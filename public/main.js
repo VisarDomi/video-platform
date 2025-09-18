@@ -12,34 +12,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- ROUTER ---
     async function handleRouteChange() {
-        const hash = window.location.hash || '#/archive';
-        const [path, ...params] = hash.slice(2).split('/');
+        const hash = window.location.hash || '#/';
+        // e.g. #/original/video.mp4/123 -> ['original', 'video.mp4', '123']
+        // e.g. #/ -> ['']
+        const parts = hash.slice(2).split('/');
+        const [type, encodedName, time] = parts;
 
-        // Always stop playback when navigating away from a video
-        if (!path.startsWith('archive/') || params.length < 2) {
-             ArchiveHandler.stopPlayback();
+        // A valid video route must have at least a type and a filename.
+        const isVideoRoute = (type === 'original' || type === 'edited') && encodedName;
+
+        // Always stop playback when navigating away from a video view.
+        if (!isVideoRoute) {
+            ArchiveHandler.stopPlayback();
         }
 
-        switch (path) {
-            case 'archive':
-                if (params.length >= 2) { // Play archive: #/archive/type/videoName(/time)
-                    const [type, encodedName, time] = params;
-                    const videoName = decodeURIComponent(encodedName);
-                    const startTime = parseFloat(time) || 0;
-                    ArchiveHandler.playVideoByName(type, videoName, startTime);
-                } else { // Show archive list: #/archive
-                    ArchiveHandler.showListPage();
-                }
-                break;
-            default:
-                window.location.hash = '#/archive';
-                break;
+        if (isVideoRoute) {
+            // Play video: #/type/videoName(/time)
+            const videoName = decodeURIComponent(encodedName);
+            const startTime = parseFloat(time) || 0;
+            ArchiveHandler.playVideoByName(type, videoName, startTime);
+        } else {
+            // Show list page for #/, #, or any other non-video route.
+            ArchiveHandler.showListPage();
+            // Redirect malformed/old hashes to the clean root URL for consistency.
+            if (location.hash !== '#/' && location.hash !== '') {
+                location.hash = '#/';
+            }
         }
     }
 
     // --- EVENT LISTENERS ---
     elements.backBtn.addEventListener('click', () => {
-        window.location.hash = '#/archive';
+        window.location.hash = '#/';
     });
     window.addEventListener('hashchange', handleRouteChange);
 

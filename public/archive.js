@@ -209,7 +209,7 @@ const ArchiveHandler = (() => {
 
     function navigateToVideo(video) {
         const savedTime = localStorage.getItem(STORAGE_KEY_PREFIX + video.filename);
-        let hash = `#/archive/${video.type}/${encodeURIComponent(video.filename)}`;
+        let hash = `#/${video.type}/${encodeURIComponent(video.filename)}`;
         if (savedTime && parseFloat(savedTime) > 0) {
             hash += `/${Math.round(parseFloat(savedTime))}`;
         }
@@ -249,7 +249,7 @@ const ArchiveHandler = (() => {
         } else {
             console.warn(`Could not find video "${videoName}" of type "${type}".`);
             alert(`Could not find video "${videoName}". It may have been deleted or moved.`);
-            location.hash = '#/archive';
+            location.hash = '#/';
         }
     }
 
@@ -269,7 +269,7 @@ const ArchiveHandler = (() => {
 
         // --- Event Listeners ---
         dom.searchInput.addEventListener('input', () => {
-             if (location.hash === '#/archive' || location.hash === '') {
+             if (location.hash === '#/' || location.hash === '') {
                  renderVideoList();
              }
         });
@@ -323,8 +323,8 @@ const ArchiveHandler = (() => {
                 const currentTime = Math.round(dom.videoPlayer.currentTime);
                 localStorage.setItem(STORAGE_KEY_PREFIX + video.filename, currentTime);
 
-                const newHash = `#/archive/${video.type}/${encodeURIComponent(video.filename)}/${currentTime}`;
-                if (location.hash.startsWith(`#/archive/${video.type}/${encodeURIComponent(video.filename)}`)) {
+                const newHash = `#/${video.type}/${encodeURIComponent(video.filename)}/${currentTime}`;
+                if (location.hash.startsWith(`#/${video.type}/${encodeURIComponent(video.filename)}`)) {
                      history.replaceState(null, '', newHash);
                 }
             }
