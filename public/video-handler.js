@@ -1,4 +1,4 @@
-const ArchiveHandler = (() => {
+const VideoHandler = (() => {
     // --- STATE ---
     let state = {
         videoList: [], // Array of objects: { filename, type }

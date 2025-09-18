@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import logger from './logger.js';
 import { PORT } from './config.js';
-import archiveApiRouter from './video.routes.js';
-import streamingRouter from './streaming.js';
+import videoApiRouter from './api/video.routes.js';
+import streamingRouter from './api/streaming.routes.js';
 
 // --- Helper Functions ---
 const logServerInfo = () => {
@@ -33,7 +33,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // --- Routers ---
-app.use('/api', archiveApiRouter);
+app.use('/api', videoApiRouter);
 app.use('/', streamingRouter);
 
 // --- Serve Frontend ---

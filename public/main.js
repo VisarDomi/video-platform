@@ -23,17 +23,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Always stop playback when navigating away from a video view.
         if (!isVideoRoute) {
-            ArchiveHandler.stopPlayback();
+            VideoHandler.stopPlayback();
         }
 
         if (isVideoRoute) {
             // Play video: #/type/videoName(/time)
             const videoName = decodeURIComponent(encodedName);
             const startTime = parseFloat(time) || 0;
-            ArchiveHandler.playVideoByName(type, videoName, startTime);
+            VideoHandler.playVideoByName(type, videoName, startTime);
         } else {
             // Show list page for #/, #, or any other non-video route.
-            ArchiveHandler.showListPage();
+            VideoHandler.showListPage();
             // Redirect malformed/old hashes to the clean root URL for consistency.
             if (location.hash !== '#/' && location.hash !== '') {
                 location.hash = '#/';
@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- INITIALIZATION ---
     function initialize() {
-        ArchiveHandler.init(elements);
+        VideoHandler.init(elements);
         handleRouteChange(); // Initial route handling
     }
 

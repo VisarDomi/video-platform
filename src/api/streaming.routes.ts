@@ -2,8 +2,8 @@ import { Router } from 'express';
 import { promises as fsp } from 'fs';
 import fs from 'fs';
 import path from 'path';
-import { findVideoPath } from './utils.js';
-import logger from './logger.js';
+import { findVideoPath } from '../utils.js';
+import logger from '../logger.js';
 
 const router = Router();
 
