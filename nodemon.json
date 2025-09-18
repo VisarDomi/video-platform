@@ -1,0 +1,21 @@
+{
+  "watch": [
+    "."
+  ],
+  "ext": "js,jsx,ts,tsx,html,css,scss,json,md,yml",
+  "ignore": [
+    ".git",
+    "node_modules/**/node_modules",
+    "dist/*",
+    "build/*",
+    "repomix-output.xml",
+    "tests/*",
+    "convert.sh",
+    "session.json",
+    "error.log",
+    "live-status.json",
+    "tango userscript.postman_collection.json"
+  ],
+  "exec": "repomix --config repomix.config.json",
+  "verbose": false
+}

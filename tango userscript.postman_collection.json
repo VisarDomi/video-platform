@@ -1,0 +1,1314 @@
+{
+	"info": {
+		"_postman_id": "c3496dfd-0824-4955-a6ef-6a9c516d9e64",
+		"name": "tango userscript",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "5158126"
+	},
+	"item": [
+		{
+			"name": "tokenData unnecessary",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "foreground-id",
+						"value": "{{foreground-id}}",
+						"type": "text"
+					},
+					{
+						"key": "interaction-id",
+						"value": "{{interaction-id}}",
+						"type": "text"
+					},
+					{
+						"key": "username",
+						"value": "{{username}}",
+						"type": "text"
+					},
+					{
+						"key": "x-app-client-session-id",
+						"value": "{{x-app-client-session-id}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"live",
+						"stream",
+						"v1",
+						"tokenData"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "tokenData",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "foreground-id",
+								"value": "{{foreground-id}}",
+								"type": "text"
+							},
+							{
+								"key": "interaction-id",
+								"value": "{{interaction-id}}",
+								"type": "text"
+							},
+							{
+								"key": "username",
+								"value": "{{username}}",
+								"type": "text"
+							},
+							{
+								"key": "x-app-client-session-id",
+								"value": "{{x-app-client-session-id}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"live",
+								"stream",
+								"v1",
+								"tokenData"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "19642bbe0dfecae2103c63749e"
+						},
+						{
+							"key": "set-cookie",
+							"value": "tt=MWViYzA5ZTA2YzY1ODAwYmExYzMyN2YyNzlkM2E4MGZkZTVmMGE5NzVlODMyMGRmOGI1ZDkyN2YyODgwNjNkYQ; Max-Age=10; Expires=Thu, 17 Apr 2025 07:52:21 GMT; Domain=tango.me; Path=/"
+						},
+						{
+							"key": "set-cookie",
+							"value": "ttu=2d9af38ef43540588f3757669da7482d; Max-Age=10; Expires=Thu, 17 Apr 2025 07:52:21 GMT; Domain=tango.me; Path=/"
+						},
+						{
+							"key": "set-cookie",
+							"value": "tte=1744876341; Max-Age=10; Expires=Thu, 17 Apr 2025 07:52:21 GMT; Domain=tango.me; Path=/"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json;charset=UTF-8"
+						},
+						{
+							"key": "date",
+							"value": "Thu, 17 Apr 2025 07:52:11 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"token\": \"MWViYzA5ZTA2YzY1ODAwYmExYzMyN2YyNzlkM2E4MGZkZTVmMGE5NzVlODMyMGRmOGI1ZDkyN2YyODgwNjNkYQ\",\n    \"expireAt\": 1744876341,\n    \"ttlSeconds\": 10,\n    \"username\": \"2d9af38ef43540588f3757669da7482d\"\n}"
+				}
+			]
+		},
+		{
+			"name": "get following",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"live",
+						"feeds",
+						"v1",
+						"following"
+					],
+					"query": [
+						{
+							"key": "pageCount",
+							"value": "0"
+						},
+						{
+							"key": "pageSize",
+							"value": "100"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "get following",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"live",
+								"feeds",
+								"v1",
+								"following"
+							],
+							"query": [
+								{
+									"key": "pageCount",
+									"value": "0"
+								},
+								{
+									"key": "pageSize",
+									"value": "100"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "1964388dd4e6b562fd3a98eceac"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Thu, 17 Apr 2025 11:36:05 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"entities\": {\n        \"basicProfile\": {\n            \"ppIJYAqOu-3e1T_V0MoATg\": {\n                \"firstName\": \"🖤Mary Devil🖤\",\n                \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFn7rlXAABNSiFjHhjillsVAAAAALSTSsE/9A2hBb2L\",\n                \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFn7rlXAABNSiFjHhjillsVAAAAALSTSsE/9A2hBb2L/thumbnail\",\n                \"gender\": \"FEMALE\",\n                \"verified\": false\n            },\n            \"qAkdDe8Av3nAZFZtgDJiUg\": {\n                \"firstName\": \"🦂\",\n                \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFn48FKAADCXYeLCmQyuKLsAAAAAKYfp4U/UWrrrAzO\",\n                \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFn48FKAADCXYeLCmQyuKLsAAAAAKYfp4U/UWrrrAzO/thumbnail\",\n                \"gender\": \"FEMALE\",\n                \"verified\": false\n            }\n        },\n        \"liveStats\": {\n            \"ppIJYAqOu-3e1T_V0MoATg\": {\n                \"points\": 9257837,\n                \"vipStatus\": 0\n            },\n            \"qAkdDe8Av3nAZFZtgDJiUg\": {\n                \"points\": 16162720,\n                \"vipStatus\": 0\n            }\n        },\n        \"stream\": {\n            \"tb3Hy_pNTWWOhFIfKCCrbA\": {\n                \"id\": \"tb3Hy_pNTWWOhFIfKCCrbA\",\n                \"status\": \"LIVING\",\n                \"kind\": \"PUBLIC\",\n                \"title\": \"Смотрите мою прямую трансляцию!\",\n                \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFnTXQ8AAAYymkcLCKnP6ZgAAAAAKYfp4U/NNhSsZLh\",\n                \"broadcasterId\": \"qAkdDe8Av3nAZFZtgDJiUg\",\n                \"ticketPrice\": 0,\n                \"viewerCount\": 23,\n                \"playlistUrl\": \"https://cinema-de41.tango.me/v2/28d1fbf14026bcf8130fbdcb222ed2f9/master.m3u8\",\n                \"relatedStreams\": [\n                    {\n                        \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn7rlXAABNSiFjHhjillsVAAAAALSTSsE/9A2hBb2L\"\n                    }\n                ],\n                \"restrictions\": {},\n                \"tags\": [\n                    \"dating\",\n                    \"multibroadcast\"\n                ],\n                \"hashtags\": [],\n                \"landscape\": false,\n                \"moderationLevel\": 5\n            },\n            \"hI2SJUkZM4i51dHqkLrjDQ\": {\n                \"id\": \"hI2SJUkZM4i51dHqkLrjDQ\",\n                \"status\": \"LIVING\",\n                \"kind\": \"PUBLIC\",\n                \"title\": \"Смотрите мою прямую трансляцию!\",\n                \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFnxqKwAAB7kwOnlmeTkZcUAAAAALSTSsE/TwO9IEya\",\n                \"broadcasterId\": \"ppIJYAqOu-3e1T_V0MoATg\",\n                \"ticketPrice\": 0,\n                \"viewerCount\": 20,\n                \"playlistUrl\": \"https://cinema-de41.tango.me/v2/cfa88d3fbfde5e99a9ee4498b9496be2/master.m3u8\",\n                \"relatedStreams\": [\n                    {\n                        \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn48FKAADCXYeLCmQyuKLsAAAAAKYfp4U/UWrrrAzO\"\n                    }\n                ],\n                \"restrictions\": {},\n                \"tags\": [\n                    \"dating\",\n                    \"multibroadcast\"\n                ],\n                \"hashtags\": [],\n                \"landscape\": false,\n                \"moderationLevel\": 5\n            }\n        },\n        \"settings\": {\n            \"tb3Hy_pNTWWOhFIfKCCrbA\": {\n                \"audioEnabled\": true,\n                \"videoEnabled\": true\n            },\n            \"hI2SJUkZM4i51dHqkLrjDQ\": {\n                \"audioEnabled\": true,\n                \"videoEnabled\": true\n            }\n        }\n    },\n    \"result\": [\n        \"hI2SJUkZM4i51dHqkLrjDQ\",\n        \"tb3Hy_pNTWWOhFIfKCCrbA\"\n    ],\n    \"totalCount\": 2,\n    \"sessionId\": \"\",\n    \"requestId\": \"0b52cceb-3e8b-4c0b-b684-16ec83984c8a\"\n}"
+				}
+			]
+		},
+		{
+			"name": "get recommended",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/recommendations?pageCount=0&pageSize=3&guest=false&utm=&moderationLevel=5&nsfwModerationLevel=5&accessToPremium=1",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"live",
+						"feeds",
+						"v1",
+						"recommendations"
+					],
+					"query": [
+						{
+							"key": "pageCount",
+							"value": "0"
+						},
+						{
+							"key": "pageSize",
+							"value": "3"
+						},
+						{
+							"key": "guest",
+							"value": "false"
+						},
+						{
+							"key": "utm",
+							"value": ""
+						},
+						{
+							"key": "moderationLevel",
+							"value": "5"
+						},
+						{
+							"key": "nsfwModerationLevel",
+							"value": "5"
+						},
+						{
+							"key": "accessToPremium",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "get recommended",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/recommendations?pageCount=0&pageSize=3&guest=false&utm=&moderationLevel=5&nsfwModerationLevel=5&accessToPremium=1",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"live",
+								"feeds",
+								"v1",
+								"recommendations"
+							],
+							"query": [
+								{
+									"key": "pageCount",
+									"value": "0"
+								},
+								{
+									"key": "pageSize",
+									"value": "3"
+								},
+								{
+									"key": "guest",
+									"value": "false"
+								},
+								{
+									"key": "utm",
+									"value": ""
+								},
+								{
+									"key": "moderationLevel",
+									"value": "5"
+								},
+								{
+									"key": "nsfwModerationLevel",
+									"value": "5"
+								},
+								{
+									"key": "accessToPremium",
+									"value": "1"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "1964388f9bda710d4245ce0d06a"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Thu, 17 Apr 2025 11:36:12 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"entities\": {\n        \"basicProfile\": {\n            \"aWc36CbTTKuO7EcYLp7Rwg\": {\n                \"firstName\": \"Анна\",\n                \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFn_c7xAAAZO3-fxmYUprQzAAAAAQD-BkM/7NlHs4V6\",\n                \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFn_c7xAAAZO3-fxmYUprQzAAAAAQD-BkM/7NlHs4V6/thumbnail\",\n                \"gender\": \"FEMALE\",\n                \"verified\": false\n            },\n            \"PnkcZrnBXpNVB21sAuzY2A\": {\n                \"firstName\": \"Pink\",\n                \"lastName\": \"Pr 🌺\",\n                \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFn_-mbAAAzjqMvDwvLCRPTAAAAAQEgBT0/UmTj8Mdu\",\n                \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFn_-mbAAAzjqMvDwvLCRPTAAAAAQEgBT0/UmTj8Mdu/thumbnail\",\n                \"gender\": \"FEMALE\",\n                \"verified\": false\n            },\n            \"vSbj12Nzg5bGEJi6kclFTA\": {\n                \"firstName\": \"KAMILA\",\n                \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFn-aRSAADjfB8XQxbWaYtXAAAAANA6hf0/0zdwZ1TU\",\n                \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFn-aRSAADjfB8XQxbWaYtXAAAAANA6hf0/0zdwZ1TU/thumbnail\",\n                \"gender\": \"FEMALE\",\n                \"verified\": false\n            }\n        },\n        \"liveStats\": {\n            \"aWc36CbTTKuO7EcYLp7Rwg\": {\n                \"points\": 2272,\n                \"vipStatus\": 0\n            },\n            \"PnkcZrnBXpNVB21sAuzY2A\": {\n                \"points\": 42473,\n                \"vipStatus\": 0\n            },\n            \"vSbj12Nzg5bGEJi6kclFTA\": {\n                \"points\": 9474048,\n                \"vipStatus\": 0\n            }\n        },\n        \"stream\": {\n            \"XPcr5HC65_f01D2pGa51uQ\": {\n                \"id\": \"XPcr5HC65_f01D2pGa51uQ\",\n                \"status\": \"LIVING\",\n                \"kind\": \"PUBLIC\",\n                \"title\": \"Мяу \",\n                \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn_-nJAAAzkWdi0O-l3bf9AAAAAQEgBT0/MZ7xDhF9\",\n                \"broadcasterId\": \"PnkcZrnBXpNVB21sAuzY2A\",\n                \"ticketPrice\": 0,\n                \"viewerCount\": 13,\n                \"playlistUrl\": \"https://cinema-de41.tango.me/v2/90f32a3e5c1f91b619129d81a37213e0/master.m3u8\",\n                \"relatedStreams\": [],\n                \"restrictions\": {},\n                \"tags\": [],\n                \"hashtags\": [],\n                \"landscape\": false,\n                \"moderationLevel\": 5\n            },\n            \"N8kmjbolAypCu6nPRNOZ4Q\": {\n                \"id\": \"N8kmjbolAypCu6nPRNOZ4Q\",\n                \"status\": \"LIVING\",\n                \"kind\": \"PUBLIC\",\n                \"title\": \"\",\n                \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn_c7xAAAZO3-fxmYUprQzAAAAAQD-BkM/7NlHs4V6\",\n                \"broadcasterId\": \"aWc36CbTTKuO7EcYLp7Rwg\",\n                \"ticketPrice\": 0,\n                \"viewerCount\": 16,\n                \"playlistUrl\": \"https://cinema-de41.tango.me/v2/0baa8c85ff5710052d1eb32ab8454402/master.m3u8\",\n                \"relatedStreams\": [],\n                \"restrictions\": {},\n                \"tags\": [\n                    \"dating\"\n                ],\n                \"hashtags\": [],\n                \"landscape\": false,\n                \"moderationLevel\": 5\n            },\n            \"X2dckvg0CFDGyyRxpbQpSw\": {\n                \"id\": \"X2dckvg0CFDGyyRxpbQpSw\",\n                \"status\": \"LIVING\",\n                \"kind\": \"PUBLIC\",\n                \"title\": \"Дивіться мою пряму трансляцію!\",\n                \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn4GJ7AACdj10e-pmgVid0AAAAANA6hf0/JT20ocqa\",\n                \"broadcasterId\": \"vSbj12Nzg5bGEJi6kclFTA\",\n                \"ticketPrice\": 0,\n                \"viewerCount\": 10,\n                \"playlistUrl\": \"https://cinema-de41.tango.me/v2/86f9fcf380cea487d5e8d57e8f992ea1/master.m3u8\",\n                \"relatedStreams\": [\n                    {\n                        \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn-7sfAAD-G-1RqefRzHiPAAAAAL_HCdE/BUZM6kaI\"\n                    },\n                    {\n                        \"thumbnail\": \"https://cget.tango.me/contentserver/download/AAFn2q9iAABcMIPQjsSXb5h_AAAAANNXFLk/LmZlf0GV\"\n                    }\n                ],\n                \"restrictions\": {},\n                \"tags\": [\n                    \"battle\",\n                    \"dating\",\n                    \"multibroadcast\"\n                ],\n                \"hashtags\": [],\n                \"landscape\": false,\n                \"moderationLevel\": 5\n            }\n        },\n        \"settings\": {\n            \"XPcr5HC65_f01D2pGa51uQ\": {\n                \"audioEnabled\": true,\n                \"videoEnabled\": true\n            },\n            \"N8kmjbolAypCu6nPRNOZ4Q\": {\n                \"audioEnabled\": true,\n                \"videoEnabled\": true\n            },\n            \"X2dckvg0CFDGyyRxpbQpSw\": {\n                \"audioEnabled\": true,\n                \"videoEnabled\": true\n            }\n        }\n    },\n    \"result\": [\n        \"X2dckvg0CFDGyyRxpbQpSw\",\n        \"XPcr5HC65_f01D2pGa51uQ\",\n        \"N8kmjbolAypCu6nPRNOZ4Q\"\n    ],\n    \"totalCount\": 968,\n    \"sessionId\": \"\",\n    \"requestId\": \"67e6514b-91e4-4f20-b146-64b4dcaded3d\"\n}"
+				}
+			]
+		},
+		{
+			"name": "get liveUrl",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://cinema-de41.tango.me/v2/46122afebee4e106f67ed30d0bc61a94/live.m3u8?m=2eec697e8600cf2a5d87c12f3a71af63",
+					"protocol": "https",
+					"host": [
+						"cinema-de41",
+						"tango",
+						"me"
+					],
+					"path": [
+						"v2",
+						"46122afebee4e106f67ed30d0bc61a94",
+						"live.m3u8"
+					],
+					"query": [
+						{
+							"key": "m",
+							"value": "2eec697e8600cf2a5d87c12f3a71af63"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "get liveUrl",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://cinema-de41.tango.me/v2/90f32a3e5c1f91b619129d81a37213e0/master.m3u8",
+							"protocol": "https",
+							"host": [
+								"cinema-de41",
+								"tango",
+								"me"
+							],
+							"path": [
+								"v2",
+								"90f32a3e5c1f91b619129d81a37213e0",
+								"master.m3u8"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "raw",
+					"header": [
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Length",
+							"value": "237"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/vnd.apple.mpegurl"
+						},
+						{
+							"key": "Content-Encoding",
+							"value": "gzip"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 varnish, 1.1 varnish"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "max-age=0, no-cache"
+						},
+						{
+							"key": "Accept-Ranges",
+							"value": "bytes"
+						},
+						{
+							"key": "Date",
+							"value": "Thu, 17 Apr 2025 11:39:50 GMT"
+						},
+						{
+							"key": "Age",
+							"value": "0"
+						},
+						{
+							"key": "X-Served-By",
+							"value": "cache-fra-eddf8230085-FRA, cache-sof1510033-SOF"
+						},
+						{
+							"key": "X-Cache",
+							"value": "MISS, MISS"
+						},
+						{
+							"key": "X-Cache-Hits",
+							"value": "0, 0"
+						},
+						{
+							"key": "Vary",
+							"value": "Accept-Encoding"
+						},
+						{
+							"key": "x-tango-req-start",
+							"value": "1744889990630"
+						},
+						{
+							"key": "x-tango-req-end",
+							"value": "1744889990655"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "x-tango-req-start, x-tango-req-end"
+						},
+						{
+							"key": "Access-Control-Allow-Credentials",
+							"value": "true"
+						},
+						{
+							"key": "Strict-Transport-Security",
+							"value": "max-age=300"
+						}
+					],
+					"cookie": [],
+					"body": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:BANDWIDTH=2200000,AVERAGE-BANDWIDTH=2032508,RESOLUTION=1280x720\n/v2/4141cb327938e94a7411b8a6f72e6c6d/live.m3u8?m=90f32a3e5c1f91b619129d81a37213e0&\n#EXT-X-STREAM-INF:BANDWIDTH=800000,AVERAGE-BANDWIDTH=274444,RESOLUTION=640x360\n/v2/26106cafe90de076e65659fbccfa0939/live.m3u8?m=90f32a3e5c1f91b619129d81a37213e0&\n"
+				}
+			]
+		},
+		{
+			"name": "live.m3u8 unnecessary",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "https://cinema-de41.tango.me/v2/21404ece8a9117266079d492002eac79/live.m3u8?m=e50fc19ebeb070bf588d1500db2cf4be&tech=hls",
+					"protocol": "https",
+					"host": [
+						"cinema-de41",
+						"tango",
+						"me"
+					],
+					"path": [
+						"v2",
+						"21404ece8a9117266079d492002eac79",
+						"live.m3u8"
+					],
+					"query": [
+						{
+							"key": "m",
+							"value": "e50fc19ebeb070bf588d1500db2cf4be"
+						},
+						{
+							"key": "tech",
+							"value": "hls"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "live.m3u8",
+					"originalRequest": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://cinema-de41.tango.me/v2/21404ece8a9117266079d492002eac79/live.m3u8?m=e50fc19ebeb070bf588d1500db2cf4be&tech=hls",
+							"protocol": "https",
+							"host": [
+								"cinema-de41",
+								"tango",
+								"me"
+							],
+							"path": [
+								"v2",
+								"21404ece8a9117266079d492002eac79",
+								"live.m3u8"
+							],
+							"query": [
+								{
+									"key": "m",
+									"value": "e50fc19ebeb070bf588d1500db2cf4be"
+								},
+								{
+									"key": "tech",
+									"value": "hls"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "raw",
+					"header": [
+						{
+							"key": "Connection",
+							"value": "keep-alive"
+						},
+						{
+							"key": "Content-Length",
+							"value": "343"
+						},
+						{
+							"key": "Content-Type",
+							"value": "application/vnd.apple.mpegurl"
+						},
+						{
+							"key": "Content-Encoding",
+							"value": "gzip"
+						},
+						{
+							"key": "Via",
+							"value": "1.1 varnish, 1.1 varnish"
+						},
+						{
+							"key": "Cache-Control",
+							"value": "max-age=0, no-cache"
+						},
+						{
+							"key": "Accept-Ranges",
+							"value": "bytes"
+						},
+						{
+							"key": "Age",
+							"value": "0"
+						},
+						{
+							"key": "Date",
+							"value": "Thu, 17 Apr 2025 07:53:43 GMT"
+						},
+						{
+							"key": "X-Served-By",
+							"value": "cache-fra-etou8220078-FRA, cache-sof1510030-SOF"
+						},
+						{
+							"key": "X-Cache",
+							"value": "MISS, MISS"
+						},
+						{
+							"key": "X-Cache-Hits",
+							"value": "0, 0"
+						},
+						{
+							"key": "Vary",
+							"value": "Accept-Encoding"
+						},
+						{
+							"key": "x-tango-req-start",
+							"value": "1744876423893"
+						},
+						{
+							"key": "x-tango-req-end",
+							"value": "1744876423918"
+						},
+						{
+							"key": "access-control-expose-headers",
+							"value": "x-tango-req-start, x-tango-req-end"
+						},
+						{
+							"key": "Access-Control-Allow-Credentials",
+							"value": "true"
+						},
+						{
+							"key": "Strict-Transport-Security",
+							"value": "max-age=300"
+						}
+					],
+					"cookie": [],
+					"body": "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MEDIA-SEQUENCE:2269\n#EXT-X-TARGETDURATION:1\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:36.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/1aa6b721b2ef774466b0c3d67ecc93b1/2269.ts?tech=hls\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:37.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/8b011d5a2eb6bd719d8ed14578375cfb/2270.ts?tech=hls\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:38.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/932e003758a40f3600de5649455ac2e6/2271.ts?tech=hls\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:39.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/034ec2d827b7f9365c28df741456300c/2272.ts?tech=hls\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:40.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/f93dee005eb7a7cb3bbc563f898c57e4/2273.ts?tech=hls\n#EXT-X-PROGRAM-DATE-TIME:2025-04-17T07:53:41.625Z\n#EXTINF:1.000,\n/v2/ss/21404ece8a9117266079d492002eac79/53d3d70bf2c9c1ca9da78d556f50d2e3/2274.ts?tech=hls\n"
+				}
+			]
+		},
+		{
+			"name": "block list",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/blockList",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"blockList"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "block list",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/blockList",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"blockList"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "1964aa55986c013872421d57b9e"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Fri, 18 Apr 2025 20:44:32 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "[\n    \"pdcByazo0_rzUTTrtiImAQ\",\n    \"2-leVs0Y0gVw8xcQK0rIOw\",\n    \"pbREiH98ZV2w_SdRR_AHDw\",\n    \"ObXWgQ4nx1ti-0yhP323og\",\n    \"3Q3_A6g5YohH8LLpl10DPA\",\n    \"yF6dERLx-eJ-way600rmlQ\",\n    \"s5ccH-HIExOPorMcn2AOmg\",\n    \"1A_ZYzJ59tbrK7K4KH1qWg\",\n    \"6dVDvr_4uFbykATWs3IDVQ\",\n    \"iruchU4lbLfrVZSmVxEs-Q\",\n    \"2StErEJzo2R34VI4JXypmw\",\n    \"5xoiDtKzhiLGAKPp0JvEmA\",\n    \"rc1CToD4mZv_Sl2_zFBjjg\",\n    \"1zeisgqgws9iSC-CyLWQNQ\",\n    \"_hwGx0JyaoRNK-b_UKgzVw\",\n    \"Ddj64SPBkpjXgV5L6dAJQw\",\n    \"e99SZV8yOUKqwcfMLzO92g\",\n    \"2N851aZmVe51r2RWL_EWqA\",\n    \"JOTgc34_UNwHcS1h6TWEsA\",\n    \"3bWQ6yZszAWDbUQFJH9yQw\",\n    \"onS3yfepwZPl9KeL6mjkgQ\",\n    \"boQO7BeSrS3wRyBg9vxcFw\",\n    \"mMUfRV-1HMDTlbJUUeMGHQ\",\n    \"WDy59bxxt6AN90juUi9Www\",\n    \"dAGUz0WRCH10zvfp7XFLzw\",\n    \"Xy3KBm4wypFzKLeUR7ncwA\",\n    \"4jtVJ_boS9kj5n8FqHe46g\",\n    \"MLrspd-mB59Nyq7ISGlEAA\",\n    \"UzoTdqzNs6TCodTGs3UoIw\",\n    \"9FmdcDis1lTNMybKXfYk7w\",\n    \"MXUqgciTn_x_lJpasCxD6A\",\n    \"EBSOIDNSBUxXKXFJ_yqlzw\",\n    \"8rUaHFnr3k4VOmHWczvM4g\",\n    \"OCkYgXvOK07lCKy7VIAIlA\",\n    \"qkBMk8mMsyzNjK3BiHQXzg\",\n    \"1-YNNZlB1raHn53ai10-3A\",\n    \"jFHZ4mBFx3_XP9g9j8vPRA\",\n    \"itWCDeB984wi11awl1WXZw\",\n    \"7g6qxqULY6nH8wIBtHr7pw\",\n    \"SJ4mz7WczsPy8SSDyYxdRQ\",\n    \"7vsI046MFd7x92XaT2i9tg\",\n    \"4EHiMhLRoKehsOtZCFUk8A\",\n    \"JvepnlmHU22hChVOTyPejw\",\n    \"YAQMR03Wfv59nZrRttauVw\",\n    \"XCIwaK3MORzGvs-8y7xplg\",\n    \"5oa-z3d1aiRVhoP_7fnC7Q\",\n    \"adpl5wqrhqLLbg9jEw4XzQ\",\n    \"o4T5a3thRt5RqholA6TVFA\",\n    \"7_885IyCjdCLvPliVjBbrQ\",\n    \"egx7guV0NgnNLpcP5a-EHg\",\n    \"JIrqFBRI3P8Fjcu_RThr_A\"\n]"
+				}
+			]
+		},
+		{
+			"name": "block",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/blockList?accountId=pdcByazo0_rzUTTrtiImAQ",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"blockList"
+					],
+					"query": [
+						{
+							"key": "accountId",
+							"value": "pdcByazo0_rzUTTrtiImAQ"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "block",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/blockList?accountId=pdcByazo0_rzUTTrtiImAQ",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"blockList"
+							],
+							"query": [
+								{
+									"key": "accountId",
+									"value": "pdcByazo0_rzUTTrtiImAQ"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "plain",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "1964aa69f465ad76653c0e3ed6c"
+						},
+						{
+							"key": "Content-Length",
+							"value": "0"
+						},
+						{
+							"key": "date",
+							"value": "Fri, 18 Apr 2025 20:45:55 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						}
+					],
+					"cookie": [],
+					"body": null
+				}
+			]
+		},
+		{
+			"name": "unblock",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/blockList?accountId=pdcByazo0_rzUTTrtiImAQ",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"blockList"
+					],
+					"query": [
+						{
+							"key": "accountId",
+							"value": "pdcByazo0_rzUTTrtiImAQ"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "follow add",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "fD6AtAlhqOUMDxSC_Uz-Xg",
+					"options": {
+						"raw": {
+							"language": "text"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/add",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"follow",
+						"add"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "follow add",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "cookie",
+								"value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFwcElkIjpudWxsLCJpc3MiOiJ0b2tlbi1zZXJ2aWNlIiwic2Vzc2lvbklkIjoiOGVmZGEzMmYtOWM5OC00NTk0LWE4NjUtMTY2NjA4MDNmYTdkIiwiZXhwIjoxNzQ0MDQwMzk1LCJqdGkiOiI3ODFhYWQ1My0zZWFiLTQ3YWItODdkYS05MDUzMzc2NDQ0YzciLCJ1c2VybmFtZSI6IjJkOWFmMzhlZjQzNTQwNTg4ZjM3NTc2NjlkYTc0ODJkIn0.g4P5RkRRQDORlsMPsiHfLoUNbi2GogsSOwQvvuPc0blNltyhw0ei5NT6GBeGAoVPwAV4LfTQQ2YTsLh_gVAfDg",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "fD6AtAlhqOUMDxSC_Uz-Xg",
+							"options": {
+								"raw": {
+									"language": "text"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/add",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"follow",
+								"add"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "19610dc443c537e0351f6ba6b6e"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Mon, 07 Apr 2025 15:26:32 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"count\": 16\n}"
+				}
+			]
+		},
+		{
+			"name": "follow list",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/list",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"follow",
+						"list"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "follow list",
+					"originalRequest": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "cookie",
+								"value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFwcElkIjpudWxsLCJpc3MiOiJ0b2tlbi1zZXJ2aWNlIiwic2Vzc2lvbklkIjoiOGVmZGEzMmYtOWM5OC00NTk0LWE4NjUtMTY2NjA4MDNmYTdkIiwiZXhwIjoxNzQ1MDAzNzA4LCJqdGkiOiJhZDBiYTUxZi0wNDU3LTQ5YWMtOTkzOC1kMmU4ZThhODJiMjgiLCJ1c2VybmFtZSI6IjJkOWFmMzhlZjQzNTQwNTg4ZjM3NTc2NjlkYTc0ODJkIn0.CyFs0ChJBh5F3vVeyZcXybNG2WOcm4qF_UHk9YSV5VJCq7gfhXYcX-niJD2a_fyXAplU7EICC9OkGjy0gehUAA",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/list",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"follow",
+								"list"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "1964a50c1f15f8952ec48b83cb2"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Fri, 18 Apr 2025 19:12:08 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "[\n    \"ppIJYAqOu-3e1T_V0MoATg\",\n    \"YiiaXM0FQikQpHud-rIixQ\",\n    \"feEgV1lwufyd5zKdvYJZxw\",\n    \"qAS0SECZXURRGO_SRtokgA\",\n    \"qAkdDe8Av3nAZFZtgDJiUg\",\n    \"B4cnDiG7OV5s1DAU2NK8pg\",\n    \"bGJ2tCcVyE9uSrMMI2v5rA\",\n    \"nmuPPEt7nrAqB3U73Z-vOQ\",\n    \"jYCQyd9-607QWKzehtLBvg\",\n    \"K56ombRfhNY8gbnDb8JKgQ\",\n    \"D1CNsL6Llxpp3E_i-kwUEw\",\n    \"vh04Z33UW6HRykBfiBCvPQ\",\n    \"sE_VuHhxvoED6GRKpUsxig\",\n    \"DMlfIMFXa86KwjnOom1UzQ\",\n    \"K-NthZfyvJyCjDYBKDXA0w\",\n    \"ctqQtRtgu8o8LV3UFS3DSQ\",\n    \"1JBGPrF-p320sZwGNud5AQ\"\n]"
+				}
+			]
+		},
+		{
+			"name": "follow remove",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "fD6AtAlhqOUMDxSC_Uz-Xg",
+					"options": {
+						"raw": {
+							"language": "text"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/remove",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"follow",
+						"remove"
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "follow remove",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "cookie",
+								"value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFwcElkIjpudWxsLCJpc3MiOiJ0b2tlbi1zZXJ2aWNlIiwic2Vzc2lvbklkIjoiOGVmZGEzMmYtOWM5OC00NTk0LWE4NjUtMTY2NjA4MDNmYTdkIiwiZXhwIjoxNzQ0MDQwMzk1LCJqdGkiOiI3ODFhYWQ1My0zZWFiLTQ3YWItODdkYS05MDUzMzc2NDQ0YzciLCJ1c2VybmFtZSI6IjJkOWFmMzhlZjQzNTQwNTg4ZjM3NTc2NjlkYTc0ODJkIn0.g4P5RkRRQDORlsMPsiHfLoUNbi2GogsSOwQvvuPc0blNltyhw0ei5NT6GBeGAoVPwAV4LfTQQ2YTsLh_gVAfDg",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "fD6AtAlhqOUMDxSC_Uz-Xg",
+							"options": {
+								"raw": {
+									"language": "text"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/follow/remove",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"follow",
+								"remove"
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "json",
+					"header": [
+						{
+							"key": "vary",
+							"value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+						},
+						{
+							"key": "x-b3-traceid",
+							"value": "19610dda3b2b45623cacbc6139"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json"
+						},
+						{
+							"key": "date",
+							"value": "Mon, 07 Apr 2025 15:28:02 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "true"
+				}
+			]
+		}
+	]
+}

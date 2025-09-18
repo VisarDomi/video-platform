@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tango Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+    <!-- Main List View -->
+    <div id="listView">        
+        <div id="archiveSearchContainer" class="search-container">
+            <input type="text" id="searchInput" placeholder="Filter archives (regex)...">
+        </div>
+
+        <div id="listContainer" class="list-container">
+            <!-- Content (archives) is injected here by JS -->
+            <p id="loadingMessage">Loading...</p>
+        </div>
+    </div>
+
+    <!-- Main Video View -->
+    <div id="videoView" class="hidden">
+        <div id="videoContainer">
+            <video id="videoPlayer" playsinline></video>
+            
+            <!-- Quadrant Controls for Archives -->
+            <div id="quadrantOverlay" class="hidden">
+                <div class="quadrant" data-action="prev"></div>
+                <div class="quadrant" data-action="next"></div>
+                <div class="quadrant" data-action="seek-back"></div>
+                <div class="quadrant" data-action="seek-forward"></div>
+            </div>
+
+            <!-- Top Bar UI -->
+            <div id="topBar">
+                <div id="streamerName"></div>
+                <!-- Progress bar for Archives -->
+                <div id="progressBar" class="hidden">
+                    <div id="progressFill"></div>
+                </div>
+                <!-- Controls -->
+                <div id="controls">
+                    <button id="backBtn">Back to List</button>
+                    <!-- Archive-specific controls -->
+                    <div id="archiveControls" class="hidden">
+                         <button id="muteBtn">Mute</button>
+                         <button id="addPointBtn">Add Point</button>
+                         <button id="createSegmentsBtn">Create/Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/archive.js"></script>
+    <script src="/main.js"></script>
+</body>
+</html>

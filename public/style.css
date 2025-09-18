@@ -1,0 +1,162 @@
+/* General */
+body, html {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #121212;
+    color: #e0e0e0;
+    overflow: hidden;
+}
+
+.hidden { display: none !important; }
+
+/* --- List View --- */
+#listView {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.main-header {
+    background-color: #1e1e1e;
+    padding: 10px 20px;
+    border-bottom: 1px solid #333;
+    text-align: center;
+}
+.main-header h1 {
+    margin: 0;
+    font-weight: 300;
+    color: #ff5e3a;
+}
+
+.search-container {
+    padding: 10px;
+    background-color: #222;
+    border-bottom: 1px solid #444;
+}
+#searchInput {
+    width: 100%;
+    padding: 10px;
+    box-sizing: border-box;
+    font-size: 16px;
+    background-color: #333;
+    border: 1px solid #555;
+    color: white;
+    border-radius: 5px;
+}
+.list-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.list-item {
+    padding: 20px 15px;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+    font-size: 18px;
+    transition: background-color 0.2s ease;
+}
+.list-item:hover {
+    background-color: #2a2a2a;
+}
+.info-message {
+    text-align: center;
+    padding: 40px;
+    font-style: italic;
+    color: #888;
+}
+
+/* --- Video View --- */
+#videoView {
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background-color: black;
+    -webkit-user-select: none; user-select: none;
+}
+#videoContainer {
+    width: 100%; height: 100%;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+#videoPlayer {
+    width: 100%; height: 100%;
+    object-fit: contain;
+}
+
+/* Quadrant Overlay */
+#quadrantOverlay {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    z-index: 10;
+}
+.quadrant { -webkit-user-select: none; user-select: none; }
+
+/* Top Bar UI */
+#topBar {
+    position: absolute; top: 0; left: 0;
+    width: 100%;
+    padding: 15px;
+    box-sizing: border-box;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0));
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+#videoContainer:hover #topBar { opacity: 1; }
+
+#streamerName {
+    font-size: 1.2em;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px black;
+    margin-bottom: 10px;
+    word-break: break-all;
+}
+
+#progressBar {
+    width: 100%; height: 15px; 
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+#progressFill {
+    width: 0; height: 100%;
+    background-color: #ff5e3a;
+    border-radius: 10px;
+}
+.segment-marker {
+    position: absolute; top: 0;
+    width: 4px; height: 100%;
+    background-color: white;
+    transform: translateX(-50%);
+}
+#controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+#archiveControls {
+    display: flex;
+    gap: 10px;
+}
+#controls button {
+    padding: 8px 12px; font-size: 14px;
+    background-color: rgba(0,0,0,0.6);
+    color: white; border: 1px solid white;
+    border-radius: 5px; cursor: pointer;
+}
+#controls button:hover {
+    background-color: #ff5e3a;
+    border-color: #ff5e3a;
+}
+#archiveControls button {
+    min-width: 80px;
+    text-align: center;
+}
