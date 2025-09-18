@@ -5,6 +5,7 @@ const ArchiveHandler = (() => {
         currentVideo: null, // The { filename, type } object of the currently playing video
         segments: [],
         seekInterval: null,
+        processingVideos: new Set(), // To track videos being edited/deleted
     };
     
     // --- CONSTANTS ---
@@ -30,31 +31,36 @@ const ArchiveHandler = (() => {
         }
     }
 
-    async function sendDeleteRequest(video) {
+    function sendDeleteRequest(video) {
         if (!confirm(`Are you sure you want to permanently DELETE "${video.filename}"?`)) return;
         
-        dom.createSegmentsBtn.textContent = 'Deleting...';
-        dom.createSegmentsBtn.disabled = true;
-        try {
-            const response = await fetch(`/api/videos/${video.type}/${encodeURIComponent(video.filename)}`, {
-                method: 'DELETE',
-            });
-            const result = await response.json();
-            if (result.success) {
-                location.hash = '#/archive';
-            } else {
+        state.processingVideos.add(video.filename);
+        updateProcessingStatusUI(video);
+
+        fetch(`/api/videos/${video.type}/${encodeURIComponent(video.filename)}`, {
+            method: 'DELETE',
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (!result.success) {
                 alert(`Failed to delete: ${result.message}`);
             }
-        } catch (error) {
+            // On success, do nothing (fire-and-forget).
+        })
+        .catch(error => {
             console.error('Delete request failed:', error);
             alert('An error occurred while trying to delete the video.');
-        } finally {
-            dom.createSegmentsBtn.textContent = 'Create/Delete';
-            dom.createSegmentsBtn.disabled = false;
-        }
+        })
+        .finally(() => {
+            state.processingVideos.delete(video.filename);
+            // If we are still on the same video, update its UI
+            if (state.currentVideo && state.currentVideo.filename === video.filename) {
+                updateProcessingStatusUI(state.currentVideo);
+            }
+        });
     }
 
-    async function sendEditRequest(video, segments) {
+    function sendEditRequest(video, segments) {
         if (segments.length % 2 !== 0) {
             return alert('You must have an even number of points (a start and end for each segment).');
         }
@@ -63,32 +69,49 @@ const ArchiveHandler = (() => {
             segmentPairs.push({ start: segments[i], end: segments[i + 1] });
         }
         
-        dom.createSegmentsBtn.textContent = 'Processing...';
-        dom.createSegmentsBtn.disabled = true;
-        try {
-            const response = await fetch('/api/edit', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: video.filename, segments: segmentPairs }) 
-            });
-            const result = await response.json();
-            if (result.success) {
-                location.hash = '#/archive';
-            } else {
+        state.processingVideos.add(video.filename);
+        updateProcessingStatusUI(video);
+
+        fetch('/api/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: video.filename, segments: segmentPairs }) 
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (!result.success) {
                 alert(`Failed to edit: ${result.message}`);
             }
-        } catch (error) {
+            // On success, do nothing (fire-and-forget).
+        })
+        .catch(error => {
             console.error('Edit request failed:', error);
             alert('An error occurred during the edit request.');
-        } finally {
-            dom.createSegmentsBtn.textContent = 'Create/Delete';
-            dom.createSegmentsBtn.disabled = false;
-        }
+        })
+        .finally(() => {
+            state.processingVideos.delete(video.filename);
+            // If we are still on the same video, update its UI
+            if (state.currentVideo && state.currentVideo.filename === video.filename) {
+                updateProcessingStatusUI(state.currentVideo);
+            }
+        });
     }
 
     // =================================================================================
     // UI HELPERS
     // =================================================================================
+
+    function updateProcessingStatusUI(video) {
+        if (!video || !dom.createSegmentsBtn) return;
+
+        if (state.processingVideos.has(video.filename)) {
+            dom.createSegmentsBtn.textContent = 'Processing...';
+            dom.createSegmentsBtn.disabled = true;
+        } else {
+            dom.createSegmentsBtn.textContent = 'Create/Delete';
+            dom.createSegmentsBtn.disabled = false;
+        }
+    }
 
     function showView(viewToShow) {
         dom.listView.classList.toggle('hidden', viewToShow !== 'list');
@@ -154,9 +177,12 @@ const ArchiveHandler = (() => {
         
         const isEditable = video.type === 'original';
         togglePlayerUI(true, isEditable);
+        if (isEditable) {
+            updateProcessingStatusUI(video);
+        }
 
         dom.videoPlayer.controls = false;
-        dom.videoPlayer.loop = true;
+        dom.videoPlayer.loop = false;
         dom.videoPlayer.src = `/video/${video.type}/${encodeURIComponent(video.filename)}`;
         
         state.segments = [];
