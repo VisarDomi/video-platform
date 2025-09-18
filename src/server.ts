@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import logger from './logger.js';
 import { PORT } from './config.js';
-import archiveApiRouter from './archive.js';
+import archiveApiRouter from './video.routes.js';
 import streamingRouter from './streaming.js';
 
 // --- Helper Functions ---
