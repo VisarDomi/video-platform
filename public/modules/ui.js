@@ -7,15 +7,39 @@ export function initUI(elements) {
     dom = elements;
 }
 
+export function updateActionButtonsUI() {
+    if (!dom.createBtn || !dom.deleteBtn) return;
+
+    const hasSegments = state.segments.length > 0;
+    
+    // Show delete only if there are no segments
+    dom.deleteBtn.classList.toggle('hidden', hasSegments);
+
+    // Show create only if there are segments
+    dom.createBtn.classList.toggle('hidden', !hasSegments);
+    
+    // Disable create if segment count is odd
+    if (hasSegments) {
+        const isEven = state.segments.length % 2 === 0;
+        dom.createBtn.disabled = !isEven;
+    }
+}
+
 export function updateProcessingStatusUI(video) {
-    if (!video || !dom.createSegmentsBtn) return;
+    if (!video || !dom.createBtn || !dom.deleteBtn || !dom.addPointBtn) return;
 
     if (state.processingVideos.has(video.filename)) {
-        dom.createSegmentsBtn.textContent = 'Processing...';
-        dom.createSegmentsBtn.disabled = true;
+        dom.createBtn.textContent = '...';
+        dom.deleteBtn.textContent = '...';
+        dom.createBtn.disabled = true;
+        dom.deleteBtn.disabled = true;
+        dom.addPointBtn.disabled = true;
     } else {
-        dom.createSegmentsBtn.textContent = 'Create/Delete';
-        dom.createSegmentsBtn.disabled = false;
+        dom.createBtn.textContent = '✂️';
+        dom.deleteBtn.textContent = '🗑️';
+        dom.addPointBtn.disabled = false;
+        // Re-enable buttons and let updateActionButtonsUI handle logic
+        updateActionButtonsUI();
     }
 }
 
@@ -53,7 +77,12 @@ export function togglePlayerUI(show, isEditable = false) {
 
     if (show) {
         dom.addPointBtn.classList.toggle('hidden', !isEditable);
-        dom.createSegmentsBtn.classList.toggle('hidden', !isEditable);
+        if (isEditable) {
+            updateActionButtonsUI();
+        } else {
+            dom.createBtn.classList.add('hidden');
+            dom.deleteBtn.classList.add('hidden');
+        }
     }
 }
 

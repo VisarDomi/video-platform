@@ -44,46 +44,58 @@ export function stopPlayback() {
 
 // --- Event Handlers ---
 
-function handleEditOrDelete() {
-    if (!state.currentVideo) return;
-    if (state.currentVideo.type === 'edited') {
-        return alert('Cannot edit an already edited video.');
-    }
+function handleDelete() {
+    if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length > 0) return;
+    
+    if (!confirm(`Are you sure you want to move ${state.currentVideo.filename} to the trash?`)) return;
 
-    if (state.segments.length === 0) {
-        state.processingVideos.add(state.currentVideo.filename);
-        ui.updateProcessingStatusUI(state.currentVideo);
+    state.processingVideos.add(state.currentVideo.filename);
+    ui.updateProcessingStatusUI(state.currentVideo);
 
-        api.sendDeleteRequest(state.currentVideo)
-            .then(result => { if (!result.success) alert(`Failed to delete ${state.currentVideo.filename}: ${result.message}`); })
-            .catch(error => {
-                console.error(`Delete request failed ${state.currentVideo.filename}:`, error);
-                alert(`An error occurred while trying to delete the video ${state.currentVideo.filename}.`);
-            })
-            .finally(() => {
-                state.processingVideos.delete(state.currentVideo.filename);
-                if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
-            });
-
-    } else {
-        if (state.segments.length % 2 !== 0) {
-            return alert('You must have an even number of points (a start and end for each segment).');
-        }
-        state.processingVideos.add(state.currentVideo.filename);
-        ui.updateProcessingStatusUI(state.currentVideo);
-
-        api.sendEditRequest(state.currentVideo, state.segments)
-            .then(result => { if (!result.success) alert(`Failed to edit ${state.currentVideo.filename}: ${result.message}`); })
-            .catch(error => {
-                console.error(`Edit request failed ${state.currentVideo.filename}:`, error);
-                alert(`An error occurred during the edit request ${state.currentVideo.filename}.`);
-            })
-            .finally(() => {
-                state.processingVideos.delete(state.currentVideo.filename);
-                if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
-            });
-    }
+    api.sendDeleteRequest(state.currentVideo)
+        .then(result => {
+            if (!result.success) {
+                alert(`Failed to delete ${state.currentVideo.filename}: ${result.message}`);
+            } else {
+                location.hash = '#/';
+            }
+        })
+        .catch(error => {
+            console.error(`Delete request failed for ${state.currentVideo.filename}:`, error);
+            alert(`An error occurred while trying to delete the video ${state.currentVideo.filename}.`);
+        })
+        .finally(() => {
+            state.processingVideos.delete(state.currentVideo.filename);
+            if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
+        });
 }
+
+function handleCreate() {
+    if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length === 0 || state.segments.length % 2 !== 0) return;
+
+    state.processingVideos.add(state.currentVideo.filename);
+    ui.updateProcessingStatusUI(state.currentVideo);
+
+    api.sendEditRequest(state.currentVideo, state.segments)
+        .then(result => {
+            if (!result.success) {
+                alert(`Failed to edit ${state.currentVideo.filename}: ${result.message}`);
+            } else {
+                const videoName = state.currentVideo.filename;
+                player.stopPlayback();
+                location.hash = `#/edited/${encodeURIComponent(videoName)}`;
+            }
+        })
+        .catch(error => {
+            console.error(`Edit request failed for ${state.currentVideo.filename}:`, error);
+            alert(`An error occurred during the edit request for ${state.currentVideo.filename}.`);
+        })
+        .finally(() => {
+            state.processingVideos.delete(state.currentVideo.filename);
+            if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
+        });
+}
+
 
 function handleTimeUpdate() {
     if (!state.currentVideo || dom.videoPlayer.seeking) return;
@@ -117,7 +129,8 @@ export function init(elements) {
         archiveControls: document.getElementById('archiveControls'),
         muteBtn: document.getElementById('muteBtn'),
         addPointBtn: document.getElementById('addPointBtn'),
-        createSegmentsBtn: document.getElementById('createSegmentsBtn'),
+        createBtn: document.getElementById('createBtn'),
+        deleteBtn: document.getElementById('deleteBtn'),
     };
     ui.initUI(dom);
     player.initPlayer(dom);
@@ -129,31 +142,17 @@ export function init(elements) {
 
     dom.muteBtn.addEventListener('click', () => {
         dom.videoPlayer.muted = !dom.videoPlayer.muted;
-        dom.muteBtn.textContent = dom.videoPlayer.muted ? 'Unmute' : 'Mute';
+        dom.muteBtn.textContent = dom.videoPlayer.muted ? '🔇' : '🔊';
     });
 
     dom.quadrantOverlay.addEventListener('pointerdown', (e) => {
-        if (state.seekInterval) clearInterval(state.seekInterval);
         const action = e.target.dataset.action;
-        const seekAmount = 5;
-
-        const performSeek = (direction) => {
-            dom.videoPlayer.currentTime += seekAmount * direction;
-            if (dom.videoPlayer.paused) dom.videoPlayer.play().catch(e => {});
-            state.seekInterval = setInterval(() => { dom.videoPlayer.currentTime += seekAmount * direction; }, 200);
-        };
-
         switch (action) {
-            case 'seek-forward': performSeek(1); break;
-            case 'seek-back': performSeek(-1); break;
             case 'next': player.navigateVideoInList(1); break;
             case 'prev': player.navigateVideoInList(-1); break;
         }
     });
     
-    const stopSeeking = () => { if (state.seekInterval) { clearInterval(state.seekInterval); state.seekInterval = null; } };
-    dom.quadrantOverlay.addEventListener('pointerup', stopSeeking);
-    dom.quadrantOverlay.addEventListener('pointerleave', stopSeeking);
     dom.quadrantOverlay.addEventListener('contextmenu', e => e.preventDefault());
     
     dom.progressBar.addEventListener('click', (e) => {
@@ -165,14 +164,16 @@ export function init(elements) {
     dom.videoPlayer.addEventListener('timeupdate', handleTimeUpdate);
     dom.videoPlayer.addEventListener('loadedmetadata', () => {
         ui.renderSegmentMarkers();
-        dom.muteBtn.textContent = dom.videoPlayer.muted ? 'Unmute' : 'Mute';
+        dom.muteBtn.textContent = dom.videoPlayer.muted ? '🔇' : '🔊';
     });
 
     dom.addPointBtn.addEventListener('click', () => {
         state.segments.push(dom.videoPlayer.currentTime);
         state.segments.sort((a, b) => a - b);
         ui.renderSegmentMarkers();
+        ui.updateActionButtonsUI();
     });
     
-    dom.createSegmentsBtn.addEventListener('click', handleEditOrDelete);
+    dom.deleteBtn.addEventListener('click', handleDelete);
+    dom.createBtn.addEventListener('click', handleCreate);
 }

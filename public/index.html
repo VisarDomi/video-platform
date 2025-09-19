@@ -29,8 +29,6 @@
             <div id="quadrantOverlay" class="hidden">
                 <div class="quadrant" data-action="prev"></div>
                 <div class="quadrant" data-action="next"></div>
-                <div class="quadrant" data-action="seek-back"></div>
-                <div class="quadrant" data-action="seek-forward"></div>
             </div>
 
             <!-- Top Bar UI -->
@@ -42,12 +40,13 @@
                 </div>
                 <!-- Controls -->
                 <div id="controls">
-                    <button id="backBtn">Back to List</button>
+                    <button id="backBtn">↩️</button>
                     <!-- Archive-specific controls -->
                     <div id="archiveControls" class="hidden">
                          <button id="muteBtn">Mute</button>
-                         <button id="addPointBtn">Add Point</button>
-                         <button id="createSegmentsBtn">Create/Delete</button>
+                         <button id="addPointBtn">📍</button>
+                         <button id="createBtn" class="hidden">✂️</button>
+                         <button id="deleteBtn" class="hidden">🗑️</button>
                     </div>
                 </div>
             </div>
