@@ -47,7 +47,8 @@ export function stopPlayback() {
 function handleDelete() {
     if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length > 0) return;
     
-    if (!confirm(`Are you sure you want to move ${state.currentVideo.filename} to the trash?`)) return;
+    // only i use this app, so no confirm
+    // if (!confirm(`Are you sure you want to move ${state.currentVideo.filename} to the trash?`)) return;
 
     state.processingVideos.add(state.currentVideo.filename);
     ui.updateProcessingStatusUI(state.currentVideo);
