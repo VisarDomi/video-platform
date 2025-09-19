@@ -12,6 +12,16 @@ export function playVideo(video, startTime = 0) {
 
     state.currentVideo = video;
     state.lastPlayedVideo = video; // Set the last played video here
+    
+    // --- ADDED LINE ---
+    // Save the last played video identifier to localStorage
+    try {
+        localStorage.setItem('last-played-video', JSON.stringify(video));
+    } catch (e) {
+        console.error("Failed to save last played video to localStorage", e);
+    }
+    // --- END ADDED LINE ---
+
     showView('video');
     dom.streamerNameEl.textContent = `Archive: ${video.filename}`;
     

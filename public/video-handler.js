@@ -140,6 +140,20 @@ function handleTimeUpdate() {
 // --- Initialization ---
 
 export function init(elements) {
+    // --- ADDED BLOCK ---
+    // Restore the last played video from localStorage on startup
+    try {
+        const savedLastVideo = localStorage.getItem('last-played-video');
+        if (savedLastVideo) {
+            state.lastPlayedVideo = JSON.parse(savedLastVideo);
+        }
+    } catch (e) {
+        console.error("Failed to load last played video from localStorage", e);
+        // If data is corrupted, clear it.
+        localStorage.removeItem('last-played-video');
+    }
+    // --- END ADDED BLOCK ---
+
     // Cache DOM elements and initialize modules
     dom = {
         ...elements,
