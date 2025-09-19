@@ -25,24 +25,6 @@ export function updateActionButtonsUI() {
     }
 }
 
-export function updateProcessingStatusUI(video) {
-    if (!video || !dom.createBtn || !dom.deleteBtn || !dom.addPointBtn) return;
-
-    if (state.processingVideos.has(video.filename)) {
-        dom.createBtn.textContent = '...';
-        dom.deleteBtn.textContent = '...';
-        dom.createBtn.disabled = true;
-        dom.deleteBtn.disabled = true;
-        dom.addPointBtn.disabled = true;
-    } else {
-        dom.createBtn.textContent = '✂️';
-        dom.deleteBtn.textContent = '🗑️';
-        dom.addPointBtn.disabled = false;
-        // Re-enable buttons and let updateActionButtonsUI handle logic
-        updateActionButtonsUI();
-    }
-}
-
 export function showView(viewToShow) {
     dom.listView.classList.toggle('hidden', viewToShow !== 'list');
     dom.videoView.classList.toggle('hidden', viewToShow !== 'video');

@@ -1,5 +1,5 @@
 import { state, STORAGE_KEY_PREFIX } from './state.js';
-import { showView, togglePlayerUI, updateProcessingStatusUI, renderSegmentMarkers, renderVideoList } from './ui.js';
+import { showView, togglePlayerUI, renderSegmentMarkers, renderVideoList } from './ui.js';
 
 let dom = {};
 
@@ -17,9 +17,6 @@ export function playVideo(video, startTime = 0) {
     
     const isEditable = video.type === 'original';
     togglePlayerUI(true, isEditable);
-    if (isEditable) {
-        updateProcessingStatusUI(video);
-    }
 
     // Re-render the list in the background to update highlight and scroll
     renderVideoList();

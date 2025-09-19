@@ -83,31 +83,37 @@ function handleDelete() {
 function handleCreate() {
     if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length === 0 || state.segments.length % 2 !== 0) return;
 
-    // For create, we DO want to show a processing state because ffmpeg takes time.
-    const videoToEdit = state.currentVideo;
-    state.processingVideos.add(videoToEdit.filename);
-    ui.updateProcessingStatusUI(videoToEdit);
+    // --- FIRE AND FORGET LOGIC (mirrors handleDelete) ---
 
-    api.sendEditRequest(videoToEdit, state.segments)
-        .then(result => {
-            if (!result.success) {
-                alert(`Failed to edit ${videoToEdit.filename}: ${result.message}`);
-            } else {
-                const videoName = videoToEdit.filename;
-                player.stopPlayback();
-                location.hash = `#/edited/${encodeURIComponent(videoName)}`;
-            }
-        })
+    // 1. Capture the video to edit, its segments, and find its position in the list.
+    const videoToEdit = state.currentVideo;
+    const savedSegments = [...state.segments]; // Segments are cleared on navigation.
+    const filter = dom.searchInput.value;
+    const regex = filter ? new RegExp(filter, 'i') : null;
+    const currentFilteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
+    const currentIndex = currentFilteredList.findIndex(v => v.filename === videoToEdit.filename && v.type === videoToEdit.type);
+
+    // 2. Immediately remove the original video from the local state for a snappy UI.
+    // The new 'edited' version will appear on the next full list refresh.
+    state.videoList = state.videoList.filter(v => !(v.filename === videoToEdit.filename && v.type === videoToEdit.type));
+    const newFilteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
+
+    // 3. Immediately navigate to the next video (or home if the list is empty).
+    if (newFilteredList.length === 0) {
+        state.currentVideo = null;
+        location.hash = '#/';
+    } else {
+        const nextIndex = Math.min(currentIndex, newFilteredList.length - 1);
+        player.navigateToVideo(newFilteredList[nextIndex]);
+    }
+
+    // 4. Send the edit request in the background. We don't wait for it.
+    // We only log an error if it fails, as the UI has already moved on.
+    api.sendEditRequest(videoToEdit, savedSegments)
         .catch(error => {
-            console.error(`Edit request failed for ${videoToEdit.filename}:`, error);
-            alert(`An error occurred during the edit request for ${videoToEdit.filename}.`);
-        })
-        .finally(() => {
-            // This cleanup is still correct for the create action
-            state.processingVideos.delete(videoToEdit.filename);
-            if (state.currentVideo) {
-                ui.updateProcessingStatusUI(state.currentVideo);
-            }
+            console.error(`Background edit request failed for ${videoToEdit.filename}:`, error);
+            // In a real-world app, you might want to notify the user that the background
+            // task failed, but for this request, just logging is fine.
         });
 }
 
