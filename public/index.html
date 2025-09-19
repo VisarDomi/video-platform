@@ -11,7 +11,7 @@
     <!-- Main List View -->
     <div id="listView">        
         <div id="archiveSearchContainer" class="search-container">
-            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=3.3">
+            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=3.6">
         </div>
 
         <div id="listContainer" class="list-container">
@@ -34,11 +34,15 @@
             <!-- Top Bar UI -->
             <div id="topBar">
                 <div id="streamerName"></div>
+                <!-- Time display is now a distinct element above the progress bar -->
+                <div id="timeDisplayContainer">
+                    <span id="timeDisplay">00:00.000 00:00.000</span>
+                </div>
                 <!-- Progress bar for Archives -->
-                <!-- Time display is now absolutely positioned over the progress bar -->
-                <span id="timeDisplay">00:00 00:00</span>
                 <div id="progressBar" class="hidden">
                     <div id="progressFill"></div>
+                    <!-- Container for segment start/end text -->
+                    <div id="segmentTextContainer"></div>
                 </div>
                 <!-- Controls -->
                 <div id="controls">
@@ -57,6 +61,6 @@
     </div>
 
     <div id="toastContainer"></div>
-    <script type="module" src="/app.js?v=3.3"></script>
+    <script type="module" src="/app.js?v=3.6"></script>
 </body>
 </html>

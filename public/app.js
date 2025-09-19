@@ -51,14 +51,6 @@ function attachEventListeners() {
     });
 }
 
-function formatTime(seconds) {
-    if (isNaN(seconds)) return '00:00';
-    const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
-    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-    return seconds >= 3600 ? `${h}:${m}:${s}` : `${m}:${s}`;
-}
-
 // --- App Logic ---
 function handleTimeUpdate() {
     if (dom.videoPlayer.seeking) return;
@@ -67,7 +59,7 @@ function handleTimeUpdate() {
     const { currentTime, duration } = dom.videoPlayer;
 
     ui.updateProgressBar(currentTime, duration);
-    dom.timeDisplay.textContent = `${formatTime(currentTime)} ${formatTime(duration)}`;
+    dom.timeDisplay.textContent = `${ui.formatTime(currentTime)} ${ui.formatTime(duration)}`;
 
     if (!currentVideo) return;
 

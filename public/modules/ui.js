@@ -7,6 +7,24 @@ export function initUI(elements) {
     dom = elements;
 }
 
+export function formatTime(seconds) {
+    if (isNaN(seconds)) return '00:00.000';
+    
+    // Calculate milliseconds from the fractional part of seconds
+    const ms = Math.floor((seconds % 1) * 1000).toString().padStart(3, '0');
+    
+    // Use the integer part for H:M:S calculation
+    const totalSecondsInt = Math.floor(seconds);
+    const h = Math.floor(totalSecondsInt / 3600).toString().padStart(2, '0');
+    const m = Math.floor((totalSecondsInt % 3600) / 60).toString().padStart(2, '0');
+    const s = (totalSecondsInt % 60).toString().padStart(2, '0');
+    
+    const timeWithoutHours = `${m}:${s}.${ms}`;
+    const timeWithHours = `${h}:${m}:${s}.${ms}`;
+
+    return totalSecondsInt >= 3600 ? timeWithHours : timeWithoutHours;
+}
+
 export function showToast(message, type = 'info', duration = 3000) {
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
@@ -69,7 +87,7 @@ function renderPlayer(state) {
     dom.quadrantOverlay.classList.toggle('hidden', !currentVideo);
     dom.progressBar.classList.toggle('hidden', !currentVideo);
     dom.archiveControls.classList.toggle('hidden', !currentVideo);
-    dom.timeDisplay.classList.toggle('hidden', !currentVideo);
+    document.getElementById('timeDisplayContainer').classList.toggle('hidden', !currentVideo);
 
     if (currentVideo) {
         dom.streamerNameEl.textContent = `${currentVideo.filename}`;
@@ -102,8 +120,12 @@ function renderPlayer(state) {
         }
     }
 
-    // Render segment markers
+    // Render segment markers on the progress bar
     document.querySelectorAll('.segment-marker').forEach(m => m.remove());
+    // Render segment text inside the progress bar
+    const segmentContainer = document.getElementById('segmentTextContainer');
+    segmentContainer.innerHTML = '';
+
     if (currentVideo && !isNaN(dom.videoPlayer.duration)) {
         segments.forEach(point => {
             const marker = document.createElement('div');
@@ -112,6 +134,24 @@ function renderPlayer(state) {
             marker.style.left = `${percentage}%`;
             dom.progressBar.appendChild(marker);
         });
+
+        for (let i = 0; i < segments.length; i += 2) {
+            const row = document.createElement('div');
+            row.className = 'segment-row';
+
+            const startSpan = document.createElement('span');
+            startSpan.className = 'segment-time-start';
+            startSpan.textContent = `start: ${formatTime(segments[i])}`;
+            row.appendChild(startSpan);
+
+            if (segments[i + 1] !== undefined) {
+                const endSpan = document.createElement('span');
+                endSpan.className = 'segment-time-end';
+                endSpan.textContent = `end: ${formatTime(segments[i + 1])}`;
+                row.appendChild(endSpan);
+            }
+            segmentContainer.appendChild(row);
+        }
     }
 }
 
