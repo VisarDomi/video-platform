@@ -1,6 +1,6 @@
 # tslive-dashboard
 
-A web interface for managing and editing archived TsLive videos.
+Safari ios focus. A web interface for managing and editing archived TsLive videos.
 
 This dashboard is a standalone tool for viewing, trimming, and managing video files in a specified directory.
 
