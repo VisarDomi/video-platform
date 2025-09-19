@@ -51,16 +51,14 @@ function handleEditOrDelete() {
     }
 
     if (state.segments.length === 0) {
-        if (!confirm(`Are you sure you want to permanently DELETE "${state.currentVideo.filename}"?`)) return;
-        
         state.processingVideos.add(state.currentVideo.filename);
         ui.updateProcessingStatusUI(state.currentVideo);
 
         api.sendDeleteRequest(state.currentVideo)
-            .then(result => { if (!result.success) alert(`Failed to delete: ${result.message}`); })
+            .then(result => { if (!result.success) alert(`Failed to delete ${state.currentVideo.filename}: ${result.message}`); })
             .catch(error => {
-                console.error('Delete request failed:', error);
-                alert('An error occurred while trying to delete the video.');
+                console.error(`Delete request failed ${state.currentVideo.filename}:`, error);
+                alert(`An error occurred while trying to delete the video ${state.currentVideo.filename}.`);
             })
             .finally(() => {
                 state.processingVideos.delete(state.currentVideo.filename);
@@ -75,10 +73,10 @@ function handleEditOrDelete() {
         ui.updateProcessingStatusUI(state.currentVideo);
 
         api.sendEditRequest(state.currentVideo, state.segments)
-            .then(result => { if (!result.success) alert(`Failed to edit: ${result.message}`); })
+            .then(result => { if (!result.success) alert(`Failed to edit ${state.currentVideo.filename}: ${result.message}`); })
             .catch(error => {
-                console.error('Edit request failed:', error);
-                alert('An error occurred during the edit request.');
+                console.error(`Edit request failed ${state.currentVideo.filename}:`, error);
+                alert(`An error occurred during the edit request ${state.currentVideo.filename}.`);
             })
             .finally(() => {
                 state.processingVideos.delete(state.currentVideo.filename);
