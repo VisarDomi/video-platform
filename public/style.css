@@ -138,12 +138,12 @@ body, html {
 }
 #controls {
     display: flex;
-    justify-content: space-between;
     align-items: center;
 }
 #archiveControls {
     display: flex;
     gap: 10px;
+    margin-left: auto; /* This is the magic line that fixes the issue */
 }
 #controls button {
     padding: 12px 18px; font-size: 36px;
@@ -152,24 +152,26 @@ body, html {
     border-radius: 8px; cursor: pointer;
     min-width: 70px;
     line-height: 1;
+    transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 }
 
 /* Apply hover only on devices that support it to avoid "sticky hover" on touch */
 @media (hover: hover) and (pointer: fine) {
-    #controls button:hover {
+    #controls button:not(:disabled):hover {
         background-color: #ff5e3a;
         border-color: #ff5e3a;
     }
 }
-#controls button:active {
+#controls button:not(:disabled):active {
     background-color: #ff5e3a;
     border-color: #ff5e3a;
 }
 #controls button:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
     background-color: rgba(0,0,0,0.6);
-    border-color: white;
+    border-color: #888;
+    color: #888;
 }
 
 #archiveControls button {
@@ -186,4 +188,43 @@ body, html {
     .list-item.current-video:hover {
         background-color: #ff7a5c;
     }
+}
+
+/* --- New Toast Styles --- */
+#toastContainer {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.toast {
+    padding: 15px 20px;
+    border-radius: 8px;
+    color: white;
+    font-size: 16px;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.5s ease;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+.toast.success { background-color: #28a745; }
+.toast.error   { background-color: #dc3545; }
+.toast.info    { background-color: #17a2b8; }
+
+/* --- New Time Display Styles --- */
+#timeDisplay {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px black;
+    color: #f0f0f0;
+    position: absolute;
+    z-index: 21; 
+    pointer-events: none;
 }

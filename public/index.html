@@ -11,7 +11,7 @@
     <!-- Main List View -->
     <div id="listView">        
         <div id="archiveSearchContainer" class="search-container">
-            <input type="text" id="searchInput" placeholder="Filter (regex)...                    v=2.0">
+            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=3.3">
         </div>
 
         <div id="listContainer" class="list-container">
@@ -35,6 +35,8 @@
             <div id="topBar">
                 <div id="streamerName"></div>
                 <!-- Progress bar for Archives -->
+                <!-- Time display is now absolutely positioned over the progress bar -->
+                <span id="timeDisplay">00:00 00:00</span>
                 <div id="progressBar" class="hidden">
                     <div id="progressFill"></div>
                 </div>
@@ -43,7 +45,8 @@
                     <button id="backBtn">↩️</button>
                     <!-- Archive-specific controls -->
                     <div id="archiveControls" class="hidden">
-                         <button id="muteBtn">Mute</button>
+                         <button id="undoPointBtn" class="hidden">↪️</button>
+                         <button id="muteBtn">🔊</button>
                          <button id="addPointBtn">📍</button>
                          <button id="createBtn" class="hidden">✂️</button>
                          <button id="deleteBtn" class="hidden">🗑️</button>
@@ -53,6 +56,7 @@
         </div>
     </div>
 
-    <script type="module" src="/app.js?v=2.0"></script>
+    <div id="toastContainer"></div>
+    <script type="module" src="/app.js?v=3.3"></script>
 </body>
 </html>

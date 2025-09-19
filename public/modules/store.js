@@ -1,6 +1,7 @@
 // public/modules/store.js
 import * as api from './api.js';
 import { navigateToVideo } from './player.js';
+import { showToast } from './ui.js';
 
 const STORAGE_KEY_LAST_VIDEO = 'last-played-video';
 
@@ -11,6 +12,7 @@ let state = {
     videoList: [],
     filter: '',
     currentVideo: null,
+    currentVideoStartTime: 0,
     lastPlayedVideo: null,
     segments: [],
 };
@@ -74,7 +76,7 @@ export const store = {
                 state.videoList = await api.fetchVideos();
             } catch (e) {
                 console.error("Failed to fetch videos", e);
-                alert("Could not load video list. Please check the server connection.");
+                showToast("Could not load video list.", 'error');
             }
             state.isLoading = false;
             notify();
@@ -88,6 +90,7 @@ export const store = {
         playVideo(video, startTime = 0) {
             if (!video) return;
             state.currentVideo = video;
+            state.currentVideoStartTime = startTime;
             state.lastPlayedVideo = video;
             state.segments = [];
             state.view = 'video';
@@ -97,6 +100,7 @@ export const store = {
 
         showList() {
             state.currentVideo = null; // Clear current video when going back to list
+            state.currentVideoStartTime = 0;
             state.view = 'list';
             notify();
         },
@@ -105,6 +109,12 @@ export const store = {
             if (!state.currentVideo || state.currentVideo.type !== 'original') return;
             state.segments.push(time);
             state.segments.sort((a, b) => a - b);
+            notify();
+        },
+
+        removeLastSegment() {
+            if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length === 0) return;
+            state.segments.pop();
             notify();
         },
 
@@ -127,7 +137,7 @@ export const store = {
             // Fire and forget API call
             api.sendDeleteRequest(videoToDelete).catch(error => {
                 console.error(`Background delete failed for ${videoToDelete.filename}:`, error);
-                alert(`Failed to delete ${videoToDelete.filename} on the server. The list may be out of sync. Please refresh.`);
+                showToast(`Failed to delete ${videoToDelete.filename}`, 'error');
                 // Revert state on failure if desired, but for this app an alert is sufficient.
             });
         },
@@ -152,7 +162,7 @@ export const store = {
             // Fire and forget API call
             api.sendEditRequest(videoToEdit, segmentsToSave).catch(error => {
                 console.error(`Background edit failed for ${videoToEdit.filename}:`, error);
-                alert(`Failed to create edited version of ${videoToEdit.filename}. The list may be out of sync. Please refresh.`);
+                showToast(`Failed to create edited version of ${videoToEdit.filename}.`, 'error');
             });
         }
     }

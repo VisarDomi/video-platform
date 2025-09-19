@@ -32,12 +32,14 @@ function attachEventListeners() {
         if (isNaN(dom.videoPlayer.duration)) return;
         const rect = dom.progressBar.getBoundingClientRect();
         dom.videoPlayer.currentTime = dom.videoPlayer.duration * ((e.clientX - rect.left) / dom.progressBar.offsetWidth);
+        dom.videoPlayer.play(); // Play video on seek
     });
 
     dom.addPointBtn.addEventListener('click', () => {
         store.actions.addSegment(dom.videoPlayer.currentTime);
     });
 
+    dom.undoPointBtn.addEventListener('click', () => store.actions.removeLastSegment());
     dom.deleteBtn.addEventListener('click', () => store.actions.deleteCurrentVideo());
     dom.createBtn.addEventListener('click', () => store.actions.createEditedVideo());
 
@@ -49,22 +51,33 @@ function attachEventListeners() {
     });
 }
 
+function formatTime(seconds) {
+    if (isNaN(seconds)) return '00:00';
+    const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
+    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return seconds >= 3600 ? `${h}:${m}:${s}` : `${m}:${s}`;
+}
+
 // --- App Logic ---
 function handleTimeUpdate() {
     if (dom.videoPlayer.seeking) return;
     
     const { currentVideo } = store.getState();
-    ui.updateProgressBar(dom.videoPlayer.currentTime, dom.videoPlayer.duration);
+    const { currentTime, duration } = dom.videoPlayer;
+
+    ui.updateProgressBar(currentTime, duration);
+    dom.timeDisplay.textContent = `${formatTime(currentTime)} ${formatTime(duration)}`;
 
     if (!currentVideo) return;
 
     const now = Date.now();
     if (now - lastHashUpdateTime > 2000) { // Throttle updates
         lastHashUpdateTime = now;
-        const currentTime = Math.round(dom.videoPlayer.currentTime);
-        localStorage.setItem(player.STORAGE_KEY_PREFIX + currentVideo.filename, currentTime);
+        const roundedTime = Math.round(currentTime);
+        localStorage.setItem(player.STORAGE_KEY_PREFIX + currentVideo.filename, roundedTime);
 
-        const newHash = `#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}/${currentTime}`;
+        const newHash = `#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}/${roundedTime}`;
         if (location.hash.startsWith(`#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}`)) {
              history.replaceState(null, '', newHash);
         }
@@ -75,6 +88,8 @@ function handleTimeUpdate() {
 async function handleRouteChange() {
     // Make sure the video list is loaded before routing.
     if (store.getState().isLoading) {
+        // This is a bit of a hack. Ideally the store would handle this loading state.
+        // For this app, it's fine.
         await store.actions.loadVideoList();
     }
     
@@ -96,7 +111,8 @@ async function handleRouteChange() {
                 store.actions.playVideo(targetVideo, startTime);
             }
         } else {
-            alert(`Could not find video "${videoName}". It may have been deleted.`);
+            // Using the new toast system for errors is better, but this one is rare.
+            ui.showToast(`Could not find video "${videoName}".`, 'error');
             location.hash = '#/';
         }
     } else {
@@ -124,8 +140,10 @@ function initialize() {
         archiveControls: document.getElementById('archiveControls'),
         muteBtn: document.getElementById('muteBtn'),
         addPointBtn: document.getElementById('addPointBtn'),
+        undoPointBtn: document.getElementById('undoPointBtn'),
         createBtn: document.getElementById('createBtn'),
         deleteBtn: document.getElementById('deleteBtn'),
+        timeDisplay: document.getElementById('timeDisplay'),
     };
 
     // 2. Initialize modules
@@ -143,7 +161,7 @@ function initialize() {
         if (lastPlayedVideoSrc !== currentSrc) {
             lastPlayedVideoSrc = currentSrc;
             if (state.currentVideo) {
-                player.playVideo(state.currentVideo);
+                player.playVideo(state.currentVideo, state.currentVideoStartTime);
             } else {
                 player.stopPlayback();
             }

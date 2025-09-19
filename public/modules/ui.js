@@ -7,6 +7,24 @@ export function initUI(elements) {
     dom = elements;
 }
 
+export function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+
+    container.appendChild(toast);
+
+    // Animate in
+    setTimeout(() => toast.classList.add('show'), 10);
+
+    // Animate out and remove
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    }, duration);
+}
+
 function renderVideoList(state) {
     dom.listContainer.innerHTML = '';
     
@@ -51,19 +69,36 @@ function renderPlayer(state) {
     dom.quadrantOverlay.classList.toggle('hidden', !currentVideo);
     dom.progressBar.classList.toggle('hidden', !currentVideo);
     dom.archiveControls.classList.toggle('hidden', !currentVideo);
+    dom.timeDisplay.classList.toggle('hidden', !currentVideo);
 
     if (currentVideo) {
-        dom.streamerNameEl.textContent = `Archive: ${currentVideo.filename}`;
+        dom.streamerNameEl.textContent = `${currentVideo.filename}`;
         
-        dom.addPointBtn.classList.toggle('hidden', !isEditable);
+        // Hide all conditional edit controls by default
+        dom.addPointBtn.classList.add('hidden');
+        dom.undoPointBtn.classList.add('hidden');
+        dom.createBtn.classList.add('hidden');
+        dom.deleteBtn.classList.add('hidden');
+
+        // Hide the back button when editing
+        dom.backBtn.classList.toggle('hidden', segments.length > 0);
+
         if (isEditable) {
             const hasSegments = segments.length > 0;
-            dom.deleteBtn.classList.toggle('hidden', hasSegments);
-            dom.createBtn.classList.toggle('hidden', !hasSegments);
-            dom.createBtn.disabled = segments.length % 2 !== 0;
-        } else {
-            dom.createBtn.classList.add('hidden');
-            dom.deleteBtn.classList.add('hidden');
+            
+            // "Add Point" is always visible for an editable video
+            dom.addPointBtn.classList.remove('hidden');
+
+            if (hasSegments) {
+                // State 2: Points exist. Show Undo and Create.
+                dom.undoPointBtn.classList.remove('hidden');
+                dom.createBtn.classList.remove('hidden');
+                // The create button is visible but disabled if segments aren't paired
+                dom.createBtn.disabled = segments.length % 2 !== 0;
+            } else {
+                // State 1: No points. Show Delete.
+                dom.deleteBtn.classList.remove('hidden');
+            }
         }
     }
 
