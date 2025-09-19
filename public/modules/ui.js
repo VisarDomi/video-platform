@@ -61,13 +61,28 @@ export function renderVideoList() {
          return;
     }
 
+    const activeVideo = state.currentVideo || state.lastPlayedVideo;
+
     filteredList.forEach(video => {
         const item = document.createElement('div');
         item.className = 'list-item archive-item';
         item.textContent = video.filename + (video.type === 'edited' ? ' (edited)' : '');
         item.addEventListener('click', () => navigateToVideo(video));
+
+        // Add highlighting for the current/last played video
+        if (activeVideo && video.filename === activeVideo.filename && video.type === activeVideo.type) {
+            item.classList.add('current-video');
+        }
+
         dom.listContainer.appendChild(item);
     });
+
+    // Scroll the highlighted item into view
+    const currentItem = dom.listContainer.querySelector('.current-video');
+    if (currentItem) {
+        // Use 'auto' behavior so it happens instantly in the background
+        currentItem.scrollIntoView({ block: 'center', behavior: 'auto' });
+    }
 }
 
 export function togglePlayerUI(show, isEditable = false) {

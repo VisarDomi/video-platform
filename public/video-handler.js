@@ -46,54 +46,68 @@ export function stopPlayback() {
 
 function handleDelete() {
     if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length > 0) return;
-    
-    // only i use this app, so no confirm
-    // if (!confirm(`Are you sure you want to move ${state.currentVideo.filename} to the trash?`)) return;
 
-    state.processingVideos.add(state.currentVideo.filename);
-    ui.updateProcessingStatusUI(state.currentVideo);
+    // --- NEW "FIRE AND FORGET" LOGIC ---
 
-    api.sendDeleteRequest(state.currentVideo)
-        .then(result => {
-            if (!result.success) {
-                alert(`Failed to delete ${state.currentVideo.filename}: ${result.message}`);
-            } else {
-                location.hash = '#/';
-            }
-        })
+    // 1. Capture the video to delete and find its position in the current list
+    const videoToDelete = state.currentVideo;
+    const filter = dom.searchInput.value;
+    const regex = filter ? new RegExp(filter, 'i') : null;
+    const currentFilteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
+    const currentIndex = currentFilteredList.findIndex(v => v.filename === videoToDelete.filename && v.type === videoToDelete.type);
+
+    // 2. Immediately remove the video from the local state for a snappy UI.
+    state.videoList = state.videoList.filter(v => !(v.filename === videoToDelete.filename && v.type === videoToDelete.type));
+    const newFilteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
+
+    // 3. Immediately navigate to the next video (or home if the list is empty).
+    if (newFilteredList.length === 0) {
+        state.currentVideo = null;
+        location.hash = '#/';
+    } else {
+        const nextIndex = Math.min(currentIndex, newFilteredList.length - 1);
+        player.navigateToVideo(newFilteredList[nextIndex]);
+    }
+
+    // 4. Send the delete request in the background. We don't wait for it.
+    // We only log an error if it fails, as the UI has already moved on.
+    api.sendDeleteRequest(videoToDelete)
         .catch(error => {
-            console.error(`Delete request failed for ${state.currentVideo.filename}:`, error);
-            alert(`An error occurred while trying to delete the video ${state.currentVideo.filename}.`);
-        })
-        .finally(() => {
-            state.processingVideos.delete(state.currentVideo.filename);
-            if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
+            console.error(`Background delete request failed for ${videoToDelete.filename}:`, error);
+            // We could alert the user here, but it might be confusing.
+            // For a single-user app, just logging the error is often enough.
         });
 }
+
 
 function handleCreate() {
     if (!state.currentVideo || state.currentVideo.type === 'edited' || state.segments.length === 0 || state.segments.length % 2 !== 0) return;
 
-    state.processingVideos.add(state.currentVideo.filename);
-    ui.updateProcessingStatusUI(state.currentVideo);
+    // For create, we DO want to show a processing state because ffmpeg takes time.
+    const videoToEdit = state.currentVideo;
+    state.processingVideos.add(videoToEdit.filename);
+    ui.updateProcessingStatusUI(videoToEdit);
 
-    api.sendEditRequest(state.currentVideo, state.segments)
+    api.sendEditRequest(videoToEdit, state.segments)
         .then(result => {
             if (!result.success) {
-                alert(`Failed to edit ${state.currentVideo.filename}: ${result.message}`);
+                alert(`Failed to edit ${videoToEdit.filename}: ${result.message}`);
             } else {
-                const videoName = state.currentVideo.filename;
+                const videoName = videoToEdit.filename;
                 player.stopPlayback();
                 location.hash = `#/edited/${encodeURIComponent(videoName)}`;
             }
         })
         .catch(error => {
-            console.error(`Edit request failed for ${state.currentVideo.filename}:`, error);
-            alert(`An error occurred during the edit request for ${state.currentVideo.filename}.`);
+            console.error(`Edit request failed for ${videoToEdit.filename}:`, error);
+            alert(`An error occurred during the edit request for ${videoToEdit.filename}.`);
         })
         .finally(() => {
-            state.processingVideos.delete(state.currentVideo.filename);
-            if (state.currentVideo) ui.updateProcessingStatusUI(state.currentVideo);
+            // This cleanup is still correct for the create action
+            state.processingVideos.delete(videoToEdit.filename);
+            if (state.currentVideo) {
+                ui.updateProcessingStatusUI(state.currentVideo);
+            }
         });
 }
 

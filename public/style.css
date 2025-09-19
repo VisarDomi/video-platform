@@ -175,3 +175,15 @@ body, html {
 #archiveControls button {
     text-align: center;
 }
+
+/* Added for highlighting current video in list */
+.list-item.current-video {
+    background-color: #0e0e0e;
+    color: #e0e0e0e0;
+    font-weight: bold;
+}
+@media (hover: hover) and (pointer: fine) {
+    .list-item.current-video:hover {
+        background-color: #ff7a5c;
+    }
+}

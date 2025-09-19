@@ -1,5 +1,5 @@
 import { state, STORAGE_KEY_PREFIX } from './state.js';
-import { showView, togglePlayerUI, updateProcessingStatusUI, renderSegmentMarkers } from './ui.js';
+import { showView, togglePlayerUI, updateProcessingStatusUI, renderSegmentMarkers, renderVideoList } from './ui.js';
 
 let dom = {};
 
@@ -11,6 +11,7 @@ export function playVideo(video, startTime = 0) {
     if (!video) return;
 
     state.currentVideo = video;
+    state.lastPlayedVideo = video; // Set the last played video here
     showView('video');
     dom.streamerNameEl.textContent = `Archive: ${video.filename}`;
     
@@ -19,6 +20,9 @@ export function playVideo(video, startTime = 0) {
     if (isEditable) {
         updateProcessingStatusUI(video);
     }
+
+    // Re-render the list in the background to update highlight and scroll
+    renderVideoList();
 
     dom.videoPlayer.controls = false;
     dom.videoPlayer.loop = false;
@@ -43,7 +47,7 @@ export function stopPlayback() {
     dom.videoPlayer.pause();
     dom.videoPlayer.removeAttribute('src');
     dom.videoPlayer.load();
-    state.currentVideo = null;
+    state.currentVideo = null; // Only clear the current video, not the last played
 }
 
 export function navigateToVideo(video) {
@@ -60,7 +64,11 @@ export function navigateVideoInList(direction) {
     const regex = filter ? new RegExp(filter, 'i') : null;
     const filteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
     
-    const currentIndex = filteredList.findIndex(v => v.filename === state.currentVideo.filename && v.type === state.currentVideo.type);
+    // Use lastPlayedVideo as a fallback if currentVideo is null
+    const activeVideo = state.currentVideo || state.lastPlayedVideo;
+    if (!activeVideo) return;
+
+    const currentIndex = filteredList.findIndex(v => v.filename === activeVideo.filename && v.type === activeVideo.type);
     
     const nextIndex = currentIndex + direction;
     if (nextIndex >= 0 && nextIndex < filteredList.length) {
