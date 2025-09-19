@@ -1,4 +1,6 @@
+// src/config.ts
 import 'dotenv/config';
+import fs from 'fs';
 
 // --- Environment Variable Validation ---
 const VIDEOS_DIRS_RAW = process.env.VIDEOS_DIRS;
@@ -15,3 +17,17 @@ if (!VIDEOS_DIRS_RAW) {
  */
 export const VIDEO_ROOT_DIRS = VIDEOS_DIRS_RAW.split(',').map(p => p.trim());
 export const PORT = 7998;
+
+// --- Startup Validation ---
+VIDEO_ROOT_DIRS.forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        console.error(`FATAL ERROR: The configured video directory does not exist: ${dir}`);
+        process.exit(1);
+    }
+    try {
+        fs.accessSync(dir, fs.constants.R_OK);
+    } catch (err) {
+        console.error(`FATAL ERROR: The configured video directory is not readable: ${dir}`);
+        process.exit(1);
+    }
+});

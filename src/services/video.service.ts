@@ -1,9 +1,11 @@
+// src/services/video.service.ts
 import { promises as fsp } from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { VIDEO_ROOT_DIRS } from '../config.js';
 import { findVideoPath } from '../utils.js';
 import logger from '../logger.js';
+import { FileNotFoundError, FfmpegError } from '../errors.js';
 
 // --- Internal Helper Functions ---
 
@@ -81,8 +83,9 @@ function executeFfmpegCommand(args: string[]): Promise<void> {
 
         ffmpeg.on('close', (code) => {
             if (code !== 0) {
-                const error = new Error(`ffmpeg process exited with code ${code}`);
-                logger.error(error.message, { fullCommand: `ffmpeg ${args.join(' ')}`, stderr: stderrOutput });
+                const fullCommand = `ffmpeg ${args.join(' ')}`;
+                const error = new FfmpegError(`ffmpeg process exited with code ${code}`, stderrOutput);
+                logger.error(error.message, { fullCommand, stderr: stderrOutput });
                 return reject(error);
             }
             resolve();
@@ -111,7 +114,7 @@ export async function getAllVideos() {
 export async function trashVideo(type: 'original' | 'edited', filename: string) {
     const foundVideo = await findVideoPath(type, filename);
     if (!foundVideo) {
-        throw new Error('Video file not found.');
+        throw new FileNotFoundError(`Video file not found: ${filename}`);
     }
     await moveFileToTrash(foundVideo.fullPath, foundVideo.baseDir);
 }
@@ -119,7 +122,7 @@ export async function trashVideo(type: 'original' | 'edited', filename: string) 
 export async function createEditedVideo(filename: string, segments: {start: number, end: number}[]) {
     const foundVideo = await findVideoPath('original', filename);
     if (!foundVideo) {
-        throw new Error('Original video file not found.');
+        throw new FileNotFoundError(`Original video file not found: ${filename}`);
     }
 
     const { fullPath: sourcePath, baseDir } = foundVideo;

@@ -1,6 +1,8 @@
+// src/api/video.routes.ts
 import { Router } from 'express';
 import * as videoService from '../services/video.service.js';
 import logger from '../logger.js';
+import { FileNotFoundError } from '../errors.js';
 
 const router = Router();
 
@@ -34,8 +36,7 @@ router.delete('/videos/:type/:filename', async (req, res) => {
         res.json({ success: true, message: 'Video moved to trash successfully.' });
     } catch (err: any) {
         logger.error('Error in trashVideo route:', { file: filename, err });
-        // Service throws a generic error, so we assume 404 if file not found.
-        if (err.message.includes('not found')) {
+        if (err instanceof FileNotFoundError) {
             return res.status(404).json({ success: false, message: err.message });
         }
         res.status(500).json({ success: false, message: 'Failed to move video to trash.' });
@@ -59,7 +60,7 @@ router.post('/edit', async (req, res) => {
         res.json({ success: true, message: 'Created edited video and moved original to trash.' });
     } catch (error: any) {
         logger.error(`Failed to process video ${filename}:`, { error });
-         if (error.message.includes('not found')) {
+         if (error instanceof FileNotFoundError) {
             return res.status(404).json({ success: false, message: error.message });
         }
         res.status(500).json({ success: false, message: 'Failed to process video.' });
