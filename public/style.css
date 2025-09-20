@@ -72,6 +72,7 @@ body, html {
     width: 100vw; height: 100vh;
     background-color: black;
     -webkit-user-select: none; user-select: none;
+    touch-action: manipulation; /* with this, we are able to make safari ios disable double touch - zoom*/
 }
 #videoContainer {
     width: 100%; height: 100%;
@@ -104,7 +105,7 @@ body, html {
     box-sizing: border-box;
     background: linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0));
     z-index: 20;
-    opacity: 0.05;
+    opacity: 0.15;
 }
 
 #streamerName {
