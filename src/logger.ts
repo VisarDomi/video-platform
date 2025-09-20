@@ -1,11 +1,12 @@
-// logger.ts
-import { getConfig } from './config.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
+// src/logger.ts
+import * as path from 'path';
+import * as url from 'url';
 import winston from 'winston';
 
+import * as config from './config.js';
+
 // Get base directory
-const __filename = fileURLToPath(import.meta.url);
+const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const logDir = path.resolve(__dirname, '..'); // Place logs in the root folder
 
@@ -34,7 +35,7 @@ const logger = winston.createLogger({
         }),
         // 2. A transport to log ERRORS to a file
         new winston.transports.File({
-            filename: path.join(logDir, getConfig().fileNames.errorLog),
+            filename: path.join(logDir, config.getConfig().fileNames.errorLog),
             level: 'error', // Only log errors to this file
             format: fileFormat,
         }),

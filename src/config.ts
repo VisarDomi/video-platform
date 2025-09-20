@@ -1,10 +1,10 @@
-// config.ts
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import os from 'os';
+// src/config.ts
+import * as fs from 'fs';
+import * as path from 'path';
+import * as url from 'url';
+import * as os from 'os';
 
-const __filename = fileURLToPath(import.meta.url);
+const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
 

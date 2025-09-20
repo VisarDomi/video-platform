@@ -1,7 +1,8 @@
-// requests.ts
+// src/requests.ts
+import * as crypto from 'crypto';
+
 import logger from './logger.js';
-import * as u from './utils.js';
-import { randomUUID } from 'crypto';
+import * as utils from './utils.js';
 
 const COOKIE_KEY = "cookie"; // lower case
 
@@ -36,9 +37,9 @@ async function makeApiRequest<T>(
         // Step 1: Build the headers. This can throw if tokens are missing.
         const headers: HeadersInit = {};
         if (authType === 'st') {
-            headers[COOKIE_KEY] = u.createCookieST();
+            headers[COOKIE_KEY] = utils.createCookieST();
         } else if (authType === 'full') {
-            headers[COOKIE_KEY] = u.createCookie();
+            headers[COOKIE_KEY] = utils.createCookie();
         }
 
         const options: RequestInit = { method, headers };
@@ -121,7 +122,7 @@ export async function getTokenDataResponse(): Promise<Response | null> {
         const options: RequestInit = {
             method: "GET",
             headers: {
-                [COOKIE_KEY]: u.createCookieST(),
+                [COOKIE_KEY]: utils.createCookieST(),
             }
         };
         const response = await fetch("https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData", options);
@@ -150,10 +151,10 @@ export async function postRefreshSession(username: string): Promise<Response | n
         'Accept-Encoding': 'gzip, deflate, br, zstd',
         'Referer': 'https://tango.me/',
         'content-type': 'application/json',
-        'foreground-id': randomUUID(),
-        'interaction-id': randomUUID(),
+        'foreground-id': crypto.randomUUID(),
+        'interaction-id': crypto.randomUUID(),
         'username': username,
-        'x-app-client-session-id': randomUUID(),
+        'x-app-client-session-id': crypto.randomUUID(),
         'Origin': 'https://tango.me',
         'DNT': '1',
         'Sec-GPC': '1',
@@ -161,7 +162,7 @@ export async function postRefreshSession(username: string): Promise<Response | n
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-site',
         'Connection': 'keep-alive',
-        [COOKIE_KEY]: u.createCookieRT(),
+        [COOKIE_KEY]: utils.createCookieRT(),
     };
 
     const refreshOptions = {

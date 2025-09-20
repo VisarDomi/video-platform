@@ -1,11 +1,12 @@
-// auth.ts
-import { getConfig } from './config.js';
+// src/auth.ts
+import * as timersPromises from 'timers/promises';
+import puppeteer, { Browser, Page, Target, HTTPResponse } from 'puppeteer';
+
+import * as config from './config.js';
 import logger from './logger.js';
-import * as u from './utils.js';
-import * as s from './state.js';
-import * as r from './requests.js';
-import { setTimeout } from 'timers/promises';
-import puppeteer, { Page, Browser } from 'puppeteer';
+import * as utils from './utils.js';
+import * as state from './state.js';
+import * as requests from './requests.js';
 
 async function extractInitialTokens() {
     const email = process.env.GOOGLE_EMAIL
@@ -46,7 +47,7 @@ async function extractInitialTokens() {
                     // Exponential backoff, capped at 5 minutes
                     const delay = Math.min(initialLaunchDelay * (2 ** (attempt - 1)), 300000); 
                     logger.warn(`Failed to launch browser (is a display available?). Retrying in ${delay / 1000} seconds...`, { originalError: error.message.split('\n')[0] });
-                    await setTimeout(delay);
+                    await timersPromises.setTimeout(delay);
                 } else {
                     // For any other unexpected error, fail immediately
                     logger.error("An unexpected error occurred while launching the browser.", { error });
@@ -69,7 +70,7 @@ async function extractInitialTokens() {
                 break;
             } catch (error) {
                 logger.error("There is no internet, trying again in 5s", { error });
-                await setTimeout(5000)
+                await timersPromises.setTimeout(5000)
             }
         }
         await tango.setUserAgent(
@@ -78,7 +79,7 @@ async function extractInitialTokens() {
 
 
         // Step 2: Click "Continue with Google"
-        await setTimeout(5000);
+        await timersPromises.setTimeout(5000);
         try {
             await tango.click('button[data-testid="GOOGLE"]');
         } catch (ignore1) {
@@ -101,7 +102,7 @@ async function extractInitialTokens() {
             }
         }
 
-        const googlePopupTarget = await browser.waitForTarget(target => target.url().includes('accounts.google.com'));
+        const googlePopupTarget = await browser.waitForTarget((target: Target) => target.url().includes('accounts.google.com'));
         const googlePopup = (await googlePopupTarget.page()) as Page;
 
         if (!googlePopup) {
@@ -120,7 +121,7 @@ async function extractInitialTokens() {
                     logger.info("Email input found. Entering email.");
                     await googlePopup.type('#identifierId', email);
                     await googlePopup.locator('::-p-aria(Next)').click();
-                    await setTimeout(3000); // Wait for transition to password page
+                    await timersPromises.setTimeout(3000); // Wait for transition to password page
                 } catch (e) {
                     logger.info("Email input not found, assuming we are already on the password or continue step.");
                 }
@@ -130,7 +131,7 @@ async function extractInitialTokens() {
                     logger.info("Password input found. Entering password.");
                     await googlePopup.type('#password input[type="password"]', password);
                     await googlePopup.locator('::-p-aria(Next)').click();
-                    await setTimeout(3000); // Wait for transition to consent page
+                    await timersPromises.setTimeout(3000); // Wait for transition to consent page
                 } catch (e) {
                     logger.info("Password input not found, assuming we are on the consent/continue step.");
                 }
@@ -145,8 +146,8 @@ async function extractInitialTokens() {
 
                 await Promise.race([
                     new Promise<void>(resolve => googlePopup.once('close', () => resolve())),
-                    new Promise<void>((_, reject) => googlePopup.once('error', (err) => reject(new Error(`Google popup crashed: ${err.message}`)))),
-                    setTimeout(20000).then(() => Promise.reject(new Error("Timeout: Google popup did not close after 20 seconds.")))
+                    new Promise<void>((_, reject) => googlePopup.once('error', (err: Error) => reject(new Error(`Google popup crashed: ${err.message}`)))),
+                    timersPromises.setTimeout(20000).then(() => Promise.reject(new Error("Timeout: Google popup did not close after 20 seconds.")))
                 ]);
 
                 logger.info("Google popup closed successfully. Authentication complete.");
@@ -170,7 +171,7 @@ async function extractInitialTokens() {
 
         logger.info("Waiting to intercept the session response from Tango's API...");
         await new Promise<void>((resolve, reject) => {
-            tango.on('response', async (response) => {
+            tango.on('response', async (response: HTTPResponse) => {
                 if (response.url() === "https://gateway.tango.me/google-login/auth-code/v1/login") {
                     let rtFound = false;
                     let stFound = false;
@@ -182,14 +183,14 @@ async function extractInitialTokens() {
                             if (cookie.trim().startsWith("Tango-RT=")) {
                                 const tangoRT = cookie.split(';')[0].substring("Tango-RT=".length);
                                 logger.info(`Found Tango-RT via Set-Cookie header.`);
-                                s.setTangoRT(tangoRT);
+                                state.setTangoRT(tangoRT);
                                 rtFound = true
-                                await u.saveTokenToFile(); // Save the refresh token to a file
+                                await utils.saveTokenToFile(); // Save the refresh token to a file
                             }
                             if (cookie.trim().startsWith("Tango-ST=")) {
                                 const tangoST = cookie.split(';')[0].substring("Tango-ST=".length);
                                 logger.info(`Found Tango-ST via Set-Cookie header.`);
-                                s.setTangoST(tangoST);
+                                state.setTangoST(tangoST);
                                 stFound = true
                             }
                         }
@@ -199,7 +200,7 @@ async function extractInitialTokens() {
                     }
                 }
             });
-            setTimeout(60000).then(() => reject(new Error("Timeout: Did not intercept a response with Tango-RT and Tango-ST within 60 seconds.")));
+            timersPromises.setTimeout(60000).then(() => reject(new Error("Timeout: Did not intercept a response with Tango-RT and Tango-ST within 60 seconds.")));
         });
 
         logger.info("Initial refresh token found.");
@@ -218,7 +219,7 @@ async function extractInitialTokens() {
 }
 
 async function setTokenData() {
-    const tokenDataResponse = await r.getTokenDataResponse();
+    const tokenDataResponse = await requests.getTokenDataResponse();
     if (!tokenDataResponse) {
         throw new Error(`Failed to fetch token data. The request function has logged the details.`);
     }
@@ -248,15 +249,15 @@ async function setTokenData() {
         if (tt && ttu && tte) {
             // The value is the second part after splitting by '='
             const ttValue = tt.split('=')[1];
-            s.setTt(ttValue);
+            state.setTt(ttValue);
 
             const ttuValue = ttu.split('=')[1];
-            s.setTtu(ttuValue);
+            state.setTtu(ttuValue);
 
             const tteValue = tte.split('=')[1];
-            s.setTte(tteValue);
+            state.setTte(tteValue);
 
-            u.updateStatusFile();
+            utils.updateStatusFile();
         } else {
             logger.error("Could not find all required cookies (tt, ttu, tte).");
             logger.info({ tt, ttu, tte });
@@ -294,7 +295,7 @@ function parseJwtPayload(token: string): { [key: string]: any } | null {
 async function refreshSession() {
     logger.info("Attempting to refresh session using Tango-RT...");
 
-    const tangoRT = s.getTangoRT();
+    const tangoRT = state.getTangoRT();
     if (!tangoRT) {
         throw new Error("Tango-RT not found in state. Cannot refresh session.");
     }
@@ -306,7 +307,7 @@ async function refreshSession() {
         throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
     }
 
-    const response = await r.postRefreshSession(username);
+    const response = await requests.postRefreshSession(username);
     if (!response) {
         throw new Error(`Failed to refresh session. The request function has logged the details. Tango-RT might be expired.`);
     }
@@ -318,12 +319,12 @@ async function refreshSession() {
         const trimmedCookie = cookieString.trim();
         if (trimmedCookie.startsWith("Tango-ST=")) {
             const newTangoST = trimmedCookie.split(';')[0].substring("Tango-ST=".length);
-            s.setTangoST(newTangoST);
+            state.setTangoST(newTangoST);
             newStFound = true;
         } else if (trimmedCookie.startsWith("Tango-RT=")) {
             const newTangoRT = trimmedCookie.split(';')[0].substring("Tango-RT=".length);
-            s.setTangoRT(newTangoRT);
-            await u.saveTokenToFile(); // Save the new refresh token immediately
+            state.setTangoRT(newTangoRT);
+            await utils.saveTokenToFile(); // Save the new refresh token immediately
             newRtFound = true;
         }
     }
@@ -345,7 +346,7 @@ async function refreshSession() {
  * Performs the initial authentication, prioritizing stored tokens before falling back to Puppeteer.
  */
 export async function initialAuth() {
-    const loaded = await u.loadTokenFromFile();
+    const loaded = await utils.loadTokenFromFile();
     if (loaded) {
         logger.info("Tango-RT loaded from file. Attempting to refresh session...");
         try {
@@ -378,7 +379,7 @@ export async function refreshShortLivedTokens() {
             logger.error("Failed to refresh short-lived tokens. Waiting for new Tango-ST.", { error });
             // Don't re-throw; just wait for the next interval. The long-lived refresh will handle fatal auth errors.
         }
-        await setTimeout(getConfig().intervals.shortTokenRefresh);
+        await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
     }
 }
 
@@ -388,8 +389,8 @@ export async function refreshShortLivedTokens() {
  */
 export async function manageTokenLifecycle() {
     while (true) {
-        const refreshInterval = getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
-        await setTimeout(refreshInterval);
+        const refreshInterval = config.getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
+        await timersPromises.setTimeout(refreshInterval);
         try {
             // 1. Attempt the efficient API-based refresh.
             await refreshSession();

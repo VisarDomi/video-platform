@@ -1,24 +1,25 @@
 // src/utils.ts
-import { getConfig } from './config.js';
-import logger from './logger.js';
-import * as s from './state.js';
-import * as r from './requests.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { promises as fsPromises } from 'fs'; // for file creation
-import fs from 'fs'; // for folder creation
+import * as path from 'path';
+import * as url from 'url';
+import * as fsPromises from 'fs/promises';
+import * as fs from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
+import * as config from './config.js';
+import logger from './logger.js';
+import * as state from './state.js';
+import * as requests from './requests.js';
+
+const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const getSessionFilePath = () => path.resolve(__dirname, '..', getConfig().fileNames.session);
-const getStatusFilePath = () => path.resolve(__dirname, '..', getConfig().fileNames.liveStatus);
+const getSessionFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.session);
+const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.liveStatus);
 
 export async function saveTokenToFile() {
     try {
-        const tangoRT = s.getTangoRT();
+        const tangoRT = state.getTangoRT();
         if (tangoRT) {
             await fsPromises.writeFile(getSessionFilePath(), JSON.stringify({ tangoRT }, null, 2));
-            logger.info(`Session token (Tango-RT) saved to ${getConfig().fileNames.session}`);
+            logger.info(`Session token (Tango-RT) saved to ${config.getConfig().fileNames.session}`);
         }
     } catch (error) {
         logger.error('Failed to save session file', { error });
@@ -30,7 +31,7 @@ export async function loadTokenFromFile(): Promise<boolean> {
         const data = await fsPromises.readFile(getSessionFilePath(), 'utf-8');
         const session = JSON.parse(data);
         if (session.tangoRT) {
-            s.setTangoRT(session.tangoRT);
+            state.setTangoRT(session.tangoRT);
             return true;
         }
     } catch (error: any) {
@@ -47,7 +48,7 @@ export async function loadTokenFromFile(): Promise<boolean> {
 export async function updateStatusFile() {
     try {
         // Convert Map to a more JSON-friendly format
-        const activeDownloads = Array.from(s.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
+        const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
             ...downloadInfo
         }));
@@ -55,10 +56,10 @@ export async function updateStatusFile() {
         const status = {
             activeDownloads, // Replaces downloads, downloading, and aliases
             tokens: {
-                tt: s.getTt(),
-                ttu: s.getTtu(),
-                tte: s.getTte(),
-                st: s.getTangoST(),
+                tt: state.getTt(),
+                ttu: state.getTtu(),
+                tte: state.getTte(),
+                st: state.getTangoST(),
             },
             lastUpdated: new Date().toISOString(),
         };
@@ -75,7 +76,7 @@ export async function updateStatusFile() {
  */
 export async function getLiveUrlFromMaster(masterPlaylistUrl: string): Promise<string | null> {
     try {
-        const masterListBody = await r.getMasterList(masterPlaylistUrl);
+        const masterListBody = await requests.getMasterList(masterPlaylistUrl);
         if (!masterListBody) {
             logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
             return null;
@@ -129,7 +130,7 @@ export interface RawPaths {
 
 export function createPaths(streamer: string, formattedDate: string): RawPaths {
     const baseFilename = `${formattedDate} ${streamer}`;
-    const storageLocation = getConfig().storagePath;
+    const storageLocation = config.getConfig().storagePath;
 
     // Ensure the main storage directory exists
     if (!fs.existsSync(storageLocation)) {
@@ -149,9 +150,9 @@ export function createPaths(streamer: string, formattedDate: string): RawPaths {
 }
 
 export function createCookie() {
-    const tt = s.getTt();
-    const ttu = s.getTtu();
-    const tte = s.getTte();
+    const tt = state.getTt();
+    const ttu = state.getTtu();
+    const tte = state.getTte();
     if (!(tt && ttu && tte)) {
         throw new Error("tt, ttu, tte not found")
     }
@@ -159,7 +160,7 @@ export function createCookie() {
 }
 
 export function createCookieST() {
-    const tangoST = s.getTangoST();
+    const tangoST = state.getTangoST();
     if (!tangoST) {
         throw new Error("Tango-ST not found")
     }
@@ -167,7 +168,7 @@ export function createCookieST() {
 }
 
 export function createCookieRT() {
-    const tangoRT = s.getTangoRT();
+    const tangoRT = state.getTangoRT();
     if (!tangoRT) {
         throw new Error("Tango-RT not found")
     }

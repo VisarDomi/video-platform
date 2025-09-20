@@ -1,16 +1,17 @@
 // src/repackager.ts
-import { spawn } from 'child_process';
-import { promises as fs } from 'fs';
-import path from 'path';
-import os from 'os';
+import * as child_process from 'child_process';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import pLimit from 'p-limit';
-import { getConfig } from './config.js';
+
+import * as config from './config.js';
 import logger from './logger.js';
 
 // Helper to run a command and get its output/error, with optional real-time logging
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
-        const process = spawn(command, args);
+        const process = child_process.spawn(command, args);
         let stdout = '';
         let stderr = '';
 
@@ -92,7 +93,7 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
 };
 
 const repairSegment = async (sourcePath: string, destPath: string, targetResolution: string): Promise<boolean> => {
-    const { repairPreset, repairCrf } = getConfig().repackager;
+    const { repairPreset, repairCrf } = config.getConfig().repackager;
     const [targetWidth, targetHeight] = targetResolution.split('x');
     const sourceName = path.basename(sourcePath);
     const parentDirName = path.basename(path.dirname(sourcePath));
@@ -121,8 +122,7 @@ const repairSegment = async (sourcePath: string, destPath: string, targetResolut
 };
 
 export const repackageFolder = async (inputDir: string): Promise<void> => {
-    const config = getConfig();
-    const repackagerConfig = config.repackager;
+    const repackagerConfig = config.getConfig().repackager;
 
     const inputDirName = path.basename(inputDir);
     // The output directory is simply the parent of the input (segment) directory.
