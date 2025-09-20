@@ -1,5 +1,5 @@
 {
-    "name": "tslive-dl",
+    "name": "tslive-downloader",
     "type": "module",
     "version": "1.0.0",
     "description": "Download from tslive",
