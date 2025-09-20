@@ -7,7 +7,31 @@ export function initUI(elements) {
     dom = elements;
 }
 
-export function formatTime(seconds) {
+/**
+ * Formats duration in seconds for the video list (e.g., "12:34" or "1:02:34").
+ * @param {number} seconds The total duration in seconds.
+ * @returns {string} The formatted duration string.
+ */
+export function formatDuration(seconds) {
+    if (isNaN(seconds) || seconds < 0) return '--:--';
+    const totalSecondsInt = Math.floor(seconds);
+    const h = Math.floor(totalSecondsInt / 3600);
+    const m = Math.floor((totalSecondsInt % 3600) / 60).toString().padStart(2, '0');
+    const s = (totalSecondsInt % 60).toString().padStart(2, '0');
+    
+    if (h > 0) {
+        return `${h.toString()}:${m}:${s}`;
+    }
+    return `${m}:${s}`;
+}
+
+
+/**
+ * Formats time in seconds with millisecond precision for the player UI.
+ * @param {number} seconds The time in seconds.
+ * @returns {string} The formatted time string (e.g., "01:23.456").
+ */
+export function formatTimePrecise(seconds) {
     if (isNaN(seconds)) return '00:00.000';
     
     // Calculate milliseconds from the fractional part of seconds
@@ -64,8 +88,18 @@ function renderVideoList(state) {
     filteredList.forEach(video => {
         const item = document.createElement('div');
         item.className = 'list-item archive-item';
-        item.textContent = video.filename + (video.type === 'edited' ? ' (edited)' : '');
         item.addEventListener('click', () => navigateToVideo(video));
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'list-item-name';
+        nameSpan.textContent = video.filename + (video.type === 'edited' ? ' (edited)' : '');
+        
+        const durationSpan = document.createElement('span');
+        durationSpan.className = 'list-item-duration';
+        durationSpan.textContent = video.duration ? formatDuration(video.duration) : '--:--';
+
+        item.appendChild(nameSpan);
+        item.appendChild(durationSpan);
 
         if (activeVideo && video.filename === activeVideo.filename && video.type === activeVideo.type) {
             item.classList.add('current-video');
@@ -141,13 +175,13 @@ function renderPlayer(state) {
 
             const startSpan = document.createElement('span');
             startSpan.className = 'segment-time-start';
-            startSpan.textContent = `start: ${formatTime(segments[i])}`;
+            startSpan.textContent = `start: ${formatTimePrecise(segments[i])}`;
             row.appendChild(startSpan);
 
             if (segments[i + 1] !== undefined) {
                 const endSpan = document.createElement('span');
                 endSpan.className = 'segment-time-end';
-                endSpan.textContent = `end: ${formatTime(segments[i + 1])}`;
+                endSpan.textContent = `end: ${formatTimePrecise(segments[i + 1])}`;
                 row.appendChild(endSpan);
             }
             segmentContainer.appendChild(row);

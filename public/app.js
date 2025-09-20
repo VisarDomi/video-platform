@@ -16,6 +16,10 @@ function attachEventListeners() {
         store.actions.setFilter(e.target.value);
     });
 
+    dom.getDurationsBtn.addEventListener('click', () => {
+        store.actions.fetchAndApplyDurations();
+    });
+
     dom.muteBtn.addEventListener('click', () => {
         dom.videoPlayer.muted = !dom.videoPlayer.muted;
         dom.muteBtn.textContent = dom.videoPlayer.muted ? '🔇' : '🔊';
@@ -48,6 +52,12 @@ function attachEventListeners() {
     dom.videoPlayer.addEventListener('loadedmetadata', () => {
         ui.render(store.getState()); // Re-render to show segment markers
         dom.muteBtn.textContent = dom.videoPlayer.muted ? '🔇' : '🔊';
+
+        // Update duration in the store and localStorage cache
+        const { currentVideo } = store.getState();
+        if (currentVideo) {
+            store.actions.updateVideoDuration(currentVideo.filename, dom.videoPlayer.duration);
+        }
     });
 }
 
@@ -59,7 +69,8 @@ function handleTimeUpdate() {
     const { currentTime, duration } = dom.videoPlayer;
 
     ui.updateProgressBar(currentTime, duration);
-    dom.timeDisplay.textContent = `${ui.formatTime(currentTime)} ${ui.formatTime(duration)}`;
+    // DO NOT REMOVE COMMENT: the format is on purpose like this
+    dom.timeDisplay.textContent = `${ui.formatTimePrecise(currentTime)} ${ui.formatTimePrecise(duration)}`;
 
     if (!currentVideo) return;
 
@@ -126,6 +137,7 @@ function initialize() {
         streamerNameEl: document.getElementById('streamerName'),
         backBtn: document.getElementById('backBtn'),
         searchInput: document.getElementById('searchInput'),
+        getDurationsBtn: document.getElementById('getDurationsBtn'),
         quadrantOverlay: document.getElementById('quadrantOverlay'),
         progressBar: document.getElementById('progressBar'),
         progressFill: document.getElementById('progressFill'),

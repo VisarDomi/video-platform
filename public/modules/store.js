@@ -4,6 +4,7 @@ import { navigateToVideo } from './player.js';
 import { showToast } from './ui.js';
 
 const STORAGE_KEY_LAST_VIDEO = 'last-played-video';
+const STORAGE_KEY_DURATIONS = 'video-durations';
 
 // --- Private State ---
 let state = {
@@ -16,6 +17,8 @@ let state = {
     lastPlayedVideo: null,
     segments: [],
 };
+let isFetchingDurations = false;
+let cachedDurations = {};
 
 // --- Listener Pattern ---
 // Allows other parts of the app to "subscribe" to state changes
@@ -57,6 +60,7 @@ export const store = {
 
     actions: {
         async initialize() {
+            // Load last played video
             try {
                 const savedLastVideo = localStorage.getItem(STORAGE_KEY_LAST_VIDEO);
                 if (savedLastVideo) {
@@ -66,6 +70,18 @@ export const store = {
                 console.error("Failed to load last played video", e);
                 localStorage.removeItem(STORAGE_KEY_LAST_VIDEO);
             }
+            
+            // Load cached durations
+            try {
+                const savedDurations = localStorage.getItem(STORAGE_KEY_DURATIONS);
+                if (savedDurations) {
+                    cachedDurations = JSON.parse(savedDurations);
+                }
+            } catch (e) {
+                console.error("Failed to load cached durations", e);
+                localStorage.removeItem(STORAGE_KEY_DURATIONS);
+            }
+
             await this.loadVideoList();
         },
 
@@ -73,7 +89,11 @@ export const store = {
             state.isLoading = true;
             notify();
             try {
-                state.videoList = await api.fetchVideos();
+                // Fetch the list and immediately merge cached durations into it
+                state.videoList = (await api.fetchVideos()).map(video => ({
+                    ...video,
+                    duration: cachedDurations[video.filename] || null
+                }));
             } catch (e) {
                 console.error("Failed to fetch videos", e);
                 showToast("Could not load video list.", 'error');
@@ -82,6 +102,55 @@ export const store = {
             notify();
         },
         
+        async fetchAndApplyDurations() {
+            if (isFetchingDurations) {
+                showToast('Already fetching durations.', 'info');
+                return;
+            }
+            
+            isFetchingDurations = true;
+            showToast('Fetching video durations...', 'info', 5000);
+
+            try {
+                const newDurations = await api.fetchVideoDurations();
+                // Merge new durations with existing cache, preferring new values
+                cachedDurations = { ...cachedDurations, ...newDurations };
+                localStorage.setItem(STORAGE_KEY_DURATIONS, JSON.stringify(cachedDurations));
+
+                // Apply the newly merged durations to the current video list
+                state.videoList.forEach(video => {
+                    if (cachedDurations[video.filename]) {
+                        video.duration = cachedDurations[video.filename];
+                    }
+                });
+                showToast('Durations loaded successfully!', 'success');
+            } catch (e) {
+                console.error("Failed to fetch durations", e);
+                showToast("Could not load video durations.", 'error');
+            } finally {
+                isFetchingDurations = false;
+                notify(); // Re-render the list with the new data
+            }
+        },
+
+        updateVideoDuration(filename, duration) {
+            if (!filename || !duration || duration <= 0) return;
+            
+            const roundedDuration = Math.round(duration);
+
+            // Update in-memory state for immediate UI consistency if needed
+            const videoInList = state.videoList.find(v => v.filename === filename);
+            if (videoInList) {
+                videoInList.duration = roundedDuration;
+            }
+
+            // Update localStorage cache if the value is new or different
+            if (cachedDurations[filename] !== roundedDuration) {
+                cachedDurations[filename] = roundedDuration;
+                localStorage.setItem(STORAGE_KEY_DURATIONS, JSON.stringify(cachedDurations));
+            }
+        },
+
         setFilter(newFilter) {
             state.filter = newFilter;
             notify();
@@ -138,7 +207,6 @@ export const store = {
             api.sendDeleteRequest(videoToDelete).catch(error => {
                 console.error(`Background delete failed for ${videoToDelete.filename}:`, error);
                 showToast(`Failed to delete ${videoToDelete.filename}`, 'error');
-                // Revert state on failure if desired, but for this app an alert is sufficient.
             });
         },
 

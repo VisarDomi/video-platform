@@ -139,3 +139,60 @@ export async function createEditedVideo(filename: string, segments: {start: numb
     // Auto-move original file to trash on success
     await moveFileToTrash(sourcePath, baseDir);
 }
+
+/**
+ * Gets the duration of a single video file using ffprobe.
+ */
+function getVideoDuration(filePath: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const ffprobe = spawn('ffprobe', [
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            filePath
+        ]);
+
+        let stdout = '';
+        let stderr = '';
+
+        ffprobe.stdout.on('data', (data) => stdout += data.toString());
+        ffprobe.stderr.on('data', (data) => stderr += data.toString());
+
+        ffprobe.on('close', (code) => {
+            if (code !== 0) {
+                logger.warn(`ffprobe failed for ${filePath} with code ${code}`, { stderr });
+                return resolve(0); // Resolve with 0 on error to not fail the whole batch
+            }
+            const duration = parseFloat(stdout.trim());
+            resolve(isNaN(duration) ? 0 : duration);
+        });
+        
+        ffprobe.on('error', (err) => {
+             logger.error(`Failed to start ffprobe for ${filePath}`, { error: err });
+             reject(err); // Reject if the process can't even start
+        });
+    });
+}
+
+/**
+ * Gets durations for all video files.
+ */
+export async function getAllVideoDurations(): Promise<Record<string, number>> {
+    const allVideos = await getAllVideos();
+    const durationPromises = allVideos.map(async (video) => {
+        const foundVideo = await findVideoPath(video.type, video.filename);
+        if (!foundVideo) {
+            return { filename: video.filename, duration: 0 };
+        }
+        const duration = await getVideoDuration(foundVideo.fullPath);
+        return { filename: video.filename, duration };
+    });
+
+    const results = await Promise.all(durationPromises);
+
+    // Convert array of objects to a single { filename: duration } object
+    return results.reduce((acc, { filename, duration }) => {
+        acc[filename] = duration;
+        return acc;
+    }, {} as Record<string, number>);
+}

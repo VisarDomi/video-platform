@@ -33,9 +33,12 @@ body, html {
     padding: 10px;
     background-color: #000000;
     border-bottom: 1px solid #444;
+    display: flex; /* Changed for button alignment */
+    align-items: center; /* Changed for button alignment */
+    gap: 10px; /* Changed for button alignment */
 }
 #searchInput {
-    width: 100%;
+    flex-grow: 1; /* Changed for button alignment */
     padding: 10px;
     box-sizing: border-box;
     font-size: 16px;
@@ -44,18 +47,47 @@ body, html {
     color: white;
     border-radius: 5px;
 }
+#getDurationsBtn { /* New Style for button */
+    padding: 8px 12px;
+    font-size: 20px;
+    background-color: #000;
+    border: 1px solid #555;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+    line-height: 1;
+}
 .list-container {
     flex-grow: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
 }
 .list-item {
-    padding: 20px 15px;
+    padding: 8px 15px; /* Adjusted padding */
     border-bottom: 1px solid #333;
     cursor: pointer;
-    font-size: 18px;
     transition: background-color 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 52px; /* Adjusted height slightly */
+    box-sizing: border-box;
+    overflow: hidden; /* ADDED THIS LINE FOR ROBUSTNESS */
 }
+.list-item-name {
+    font-size: 16px; /* Adjusted size */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+.list-item-duration {
+    font-size: 13px; /* Adjusted size */
+    color: #aaa;
+    margin-top: 2px;
+    line-height: 1.2;
+}
+
 .list-item:hover {
     background-color: #2a2a2a;
 }
@@ -72,7 +104,7 @@ body, html {
     width: 100vw; height: 100vh;
     background-color: black;
     -webkit-user-select: none; user-select: none;
-    touch-action: manipulation; /* with this, we are able to make safari ios disable double touch - zoom*/
+    touch-action: manipulation;
 }
 #videoContainer {
     width: 100%; height: 100%;
@@ -105,6 +137,7 @@ body, html {
     box-sizing: border-box;
     background: linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0));
     z-index: 20;
+    /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
     opacity: 0.15;
 }
 

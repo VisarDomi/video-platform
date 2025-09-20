@@ -10,6 +10,17 @@ export async function fetchVideos() {
 }
 
 /**
+ * Fetches a map of video filenames to their durations.
+ */
+export async function fetchVideoDurations() {
+    const response = await fetch('/api/videos/durations');
+    if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+    }
+    return await response.json();
+}
+
+/**
  * Sends a request to the server to delete a video.
  */
 export async function sendDeleteRequest(video) {

@@ -21,6 +21,21 @@ router.get('/videos', async (req, res) => {
 });
 
 /**
+ * GET /api/videos/durations
+ * Retrieves a map of filenames to their duration in seconds.
+ */
+router.get('/videos/durations', async (req, res) => {
+    try {
+        const durations = await videoService.getAllVideoDurations();
+        res.json(durations);
+    } catch (error: any) {
+        logger.error(`Error getting video durations:`, { error });
+        res.status(500).json({ success: false, message: 'Could not retrieve video durations.' });
+    }
+});
+
+
+/**
  * DELETE /api/videos/:type/:filename
  * Moves a specified video file to a 'trash' directory.
  */
