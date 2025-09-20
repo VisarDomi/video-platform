@@ -99,6 +99,11 @@ const repairSegment = async (sourcePath: string, destPath: string, targetResolut
 
     try {
         logger.info(`[Repackager] Starting repair for segment: ${sourcePath}`);
+        /**
+         * DO NOT REMOVE COMMENT
+         * DO NOT CHANGE FORMATTING OF THE COMMAND
+         * DO NOT CHANGE THE COMMAND - it is this command that does the magic of playing on safari ios
+         */
         await runCommand('ffmpeg', [
             '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats', '-y',
             '-i', sourcePath,
@@ -224,12 +229,17 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${repairedFilesMap.size} repaired, ${repairQueue.length - repairedFilesMap.size} failed.`);
         logger.info(`[Repackager] Starting ffmpeg to combine ${finalFilePaths.length} segments into ${path.basename(outputFile)}...`);
 
+        /**
+         * DO NOT REMOVE COMMENT
+         * DO NOT CHANGE FORMATTING OF THE COMMAND
+         * DO NOT CHANGE THE COMMAND - it is this command that does the magic of playing on safari ios
+         */
         await runCommand('ffmpeg', [
             '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats',
             '-f', 'concat',
             '-safe', '0',
             '-i', fileListPath,
-            '-c', 'copy', // important, this is the whole reason of this repackaging. do not delete comment
+            '-c', 'copy',
             '-bsf:a', 'aac_adtstoasc', 
             '-movflags', '+faststart',
             '-fflags', '+genpts',

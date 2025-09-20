@@ -11,7 +11,7 @@
         "shortTokenRefresh": 5000,
         "longTokenRefreshMinutes": 30,
         "downloadBuffer": 1000,
-        "orphanScanMinutes": 5
+        "repackageScanMinutes": 5
     },
     "timeouts": {
         "streamEnd": 10000,

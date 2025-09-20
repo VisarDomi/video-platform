@@ -12,51 +12,6 @@ import path from 'path';
 import { repackageFolder } from './repackager.js';
 import { spawn } from 'child_process';
 
-// --- Repackager Queue System ---
-const repackagingQueue: string[] = [];
-let isRepackaging = false;
-
-async function processRepackageQueue() {
-    if (isRepackaging || repackagingQueue.length === 0) {
-        return; // Worker is busy or queue is empty
-    }
-    isRepackaging = true;
-    logger.info('[Repackager Queue] Worker started processing an item.');
-
-    const folderPath = repackagingQueue.shift();
-    if (folderPath) {
-        try {
-            logger.info(`[Repackager Queue] Processing: ${path.basename(folderPath)}`);
-            await repackageFolder(folderPath);
-        } catch (err: any) {
-            logger.error(`[Repackager Queue] Repackaging failed for ${path.basename(folderPath)}`, { error: err.message });
-        }
-    }
-
-    isRepackaging = false;
-    logger.info('[Repackager Queue] Worker finished processing an item.');
-
-    // If there are more items, schedule the next run without blocking.
-    if (repackagingQueue.length > 0) {
-        (async () => {
-            await delay(1000); 
-            processRepackageQueue();
-        })();
-    } else {
-        logger.info('[Repackager Queue] Queue is empty. Worker is now idle.');
-    }
-}
-
-function addToRepackageQueue(folderPath: string) {
-    if (!repackagingQueue.includes(folderPath)) {
-        repackagingQueue.push(folderPath);
-        logger.info(`[Repackager Queue] Added '${path.basename(folderPath)}' to the queue. Total items: ${repackagingQueue.length}`);
-        processRepackageQueue(); // Start the worker if it's not already running
-    } else {
-        logger.warn(`[Repackager Queue] Folder '${path.basename(folderPath)}' is already in the queue. Ignoring.`);
-    }
-}
-
 
 async function pollFollowingStreams() {
     logger.info('Starting stream watcher...');
@@ -260,119 +215,110 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         logger.info(`${u.getFormattedDate()} Finished download process for: ${alias}`);
         s.getActiveDownloads().delete(masterListUrl);
         u.updateStatusFile();
-
-        if (segmentsDirPath && totalSegmentsDownloaded > 0 && getConfig().repackager.enabled) {
-            addToRepackageQueue(segmentsDirPath);
-        } else if (totalSegmentsDownloaded > 0) {
-            if (segmentsDirPath) {
-                logger.info(`Download complete for ${path.basename(segmentsDirPath)}, but repackager is disabled.`);
-            }
-        } else {
-             logger.info(`Download complete for ${alias}, but no segments were downloaded. No repackaging needed.`);
-        }
     }
 }
 
-async function processOrphanedFolders() {
-    logger.info("[Orphan Scan] Scanning storage path for orphaned folders to process...");
+
+async function processCompletedDownloads() {
+    logger.info("[Repackager] Scanning storage path for completed downloads...");
     const config = getConfig();
     const storageDir = config.storagePath;
 
     try {
         const entries = await fsPromises.readdir(storageDir, { withFileTypes: true });
         
-        // This regex matches the format "YYYY-MM-DD HHMMSS streamer_name"
         const downloadFolderPattern = /^\d{4}-\d{2}-\d{2} \d{6} .+/;
-        const allDirectories = entries.filter(e => e.isDirectory());
-        
-        // Filter to only include folders that match our download naming convention
-        const segmentFolders = allDirectories.filter(dir => downloadFolderPattern.test(dir.name));
-
-        // Log ignored folders for clarity and debugging
-        allDirectories
-            .filter(dir => !downloadFolderPattern.test(dir.name))
-            .forEach(dir => logger.verbose(`[Orphan Scan] Ignoring non-download folder: ${dir.name}`));
+        const potentialFolders = entries.filter(e => e.isDirectory() && downloadFolderPattern.test(e.name));
 
         const mp4Files = new Set(
             entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
         );
+
+        // --- CHANGE START: Added .ts file cleanup logic ---
         const tsFiles = new Set(
-            entries.filter(e => e.isFile() && e.name.endsWith('.ts')).map(e => path.parse(e.name).name)
+             entries.filter(e => e.isFile() && e.name.endsWith('.ts')).map(e => path.parse(e.name).name)
         );
 
-        if (segmentFolders.length === 0 && tsFiles.size === 0) {
-            logger.info("[Orphan Scan] No segment folders or .ts files found to scan.");
-            return;
-        }
-        
-        logger.info(`[Orphan Scan] Found ${segmentFolders.length} segment folder(s), ${mp4Files.size} MP4 file(s), and ${tsFiles.size} TS file(s).`);
-
-        // Cleanup .ts files that have a corresponding .mp4
         for (const baseName of tsFiles) {
             if (mp4Files.has(baseName)) {
                 const tsFilePath = path.join(storageDir, `${baseName}.ts`);
-                logger.info(`[Orphan Scan] Deleting stale .ts file with existing MP4: ${baseName}.ts`);
+                logger.info(`[Repackager Cleanup] Deleting stale .ts file with existing MP4: ${baseName}.ts`);
                 await fsPromises.unlink(tsFilePath).catch(err => logger.error(`Failed to delete stale .ts file: ${tsFilePath}`, { err }));
             }
         }
+        // --- CHANGE END ---
 
-        // Cleanup segment folders
-        for (const folder of segmentFolders) {
+        if (potentialFolders.length === 0) {
+            logger.info("[Repackager] No download folders found to scan.");
+            return;
+        }
+        
+        for (const folder of potentialFolders) {
             const fullFolderPath = path.join(storageDir, folder.name);
 
             if (mp4Files.has(folder.name)) {
                 if (config.repackager.deleteRawOnSuccess) {
-                    logger.info(`[Orphan Scan] Deleting stale segment folder with existing MP4: ${folder.name}`);
+                    logger.info(`[Repackager] Deleting stale segment folder with existing MP4: ${folder.name}`);
                     await fsPromises.rm(fullFolderPath, { recursive: true, force: true });
                 }
-            } else {
-                const stats = await fsPromises.stat(fullFolderPath);
-                const staleTimeout = config.timeouts.staleStream * 2;
-                const isStale = (Date.now() - stats.mtime.getTime()) > staleTimeout;
+                continue;
+            }
+            
+            const isActive = Array.from(s.getActiveDownloads().values()).some(dl => {
+                // A simple check to see if the streamer alias is at the end of the folder name
+                return folder.name.endsWith(dl.alias);
+            });
+            if(isActive) {
+                logger.verbose(`[Repackager] Folder '${folder.name}' belongs to an active download. Skipping.`);
+                continue;
+            }
 
-                if (isStale) {
-                    logger.info(`[Orphan Scan] Found orphaned, stale folder '${folder.name}'. Adding to repackage queue.`);
-                    addToRepackageQueue(fullFolderPath);
-                }
+            const stats = await fsPromises.stat(fullFolderPath);
+            const staleTimeout = config.timeouts.staleStream * 2; 
+            const isStale = (Date.now() - stats.mtime.getTime()) > staleTimeout;
+            
+            if (isStale) {
+                logger.info(`[Repackager] Found stale, completed folder '${folder.name}'. Starting processing.`);
+                await repackageFolder(fullFolderPath);
+            } else {
+                 logger.verbose(`[Repackager] Folder '${folder.name}' is not stale yet. Skipping.`);
             }
         }
-        logger.info("[Orphan Scan] Scan complete.");
+        logger.info("[Repackager] Scan complete.");
 
     } catch (error: any) {
         if (error.code === 'ENOENT') {
-            // This is not an error, just means the folder hasn't been created yet.
+             logger.warn(`[Repackager] Storage path ${storageDir} does not exist. Skipping scan.`);
         } else {
-            logger.error("[Orphan Scan] Failed to scan for orphaned folders.", { error });
+            logger.error("[Repackager] Failed to scan for completed folders.", { error });
         }
     }
 }
 
-/**
- * A continuous loop that periodically scans for orphaned folders if the repackager is enabled.
- */
-async function manageOrphanedFolders() {
-    logger.info("Starting orphaned folder manager...");
-    // Run once at the beginning
+
+async function manageRepackaging() {
+    logger.info("Starting repackager service...");
     if (getConfig().repackager.enabled) {
-        await processOrphanedFolders();
+        await processCompletedDownloads();
     }
     
     while(true) {
-        const scanInterval = getConfig().intervals.orphanScanMinutes * 60 * 1000;
+        const scanInterval = getConfig().intervals.repackageScanMinutes * 60 * 1000;
         await delay(scanInterval);
 
         try {
             if (getConfig().repackager.enabled) {
-                logger.info("Periodic orphan scan triggered by manager.");
-                await processOrphanedFolders();
+                logger.info("Periodic repackage scan triggered by manager.");
+                await processCompletedDownloads();
             } else {
-                logger.verbose("Repackager is disabled, skipping periodic orphan scan.");
+                logger.verbose("Repackager is disabled, skipping periodic scan.");
             }
         } catch(error) {
-            logger.error("An unexpected error occurred in the orphan folder manager loop.", { error });
+            logger.error("An unexpected error occurred in the repackager manager loop.", { error });
         }
     }
 }
+
 
 async function main() {
     logger.info("--- Starting Tango Downloader Service ---");
@@ -381,11 +327,10 @@ async function main() {
     await a.initialAuth();
     logger.info("Initial authentication successful.");
     
-    // Start all background processes
-    manageOrphanedFolders(); // <-- REPLACED THE OLD LOGIC
+    manageRepackaging();
     a.refreshShortLivedTokens();
     a.manageTokenLifecycle();
-    logger.info("Background processes started (Orphan Manager, Token Refreshes).");
+    logger.info("Background processes started (Repackager, Token Refreshes).");
 
     pollFollowingStreams();
 

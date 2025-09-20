@@ -10,7 +10,7 @@ const CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
 
 // Define an interface for strong typing that matches the new structure
 interface IConfig {
-  storagePath: string; // <-- UPDATED
+  storagePath: string;
   fileNames: {
     session: string;
     liveStatus: string;
@@ -22,7 +22,7 @@ interface IConfig {
     shortTokenRefresh: number;
     longTokenRefreshMinutes: number;
     downloadBuffer: number;
-    orphanScanMinutes: number; // <-- NEW
+    repackageScanMinutes: number; // Renamed from orphanScanMinutes for clarity
   };
   timeouts: {
     streamEnd: number;
@@ -41,7 +41,7 @@ interface IConfig {
 
 // Update the default configuration to match the new structure
 const defaultConfig: IConfig = {
-  storagePath: "/home/visar/Documents/tango", // <-- UPDATED (sensible default)
+  storagePath: "/home/visar/Documents/tango",
   fileNames: {
     session: "session.json",
     liveStatus: "live-status.json",
@@ -53,7 +53,7 @@ const defaultConfig: IConfig = {
     shortTokenRefresh: 5000,
     longTokenRefreshMinutes: 30,
     downloadBuffer: 1000,
-    orphanScanMinutes: 5, // <-- NEW
+    repackageScanMinutes: 5, // Renamed from orphanScanMinutes
   },
   timeouts: {
     streamEnd: 10000,
