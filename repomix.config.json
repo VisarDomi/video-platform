@@ -1,0 +1,45 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml"
+  },
+  "include": [
+    "**/*.js",
+    "**/*.py",
+    "**/*.jsx",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.html",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.json",
+    "**/*.md",
+    "**/Dockerfile",
+    "**/*.yml"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "node_modules/**",
+      ".git/**",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      "package-lock.json",
+      "repomix-output.xml",
+      "repomix.config.json",
+      "nodemon.json",
+      ".gitignore",
+      "LICENSE",
+      "temp.txt",
+      "tests/**",
+      "*.mp4",
+      "convert.sh",
+      "session.json",
+      "live-status.json",
+      "tango/**",
+      "tango-raw/**"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+    "name": "tango-dl",
+    "type": "module",
+    "version": "1.0.0",
+    "description": "Download from tango",
+    "main": "tango.ts",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "start": "npm run build && pm2 start dist/tango.js --name tango-downloader",
+        "restart": "npm run build && pm2 restart tango-downloader",
+        "stop": "pm2 stop tango-downloader",
+        "logs": "pm2 logs tango-downloader -f"
+    },
+    "keywords": [],
+    "author": "visardomi4@gmail.com",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "20.8.10",
+        "dotenv-cli": "^10.0.0",
+        "nodemon": "^3.1.10",
+        "ts-node": "^10.9.2",
+        "typescript": "5.2.2"
+    },
+    "dependencies": {
+        "dotenv": "^17.2.2",
+        "p-limit": "^7.1.1",
+        "puppeteer": "23.10.1",
+        "winston": "^3.17.0"
+    }
+}
