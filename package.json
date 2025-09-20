@@ -1,5 +1,5 @@
 {
-    "name": "tango-dl",
+    "name": "tango-downloader",
     "type": "module",
     "version": "1.0.0",
     "description": "Download from tango",
