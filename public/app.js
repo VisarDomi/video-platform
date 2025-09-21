@@ -5,13 +5,14 @@ import * as player from './modules/player.js';
 
 let dom = {};
 let lastHashUpdateTime = 0;
+let lastQuadrantTapTime = 0;
 
 // --- DOM Event Listeners (Dispatch actions to the store) ---
 function attachEventListeners() {
     dom.backBtn.addEventListener('click', () => {
         window.location.hash = '#/';
     });
-    
+
     dom.searchInput.addEventListener('input', (e) => {
         store.actions.setFilter(e.target.value);
     });
@@ -47,7 +48,21 @@ function attachEventListeners() {
         }
     });
     dom.quadrantOverlay.addEventListener('contextmenu', e => e.preventDefault());
-    
+
+    // DO NOT REMOVE COMMENT
+    // This block is specifically to prevent double-tap-to-zoom on iOS Safari,
+    // where `touch-action: manipulation` can be unreliable on overlay elements.
+    // We manually detect a quick second tap and prevent its default behavior.
+    dom.quadrantOverlay.addEventListener('touchstart', (e) => {
+        const currentTime = new Date().getTime();
+        const timeSinceLastTap = currentTime - lastQuadrantTapTime;
+
+        if (timeSinceLastTap < 400 && timeSinceLastTap > 0) {
+            e.preventDefault();
+        }
+        lastQuadrantTapTime = currentTime;
+    }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work on touch events.
+
     dom.progressBar.addEventListener('click', (e) => {
         if (isNaN(dom.videoPlayer.duration)) return;
         const rect = dom.progressBar.getBoundingClientRect();
@@ -80,7 +95,7 @@ function attachEventListeners() {
 // --- App Logic ---
 function handleTimeUpdate() {
     if (dom.videoPlayer.seeking) return;
-    
+
     const { currentVideo } = store.getState();
     const { currentTime, duration } = dom.videoPlayer;
 
@@ -98,7 +113,7 @@ function handleTimeUpdate() {
 
         const newHash = `#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}/${roundedTime}`;
         if (location.hash.startsWith(`#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}`)) {
-             history.replaceState(null, '', newHash);
+            history.replaceState(null, '', newHash);
         }
     }
 }
@@ -111,12 +126,12 @@ async function handleRouteChange() {
         // For this app, it's fine.
         await store.actions.loadVideoList();
     }
-    
+
     const hash = window.location.hash || '#/';
     const parts = hash.slice(2).split('/');
     const [type, encodedName, time] = parts;
     const isVideoRoute = (type === 'original' || type === 'edited') && encodedName;
-    
+
     let currentVideoState = store.getState().currentVideo;
 
     if (isVideoRoute) {
@@ -125,7 +140,7 @@ async function handleRouteChange() {
         const targetVideo = store.getState().videoList.find(v => v.filename === videoName && v.type === type);
 
         if (targetVideo) {
-             // Only dispatch a play action if the video isn't already the current one
+            // Only dispatch a play action if the video isn't already the current one
             if (currentVideoState?.filename !== targetVideo.filename || currentVideoState?.type !== targetVideo.type) {
                 store.actions.playVideo(targetVideo, startTime);
             }
@@ -169,7 +184,7 @@ function initialize() {
     // 2. Initialize modules
     ui.initUI(dom);
     player.initPlayer(dom);
-    
+
     // 3. Subscribe the UI to state changes.
     // The `render` function will now be called automatically whenever state is updated.
     let lastPlayedVideoSrc = null;

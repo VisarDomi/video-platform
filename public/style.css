@@ -130,6 +130,11 @@ body, html {
 .quadrant {
     -webkit-user-select: none;
     user-select: none;
+    /* DO NOT REMOVE COMMENT
+    * touch-action: manipulation; fixes zooming in safari ios when double tapping
+    * it works for seeking the seekbar, but is currently broken for seekforward seekbackward
+    */
+    touch-action: manipulation;
 }
 
 /* Top Bar UI */
