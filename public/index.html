@@ -11,7 +11,7 @@
     <!-- Main List View -->
     <div id="listView">        
         <div id="archiveSearchContainer" class="search-container">
-            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=4.4">
+            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=4.7">
             <button id="getDurationsBtn" title="Fetch all video durations">🕒</button>
         </div>
 
@@ -30,6 +30,8 @@
             <div id="quadrantOverlay" class="hidden">
                 <div class="quadrant" data-action="prev"></div>
                 <div class="quadrant" data-action="next"></div>
+                <div class="quadrant" data-action="seek-backward"></div>
+                <div class="quadrant" data-action="seek-forward"></div>
             </div>
 
             <!-- Top Bar UI -->
@@ -62,6 +64,6 @@
     </div>
 
     <div id="toastContainer"></div>
-    <script type="module" src="/app.js?v=4.4"></script>
+    <script type="module" src="/app.js?v=4.7"></script>
 </body>
 </html>

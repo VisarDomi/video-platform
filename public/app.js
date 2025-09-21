@@ -27,8 +27,24 @@ function attachEventListeners() {
 
     dom.quadrantOverlay.addEventListener('pointerdown', (e) => {
         const action = e.target.dataset.action;
-        if (action === 'next') player.navigateVideoInList(1);
-        if (action === 'prev') player.navigateVideoInList(-1);
+        const SEEK_TIME_SECONDS = 5; // seconds
+
+        switch (action) {
+            case 'next':
+                player.navigateVideoInList(1);
+                break;
+            case 'prev':
+                player.navigateVideoInList(-1);
+                break;
+            case 'seek-forward':
+                if (isNaN(dom.videoPlayer.duration)) return;
+                dom.videoPlayer.currentTime = Math.min(dom.videoPlayer.duration, dom.videoPlayer.currentTime + SEEK_TIME_SECONDS);
+                break;
+            case 'seek-backward':
+                if (isNaN(dom.videoPlayer.duration)) return;
+                dom.videoPlayer.currentTime = Math.max(0, dom.videoPlayer.currentTime - SEEK_TIME_SECONDS);
+                break;
+        }
     });
     dom.quadrantOverlay.addEventListener('contextmenu', e => e.preventDefault());
     
