@@ -2,10 +2,55 @@
 import { navigateToVideo } from './player.js';
 
 let dom = {};
+let topBarFadeTimer = null;
 
-export function initUI(elements) {
-    dom = elements;
+
+/**
+ * Initializes the UI module with DOM elements.
+ * @param {object} domElements - Cached DOM elements from dom.js
+ */
+export function initUI(domElements) {
+    dom = domElements;
+    // The problematic click listener that was here has been removed.
+    // The new listener will be added in app.js.
 }
+
+/**
+ * Triggers a brief flash on the top bar for visual feedback.
+ * This is now exported to be used by app.js.
+ * @param {string|number} finalOpacity The opacity to return to after the flash.
+ */
+export function flashTopBar(finalOpacity) {
+    // Clear any pending timeout from a previous click to avoid interrupting it incorrectly.
+    if (topBarFadeTimer) {
+        clearTimeout(topBarFadeTimer);
+        // Reset the transition property to ensure it's not stuck on 'none'.
+        dom.topBar.style.transition = '';
+    }
+
+    // 1. Disable the transition to make the next change immediate.
+    dom.topBar.style.transition = 'none';
+
+    // 2. Set the 'flash' opacity. This happens instantly.
+    dom.topBar.style.opacity = '0.5';
+
+    // 3. Force the browser to apply the above style change before proceeding.
+    //    Accessing offsetHeight is a lightweight way to trigger a browser reflow.
+    void dom.topBar.offsetHeight;
+
+    // 4. Re-enable the transition, matching the one in the CSS.
+    dom.topBar.style.transition = 'opacity 1s ease';
+
+    // 5. Set the final opacity. The browser will now animate from 0.5 to this value over 1s.
+    dom.topBar.style.opacity = finalOpacity;
+
+    // 6. After the animation is done, remove the inline style so the stylesheet takes over again.
+    topBarFadeTimer = setTimeout(() => {
+        dom.topBar.style.transition = '';
+        topBarFadeTimer = null;
+    }, 1000); // Duration must match the transition.
+}
+
 
 /**
  * Formats duration in seconds for the video list (e.g., "12:34" or "1:02:34").
@@ -66,6 +111,9 @@ export function showToast(message, type = 'info', duration = 3000) {
         toast.addEventListener('transitionend', () => toast.remove(), { once: true });
     }, duration);
 }
+
+// NOTE: The old _handleTopBarClick and _renderTopBarOpacity functions have been removed
+// as their logic is now integrated here and in renderPlayer.
 
 function renderVideoList(state) {
     // Target the new wrapper for video items, leaving the search bar alone.
@@ -130,10 +178,11 @@ function renderPlayer(state) {
         const isOriginal = currentVideo.type === 'original';
         const hasSegments = segments.length > 0;
 
-        // Set topBar opacity based on player mode
-        const isViewMode = playerMode === 'view' || currentVideo.type === 'edited';
-        /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
-        dom.topBar.style.opacity = isViewMode ? '0' : '0.15';
+        // --- KEY CHANGE ---
+        // The conditional check is removed. This now cleanly sets the resting-state opacity.
+        // The flash effect is handled imperatively by flashTopBar when a click occurs.
+        const isEditMode = playerMode === 'edit' && currentVideo.type === 'original';
+        dom.topBar.style.opacity = isEditMode ? '0.15' : '0';
         
         // Hide all conditional buttons by default, then show them based on state
         dom.modeOrUndoBtn.classList.add('hidden');

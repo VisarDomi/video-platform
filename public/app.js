@@ -54,6 +54,22 @@ function attachEventListeners() {
         store.actions.fetchAndApplyDurations();
     });
 
+    // --- NEW ---
+    // Add a single click listener to the video view for visual feedback.
+    // This event bubbles up from clicks on the quadrant overlay, progress bar, and buttons.
+    dom.videoView.addEventListener('click', (e) => {
+        // Only flash if the user clicks on an interactive area
+        if (e.target.closest('#quadrantOverlay') || e.target.closest('#topBar')) {
+            const { currentVideo, playerMode } = store.getState();
+            if (!currentVideo) return;
+    
+            const isEditMode = playerMode === 'edit' && currentVideo.type === 'original';
+            const finalOpacity = isEditMode ? '0.15' : '0';
+            ui.flashTopBar(finalOpacity);
+        }
+    });
+
+
     dom.muteBtn.addEventListener('click', () => {
         dom.videoPlayer.muted = !dom.videoPlayer.muted;
         dom.muteBtn.textContent = dom.videoPlayer.muted ? '🔇' : '🔊';

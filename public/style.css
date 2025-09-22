@@ -161,6 +161,8 @@ body, html {
     z-index: 20;
     /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
     opacity: 0.15;
+    /* CHANGED: Updated duration and easing for the desired effect */
+    transition: opacity 1s ease;
 }
 
 #streamerName {
