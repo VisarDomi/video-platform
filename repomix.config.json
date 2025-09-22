@@ -33,7 +33,6 @@
       ".gitignore",
       "LICENSE",
       "temp.txt",
-      "tests/**",
       "*.mp4",
       "convert.sh",
       "session.json",

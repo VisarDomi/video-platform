@@ -10,7 +10,8 @@
     "start": "npm run build && pm2 start dist/server.js --name tango-editor",
     "restart": "npm run build && pm2 restart tango-editor",
     "stop": "pm2 stop tango-editor",
-    "logs": "pm2 logs tango-editor -f"
+    "logs": "pm2 logs tango-editor -f",
+    "test": "vitest"
   },
   "author": "",
   "license": "ISC",
@@ -24,8 +25,11 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
     "@types/node": "^20.12.7",
+    "@vitest/ui": "^3.2.4",
+    "jsdom": "^27.0.0",
     "nodemon": "^3.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^3.2.4"
   }
 }

@@ -9,7 +9,6 @@
     "dist/*",
     "build/*",
     "repomix-output.xml",
-    "tests/*",
     "convert.sh",
     "session.json",
     "error.log",
