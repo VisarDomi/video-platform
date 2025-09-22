@@ -16,6 +16,7 @@ let state = {
     currentVideoStartTime: 0,
     lastPlayedVideo: null,
     segments: [],
+    playerMode: 'view', // 'view' or 'edit'
 };
 let isFetchingDurations = false;
 let cachedDurations = {};
@@ -163,6 +164,8 @@ export const store = {
             state.lastPlayedVideo = video;
             state.segments = [];
             state.view = 'video';
+            // Set default player mode
+            state.playerMode = (video.type === 'original') ? 'edit' : 'view';
             localStorage.setItem(STORAGE_KEY_LAST_VIDEO, JSON.stringify(video));
             notify();
         },
@@ -171,6 +174,12 @@ export const store = {
             state.currentVideo = null; // Clear current video when going back to list
             state.currentVideoStartTime = 0;
             state.view = 'list';
+            notify();
+        },
+
+        togglePlayerMode() {
+            if (state.currentVideo?.type !== 'original') return;
+            state.playerMode = state.playerMode === 'edit' ? 'view' : 'edit';
             notify();
         },
 

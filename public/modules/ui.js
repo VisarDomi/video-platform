@@ -115,41 +115,62 @@ function renderVideoList(state) {
 }
 
 function renderPlayer(state) {
-    const { currentVideo, segments } = state;
-    const isEditable = currentVideo?.type === 'original';
+    const { currentVideo, segments, playerMode } = state;
 
     dom.quadrantOverlay.classList.toggle('hidden', !currentVideo);
     dom.progressBar.classList.toggle('hidden', !currentVideo);
-    dom.archiveControls.classList.toggle('hidden', !currentVideo);
+    dom.playerControlsContainer.classList.toggle('hidden', !currentVideo);
     document.getElementById('timeDisplayContainer').classList.toggle('hidden', !currentVideo);
 
     if (currentVideo) {
         dom.streamerNameEl.textContent = `${currentVideo.filename}`;
         
-        // Hide all conditional edit controls by default
+        const isOriginal = currentVideo.type === 'original';
+        const hasSegments = segments.length > 0;
+        
+        // Hide all conditional buttons by default, then show them based on state
+        dom.modeOrUndoBtn.classList.add('hidden');
+        dom.goBackBtn.classList.add('hidden');
         dom.addPointBtn.classList.add('hidden');
-        dom.undoPointBtn.classList.add('hidden');
-        dom.createBtn.classList.add('hidden');
-        dom.deleteBtn.classList.add('hidden');
+        dom.deleteOrCutBtn.classList.add('hidden');
 
-        // Hide the back button when editing
-        dom.backBtn.classList.toggle('hidden', segments.length > 0);
+        // Mute button is always visible when a video is playing
+        dom.muteBtn.classList.remove('hidden');
 
-        if (isEditable) {
-            const hasSegments = segments.length > 0;
-            
-            // "Add Point" is always visible for an editable video
+        if (playerMode === 'view' || !isOriginal) {
+            // VIEW MODE
+            dom.goBackBtn.classList.remove('hidden');
+            if (isOriginal) {
+                // For original videos, show button to switch back to edit mode
+                dom.modeOrUndoBtn.classList.remove('hidden');
+                dom.modeOrUndoBtn.textContent = '✏️';
+                dom.modeOrUndoBtn.title = 'Edit Mode';
+            }
+        } else {
+            // EDIT MODE (only possible for original videos)
             dom.addPointBtn.classList.remove('hidden');
 
             if (hasSegments) {
-                // State 2: Points exist. Show Undo and Create.
-                dom.undoPointBtn.classList.remove('hidden');
-                dom.createBtn.classList.remove('hidden');
-                // The create button is visible but disabled if segments aren't paired
-                dom.createBtn.disabled = segments.length % 2 !== 0;
+                // Edit mode WITH points
+                dom.modeOrUndoBtn.classList.remove('hidden');
+                dom.modeOrUndoBtn.textContent = '↪️';
+                dom.modeOrUndoBtn.title = 'Undo Last Point';
+                
+                dom.deleteOrCutBtn.classList.remove('hidden');
+                dom.deleteOrCutBtn.textContent = '✂️';
+                dom.deleteOrCutBtn.title = 'Create Cut';
+                dom.deleteOrCutBtn.disabled = segments.length % 2 !== 0;
+
             } else {
-                // State 1: No points. Show Delete.
-                dom.deleteBtn.classList.remove('hidden');
+                // Edit mode WITHOUT points
+                dom.modeOrUndoBtn.classList.remove('hidden');
+                dom.modeOrUndoBtn.textContent = '👁️';
+                dom.modeOrUndoBtn.title = 'View Mode';
+
+                dom.deleteOrCutBtn.classList.remove('hidden');
+                dom.deleteOrCutBtn.textContent = '🗑️';
+                dom.deleteOrCutBtn.title = 'Delete Video';
+                dom.deleteOrCutBtn.disabled = false;
             }
         }
     }
@@ -205,10 +226,11 @@ export function render(state) {
     dom.listView.classList.toggle('hidden', state.view !== 'list');
     dom.videoView.classList.toggle('hidden', state.view !== 'video');
 
-    // 2. Update search input
+    // 2. Update search input and clear button
     if (document.activeElement !== dom.searchInput) {
         dom.searchInput.value = state.filter;
     }
+    dom.clearSearchBtn.classList.toggle('hidden', !state.filter);
 
     // 3. Render sub-components
     if (state.view === 'list') {

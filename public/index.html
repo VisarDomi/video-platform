@@ -11,7 +11,8 @@
     <!-- Main List View -->
     <div id="listView">        
         <div id="archiveSearchContainer" class="search-container">
-            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=4.8">
+            <input type="text" id="searchInput" placeholder="Filter (regex)...                v=49">
+            <button id="clearSearchBtn" class="hidden" title="Clear filter">❌</button>
             <button id="getDurationsBtn" title="Fetch all video durations">🕒</button>
         </div>
 
@@ -49,14 +50,13 @@
                 </div>
                 <!-- Controls -->
                 <div id="controls">
-                    <button id="backBtn">↩️</button>
-                    <!-- Archive-specific controls -->
-                    <div id="archiveControls" class="hidden">
-                         <button id="undoPointBtn" class="hidden">↪️</button>
+                    <!-- All player buttons are now in one container for left alignment -->
+                    <div id="playerControlsContainer">
+                         <button id="modeOrUndoBtn"></button>
                          <button id="muteBtn">🔊</button>
-                         <button id="addPointBtn">📍</button>
-                         <button id="createBtn" class="hidden">✂️</button>
-                         <button id="deleteBtn" class="hidden">🗑️</button>
+                         <button id="goBackBtn" title="Back to List">↩️</button>
+                         <button id="addPointBtn" title="Add Point">📍</button>
+                         <button id="deleteOrCutBtn"></button>
                     </div>
                 </div>
             </div>
@@ -64,6 +64,6 @@
     </div>
 
     <div id="toastContainer"></div>
-    <script type="module" src="/app.js?v=4.8"></script>
+    <script type="module" src="/app.js?v=49"></script>
 </body>
 </html>

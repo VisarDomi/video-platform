@@ -6,6 +6,7 @@ body, html {
     background-color: #000000;
     color: #ffffff;
     overflow: hidden;
+    -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
 .hidden { display: none !important; }
@@ -46,6 +47,18 @@ body, html {
     border: 1px solid #555;
     color: white;
     border-radius: 5px;
+}
+#clearSearchBtn {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 5px;
+}
+#clearSearchBtn:hover {
+    color: white;
 }
 #getDurationsBtn { /* New Style for button */
     padding: 8px 12px;
@@ -190,10 +203,10 @@ body, html {
     display: flex;
     align-items: center;
 }
-#archiveControls {
+#playerControlsContainer {
     display: flex;
     gap: 10px;
-    margin-left: auto; /* This is the magic line that fixes the issue */
+    /* Removed margin-left: auto; to align buttons to the left */
 }
 #controls button {
     padding: 12px 18px; font-size: 36px;
@@ -224,7 +237,7 @@ body, html {
     color: #888;
 }
 
-#archiveControls button {
+#playerControlsContainer button {
     text-align: center;
 }
 

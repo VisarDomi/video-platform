@@ -6,15 +6,48 @@ import * as player from './modules/player.js';
 let dom = {};
 let lastHashUpdateTime = 0;
 let lastQuadrantTapTime = 0;
+let wakeLock = null;
+
+// --- Screen Wake Lock (for iOS screen dimming) ---
+const requestWakeLock = async () => {
+    if ('wakeLock' in navigator) {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+            console.error(`Could not acquire wake lock: ${err.name}, ${err.message}`);
+        }
+    }
+};
+
+const releaseWakeLock = async () => {
+    if (wakeLock !== null) {
+        await wakeLock.release();
+        wakeLock = null;
+    }
+};
+
 
 // --- DOM Event Listeners (Dispatch actions to the store) ---
 function attachEventListeners() {
-    dom.backBtn.addEventListener('click', () => {
+    dom.goBackBtn.addEventListener('click', () => {
         window.location.hash = '#/';
     });
 
     dom.searchInput.addEventListener('input', (e) => {
-        store.actions.setFilter(e.target.value);
+        const oldFilter = store.getState().filter;
+        const newFilter = e.target.value;
+        store.actions.setFilter(newFilter);
+        // If the filter was cleared, scroll to the top of the list
+        if (oldFilter && !newFilter) {
+            dom.listContainer.scrollTop = 0;
+        }
+    });
+
+    dom.clearSearchBtn.addEventListener('click', () => {
+        store.actions.setFilter('');
+        dom.searchInput.value = '';
+        dom.listContainer.scrollTop = 0;
+        dom.searchInput.focus();
     });
 
     dom.getDurationsBtn.addEventListener('click', () => {
@@ -49,10 +82,12 @@ function attachEventListeners() {
     });
     dom.quadrantOverlay.addEventListener('contextmenu', e => e.preventDefault());
 
-    // DO NOT REMOVE COMMENT
-    // This block is specifically to prevent double-tap-to-zoom on iOS Safari,
-    // where `touch-action: manipulation` can be unreliable on overlay elements.
-    // We manually detect a quick second tap and prevent its default behavior.
+    // --- Double Tap Zoom Prevention ---
+    // 1. Prevent default on dblclick, a more direct approach.
+    dom.quadrantOverlay.addEventListener('dblclick', (e) => e.preventDefault());
+    dom.videoPlayer.addEventListener('dblclick', (e) => e.preventDefault());
+    
+    // 2. Keep the manual detection as a fallback for certain iOS behaviors.
     dom.quadrantOverlay.addEventListener('touchstart', (e) => {
         const currentTime = new Date().getTime();
         const timeSinceLastTap = currentTime - lastQuadrantTapTime;
@@ -62,6 +97,7 @@ function attachEventListeners() {
         }
         lastQuadrantTapTime = currentTime;
     }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work on touch events.
+
 
     dom.progressBar.addEventListener('click', (e) => {
         if (isNaN(dom.videoPlayer.duration)) return;
@@ -73,10 +109,25 @@ function attachEventListeners() {
     dom.addPointBtn.addEventListener('click', () => {
         store.actions.addSegment(dom.videoPlayer.currentTime);
     });
+    
+    dom.modeOrUndoBtn.addEventListener('click', () => {
+        const { segments, playerMode, currentVideo } = store.getState();
+        if (currentVideo?.type === 'original' && playerMode === 'edit' && segments.length > 0) {
+            store.actions.removeLastSegment(); // Acts as Undo
+        } else {
+            store.actions.togglePlayerMode(); // Acts as Mode Toggle
+        }
+    });
 
-    dom.undoPointBtn.addEventListener('click', () => store.actions.removeLastSegment());
-    dom.deleteBtn.addEventListener('click', () => store.actions.deleteCurrentVideo());
-    dom.createBtn.addEventListener('click', () => store.actions.createEditedVideo());
+    dom.deleteOrCutBtn.addEventListener('click', () => {
+        const { segments } = store.getState();
+        if (segments.length > 0) {
+            store.actions.createEditedVideo(); // Acts as Cut
+        } else {
+            store.actions.deleteCurrentVideo(); // Acts as Delete
+        }
+    });
+
 
     // Video player events for UI updates
     dom.videoPlayer.addEventListener('timeupdate', handleTimeUpdate);
@@ -88,6 +139,13 @@ function attachEventListeners() {
         const { currentVideo } = store.getState();
         if (currentVideo) {
             store.actions.updateVideoDuration(currentVideo.filename, dom.videoPlayer.duration);
+        }
+    });
+
+    // Re-acquire wake lock when tab becomes visible again
+    document.addEventListener('visibilitychange', async () => {
+        if (wakeLock !== null && document.visibilityState === 'visible') {
+            await requestWakeLock();
         }
     });
 }
@@ -166,19 +224,20 @@ function initialize() {
         listContainer: document.getElementById('listContainer'),
         videoPlayer: document.getElementById('videoPlayer'),
         streamerNameEl: document.getElementById('streamerName'),
-        backBtn: document.getElementById('backBtn'),
         searchInput: document.getElementById('searchInput'),
+        clearSearchBtn: document.getElementById('clearSearchBtn'),
         getDurationsBtn: document.getElementById('getDurationsBtn'),
         quadrantOverlay: document.getElementById('quadrantOverlay'),
         progressBar: document.getElementById('progressBar'),
         progressFill: document.getElementById('progressFill'),
-        archiveControls: document.getElementById('archiveControls'),
+        playerControlsContainer: document.getElementById('playerControlsContainer'),
         muteBtn: document.getElementById('muteBtn'),
         addPointBtn: document.getElementById('addPointBtn'),
-        undoPointBtn: document.getElementById('undoPointBtn'),
-        createBtn: document.getElementById('createBtn'),
-        deleteBtn: document.getElementById('deleteBtn'),
         timeDisplay: document.getElementById('timeDisplay'),
+        // New combined/repurposed buttons
+        goBackBtn: document.getElementById('goBackBtn'),
+        modeOrUndoBtn: document.getElementById('modeOrUndoBtn'),
+        deleteOrCutBtn: document.getElementById('deleteOrCutBtn'),
     };
 
     // 2. Initialize modules
@@ -191,14 +250,16 @@ function initialize() {
     store.subscribe(state => {
         ui.render(state);
 
-        // Control the video player based on state changes
+        // Control the video player and wake lock based on state changes
         const currentSrc = state.currentVideo ? `/video/${state.currentVideo.type}/${encodeURIComponent(state.currentVideo.filename)}` : null;
         if (lastPlayedVideoSrc !== currentSrc) {
             lastPlayedVideoSrc = currentSrc;
             if (state.currentVideo) {
                 player.playVideo(state.currentVideo, state.currentVideoStartTime);
+                requestWakeLock();
             } else {
                 player.stopPlayback();
+                releaseWakeLock();
             }
         }
     });
