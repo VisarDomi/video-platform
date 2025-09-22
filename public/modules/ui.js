@@ -68,18 +68,19 @@ export function showToast(message, type = 'info', duration = 3000) {
 }
 
 function renderVideoList(state) {
-    dom.listContainer.innerHTML = '';
+    // Target the new wrapper for video items, leaving the search bar alone.
+    dom.videoItemsWrapper.innerHTML = '';
     
     const regex = state.filter ? new RegExp(state.filter, 'i') : null;
     const filteredList = state.videoList.filter(video => !regex || regex.test(video.filename));
 
     if (state.isLoading) {
-        dom.listContainer.innerHTML = '<p id="loadingMessage">Loading...</p>';
+        dom.videoItemsWrapper.innerHTML = '<p id="loadingMessage">Loading...</p>';
         return;
     }
     
     if (filteredList.length === 0) {
-         dom.listContainer.innerHTML = '<p class="info-message">No archived videos found.</p>';
+         dom.videoItemsWrapper.innerHTML = '<p class="info-message">No archived videos found.</p>';
          return;
     }
 
@@ -105,10 +106,11 @@ function renderVideoList(state) {
             item.classList.add('current-video');
         }
 
-        dom.listContainer.appendChild(item);
+        dom.videoItemsWrapper.appendChild(item);
     });
 
-    const currentItem = dom.listContainer.querySelector('.current-video');
+    // The scroll target is now the wrapper's children.
+    const currentItem = dom.videoItemsWrapper.querySelector('.current-video');
     if (currentItem) {
         currentItem.scrollIntoView({ block: 'center', behavior: 'auto' });
     }

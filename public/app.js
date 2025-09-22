@@ -222,6 +222,7 @@ function initialize() {
         listView: document.getElementById('listView'),
         videoView: document.getElementById('videoView'),
         listContainer: document.getElementById('listContainer'),
+        videoItemsWrapper: document.getElementById('videoItemsWrapper'), // Added wrapper
         videoPlayer: document.getElementById('videoPlayer'),
         streamerNameEl: document.getElementById('streamerName'),
         searchInput: document.getElementById('searchInput'),
