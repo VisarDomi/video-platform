@@ -112,6 +112,7 @@ function attachEventListeners() {
             case 'seek-backward':
                 if (isNaN(dom.videoPlayer.duration)) return;
                 dom.videoPlayer.currentTime = Math.max(0, dom.videoPlayer.currentTime - SEEK_TIME_SECONDS);
+                dom.videoPlayer.play(); // <-- ADD THIS LINE
                 break;
         }
     });
