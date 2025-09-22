@@ -222,13 +222,14 @@ function initialize() {
         listView: document.getElementById('listView'),
         videoView: document.getElementById('videoView'),
         listContainer: document.getElementById('listContainer'),
-        videoItemsWrapper: document.getElementById('videoItemsWrapper'), // Added wrapper
+        videoItemsWrapper: document.getElementById('videoItemsWrapper'),
         videoPlayer: document.getElementById('videoPlayer'),
         streamerNameEl: document.getElementById('streamerName'),
         searchInput: document.getElementById('searchInput'),
         clearSearchBtn: document.getElementById('clearSearchBtn'),
         getDurationsBtn: document.getElementById('getDurationsBtn'),
         quadrantOverlay: document.getElementById('quadrantOverlay'),
+        topBar: document.getElementById('topBar'), // ADDED THIS LINE
         progressBar: document.getElementById('progressBar'),
         progressFill: document.getElementById('progressFill'),
         playerControlsContainer: document.getElementById('playerControlsContainer'),

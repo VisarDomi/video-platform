@@ -129,6 +129,11 @@ function renderPlayer(state) {
         
         const isOriginal = currentVideo.type === 'original';
         const hasSegments = segments.length > 0;
+
+        // Set topBar opacity based on player mode
+        const isViewMode = playerMode === 'view' || currentVideo.type === 'edited';
+        /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
+        dom.topBar.style.opacity = isViewMode ? '0' : '0.15';
         
         // Hide all conditional buttons by default, then show them based on state
         dom.modeOrUndoBtn.classList.add('hidden');
