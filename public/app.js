@@ -6,7 +6,10 @@ import * as player from './modules/player.js';
 let dom = {};
 let lastHashUpdateTime = 0;
 let lastQuadrantTapTime = 0;
+let lastProgressBarTapTime = 0; // <-- ADD THIS LINE
 let wakeLock = null;
+let isScrubbing = false; // <-- ADD THIS LINE
+
 
 // --- Screen Wake Lock (for iOS screen dimming) ---
 const requestWakeLock = async () => {
@@ -26,6 +29,22 @@ const releaseWakeLock = async () => {
     }
 };
 
+function handleScrub(e) {
+    if (isNaN(dom.videoPlayer.duration)) return;
+
+    const rect = dom.progressBar.getBoundingClientRect();
+    // Clamp the position to be within the bar's bounds
+    const position = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const newTime = dom.videoPlayer.duration * (position / rect.width);
+
+    // 1. Optimistic UI Update: Update the visuals instantly.
+    ui.updateProgressBar(newTime, dom.videoPlayer.duration);
+    dom.timeDisplay.textContent = `${ui.formatTimePrecise(newTime)} ${ui.formatTimePrecise(dom.videoPlayer.duration)}`;
+
+
+    // 2. Update the actual video player time.
+    dom.videoPlayer.currentTime = newTime;
+}
 
 // --- DOM Event Listeners (Dispatch actions to the store) ---
 function attachEventListeners() {
@@ -62,7 +81,7 @@ function attachEventListeners() {
         if (e.target.closest('#quadrantOverlay') || e.target.closest('#topBar')) {
             const { currentVideo, playerMode } = store.getState();
             if (!currentVideo) return;
-    
+
             const isEditMode = playerMode === 'edit' && currentVideo.type === 'original';
             const finalOpacity = isEditMode ? '0.15' : '0';
             ui.flashTopBar(finalOpacity);
@@ -102,7 +121,7 @@ function attachEventListeners() {
     // 1. Prevent default on dblclick, a more direct approach.
     dom.quadrantOverlay.addEventListener('dblclick', (e) => e.preventDefault());
     dom.videoPlayer.addEventListener('dblclick', (e) => e.preventDefault());
-    
+
     // 2. Keep the manual detection as a fallback for certain iOS behaviors.
     dom.quadrantOverlay.addEventListener('touchstart', (e) => {
         const currentTime = new Date().getTime();
@@ -114,18 +133,51 @@ function attachEventListeners() {
         lastQuadrantTapTime = currentTime;
     }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work on touch events.
 
+    // --- NEW Zoom Prevention for Progress Bar ---
+    // 1. Prevent default on dblclick, a more direct approach.
+    dom.progressBar.addEventListener('dblclick', e => e.preventDefault());
 
-    dom.progressBar.addEventListener('click', (e) => {
-        if (isNaN(dom.videoPlayer.duration)) return;
-        const rect = dom.progressBar.getBoundingClientRect();
-        dom.videoPlayer.currentTime = dom.videoPlayer.duration * ((e.clientX - rect.left) / dom.progressBar.offsetWidth);
-        dom.videoPlayer.play(); // Play video on seek
+    // 2. Add manual detection as a robust fallback for iOS.
+    dom.progressBar.addEventListener('touchstart', (e) => {
+        const currentTime = new Date().getTime();
+        const timeSinceLastTap = currentTime - lastProgressBarTapTime;
+
+        if (timeSinceLastTap < 400 && timeSinceLastTap > 0) {
+            // A quick second tap was detected, prevent the default zoom behavior.
+            e.preventDefault();
+        }
+        lastProgressBarTapTime = currentTime;
+    }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work here.
+
+    // --- NEW Scrubbing Logic ---
+    const onPointerMove = (e) => {
+        if (isScrubbing) {
+            handleScrub(e);
+        }
+    };
+
+    const onPointerUp = () => {
+        if (isScrubbing) {
+            isScrubbing = false;
+            dom.videoPlayer.play(); // Resume playback when scrubbing is done
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+        }
+    };
+
+    dom.progressBar.addEventListener('pointerdown', (e) => {
+        isScrubbing = true;
+        handleScrub(e); // Handle the initial click position
+
+        // Attach listeners to the window to allow dragging outside the progress bar
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
     });
 
     dom.addPointBtn.addEventListener('click', () => {
         store.actions.addSegment(dom.videoPlayer.currentTime);
     });
-    
+
     dom.modeOrUndoBtn.addEventListener('click', () => {
         const { segments, playerMode, currentVideo } = store.getState();
         if (currentVideo?.type === 'original' && playerMode === 'edit' && segments.length > 0) {

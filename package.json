@@ -5,6 +5,7 @@
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
+    "prebuild": "node -e \"require('fs').writeFileSync('public/index.html', require('fs').readFileSync('public/index.html', 'utf8').replace(/app\\.js\\?v=(\\d+)/, (match, n) => 'app.js?v=' + (parseInt(n, 10) + 1)))\"",
     "build": "rm -rf dist && tsc",
     "start": "npm run build && pm2 start dist/server.js --name tango-editor",
     "restart": "npm run build && pm2 restart tango-editor",
