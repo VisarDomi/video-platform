@@ -61,9 +61,9 @@ router.delete('/videos/:type/:filename', async (req, res) => {
 
 /**
  * POST /api/edit
- * Creates a new, edited video from segments of an original video.
+ * Adds a video editing job to the background queue.
  */
-router.post('/edit', async (req, res) => {
+router.post('/edit', (req, res) => {
     const { filename, segments }: { filename: string, segments: {start: number, end: number}[] } = req.body;
 
     if (!filename || !segments || segments.length === 0) {
@@ -71,15 +71,33 @@ router.post('/edit', async (req, res) => {
     }
 
     try {
-        await videoService.createEditedVideo(filename, segments);
-        res.json({ success: true, message: 'Created edited video and moved original to trash.' });
+        // This is now a fire-and-forget call that adds the job to the queue
+        videoService.createEditedVideo(filename, segments);
+        res.json({ success: true, message: 'Video edit job has been added to the queue.' });
     } catch (error: any) {
-        logger.error(`Failed to process video ${filename}:`, { error });
-         if (error instanceof FileNotFoundError) {
-            return res.status(404).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: 'Failed to process video.' });
+        logger.error(`Failed to queue video for processing ${filename}:`, { error });
+        res.status(500).json({ success: false, message: 'Failed to queue video for processing.' });
     }
 });
+
+/**
+ * POST /api/videos/original/:filename/save
+ * Moves an original video to the 'edited' folder without trimming.
+ */
+router.post('/videos/original/:filename/save', async (req, res) => {
+    const { filename } = req.params;
+
+    try {
+        await videoService.moveVideoToEdited('original', filename);
+        res.json({ success: true, message: 'Video moved to edited folder successfully.' });
+    } catch (err: any) {
+        logger.error('Error in moveVideoToEdited route:', { file: filename, err });
+        if (err instanceof FileNotFoundError) {
+            return res.status(404).json({ success: false, message: err.message });
+        }
+        res.status(500).json({ success: false, message: 'Failed to move video.' });
+    }
+});
+
 
 export default router;

@@ -46,3 +46,13 @@ export async function sendEditRequest(video, segments) {
     });
     return await response.json();
 }
+
+/**
+ * Sends a request to the server to save a video (move to 'edited' folder).
+ */
+export async function sendSaveRequest(video) {
+    const response = await fetch(`/api/videos/original/${encodeURIComponent(video.filename)}/save`, {
+        method: 'POST',
+    });
+    return await response.json();
+}

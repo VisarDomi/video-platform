@@ -189,12 +189,13 @@ function renderPlayer(state) {
         dom.goBackBtn.classList.add('hidden');
         dom.addPointBtn.classList.add('hidden');
         dom.deleteOrCutBtn.classList.add('hidden');
+        dom.videoOkBtn.classList.add('hidden');
+        dom.muteBtn.classList.add('hidden');
 
-        // Mute button is always visible when a video is playing
-        dom.muteBtn.classList.remove('hidden');
 
         if (playerMode === 'view' || !isOriginal) {
             // VIEW MODE
+            dom.muteBtn.classList.remove('hidden');
             dom.goBackBtn.classList.remove('hidden');
             if (isOriginal) {
                 // For original videos, show button to switch back to edit mode
@@ -222,6 +223,8 @@ function renderPlayer(state) {
                 dom.modeOrUndoBtn.classList.remove('hidden');
                 dom.modeOrUndoBtn.textContent = '👁️';
                 dom.modeOrUndoBtn.title = 'View Mode';
+
+                dom.videoOkBtn.classList.remove('hidden');
 
                 dom.deleteOrCutBtn.classList.remove('hidden');
                 dom.deleteOrCutBtn.textContent = '🗑️';

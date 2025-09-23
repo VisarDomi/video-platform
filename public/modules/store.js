@@ -219,6 +219,29 @@ export const store = {
             });
         },
 
+        saveCurrentVideo() {
+            if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length > 0) return;
+
+            const videoToSave = state.currentVideo;
+            const originalList = [...state.videoList];
+            const nextVideo = findNextVideoAfterChange(videoToSave, originalList);
+
+            // Optimistic UI update
+            state.videoList = state.videoList.filter(v => !(v.filename === videoToSave.filename && v.type === videoToSave.type));
+
+            if (nextVideo) {
+                navigateToVideo(nextVideo);
+            } else {
+                location.hash = '#/';
+            }
+
+            // Fire and forget API call
+            api.sendSaveRequest(videoToSave).catch(error => {
+                console.error(`Background save failed for ${videoToSave.filename}:`, error);
+                showToast(`Failed to save ${videoToSave.filename}`, 'error');
+            });
+        },
+
         createEditedVideo() {
             if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length === 0 || state.segments.length % 2 !== 0) return;
 

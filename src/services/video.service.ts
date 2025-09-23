@@ -7,6 +7,11 @@ import { findVideoPath } from '../utils.js';
 import logger from '../logger.js';
 import { FileNotFoundError, FfmpegError } from '../errors.js';
 
+// --- Video Editing Queue ---
+const editQueue: { filename: string, segments: {start: number, end: number}[] }[] = [];
+let isProcessingQueue = false;
+
+
 // --- Internal Helper Functions ---
 
 /**
@@ -98,6 +103,55 @@ function executeFfmpegCommand(args: string[]): Promise<void> {
     });
 }
 
+/**
+ * The core logic for processing a single video edit job.
+ */
+async function _processVideoEdit(filename: string, segments: {start: number, end: number}[]) {
+    const foundVideo = await findVideoPath('original', filename);
+    if (!foundVideo) {
+        throw new FileNotFoundError(`Original video file not found: ${filename}`);
+    }
+
+    const { fullPath: sourcePath, baseDir } = foundVideo;
+    const editedVideosDir = path.join(baseDir, 'edited');
+    const outputPath = path.join(editedVideosDir, filename);
+
+    await fsp.mkdir(editedVideosDir, { recursive: true });
+
+    const ffmpegArgs = buildFfmpegArgs(sourcePath, outputPath, segments);
+    await executeFfmpegCommand(ffmpegArgs);
+
+    logger.info(`Successfully created edited video: ${outputPath}`);
+
+    // Auto-move original file to trash on success
+    await moveFileToTrash(sourcePath, baseDir);
+}
+
+/**
+ * Processes the edit queue one job at a time.
+ */
+async function processEditQueue() {
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
+    logger.info(`Starting edit queue processing. Jobs in queue: ${editQueue.length}`);
+
+    while (editQueue.length > 0) {
+        const job = editQueue.shift();
+        if (job) {
+            try {
+                logger.info(`Processing job for: ${job.filename}`, { segments: job.segments });
+                await _processVideoEdit(job.filename, job.segments);
+            } catch (error) {
+                // Log the error but continue processing the rest of the queue
+                logger.error(`Failed to process job for ${job.filename}:`, { error });
+            }
+        }
+    }
+
+    isProcessingQueue = false;
+    logger.info('Edit queue processing finished.');
+}
+
 
 // --- Exported Service Functions ---
 
@@ -119,25 +173,32 @@ export async function trashVideo(type: 'original' | 'edited', filename: string) 
     await moveFileToTrash(foundVideo.fullPath, foundVideo.baseDir);
 }
 
-export async function createEditedVideo(filename: string, segments: {start: number, end: number}[]) {
-    const foundVideo = await findVideoPath('original', filename);
+export function createEditedVideo(filename: string, segments: {start: number, end: number}[]) {
+    editQueue.push({ filename, segments });
+    logger.info(`Added video to edit queue: ${filename}. Queue size: ${editQueue.length}`);
+    
+    // Asynchronously process the queue without blocking the API response.
+    // The 'void' operator indicates we are intentionally not awaiting the promise.
+    void processEditQueue();
+}
+
+export async function moveVideoToEdited(type: 'original', filename: string) {
+    if (type !== 'original') {
+        throw new Error('Only original videos can be moved to the edited folder.');
+    }
+    
+    const foundVideo = await findVideoPath(type, filename);
     if (!foundVideo) {
-        throw new FileNotFoundError(`Original video file not found: ${filename}`);
+        throw new FileNotFoundError(`Video file not found: ${filename}`);
     }
 
     const { fullPath: sourcePath, baseDir } = foundVideo;
     const editedVideosDir = path.join(baseDir, 'edited');
-    const outputPath = path.join(editedVideosDir, filename);
-
+    const destinationPath = path.join(editedVideosDir, filename);
+    
     await fsp.mkdir(editedVideosDir, { recursive: true });
-
-    const ffmpegArgs = buildFfmpegArgs(sourcePath, outputPath, segments);
-    await executeFfmpegCommand(ffmpegArgs);
-
-    logger.info(`Successfully created edited video: ${outputPath}`);
-
-    // Auto-move original file to trash on success
-    await moveFileToTrash(sourcePath, baseDir);
+    await fsp.rename(sourcePath, destinationPath);
+    logger.info(`Moved video to edited folder: ${destinationPath}`);
 }
 
 /**

@@ -5,29 +5,55 @@ import * as player from './modules/player.js';
 
 let dom = {};
 let lastHashUpdateTime = 0;
-let lastQuadrantTapTime = 0;
-let lastProgressBarTapTime = 0; // <-- ADD THIS LINE
+let lastVideoViewTapTime = 0;
+let lastProgressBarTapTime = 0;
 let wakeLock = null;
-let isScrubbing = false; // <-- ADD THIS LINE
+let isScrubbing = false;
 
 
 // --- Screen Wake Lock (for iOS screen dimming) ---
+// A tiny, silent, looping MP4 video data URI to prevent screen dimming on iOS
+const silentVideoDataURI = "data:video/mp4;base64,AAAAHGZ0eXBNU05WAAACAE1TTlYxAAAPeG1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAhhdWRpbyAAAAAEZHNtcAAAAAABAAAAAAAAAAAAAAACAAEAQAAAACBlZHRzAAAAAGVsc3QAAAAAAAAAAQAAA+gAAAAAAAEAAAAAAhhhZHRhAAAAAUG1kNGEAAAAAAAAAAAAAAAADNAAAAZptZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAAPoAAAAAAAAVQBoZGxyAAAAAAAAAABzb3VuAAAAAAAAAAAAAAAAU291bmRIYW5kbGVyAAAAAQhtc3RhAAAAYnN0c2QAAAAAAAAAAQAAAEFlbXA0YQAAAAAAAAEAAAAAAAAAAAACABAAAAAYc3J0cwAAAAAAAAAAAAAAEAAAAQAAAGN0dHMAAAAAAAAAAAAAAAEAAAACAAAAABRzdHNjAAAAAAAAAAAAAAABAAAAAQAAAAEAAAABAAAAHHN0c3oAAAAAAAAAAAAAAAABAAAAEAAAAAxyZGNsAAAAAQAAAAMAAAAAGHN0Y28AAAAAAAAAAAAAAAEAAABkAAAAGGZyZWUAAAADGG1kYXQAAAAGg3cBAQAAAAAAAAAAAA==";
+let noSleepVideo = null;
+
 const requestWakeLock = async () => {
+    // Use the modern Wake Lock API if available
     if ('wakeLock' in navigator) {
         try {
             wakeLock = await navigator.wakeLock.request('screen');
         } catch (err) {
-            console.error(`Could not acquire wake lock: ${err.name}, ${err.message}`);
+            console.error(`Could not acquire Wake Lock: ${err.name}, ${err.message}`);
         }
+        return;
+    }
+
+    // Fallback for browsers that don't support Wake Lock API (like Safari on iOS)
+    if (!noSleepVideo) {
+        noSleepVideo = document.createElement('video');
+        noSleepVideo.setAttribute('playsinline', '');
+        noSleepVideo.setAttribute('loop', '');
+        noSleepVideo.style.display = 'none';
+        noSleepVideo.src = silentVideoDataURI;
+        document.body.appendChild(noSleepVideo);
+    }
+    try {
+        await noSleepVideo.play();
+    } catch(e) {
+        console.error('Could not play silent video for wake lock fallback.', e);
     }
 };
 
 const releaseWakeLock = async () => {
-    if (wakeLock !== null) {
+    if (wakeLock) {
         await wakeLock.release();
         wakeLock = null;
     }
+
+    if (noSleepVideo) {
+        noSleepVideo.pause();
+    }
 };
+
 
 function handleScrub(e) {
     if (isNaN(dom.videoPlayer.duration)) return;
@@ -119,32 +145,30 @@ function attachEventListeners() {
     dom.quadrantOverlay.addEventListener('contextmenu', e => e.preventDefault());
 
     // --- Double Tap Zoom Prevention ---
-    // 1. Prevent default on dblclick, a more direct approach.
-    dom.quadrantOverlay.addEventListener('dblclick', (e) => e.preventDefault());
-    dom.videoPlayer.addEventListener('dblclick', (e) => e.preventDefault());
-
-    // 2. Keep the manual detection as a fallback for certain iOS behaviors.
-    dom.quadrantOverlay.addEventListener('touchstart', (e) => {
+    // Prevent double-tap zoom on the entire video viewing area, crucial for iOS.
+    // The CSS `touch-action: manipulation` on #videoView is the primary fix.
+    // This JS is a more aggressive fallback.
+    dom.videoView.addEventListener('dblclick', (e) => e.preventDefault());
+    dom.videoView.addEventListener('touchstart', (e) => {
+        // Only prevent default if the target is not an interactive element within the top bar.
+        if (e.target.closest('#topBar')) {
+            return;
+        }
         const currentTime = new Date().getTime();
-        const timeSinceLastTap = currentTime - lastQuadrantTapTime;
-
+        const timeSinceLastTap = currentTime - lastVideoViewTapTime;
         if (timeSinceLastTap < 400 && timeSinceLastTap > 0) {
             e.preventDefault();
         }
-        lastQuadrantTapTime = currentTime;
-    }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work on touch events.
+        lastVideoViewTapTime = currentTime;
+    }, { passive: false });
 
     // --- NEW Zoom Prevention for Progress Bar ---
-    // 1. Prevent default on dblclick, a more direct approach.
     dom.progressBar.addEventListener('dblclick', e => e.preventDefault());
-
-    // 2. Add manual detection as a robust fallback for iOS.
     dom.progressBar.addEventListener('touchstart', (e) => {
         const currentTime = new Date().getTime();
         const timeSinceLastTap = currentTime - lastProgressBarTapTime;
 
         if (timeSinceLastTap < 400 && timeSinceLastTap > 0) {
-            // A quick second tap was detected, prevent the default zoom behavior.
             e.preventDefault();
         }
         lastProgressBarTapTime = currentTime;
@@ -188,6 +212,10 @@ function attachEventListeners() {
         }
     });
 
+    dom.videoOkBtn.addEventListener('click', () => {
+        store.actions.saveCurrentVideo();
+    });
+
     dom.deleteOrCutBtn.addEventListener('click', () => {
         const { segments } = store.getState();
         if (segments.length > 0) {
@@ -213,7 +241,8 @@ function attachEventListeners() {
 
     // Re-acquire wake lock when tab becomes visible again
     document.addEventListener('visibilitychange', async () => {
-        if (wakeLock !== null && document.visibilityState === 'visible') {
+        if (document.visibilityState === 'visible' && (wakeLock || noSleepVideo)) {
+            // Re-request the lock if we were previously in a state that needed it
             await requestWakeLock();
         }
     });
@@ -308,6 +337,7 @@ function initialize() {
         // New combined/repurposed buttons
         goBackBtn: document.getElementById('goBackBtn'),
         modeOrUndoBtn: document.getElementById('modeOrUndoBtn'),
+        videoOkBtn: document.getElementById('videoOkBtn'),
         deleteOrCutBtn: document.getElementById('deleteOrCutBtn'),
     };
 
