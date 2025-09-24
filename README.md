@@ -1,4 +1,4 @@
-# TsLive Video Editor
+# tslive-editor
 
 **A fast, self-hosted web interface for viewing and trimming local video archives.**
 
