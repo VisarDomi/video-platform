@@ -1,4 +1,4 @@
-# Tango Video Editor
+# tango-editor
 
 **A fast, self-hosted web interface for viewing and trimming local video archives.**
 
