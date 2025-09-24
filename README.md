@@ -1,4 +1,4 @@
-# tslive-dl
+# tslive-downloader
 Download from tslive.
 
 ## how to use
