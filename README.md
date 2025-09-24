@@ -1,4 +1,4 @@
-# tango-dl
+# tango-downloader
 Download from tango.
 
 ## how to use
