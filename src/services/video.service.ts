@@ -16,10 +16,9 @@ let isProcessingQueue = false;
 
 /**
  * Moves a file to a 'trash_edit' subdirectory within its base directory.
- * This is used to avoid conflicts with other applications that may use a 'trash' folder.
  */
 async function moveFileToTrash(filePath: string, baseDir: string) {
-    const trashDir = path.join(baseDir, 'trash_edit');
+    const trashDir = path.join(baseDir, 'trash');
     await fsp.mkdir(trashDir, { recursive: true });
     
     const filename = path.basename(filePath);
