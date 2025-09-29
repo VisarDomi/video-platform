@@ -235,19 +235,18 @@ async function processCompletedDownloads() {
             entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
         );
 
-        // --- CHANGE START: Added .ts file cleanup logic ---
-        const tsFiles = new Set(
-             entries.filter(e => e.isFile() && e.name.endsWith('.ts')).map(e => path.parse(e.name).name)
+        const tsFilesWithExt = new Set(
+             entries.filter(e => e.isFile() && e.name.endsWith('.ts')).map(e => e.name)
         );
 
-        for (const baseName of tsFiles) {
+        for (const tsFile of tsFilesWithExt) {
+            const baseName = path.parse(tsFile).name;
             if (mp4Files.has(baseName)) {
-                const tsFilePath = path.join(storageDir, `${baseName}.ts`);
-                logger.info(`[Repackager Cleanup] Moving stale .ts file to trash: ${baseName}.ts`);
+                const tsFilePath = path.join(storageDir, tsFile);
+                logger.info(`[Repackager Cleanup] Moving stale .ts file to trash: ${tsFile}`);
                 await utils.moveToTrash(tsFilePath);
             }
         }
-        // --- CHANGE END ---
 
         if (potentialFolders.length === 0) {
             logger.info("[Repackager] No download folders found to scan.");
@@ -255,6 +254,10 @@ async function processCompletedDownloads() {
         }
         
         for (const folder of potentialFolders) {
+            // Skips the 'trash' directory itself
+            if (folder.name === 'trash') continue;
+            if (folder.name === 'edit') continue;
+
             const fullFolderPath = path.join(storageDir, folder.name);
 
             if (mp4Files.has(folder.name)) {
@@ -266,21 +269,48 @@ async function processCompletedDownloads() {
             }
             
             const isActive = Array.from(state.getActiveDownloads().values()).some(dl => {
-                // A simple check to see if the streamer alias is at the end of the folder name
                 return folder.name.endsWith(dl.alias);
             });
-            if(isActive) {
-                logger.verbose(`[Repackager] Folder '${folder.name}' belongs to an active download. Skipping.`);
+            if (isActive) {
+                logger.verbose(`[Repackager] Skipping all folders that have the same alias as ${folder.name}`);
                 continue;
             }
-
+            
             const stats = await fsPromises.stat(fullFolderPath);
             const staleTimeout = cfg.timeouts.staleStream * 2; 
             const isStale = (Date.now() - stats.mtime.getTime()) > staleTimeout;
             
             if (isStale) {
+                // Pre-check for empty folder
+                try {
+                    const dirEntries = await fsPromises.readdir(fullFolderPath);
+                    if (dirEntries.length === 0) {
+                        logger.warn(`[Repackager] Found empty stale folder '${folder.name}'. Moving to trash.`);
+                        if (cfg.repackager.deleteRawOnSuccess) {
+                            await utils.moveToTrash(fullFolderPath);
+                            const bigTsFilePath = path.join(storageDir, `${folder.name}.ts`);
+                            await utils.moveToTrash(bigTsFilePath);
+                        }
+                        continue; // Move to the next folder
+                    }
+                } catch (readError) {
+                    logger.error(`[Repackager] Could not read contents of folder '${folder.name}'. Skipping.`, { readError });
+                    continue; // Move to the next folder if it's unreadable
+                }
+
                 logger.info(`[Repackager] Found stale, completed folder '${folder.name}'. Starting processing.`);
+                // This function now just creates the MP4.
                 await repackager.repackageFolder(fullFolderPath);
+
+                // The cleanup logic is now here, where it belongs.
+                if (cfg.repackager.deleteRawOnSuccess) {
+                    // 1. Move the folder of original segments to trash.
+                    await utils.moveToTrash(fullFolderPath);
+
+                    // 2. Move the corresponding large .ts file to trash.
+                    const bigTsFilePath = path.join(storageDir, `${folder.name}.ts`);
+                    await utils.moveToTrash(bigTsFilePath);
+                }
             } else {
                  logger.verbose(`[Repackager] Folder '${folder.name}' is not stale yet. Skipping.`);
             }

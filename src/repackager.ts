@@ -106,11 +106,8 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
 
     try {
         await fs.access(outputFile);
-        logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
-        if (repackagerConfig.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Moving raw segment folder to trash: ${inputDirName}`);
-            await utils.moveToTrash(inputDir);
-        }
+        logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping actual repackaging.`);
+        // Note: The cleanup of the source folder is handled by the calling function.
         return;
     } catch (e) {
         // File doesn't exist, proceed.
@@ -124,21 +121,11 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         return;
     }
 
-    // 1. If the directory is completely empty, move it to trash.
-    if (allDirEntries.length === 0) {
-        logger.warn(`[Repackager] Directory ${path.basename(inputDir)} is empty. Moving it to trash.`);
-        await utils.moveToTrash(inputDir);
-        return;
-    }
-
-    // 2. If not empty, find the .ts files.
     const tsFiles = allDirEntries
         .filter(f => f.endsWith('.ts'))
         .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
         .map(f => path.join(inputDir, f));
 
-    // 3. If the folder is not empty but contains no .ts files, it's an anomaly.
-    //    Log it and leave it alone for manual inspection. DO NOT DELETE.
     if (tsFiles.length === 0) {
         logger.warn(`[Repackager] No .ts files found in non-empty directory ${path.basename(inputDir)}. Skipping repackaging to be safe.`);
         return;
@@ -166,10 +153,6 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
 
     if (goodFiles.length === 0) {
         logger.warn(`[Repackager] No valid segments found for ${inputDirName}. Skipping MP4 creation.`);
-        if (repackagerConfig.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Moving folder with only bad segments to trash: ${inputDirName}`);
-            await utils.moveToTrash(inputDir);
-        }
         return;
     }
     
@@ -201,11 +184,6 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         ], `Combine: ${inputDirName}`);
 
         logger.info(`[Repackager] Success! MP4 file created for ${inputDirName}`);
-
-        if (repackagerConfig.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Moving raw segment folder to trash: ${inputDirName}`);
-            await utils.moveToTrash(inputDir);
-        }
 
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
