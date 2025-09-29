@@ -7,6 +7,7 @@ import pLimit from 'p-limit';
 
 import * as config from './config.js';
 import logger from './logger.js';
+import * as utils from './utils.js';
 
 // Helper to run a command and get its output/error, with optional real-time logging
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
@@ -60,7 +61,7 @@ const getVideoResolution = async (filePath: string): Promise<string | null> => {
 };
 
 interface CheckResult {
-    status: 'good' | 'repair';
+    status: 'good' | 'bad'; // Simplified status
     path: string;
     reason?: string;
 }
@@ -86,40 +87,12 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
     }
 
     if (reasons.length > 0) {
-        return { status: 'repair', path: filePath, reason: reasons.join(' | ') };
+        return { status: 'bad', path: filePath, reason: reasons.join(' | ') };
     } else {
         return { status: 'good', path: filePath };
     }
 };
 
-const repairSegment = async (sourcePath: string, destPath: string, targetResolution: string): Promise<boolean> => {
-    const { repairPreset, repairCrf } = config.getConfig().repackager;
-    const [targetWidth, targetHeight] = targetResolution.split('x');
-    const sourceName = path.basename(sourcePath);
-    const parentDirName = path.basename(path.dirname(sourcePath));
-
-    try {
-        logger.info(`[Repackager] Starting repair for segment: ${sourcePath}`);
-        /**
-         * DO NOT REMOVE COMMENT
-         * DO NOT CHANGE FORMATTING OF THE COMMAND
-         * DO NOT CHANGE THE COMMAND - it is this command that does the magic of playing on safari ios
-         */
-        await runCommand('ffmpeg', [
-            '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats', '-y',
-            '-i', sourcePath,
-            '-vf', `scale=${targetWidth}:${targetHeight},format=yuv420p`,
-            '-c:v', 'libx264', '-preset', repairPreset, '-crf', repairCrf,
-            '-c:a', 'copy',
-            destPath,
-        ], `Repair: ${parentDirName}/${sourceName}`);
-        logger.info(`[Repackager] Successfully repaired segment: ${sourcePath}`);
-        return true;
-    } catch (error: any) {
-        logger.error(`Failed to repair ${sourcePath}`, { error: error.message });
-        return false;
-    }
-};
 
 export const repackageFolder = async (inputDir: string): Promise<void> => {
     const repackagerConfig = config.getConfig().repackager;
@@ -135,8 +108,8 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         await fs.access(outputFile);
         logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
         if (repackagerConfig.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Deleting raw segment folder: ${inputDirName}`);
-            await fs.rm(inputDir, { recursive: true, force: true });
+            logger.info(`[Repackager] Moving raw segment folder to trash: ${inputDirName}`);
+            await utils.moveToTrash(inputDir);
         }
         return;
     } catch (e) {
@@ -151,10 +124,10 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         return;
     }
 
-    // 1. If the directory is completely empty, it's safe to clean up.
+    // 1. If the directory is completely empty, move it to trash.
     if (allDirEntries.length === 0) {
-        logger.warn(`[Repackager] Directory ${path.basename(inputDir)} is empty. Cleaning it up.`);
-        await fs.rm(inputDir, { recursive: true, force: true });
+        logger.warn(`[Repackager] Directory ${path.basename(inputDir)} is empty. Moving it to trash.`);
+        await utils.moveToTrash(inputDir);
         return;
     }
 
@@ -185,49 +158,29 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
     const checkResults = await Promise.all(checkPromises);
     
     const goodFiles = checkResults.filter(r => r.status === 'good').map(r => r.path);
-    const repairQueue = checkResults.filter(r => r.status === 'repair');
+    const badFiles = checkResults.filter(r => r.status === 'bad');
     
-    repairQueue.forEach(item => {
-        logger.warn(`[Repackager] Needs repair (${item.reason}): ${item.path}`);
+    badFiles.forEach(item => {
+        logger.warn(`[Repackager] Skipping segment (${item.reason}): ${path.basename(item.path)}`);
     });
 
-    const repairedFilesMap = new Map<string, string>();
-    const repairDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-repacker-'));
+    if (goodFiles.length === 0) {
+        logger.warn(`[Repackager] No valid segments found for ${inputDirName}. Skipping MP4 creation.`);
+        if (repackagerConfig.deleteRawOnSuccess) {
+            logger.info(`[Repackager] Moving folder with only bad segments to trash: ${inputDirName}`);
+            await utils.moveToTrash(inputDir);
+        }
+        return;
+    }
     
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-repacker-'));
     try {
-        if (repairQueue.length > 0) {
-            logger.info(`[Repackager] Repairing ${repairQueue.length} segment(s)...`);
-            const repairPromises = repairQueue.map(item => limit(async () => {
-                const sourcePath = item.path;
-                const destPath = path.join(repairDir, path.basename(sourcePath));
-                const success = await repairSegment(sourcePath, destPath, targetResolution);
-                if (success) {
-                    repairedFilesMap.set(sourcePath, destPath);
-                }
-            }));
-            await Promise.all(repairPromises);
-        }
-
-        const fileListPath = path.join(repairDir, 'file_list.txt');
-        const finalFilePaths: string[] = [];
-
-        for (const f of tsFiles) {
-            if (repairedFilesMap.has(f)) {
-                finalFilePaths.push(repairedFilesMap.get(f)!);
-            } else if (goodFiles.includes(f)) {
-                finalFilePaths.push(f);
-            }
-        }
-        
-        if (finalFilePaths.length === 0) {
-            throw new Error('No valid segments left to process after repair attempts.');
-        }
-
-        const fileListContent = finalFilePaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+        const fileListPath = path.join(tempDir, 'file_list.txt');
+        const fileListContent = goodFiles.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
         await fs.writeFile(fileListPath, fileListContent);
 
-        logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${repairedFilesMap.size} repaired, ${repairQueue.length - repairedFilesMap.size} failed.`);
-        logger.info(`[Repackager] Starting ffmpeg to combine ${finalFilePaths.length} segments into ${path.basename(outputFile)}...`);
+        logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
+        logger.info(`[Repackager] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
 
         /**
          * DO NOT REMOVE COMMENT
@@ -250,11 +203,11 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         logger.info(`[Repackager] Success! MP4 file created for ${inputDirName}`);
 
         if (repackagerConfig.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Deleting raw segment folder: ${inputDirName}`);
-            await fs.rm(inputDir, { recursive: true, force: true });
+            logger.info(`[Repackager] Moving raw segment folder to trash: ${inputDirName}`);
+            await utils.moveToTrash(inputDir);
         }
 
     } finally {
-        await fs.rm(repairDir, { recursive: true, force: true });
+        await fs.rm(tempDir, { recursive: true, force: true });
     }
 };

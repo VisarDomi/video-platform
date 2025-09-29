@@ -205,9 +205,9 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         }));
 
         if (totalSegmentsDownloaded === 0) {
-            logger.warn(`No segments were downloaded for ${alias}, deleting empty directory and file.`);
-            if (tsFilePath) await fsPromises.unlink(tsFilePath).catch(e => { if (e.code !== 'ENOENT') throw e; });
-            if (segmentsDirPath) await fsPromises.rm(segmentsDirPath, { recursive: true, force: true }).catch(e => { if (e.code !== 'ENOENT') throw e; });
+            logger.warn(`No segments were downloaded for ${alias}, moving empty directory and file to trash.`);
+            if (tsFilePath) await utils.moveToTrash(tsFilePath);
+            if (segmentsDirPath) await utils.moveToTrash(segmentsDirPath);
         }
 
     } catch (error) {
@@ -243,8 +243,8 @@ async function processCompletedDownloads() {
         for (const baseName of tsFiles) {
             if (mp4Files.has(baseName)) {
                 const tsFilePath = path.join(storageDir, `${baseName}.ts`);
-                logger.info(`[Repackager Cleanup] Deleting stale .ts file with existing MP4: ${baseName}.ts`);
-                await fsPromises.unlink(tsFilePath).catch(err => logger.error(`Failed to delete stale .ts file: ${tsFilePath}`, { err }));
+                logger.info(`[Repackager Cleanup] Moving stale .ts file to trash: ${baseName}.ts`);
+                await utils.moveToTrash(tsFilePath);
             }
         }
         // --- CHANGE END ---
@@ -259,8 +259,8 @@ async function processCompletedDownloads() {
 
             if (mp4Files.has(folder.name)) {
                 if (cfg.repackager.deleteRawOnSuccess) {
-                    logger.info(`[Repackager] Deleting stale segment folder with existing MP4: ${folder.name}`);
-                    await fsPromises.rm(fullFolderPath, { recursive: true, force: true });
+                    logger.info(`[Repackager] Moving stale segment folder to trash: ${folder.name}`);
+                    await utils.moveToTrash(fullFolderPath);
                 }
                 continue;
             }
