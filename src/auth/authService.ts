@@ -113,13 +113,14 @@ export class AuthService {
 
     private async _refreshShortLivedTokens() {
         while (true) {
+            const refreshInterval = config.getConfig().intervals.shortTokenRefresh
             try {
                 await this._setTokenData();
                 await this.authContext.saveTokenToFile(); // Persist the new short-lived tokens
             } catch (error) {
-                logger.error("Failed to refresh short-lived tokens. Waiting for new Tango-ST.", { error });
+                logger.error(`Failed to refresh short-lived tokens. Waiting for new Tango-ST in ${refreshInterval/1000}s.`, { error });
             }
-            await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
+            await timersPromises.setTimeout(refreshInterval);
         }
     }
 

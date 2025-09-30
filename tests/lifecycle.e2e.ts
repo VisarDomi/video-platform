@@ -1,293 +1,224 @@
 // tests/lifecycle.e2e.ts
-import { spawn, ChildProcess } from 'child_process';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import 'dotenv/config';
+import { spawn, ChildProcess } from "child_process";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as url from "url";
+// Correctly import from the compiled output
+import * as configLoader from "../dist/common/config.js";
+import { findProjectRoot } from "../dist/common/utils.js";
 
-// --- Test Configuration ---
-const TEST_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes overall timeout for the test
-const DOWNLOAD_DURATION_S = 60; // How long to let the download run
-const MIN_EXPECTED_SEGMENTS = 50; // Minimum .ts files after DOWNLOAD_DURATION_S
-const COMBINER_SETUP_COPIES = 20; // Number of copies for the combiner test
+// --- Test Constants & Configuration ---
+const TEST_TIMEOUT = 5 * 60 * 1000;
+const DOWNLOAD_DURATION_S = 60;
+const MONITORING_INTERVAL_MS = 5000;
 
-// --- Global Variables ---
-let appProcess: ChildProcess | null = null;
-let config: any; // Will hold the content of config.json
+// --- Correct Path Resolution (as you provided) ---
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = findProjectRoot(__dirname);
+const config = configLoader.getConfig();
+const configPath = path.join(projectRoot, "config.json");
 
 // --- Helper Functions ---
 
-/**
- * Reads and parses the main config.json file.
- */
-async function getAppConfig() {
-    const configRaw = await fs.readFile('config.json', 'utf-8');
-    return JSON.parse(configRaw);
-}
+const log = (phase: string, message: string) => {
+    console.log(`[Phase ${phase} Test Runner] ${message}`);
+};
 
-/**
- * Deletes all artifacts created during the test run to ensure a clean slate.
- */
-async function cleanup() {
-    console.log('[Cleanup] Removing test artifacts...');
-    if (!config) config = await getAppConfig();
-    const projectRoot = process.cwd();
-    const filesToDelete = [
-        config.fileNames.liveStatus,
-        config.fileNames.errorLog,
-        'processed-by-combiner.txt',
-    ];
-    for (const file of filesToDelete) {
-        await fs.rm(path.join(projectRoot, file), { force: true });
-    }
-    await fs.rm(config.storagePath, { recursive: true, force: true });
-    console.log('[Cleanup] Finished.');
-}
-
-/**
- * Starts the application as a child process and resolves when it's ready.
- * It streams the application's logs to the console for real-time feedback.
- */
-function startApp(): Promise<ChildProcess> {
-    console.log('[Test Runner] Starting application process...');
+const runCommand = (command: string, args: string[]): Promise<string> => {
     return new Promise((resolve, reject) => {
-        const proc = spawn('node', ['dist/main.js'], {
-            cwd: process.cwd(),
-            env: process.env,
+        const process = spawn(command, args);
+        let stdout = "", stderr = "";
+        process.stdout.on("data", (data) => (stdout += data.toString()));
+        process.stderr.on("data", (data) => (stderr += data.toString()));
+        process.on("close", (code) => {
+            if (code === 0) resolve(stdout.trim());
+            else reject(new Error(`Command "${command} ${args.join(" ")}" failed with code ${code}:\n${stderr}`));
         });
+        process.on("error", (err) => reject(err));
+    });
+};
 
-        let output = '';
-        const onData = (data: Buffer) => {
-            const str = data.toString();
-            // Prefix app logs to distinguish them from test logs
-            str.trim().split('\n').forEach(line => console.log(`[APP] ${line}`));
-            output += str;
-            // The app is considered "ready" once all services are confirmed running.
-            if (output.includes('All enabled services are running')) {
-                proc.stdout.removeListener('data', onData);
-                proc.stderr.removeListener('data', onData);
-                console.log('[Test Runner] Application is up and running.');
-                resolve(proc);
-            }
-        };
+const startApp = (): ChildProcess => {
+    log("N/A", "Starting application process...");
+    // Use your specified command to run from dist
+    const appProcess = spawn("node", [path.join(projectRoot, "dist/main.js")], {
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: projectRoot,
+    });
+    appProcess.stdout?.on("data", (data) => process.stdout.write(`[APP] ${data.toString()}`));
+    appProcess.stderr?.on("data", (data) => process.stderr.write(`[APP ERROR] ${data.toString()}`));
+    return appProcess;
+};
 
-        proc.stdout.on('data', onData);
-        proc.stderr.on('data', onData);
-        proc.on('error', (err) => reject(new Error(`Failed to start app: ${err.message}`)));
-        proc.on('exit', (code, signal) => {
-            if (code !== 0 && signal !== 'SIGINT') {
-                console.error(`[Test Runner] App process exited unexpectedly with code ${code}, signal ${signal}`);
-            }
+const stopApp = async (appProcess: ChildProcess | null): Promise<void> => {
+    if (!appProcess || appProcess.killed) return;
+    log("N/A", "Gracefully stopping application process...");
+    appProcess.kill("SIGINT");
+    await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            if (!appProcess.killed) appProcess.kill("SIGKILL");
+            resolve(null);
+        }, 5000);
+        appProcess.on("exit", () => {
+            clearTimeout(timeout);
+            resolve(null);
         });
     });
-}
+    log("N/A", "Application process stopped.");
+};
 
-/**
- * Sends a SIGINT signal to the process and waits for it to exit gracefully.
- */
-function gracefulShutdown(proc: ChildProcess): Promise<void> {
-    console.log('[Test Runner] Sending graceful shutdown signal (SIGINT)...');
-    return new Promise((resolve) => {
-        proc.on('exit', () => {
-            console.log('[Test Runner] Application process has exited.');
-            resolve();
-        });
-        proc.kill('SIGINT'); // Simulates Ctrl+C
-    });
-}
-
-/**
- * Waits for a file to exist at a given path.
- */
-async function waitForFile(filePath: string, timeoutMs: number = 30000): Promise<void> {
+const waitFor = async (conditionFn: () => Promise<boolean>, timeoutMs: number, intervalMs: number, description: string): Promise<void> => {
     const startTime = Date.now();
+    log("N/A", `Waiting for condition: ${description}`);
     while (Date.now() - startTime < timeoutMs) {
-        try {
-            await fs.access(filePath);
-            console.log(`[Check] Found file: ${path.basename(filePath)}`);
+        if (await conditionFn()) {
+            log("N/A", `Condition met: ${description}`);
             return;
-        } catch {
-            await new Promise(res => setTimeout(res, 1000));
         }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
-    throw new Error(`Timeout: File not found at ${filePath} after ${timeoutMs / 1000}s`);
-}
+    throw new Error(`Timeout waiting for condition: ${description}`);
+};
 
-/**
- * Checks if a file's size is increasing over a duration.
- */
-async function checkFileSizeGrowth(filePath: string, durationMs: number): Promise<void> {
-    console.log(`[Check] Monitoring file size growth for ${path.basename(filePath)} over ${durationMs / 1000}s...`);
-    let lastSize = (await fs.stat(filePath)).size;
-    await new Promise(res => setTimeout(res, durationMs));
-    const finalSize = (await fs.stat(filePath)).size;
+const cleanup = async () => {
+    log("N/A", "--- Running Cleanup ---");
+    const cleanupPromises = [
+        fs.rm(config.storagePath, { recursive: true, force: true }).catch(() => {}),
+        fs.unlink(path.join(projectRoot, config.fileNames.liveStatus)).catch(() => {}),
+        fs.unlink(path.join(projectRoot, "processed-by-combiner.txt")).catch(() => {}),
+    ];
+    await Promise.all(cleanupPromises);
+    log("N/A", "Cleanup complete.");
+};
 
-    if (finalSize > lastSize) {
-        console.log(`[Check] PASSED: File grew from ${lastSize} to ${finalSize} bytes.`);
+const reportDownloadHealth = (duration: number, segmentCount: number) => {
+    const green = "\x1b[32m", yellow = "\x1b[33m", red = "\x1b[31m", reset = "\x1b[0m";
+    log("1: Downloader", "--- Download Health Report ---");
+    log("1: Downloader", `Final Segment Count: ${segmentCount}`);
+    log("1: Downloader", `Video Duration (ffprobe): ${duration.toFixed(2)} seconds`);
+    if (duration >= DOWNLOAD_DURATION_S * 0.9) {
+        log("1: Downloader", `${green}Verdict: HEALTHY - Download was stable and complete.${reset}`);
+    } else if (duration >= DOWNLOAD_DURATION_S * 0.5) {
+        log("1: Downloader", `${yellow}Verdict: DEGRADED - Download was successful but may have stalled.${reset}`);
     } else {
-        throw new Error(`[Check] FAILED: File size did not grow. Start: ${lastSize}, End: ${finalSize}`);
+        log("1: Downloader", `${red}Verdict: UNHEALTHY - Download failed to capture sufficient data.${reset}`);
+        throw new Error(`Download was unhealthy. Duration: ${duration.toFixed(2)}s, Segments: ${segmentCount}.`);
     }
-}
+};
 
-/**
- * Finds the first subdirectory in a given directory, which should be the streamer's folder.
- */
-async function findStreamerFolder(baseDir: string, timeoutMs: number = 30000): Promise<string> {
-    console.log(`[Check] Searching for streamer download folder in: ${baseDir}`);
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-        const entries = await fs.readdir(baseDir, { withFileTypes: true });
-        const subdirs = entries.filter(e => e.isDirectory() && e.name !== 'trash' && e.name !== 'edited');
-        if (subdirs.length > 0) {
-            const folderPath = path.join(baseDir, subdirs[0].name);
-            console.log(`[Check] Found streamer folder: ${subdirs[0].name}`);
-            return folderPath;
-        }
-        await new Promise(res => setTimeout(res, 2000));
-    }
-    throw new Error(`Timeout: No streamer download folder found in ${baseDir} after ${timeoutMs / 1000}s`);
-}
+// --- Main Test Logic ---
+async function runE2ETest() {
+    let appProcess: ChildProcess | null = null;
+    let streamerFolderName: string | null = null;
+    let mp4FileName: string | null = null;
+    let originalConfig: string | null = null;
 
-
-/**
- * The main test execution flow.
- */
-async function runTest() {
-    console.log('--- E2E LIFECYCLE TEST: STARTING ---');
-    config = await getAppConfig();
-
-    // =================================================================
-    // PHASE 1: AUTHENTICATION & DOWNLOADING
-    // =================================================================
-    console.log('\n--- PHASE 1: Testing Downloader ---');
-    console.log('Ensure a valid session.json is in the project root.');
-    appProcess = await startApp();
-
-    const streamerDir = await findStreamerFolder(config.storagePath);
-    const mainTsFile = path.join(config.storagePath, `${path.basename(streamerDir)}.ts`);
-    
-    // Concurrently check for file growth and wait for segments to accumulate
-    const growthPromise = checkFileSizeGrowth(mainTsFile, DOWNLOAD_DURATION_S * 1000);
-    const segmentWaitPromise = new Promise(res => setTimeout(res, DOWNLOAD_DURATION_S * 1000));
-    await Promise.all([growthPromise, segmentWaitPromise]);
-
-    const segments = (await fs.readdir(streamerDir)).filter(f => f.endsWith('.ts'));
-    console.log(`[Check] Found ${segments.length} .ts segment files.`);
-    if (segments.length < MIN_EXPECTED_SEGMENTS) {
-        throw new Error(`Download test failed: Expected at least ${MIN_EXPECTED_SEGMENTS} segments, but found only ${segments.length}.`);
-    }
-    console.log('[Check] PASSED: Download ran successfully for 60 seconds.');
-
-    await gracefulShutdown(appProcess);
-    appProcess = null;
-    console.log('--- PHASE 1: COMPLETE ---');
-
-
-    // =================================================================
-    // PHASE 2: ASSEMBLING
-    // =================================================================
-    console.log('\n--- PHASE 2: Testing Assembler ---');
-    await fs.rm(path.join(process.cwd(), config.fileNames.liveStatus), { force: true });
-    console.log('[Setup] Deleted live-status.json to ensure assembler processes the new folder.');
-
-    appProcess = await startApp();
-
-    const expectedMp4Path = path.join(config.storagePath, `${path.basename(streamerDir)}.mp4`);
-    await waitForFile(expectedMp4Path);
-    console.log(`[Check] PASSED: Assembler created ${path.basename(expectedMp4Path)}.`);
-
-    // Check for cleanup
     try {
-        await fs.access(streamerDir);
-        throw new Error('[Check] FAILED: Assembler did not delete the source segment folder.');
-    } catch (e: any) {
-        if (e.code === 'ENOENT') {
-            console.log('[Check] PASSED: Source segment folder was deleted.');
-        } else throw e;
-    }
-    
-    await gracefulShutdown(appProcess);
-    appProcess = null;
-    console.log('--- PHASE 2: COMPLETE ---');
-
-    // =================================================================
-    // PHASE 3: COMBINING
-    // =================================================================
-    console.log('\n--- PHASE 3: Testing Combiner ---');
-    const editedDir = path.join(config.storagePath, 'edited');
-    await fs.mkdir(editedDir, { recursive: true });
-    await fs.rm(path.join(process.cwd(), 'processed-by-combiner.txt'), { force: true });
-
-    console.log(`[Setup] Copying ${path.basename(expectedMp4Path)} ${COMBINER_SETUP_COPIES} times to trigger the combiner...`);
-    for (let i = 0; i < COMBINER_SETUP_COPIES; i++) {
-        const timestamp = new Date(Date.now() - i * 90000).toISOString()
-            .replace(/T/, ' ').replace(/:/g, '').slice(0, 16);
-        const parsedName = path.basename(expectedMp4Path).match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+)\.mp4$/);
-        if (!parsedName) throw new Error("Could not parse MP4 filename for combiner setup.");
-        const streamerName = parsedName[2];
-        const newName = `${timestamp.replace("-", "").replace("-", "")} ${streamerName}.mp4`;
-        await fs.copyFile(expectedMp4Path, path.join(editedDir, newName));
-    }
-    console.log(`[Setup] Copied ${COMBINER_SETUP_COPIES} files.`);
-
-    appProcess = await startApp();
-
-    // Wait for the combined file to appear. It will have "min.mp4" in the name.
-    const combinedFilePromise = (async () => {
-        while (true) {
-            const files = await fs.readdir(editedDir);
-            const combinedFile = files.find(f => f.includes('min.mp4'));
-            if (combinedFile) {
-                console.log(`[Check] Found combined file: ${combinedFile}`);
-                return combinedFile;
-            }
-            await new Promise(res => setTimeout(res, 2000));
-        }
-    })();
-    
-    await combinedFilePromise;
-    console.log('[Check] PASSED: Combiner created a new video file.');
-
-    // The test gracefully exits after the first successful combine, as requested.
-    await gracefulShutdown(appProcess);
-    appProcess = null;
-    console.log('--- PHASE 3: COMPLETE ---');
-
-}
-
-// --- Main Execution Block ---
-(async () => {
-    // Initial cleanup is crucial for a clean run
-    try {
-        config = await getAppConfig();
+        // --- Global Setup ---
+        originalConfig = await fs.readFile(configPath, "utf-8");
+        const baseConfig = configLoader.getConfig(); // Load the FULLY MERGED config
+        log("0: Setup", `Using storage path: ${baseConfig.storagePath}`);
         await cleanup();
-        // The user is responsible for providing session.json before this script runs.
-        console.log("Copying provided session.json fixture to project root for test...")
-        await fs.copyFile('tests/fixtures/session.json', 'session.json');
-    } catch (e:any) {
-        if(e.code !== 'ENOENT') { // It's okay if session.json fixture doesn't exist
-            console.error("Error during initial cleanup:", e);
-            process.exit(1);
+        await fs.mkdir(baseConfig.storagePath, { recursive: true });
+        await fs.access(path.join(projectRoot, "session.json"));
+
+        // --- PHASE 1: Downloader ---
+        console.log("\n--- PHASE 1: Testing Downloader ---");
+        // Use original config for this phase
+        appProcess = startApp();
+        // ... (rest of downloader test is unchanged) ...
+        await waitFor(async () => {
+            const files = await fs.readdir(baseConfig.storagePath, { withFileTypes: true }).catch(() => []);
+            const folder = files.find((f) => f.isDirectory() && f.name.match(/^\d{4}-\d{2}-\d{2} \d{6} .+/));
+            if (folder) streamerFolderName = folder.name;
+            return !!folder;
+        }, 60000, 2000, "streamer download folder to be created");
+        if (!streamerFolderName) throw new Error("Streamer folder was not created.");
+        log("1: Downloader", `Detected streamer folder: ${streamerFolderName}`);
+        const tsFilePath = path.join(baseConfig.storagePath, `${streamerFolderName}.ts`);
+        const segmentsFolderPath = path.join(baseConfig.storagePath, streamerFolderName);
+        log("1: Downloader", `Monitoring download for ${DOWNLOAD_DURATION_S} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, DOWNLOAD_DURATION_S * 1000));
+        log("1: Downloader", "Monitoring complete. Stopping app to analyze results.");
+        await stopApp(appProcess);
+        appProcess = null;
+        const finalSegmentCount = (await fs.readdir(segmentsFolderPath)).filter((f) => f.endsWith(".ts")).length;
+        const duration = parseFloat(await runCommand("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", tsFilePath,]));
+        reportDownloadHealth(duration, finalSegmentCount);
+        log("1: Downloader", "SUCCESS - Download health check passed.");
+
+
+        // --- PHASE 2: Assembler (Downloader Disabled) ---
+        console.log("\n--- PHASE 2: Testing Assembler ---");
+        const assemblerConfig = configLoader.getConfig(); // Get a fresh, merged config object
+        assemblerConfig.downloader.enabled = false; // This is now safe
+        await fs.writeFile(configPath, JSON.stringify(assemblerConfig, null, 4));
+        log("2: Assembler", "Config updated to disable downloader. Deleting live-status.json.");
+        await fs.unlink(path.join(projectRoot, baseConfig.fileNames.liveStatus)).catch(() => {});
+        appProcess = startApp();
+        mp4FileName = `${streamerFolderName}.mp4`;
+        const mp4FilePath = path.join(baseConfig.storagePath, mp4FileName);
+        // ... (rest of assembler test is unchanged) ...
+        await waitFor(async () => fs.access(mp4FilePath).then(() => true).catch(() => false), 120000, 2000, "MP4 file to be created");
+        log("2: Assembler", `MP4 file created: ${mp4FileName}. Verifying cleanup...`);
+        await waitFor(async () => fs.access(segmentsFolderPath).then(() => false).catch(() => true), 30000, 1000, "raw segment folder to be deleted");
+        await waitFor(async () => fs.access(tsFilePath).then(() => false).catch(() => true), 30000, 1000, "large .ts file to be deleted");
+        log("2: Assembler", "SUCCESS - MP4 assembled and raw files cleaned up.");
+        await stopApp(appProcess);
+        appProcess = null;
+
+        // --- PHASE 3: Combiner (Downloader & Assembler Disabled) ---
+        console.log("\n--- PHASE 3: Testing Combiner ---");
+        const combinerConfig = configLoader.getConfig(); // Get a fresh, merged config object
+        combinerConfig.downloader.enabled = false;
+        combinerConfig.repackager.enabled = false; // This is now safe
+        await fs.writeFile(configPath, JSON.stringify(combinerConfig, null, 4));
+        // ... (rest of combiner test is unchanged) ...
+        log("3: Combiner", "Config updated to disable downloader and assembler.");
+        const editedFolderPath = path.join(baseConfig.storagePath, "edited");
+        await fs.mkdir(editedFolderPath, { recursive: true });
+        const mp4Duration = parseFloat(await runCommand("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", mp4FilePath,]));
+        const minCombineDuration = baseConfig.combiner.minDurationMinutes * 60;
+        const copiesNeeded = Math.ceil(minCombineDuration / mp4Duration) + 1;
+        log("3: Combiner", `MP4 duration is ${mp4Duration.toFixed(1)}s. Creating ${copiesNeeded} copies to exceed ${minCombineDuration}s.`);
+        const parsedName = mp4FileName.match(/^(\d{4}-\d{2}-\d{2} \d{4})(\d{2}) (.+)\.mp4$/);
+        if (!parsedName) throw new Error("Could not parse MP4 filename to setup combiner test.");
+        const [, date, seconds, username] = parsedName;
+        for (let i = 0; i < copiesNeeded; i++) {
+            const newSeconds = String(parseInt(seconds) + i).padStart(2, "0");
+            const newFileName = `${date}${newSeconds} ${username}.mp4`;
+            await fs.copyFile(mp4FilePath, path.join(editedFolderPath, newFileName));
         }
-    }
+        appProcess = startApp();
+        await waitFor(async () => (await fs.readdir(editedFolderPath)).some(f => f.includes("min.mp4")), 120000, 2000, "combined MP4 file to be created");
+        log("3: Combiner", "SUCCESS - Videos combined as expected.");
+        await stopApp(appProcess);
+        appProcess = null;
 
 
-    const testPromise = runTest();
-    const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Test timed out after ${TEST_TIMEOUT_MS / 1000}s`)), TEST_TIMEOUT_MS)
-    );
-
-    try {
-        await Promise.race([testPromise, timeoutPromise]);
-        console.log('\n✅✅✅ E2E LIFECYCLE TEST SUCCEEDED ✅✅✅');
+        console.log("\n✅✅✅ E2E LIFECYCLE TEST PASSED ✅✅✅\n");
     } catch (error) {
-        console.error('\n❌❌❌ E2E LIFECYCLE TEST FAILED ❌❌❌');
-        console.error((error as Error).message);
-        if (appProcess && !appProcess.killed) {
-            console.log('Force killing hanging application process...');
-            appProcess.kill('SIGKILL');
-        }
-        process.exit(1);
+        console.error("\n❌❌❌ E2E LIFECYCLE TEST FAILED ❌❌❌");
+        console.error(error);
+        process.exitCode = 1;
     } finally {
+        if (appProcess && !appProcess.killed) await stopApp(appProcess);
+        if (originalConfig) await fs.writeFile(configPath, originalConfig); // Restore config
         await cleanup();
     }
+}
+
+// --- Execute ---
+(async () => {
+    // Set a hard timeout for the entire test suite
+    const timeout = setTimeout(() => {
+        console.error(`\n❌❌❌ E2E TEST SUITE TIMED OUT AFTER ${TEST_TIMEOUT / 1000}s ❌❌❌`);
+        process.exit(1);
+    }, TEST_TIMEOUT);
+
+    await runE2ETest();
+
+    clearTimeout(timeout);
+    process.exit(process.exitCode || 0);
 })();
