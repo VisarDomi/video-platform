@@ -8,7 +8,13 @@ import pLimit from 'p-limit';
 import * as config from './config.js';
 import logger from './logger.js';
 
-const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr:string }> => {
+
+// --- Low-level FFmpeg Utilities ---
+
+/**
+ * A promise-based wrapper for spawning child processes, capturing stdout/stderr.
+ */
+const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
         const process = child_process.spawn(command, args);
         let stdout = '';
@@ -39,6 +45,9 @@ const runCommand = (command: string, args: string[], logPrefix?: string): Promis
     });
 };
 
+/**
+ * Uses ffprobe to get the video resolution of a file.
+ */
 const getVideoResolution = async (filePath: string): Promise<string | null> => {
     try {
         const { stdout } = await runCommand('ffprobe', [
@@ -55,6 +64,14 @@ const getVideoResolution = async (filePath: string): Promise<string | null> => {
     }
 };
 
+
+// --- Segment Validation ---
+
+interface ValidationResult {
+    goodFiles: string[];
+    badFiles: { path: string; reason: string }[];
+}
+
 interface CheckResult {
     status: 'good' | 'bad';
     path: string;
@@ -66,7 +83,7 @@ interface CheckResult {
  */
 const checkSegment = async (filePath: string, targetResolution: string): Promise<CheckResult> => {
     const reasons: string[] = [];
-    
+
     // 1. Check for corruption. A segment is considered corrupt if ffmpeg
     //    either fails (non-zero exit code) or prints anything to stderr.
     try {
@@ -95,10 +112,80 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
     }
 };
 
+/**
+ * Validates a list of .ts segments in parallel.
+ */
+async function validateSegments(tsFiles: string[], targetResolution: string, maxWorkers: number): Promise<ValidationResult> {
+    logger.info(`[Repackager] Validating ${tsFiles.length} segments with target resolution ${targetResolution}...`);
+
+    const limit = pLimit(maxWorkers);
+    const checkPromises = tsFiles.map(file => limit(() => checkSegment(file, targetResolution)));
+    const checkResults = await Promise.all(checkPromises);
+
+    const goodFiles: string[] = [];
+    const badFiles: { path: string; reason: string }[] = [];
+
+    for (const result of checkResults) {
+        if (result.status === 'good') {
+            goodFiles.push(result.path);
+        } else {
+            badFiles.push({ path: result.path, reason: result.reason || 'Unknown reason' });
+        }
+    }
+
+    badFiles.forEach(item => {
+        logger.warn(`[Repackager] Skipping segment (${item.reason}): ${path.basename(item.path)}`);
+    });
+
+    logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
+    return { goodFiles, badFiles };
+}
+
+
+// --- File Concatenation ---
+
+/**
+ * Concatenates a list of video files into a single MP4 using ffmpeg.
+ */
+async function concatenateSegments(goodFiles: string[], outputFile: string, logPrefix: string): Promise<void> {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-repacker-'));
+    try {
+        const fileListPath = path.join(tempDir, 'file_list.txt');
+        const fileListContent = goodFiles.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+        await fs.writeFile(fileListPath, fileListContent);
+
+        logger.info(`[Repackager] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
+
+        await runCommand('ffmpeg', [
+            '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', fileListPath,
+            '-c', 'copy',
+            '-bsf:a', 'aac_adtstoasc',
+            '-movflags', '+faststart',
+            '-fflags', '+genpts',
+            '-y',
+            outputFile
+        ], `Combine: ${logPrefix}`);
+
+        logger.info(`[Repackager] Success! MP4 file created for ${path.basename(outputFile)}`);
+
+    } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+
+// --- Public API ---
+
+/**
+ * Orchestrates the validation and repackaging of a folder of .ts segments into a single .mp4 file.
+ */
 export const repackageFolder = async (inputDir: string): Promise<void> => {
-    const repackagerConfig = config.getConfig().repackager;
+    const { repackager: repackagerConfig } = config.getConfig();
     const inputDirName = path.basename(inputDir);
-    const outputDir = path.resolve(inputDir, '..'); 
+    const outputDir = path.dirname(inputDir);
     const outputFile = path.join(outputDir, `${inputDirName}.mp4`);
 
     logger.info(`[Repackager] Starting process for: ${inputDirName}`);
@@ -116,59 +203,22 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         .map(f => path.join(inputDir, f));
 
     if (tsFiles.length === 0) {
-        logger.warn(`[Repackager] No .ts files found in directory ${inputDirName}. Skipping repackaging.`);
+        logger.warn(`[Repackager] No .ts files found in directory ${inputDirName}. Skipping.`);
         return;
     }
 
-    const targetResolution = repackagerConfig.enforceResolution;
-    if (!targetResolution) {
+    const { enforceResolution, maxWorkers } = repackagerConfig;
+    if (!enforceResolution) {
         logger.error(`[Repackager] 'enforceResolution' is not set in config. Aborting for ${inputDirName}.`);
         return;
     }
 
-    const limit = pLimit(repackagerConfig.maxWorkers || os.cpus().length);
-
-    logger.info(`[Repackager] Validating ${tsFiles.length} segments with target resolution ${targetResolution}...`);
-    const checkPromises = tsFiles.map(file => limit(() => checkSegment(file, targetResolution)));
-    const checkResults = await Promise.all(checkPromises);
-    
-    const goodFiles = checkResults.filter(r => r.status === 'good').map(r => r.path);
-    const badFiles = checkResults.filter(r => r.status === 'bad');
-    
-    badFiles.forEach(item => {
-        logger.warn(`[Repackager] Skipping segment (${item.reason}): ${path.basename(item.path)}`);
-    });
+    const { goodFiles } = await validateSegments(tsFiles, enforceResolution, maxWorkers || os.cpus().length);
 
     if (goodFiles.length === 0) {
         logger.warn(`[Repackager] No valid segments found for ${inputDirName}. Skipping MP4 creation.`);
         return;
     }
-    
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-repacker-'));
-    try {
-        const fileListPath = path.join(tempDir, 'file_list.txt');
-        const fileListContent = goodFiles.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
-        await fs.writeFile(fileListPath, fileListContent);
 
-        logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
-        logger.info(`[Repackager] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
-
-        await runCommand('ffmpeg', [
-            '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats',
-            '-f', 'concat',
-            '-safe', '0',
-            '-i', fileListPath,
-            '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc',
-            '-movflags', '+faststart',
-            '-fflags', '+genpts',
-            '-y',
-            outputFile
-        ], `Combine: ${inputDirName}`);
-
-        logger.info(`[Repackager] Success! MP4 file created for ${inputDirName}`);
-
-    } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
-    }
+    await concatenateSegments(goodFiles, outputFile, inputDirName);
 };
