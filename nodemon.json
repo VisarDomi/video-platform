@@ -7,13 +7,13 @@
     "dist/*",
     "build/*",
     "repomix-output.xml",
-    "tests/*",
     "convert.sh",
     "session.json",
     "error.log",
     "live-status.json",
     "tango/*",
-    "tango-raw/*"
+    "tango-raw/*",
+    "tests/fixtures/*.ts"
   ],
   "exec": "repomix --config repomix.config.json",
   "verbose": false

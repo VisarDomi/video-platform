@@ -15,7 +15,8 @@
     "**/*.json",
     "**/*.md",
     "**/Dockerfile",
-    "**/*.yml"
+    "**/*.yml",
+    "tests/fixtures/readme.txt"
   ],
   "ignore": {
     "useGitignore": true,
@@ -33,13 +34,13 @@
       ".gitignore",
       "LICENSE",
       "temp.txt",
-      "tests/**",
       "*.mp4",
       "convert.sh",
       "session.json",
       "live-status.json",
       "tango/**",
-      "tango-raw/**"
+      "tango-raw/**",
+      "tests/fixtures/*.ts"
     ]
   }
 }
