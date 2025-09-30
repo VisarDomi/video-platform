@@ -22,50 +22,56 @@ export class TokenManager {
         let success = false;
         while (!success) {
             try {
-                const refreshed = await this._tryLoadAndRefreshFromFile();
-                if (refreshed) {
-                    logger.info("Session successfully refreshed using token from file.");
-                    success = true;
-                    continue;
-                }
-
-                logger.info("Performing full login via Puppeteer to get new tokens...");
-                await this._performFreshLogin();
+                // The core authentication flow, now simplified.
+                await this._attemptAuthentication();
                 success = true;
 
             } catch (error) {
                 const errorMessage = (error as Error).message;
-                logger.error(`Initial authentication failed: ${errorMessage}. Retrying in 30 seconds...`);
+                logger.error(`Catastrophic authentication failure: ${errorMessage}. Retrying in 30 seconds...`);
                 await timersPromises.setTimeout(30000);
             }
         }
+    }
+    
+    /**
+     * Attempts the full authentication sequence. Tries the fast path (refresh from file)
+     * first, and falls back to the slow path (Puppeteer login) if the fast path fails.
+     * @throws Will throw if the fallback path also fails.
+     */
+    private async _attemptAuthentication() {
+        try {
+            await this._tryLoadAndRefreshFromFile();
+            logger.info("Session successfully established using token from file.");
+        } catch (error) {
+            logger.warn(`Could not refresh from file, falling back to Puppeteer. Reason: ${(error as Error).message}`);
+            await this._performFreshLogin();
+            logger.info("Session successfully established via fresh Puppeteer login.");
+        }
+    }
+    
+    /**
+     * Tries to load a token from session.json and refresh it.
+     * @throws Throws an error if loading or refreshing fails.
+     */
+    private async _tryLoadAndRefreshFromFile(): Promise<void> {
+        const loaded = await this.authContext.loadTokenFromFile();
+        if (!loaded) {
+            throw new Error("Session file not found or is invalid.");
+        }
+        
+        logger.info("Tango-RT loaded from file. Attempting to refresh session...");
+        await this._refreshSession();
+        await this._setTokenData();
     }
     
     public startBackgroundJobs() {
         this._refreshShortLivedTokens();
         this._manageTokenLifecycle();
     }
-    
-    private async _tryLoadAndRefreshFromFile(): Promise<boolean> {
-        const loaded = await this.authContext.loadTokenFromFile();
-        if (loaded) {
-            logger.info("Tango-RT loaded from file. Attempting to refresh session...");
-            try {
-                await this._refreshSession();
-                await this._setTokenData();
-                return true;
-            } catch (error) {
-                logger.warn(
-                    "Failed to refresh session using token from file. Falling back to full Puppeteer login.",
-                    { error: (error as Error).message }
-                );
-                return false;
-            }
-        }
-        return false;
-    }
 
     private async _performFreshLogin() {
+        logger.info("Performing full login via Puppeteer to get new tokens...");
         await this._extractInitialTokens();
         await this._setTokenData();
     }
@@ -119,7 +125,7 @@ export class TokenManager {
             await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
         }
     }
-
+    
     private async _manageTokenLifecycle() {
         while (true) {
             const refreshInterval = config.getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
