@@ -6,14 +6,9 @@ import * as path from 'path';
 
 import * as config from '../config.js';
 import logger from '../logger.js';
-import * as utils from '../utils.js';
-// import * as state from '../state.js'; // <-- REMOVED! The key to decoupling.
+import * as storage from '../storage.js'; // <-- NEW IMPORT
 import * as repackager from '../repackager.js';
 
-/**
- * Reads the live-status.json file to get the aliases of currently active downloads.
- * This is the sole communication point from the downloader to the repackager.
- */
 async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
     const statusFilePath = path.join(config.getConfig().storagePath, config.getConfig().fileNames.liveStatus);
     try {
@@ -27,26 +22,21 @@ async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
         if (error.code !== 'ENOENT') {
             logger.warn(`[Repackager] Could not read or parse live-status.json.`, { error });
         }
-        // If file doesn't exist or is invalid, assume no active downloads.
     }
     return new Set();
 }
 
-
-/**
- * Represents the contents of the storage directory, categorized for processing.
- */
 interface StorageContents {
     potentialFolders: fs.Dirent[];
-    mp4FileNames: Set<string>; // Basename without extension
-    tsFileNames: Set<string>; // Basename with extension
+    mp4FileNames: Set<string>;
+    tsFileNames: Set<string>;
 }
 
 async function getStorageContents(storagePath: string): Promise<StorageContents | null> {
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
         
-        const potentialFolders = entries.filter(e => e.isDirectory() && utils.parseDownloadFolderName(e.name));
+        const potentialFolders = entries.filter(e => e.isDirectory() && storage.parseDownloadFolderName(e.name)); // Use storage module
 
         const mp4FileNames = new Set(
             entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
@@ -75,7 +65,7 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
         const baseName = path.parse(tsFile).name;
         if (contents.mp4FileNames.has(baseName)) {
             logger.info(`[Repackager Cleanup] Moving stale .ts file to trash: ${tsFile}`);
-            await utils.moveToTrash(path.join(storagePath, tsFile));
+            await storage.moveToTrash(path.join(storagePath, tsFile)); // Use storage module
         }
     }
 
@@ -83,7 +73,7 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
         for (const folder of contents.potentialFolders) {
             if (contents.mp4FileNames.has(folder.name)) {
                 logger.info(`[Repackager Cleanup] Moving stale segment folder to trash: ${folder.name}`);
-                await utils.moveToTrash(path.join(storagePath, folder.name));
+                await storage.moveToTrash(path.join(storagePath, folder.name)); // Use storage module
             }
         }
     }
@@ -98,8 +88,8 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
         if (dirEntries.length === 0) {
             logger.warn(`[Repackager] Found empty stale folder '${folderName}'. Moving to trash.`);
             if (cfg.repackager.deleteRawOnSuccess) {
-                await utils.moveToTrash(folderPath);
-                await utils.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
+                await storage.moveToTrash(folderPath); // Use storage module
+                await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`)); // Use storage module
             }
             return;
         }
@@ -116,8 +106,8 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
         await fsPromises.access(mp4Path);
         if (cfg.repackager.deleteRawOnSuccess) {
             logger.info(`[Repackager] Repackage successful. Moving raw assets to trash for '${folderName}'.`);
-            await utils.moveToTrash(folderPath);
-            await utils.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
+            await storage.moveToTrash(folderPath); // Use storage module
+            await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`)); // Use storage module
         }
     } catch {
         logger.warn(`[Repackager] Repackage process for '${folderName}' finished, but output MP4 not found. Raw files will be kept.`);
@@ -136,7 +126,6 @@ async function processCompletedDownloads() {
 
     await cleanupCompletedAssets(storageDir, contents);
 
-    // --> REFACTORED: Read from the file system, not in-memory state.
     const activeDownloadAliases = await getActiveDownloadAliasesFromFile();
     const staleTimeout = cfg.timeouts.staleStream * 2;
 
@@ -145,7 +134,7 @@ async function processCompletedDownloads() {
             continue;
         }
 
-        const parsedName = utils.parseDownloadFolderName(folder.name);
+        const parsedName = storage.parseDownloadFolderName(folder.name); // Use storage module
         if (!parsedName || activeDownloadAliases.has(parsedName.alias)) {
             logger.verbose(`[Repackager] Skipping folder for active or unparsable alias: ${folder.name}`);
             continue;

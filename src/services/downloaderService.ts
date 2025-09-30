@@ -6,17 +6,16 @@ import * as child_process from 'child_process';
 
 import * as config from '../config.js';
 import logger from '../logger.js';
-import * as utils from '../utils.js';
+import * as storage from '../storage.js'; // <-- NEW IMPORT
 import * as state from '../state.js';
 import * as requests from '../requests.js';
 import { AuthContext } from '../auth/authContext.js';
 
-// --- Local Helper for State Reporting ---
+// --- Local Helpers for Downloader ---
+function getResponseBodyLines(responseBody: string): string[] {
+    return responseBody.split("\n").filter(line => line.trim() !== '');
+}
 
-/**
- * Writes the current download state to the live-status.json file.
- * This is the primary way this service communicates its state to the outside world.
- */
 async function updateStatusFile(authContext: AuthContext) {
     try {
         const cfg = config.getConfig();
@@ -43,6 +42,40 @@ async function updateStatusFile(authContext: AuthContext) {
     }
 }
 
+async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
+    try {
+        const masterListBody = await requests.getMasterList(masterPlaylistUrl, authContext);
+        if (!masterListBody) {
+            logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
+            return null;
+        }
+
+        const masterLines = getResponseBodyLines(masterListBody);
+        let relativeLiveUrl;
+        for (let i = 0; i < masterLines.length; i++) {
+            if (masterLines[i].includes("RESOLUTION=1280x720")) {
+                relativeLiveUrl = masterLines[i + 1];
+                break;
+            }
+        }
+
+        if (!relativeLiveUrl) {
+            logger.warn(`Could not find HD stream in master playlist: ${masterPlaylistUrl}`);
+            return null;
+        }
+
+        const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
+        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
+        if (livePlaylistUrl.endsWith("&")) {
+            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
+        }
+        return livePlaylistUrl;
+    } catch (error) {
+        logger.error(`Error resolving live URL from master: ${masterPlaylistUrl}`, { error });
+        return null;
+    }
+}
+
 
 // --- Core Service Logic ---
 
@@ -61,14 +94,14 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     try {
         alias = await requests.getStreamerAlias(streamerId, authContext);
         downloadState.alias = alias;
-        await updateStatusFile(authContext); // Use local helper
+        await updateStatusFile(authContext);
 
         let liveUrl: string | null = null;
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 5000;
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const resolvedUrl = await utils.getLiveUrlFromMaster(masterListUrl, authContext);
+            const resolvedUrl = await getLiveUrlFromMaster(masterListUrl, authContext); // Use local helper
             if (resolvedUrl) {
                 liveUrl = resolvedUrl;
                 break;
@@ -82,14 +115,14 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         }
 
         downloadState.liveUrl = liveUrl;
-        await updateStatusFile(authContext); // Use local helper
+        await updateStatusFile(authContext);
 
         const startDate = new Date();
-        const paths = utils.createDownloadPaths(alias, startDate);
+        const paths = storage.createDownloadPaths(alias, startDate); // Use storage module
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${utils.getFormattedDate(startDate)} ${alias} started downloading.`);
+        logger.info(`${storage.getFormattedDate(startDate)} ${alias} started downloading.`); // Use storage module
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
@@ -119,7 +152,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
             if (liveResponse.success && liveResponse.data) {
                 lastOnline = Date.now();
                 first404Timestamp = null;
-                const liveLines = utils.getResponseBodyLines(liveResponse.data);
+                const liveLines = getResponseBodyLines(liveResponse.data);
                 const cinemaApiUrl = masterListUrl.split("/v2/")[0];
 
                 const segmentsToDownload: string[] = [];
@@ -191,16 +224,16 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
 
         if (totalSegmentsDownloaded === 0) {
             logger.warn(`No segments were downloaded for ${alias}, moving empty directory and file to trash.`);
-            if (tsFilePath) await utils.moveToTrash(tsFilePath);
-            if (segmentsDirPath) await utils.moveToTrash(segmentsDirPath);
+            if (tsFilePath) await storage.moveToTrash(tsFilePath); // Use storage module
+            if (segmentsDirPath) await storage.moveToTrash(segmentsDirPath); // Use storage module
         }
 
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
-        logger.info(`${utils.getFormattedDate()} Finished download process for: ${alias}`);
+        logger.info(`${storage.getFormattedDate()} Finished download process for: ${alias}`); // Use storage module
         state.getActiveDownloads().delete(masterListUrl);
-        await updateStatusFile(authContext); // Use local helper
+        await updateStatusFile(authContext);
     }
 }
 
@@ -235,7 +268,7 @@ export async function startDownloaderService(authContext: AuthContext) {
                                 liveUrl: null
                             });
                             logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                            await updateStatusFile(authContext); // Use local helper
+                            await updateStatusFile(authContext);
                             
                             initiateAndDownloadStream(streamerId, masterPlaylistUrl, authContext);
                         }

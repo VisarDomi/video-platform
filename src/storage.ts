@@ -1,54 +1,12 @@
-// src/utils.ts
-import * as path from 'path';
-import * as url from 'url';
-import * as fsPromises from 'fs/promises';
+// src/storage.ts
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
+import * as path from 'path';
 
 import * as config from './config.js';
 import logger from './logger.js';
-// import * as state from './state.js'; // <-- REMOVED! No longer needed here.
-import * as requests from './requests.js';
-import { AuthContext } from './auth/authContext.js';
 
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const FOLDER_NAME_REGEX = /^(\d{4}-\d{2}-\d{2} \d{6}) (.+)$/;
-
-// The updateStatusFile function has been moved to downloaderService.ts to break circular dependencies.
-
-export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
-    try {
-        const masterListBody = await requests.getMasterList(masterPlaylistUrl, authContext);
-        if (!masterListBody) {
-            logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
-            return null;
-        }
-
-        const masterLines = getResponseBodyLines(masterListBody);
-        let relativeLiveUrl;
-        for (let i = 0; i < masterLines.length; i++) {
-            if (masterLines[i].includes("RESOLUTION=1280x720")) {
-                relativeLiveUrl = masterLines[i + 1];
-                break;
-            }
-        }
-
-        if (!relativeLiveUrl) {
-            logger.warn(`Could not find HD stream in master playlist: ${masterPlaylistUrl}`);
-            return null;
-        }
-
-        const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
-        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
-        if (livePlaylistUrl.endsWith("&")) {
-            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
-        }
-        return livePlaylistUrl;
-    } catch (error) {
-        logger.error(`Error resolving live URL from master: ${masterPlaylistUrl}`, { error });
-        return null;
-    }
-}
 
 export function getFormattedDate(date: Date = new Date()): string {
     const year = date.getFullYear();
@@ -98,10 +56,6 @@ export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
     }
 
     return { tsFilePath, segmentsDirPath };
-}
-
-export function getResponseBodyLines(responseBody: string) {
-    return responseBody.split("\n");
 }
 
 export async function moveToTrash(sourcePath: string) {
