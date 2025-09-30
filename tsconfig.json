@@ -6,7 +6,8 @@
     "moduleResolution": "node",
     "esModuleInterop": true,
     "strict": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "isolatedModules": true // <-- ADD THIS LINE
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "**/*.spec.ts"]
