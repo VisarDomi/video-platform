@@ -2,6 +2,7 @@
 import puppeteer, { Browser, HTTPResponse } from "puppeteer";
 import * as timersPromises from "timers/promises";
 import logger from "../logger.js";
+import { TANGO_URLS, COOKIE_NAMES } from './authConstants.js';
 
 interface InitialTokens {
     tangoRT: string;
@@ -10,8 +11,6 @@ interface InitialTokens {
 
 /**
  * Launches Puppeteer to perform a full browser login and intercept the initial tokens.
- * This is a self-contained, single-purpose function.
- * @returns A promise that resolves with the extracted Tango-RT and Tango-ST tokens.
  */
 export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
     const email = process.env.GOOGLE_EMAIL;
@@ -54,11 +53,11 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
             throw new Error("Browser could not be initialized after all attempts. Please check the logs.");
         }
         const tango = await browser.newPage();
-        await tango.goto("https://tango.me", { waitUntil: "networkidle2" });
+        await tango.goto(TANGO_URLS.HOME, { waitUntil: "networkidle2" });
         
         const tokens = await new Promise<InitialTokens>((resolve, reject) => {
             tango.on("response", async (response: HTTPResponse) => {
-                if (response.url() === "https://gateway.tango.me/google-login/auth-code/v1/login") {
+                if (response.url() === TANGO_URLS.GOOGLE_LOGIN) {
                     let foundRT: string | null = null;
                     let foundST: string | null = null;
                     const headers = response.headers();
@@ -66,11 +65,11 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
                     if (setCookieHeader) {
                         const cookies = setCookieHeader.split("\n");
                         for (const cookie of cookies) {
-                            if (cookie.trim().startsWith("Tango-RT=")) {
-                                foundRT = cookie.split(";")[0].substring("Tango-RT=".length);
+                            if (cookie.trim().startsWith(COOKIE_NAMES.TANGO_RT_PREFIX)) {
+                                foundRT = cookie.split(";")[0].substring(COOKIE_NAMES.TANGO_RT_PREFIX.length);
                             }
-                            if (cookie.trim().startsWith("Tango-ST=")) {
-                                foundST = cookie.split(";")[0].substring("Tango-ST=".length);
+                            if (cookie.trim().startsWith(COOKIE_NAMES.TANGO_ST_PREFIX)) {
+                                foundST = cookie.split(";")[0].substring(COOKIE_NAMES.TANGO_ST_PREFIX.length);
                             }
                         }
                     }
