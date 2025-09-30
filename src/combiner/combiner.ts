@@ -1,6 +1,6 @@
 // src/combiner/combiner.ts
-import * as child_process from "child_process";
-import * as fs from "fs/promises";
+import * as childProcess from "child_process";
+import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import pLimit from "p-limit";
@@ -20,7 +20,7 @@ interface VideoInfo {
 
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr:string }> => {
     return new Promise((resolve, reject) => {
-        const process = child_process.spawn(command, args);
+        const process = childProcess.spawn(command, args);
         let stdout = '';
         let stderr = '';
         process.stdout.on('data', (data) => (stdout += data.toString()));
@@ -74,12 +74,12 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
     const totalDuration = Math.round(videoBatch.reduce((sum, v) => sum + v.duration, 0) / 60);
     const outputFileName = `${firstVideo.timestamp} ${firstVideo.username} ${totalDuration}min.mp4`;
     const outputFile = path.join(outputDir, outputFileName);
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-combiner-'));
+    const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'tango-combiner-'));
     const fileListPath = path.join(tempDir, 'filelist.txt');
 
     try {
         const fileListContent = videoBatch.map(v => `file '${v.filePath.replace(/'/g, "'\\''")}'`).join('\n');
-        await fs.writeFile(fileListPath, fileListContent);
+        await fsPromises.writeFile(fileListPath, fileListContent);
         logger.info(`[Combiner] Stitching ${videoBatch.length} videos into ${outputFileName}...`);
 
         await runCommand('ffmpeg', [
@@ -91,7 +91,7 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
         logger.info(`[Combiner] Successfully created stitched video: ${outputFile}`);
         return outputFile;
     } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fsPromises.rm(tempDir, { recursive: true, force: true });
     }
 }
 

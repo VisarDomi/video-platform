@@ -1,6 +1,6 @@
 // src/assembler/assembler.ts
-import * as child_process from 'child_process';
-import * as fs from 'fs/promises';
+import * as childProcess from 'child_process';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import pLimit from 'p-limit';
@@ -13,7 +13,7 @@ import logger from '../logger.js';
 
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
-        const process = child_process.spawn(command, args);
+        const process = childProcess.spawn(command, args);
         let stdout = '';
         let stderr = '';
 
@@ -124,11 +124,11 @@ async function validateSegments(tsFiles: string[], targetResolution: string, max
 // --- File Concatenation ---
 
 async function concatenateSegments(goodFiles: string[], outputFile: string, logPrefix: string): Promise<void> {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-assembler-'));
+    const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'tango-assembler-'));
     try {
         const fileListPath = path.join(tempDir, 'file_list.txt');
         const fileListContent = goodFiles.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
-        await fs.writeFile(fileListPath, fileListContent);
+        await fsPromises.writeFile(fileListPath, fileListContent);
 
         logger.info(`[Assembler] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
 
@@ -186,7 +186,7 @@ async function concatenateSegments(goodFiles: string[], outputFile: string, logP
         logger.info(`[Assembler] Success! MP4 file created for ${path.basename(outputFile)}`);
 
     } finally {
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fsPromises.rm(tempDir, { recursive: true, force: true });
     }
 }
 
@@ -202,12 +202,12 @@ export const assembleSegmentsIntoMp4 = async (inputDir: string): Promise<void> =
     logger.info(`[Assembler] Starting process for: ${inputDirName}`);
 
     try {
-        await fs.access(outputFile);
+        await fsPromises.access(outputFile);
         logger.info(`[Assembler] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
         return;
     } catch (e) { /* File doesn't exist, proceed. */ }
 
-    const allDirEntries = await fs.readdir(inputDir).catch(() => []);
+    const allDirEntries = await fsPromises.readdir(inputDir).catch(() => []);
     const tsFiles = allDirEntries
         .filter(f => f.endsWith('.ts'))
         .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))

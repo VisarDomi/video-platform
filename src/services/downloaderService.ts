@@ -2,7 +2,7 @@
 import * as fsPromises from 'fs/promises';
 import * as timersPromises from 'timers/promises';
 import * as path from 'path';
-import * as child_process from 'child_process';
+import * as childProcess from 'child_process';
 
 import * as config from '../config.js';
 import logger from '../logger.js';
@@ -127,7 +127,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
 
-        const ffmpegProcess = child_process.spawn('ffmpeg', [
+        const ffmpegProcess = childProcess.spawn('ffmpeg', [
             '-hide_banner', '-loglevel', 'error', '-stats',
             '-fflags', '+genpts', '-i', 'pipe:0', '-c', 'copy',
             '-f', 'mpegts', '-y', tsFilePath

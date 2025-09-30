@@ -1,6 +1,7 @@
 // tests/lifecycle.e2e.ts
 import { spawn, ChildProcess } from 'child_process';
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as url from 'url';
@@ -28,17 +29,17 @@ async function waitForDownloadAssets(storagePath: string, targetSegmentCount: nu
     let elapsedTime = 0;
 
     while (elapsedTime < maxWaitTime) {
-        const entries = await fs.readdir(storagePath, { withFileTypes: true });
+        const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
         const downloadFolders = entries.filter(e => e.isDirectory() && /^\d{4}-\d{2}-\d{2} \d{6} .+/ .test(e.name));
 
         for (const folder of downloadFolders) {
             const folderPath = path.join(storagePath, folder.name);
             const growingTsPath = path.join(storagePath, `${folder.name}.ts`);
             
-            const growingTsExists = await fs.access(growingTsPath).then(() => true).catch(() => false);
+            const growingTsExists = await fsPromises.access(growingTsPath).then(() => true).catch(() => false);
             
             if (growingTsExists) {
-                const segments = await fs.readdir(folderPath);
+                const segments = await fsPromises.readdir(folderPath);
                 const tsFiles = segments.filter(f => f.endsWith('.ts'));
 
                 if (tsFiles.length >= targetSegmentCount) {
@@ -64,9 +65,9 @@ async function waitForRepackagedFile(dir: string, mp4Name: string, rawFolderName
     const mp4Path = path.join(dir, mp4Name);
 
     while (elapsedTime < maxWaitTime) {
-        const mp4Exists = await fs.access(mp4Path).then(() => true).catch(() => false);
-        const rawFolderExists = await fs.access(path.join(dir, rawFolderName)).then(() => true).catch(() => false);
-        const rawTsExists = await fs.access(path.join(dir, rawTsName)).then(() => true).catch(() => false);
+        const mp4Exists = await fsPromises.access(mp4Path).then(() => true).catch(() => false);
+        const rawFolderExists = await fsPromises.access(path.join(dir, rawFolderName)).then(() => true).catch(() => false);
+        const rawTsExists = await fsPromises.access(path.join(dir, rawTsName)).then(() => true).catch(() => false);
 
         if (mp4Exists && !rawFolderExists && !rawTsExists) {
             console.log('✅ Repackage and cleanup successful: MP4 exists and raw files are deleted.');
@@ -84,18 +85,24 @@ async function waitForCombinedFile(storageDir: string, alias: string, expectedSo
     const maxWaitTime = 45000; // Increased timeout for more files
     let elapsedTime = 0;
 
+    const editedDir = path.join(storageDir, 'edited');
+
     while (elapsedTime < maxWaitTime) {
-        const entries = await fs.readdir(storageDir, { withFileTypes: true });
+        let entries: fs.Dirent[] = [];
+        try {
+            entries = await fsPromises.readdir(editedDir, { withFileTypes: true });
+        } catch (e) { /* edited dir might not exist yet, continue polling */ }
+        
         const combinedFile = entries.find(e => e.isFile() && e.name.includes(alias) && e.name.includes('min.mp4'));
         
         if (combinedFile) {
-            const combinedFilePath = path.join(storageDir, combinedFile.name);
+            const combinedFilePath = path.join(editedDir, combinedFile.name);
             console.log(`✅ Found combined file: ${combinedFile.name}`);
 
             const trashDir = path.join(storageDir, 'trash');
             let sourcesInTrash = 0;
             try {
-                const trashEntries = await fs.readdir(trashDir);
+                const trashEntries = await fsPromises.readdir(trashDir);
                 sourcesInTrash = trashEntries.filter(f => f.includes(alias) && f.endsWith('.mp4')).length;
             } catch (e) { /* trash may not exist yet */ }
 
@@ -126,7 +133,7 @@ async function testDownloadInProgress(tempDir: string): Promise<string> {
             combiner: { enabled: false },
             fileNames: { session: path.join(rootDir, 'session.json') }
         };
-        await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig));
+        await fsPromises.writeFile(tempConfigPath, JSON.stringify(tempConfig));
 
         appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir, stdio: 'pipe' });
         appProcess.stdout?.on('data', data => process.stdout.write(data.toString()));
@@ -167,7 +174,7 @@ async function testRepackageAndCleanup(tempDir: string, staleFolderName: string)
             timeouts: { staleStream: 5000 },
             intervals: { repackageScanMinutes: 0.1 }
         };
-        await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
+        await fsPromises.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
 
         console.log(`Relaunching app. Expecting it to find and process stale folder: ${staleFolderName}`);
         appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir, stdio: 'pipe' });
@@ -193,9 +200,10 @@ async function testCombination(tempDir: string, sourceMp4Path: string) {
     console.log('\n--- Scenario 3: Verifying Combination and Cleanup (Robust Test) ---');
     let appProcess: ChildProcess | null = null;
     
-    const combinerTestDir = path.join(tempDir, 'combiner-test');
-    await fs.mkdir(combinerTestDir);
-    const tempConfigPath = path.join(combinerTestDir, 'config.json');
+    const baseTestDir = path.join(tempDir, 'combiner-test');
+    const editedDir = path.join(baseTestDir, 'edited');
+    await fsPromises.mkdir(editedDir, { recursive: true });
+    const tempConfigPath = path.join(baseTestDir, 'config.json');
     
     const sourceMp4BaseName = path.basename(sourceMp4Path);
     const nameParts = sourceMp4BaseName.match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)\.mp4$/);
@@ -205,7 +213,7 @@ async function testCombination(tempDir: string, sourceMp4Path: string) {
     
     try {
         // --- ARRANGE ---
-        console.log(`Isolating test in: ${combinerTestDir}`);
+        console.log(`Isolating test in: ${baseTestDir}, watching ${editedDir}`);
         const NUM_COPIES = 200; // Create a large number of files for a robust test.
         const sourceFilesToCreate: string[] = [];
 
@@ -223,13 +231,13 @@ async function testCombination(tempDir: string, sourceMp4Path: string) {
             const newDatePart = newDate.toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '');
             const newMp4Name = `${newDatePart} ${alias}.mp4`;
             sourceFilesToCreate.push(newMp4Name);
-            await fs.copyFile(sourceMp4Path, path.join(combinerTestDir, newMp4Name));
+            await fsPromises.copyFile(sourceMp4Path, path.join(editedDir, newMp4Name));
         }
-        console.log(`Created ${NUM_COPIES} source files for user '${alias}'.`);
+        console.log(`Created ${NUM_COPIES} source files for user '${alias}' in 'edited' folder.`);
         
         // --- ACT ---
         const tempConfig: Partial<any> = {
-            storagePath: combinerTestDir,
+            storagePath: baseTestDir,
             downloader: { enabled: false },
             repackager: { enabled: false },
             combiner: { 
@@ -239,19 +247,19 @@ async function testCombination(tempDir: string, sourceMp4Path: string) {
             },
             fileNames: { session: path.join(rootDir, 'session.json') }
         };
-        await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
+        await fsPromises.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
         
         console.log('Pausing briefly to ensure all files are written before starting app...');
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         console.log('Relaunching app with only combiner enabled...');
-        appProcess = spawn('node', [APP_ENTRY], { cwd: combinerTestDir, stdio: 'pipe' });
+        appProcess = spawn('node', [APP_ENTRY], { cwd: baseTestDir, stdio: 'pipe' });
         appProcess.stdout?.on('data', data => process.stdout.write(data.toString()));
         appProcess.stderr?.on('data', data => process.stderr.write(data.toString()));
 
         console.log('Waiting for combiner to complete its work...');
         // Expect at least 40 files to be combined to reach a 15-min threshold from ~20s videos.
-        await waitForCombinedFile(combinerTestDir, alias, 40);
+        await waitForCombinedFile(baseTestDir, alias, 40);
         
         // --- ASSERT ---
         console.log('✅ Assertion PASSED: Combined MP4 was created and sources were trashed.');
@@ -265,7 +273,7 @@ async function testCombination(tempDir: string, sourceMp4Path: string) {
 // --- Main Test Runner ---
 
 async function main() {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lifecycle-suite-'));
+    const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'lifecycle-suite-'));
     
     const timeout = setTimeout(() => {
         console.error(`\n--- E2E TEST SUITE TIMED OUT AFTER ${GLOBAL_TEST_TIMEOUT / 1000}s ---`);
@@ -274,13 +282,13 @@ async function main() {
 
     try {
         console.log(`--- Starting E2E Test Suite in ${tempDir} ---`);
-        await fs.rm(PROCESSED_FILE_TRACKER, { force: true });
+        await fsPromises.rm(PROCESSED_FILE_TRACKER, { force: true });
         
         // SCENARIO 1: Download
         const staleFolderName = await testDownloadInProgress(tempDir);
         
         console.log('Simulating clean restart by deleting live-status.json...');
-        await fs.rm(path.join(tempDir, 'live-status.json'), { force: true });
+        await fsPromises.rm(path.join(tempDir, 'live-status.json'), { force: true });
 
         // SCENARIO 2: Assemble
         const createdMp4Path = await testRepackageAndCleanup(tempDir, staleFolderName);
@@ -297,8 +305,8 @@ async function main() {
         process.exit(1);
     } finally {
         clearTimeout(timeout);
-        await fs.rm(PROCESSED_FILE_TRACKER, { force: true });
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fsPromises.rm(PROCESSED_FILE_TRACKER, { force: true });
+        await fsPromises.rm(tempDir, { recursive: true, force: true });
         console.log('Global temporary directory and state files cleaned up.');
     }
 }

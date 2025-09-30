@@ -1,5 +1,5 @@
 // tests/assembler.e2e.ts
-import * as fs from 'fs/promises';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import * as url from 'url';
@@ -30,7 +30,7 @@ class MemoryTransport extends TransportStream { // <-- EXTEND THE CORRECT CLASS
 
 async function runAssemblerTest() {
     console.log('\n--- Starting E2E Test: Assembler Logic ---');
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'repack-test-'));
+    const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'repack-test-'));
     const downloadFolderName = '2025-01-01 120000 test-streamer';
     const downloadFolderPath = path.join(tempDir, downloadFolderName);
     const memoryTransport = new MemoryTransport();
@@ -38,14 +38,14 @@ async function runAssemblerTest() {
     try {
         // --- 1. ARRANGE ---
         console.log(`Setting up test in temporary directory: ${tempDir}`);
-        await fs.mkdir(downloadFolderPath);
+        await fsPromises.mkdir(downloadFolderPath);
 
         console.log('Copying test fixtures...');
-        await fs.copyFile(path.join(fixturesDir, 'good_segment.ts'), path.join(downloadFolderPath, '1.ts'));
-        await fs.copyFile(path.join(fixturesDir, 'corrupted_segment.ts'), path.join(downloadFolderPath, '2.ts'));
-        await fs.copyFile(path.join(fixturesDir, 'bad_resolution.ts'), path.join(downloadFolderPath, '3.ts'));
-        await fs.writeFile(path.join(downloadFolderPath, '4.ts'), ''); // 0-byte file
-        await fs.copyFile(path.join(fixturesDir, 'good_segment_2.ts'), path.join(downloadFolderPath, '5.ts'));
+        await fsPromises.copyFile(path.join(fixturesDir, 'good_segment.ts'), path.join(downloadFolderPath, '1.ts'));
+        await fsPromises.copyFile(path.join(fixturesDir, 'corrupted_segment.ts'), path.join(downloadFolderPath, '2.ts'));
+        await fsPromises.copyFile(path.join(fixturesDir, 'bad_resolution.ts'), path.join(downloadFolderPath, '3.ts'));
+        await fsPromises.writeFile(path.join(downloadFolderPath, '4.ts'), ''); // 0-byte file
+        await fsPromises.copyFile(path.join(fixturesDir, 'good_segment_2.ts'), path.join(downloadFolderPath, '5.ts'));
         
         logger.add(memoryTransport);
         console.log('Test fixtures prepared. Running assembler...');
@@ -76,7 +76,7 @@ async function runAssemblerTest() {
         
         // Assertion 5: Final MP4 file was created
         const finalMp4Path = path.join(tempDir, `${downloadFolderName}.mp4`);
-        await fs.access(finalMp4Path);
+        await fsPromises.access(finalMp4Path);
         console.log('✅ Assertion PASSED: Final MP4 file exists.');
 
         console.log('\n--- E2E Test PASSED: Assembler Logic ---');
@@ -88,7 +88,7 @@ async function runAssemblerTest() {
     } finally {
         // --- 4. TEARDOWN ---
         logger.remove(memoryTransport);
-        await fs.rm(tempDir, { recursive: true, force: true });
+        await fsPromises.rm(tempDir, { recursive: true, force: true });
         console.log('Temporary test directory cleaned up.');
 
         // --- 5. EXIT ---

@@ -1,5 +1,5 @@
 // src/fileTracker.ts
-import * as fs from "fs/promises";
+import * as fsPromises from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
@@ -14,7 +14,7 @@ const PROCESSED_FILE_PATH = path.join(ROOT_DIR, "processed-by-combiner.txt");
  */
 export async function loadProcessedFiles(): Promise<Set<string>> {
   try {
-    const content = await fs.readFile(PROCESSED_FILE_PATH, "utf-8");
+    const content = await fsPromises.readFile(PROCESSED_FILE_PATH, "utf-8");
     const titles = content.split("\n").filter(line => line.trim() !== "");
     return new Set(titles);
   } catch (error: any) {
@@ -31,13 +31,13 @@ export async function loadProcessedFiles(): Promise<Set<string>> {
 export async function saveProcessedFiles(fileNames: string[]): Promise<void> {
   if (fileNames.length === 0) return;
   const content = fileNames.join("\n") + "\n";
-  await fs.appendFile(PROCESSED_FILE_PATH, content);
+  await fsPromises.appendFile(PROCESSED_FILE_PATH, content);
 }
 
 /**
  * Reads all .mp4 files from the specified directory.
  */
 export async function getLocalVideoFiles(directory: string): Promise<string[]> {
-    const allFiles = await fs.readdir(directory);
+    const allFiles = await fsPromises.readdir(directory);
     return allFiles.filter(file => file.toLowerCase().endsWith('.mp4'));
 }

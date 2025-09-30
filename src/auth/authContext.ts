@@ -1,5 +1,5 @@
 // src/auth/authContext.ts
-import * as fs from 'fs/promises';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as url from 'url';
 import logger from '../logger.js';
@@ -82,7 +82,7 @@ export class AuthContext {
     public async loadTokenFromFile(): Promise<boolean> {
         try {
             const filePath = this._getSessionFilePath();
-            const data = await fs.readFile(filePath, 'utf-8');
+            const data = await fsPromises.readFile(filePath, 'utf-8');
             const session = JSON.parse(data);
             if (session.tangoRT) {
                 this.tangoRT = session.tangoRT;
@@ -100,7 +100,7 @@ export class AuthContext {
         try {
             if (this.tangoRT) {
                 const filePath = this._getSessionFilePath();
-                await fs.writeFile(filePath, JSON.stringify({ tangoRT: this.tangoRT }, null, 2));
+                await fsPromises.writeFile(filePath, JSON.stringify({ tangoRT: this.tangoRT }, null, 2));
                 logger.info(`Session token (Tango-RT) saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
