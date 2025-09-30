@@ -22,7 +22,7 @@ interface IConfig {
     shortTokenRefresh: number;
     longTokenRefreshMinutes: number;
     downloadBuffer: number;
-    repackageScanMinutes: number; // Renamed from orphanScanMinutes for clarity
+    repackageScanMinutes: number;
   };
   timeouts: {
     streamEnd: number;
@@ -33,8 +33,6 @@ interface IConfig {
     enabled: boolean;
     enforceResolution: string | null;
     maxWorkers: number;
-    repairPreset: string;
-    repairCrf: string;
     deleteRawOnSuccess: boolean;
   };
 }
@@ -53,7 +51,7 @@ const defaultConfig: IConfig = {
     shortTokenRefresh: 5000,
     longTokenRefreshMinutes: 30,
     downloadBuffer: 1000,
-    repackageScanMinutes: 5, // Renamed from orphanScanMinutes
+    repackageScanMinutes: 5,
   },
   timeouts: {
     streamEnd: 10000,
@@ -63,9 +61,7 @@ const defaultConfig: IConfig = {
   repackager: {
     enabled: true,
     enforceResolution: "720x1280",
-    maxWorkers: Math.floor(os.cpus().length * 0.5) || 4,
-    repairPreset: "veryfast",
-    repairCrf: "18",
+    maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4, // Use 75% of cores, capped at 8.
     deleteRawOnSuccess: true
   }
 };

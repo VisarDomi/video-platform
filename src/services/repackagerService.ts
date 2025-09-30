@@ -25,9 +25,8 @@ interface StorageContents {
 async function getStorageContents(storagePath: string): Promise<StorageContents | null> {
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
-
-        const downloadFolderPattern = /^\d{4}-\d{2}-\d{2} \d{6} .+/;
-        const potentialFolders = entries.filter(e => e.isDirectory() && downloadFolderPattern.test(e.name));
+        
+        const potentialFolders = entries.filter(e => e.isDirectory() && utils.parseDownloadFolderName(e.name));
 
         const mp4FileNames = new Set(
             entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
@@ -139,11 +138,9 @@ async function processCompletedDownloads() {
             continue;
         }
 
-        // Extract alias from folder name like "2024-01-01 123456 alias name"
-        // The date format "YYYY-MM-DD HHMMSS " is 18 characters long.
-        const folderAlias = folder.name.substring(18);
-        if (activeDownloadAliases.has(folderAlias)) {
-            logger.verbose(`[Repackager] Skipping folder for active alias: ${folder.name}`);
+        const parsedName = utils.parseDownloadFolderName(folder.name);
+        if (!parsedName || activeDownloadAliases.has(parsedName.alias)) {
+            logger.verbose(`[Repackager] Skipping folder for active or unparsable alias: ${folder.name}`);
             continue;
         }
 

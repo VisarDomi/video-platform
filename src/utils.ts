@@ -13,6 +13,7 @@ import { AuthContext } from './auth/authContext.js';
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.liveStatus);
+const FOLDER_NAME_REGEX = /^(\d{4}-\d{2}-\d{2} \d{6}) (.+)$/;
 
 export async function updateStatusFile(authContext: AuthContext) {
     try {
@@ -71,24 +72,45 @@ export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContex
     }
 }
 
-export function getFormattedDate() {
-    const now = new Date(Date.now());
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    const seconds = String(now.getSeconds()).padStart(2, "0");
+export function getFormattedDate(date: Date = new Date()): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
     return `${year}-${month}-${day} ${hours}${minutes}${seconds}`;
 }
 
-export interface RawPaths {
+/**
+ * Generates a standardized folder/file name for a download.
+ */
+export function generateDownloadBaseName(alias: string, date: Date): string {
+    const formattedDate = getFormattedDate(date);
+    return `${formattedDate} ${alias}`;
+}
+
+/**
+ * Parses a download folder name into its constituent parts.
+ */
+export function parseDownloadFolderName(folderName: string): { alias: string; dateString: string } | null {
+    const match = folderName.match(FOLDER_NAME_REGEX);
+    if (!match) {
+        return null;
+    }
+    return {
+        dateString: match[1],
+        alias: match[2],
+    };
+}
+
+export interface DownloadPaths {
     tsFilePath: string;
     segmentsDirPath: string;
 }
 
-export function createPaths(streamer: string, formattedDate: string): RawPaths {
-    const baseFilename = `${formattedDate} ${streamer}`;
+export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
+    const baseFilename = generateDownloadBaseName(alias, date);
     const storageLocation = config.getConfig().storagePath;
 
     if (!fs.existsSync(storageLocation)) {

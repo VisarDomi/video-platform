@@ -49,12 +49,12 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         downloadState.liveUrl = liveUrl;
         utils.updateStatusFile(authContext);
 
-        const formattedDate = utils.getFormattedDate();
-        const paths = utils.createPaths(alias, formattedDate);
+        const startDate = new Date();
+        const paths = utils.createDownloadPaths(alias, startDate);
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${formattedDate} ${alias} started downloading.`);
+        logger.info(`${utils.getFormattedDate(startDate)} ${alias} started downloading.`);
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);

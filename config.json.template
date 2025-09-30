@@ -22,8 +22,6 @@
         "enabled": true,
         "enforceResolution": "720x1280",
         "maxWorkers": 8,
-        "repairPreset": "veryfast",
-        "repairCrf": "18",
         "deleteRawOnSuccess": true
     }
 }
