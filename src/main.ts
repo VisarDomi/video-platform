@@ -1,4 +1,4 @@
-// src/tango.ts
+// src/main.ts
 import 'dotenv/config';
 import * as fsPromises from 'fs/promises';
 import * as timersPromises from 'timers/promises';
@@ -12,15 +12,16 @@ import * as state from './state.js';
 import * as requests from './requests.js';
 import * as tokenManager from './tokenManager.js';
 import * as repackager from './repackager.js';
+import { AuthContext } from './authContext.js';
 
 
-async function pollFollowingStreams() {
+async function pollFollowingStreams(authContext: AuthContext) {
     logger.info('Starting stream watcher...');
     let lastKnownTotal = -1;
 
     while (true) {
         try {
-            const streamIdsResponseBody = await requests.getFollowingResponseBody();
+            const streamIdsResponseBody = await requests.getFollowingResponseBody(authContext);
 
             const activeDownloads = state.getActiveDownloads();
             const currentTotal = activeDownloads.size;
@@ -45,9 +46,9 @@ async function pollFollowingStreams() {
                                 liveUrl: null
                             });
                             logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                            utils.updateStatusFile();
+                            utils.updateStatusFile(authContext);
                             
-                            initiateAndDownloadStream(streamerId, masterPlaylistUrl);
+                            initiateAndDownloadStream(streamerId, masterPlaylistUrl, authContext);
                         }
                     }
                 }
@@ -61,7 +62,7 @@ async function pollFollowingStreams() {
     }
 }
 
-async function initiateAndDownloadStream(streamerId: string, masterListUrl: string) {
+async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, authContext: AuthContext) {
     let alias = streamerId;
     let tsFilePath: string | null = null;
     let segmentsDirPath: string | null = null;
@@ -74,16 +75,16 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     }
 
     try {
-        alias = await requests.getStreamerAlias(streamerId);
+        alias = await requests.getStreamerAlias(streamerId, authContext);
         downloadState.alias = alias;
-        utils.updateStatusFile();
+        utils.updateStatusFile(authContext);
 
         let liveUrl: string | null = null;
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 5000;
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const resolvedUrl = await utils.getLiveUrlFromMaster(masterListUrl);
+            const resolvedUrl = await utils.getLiveUrlFromMaster(masterListUrl, authContext);
             if (resolvedUrl) {
                 liveUrl = resolvedUrl;
                 break;
@@ -97,7 +98,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         }
 
         downloadState.liveUrl = liveUrl;
-        utils.updateStatusFile();
+        utils.updateStatusFile(authContext);
 
         const formattedDate = utils.getFormattedDate();
         const paths = utils.createPaths(alias, formattedDate);
@@ -130,7 +131,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         let lastSegmentDownloadedTimestamp = Date.now();
 
         while (true) {
-            const liveResponse = await requests.getLiveList(liveUrl);
+            const liveResponse = await requests.getLiveList(liveUrl, authContext);
             if (liveResponse.success && liveResponse.data) {
                 lastOnline = Date.now();
                 first404Timestamp = null;
@@ -215,7 +216,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     } finally {
         logger.info(`${utils.getFormattedDate()} Finished download process for: ${alias}`);
         state.getActiveDownloads().delete(masterListUrl);
-        utils.updateStatusFile();
+        utils.updateStatusFile(authContext);
     }
 }
 
@@ -254,7 +255,6 @@ async function processCompletedDownloads() {
         }
         
         for (const folder of potentialFolders) {
-            // Skips the 'trash' directory itself
             if (folder.name === 'trash') continue;
             if (folder.name === 'edit') continue;
 
@@ -281,7 +281,6 @@ async function processCompletedDownloads() {
             const isStale = (Date.now() - stats.mtime.getTime()) > staleTimeout;
             
             if (isStale) {
-                // Pre-check for empty folder
                 try {
                     const dirEntries = await fsPromises.readdir(fullFolderPath);
                     if (dirEntries.length === 0) {
@@ -291,23 +290,18 @@ async function processCompletedDownloads() {
                             const bigTsFilePath = path.join(storageDir, `${folder.name}.ts`);
                             await utils.moveToTrash(bigTsFilePath);
                         }
-                        continue; // Move to the next folder
+                        continue;
                     }
                 } catch (readError) {
                     logger.error(`[Repackager] Could not read contents of folder '${folder.name}'. Skipping.`, { readError });
-                    continue; // Move to the next folder if it's unreadable
+                    continue;
                 }
 
                 logger.info(`[Repackager] Found stale, completed folder '${folder.name}'. Starting processing.`);
-                // This function now just creates the MP4.
                 await repackager.repackageFolder(fullFolderPath);
 
-                // The cleanup logic is now here, where it belongs.
                 if (cfg.repackager.deleteRawOnSuccess) {
-                    // 1. Move the folder of original segments to trash.
                     await utils.moveToTrash(fullFolderPath);
-
-                    // 2. Move the corresponding large .ts file to trash.
                     const bigTsFilePath = path.join(storageDir, `${folder.name}.ts`);
                     await utils.moveToTrash(bigTsFilePath);
                 }
@@ -356,15 +350,15 @@ async function main() {
     logger.info("Starting initial authentication...");
     const manager = new tokenManager.TokenManager();
     await manager.initialAuth();
+    const authContext = manager.getAuthContext();
     logger.info("Initial authentication successful.");
     
+    // Pass the auth context to the main loops
+    pollFollowingStreams(authContext);
     manageRepackaging();
+    
     manager.startBackgroundJobs();
-    logger.info("Background processes started (Repackager, Token Refreshes).");
-
-    pollFollowingStreams();
-
-    logger.info("Downloader service is now running and polling for streams.");
+    logger.info("Background processes started (Token Refreshes).");
 }
 
 main();

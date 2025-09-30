@@ -12,7 +12,10 @@ const getSessionFilePath = () => path.resolve(process.cwd(), config.getConfig().
  */
 export class AuthContext {
     private tangoRT: string | null = null;
-    private tangoST: string | null = null; // <-- NEW
+    private tangoST: string | null = null;
+    private tt: string | null = null;
+    private ttu: string | null = null;
+    private tte: string | null = null;
 
     public getTangoRT(): string | null {
         return this.tangoRT;
@@ -22,7 +25,6 @@ export class AuthContext {
         this.tangoRT = rt;
     }
 
-    // --- NEW GETTER/SETTER ---
     public getTangoST(): string | null {
         return this.tangoST;
     }
@@ -30,7 +32,30 @@ export class AuthContext {
     public setTangoST(st: string): void {
         this.tangoST = st;
     }
-    // --- END NEW ---
+
+    public getTt(): string | null {
+        return this.tt;
+    }
+
+    public setTt(tt: string): void {
+        this.tt = tt;
+    }
+    
+    public getTtu(): string | null {
+        return this.ttu;
+    }
+
+    public setTtu(ttu: string): void {
+        this.ttu = ttu;
+    }
+    
+    public getTte(): string | null {
+        return this.tte;
+    }
+
+    public setTte(tte: string): void {
+        this.tte = tte;
+    }
 
     public async loadTokenFromFile(): Promise<boolean> {
         try {

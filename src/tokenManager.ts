@@ -3,8 +3,6 @@ import * as timersPromises from "timers/promises";
 import puppeteer, { Browser, Page, Target, HTTPResponse } from "puppeteer";
 import * as config from "./config.js";
 import logger from "./logger.js";
-import * as utils from "./utils.js";
-import * as state from "./state.js";
 import * as requests from "./requests.js";
 import { AuthContext } from "./authContext.js";
 
@@ -13,6 +11,10 @@ export class TokenManager {
 
     constructor() {
         this.authContext = new AuthContext();
+    }
+    
+    public getAuthContext(): AuthContext {
+        return this.authContext;
     }
 
     public async initialAuth() {
@@ -113,8 +115,7 @@ export class TokenManager {
                                 }
                                 if (cookie.trim().startsWith("Tango-ST=")) {
                                     const tangoST = cookie.split(";")[0].substring("Tango-ST=".length);
-                                    this.authContext.setTangoST(tangoST); // Set on context
-                                    state.setTangoST(tangoST);           // Keep sync
+                                    this.authContext.setTangoST(tangoST);
                                     stFound = true;
                                 }
                             }
@@ -160,8 +161,7 @@ export class TokenManager {
             const trimmedCookie = cookieString.trim();
             if (trimmedCookie.startsWith("Tango-ST=")) {
                 const newTangoST = trimmedCookie.split(";")[0].substring("Tango-ST=".length);
-                this.authContext.setTangoST(newTangoST); // Set on context
-                state.setTangoST(newTangoST);           // Keep sync
+                this.authContext.setTangoST(newTangoST);
                 newStFound = true;
             } else if (trimmedCookie.startsWith("Tango-RT=")) {
                 const newTangoRT = trimmedCookie.split(";")[0].substring("Tango-RT=".length);
@@ -181,7 +181,7 @@ export class TokenManager {
     }
 
     private async setTokenData() {
-        const tokenDataResponse = await requests.getTokenDataResponse(this.authContext); // Pass context
+        const tokenDataResponse = await requests.getTokenDataResponse(this.authContext);
         if (!tokenDataResponse) {
             throw new Error(`Failed to fetch token data. The request function has logged the details.`);
         }
@@ -195,13 +195,10 @@ export class TokenManager {
                 if (trimmedCookie.startsWith("tte=")) tte = trimmedCookie.split(";")[0];
             }
             if (tt && ttu && tte) {
-                const ttValue = tt.split("=")[1];
-                state.setTt(ttValue);
-                const ttuValue = ttu.split("=")[1];
-                state.setTtu(ttuValue);
-                const tteValue = tte.split("=")[1];
-                state.setTte(tteValue);
-                await utils.updateStatusFile();
+                this.authContext.setTt(tt.split("=")[1]);
+                this.authContext.setTtu(ttu.split("=")[1]);
+                this.authContext.setTte(tte.split("=")[1]);
+                // THE BUG WAS HERE: The old call to `utils.updateStatusFile()` is now removed.
             } else {
                 logger.error("Could not find all required cookies (tt, ttu, tte).");
                 logger.info({ tt, ttu, tte });

@@ -8,6 +8,7 @@ import * as config from './config.js';
 import logger from './logger.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
+import { AuthContext } from './authContext.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +17,7 @@ const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig()
 /**
  * Writes the current download and authentication state to a file for the web server to read.
  */
-export async function updateStatusFile() {
+export async function updateStatusFile(authContext: AuthContext) {
     try {
         // Convert Map to a more JSON-friendly format
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
@@ -27,10 +28,10 @@ export async function updateStatusFile() {
         const status = {
             activeDownloads, // Replaces downloads, downloading, and aliases
             tokens: {
-                tt: state.getTt(),
-                ttu: state.getTtu(),
-                tte: state.getTte(),
-                st: state.getTangoST(),
+                tt: authContext.getTt(),
+                ttu: authContext.getTtu(),
+                tte: authContext.getTte(),
+                st: authContext.getTangoST(),
             },
             lastUpdated: new Date().toISOString(),
         };
@@ -45,9 +46,9 @@ export async function updateStatusFile() {
  * @param masterPlaylistUrl The URL of the master m3u8 playlist.
  * @returns The final live m3u8 playlist URL, or null if it cannot be resolved.
  */
-export async function getLiveUrlFromMaster(masterPlaylistUrl: string): Promise<string | null> {
+export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
     try {
-        const masterListBody = await requests.getMasterList(masterPlaylistUrl);
+        const masterListBody = await requests.getMasterList(masterPlaylistUrl, authContext);
         if (!masterListBody) {
             logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
             return null;
@@ -78,7 +79,6 @@ export async function getLiveUrlFromMaster(masterPlaylistUrl: string): Promise<s
         return null;
     }
 }
-// --- END NEW SHARED FUNCTION ---
 
 
 export function getFormattedDate() {
@@ -95,7 +95,7 @@ export function getFormattedDate() {
 }
 
 export interface RawPaths {
-    tsFilePath: string; // <-- RE-ADDED
+    tsFilePath: string;
     segmentsDirPath: string;
 }
 
@@ -103,37 +103,35 @@ export function createPaths(streamer: string, formattedDate: string): RawPaths {
     const baseFilename = `${formattedDate} ${streamer}`;
     const storageLocation = config.getConfig().storagePath;
 
-    // Ensure the main storage directory exists
     if (!fs.existsSync(storageLocation)) {
         fs.mkdirSync(storageLocation, { recursive: true });
         logger.info(`Storage folder created at: ${storageLocation}`);
     }
 
-    const tsFilePath = path.resolve(storageLocation, `${baseFilename}.ts`); // <-- RE-ADDED
+    const tsFilePath = path.resolve(storageLocation, `${baseFilename}.ts`);
     const segmentsDirPath = path.resolve(storageLocation, baseFilename);
     
-    // Ensure the specific directory for this download's segments exists
     if (!fs.existsSync(segmentsDirPath)) {
         fs.mkdirSync(segmentsDirPath, { recursive: true });
     }
 
-    return { tsFilePath, segmentsDirPath }; // <-- RE-ADDED tsFilePath
+    return { tsFilePath, segmentsDirPath };
 }
 
-export function createCookie() {
-    const tt = state.getTt();
-    const ttu = state.getTtu();
-    const tte = state.getTte();
+export function createCookie(authContext: AuthContext) {
+    const tt = authContext.getTt();
+    const ttu = authContext.getTtu();
+    const tte = authContext.getTte();
     if (!(tt && ttu && tte)) {
-        throw new Error("tt, ttu, tte not found")
+        throw new Error("tt, ttu, tte not found in AuthContext")
     }
     return `tt=${tt};ttu=${ttu};tte=${tte}`
 }
 
-export function createCookieST() {
-    const tangoST = state.getTangoST();
+export function createCookieST(authContext: AuthContext) {
+    const tangoST = authContext.getTangoST();
     if (!tangoST) {
-        throw new Error("Tango-ST not found")
+        throw new Error("Tango-ST not found in AuthContext")
     }
     return `Tango-ST=${tangoST}`
 }

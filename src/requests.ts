@@ -1,5 +1,4 @@
 // src/requests.ts
-import * as crypto from 'crypto';
 import logger from './logger.js';
 import * as utils from './utils.js';
 import { AuthContext } from './authContext.js';
@@ -16,15 +15,16 @@ export interface ApiResponse<T> {
 async function makeApiRequest<T>(
     url: string,
     method: string,
+    authContext: AuthContext,
     authType: 'st' | 'full' | 'none',
     responseType: 'json' | 'text' | 'arrayBuffer' = 'json'
 ): Promise<ApiResponse<T>> {
     try {
         const headers: HeadersInit = {};
         if (authType === 'st') {
-            headers[COOKIE_KEY] = utils.createCookieST();
+            headers[COOKIE_KEY] = utils.createCookieST(authContext);
         } else if (authType === 'full') {
-            headers[COOKIE_KEY] = utils.createCookie();
+            headers[COOKIE_KEY] = utils.createCookie(authContext);
         }
         const options: RequestInit = { method, headers };
         const response = await fetch(url, options);
@@ -46,26 +46,26 @@ async function makeApiRequest<T>(
     }
 }
 
-export async function getFollowingResponseBody() {
-    const response = await makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100", "GET", 'st', 'json');
+export async function getFollowingResponseBody(authContext: AuthContext) {
+    const response = await makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", authContext, 'st', 'json');
     return response.success ? response.data : null;
 }
 
-export async function getStreamerAlias(streamerId: string): Promise<string> {
-    const response = await makeApiRequest<any>(`https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`, "GET", 'st', 'json');
+export async function getStreamerAlias(streamerId: string, authContext: AuthContext): Promise<string> {
+    const response = await makeApiRequest<any>(`https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`, "GET", authContext, 'st', 'json');
     if (response.success && response.data?.basicProfile?.aliases?.[0]?.alias) {
         return response.data.basicProfile.aliases[0].alias;
     }
     return streamerId;
 }
 
-export async function getMasterList(masterListUrl: string) {
-    const response = await makeApiRequest<string>(masterListUrl, "GET", 'full', 'text');
+export async function getMasterList(masterListUrl: string, authContext: AuthContext) {
+    const response = await makeApiRequest<string>(masterListUrl, "GET", authContext, 'full', 'text');
     return response.success ? response.data : null;
 }
 
-export function getLiveList(liveUrl: string): Promise<ApiResponse<string>> {
-    return makeApiRequest<string>(liveUrl, "GET", 'full', 'text');
+export function getLiveList(liveUrl: string, authContext: AuthContext): Promise<ApiResponse<string>> {
+    return makeApiRequest<string>(liveUrl, "GET", authContext, 'full', 'text');
 }
 
 export async function getTokenDataResponse(authContext: AuthContext): Promise<Response | null> {
