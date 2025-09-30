@@ -82,13 +82,12 @@ async function waitForFileState(dir: string, mp4Name: string, rawFolderName: str
 async function testDownloadInProgress(tempDir: string): Promise<string> {
     console.log('\n--- Scenario 1: Verifying Active Download ---');
     let appProcess: ChildProcess | null = null;
-    let logBuffer = '';
     const tempConfigPath = path.join(tempDir, 'config.json');
 
     try {
         const tempConfig: Partial<any> = {
             storagePath: tempDir,
-            repackager: { enabled: false }, // Focus only on downloading
+            repackager: { enabled: false },
             fileNames: { session: path.join(rootDir, 'session.json') }
         };
         await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig));
@@ -98,7 +97,6 @@ async function testDownloadInProgress(tempDir: string): Promise<string> {
         appProcess.stdout?.on('data', data => {
             const output = data.toString();
             process.stdout.write(output);
-            logBuffer += output;
         });
 
         console.log('Waiting for download to start and write at least 3 segments...');
@@ -137,17 +135,14 @@ async function testFullLifecycle(tempDir: string, staleFolderName: string) {
     try {
         const tempConfig: Partial<any> = {
             storagePath: tempDir,
-            // --> FIX: Disable the downloader to prevent the race condition
-            downloader: {
-                enabled: false 
-            },
+            downloader: { enabled: false },
             repackager: {
                 enabled: true,
                 deleteRawOnSuccess: true
             },
             fileNames: { session: path.join(rootDir, 'session.json') },
             timeouts: { staleStream: 5000 },
-            intervals: { repackageScanMinutes: 0.1 } // 6 seconds
+            intervals: { repackageScanMinutes: 0.1 }
         };
         await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
 
@@ -188,6 +183,11 @@ async function main() {
         staleFolderName = await testDownloadInProgress(tempDir);
         
         if (staleFolderName) {
+            // --> FIX: Clean up the "dirty" state file left by the killed process.
+            console.log('Simulating clean restart by deleting live-status.json...');
+            const statusFilePath = path.join(tempDir, 'live-status.json');
+            await fs.rm(statusFilePath, { force: true }); // Use force:true to avoid errors if it doesn't exist for any reason.
+
             await testFullLifecycle(tempDir, staleFolderName);
         } else {
             throw new Error('First test scenario failed to produce a folder for the second scenario.');

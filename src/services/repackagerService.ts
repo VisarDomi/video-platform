@@ -7,8 +7,31 @@ import * as path from 'path';
 import * as config from '../config.js';
 import logger from '../logger.js';
 import * as utils from '../utils.js';
-import * as state from '../state.js';
+// import * as state from '../state.js'; // <-- REMOVED! The key to decoupling.
 import * as repackager from '../repackager.js';
+
+/**
+ * Reads the live-status.json file to get the aliases of currently active downloads.
+ * This is the sole communication point from the downloader to the repackager.
+ */
+async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
+    const statusFilePath = path.join(config.getConfig().storagePath, config.getConfig().fileNames.liveStatus);
+    try {
+        const data = await fsPromises.readFile(statusFilePath, 'utf-8');
+        const status = JSON.parse(data);
+        if (status?.activeDownloads && Array.isArray(status.activeDownloads)) {
+            const aliases = status.activeDownloads.map((dl: any) => dl.alias);
+            return new Set(aliases);
+        }
+    } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+            logger.warn(`[Repackager] Could not read or parse live-status.json.`, { error });
+        }
+        // If file doesn't exist or is invalid, assume no active downloads.
+    }
+    return new Set();
+}
+
 
 /**
  * Represents the contents of the storage directory, categorized for processing.
@@ -19,9 +42,6 @@ interface StorageContents {
     tsFileNames: Set<string>; // Basename with extension
 }
 
-/**
- * Reads the storage directory and categorizes its contents.
- */
 async function getStorageContents(storagePath: string): Promise<StorageContents | null> {
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
@@ -48,13 +68,9 @@ async function getStorageContents(storagePath: string): Promise<StorageContents 
     }
 }
 
-/**
- * Cleans up raw assets (.ts file and segment folder) if a corresponding .mp4 already exists.
- */
 async function cleanupCompletedAssets(storagePath: string, contents: StorageContents): Promise<void> {
     const cfg = config.getConfig();
 
-    // Cleanup stale .ts files that have a matching .mp4
     for (const tsFile of contents.tsFileNames) {
         const baseName = path.parse(tsFile).name;
         if (contents.mp4FileNames.has(baseName)) {
@@ -63,7 +79,6 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
         }
     }
 
-    // If configured, cleanup segment folders that have a matching .mp4
     if (cfg.repackager.deleteRawOnSuccess) {
         for (const folder of contents.potentialFolders) {
             if (contents.mp4FileNames.has(folder.name)) {
@@ -74,9 +89,6 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
     }
 }
 
-/**
- * Processes a single candidate folder: repackages and optionally cleans up.
- */
 async function processCandidateFolder(folderPath: string): Promise<void> {
     const cfg = config.getConfig();
     const folderName = path.basename(folderPath);
@@ -87,7 +99,6 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
             logger.warn(`[Repackager] Found empty stale folder '${folderName}'. Moving to trash.`);
             if (cfg.repackager.deleteRawOnSuccess) {
                 await utils.moveToTrash(folderPath);
-                // Also trash the corresponding large .ts file if it exists
                 await utils.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
             }
             return;
@@ -102,7 +113,7 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
 
     const mp4Path = path.join(path.dirname(folderPath), `${folderName}.mp4`);
     try {
-        await fsPromises.access(mp4Path); // Check if repackage created the file
+        await fsPromises.access(mp4Path);
         if (cfg.repackager.deleteRawOnSuccess) {
             logger.info(`[Repackager] Repackage successful. Moving raw assets to trash for '${folderName}'.`);
             await utils.moveToTrash(folderPath);
@@ -113,9 +124,6 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
     }
 }
 
-/**
- * The main orchestrator for scanning and processing completed downloads.
- */
 async function processCompletedDownloads() {
     logger.info("[Repackager] Scanning for completed downloads...");
     const cfg = config.getConfig();
@@ -123,17 +131,16 @@ async function processCompletedDownloads() {
 
     const contents = await getStorageContents(storageDir);
     if (!contents) {
-        return; // Error already logged by getStorageContents
+        return;
     }
 
-    // First, clean up any assets from previous successful runs
     await cleanupCompletedAssets(storageDir, contents);
 
-    const activeDownloadAliases = new Set(Array.from(state.getActiveDownloads().values(), dl => dl.alias));
+    // --> REFACTORED: Read from the file system, not in-memory state.
+    const activeDownloadAliases = await getActiveDownloadAliasesFromFile();
     const staleTimeout = cfg.timeouts.staleStream * 2;
 
     for (const folder of contents.potentialFolders) {
-        // Skip if an MP4 already exists (already handled by cleanup, but a good safeguard)
         if (contents.mp4FileNames.has(folder.name)) {
             continue;
         }
@@ -161,11 +168,6 @@ async function processCompletedDownloads() {
     logger.info("[Repackager] Scan complete.");
 }
 
-
-/**
- * Starts the main loop for periodically scanning for completed downloads to repackage.
- * This function does not return and runs indefinitely.
- */
 export async function startRepackagerService() {
     logger.info("Starting repackager service...");
     if (config.getConfig().repackager.enabled) {

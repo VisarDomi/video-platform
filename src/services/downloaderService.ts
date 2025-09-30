@@ -11,6 +11,41 @@ import * as state from '../state.js';
 import * as requests from '../requests.js';
 import { AuthContext } from '../auth/authContext.js';
 
+// --- Local Helper for State Reporting ---
+
+/**
+ * Writes the current download state to the live-status.json file.
+ * This is the primary way this service communicates its state to the outside world.
+ */
+async function updateStatusFile(authContext: AuthContext) {
+    try {
+        const cfg = config.getConfig();
+        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
+        
+        const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
+            masterPlaylistUrl,
+            ...downloadInfo
+        }));
+
+        const status = {
+            activeDownloads,
+            tokens: {
+                tt: authContext.getTt(),
+                ttu: authContext.getTtu(),
+                tte: authContext.getTte(),
+                st: authContext.getTangoST(),
+            },
+            lastUpdated: new Date().toISOString(),
+        };
+        await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
+    } catch (error) {
+        logger.error('Failed to write status file', { error });
+    }
+}
+
+
+// --- Core Service Logic ---
+
 async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, authContext: AuthContext) {
     let alias = streamerId;
     let tsFilePath: string | null = null;
@@ -26,7 +61,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     try {
         alias = await requests.getStreamerAlias(streamerId, authContext);
         downloadState.alias = alias;
-        utils.updateStatusFile(authContext);
+        await updateStatusFile(authContext); // Use local helper
 
         let liveUrl: string | null = null;
         const MAX_RETRIES = 3;
@@ -47,7 +82,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         }
 
         downloadState.liveUrl = liveUrl;
-        utils.updateStatusFile(authContext);
+        await updateStatusFile(authContext); // Use local helper
 
         const startDate = new Date();
         const paths = utils.createDownloadPaths(alias, startDate);
@@ -165,14 +200,10 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     } finally {
         logger.info(`${utils.getFormattedDate()} Finished download process for: ${alias}`);
         state.getActiveDownloads().delete(masterListUrl);
-        utils.updateStatusFile(authContext);
+        await updateStatusFile(authContext); // Use local helper
     }
 }
 
-/**
- * Starts the main loop for polling followed streams and initiating downloads.
- * This function does not return and runs indefinitely.
- */
 export async function startDownloaderService(authContext: AuthContext) {
     logger.info('Starting stream watcher...');
     let lastKnownTotal = -1;
@@ -204,9 +235,8 @@ export async function startDownloaderService(authContext: AuthContext) {
                                 liveUrl: null
                             });
                             logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                            utils.updateStatusFile(authContext);
+                            await updateStatusFile(authContext); // Use local helper
                             
-                            // Don't await this, let it run in the background
                             initiateAndDownloadStream(streamerId, masterPlaylistUrl, authContext);
                         }
                     }

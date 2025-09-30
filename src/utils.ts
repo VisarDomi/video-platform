@@ -6,37 +6,15 @@ import * as fs from 'fs';
 
 import * as config from './config.js';
 import logger from './logger.js';
-import * as state from './state.js';
+// import * as state from './state.js'; // <-- REMOVED! No longer needed here.
 import * as requests from './requests.js';
 import { AuthContext } from './auth/authContext.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.liveStatus);
 const FOLDER_NAME_REGEX = /^(\d{4}-\d{2}-\d{2} \d{6}) (.+)$/;
 
-export async function updateStatusFile(authContext: AuthContext) {
-    try {
-        const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
-            masterPlaylistUrl,
-            ...downloadInfo
-        }));
-
-        const status = {
-            activeDownloads,
-            tokens: {
-                tt: authContext.getTt(),
-                ttu: authContext.getTtu(),
-                tte: authContext.getTte(),
-                st: authContext.getTangoST(),
-            },
-            lastUpdated: new Date().toISOString(),
-        };
-        await fsPromises.writeFile(getStatusFilePath(), JSON.stringify(status, null, 2));
-    } catch (error) {
-        logger.error('Failed to write status file', { error });
-    }
-}
+// The updateStatusFile function has been moved to downloaderService.ts to break circular dependencies.
 
 export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
     try {
@@ -82,17 +60,11 @@ export function getFormattedDate(date: Date = new Date()): string {
     return `${year}-${month}-${day} ${hours}${minutes}${seconds}`;
 }
 
-/**
- * Generates a standardized folder/file name for a download.
- */
 export function generateDownloadBaseName(alias: string, date: Date): string {
     const formattedDate = getFormattedDate(date);
     return `${formattedDate} ${alias}`;
 }
 
-/**
- * Parses a download folder name into its constituent parts.
- */
 export function parseDownloadFolderName(folderName: string): { alias: string; dateString: string } | null {
     const match = folderName.match(FOLDER_NAME_REGEX);
     if (!match) {
