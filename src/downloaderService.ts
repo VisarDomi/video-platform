@@ -8,9 +8,23 @@ import * as url from "url";
 import * as config from "./config.js";
 import logger from "./logger.js";
 import * as storage from "./storage.js";
-import * as state from "./state.js";
 import * as requests from "./requests.js";
 import { Tokens } from "./requests.js";
+
+// --- Download State ---
+interface ActiveDownload {
+    streamerId: string;
+    alias: string;
+    liveUrl: string | null; // Is null until the master playlist is resolved
+}
+// The key is the master playlist URL from the /following API response
+const _activeDownloads: Map<string, ActiveDownload> = new Map();
+
+// --- Download Getters ---
+// The Map is mutated directly, so we just need a getter.
+export function getActiveDownloads(): Map<string, ActiveDownload> {
+    return _activeDownloads;
+}
 
 // --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
@@ -54,7 +68,7 @@ async function updateStatusFile() {
         const cfg = config.getConfig();
         const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
 
-        const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
+        const activeDownloads = Array.from(getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
             ...downloadInfo,
         }));
@@ -111,7 +125,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     let segmentsDirPath: string | null = null;
     let totalSegmentsDownloaded = 0;
 
-    const downloadState = state.getActiveDownloads().get(masterListUrl);
+    const downloadState = getActiveDownloads().get(masterListUrl);
     if (!downloadState) {
         logger.error(`Could not find state for download with master URL: ${masterListUrl}. Aborting.`);
         return;
@@ -274,7 +288,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
         logger.info(`${storage.getFormattedDate()} Finished download process for: ${alias}`);
-        state.getActiveDownloads().delete(masterListUrl);
+        getActiveDownloads().delete(masterListUrl);
         await updateStatusFile();
     }
 }
@@ -294,7 +308,7 @@ export async function startDownloaderService() {
 
             const streamIdsResponseBody = await requests.getFollowingResponseBody(tokens);
 
-            const activeDownloads = state.getActiveDownloads();
+            const activeDownloads = getActiveDownloads();
             const currentTotal = activeDownloads.size;
             if (currentTotal !== lastKnownTotal) {
                 logger.info(`Watching for streams... Total active/pending: ${currentTotal}`);
