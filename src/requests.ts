@@ -143,7 +143,7 @@ export async function getTokenDataResponse(): Promise<Response | null> {
  * Returns the raw `Response` object on success to allow header processing.
  * @param username The username or sessionId from the Tango-RT JWT payload.
  */
-export async function postRefreshSession(username: string): Promise<Response | null> {
+export async function postRefreshSession(username: string, tangoRT: string): Promise<Response | null> {
     const refreshHeaders: HeadersInit = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
         'Accept': 'application/json',
@@ -162,7 +162,7 @@ export async function postRefreshSession(username: string): Promise<Response | n
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-site',
         'Connection': 'keep-alive',
-        [COOKIE_KEY]: utils.createCookieRT(),
+        [COOKIE_KEY]: `Tango-RT=${tangoRT}`,
     };
 
     const refreshOptions = {

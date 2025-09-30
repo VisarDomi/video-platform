@@ -10,7 +10,7 @@ import logger from './logger.js';
 import * as utils from './utils.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
-import * as auth from './auth.js';
+import * as tokenManager from './tokenManager.js';
 import * as repackager from './repackager.js';
 
 
@@ -353,14 +353,13 @@ async function manageRepackaging() {
 
 async function main() {
     logger.info("--- Starting Tango Downloader Service ---");
-
     logger.info("Starting initial authentication...");
-    await auth.initialAuth();
+    const manager = new tokenManager.TokenManager();
+    await manager.initialAuth();
     logger.info("Initial authentication successful.");
     
     manageRepackaging();
-    auth.refreshShortLivedTokens();
-    auth.manageTokenLifecycle();
+    manager.startBackgroundJobs();
     logger.info("Background processes started (Repackager, Token Refreshes).");
 
     pollFollowingStreams();

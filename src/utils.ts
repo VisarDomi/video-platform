@@ -11,36 +11,7 @@ import * as requests from './requests.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const getSessionFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.session);
 const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.liveStatus);
-
-export async function saveTokenToFile() {
-    try {
-        const tangoRT = state.getTangoRT();
-        if (tangoRT) {
-            await fsPromises.writeFile(getSessionFilePath(), JSON.stringify({ tangoRT }, null, 2));
-            logger.info(`Session token (Tango-RT) saved to ${config.getConfig().fileNames.session}`);
-        }
-    } catch (error) {
-        logger.error('Failed to save session file', { error });
-    }
-}
-
-export async function loadTokenFromFile(): Promise<boolean> {
-    try {
-        const data = await fsPromises.readFile(getSessionFilePath(), 'utf-8');
-        const session = JSON.parse(data);
-        if (session.tangoRT) {
-            state.setTangoRT(session.tangoRT);
-            return true;
-        }
-    } catch (error: any) {
-        if (error.code !== 'ENOENT') { // Don't log an error if the file simply doesn't exist
-            logger.error('Failed to read session file', { error });
-        }
-    }
-    return false;
-}
 
 /**
  * Writes the current download and authentication state to a file for the web server to read.
@@ -165,14 +136,6 @@ export function createCookieST() {
         throw new Error("Tango-ST not found")
     }
     return `Tango-ST=${tangoST}`
-}
-
-export function createCookieRT() {
-    const tangoRT = state.getTangoRT();
-    if (!tangoRT) {
-        throw new Error("Tango-RT not found")
-    }
-    return `Tango-RT=${tangoRT}`
 }
 
 export function getResponseBodyLines(responseBody: string) {
