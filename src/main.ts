@@ -4,7 +4,7 @@ import "dotenv/config";
 import logger from "./common/logger.js";
 import * as config from "./common/config.js";
 import { AuthService } from "./auth/authService.js";
-import { startDownloaderService } from "./downloader/downloaderService.js";
+import { DownloaderService } from "./downloader/downloaderService.js";
 import { startAssemblerService } from "./assembler/assemblerService.js";
 import { startCombinerService } from "./combiner/combinerService.js";
 
@@ -19,11 +19,13 @@ async function main() {
     logger.info("Initial authentication successful.");
 
     if (cfg.downloader.enabled) {
-        startDownloaderService();
+        const downloaderService = new DownloaderService();
+        downloaderService.start();
     } else {
         logger.warn("Downloader service is disabled via config.");
     }
-
+    
+    // ... (rest of the services start as before)
     if (cfg.repackager.enabled) {
         startAssemblerService();
     } else {
