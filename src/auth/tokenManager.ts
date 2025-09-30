@@ -4,7 +4,8 @@ import * as config from "../config.js";
 import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
 import { extractTokensWithPuppeteer } from "./puppeteerLogin.js";
-import * as authClient from "./authClient.js"; // <-- NEW IMPORT
+import * as authClient from "./authClient.js";
+import { parseJwtPayload } from "./authUtils.js"; // <-- NEW IMPORT
 
 export class TokenManager {
     private authContext: AuthContext;
@@ -17,30 +18,26 @@ export class TokenManager {
         return this.authContext;
     }
 
+    /**
+     * Orchestrates the initial authentication flow, with retries.
+     */
     public async initialAuth() {
         let success = false;
         while (!success) {
             try {
-                const loaded = await this.authContext.loadTokenFromFile();
-                if (loaded) {
-                    logger.info("Tango-RT loaded from file. Attempting to refresh session...");
-                    try {
-                        await this.refreshSession();
-                        await this.setTokenData();
-                        logger.info("Session successfully refreshed using token from file.");
-                        success = true;
-                        continue;
-                    } catch (error) {
-                        logger.warn(
-                            "Failed to refresh session using token from file. Falling back to full Puppeteer login.",
-                            { error: (error as Error).message }
-                        );
-                    }
+                // First, try the "happy path": load a token and refresh it.
+                const refreshed = await this.tryLoadAndRefreshFromFile();
+                if (refreshed) {
+                    logger.info("Session successfully refreshed using token from file.");
+                    success = true;
+                    continue;
                 }
+
+                // If that fails, perform a full login.
                 logger.info("Performing full login via Puppeteer to get new tokens...");
-                await this.extractInitialTokens();
-                await this.setTokenData();
+                await this.performFreshLogin();
                 success = true;
+
             } catch (error) {
                 const errorMessage = (error as Error).message;
                 logger.error(`Initial authentication failed: ${errorMessage}. Retrying in 30 seconds...`);
@@ -48,10 +45,41 @@ export class TokenManager {
             }
         }
     }
-
+    
     public async startBackgroundJobs() {
         this.refreshShortLivedTokens();
         this.manageTokenLifecycle();
+    }
+    
+    /**
+     * Attempts to load a token from session.json and refresh it.
+     * @returns True if successful, false otherwise.
+     */
+    private async tryLoadAndRefreshFromFile(): Promise<boolean> {
+        const loaded = await this.authContext.loadTokenFromFile();
+        if (loaded) {
+            logger.info("Tango-RT loaded from file. Attempting to refresh session...");
+            try {
+                await this.refreshSession();
+                await this.setTokenData();
+                return true;
+            } catch (error) {
+                logger.warn(
+                    "Failed to refresh session using token from file. Falling back to full Puppeteer login.",
+                    { error: (error as Error).message }
+                );
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Performs a fresh login using Puppeteer to get all new tokens.
+     */
+    private async performFreshLogin() {
+        await this.extractInitialTokens();
+        await this.setTokenData();
     }
 
     private async extractInitialTokens() {
@@ -61,14 +89,13 @@ export class TokenManager {
         await this.authContext.saveTokenToFile();
     }
 
-    // --- REFACTORED: Uses authClient ---
     private async refreshSession() {
         logger.info("Attempting to refresh session using Tango-RT...");
         const tangoRT = this.authContext.getTangoRT();
         if (!tangoRT) {
             throw new Error("Tango-RT not found in auth context. Cannot refresh session.");
         }
-        const payload = this.parseJwtPayload(tangoRT);
+        const payload = parseJwtPayload(tangoRT); // <-- USE IMPORTED FUNCTION
         const username = payload?.username || payload?.sessionId;
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
@@ -90,7 +117,6 @@ export class TokenManager {
         }
     }
 
-    // --- REFACTORED: Uses authClient ---
     private async setTokenData() {
         const tangoST = this.authContext.getTangoST();
         if (!tangoST) {
@@ -107,19 +133,7 @@ export class TokenManager {
         this.authContext.setTtu(result.ttu);
         this.authContext.setTte(result.tte);
     }
-
-    private parseJwtPayload(token: string): { [key: string]: any } | null {
-        try {
-            const base64Url = token.split(".")[1];
-            if (!base64Url) return null;
-            const jsonPayload = Buffer.from(base64Url, "base64").toString();
-            return JSON.parse(jsonPayload);
-        } catch (error) {
-            logger.error("Failed to parse JWT payload", { token, error });
-            return null;
-        }
-    }
-
+    
     private async refreshShortLivedTokens() {
         while (true) {
             try {
@@ -141,8 +155,7 @@ export class TokenManager {
             } catch (error) {
                 logger.error("Lightweight session refresh failed. Falling back to full Puppeteer re-authentication.", { error });
                 try {
-                    await this.extractInitialTokens();
-                    await this.setTokenData();
+                    await this.performFreshLogin();
                     logger.info("Successfully re-authenticated via Puppeteer and refreshed all tokens.");
                 } catch (fatalError) {
                     logger.error("CRITICAL: The fallback Puppeteer re-authentication also failed.", { fatalError });
