@@ -7,8 +7,9 @@ import pLimit from "p-limit";
 import logger from "../logger.js";
 import * as storage from "../storage.js";
 import * as fileTracker from "../fileTracker.js";
+import * as config from "../config.js"; // <-- NEW IMPORT
 
-const MIN_DURATION_SECONDS = 15 * 60; // 15 minutes
+const getMinDurationSeconds = (): number => config.getConfig().combiner.minDurationMinutes * 60;
 
 interface VideoInfo {
     filePath: string;
@@ -130,6 +131,8 @@ export async function combineShortVideos(unprocessedFiles: string[], baseDir: st
     let allSourceFilesToTrash: string[] = [];
     let allSourceFileNamesToTrack: string[] = [];
 
+    const minDurationSeconds = getMinDurationSeconds(); // <-- Get from config
+
     for (const [username, userVideos] of videosByUser.entries()) {
         logger.info(`[Combiner] Processing ${userVideos.length} videos for user: ${username}`);
         userVideos.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -143,10 +146,10 @@ export async function combineShortVideos(unprocessedFiles: string[], baseDir: st
                 batch.push(video);
                 batchDuration += video.duration;
                 processedCount++;
-                if (batchDuration >= MIN_DURATION_SECONDS) break;
+                if (batchDuration >= minDurationSeconds) break; // <-- Use config value
             }
 
-            if (batch.length > 1 && batchDuration >= MIN_DURATION_SECONDS) {
+            if (batch.length > 1 && batchDuration >= minDurationSeconds) { // <-- Use config value
                 logger.info(`[Combiner] Formed a batch of ${batch.length} for ${username} (${Math.round(batchDuration / 60)} mins).`);
                 await stitchVideos(batch, baseDir);
 

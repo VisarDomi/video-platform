@@ -25,7 +25,8 @@
         "deleteRawOnSuccess": true
     },
     "combiner": {
-    "enabled": true,
-    "scanIntervalHours": 6
+        "enabled": true,
+        "scanIntervalHours": 6,
+        "minDurationMinutes": 15
     }
 }

@@ -37,9 +37,10 @@ export interface IConfig {
     maxWorkers: number;
     deleteRawOnSuccess: boolean;
   };
-  combiner: { // <-- NEW SECTION
+  combiner: {
     enabled: boolean;
     scanIntervalHours: number;
+    minDurationMinutes: number; // <-- NEW
   };
 }
 
@@ -72,9 +73,10 @@ const defaultConfig: IConfig = {
     maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4,
     deleteRawOnSuccess: true
   },
-  combiner: { // <-- NEW SECTION
-    enabled: false, // Default to off
-    scanIntervalHours: 6
+  combiner: {
+    enabled: false,
+    scanIntervalHours: 6,
+    minDurationMinutes: 15, // <-- NEW
   }
 };
 
@@ -94,7 +96,7 @@ function loadConfig(): IConfig {
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
                     downloader: { ...mergedConfig.downloader, ...userConfig.downloader },
                     repackager: { ...mergedConfig.repackager, ...userConfig.repackager },
-                    combiner: { ...mergedConfig.combiner, ...userConfig.combiner } // <-- NEW
+                    combiner: { ...mergedConfig.combiner, ...userConfig.combiner }
                 };
             } catch (error) {
                 console.error(`Error reading or parsing config file at ${filePath}.`, { error });

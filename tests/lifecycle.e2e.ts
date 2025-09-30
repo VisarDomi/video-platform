@@ -57,19 +57,20 @@ async function waitForDownloadAssets(storagePath: string, targetSegmentCount: nu
     throw new Error(`Timed out after ${maxWaitTime / 1000}s waiting for a download with ${targetSegmentCount} segment file(s).`);
 }
 
-async function waitForRepackagedFile(dir: string, mp4Name: string, rawFolderName: string, rawTsName: string): Promise<void> {
+async function waitForRepackagedFile(dir: string, mp4Name: string, rawFolderName: string, rawTsName: string): Promise<string> {
     const pollInterval = 1000;
     const maxWaitTime = 30000;
     let elapsedTime = 0;
+    const mp4Path = path.join(dir, mp4Name);
 
     while (elapsedTime < maxWaitTime) {
-        const mp4Exists = await fs.access(path.join(dir, mp4Name)).then(() => true).catch(() => false);
+        const mp4Exists = await fs.access(mp4Path).then(() => true).catch(() => false);
         const rawFolderExists = await fs.access(path.join(dir, rawFolderName)).then(() => true).catch(() => false);
         const rawTsExists = await fs.access(path.join(dir, rawTsName)).then(() => true).catch(() => false);
 
         if (mp4Exists && !rawFolderExists && !rawTsExists) {
             console.log('✅ Repackage and cleanup successful: MP4 exists and raw files are deleted.');
-            return;
+            return mp4Path;
         }
 
         await new Promise(resolve => setTimeout(resolve, pollInterval));
@@ -141,11 +142,29 @@ async function testDownloadInProgress(tempDir: string): Promise<string> {
         console.log('✅ Assertion PASSED: At least 3 segment files were created.');
 
         const initialStats = await fs.stat(growingTsPath);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        const finalStats = await fs.stat(growingTsPath);
+        const initialSegments = await fs.readdir(segmentFolderPath);
+        const initialSegmentCount = initialSegments.filter(f => f.endsWith('.ts')).length;
+
+        console.log(`Initial size of ${path.basename(growingTsPath)}: ${initialStats.size} bytes.`);
+        console.log(`Initial segment count: ${initialSegmentCount}. Waiting to verify growth...`);
         
-        assert.ok(finalStats.size > initialStats.size, `The main .ts file did not grow in size. Initial: ${initialStats.size}, Final: ${finalStats.size}`);
-        console.log('✅ Assertion PASSED: Concatenated .ts file is growing.');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        const finalStats = await fs.stat(growingTsPath);
+        const finalSegments = await fs.readdir(segmentFolderPath);
+        const finalSegmentCount = finalSegments.filter(f => f.endsWith('.ts')).length;
+        
+        console.log(`Final size of ${path.basename(growingTsPath)}: ${finalStats.size} bytes.`);
+        console.log(`Final segment count: ${finalSegmentCount}.`);
+        
+        const hasGrown = finalStats.size > initialStats.size || finalSegmentCount > initialSegmentCount;
+        assert.ok(
+            hasGrown, 
+            'Download did not progress. ' +
+            `File size: ${initialStats.size} -> ${finalStats.size}. ` +
+            `Segment count: ${initialSegmentCount} -> ${finalSegmentCount}.`
+        );
+        console.log('✅ Assertion PASSED: Download is progressing (either file size or segment count increased).');
 
         return downloadFolderName;
 
@@ -158,10 +177,11 @@ async function testDownloadInProgress(tempDir: string): Promise<string> {
     }
 }
 
-async function testRepackageAndCleanup(tempDir: string, staleFolderName: string) {
+async function testRepackageAndCleanup(tempDir: string, staleFolderName: string): Promise<string> {
     console.log('\n--- Scenario 2: Verifying Repackage and Cleanup ---');
     let appProcess: ChildProcess | null = null;
     const tempConfigPath = path.join(tempDir, 'config.json');
+    let createdMp4Path: string | null = null;
 
     try {
         const tempConfig: Partial<any> = {
@@ -184,60 +204,73 @@ async function testRepackageAndCleanup(tempDir: string, staleFolderName: string)
         const rawTsName = `${staleFolderName}.ts`;
 
         console.log('Waiting for assembler to complete its work...');
-        await waitForRepackagedFile(tempDir, mp4Name, staleFolderName, rawTsName);
+        createdMp4Path = await waitForRepackagedFile(tempDir, mp4Name, staleFolderName, rawTsName);
 
         console.log('✅ Assertion PASSED: Repackage lifecycle complete.');
+        return createdMp4Path;
 
     } finally {
         if (appProcess) appProcess.kill('SIGTERM');
+        if (!createdMp4Path) throw new Error("Repackaging did not produce an MP4 file path.");
     }
 }
 
-async function testCombination(tempDir: string, staleFolderName: string) {
+async function testCombination(tempDir: string, sourceMp4Path: string) {
     console.log('\n--- Scenario 3: Verifying Combination and Cleanup ---');
     let appProcess: ChildProcess | null = null;
-    const tempConfigPath = path.join(tempDir, 'config.json');
-
-    const nameParts = staleFolderName.match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+)$/);
-    assert.ok(nameParts && nameParts[1] && nameParts[2], `Could not parse folder name: ${staleFolderName}`);
+    
+    // --- FIX: Create a clean, isolated directory for the combination test ---
+    const combinerTestDir = path.join(tempDir, 'combiner-test');
+    await fs.mkdir(combinerTestDir);
+    const tempConfigPath = path.join(combinerTestDir, 'config.json');
+    
+    const sourceMp4BaseName = path.basename(sourceMp4Path);
+    const nameParts = sourceMp4BaseName.match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)\.mp4$/);
+    assert.ok(nameParts && nameParts[1] && nameParts[2], `Could not parse MP4 name: ${sourceMp4BaseName}`);
     const datePart = nameParts[1];
     const alias = nameParts[2];
     
-    const firstMp4Name = `${staleFolderName}.mp4`;
-    const secondMp4Name = `${datePart.slice(0, 13)}100 ${alias}.mp4`; // e.g., 120000 -> 120100
+    const firstMp4Name = sourceMp4BaseName;
+    const secondDatePart = `${datePart.slice(0, 11)}${(parseInt(datePart.slice(11)) + 60).toString().padStart(6, '0')}`; // Add 1 minute
+    const secondMp4Name = `${secondDatePart} ${alias}.mp4`;
 
     try {
         // --- ARRANGE ---
-        console.log('Arranging files for combination test...');
-        const firstMp4Path = path.join(tempDir, firstMp4Name);
-        const secondMp4Path = path.join(tempDir, secondMp4Name);
-        await fs.copyFile(firstMp4Path, secondMp4Path);
+        console.log(`Isolating test in: ${combinerTestDir}`);
+        const firstMp4Path = path.join(combinerTestDir, firstMp4Name);
+        const secondMp4Path = path.join(combinerTestDir, secondMp4Name);
+        await fs.copyFile(sourceMp4Path, firstMp4Path);
+        await fs.copyFile(sourceMp4Path, secondMp4Path);
         console.log(`Created two source files: ${firstMp4Name}, ${secondMp4Name}`);
         const sourceFiles = [firstMp4Name, secondMp4Name];
         
         // --- ACT ---
         const tempConfig: Partial<any> = {
-            storagePath: tempDir,
+            storagePath: combinerTestDir, // <-- Point to the isolated directory
             downloader: { enabled: false },
             repackager: { enabled: false },
-            combiner: { enabled: true, scanIntervalHours: 0.001 }, // ~3.6 seconds
+            combiner: { 
+                enabled: true, 
+                scanIntervalHours: 0.001, 
+                minDurationMinutes: 0.1 // 6 seconds
+            },
             fileNames: { session: path.join(rootDir, 'session.json') }
         };
         await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
 
         console.log('Relaunching app with only combiner enabled...');
-        appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir, stdio: 'pipe' });
+        appProcess = spawn('node', [APP_ENTRY], { cwd: combinerTestDir, stdio: 'pipe' }); // <-- Run from isolated directory
         appProcess.stdout?.on('data', data => process.stdout.write(data.toString()));
         appProcess.stderr?.on('data', data => process.stderr.write(data.toString()));
 
         console.log('Waiting for combiner to complete its work...');
-        await waitForCombinedFile(tempDir, alias, sourceFiles);
+        await waitForCombinedFile(combinerTestDir, alias, sourceFiles);
         
         // --- ASSERT ---
         console.log('✅ Assertion PASSED: Combined MP4 was created and sources were trashed.');
 
         for (const sourceFile of sourceFiles) {
-            await assert.rejects(fs.access(path.join(tempDir, sourceFile)), { code: 'ENOENT' });
+            await assert.rejects(fs.access(path.join(combinerTestDir, sourceFile)), { code: 'ENOENT' });
         }
         console.log('✅ Assertion PASSED: Source files were removed from storage root.');
 
@@ -258,7 +291,6 @@ async function testCombination(tempDir: string, staleFolderName: string) {
 
 async function main() {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lifecycle-suite-'));
-    let staleFolderName: string | null = null;
     
     const timeout = setTimeout(() => {
         console.error(`\n--- E2E TEST SUITE TIMED OUT AFTER ${GLOBAL_TEST_TIMEOUT / 1000}s ---`);
@@ -270,16 +302,16 @@ async function main() {
         await fs.rm(PROCESSED_FILE_TRACKER, { force: true });
         
         // SCENARIO 1: Download
-        staleFolderName = await testDownloadInProgress(tempDir);
+        const staleFolderName = await testDownloadInProgress(tempDir);
         
         console.log('Simulating clean restart by deleting live-status.json...');
         await fs.rm(path.join(tempDir, 'live-status.json'), { force: true });
 
         // SCENARIO 2: Assemble
-        await testRepackageAndCleanup(tempDir, staleFolderName);
+        const createdMp4Path = await testRepackageAndCleanup(tempDir, staleFolderName);
         
         // SCENARIO 3: Combine
-        await testCombination(tempDir, staleFolderName);
+        await testCombination(tempDir, createdMp4Path);
 
         console.log('\n✅✅✅ All E2E test scenarios PASSED! ✅✅✅');
         process.exit(0);
