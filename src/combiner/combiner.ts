@@ -7,7 +7,7 @@ import pLimit from "p-limit";
 import logger from "../logger.js";
 import * as storage from "../storage.js";
 import * as fileTracker from "../fileTracker.js";
-import * as config from "../config.js"; // <-- NEW IMPORT
+import * as config from "../config.js";
 
 const getMinDurationSeconds = (): number => config.getConfig().combiner.minDurationMinutes * 60;
 
@@ -131,7 +131,7 @@ export async function combineShortVideos(unprocessedFiles: string[], baseDir: st
     let allSourceFilesToTrash: string[] = [];
     let allSourceFileNamesToTrack: string[] = [];
 
-    const minDurationSeconds = getMinDurationSeconds(); // <-- Get from config
+    const minDurationSeconds = getMinDurationSeconds();
 
     for (const [username, userVideos] of videosByUser.entries()) {
         logger.info(`[Combiner] Processing ${userVideos.length} videos for user: ${username}`);
@@ -146,10 +146,12 @@ export async function combineShortVideos(unprocessedFiles: string[], baseDir: st
                 batch.push(video);
                 batchDuration += video.duration;
                 processedCount++;
-                if (batchDuration >= minDurationSeconds) break; // <-- Use config value
+                // FIX 1: Only break if we have *more than one* video. This prevents
+                // creating a batch-of-one that fails the `batch.length > 1` check.
+                if (batch.length > 1 && batchDuration >= minDurationSeconds) break;
             }
 
-            if (batch.length > 1 && batchDuration >= minDurationSeconds) { // <-- Use config value
+            if (batch.length > 1 && batchDuration >= minDurationSeconds) {
                 logger.info(`[Combiner] Formed a batch of ${batch.length} for ${username} (${Math.round(batchDuration / 60)} mins).`);
                 await stitchVideos(batch, baseDir);
 
@@ -160,7 +162,8 @@ export async function combineShortVideos(unprocessedFiles: string[], baseDir: st
                 remainingVideos.splice(0, processedCount);
             } else {
                 logger.info(`[Combiner] Not enough videos for ${username} to meet threshold. ${remainingVideos.length} videos remain.`);
-                allSourceFileNamesToTrack.push(...remainingVideos.map(v => v.filePath).map(f => path.basename(f)));
+                // FIX 2: Do not mark videos as processed if they weren't combined.
+                // They should be re-evaluated in the next cycle with any new files.
                 break;
             }
         }
