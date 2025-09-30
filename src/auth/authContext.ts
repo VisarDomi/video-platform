@@ -2,9 +2,11 @@
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as url from "url";
+
 import logger from "../logger.js";
 import * as config from "../config.js";
-import { HEADERS, COOKIE_NAMES } from "./authConstants.js";
+import * as constants from "../constants.js";
+
 import { RefreshResult, TokenDataResult } from "./authClient.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
@@ -77,7 +79,7 @@ export class AuthContext {
         if (!this.tangoST) {
             throw new Error("Cannot create API headers: Tango-ST is missing from AuthContext.");
         }
-        return { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
+        return { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
     }
 
     public getStreamHeaders(): HeadersInit {
@@ -85,7 +87,7 @@ export class AuthContext {
             throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from AuthContext.");
         }
         const cookie = `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
-        return { [HEADERS.COOKIE]: cookie };
+        return { [constants.HEADERS.COOKIE]: cookie };
     }
 
     // --- File Operations ---

@@ -1,6 +1,6 @@
 // src/auth/authClient.ts
 import logger from "../logger.js";
-import { TANGO_URLS, COOKIE_NAMES, HEADERS } from "./authConstants.js";
+import * as constants from "../constants.js";
 
 export interface RefreshResult {
     newTangoST: string;
@@ -19,17 +19,17 @@ export interface TokenDataResult {
  */
 export async function refreshSession(username: string, tangoRT: string): Promise<RefreshResult> {
     const refreshHeaders: HeadersInit = {
-        "User-Agent": HEADERS.USER_AGENT,
+        "User-Agent": constants.HEADERS.USER_AGENT,
         Accept: "application/json",
         "content-type": "application/json",
         username: username,
-        Origin: TANGO_URLS.HOME,
-        [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_RT_PREFIX}${tangoRT}`,
+        Origin: constants.TANGO_URLS.HOME,
+        [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_RT_PREFIX}${tangoRT}`,
     };
     const refreshOptions = { method: "POST", headers: refreshHeaders };
 
     try {
-        const response = await fetch(TANGO_URLS.SESSION_REFRESH, refreshOptions);
+        const response = await fetch(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
         if (!response.ok) {
             throw new Error(`Session refresh failed with status ${response.status}. Tango-RT may be expired.`);
         }
@@ -40,10 +40,10 @@ export async function refreshSession(username: string, tangoRT: string): Promise
 
         for (const cookieString of allCookies) {
             const trimmedCookie = cookieString.trim();
-            if (trimmedCookie.startsWith(COOKIE_NAMES.TANGO_ST_PREFIX)) {
-                newTangoST = trimmedCookie.split(";")[0].substring(COOKIE_NAMES.TANGO_ST_PREFIX.length);
-            } else if (trimmedCookie.startsWith(COOKIE_NAMES.TANGO_RT_PREFIX)) {
-                newTangoRT = trimmedCookie.split(";")[0].substring(COOKIE_NAMES.TANGO_RT_PREFIX.length);
+            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
+                newTangoST = trimmedCookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
+            } else if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
+                newTangoRT = trimmedCookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
             }
         }
 
@@ -71,9 +71,9 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult> 
     try {
         const options: RequestInit = {
             method: "GET",
-            headers: { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${tangoST}` },
+            headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tangoST}` },
         };
-        const response = await fetch(TANGO_URLS.TOKEN_DATA, options);
+        const response = await fetch(constants.TANGO_URLS.TOKEN_DATA, options);
 
         if (!response.ok) {
             throw new Error(`Token data fetch failed with status ${response.status}`);
@@ -86,9 +86,9 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult> 
 
         for (const cookieString of allCookies) {
             const trimmedCookie = cookieString.trim();
-            if (trimmedCookie.startsWith(COOKIE_NAMES.TT_PREFIX)) tt = trimmedCookie.split("=")[1].split(";")[0];
-            if (trimmedCookie.startsWith(COOKIE_NAMES.TTU_PREFIX)) ttu = trimmedCookie.split("=")[1].split(";")[0];
-            if (trimmedCookie.startsWith(COOKIE_NAMES.TTE_PREFIX)) tte = trimmedCookie.split("=")[1].split(";")[0];
+            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TT_PREFIX)) tt = trimmedCookie.split("=")[1].split(";")[0];
+            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TTU_PREFIX)) ttu = trimmedCookie.split("=")[1].split(";")[0];
+            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TTE_PREFIX)) tte = trimmedCookie.split("=")[1].split(";")[0];
         }
 
         if (!tt || !ttu || !tte) {

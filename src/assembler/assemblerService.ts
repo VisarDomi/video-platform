@@ -7,6 +7,8 @@ import * as path from "path";
 import * as config from "../config.js";
 import logger from "../logger.js";
 import * as storage from "../storage.js";
+
+import * as assemblerUtils from "./assemblerUtils.js";
 import { assembleSegmentsIntoMp4 } from "./assembler.js";
 
 async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
@@ -36,7 +38,7 @@ async function getStorageContents(storagePath: string): Promise<StorageContents 
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
 
-        const potentialFolders = entries.filter((e) => e.isDirectory() && storage.parseDownloadFolderName(e.name));
+        const potentialFolders = entries.filter((e) => e.isDirectory() && assemblerUtils.parseDownloadFolderName(e.name));
 
         const mp4FileNames = new Set(entries.filter((e) => e.isFile() && e.name.endsWith(".mp4")).map((e) => path.parse(e.name).name));
 
@@ -129,7 +131,7 @@ async function processCompletedDownloads() {
             continue;
         }
 
-        const parsedName = storage.parseDownloadFolderName(folder.name);
+        const parsedName = assemblerUtils.parseDownloadFolderName(folder.name);
         if (!parsedName || activeDownloadAliases.has(parsedName.alias)) {
             logger.verbose(`[Assembler] Skipping folder for active or unparsable alias: ${folder.name}`);
             continue;

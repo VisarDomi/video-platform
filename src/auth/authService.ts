@@ -1,24 +1,26 @@
 // src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
+
 import * as config from "../config.js";
 import logger from "../logger.js";
-import { AuthContext } from "./authContext.js";
-import { extractTokensWithPuppeteer } from "./puppeteerLogin.js";
-import * as authClient from "./authClient.js";
-import { parseJwtPayload } from "./authUtils.js";
 
-export class TokenManager {
-    private authContext: AuthContext;
+import * as authContext from "./authContext.js";
+import * as puppeteerLogin from "./puppeteerLogin.js";
+import * as authClient from "./authClient.js";
+import * as authUtils from "./authUtils.js";
+
+export class AuthService {
+    private authContext: authContext.AuthContext;
 
     constructor() {
-        this.authContext = new AuthContext();
+        this.authContext = new authContext.AuthContext();
     }
 
-    public getAuthContext(): AuthContext {
+    public getAuthContext(): authContext.AuthContext {
         return this.authContext;
     }
 
-    public async initialAuth() {
+    public async initiateAuth() {
         let success = false;
         while (!success) {
             try {
@@ -66,7 +68,7 @@ export class TokenManager {
     }
 
     private async _extractInitialTokens() {
-        const tokens = await extractTokensWithPuppeteer();
+        const tokens = await puppeteerLogin.extractTokensWithPuppeteer();
         this.authContext.updateFromLogin(tokens);
         // We save after _setTokenData in _performFreshLogin to have the full set
     }
@@ -83,7 +85,7 @@ export class TokenManager {
         if (!tangoRT) {
             throw new Error("Tango-RT not found in auth context. Cannot refresh session.");
         }
-        const payload = parseJwtPayload(tangoRT);
+        const payload = authUtils.parseJwtPayload(tangoRT);
         const username = payload?.username || payload?.sessionId;
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");

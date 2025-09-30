@@ -1,6 +1,6 @@
 // src/requests.ts
-import logger from "./logger.js";
-import { COOKIE_NAMES, HEADERS } from "./auth/authConstants.js";
+import logger from "../logger.js";
+import * as constants from "../constants.js";
 
 export interface Tokens {
     st: string | null;
@@ -13,7 +13,7 @@ function getApiHeaders(tokens: Tokens): HeadersInit {
     if (!tokens.st) {
         throw new Error("Cannot create API headers: Tango-ST is missing from tokens.");
     }
-    return { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}` };
+    return { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}` };
 }
 
 function getStreamHeaders(tokens: Tokens): HeadersInit {
@@ -21,7 +21,7 @@ function getStreamHeaders(tokens: Tokens): HeadersInit {
         throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
     }
     const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
-    return { [HEADERS.COOKIE]: cookie };
+    return { [constants.HEADERS.COOKIE]: cookie };
 }
 
 /**

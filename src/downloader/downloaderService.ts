@@ -5,11 +5,12 @@ import * as path from "path";
 import * as childProcess from "child_process";
 import * as url from "url";
 
-import * as config from "./config.js";
-import logger from "./logger.js";
-import * as storage from "./storage.js";
+import * as config from "../config.js";
+import logger from "../logger.js";
+import * as storage from "../storage.js";
+
+import * as downloaderUtils from "./downloaderUtils.js";
 import * as requests from "./requests.js";
-import { Tokens } from "./requests.js";
 
 // --- Download State ---
 interface ActiveDownload {
@@ -36,7 +37,7 @@ function getResponseBodyLines(responseBody: string): string[] {
     return responseBody.split("\n").filter((line) => line.trim() !== "");
 }
 
-async function readTokensFromSessionFile(): Promise<Tokens | null> {
+async function readTokensFromSessionFile(): Promise<requests.Tokens | null> {
     try {
         const cfg = config.getConfig();
         const sessionFileName = cfg.fileNames.session;
@@ -83,7 +84,7 @@ async function updateStatusFile() {
     }
 }
 
-async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: Tokens): Promise<string | null> {
+async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: requests.Tokens): Promise<string | null> {
     try {
         const masterListBody = await requests.getMasterList(masterPlaylistUrl, tokens);
         if (!masterListBody) {
@@ -119,7 +120,7 @@ async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: Tokens): 
 
 // --- Core Service Logic ---
 
-async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, tokens: Tokens) {
+async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, tokens: requests.Tokens) {
     let alias = streamerId;
     let tsFilePath: string | null = null;
     let segmentsDirPath: string | null = null;
@@ -158,11 +159,11 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         await updateStatusFile();
 
         const startDate = new Date();
-        const paths = storage.createDownloadPaths(alias, startDate);
+        const paths = downloaderUtils.createDownloadPaths(alias, startDate);
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${storage.getFormattedDate(startDate)} ${alias} started downloading.`);
+        logger.info(`${downloaderUtils.getFormattedDate(startDate)} ${alias} started downloading.`);
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
@@ -287,7 +288,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
-        logger.info(`${storage.getFormattedDate()} Finished download process for: ${alias}`);
+        logger.info(`${downloaderUtils.getFormattedDate()} Finished download process for: ${alias}`);
         getActiveDownloads().delete(masterListUrl);
         await updateStatusFile();
     }

@@ -2,10 +2,12 @@
 import * as timersPromises from "timers/promises";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
+
 import * as config from "../config.js";
 import logger from "../logger.js";
+
 import * as fileTracker from "./fileTracker.js";
-import { combineShortVideos } from "./combiner.js";
+import * as combiner from "./combiner.js";
 
 async function runCombinationCycle() {
     logger.info("[Combiner] Starting MP4 combination cycle...");
@@ -24,7 +26,7 @@ async function runCombinationCycle() {
 
         if (unprocessedFiles.length > 0) {
             // combineShortVideos takes the base directory to construct full paths
-            await combineShortVideos(unprocessedFiles, editedDir);
+            await combiner.combineShortVideos(unprocessedFiles, editedDir);
         } else {
             logger.info("[Combiner] No new MP4 files to combine in 'edited' folder.");
         }
