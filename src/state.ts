@@ -1,4 +1,4 @@
-// state.ts
+// src/state.ts
 
 // --- Auth State ---
 let _tt: string;

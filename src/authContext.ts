@@ -1,5 +1,4 @@
 // src/authContext.ts
-
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import logger from './logger.js';
@@ -13,7 +12,7 @@ const getSessionFilePath = () => path.resolve(process.cwd(), config.getConfig().
  */
 export class AuthContext {
     private tangoRT: string | null = null;
-    // We will add tt, ttu, tte, tangoST here in later steps.
+    private tangoST: string | null = null; // <-- NEW
 
     public getTangoRT(): string | null {
         return this.tangoRT;
@@ -23,10 +22,16 @@ export class AuthContext {
         this.tangoRT = rt;
     }
 
-    /**
-     * Attempts to load the Tango-RT from the session file into this context.
-     * @returns {Promise<boolean>} True if the token was successfully loaded, false otherwise.
-     */
+    // --- NEW GETTER/SETTER ---
+    public getTangoST(): string | null {
+        return this.tangoST;
+    }
+
+    public setTangoST(st: string): void {
+        this.tangoST = st;
+    }
+    // --- END NEW ---
+
     public async loadTokenFromFile(): Promise<boolean> {
         try {
             const filePath = getSessionFilePath();
@@ -37,16 +42,13 @@ export class AuthContext {
                 return true;
             }
         } catch (error: any) {
-            if (error.code !== 'ENOENT') { // Don't log an error if the file simply doesn't exist
+            if (error.code !== 'ENOENT') {
                 logger.error('Failed to read session file', { error });
             }
         }
         return false;
     }
 
-    /**
-     * Saves the current Tango-RT from this context to the session file.
-     */
     public async saveTokenToFile(): Promise<void> {
         try {
             if (this.tangoRT) {
