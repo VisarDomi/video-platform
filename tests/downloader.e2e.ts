@@ -11,126 +11,200 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
 const APP_ENTRY = path.join(rootDir, 'dist', 'main.js');
-const TEST_TIMEOUT = 90000; // 90 seconds, allowing time for stream discovery and segment download
+const GLOBAL_TEST_TIMEOUT = 120000; // 2 minutes for the whole suite
 
-async function waitForSegments(storagePath: string): Promise<string> {
+// --- Test Helper Functions ---
+
+interface DownloadAssets {
+    segmentFolderPath: string;
+    growingTsPath: string;
+}
+
+async function waitForDownloadAssets(storagePath: string, targetSegmentCount: number): Promise<DownloadAssets> {
     const pollInterval = 1000;
-    const maxWaitTime = 30000;
+    const maxWaitTime = 45000;
     let elapsedTime = 0;
 
     while (elapsedTime < maxWaitTime) {
         const entries = await fs.readdir(storagePath, { withFileTypes: true });
-        const downloadFolder = entries.find(e => e.isDirectory() && /^\d{4}-\d{2}-\d{2} \d{6} .+/ .test(e.name));
+        const downloadFolders = entries.filter(e => e.isDirectory() && /^\d{4}-\d{2}-\d{2} \d{6} .+/ .test(e.name));
 
-        if (downloadFolder) {
-            const downloadFolderPath = path.join(storagePath, downloadFolder.name);
-            const segments = await fs.readdir(downloadFolderPath);
-            if (segments.some(f => f.endsWith('.ts'))) {
-                console.log(`✅ Segment file(s) found in ${downloadFolder.name}.`);
-                return downloadFolderPath;
+        for (const folder of downloadFolders) {
+            const folderPath = path.join(storagePath, folder.name);
+            const growingTsPath = path.join(storagePath, `${folder.name}.ts`);
+            
+            const growingTsExists = await fs.access(growingTsPath).then(() => true).catch(() => false);
+            
+            if (growingTsExists) {
+                const segments = await fs.readdir(folderPath);
+                const tsFiles = segments.filter(f => f.endsWith('.ts'));
+
+                if (tsFiles.length >= targetSegmentCount) {
+                    console.log(`✅ Found valid asset pair for ${folder.name} with ${tsFiles.length} segments.`);
+                    return {
+                        segmentFolderPath: folderPath,
+                        growingTsPath: growingTsPath,
+                    };
+                }
             }
         }
 
         await new Promise(resolve => setTimeout(resolve, pollInterval));
         elapsedTime += pollInterval;
     }
-
-    throw new Error(`Timed out after ${maxWaitTime / 1000}s waiting for segment files.`);
+    throw new Error(`Timed out after ${maxWaitTime / 1000}s waiting for a download with ${targetSegmentCount} segment file(s).`);
 }
 
-async function runDownloaderTest() {
-    console.log('\n--- Starting E2E Test: Live Stream Download ---');
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'downloader-test-'));
-    const tempConfigPath = path.join(tempDir, 'config.json');
+async function waitForFileState(dir: string, mp4Name: string, rawFolderName: string, rawTsName: string): Promise<void> {
+    const pollInterval = 1000;
+    const maxWaitTime = 30000;
+    let elapsedTime = 0;
 
+    while (elapsedTime < maxWaitTime) {
+        const mp4Exists = await fs.access(path.join(dir, mp4Name)).then(() => true).catch(() => false);
+        const rawFolderExists = await fs.access(path.join(dir, rawFolderName)).then(() => true).catch(() => false);
+        const rawTsExists = await fs.access(path.join(dir, rawTsName)).then(() => true).catch(() => false);
+
+        if (mp4Exists && !rawFolderExists && !rawTsExists) {
+            console.log('✅ Repackage and cleanup successful: MP4 exists and raw files are deleted.');
+            return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        elapsedTime += pollInterval;
+    }
+    throw new Error('Timed out waiting for repackager to create MP4 and delete raw files.');
+}
+
+
+// --- Test Scenarios ---
+
+async function testDownloadInProgress(tempDir: string): Promise<string> {
+    console.log('\n--- Scenario 1: Verifying Active Download ---');
     let appProcess: ChildProcess | null = null;
     let logBuffer = '';
-
-    const cleanup = async () => {
-        if (appProcess) {
-            console.log('Tearing down application process...');
-            appProcess.kill('SIGTERM');
-            appProcess = null;
-        }
-        await fs.rm(tempDir, { recursive: true, force: true });
-        console.log('Temporary test directory and config cleaned up.');
-    };
+    const tempConfigPath = path.join(tempDir, 'config.json');
 
     try {
-        // --- 1. ARRANGE ---
-        console.log(`Setting up test in temporary directory: ${tempDir}`);
-
         const tempConfig: Partial<any> = {
             storagePath: tempDir,
-            repackager: { enabled: false },
-            // --> FIX: Point directly to the root session.json file using an absolute path.
-            fileNames: {
-                session: path.join(rootDir, 'session.json')
-            }
+            repackager: { enabled: false }, // Focus only on downloading
+            fileNames: { session: path.join(rootDir, 'session.json') }
         };
         await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig));
 
-        // --- 2. ACT ---
-        console.log('Launching the application...');
-        appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir });
+        appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir, stdio: 'pipe' });
 
-        const testPromise = new Promise<void>((resolve, reject) => {
-            appProcess?.stdout?.on('data', (data) => {
-                const output = data.toString();
-                process.stdout.write(output);
-                logBuffer += output;
-                if (output.match(/started downloading\./)) {
-                    resolve();
-                }
-            });
-            appProcess?.stderr?.on('data', (data) => {
-                const errorOutput = data.toString();
-                process.stderr.write(errorOutput);
-                logBuffer += errorOutput;
-            });
-            appProcess?.on('close', (code) => {
-                if (code !== 0 && code !== null) {
-                    reject(new Error(`Application exited prematurely with code ${code}`));
-                }
-            });
-            appProcess?.on('error', (err) => {
-                reject(new Error(`Failed to start application: ${err.message}`));
-            });
+        appProcess.stdout?.on('data', data => {
+            const output = data.toString();
+            process.stdout.write(output);
+            logBuffer += output;
         });
 
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => {
-                console.error('--- LOG BUFFER ON TIMEOUT ---');
-                console.error(logBuffer);
-                console.error('-----------------------------');
-                reject(new Error(`Test timed out after ${TEST_TIMEOUT / 1000}s.`));
-            }, TEST_TIMEOUT)
-        );
-
-        await Promise.race([testPromise, timeoutPromise]);
+        console.log('Waiting for download to start and write at least 3 segments...');
+        const { segmentFolderPath, growingTsPath } = await waitForDownloadAssets(tempDir, 3);
+        const downloadFolderName = path.basename(segmentFolderPath);
         
-        // --- 3. ASSERT ---
-        console.log('Verifying results...');
-        assert.ok(logBuffer.match(/started downloading\./), 'Did not find "started downloading" log message.');
-        console.log('✅ Assertion PASSED: "started downloading" log found.');
+        console.log('✅ Assertion PASSED: At least 3 segment files were created.');
 
-        console.log('Waiting for segment files to be created...');
-        const downloadFolderPath = await waitForSegments(tempDir);
-        const segments = await fs.readdir(downloadFolderPath);
-        const tsFiles = segments.filter(f => f.endsWith('.ts'));
-        assert.ok(tsFiles.length > 0, 'No .ts segment files were found in the download directory.');
-        console.log(`✅ Assertion PASSED: Found ${tsFiles.length} segment file(s).`);
+        const initialStats = await fs.stat(growingTsPath);
+        console.log(`Initial size of ${path.basename(growingTsPath)}: ${initialStats.size} bytes. Waiting to verify growth...`);
+        
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-        console.log('\n--- E2E Test PASSED: Live Stream Download ---');
-        process.exit(0);
+        const finalStats = await fs.stat(growingTsPath);
+        console.log(`Final size of ${path.basename(growingTsPath)}: ${finalStats.size} bytes.`);
+        
+        assert.ok(finalStats.size > initialStats.size, 'The main .ts file did not grow in size.');
+        console.log('✅ Assertion PASSED: Concatenated .ts file is growing.');
 
-    } catch (error) {
-        console.error('\n--- E2E Test FAILED: Live Stream Download ---');
-        console.error(error);
-        process.exit(1);
+        return downloadFolderName;
+
     } finally {
-        await cleanup();
+        if (appProcess) {
+            console.log('Terminating download process to simulate stream ending...');
+            appProcess.kill('SIGTERM');
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 }
 
-runDownloaderTest();
+async function testFullLifecycle(tempDir: string, staleFolderName: string) {
+    console.log('\n--- Scenario 2: Verifying Repackage and Cleanup ---');
+    let appProcess: ChildProcess | null = null;
+    const tempConfigPath = path.join(tempDir, 'config.json');
+
+    try {
+        const tempConfig: Partial<any> = {
+            storagePath: tempDir,
+            // --> FIX: Disable the downloader to prevent the race condition
+            downloader: {
+                enabled: false 
+            },
+            repackager: {
+                enabled: true,
+                deleteRawOnSuccess: true
+            },
+            fileNames: { session: path.join(rootDir, 'session.json') },
+            timeouts: { staleStream: 5000 },
+            intervals: { repackageScanMinutes: 0.1 } // 6 seconds
+        };
+        await fs.writeFile(tempConfigPath, JSON.stringify(tempConfig, null, 2));
+
+        console.log(`Relaunching app. Expecting it to find and process stale folder: ${staleFolderName}`);
+        appProcess = spawn('node', [APP_ENTRY], { cwd: tempDir, stdio: 'pipe' });
+        
+        appProcess.stdout?.on('data', data => process.stdout.write(data.toString()));
+        appProcess.stderr?.on('data', data => process.stderr.write(data.toString()));
+        
+        const mp4Name = `${staleFolderName}.mp4`;
+        const rawTsName = `${staleFolderName}.ts`;
+
+        console.log('Waiting for repackager to complete its work...');
+        await waitForFileState(tempDir, mp4Name, staleFolderName, rawTsName);
+
+        console.log('✅ Assertion PASSED: Lifecycle complete.');
+
+    } finally {
+        if (appProcess) appProcess.kill('SIGTERM');
+    }
+}
+
+
+// --- Main Test Runner ---
+
+async function main() {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'downloader-suite-'));
+    let staleFolderName: string | null = null;
+    
+    const timeout = setTimeout(() => {
+        console.error(`\n--- E2E TEST SUITE TIMED OUT AFTER ${GLOBAL_TEST_TIMEOUT / 1000}s ---`);
+        process.exit(1);
+    }, GLOBAL_TEST_TIMEOUT);
+
+    try {
+        console.log(`--- Starting E2E Test Suite in ${tempDir} ---`);
+        
+        staleFolderName = await testDownloadInProgress(tempDir);
+        
+        if (staleFolderName) {
+            await testFullLifecycle(tempDir, staleFolderName);
+        } else {
+            throw new Error('First test scenario failed to produce a folder for the second scenario.');
+        }
+
+        console.log('\n✅✅✅ All E2E test scenarios PASSED! ✅✅✅');
+        process.exit(0);
+
+    } catch (error) {
+        console.error('\n--- E2E Test Suite FAILED ---');
+        console.error(error);
+        process.exit(1);
+    } finally {
+        clearTimeout(timeout);
+        await fs.rm(tempDir, { recursive: true, force: true });
+        console.log('Global temporary directory cleaned up.');
+    }
+}
+
+main();

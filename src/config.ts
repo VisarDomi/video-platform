@@ -28,6 +28,9 @@ export interface IConfig {
     networkBuffer: number;
     staleStream: number;
   };
+  downloader: { // <-- NEW SECTION
+    enabled: boolean;
+  };
   repackager: {
     enabled: boolean;
     enforceResolution: string | null;
@@ -56,6 +59,9 @@ const defaultConfig: IConfig = {
     networkBuffer: 100000,
     staleStream: 15000,
   },
+  downloader: { // <-- NEW SECTION
+    enabled: true,
+  },
   repackager: {
     enabled: true,
     enforceResolution: "720x1280",
@@ -79,6 +85,7 @@ function loadConfig(): IConfig {
                     fileNames: { ...mergedConfig.fileNames, ...userConfig.fileNames },
                     intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
+                    downloader: { ...mergedConfig.downloader, ...userConfig.downloader },
                     repackager: { ...mergedConfig.repackager, ...userConfig.repackager }
                 };
             } catch (error) {
@@ -87,11 +94,7 @@ function loadConfig(): IConfig {
         }
     };
 
-    // --> FIX: Load in hierarchical order: defaults -> root config -> cwd config
-    // 1. Defaults are already set.
-    // 2. Merge root config file.
     loadAndMerge(ROOT_CONFIG_PATH);
-    // 3. Merge CWD config file (will override root settings if present, which is what the test needs).
     loadAndMerge(path.resolve(process.cwd(), "config.json"));
     
     console.log(`Configuration has been loaded/reloaded.`);
@@ -105,7 +108,6 @@ export function getConfig(): IConfig {
 }
 
 let debounceTimer: NodeJS.Timeout | null = null;
-// Watch the root config for changes in normal operation
 fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
     if (filename && eventType === 'change') {
         if (debounceTimer) clearTimeout(debounceTimer);
