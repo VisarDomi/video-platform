@@ -10,13 +10,15 @@
         "restart": "npm run build && pm2 restart tango-downloader2",
         "stop": "pm2 stop tango-downloader2",
         "logs": "pm2 logs tango-downloader2 -f",
-        "test:e2e": "dotenv -e .env -- ts-node --esm tests/e2e.ts"
+        "test:e2e": "dotenv -e .env -- ts-node --esm tests/e2e.ts",
+        "test:e2e:download": "dotenv -e .env -- cross-env E2E_TEST_NAME='Stream Download' ts-node --esm tests/e2e.ts"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
     "license": "MIT",
     "devDependencies": {
         "@types/node": "20.8.10",
+        "cross-env": "^10.1.0",
         "dotenv-cli": "^10.0.0",
         "nodemon": "^3.1.10",
         "ts-node": "^10.9.2",

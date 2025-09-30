@@ -1,10 +1,11 @@
 // src/tokenManager.ts
 import * as timersPromises from "timers/promises";
-import puppeteer, { Browser, Page, Target, HTTPResponse } from "puppeteer";
+import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer";
 import * as config from "./config.js";
 import logger from "./logger.js";
-import * as requests from "./requests.js";
 import { AuthContext } from "./authContext.js";
+
+const COOKIE_KEY = "cookie";
 
 export class TokenManager {
     private authContext: AuthContext;
@@ -54,7 +55,57 @@ export class TokenManager {
         this.manageTokenLifecycle();
     }
 
+    // --- NEW: Moved from requests.ts ---
+    private async postRefreshSession(username: string, tangoRT: string): Promise<Response | null> {
+        const refreshHeaders: HeadersInit = {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
+            'Accept': 'application/json',
+            'content-type': 'application/json',
+            'username': username,
+            'Origin': 'https://tango.me',
+            [COOKIE_KEY]: `Tango-RT=${tangoRT}`,
+        };
+        const refreshOptions = { method: "POST", headers: refreshHeaders };
+        try {
+            const response = await fetch("https://gateway.tango.me/proxycador/api/session/refresh", refreshOptions);
+            if (!response.ok) {
+                logger.error(`Failed to refresh session. Tango-RT might be expired.`, { status: response.status });
+                return null;
+            }
+            return response;
+        } catch (error) {
+            logger.error(`Network error during session refresh`, { error });
+            return null;
+        }
+    }
+
+    private async getTokenDataResponse(): Promise<Response | null> {
+        try {
+            const tangoST = this.authContext.getTangoST();
+            if (!tangoST) {
+                throw new Error("Tango-ST not found in auth context");
+            }
+            const options: RequestInit = {
+                method: "GET",
+                headers: {
+                    [COOKIE_KEY]: `Tango-ST=${tangoST}`,
+                }
+            };
+            const response = await fetch("https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData", options);
+            if (!response.ok) {
+                logger.error(`Failed to fetch token data, status: ${response.status}`);
+                return null;
+            }
+            return response;
+        } catch (error) {
+            logger.error(`Network error during token data fetch`, { error });
+            return null;
+        }
+    }
+    // --- END NEW ---
+
     private async extractInitialTokens() {
+        // ... (rest of the method is unchanged)
         const email = process.env.GOOGLE_EMAIL;
         const password = process.env.GOOGLE_PASSWORD;
         if (!(email && password)) {
@@ -94,7 +145,6 @@ export class TokenManager {
                 throw new Error("Browser could not be initialized after all attempts. Please check the logs.");
             }
             const tango = await browser.newPage();
-            // This is a simplified placeholder for your full puppeteer logic
             await tango.goto("https://tango.me", { waitUntil: "networkidle2" });
             
             await new Promise<void>((resolve, reject) => {
@@ -150,7 +200,7 @@ export class TokenManager {
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
-        const response = await requests.postRefreshSession(username, tangoRT);
+        const response = await this.postRefreshSession(username, tangoRT); // <-- USE THIS
         if (!response) {
             throw new Error(`Failed to refresh session. The request function has logged the details. Tango-RT might be expired.`);
         }
@@ -181,7 +231,7 @@ export class TokenManager {
     }
 
     private async setTokenData() {
-        const tokenDataResponse = await requests.getTokenDataResponse(this.authContext);
+        const tokenDataResponse = await this.getTokenDataResponse(); // <-- USE THIS
         if (!tokenDataResponse) {
             throw new Error(`Failed to fetch token data. The request function has logged the details.`);
         }
@@ -198,7 +248,6 @@ export class TokenManager {
                 this.authContext.setTt(tt.split("=")[1]);
                 this.authContext.setTtu(ttu.split("=")[1]);
                 this.authContext.setTte(tte.split("=")[1]);
-                // THE BUG WAS HERE: The old call to `utils.updateStatusFile()` is now removed.
             } else {
                 logger.error("Could not find all required cookies (tt, ttu, tte).");
                 logger.info({ tt, ttu, tte });

@@ -1,6 +1,5 @@
 // src/requests.ts
 import logger from './logger.js';
-import * as utils from './utils.js';
 import { AuthContext } from './authContext.js';
 
 const COOKIE_KEY = "cookie";
@@ -16,15 +15,15 @@ async function makeApiRequest<T>(
     url: string,
     method: string,
     authContext: AuthContext,
-    authType: 'st' | 'full' | 'none',
+    authType: 'st' | 'full', // 'none' is no longer used by any caller
     responseType: 'json' | 'text' | 'arrayBuffer' = 'json'
 ): Promise<ApiResponse<T>> {
     try {
         const headers: HeadersInit = {};
         if (authType === 'st') {
-            headers[COOKIE_KEY] = utils.createCookieST(authContext);
+            headers[COOKIE_KEY] = authContext.createCookieST();
         } else if (authType === 'full') {
-            headers[COOKIE_KEY] = utils.createCookie(authContext);
+            headers[COOKIE_KEY] = authContext.createCookie();
         }
         const options: RequestInit = { method, headers };
         const response = await fetch(url, options);
@@ -47,7 +46,7 @@ async function makeApiRequest<T>(
 }
 
 export async function getFollowingResponseBody(authContext: AuthContext) {
-    const response = await makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", authContext, 'st', 'json');
+    const response = await makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100", "GET", authContext, 'st', 'json');
     return response.success ? response.data : null;
 }
 
@@ -68,55 +67,9 @@ export function getLiveList(liveUrl: string, authContext: AuthContext): Promise<
     return makeApiRequest<string>(liveUrl, "GET", authContext, 'full', 'text');
 }
 
-export async function getTokenDataResponse(authContext: AuthContext): Promise<Response | null> {
-    try {
-        const tangoST = authContext.getTangoST();
-        if (!tangoST) {
-            throw new Error("Tango-ST not found in auth context");
-        }
-        const options: RequestInit = {
-            method: "GET",
-            headers: {
-                [COOKIE_KEY]: `Tango-ST=${tangoST}`,
-            }
-        };
-        const response = await fetch("https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData", options);
-        if (!response.ok) {
-            logger.error(`Failed to fetch token data, status: ${response.status}`);
-            return null;
-        }
-        return response;
-    } catch (error) {
-        logger.error(`Network error during token data fetch`, { error });
-        return null;
-    }
-}
-
-export async function postRefreshSession(username: string, tangoRT: string): Promise<Response | null> {
-    const refreshHeaders: HeadersInit = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
-        'Accept': 'application/json',
-        'content-type': 'application/json',
-        'username': username,
-        'Origin': 'https://tango.me',
-        [COOKIE_KEY]: `Tango-RT=${tangoRT}`,
-    };
-    const refreshOptions = { method: "POST", headers: refreshHeaders };
-    try {
-        const response = await fetch("https://gateway.tango.me/proxycador/api/session/refresh", refreshOptions);
-        if (!response.ok) {
-            logger.error(`Failed to refresh session. Tango-RT might be expired.`, { status: response.status });
-            return null;
-        }
-        return response;
-    } catch (error) {
-        logger.error(`Network error during session refresh`, { error });
-        return null;
-    }
-}
-
 export async function getTsSegment(tsUrl: string): Promise<Buffer | null> {
     try {
+        // This request is unauthenticated, so it doesn't need the helper
         const tsResponse = await fetch(tsUrl);
         if (tsResponse.ok) {
             const tsBuffer = await tsResponse.arrayBuffer();

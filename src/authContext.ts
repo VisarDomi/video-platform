@@ -7,8 +7,7 @@ import * as config from './config.js';
 const getSessionFilePath = () => path.resolve(process.cwd(), config.getConfig().fileNames.session);
 
 /**
- * A container for all authentication-related state.
- * This class centralizes token management, moving away from global state.
+ * A container for all authentication-related state and formatting logic.
  */
 export class AuthContext {
     private tangoRT: string | null = null;
@@ -17,45 +16,32 @@ export class AuthContext {
     private ttu: string | null = null;
     private tte: string | null = null;
 
-    public getTangoRT(): string | null {
-        return this.tangoRT;
+    public getTangoRT(): string | null { return this.tangoRT; }
+    public setTangoRT(rt: string): void { this.tangoRT = rt; }
+    public getTangoST(): string | null { return this.tangoST; }
+    public setTangoST(st: string): void { this.tangoST = st; }
+    public getTt(): string | null { return this.tt; }
+    public setTt(tt: string): void { this.tt = tt; }
+    public getTtu(): string | null { return this.ttu; }
+    public setTtu(ttu: string): void { this.ttu = ttu; }
+    public getTte(): string | null { return this.tte; }
+    public setTte(tte: string): void { this.tte = tte; }
+
+    // --- NEW: Moved from utils.ts ---
+    public createCookie(): string {
+        if (!(this.tt && this.ttu && this.tte)) {
+            throw new Error("tt, ttu, tte not found in AuthContext");
+        }
+        return `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
     }
 
-    public setTangoRT(rt: string): void {
-        this.tangoRT = rt;
+    public createCookieST(): string {
+        if (!this.tangoST) {
+            throw new Error("Tango-ST not found in AuthContext");
+        }
+        return `Tango-ST=${this.tangoST}`;
     }
-
-    public getTangoST(): string | null {
-        return this.tangoST;
-    }
-
-    public setTangoST(st: string): void {
-        this.tangoST = st;
-    }
-
-    public getTt(): string | null {
-        return this.tt;
-    }
-
-    public setTt(tt: string): void {
-        this.tt = tt;
-    }
-    
-    public getTtu(): string | null {
-        return this.ttu;
-    }
-
-    public setTtu(ttu: string): void {
-        this.ttu = ttu;
-    }
-    
-    public getTte(): string | null {
-        return this.tte;
-    }
-
-    public setTte(tte: string): void {
-        this.tte = tte;
-    }
+    // --- END NEW ---
 
     public async loadTokenFromFile(): Promise<boolean> {
         try {

@@ -19,14 +19,13 @@ const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig()
  */
 export async function updateStatusFile(authContext: AuthContext) {
     try {
-        // Convert Map to a more JSON-friendly format
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
             ...downloadInfo
         }));
 
         const status = {
-            activeDownloads, // Replaces downloads, downloading, and aliases
+            activeDownloads,
             tokens: {
                 tt: authContext.getTt(),
                 ttu: authContext.getTtu(),
@@ -43,8 +42,6 @@ export async function updateStatusFile(authContext: AuthContext) {
 
 /**
  * Fetches and parses a master playlist URL to find the final live playlist URL for the HD stream.
- * @param masterPlaylistUrl The URL of the master m3u8 playlist.
- * @returns The final live m3u8 playlist URL, or null if it cannot be resolved.
  */
 export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
     try {
@@ -54,7 +51,7 @@ export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContex
             return null;
         }
 
-        const masterLines = getResponseBodyLines(masterListBody); // Use local helper
+        const masterLines = getResponseBodyLines(masterListBody);
         let relativeLiveUrl;
         for (let i = 0; i < masterLines.length; i++) {
             if (masterLines[i].includes("RESOLUTION=1280x720")) {
@@ -80,7 +77,6 @@ export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContex
     }
 }
 
-
 export function getFormattedDate() {
     const now = new Date(Date.now());
     const year = now.getFullYear();
@@ -89,9 +85,7 @@ export function getFormattedDate() {
     const hours = String(now.getHours()).padStart(2, "0");
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
-    const formattedDate = `${year}-${month}-${day} ${hours}${minutes}${seconds}`;
-
-    return formattedDate;
+    return `${year}-${month}-${day} ${hours}${minutes}${seconds}`;
 }
 
 export interface RawPaths {
@@ -116,24 +110,6 @@ export function createPaths(streamer: string, formattedDate: string): RawPaths {
     }
 
     return { tsFilePath, segmentsDirPath };
-}
-
-export function createCookie(authContext: AuthContext) {
-    const tt = authContext.getTt();
-    const ttu = authContext.getTtu();
-    const tte = authContext.getTte();
-    if (!(tt && ttu && tte)) {
-        throw new Error("tt, ttu, tte not found in AuthContext")
-    }
-    return `tt=${tt};ttu=${ttu};tte=${tte}`
-}
-
-export function createCookieST(authContext: AuthContext) {
-    const tangoST = authContext.getTangoST();
-    if (!tangoST) {
-        throw new Error("Tango-ST not found in AuthContext")
-    }
-    return `Tango-ST=${tangoST}`
 }
 
 export function getResponseBodyLines(responseBody: string) {

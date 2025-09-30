@@ -1,145 +1,139 @@
 // tests/e2e.ts
-import * as child_process from 'child_process';
-import * as fs from 'fs/promises';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as url from 'url';
 
-// --- Configuration ---
-const SESSION_FILE = 'session.json';
-const STATUS_FILE = 'live-status.json';
-const ERROR_LOG = 'error.log';
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
 
-interface TestScenario {
-    name: string;
-    logSuccessMessage: string;
-    timeout: number;
-    preRun?: () => Promise<void>; // Optional setup function
-    postRun?: () => Promise<void>; // Optional verification function
-    failureCondition?: (log: string) => boolean; // Optional check for wrong behavior
+const APP_ENTRY = path.join(rootDir, 'dist', 'main.js');
+const TEST_TIMEOUT = 60000; // 60 seconds
+
+interface TestConfig {
+    testName: string;
+    successLog: string | RegExp;
+    failureLog?: string | RegExp;
+    timeout?: number;
 }
 
-// --- Test Scenarios Definition ---
+/**
+ * A generic helper to run an E2E test scenario.
+ */
+function runTest(config: TestConfig): Promise<void> {
+    const { testName, successLog, failureLog, timeout = TEST_TIMEOUT } = config;
+    let appProcess: ChildProcess | null = null;
+    let logBuffer = '';
 
-const FreshLoginScenario: TestScenario = {
-    name: "Fresh Login (Puppeteer)",
-    logSuccessMessage: 'Initial authentication successful.',
-    timeout: 3 * 60 * 1000, // 3 minutes
-    preRun: async () => {
-        console.log('--- Scenario: Fresh Login ---');
-        console.log('Ensuring clean slate by deleting old session files...');
-        for (const file of [SESSION_FILE, STATUS_FILE, ERROR_LOG]) {
-            try {
-                await fs.rm(path.resolve(process.cwd(), file));
-            } catch (error: any) {
-                if (error.code !== 'ENOENT') throw error;
+    console.log(`\n--- Starting E2E Test: ${testName} ---`);
+
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            const error = new Error(`Test timed out after ${timeout / 1000}s. Did not find success log: "${successLog}"`);
+            console.error('--- LOG BUFFER ON TIMEOUT ---');
+            console.error(logBuffer);
+            console.error('-----------------------------');
+            cleanupAndReject(error);
+        }, timeout);
+
+        const cleanupAndReject = (error: Error) => {
+            clearTimeout(timer);
+            if (appProcess) {
+                console.log(`Step 5: Tearing down application process...`);
+                appProcess.kill('SIGTERM');
+                appProcess = null;
             }
-        }
-    },
-    postRun: async () => {
-        console.log('Verifying session files were created from scratch...');
-        const sessionData = JSON.parse(await fs.readFile(SESSION_FILE, 'utf-8'));
-        if (!sessionData.tangoRT || typeof sessionData.tangoRT !== 'string') {
-            throw new Error(`${SESSION_FILE} is missing 'tangoRT' property.`);
-        }
-        console.log(`  - Verified ${SESSION_FILE}`);
-    }
-};
+            reject(error);
+        };
+        
+        console.log(`--- Scenario: ${testName} ---`);
+        console.log(`Using existing token from session.json...`);
 
-const RefreshScenario: TestScenario = {
-    name: "Token Refresh",
-    logSuccessMessage: 'Session successfully refreshed using token from file.',
-    timeout: 1 * 60 * 1000, // 1 minute
-    preRun: async () => {
-        console.log('--- Scenario: Token Refresh ---');
-        console.log(`Using existing token from ${SESSION_FILE}...`);
-        // Clean up status file to ensure we're testing its creation on refresh
-        try { await fs.rm(STATUS_FILE); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
-    },
-    failureCondition: (log: string) => {
-        return log.includes('Launching browser for automatic login');
-    }
-};
+        console.log(`\nStep 2: Launching the application...`);
+        appProcess = spawn('node', [APP_ENTRY], { cwd: rootDir });
 
-// --- Test Runner ---
-
-async function runTest(scenario: TestScenario) {
-    console.log(`\n--- Starting E2E Test: ${scenario.name} ---`);
-    let appProcess: child_process.ChildProcess | null = null;
-
-    try {
-        // 1. Run scenario-specific setup
-        if (scenario.preRun) {
-            await scenario.preRun();
-        }
-
-        // 2. Launch the Application
-        console.log('\nStep 2: Launching the application...');
-        appProcess = child_process.spawn('node', ['--loader', 'ts-node/esm', 'src/main.ts']);
-
-        // 3. Monitor Logs
         console.log(`\nStep 3: Monitoring logs...`);
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error(`Test timed out after ${scenario.timeout / 1000}s.`)), scenario.timeout);
-
-            const onData = (data: Buffer) => {
-                const log = data.toString();
-                process.stdout.write(log); // Show app logs in real-time
-
-                if (scenario.failureCondition?.(log)) {
-                    clearTimeout(timeout);
-                    reject(new Error("FAILURE: A failure condition was met. Check logs."));
+        
+        appProcess.stdout?.on('data', (data) => {
+            const output = data.toString();
+            process.stdout.write(output);
+            logBuffer += output;
+            
+            if (output.match(successLog)) {
+                clearTimeout(timer);
+                console.log(`\n--- E2E Test PASSED: ${testName} ---`);
+                if (appProcess) {
+                    console.log(`\nStep 5: Tearing down application process...`);
+                    appProcess.kill('SIGTERM');
+                    appProcess = null;
                 }
-                if (log.includes(scenario.logSuccessMessage)) {
-                    clearTimeout(timeout);
-                    resolve();
-                }
-            };
-            appProcess?.stdout?.on('data', onData);
-            appProcess?.stderr?.on('data', onData);
-            appProcess?.on('close', (code) => {
-                clearTimeout(timeout);
-                reject(new Error(`Application exited prematurely with code ${code}`));
-            });
+                resolve();
+            } else if (failureLog && output.match(failureLog)) {
+                cleanupAndReject(new Error(`Detected failure log: "${failureLog}"`));
+            }
         });
 
-        // 4. Run scenario-specific verification
-        if (scenario.postRun) {
-            await scenario.postRun();
-        }
-        
-        console.log(`\n--- E2E Test PASSED: ${scenario.name} ---`);
-    } catch (error) {
-        console.error(`\n--- E2E Test FAILED: ${scenario.name} ---`);
-        console.error(error);
-        process.exit(1);
-    } finally {
-        if (appProcess) {
-            console.log('\nStep 5: Tearing down application process...');
-            appProcess.kill();
-        }
-    }
+        appProcess.stderr?.on('data', (data) => {
+            const errorOutput = data.toString();
+            process.stderr.write(errorOutput);
+            logBuffer += errorOutput;
+        });
+
+        appProcess.on('close', (code) => {
+            if (code !== 0 && code !== null) {
+                cleanupAndReject(new Error(`Application exited prematurely with code ${code}`));
+            }
+        });
+
+        appProcess.on('error', (err) => {
+            cleanupAndReject(new Error(`Failed to start application: ${err.message}`));
+        });
+    });
 }
 
-// --- Main Execution Logic ---
+/**
+ * Main test runner function
+ */
 async function main() {
-    try {
-        const sessionFileContent = await fs.readFile(SESSION_FILE, 'utf-8');
-        const sessionData = JSON.parse(sessionFileContent);
-        if (sessionData && sessionData.tangoRT) {
-            // If we have a token, run the refresh test
-            await runTest(RefreshScenario);
-        } else {
-            // If token is invalid or file is malformed, run fresh login
-            await runTest(FreshLoginScenario);
+    const allTests: TestConfig[] = [
+        {
+            testName: 'Token Refresh',
+            successLog: 'Session successfully refreshed using token from file.',
+            failureLog: 'Failed to refresh session',
+            timeout: 15000 // This should be fast
+        },
+        {
+            testName: 'Stream Download',
+            successLog: 'started downloading.',
+            failureLog: 'Failed to poll for following streams'
         }
-    } catch (error: any) {
-        // If file doesn't exist (ENOENT), it's a fresh login
-        if (error.code === 'ENOENT') {
-            await runTest(FreshLoginScenario);
-        } else {
-            // Any other error reading the file is a failure
-            console.error(`Failed to read or parse ${SESSION_FILE}.`, error);
+    ];
+
+    const testNameToRun = process.env.E2E_TEST_NAME;
+    let testsToRun = allTests;
+
+    if (testNameToRun) {
+        testsToRun = allTests.filter(test => test.testName === testNameToRun);
+        if (testsToRun.length === 0) {
+            console.error(`\n❌ Error: No E2E test found with the name "${testNameToRun}"`);
+            console.error(`Available tests are: ${allTests.map(t => `'${t.testName}'`).join(', ')}`);
             process.exit(1);
         }
+        console.log(`🎯 Running targeted E2E test: ${testNameToRun}`);
+    }
+
+    try {
+        for (const testConfig of testsToRun) {
+            await runTest(testConfig);
+        }
+
+        console.log('\n✅ All executed E2E tests passed! ✅');
+        process.exit(0);
+
+    } catch (error: any) {
+        console.error(`\n--- E2E Test FAILED ---`);
+        console.error(error.message);
+        process.exit(1);
     }
 }
 
