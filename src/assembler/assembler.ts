@@ -1,19 +1,16 @@
-// src/repackager.ts
+// src/assembler/assembler.ts
 import * as child_process from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import pLimit from 'p-limit';
 
-import * as config from './config.js';
-import logger from './logger.js';
+import * as config from '../config.js';
+import logger from '../logger.js';
 
 
 // --- Low-level FFmpeg Utilities ---
 
-/**
- * A promise-based wrapper for spawning child processes, capturing stdout/stderr.
- */
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
         const process = child_process.spawn(command, args);
@@ -45,9 +42,6 @@ const runCommand = (command: string, args: string[], logPrefix?: string): Promis
     });
 };
 
-/**
- * Uses ffprobe to get the video resolution of a file.
- */
 const getVideoResolution = async (filePath: string): Promise<string | null> => {
     try {
         const { stdout } = await runCommand('ffprobe', [
@@ -78,14 +72,8 @@ interface CheckResult {
     reason?: string;
 }
 
-/**
- * Checks a single .ts segment for corruption and correct resolution.
- */
 const checkSegment = async (filePath: string, targetResolution: string): Promise<CheckResult> => {
     const reasons: string[] = [];
-
-    // 1. Check for corruption. A segment is considered corrupt if ffmpeg
-    //    either fails (non-zero exit code) or prints anything to stderr.
     try {
         const { stderr } = await runCommand('ffmpeg', ['-nostdin', '-v', 'error', '-i', filePath, '-f', 'null', '-']);
         if (stderr.trim().length > 0) {
@@ -95,7 +83,6 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
         reasons.push('CORRUPTED');
     }
 
-    // 2. Check resolution.
     const currentResolution = await getVideoResolution(filePath);
     if (!currentResolution) {
         if (!reasons.includes('CORRUPTED')) {
@@ -112,19 +99,13 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
     }
 };
 
-/**
- * Validates a list of .ts segments in parallel.
- */
 async function validateSegments(tsFiles: string[], targetResolution: string, maxWorkers: number): Promise<ValidationResult> {
-    logger.info(`[Repackager] Validating ${tsFiles.length} segments with target resolution ${targetResolution}...`);
-
+    logger.info(`[Assembler] Validating ${tsFiles.length} segments with target resolution ${targetResolution}...`);
     const limit = pLimit(maxWorkers);
     const checkPromises = tsFiles.map(file => limit(() => checkSegment(file, targetResolution)));
     const checkResults = await Promise.all(checkPromises);
-
     const goodFiles: string[] = [];
     const badFiles: { path: string; reason: string }[] = [];
-
     for (const result of checkResults) {
         if (result.status === 'good') {
             goodFiles.push(result.path);
@@ -132,44 +113,77 @@ async function validateSegments(tsFiles: string[], targetResolution: string, max
             badFiles.push({ path: result.path, reason: result.reason || 'Unknown reason' });
         }
     }
-
     badFiles.forEach(item => {
-        logger.warn(`[Repackager] Skipping segment (${item.reason}): ${path.basename(item.path)}`);
+        logger.warn(`[Assembler] Skipping segment (${item.reason}): ${path.basename(item.path)}`);
     });
-
-    logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
+    logger.info(`[Assembler] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
     return { goodFiles, badFiles };
 }
 
 
 // --- File Concatenation ---
 
-/**
- * Concatenates a list of video files into a single MP4 using ffmpeg.
- */
 async function concatenateSegments(goodFiles: string[], outputFile: string, logPrefix: string): Promise<void> {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-repacker-'));
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tango-assembler-'));
     try {
         const fileListPath = path.join(tempDir, 'file_list.txt');
         const fileListContent = goodFiles.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
         await fs.writeFile(fileListPath, fileListContent);
 
-        logger.info(`[Repackager] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
+        logger.info(`[Assembler] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
 
+        /**
+         * --- Deep Dive into FFmpeg Flags for Safari/iOS Compatibility ---
+         * 
+         * As you noted, Safari (especially on iOS) is extremely picky about MP4 files,
+         * particularly when dealing with concatenated streams. Standard players like VLC or MPV
+         * are far more forgiving. These flags are crucial for creating a universally playable file.
+         *
+         * The command: ffmpeg -f concat -i file_list.txt -c copy -bsf:a aac_adtstoasc -movflags +faststart -fflags +genpts -y output.mp4
+         */
         await runCommand('ffmpeg', [
             '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats',
-            '-f', 'concat',
-            '-safe', '0',
+            // Input Driver
+            '-f', 'concat', // Use the concat demuxer, which reads a list of files to concatenate.
+            '-safe', '0',   // Allows absolute paths in the file list. Necessary since we use full paths.
             '-i', fileListPath,
-            '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc',
-            '-movflags', '+faststart',
-            '-fflags', '+genpts',
-            '-y',
-            outputFile
-        ], `Combine: ${logPrefix}`);
+            
+            // Core Operation
+            '-c', 'copy',   // Stream copy. This is VITAL. We are not re-encoding the video or audio.
+                            // We are just copying the raw H.264 video and AAC audio from the .ts segments
+                            // into a new MP4 container. This is extremely fast and preserves quality.
 
-        logger.info(`[Repackager] Success! MP4 file created for ${path.basename(outputFile)}`);
+            // Audio Bitstream Filter for Safari/iOS
+            '-bsf:a', 'aac_adtstoasc',
+                            // The raw audio in MPEG-TS segments is typically AAC with ADTS headers. These headers
+                            // describe the audio frame. The MP4 container format, however, does not use ADTS headers;
+                            // it stores this information globally in the 'moov' atom. This bitstream filter
+                            // (**A**udio **D**ata **T**ransport **S**tream **to** **A**udio **S**pecific **C**onfig)
+                            // strips the per-frame ADTS headers and converts them into the global configuration
+                            // that the MP4 container requires. Without this, Safari/iOS will often fail to play the audio.
+
+            // MP4 Container Flags for Safari/iOS Streaming
+            '-movflags', '+faststart',
+                            // The MP4 container has a metadata section called the 'moov' atom, which contains the
+                            // index and information needed to play the file (timescales, durations, etc.). By default,
+                            // ffmpeg writes this atom at the END of the file after all video/audio data is written.
+                            // For web streaming, a player needs this information FIRST to know how to play the video.
+                            // '+faststart' post-processes the file to move the 'moov' atom from the end to the beginning.
+                            // This allows the video to start playing immediately as it downloads, which is critical for web players.
+
+            // Timestamp Generation Flags for Concatenated Segments
+            '-fflags', '+genpts',
+                            // When concatenating raw `.ts` files that may have missing or incorrect timestamps (PTS - Presentation Timestamp),
+                            // playback can be jerky or broken. This flag tells ffmpeg to regenerate the timestamps based on the frame
+                            // rate and order, creating a smooth, continuous timeline. This is another key fix for Safari, which is
+                            // less tolerant of timestamp discontinuities than other players.
+
+            // Output Options
+            '-y', // Overwrite output file without asking.
+            outputFile
+        ], `Assemble: ${logPrefix}`);
+
+        logger.info(`[Assembler] Success! MP4 file created for ${path.basename(outputFile)}`);
 
     } finally {
         await fs.rm(tempDir, { recursive: true, force: true });
@@ -179,20 +193,17 @@ async function concatenateSegments(goodFiles: string[], outputFile: string, logP
 
 // --- Public API ---
 
-/**
- * Orchestrates the validation and repackaging of a folder of .ts segments into a single .mp4 file.
- */
-export const repackageFolder = async (inputDir: string): Promise<void> => {
+export const assembleSegmentsIntoMp4 = async (inputDir: string): Promise<void> => {
     const { repackager: repackagerConfig } = config.getConfig();
     const inputDirName = path.basename(inputDir);
     const outputDir = path.dirname(inputDir);
     const outputFile = path.join(outputDir, `${inputDirName}.mp4`);
 
-    logger.info(`[Repackager] Starting process for: ${inputDirName}`);
+    logger.info(`[Assembler] Starting process for: ${inputDirName}`);
 
     try {
         await fs.access(outputFile);
-        logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
+        logger.info(`[Assembler] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
         return;
     } catch (e) { /* File doesn't exist, proceed. */ }
 
@@ -203,20 +214,20 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         .map(f => path.join(inputDir, f));
 
     if (tsFiles.length === 0) {
-        logger.warn(`[Repackager] No .ts files found in directory ${inputDirName}. Skipping.`);
+        logger.warn(`[Assembler] No .ts files found in directory ${inputDirName}. Skipping.`);
         return;
     }
 
     const { enforceResolution, maxWorkers } = repackagerConfig;
     if (!enforceResolution) {
-        logger.error(`[Repackager] 'enforceResolution' is not set in config. Aborting for ${inputDirName}.`);
+        logger.error(`[Assembler] 'enforceResolution' is not set in config. Aborting for ${inputDirName}.`);
         return;
     }
 
     const { goodFiles } = await validateSegments(tsFiles, enforceResolution, maxWorkers || os.cpus().length);
 
     if (goodFiles.length === 0) {
-        logger.warn(`[Repackager] No valid segments found for ${inputDirName}. Skipping MP4 creation.`);
+        logger.warn(`[Assembler] No valid segments found for ${inputDirName}. Skipping MP4 creation.`);
         return;
     }
 

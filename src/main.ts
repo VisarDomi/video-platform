@@ -1,23 +1,22 @@
 // src/main.ts
 import 'dotenv/config';
 import logger from './logger.js';
-import * as config from './config.js'; // Import config
+import * as config from './config.js';
 import { TokenManager } from './auth/tokenManager.js';
 import { startDownloaderService } from './services/downloaderService.js';
-import { startRepackagerService } from './services/repackagerService.js';
+import { startAssemblerService } from './assembler/assemblerService.js';
+import { startCombinerService } from './combiner/combinerService.js';
 
 async function main() {
     logger.info("--- Starting Tango Downloader Service ---");
     const cfg = config.getConfig();
     
-    // 1. Authenticate and get the context
     logger.info("Starting initial authentication...");
     const tokenManager = new TokenManager();
     await tokenManager.initialAuth();
     const authContext = tokenManager.getAuthContext();
     logger.info("Initial authentication successful.");
     
-    // 2. Start the main application services based on config
     if (cfg.downloader.enabled) {
         startDownloaderService(authContext);
     } else {
@@ -25,12 +24,17 @@ async function main() {
     }
     
     if (cfg.repackager.enabled) {
-        startRepackagerService();
+        startAssemblerService();
     } else {
-        logger.warn("Repackager service is disabled via config.");
+        logger.warn("Segment Assembler service is disabled via config.");
+    }
+
+    if (cfg.combiner.enabled) {
+        startCombinerService();
+    } else {
+        logger.warn("MP4 Combiner service is disabled via config.");
     }
     
-    // 3. Start background maintenance jobs
     tokenManager.startBackgroundJobs();
     
     logger.info("All services are running.");

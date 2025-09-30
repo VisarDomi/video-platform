@@ -4,10 +4,9 @@ import * as path from 'path';
 import * as os from 'os';
 import * as url from 'url';
 import assert from 'assert';
-import winston from 'winston';
 import TransportStream from 'winston-transport';
 
-import { repackageFolder } from '../dist/repackager.js';
+import { assembleSegmentsIntoMp4 } from '../dist/assembler/assembler.js';
 import logger from '../dist/logger.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
@@ -52,7 +51,7 @@ async function runRepackagingTest() {
         console.log('Test fixtures prepared. Running repackager...');
 
         // --- 2. ACT ---
-        await repackageFolder(downloadFolderPath);
+        await assembleSegmentsIntoMp4(downloadFolderPath);
         console.log('Repackager finished.');
 
         // --- 3. ASSERT ---

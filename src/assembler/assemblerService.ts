@@ -1,4 +1,4 @@
-// src/services/repackagerService.ts
+// src/assembler/assemblerService.ts
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as timersPromises from 'timers/promises';
@@ -6,8 +6,8 @@ import * as path from 'path';
 
 import * as config from '../config.js';
 import logger from '../logger.js';
-import * as storage from '../storage.js'; // <-- NEW IMPORT
-import * as repackager from '../repackager.js';
+import * as storage from '../storage.js';
+import { assembleSegmentsIntoMp4 } from './assembler.js';
 
 async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
     const statusFilePath = path.join(config.getConfig().storagePath, config.getConfig().fileNames.liveStatus);
@@ -20,7 +20,7 @@ async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
         }
     } catch (error: any) {
         if (error.code !== 'ENOENT') {
-            logger.warn(`[Repackager] Could not read or parse live-status.json.`, { error });
+            logger.warn(`[Assembler] Could not read or parse live-status.json.`, { error });
         }
     }
     return new Set();
@@ -36,7 +36,7 @@ async function getStorageContents(storagePath: string): Promise<StorageContents 
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
         
-        const potentialFolders = entries.filter(e => e.isDirectory() && storage.parseDownloadFolderName(e.name)); // Use storage module
+        const potentialFolders = entries.filter(e => e.isDirectory() && storage.parseDownloadFolderName(e.name));
 
         const mp4FileNames = new Set(
             entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
@@ -50,9 +50,9 @@ async function getStorageContents(storagePath: string): Promise<StorageContents 
 
     } catch (error: any) {
         if (error.code === 'ENOENT') {
-            logger.warn(`[Repackager] Storage path ${storagePath} does not exist. Skipping scan.`);
+            logger.warn(`[Assembler] Storage path ${storagePath} does not exist. Skipping scan.`);
         } else {
-            logger.error("[Repackager] Failed to scan storage directory.", { error });
+            logger.error("[Assembler] Failed to scan storage directory.", { error });
         }
         return null;
     }
@@ -64,16 +64,16 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
     for (const tsFile of contents.tsFileNames) {
         const baseName = path.parse(tsFile).name;
         if (contents.mp4FileNames.has(baseName)) {
-            logger.info(`[Repackager Cleanup] Moving stale .ts file to trash: ${tsFile}`);
-            await storage.moveToTrash(path.join(storagePath, tsFile)); // Use storage module
+            logger.info(`[Assembler Cleanup] Moving stale .ts file to trash: ${tsFile}`);
+            await storage.moveToTrash(path.join(storagePath, tsFile));
         }
     }
 
     if (cfg.repackager.deleteRawOnSuccess) {
         for (const folder of contents.potentialFolders) {
             if (contents.mp4FileNames.has(folder.name)) {
-                logger.info(`[Repackager Cleanup] Moving stale segment folder to trash: ${folder.name}`);
-                await storage.moveToTrash(path.join(storagePath, folder.name)); // Use storage module
+                logger.info(`[Assembler Cleanup] Moving stale segment folder to trash: ${folder.name}`);
+                await storage.moveToTrash(path.join(storagePath, folder.name));
             }
         }
     }
@@ -86,36 +86,36 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
     try {
         const dirEntries = await fsPromises.readdir(folderPath);
         if (dirEntries.length === 0) {
-            logger.warn(`[Repackager] Found empty stale folder '${folderName}'. Moving to trash.`);
+            logger.warn(`[Assembler] Found empty stale folder '${folderName}'. Moving to trash.`);
             if (cfg.repackager.deleteRawOnSuccess) {
-                await storage.moveToTrash(folderPath); // Use storage module
-                await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`)); // Use storage module
+                await storage.moveToTrash(folderPath);
+                await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
             }
             return;
         }
     } catch (readError) {
-        logger.error(`[Repackager] Could not read contents of folder '${folderName}'. Skipping.`, { readError });
+        logger.error(`[Assembler] Could not read contents of folder '${folderName}'. Skipping.`, { readError });
         return;
     }
 
-    logger.info(`[Repackager] Found stale, completed folder '${folderName}'. Starting processing.`);
-    await repackager.repackageFolder(folderPath);
+    logger.info(`[Assembler] Found stale, completed folder '${folderName}'. Starting processing.`);
+    await assembleSegmentsIntoMp4(folderPath);
 
     const mp4Path = path.join(path.dirname(folderPath), `${folderName}.mp4`);
     try {
         await fsPromises.access(mp4Path);
         if (cfg.repackager.deleteRawOnSuccess) {
-            logger.info(`[Repackager] Repackage successful. Moving raw assets to trash for '${folderName}'.`);
-            await storage.moveToTrash(folderPath); // Use storage module
-            await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`)); // Use storage module
+            logger.info(`[Assembler] Assembly successful. Moving raw assets to trash for '${folderName}'.`);
+            await storage.moveToTrash(folderPath);
+            await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
         }
     } catch {
-        logger.warn(`[Repackager] Repackage process for '${folderName}' finished, but output MP4 not found. Raw files will be kept.`);
+        logger.warn(`[Assembler] Assembly process for '${folderName}' finished, but output MP4 not found. Raw files will be kept.`);
     }
 }
 
 async function processCompletedDownloads() {
-    logger.info("[Repackager] Scanning for completed downloads...");
+    logger.info("[Assembler] Scanning for completed downloads...");
     const cfg = config.getConfig();
     const storageDir = cfg.storagePath;
 
@@ -134,9 +134,9 @@ async function processCompletedDownloads() {
             continue;
         }
 
-        const parsedName = storage.parseDownloadFolderName(folder.name); // Use storage module
+        const parsedName = storage.parseDownloadFolderName(folder.name);
         if (!parsedName || activeDownloadAliases.has(parsedName.alias)) {
-            logger.verbose(`[Repackager] Skipping folder for active or unparsable alias: ${folder.name}`);
+            logger.verbose(`[Assembler] Skipping folder for active or unparsable alias: ${folder.name}`);
             continue;
         }
 
@@ -148,17 +148,17 @@ async function processCompletedDownloads() {
             if (isStale) {
                 await processCandidateFolder(fullFolderPath);
             } else {
-                logger.verbose(`[Repackager] Folder '${folder.name}' is not stale yet. Skipping.`);
+                logger.verbose(`[Assembler] Folder '${folder.name}' is not stale yet. Skipping.`);
             }
         } catch (statError) {
-            logger.error(`[Repackager] Could not stat folder '${folder.name}'. Skipping.`, { error: statError });
+            logger.error(`[Assembler] Could not stat folder '${folder.name}'. Skipping.`, { error: statError });
         }
     }
-    logger.info("[Repackager] Scan complete.");
+    logger.info("[Assembler] Scan complete.");
 }
 
-export async function startRepackagerService() {
-    logger.info("Starting repackager service...");
+export async function startAssemblerService() {
+    logger.info("Starting segment assembler service...");
     if (config.getConfig().repackager.enabled) {
         await processCompletedDownloads();
     }
@@ -169,13 +169,13 @@ export async function startRepackagerService() {
 
         try {
             if (config.getConfig().repackager.enabled) {
-                logger.info("Periodic repackage scan triggered by manager.");
+                logger.info("Periodic segment assembly scan triggered by manager.");
                 await processCompletedDownloads();
             } else {
-                logger.verbose("Repackager is disabled, skipping periodic scan.");
+                logger.verbose("Segment assembler is disabled, skipping periodic scan.");
             }
         } catch (error) {
-            logger.error("An unexpected error occurred in the repackager manager loop.", { error });
+            logger.error("An unexpected error occurred in the assembler service loop.", { error });
         }
     }
 }

@@ -28,7 +28,7 @@ export interface IConfig {
     networkBuffer: number;
     staleStream: number;
   };
-  downloader: { // <-- NEW SECTION
+  downloader: {
     enabled: boolean;
   };
   repackager: {
@@ -36,6 +36,10 @@ export interface IConfig {
     enforceResolution: string | null;
     maxWorkers: number;
     deleteRawOnSuccess: boolean;
+  };
+  combiner: { // <-- NEW SECTION
+    enabled: boolean;
+    scanIntervalHours: number;
   };
 }
 
@@ -59,7 +63,7 @@ const defaultConfig: IConfig = {
     networkBuffer: 100000,
     staleStream: 15000,
   },
-  downloader: { // <-- NEW SECTION
+  downloader: {
     enabled: true,
   },
   repackager: {
@@ -67,6 +71,10 @@ const defaultConfig: IConfig = {
     enforceResolution: "720x1280",
     maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4,
     deleteRawOnSuccess: true
+  },
+  combiner: { // <-- NEW SECTION
+    enabled: false, // Default to off
+    scanIntervalHours: 6
   }
 };
 
@@ -78,7 +86,6 @@ function loadConfig(): IConfig {
             try {
                 const fileContent = fs.readFileSync(filePath, 'utf-8');
                 const userConfig = JSON.parse(fileContent);
-                // Deep merge logic
                 mergedConfig = {
                     ...mergedConfig,
                     ...userConfig,
@@ -86,7 +93,8 @@ function loadConfig(): IConfig {
                     intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
                     downloader: { ...mergedConfig.downloader, ...userConfig.downloader },
-                    repackager: { ...mergedConfig.repackager, ...userConfig.repackager }
+                    repackager: { ...mergedConfig.repackager, ...userConfig.repackager },
+                    combiner: { ...mergedConfig.combiner, ...userConfig.combiner } // <-- NEW
                 };
             } catch (error) {
                 console.error(`Error reading or parsing config file at ${filePath}.`, { error });

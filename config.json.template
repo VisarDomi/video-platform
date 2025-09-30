@@ -23,5 +23,9 @@
         "enforceResolution": "720x1280",
         "maxWorkers": 8,
         "deleteRawOnSuccess": true
+    },
+    "combiner": {
+    "enabled": true,
+    "scanIntervalHours": 6
     }
 }
