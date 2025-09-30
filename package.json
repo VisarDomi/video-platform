@@ -11,7 +11,7 @@
         "stop": "pm2 stop tango-downloader2",
         "logs": "pm2 logs tango-downloader2 -f",
         "test:e2e": "npm run build && dotenv -e .env -- ts-node --esm tests/lifecycle.e2e.ts",
-        "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest"
+        "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --detectOpenHandles"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",

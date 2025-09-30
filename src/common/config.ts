@@ -122,13 +122,18 @@ export function getConfig(): IConfig {
 }
 
 let debounceTimer: NodeJS.Timeout | null = null;
-fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
-    if (filename && eventType === "change") {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            console.log(`config.json changed. Reloading settings...`);
-            liveConfig = loadConfig();
-            debounceTimer = null;
-        }, 100);
-    }
-});
+
+// --- THIS IS THE FIX ---
+// Only watch for config changes when NOT running in a test environment.
+if (process.env.NODE_ENV !== 'test') {
+    fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
+        if (filename && eventType === "change") {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                console.log(`config.json changed. Reloading settings...`);
+                liveConfig = loadConfig();
+                debounceTimer = null;
+            }, 100);
+        }
+    });
+}
