@@ -6,45 +6,69 @@ import * as childProcess from 'child_process';
 
 import * as config from './config.js';
 import logger from './logger.js';
-import * as storage from './storage.js'; // <-- NEW IMPORT
+import * as storage from './storage.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
-import { AuthContext } from './auth/authContext.js';
+import { Tokens } from './requests.js';
 
 // --- Local Helpers for Downloader ---
 function getResponseBodyLines(responseBody: string): string[] {
     return responseBody.split("\n").filter(line => line.trim() !== '');
 }
 
-async function updateStatusFile(authContext: AuthContext) {
+async function readTokensFromStatusFile(): Promise<Tokens | null> {
+    try {
+        const cfg = config.getConfig();
+        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
+        const data = await fsPromises.readFile(statusFilePath, 'utf-8');
+        const status = JSON.parse(data);
+        if (status.tokens && status.tokens.st) {
+            return status.tokens as Tokens;
+        }
+        return null;
+    } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+            // Log error only if it's not a "file not found" error, which is expected on first run.
+            logger.error('Failed to read tokens from status file', { error });
+        }
+        return null;
+    }
+}
+
+async function updateStatusFile() {
     try {
         const cfg = config.getConfig();
         const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
         
+        let status: any = {};
+        try {
+            const data = await fsPromises.readFile(statusFilePath, 'utf-8');
+            status = JSON.parse(data);
+        } catch (error: any) {
+            if (error.code !== 'ENOENT') {
+                logger.warn('Could not read live-status.json before download update, will create a new one.', { error });
+            }
+            // If file doesn't exist or is invalid, status remains an empty object, which is fine.
+        }
+
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
             ...downloadInfo
         }));
 
-        const status = {
-            activeDownloads,
-            tokens: {
-                tt: authContext.getTt(),
-                ttu: authContext.getTtu(),
-                tte: authContext.getTte(),
-                st: authContext.getTangoST(),
-            },
-            lastUpdated: new Date().toISOString(),
-        };
+        status.activeDownloads = activeDownloads;
+        status.lastUpdated = new Date().toISOString();
+
         await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
     } catch (error) {
-        logger.error('Failed to write status file', { error });
+        logger.error('Failed to write download status to file', { error });
     }
 }
 
-async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
+
+async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: Tokens): Promise<string | null> {
     try {
-        const masterListBody = await requests.getMasterList(masterPlaylistUrl, authContext);
+        const masterListBody = await requests.getMasterList(masterPlaylistUrl, tokens);
         if (!masterListBody) {
             logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
             return null;
@@ -79,7 +103,7 @@ async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: Auth
 
 // --- Core Service Logic ---
 
-async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, authContext: AuthContext) {
+async function initiateAndDownloadStream(streamerId: string, masterListUrl: string, tokens: Tokens) {
     let alias = streamerId;
     let tsFilePath: string | null = null;
     let segmentsDirPath: string | null = null;
@@ -92,16 +116,16 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     }
 
     try {
-        alias = await requests.getStreamerAlias(streamerId, authContext);
+        alias = await requests.getStreamerAlias(streamerId, tokens);
         downloadState.alias = alias;
-        await updateStatusFile(authContext);
+        await updateStatusFile();
 
         let liveUrl: string | null = null;
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 5000;
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const resolvedUrl = await getLiveUrlFromMaster(masterListUrl, authContext); // Use local helper
+            const resolvedUrl = await getLiveUrlFromMaster(masterListUrl, tokens);
             if (resolvedUrl) {
                 liveUrl = resolvedUrl;
                 break;
@@ -115,14 +139,14 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         }
 
         downloadState.liveUrl = liveUrl;
-        await updateStatusFile(authContext);
+        await updateStatusFile();
 
         const startDate = new Date();
-        const paths = storage.createDownloadPaths(alias, startDate); // Use storage module
+        const paths = storage.createDownloadPaths(alias, startDate);
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${storage.getFormattedDate(startDate)} ${alias} started downloading.`); // Use storage module
+        logger.info(`${storage.getFormattedDate(startDate)} ${alias} started downloading.`);
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
@@ -148,7 +172,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         let lastSegmentDownloadedTimestamp = Date.now();
 
         while (true) {
-            const liveResponse = await requests.getLiveList(liveUrl, authContext);
+            const liveResponse = await requests.getLiveList(liveUrl, tokens);
             if (liveResponse.success && liveResponse.data) {
                 lastOnline = Date.now();
                 first404Timestamp = null;
@@ -224,26 +248,33 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
 
         if (totalSegmentsDownloaded === 0) {
             logger.warn(`No segments were downloaded for ${alias}, moving empty directory and file to trash.`);
-            if (tsFilePath) await storage.moveToTrash(tsFilePath); // Use storage module
-            if (segmentsDirPath) await storage.moveToTrash(segmentsDirPath); // Use storage module
+            if (tsFilePath) await storage.moveToTrash(tsFilePath);
+            if (segmentsDirPath) await storage.moveToTrash(segmentsDirPath);
         }
 
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
-        logger.info(`${storage.getFormattedDate()} Finished download process for: ${alias}`); // Use storage module
+        logger.info(`${storage.getFormattedDate()} Finished download process for: ${alias}`);
         state.getActiveDownloads().delete(masterListUrl);
-        await updateStatusFile(authContext);
+        await updateStatusFile();
     }
 }
 
-export async function startDownloaderService(authContext: AuthContext) {
+export async function startDownloaderService() {
     logger.info('Starting stream watcher...');
     let lastKnownTotal = -1;
 
     while (true) {
         try {
-            const streamIdsResponseBody = await requests.getFollowingResponseBody(authContext);
+            const tokens = await readTokensFromStatusFile();
+            if (!tokens) {
+                logger.warn("Tokens not available in live-status.json. Downloader is waiting for auth service to provide them...");
+                await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
+                continue;
+            }
+
+            const streamIdsResponseBody = await requests.getFollowingResponseBody(tokens);
 
             const activeDownloads = state.getActiveDownloads();
             const currentTotal = activeDownloads.size;
@@ -268,9 +299,9 @@ export async function startDownloaderService(authContext: AuthContext) {
                                 liveUrl: null
                             });
                             logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                            await updateStatusFile(authContext);
+                            await updateStatusFile();
                             
-                            initiateAndDownloadStream(streamerId, masterPlaylistUrl, authContext);
+                            initiateAndDownloadStream(streamerId, masterPlaylistUrl, tokens);
                         }
                     }
                 }

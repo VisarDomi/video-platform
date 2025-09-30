@@ -54,8 +54,13 @@ export async function refreshSession(username: string, tangoRT: string): Promise
         return { newTangoST, newTangoRT };
 
     } catch (error) {
-        logger.error(`Network error during session refresh`, { originalError: error });
-        throw new Error(`Network error during session refresh: ${(error as Error).message}`);
+        const err = error as Error & { cause?: any };
+        const logDetails = {
+            message: err.message,
+            cause: err.cause ? (err.cause.code || err.cause.message || err.cause) : 'N/A',
+        };
+        logger.error(`Network error during session refresh`, { error: logDetails });
+        throw new Error(`Network error during session refresh: ${err.message}`);
     }
 }
 
@@ -94,7 +99,12 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult> 
         return { tt, ttu, tte };
 
     } catch (error) {
-        logger.error(`Network error during token data fetch`, { originalError: error });
-        throw new Error(`Network error during token data fetch: ${(error as Error).message}`);
+        const err = error as Error & { cause?: any };
+        const logDetails = {
+            message: err.message,
+            cause: err.cause ? (err.cause.code || err.cause.message || err.cause) : 'N/A',
+        };
+        logger.error(`Network error during token data fetch`, { error: logDetails });
+        throw new Error(`Network error during token data fetch: ${err.message}`);
     }
 }

@@ -1,6 +1,28 @@
 // src/requests.ts
 import logger from './logger.js';
-import { AuthContext } from './auth/authContext.js';
+import { COOKIE_NAMES, HEADERS } from './auth/authConstants.js';
+
+export interface Tokens {
+    st: string | null;
+    tt: string | null;
+    ttu: string | null;
+    tte: string | null;
+}
+
+function getApiHeaders(tokens: Tokens): HeadersInit {
+    if (!tokens.st) {
+        throw new Error("Cannot create API headers: Tango-ST is missing from tokens.");
+    }
+    return { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}` };
+}
+
+function getStreamHeaders(tokens: Tokens): HeadersInit {
+    if (!tokens.tt || !tokens.ttu || !tokens.tte) {
+        throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
+    }
+    const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
+    return { [HEADERS.COOKIE]: cookie };
+}
 
 /**
  * A generic, internal helper for making API requests.
@@ -29,13 +51,13 @@ async function makeApiRequest<T>(
     }
 }
 
-export async function getFollowingResponseBody(authContext: AuthContext): Promise<any | null> {
-    const headers = authContext.getApiHeaders();
-    return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100", "GET", headers, 'json');
+export async function getFollowingResponseBody(tokens: Tokens): Promise<any | null> {
+    const headers = getApiHeaders(tokens);
+    return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", headers, 'json');
 }
 
-export async function getStreamerAlias(streamerId: string, authContext: AuthContext): Promise<string> {
-    const headers = authContext.getApiHeaders();
+export async function getStreamerAlias(streamerId: string, tokens: Tokens): Promise<string> {
+    const headers = getApiHeaders(tokens);
     const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`;
     const response = await makeApiRequest<any>(url, "GET", headers, 'json');
     if (response?.basicProfile?.aliases?.[0]?.alias) {
@@ -44,14 +66,14 @@ export async function getStreamerAlias(streamerId: string, authContext: AuthCont
     return streamerId;
 }
 
-export async function getMasterList(masterListUrl: string, authContext: AuthContext): Promise<string | null> {
-    const headers = authContext.getStreamHeaders();
+export async function getMasterList(masterListUrl: string, tokens: Tokens): Promise<string | null> {
+    const headers = getStreamHeaders(tokens);
     return makeApiRequest<string>(masterListUrl, "GET", headers, 'text');
 }
 
-export async function getLiveList(liveUrl: string, authContext: AuthContext): Promise<{ success: boolean, data: string | null, status?: number }> {
+export async function getLiveList(liveUrl: string, tokens: Tokens): Promise<{ success: boolean, data: string | null, status?: number }> {
     try {
-        const headers = authContext.getStreamHeaders();
+        const headers = getStreamHeaders(tokens);
         const options: RequestInit = { method: "GET", headers };
         const response = await fetch(liveUrl, options);
         

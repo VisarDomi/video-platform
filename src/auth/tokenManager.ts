@@ -1,5 +1,7 @@
 // src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
+import * as fsPromises from 'fs/promises';
+import * as path from 'path';
 import * as config from "../config.js";
 import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
@@ -50,7 +52,7 @@ export class TokenManager {
         }
         
         logger.info("Tango-RT loaded from file. Attempting to bring all tokens up-to-date...");
-        await this._ensureValidTokens(); // <-- CONSOLIDATED CALL
+        await this._ensureValidTokens();
     }
     
     public startBackgroundJobs() {
@@ -61,7 +63,8 @@ export class TokenManager {
     private async _performFreshLogin() {
         logger.info("Performing full login via Puppeteer to get new tokens...");
         await this._extractInitialTokens();
-        await this._setTokenData(); // `setTokenData` is still needed after a fresh login
+        await this._setTokenData();
+        await this._updateStatusFile();
     }
 
     private async _extractInitialTokens() {
@@ -73,6 +76,7 @@ export class TokenManager {
     private async _ensureValidTokens() {
         await this._refreshSession();
         await this._setTokenData();
+        await this._updateStatusFile();
     }
 
     private async _refreshSession() {
@@ -107,12 +111,42 @@ export class TokenManager {
         const result = await authClient.fetchTokenData(tangoST);
         this.authContext.updateFromTokenData(result);
     }
+
+    private async _updateStatusFile(): Promise<void> {
+        const cfg = config.getConfig();
+        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
+        
+        let status: any = {};
+        try {
+            const data = await fsPromises.readFile(statusFilePath, 'utf-8');
+            status = JSON.parse(data);
+        } catch (error: any) {
+            if (error.code !== 'ENOENT') {
+                logger.warn('Could not read live-status.json before token update, will create a new one.', { error });
+            }
+            // If file doesn't exist or is invalid, status remains an empty object, which is fine.
+        }
+
+        status.tokens = {
+            tt: this.authContext.getTt(),
+            ttu: this.authContext.getTtu(),
+            tte: this.authContext.getTte(),
+            st: this.authContext.getTangoST(),
+        };
+        status.lastUpdated = new Date().toISOString();
+
+        try {
+            await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
+        } catch (error) {
+            logger.error('Failed to write tokens to status file', { error });
+        }
+    }
     
     private async _refreshShortLivedTokens() {
         while (true) {
             try {
-                // This only needs to refresh the short-lived tokens, not the whole session.
                 await this._setTokenData();
+                await this._updateStatusFile();
             } catch (error) {
                 logger.error("Failed to refresh short-lived tokens. Waiting for new Tango-ST.", { error });
             }
@@ -130,7 +164,7 @@ export class TokenManager {
     
     private async _maintainSession() {
         try {
-            await this._ensureValidTokens(); // <-- CONSOLIDATED CALL
+            await this._ensureValidTokens();
         } catch (error) {
             logger.error("Lightweight session refresh failed. Falling back to full Puppeteer re-authentication.", { error });
             try {

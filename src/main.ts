@@ -14,11 +14,10 @@ async function main() {
     logger.info("Starting initial authentication...");
     const tokenManager = new TokenManager();
     await tokenManager.initialAuth();
-    const authContext = tokenManager.getAuthContext();
     logger.info("Initial authentication successful.");
     
     if (cfg.downloader.enabled) {
-        startDownloaderService(authContext);
+        startDownloaderService();
     } else {
         logger.warn("Downloader service is disabled via config.");
     }
