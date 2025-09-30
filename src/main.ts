@@ -38,7 +38,7 @@ async function main() {
         logger.warn("MP4 Combiner service is disabled via config.");
     }
 
-    logger.info("All services are running.");
+    logger.info("All enabled services are running.");
 }
 
 main();

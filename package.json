@@ -10,10 +10,7 @@
         "restart": "npm run build && pm2 restart tango-downloader2",
         "stop": "pm2 stop tango-downloader2",
         "logs": "pm2 logs tango-downloader2 -f",
-        "test:puppeteer": "npm run build && dotenv -e .env -- ts-node --esm tests/auth.e2e.ts",
-        "test:shorttoken": "npm run build && dotenv -e .env -- cross-env E2E_TEST_NAME='Stream Download' ts-node --esm tests/auth.e2e.ts",
-        "test:assembler": "npm run build && ts-node --esm tests/assembler.e2e.ts",
-        "test:lifecycle": "npm run build && dotenv -e .env -- ts-node --esm tests/lifecycle.e2e.ts"
+        "test": "npm run build && dotenv -e .env -- ts-node --esm tests/lifecycle.e2e.ts"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",

@@ -1,6 +1,7 @@
 // src/auth/authClient.ts
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
+import * as authQueue from "./authQueue.js";
 
 export interface RefreshResult {
     newTangoST: string;
@@ -29,7 +30,7 @@ export async function refreshSession(username: string, tangoRT: string): Promise
     const refreshOptions = { method: "POST", headers: refreshHeaders };
 
     try {
-        const response = await fetch(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
+        const response = await authQueue.requestQueue.add<Response>(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
         if (!response.ok) {
             throw new Error(`Session refresh failed with status ${response.status}. Tango-RT may be expired.`);
         }
@@ -73,7 +74,7 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult> 
             method: "GET",
             headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tangoST}` },
         };
-        const response = await fetch(constants.TANGO_URLS.TOKEN_DATA, options);
+        const response = await authQueue.requestQueue.add<Response>(constants.TANGO_URLS.TOKEN_DATA, options);
 
         if (!response.ok) {
             throw new Error(`Token data fetch failed with status ${response.status}`);
