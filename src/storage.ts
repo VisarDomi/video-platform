@@ -1,10 +1,10 @@
 // src/storage.ts
-import * as fs from 'fs';
-import * as fsPromises from 'fs/promises';
-import * as path from 'path';
+import * as fs from "fs";
+import * as fsPromises from "fs/promises";
+import * as path from "path";
 
-import * as config from './config.js';
-import logger from './logger.js';
+import * as config from "./config.js";
+import logger from "./logger.js";
 
 const FOLDER_NAME_REGEX = /^(\d{4}-\d{2}-\d{2} \d{6}) (.+)$/;
 
@@ -50,7 +50,7 @@ export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
 
     const tsFilePath = path.resolve(storageLocation, `${baseFilename}.ts`);
     const segmentsDirPath = path.resolve(storageLocation, baseFilename);
-    
+
     if (!fs.existsSync(segmentsDirPath)) {
         fs.mkdirSync(segmentsDirPath, { recursive: true });
     }
@@ -60,12 +60,12 @@ export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
 
 export async function moveToTrash(sourcePath: string) {
     const storagePath = config.getConfig().storagePath;
-    const trashDir = path.join(storagePath, 'trash');
+    const trashDir = path.join(storagePath, "trash");
 
     try {
         await fsPromises.stat(sourcePath);
     } catch (error: any) {
-        if (error.code === 'ENOENT') {
+        if (error.code === "ENOENT") {
             logger.verbose(`Source path to be trashed does not exist, skipping: ${path.basename(sourcePath)}`);
             return;
         }
@@ -80,10 +80,10 @@ export async function moveToTrash(sourcePath: string) {
         await fsPromises.rename(sourcePath, destPath);
         logger.info(`Moved to trash: ${baseName}`);
     } catch (error: any) {
-        if (error.code === 'EEXIST' || error.code === 'ENOTEMPTY') {
+        if (error.code === "EEXIST" || error.code === "ENOTEMPTY") {
             try {
                 const baseName = path.basename(sourcePath);
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
                 const newDestPath = path.join(trashDir, `${timestamp}-${baseName}`);
                 await fsPromises.rename(sourcePath, newDestPath);
                 logger.info(`Moved to trash with new name: ${path.basename(newDestPath)}`);

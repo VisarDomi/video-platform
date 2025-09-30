@@ -1,5 +1,5 @@
 // src/auth/authUtils.ts
-import logger from '../logger.js';
+import logger from "../logger.js";
 
 /**
  * Parses the payload of a JSON Web Token (JWT) without verifying its signature.

@@ -2,7 +2,7 @@
 import puppeteer, { Browser, HTTPResponse } from "puppeteer";
 import * as timersPromises from "timers/promises";
 import logger from "../logger.js";
-import { TANGO_URLS, COOKIE_NAMES } from './authConstants.js';
+import { TANGO_URLS, COOKIE_NAMES } from "./authConstants.js";
 
 interface InitialTokens {
     tangoRT: string;
@@ -20,7 +20,7 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
     }
     logger.info(`Puppeteer is using browser executable at: ${puppeteer.executablePath()}`);
     let browser: Browser | undefined;
-    
+
     try {
         const maxLaunchRetries = 10;
         const initialLaunchDelay = 2000;
@@ -54,7 +54,7 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
         }
         const tango = await browser.newPage();
         await tango.goto(TANGO_URLS.HOME, { waitUntil: "networkidle2" });
-        
+
         const tokens = await new Promise<InitialTokens>((resolve, reject) => {
             tango.on("response", async (response: HTTPResponse) => {
                 if (response.url() === TANGO_URLS.GOOGLE_LOGIN) {
@@ -78,12 +78,13 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
                     }
                 }
             });
-            timersPromises.setTimeout(60000).then(() => reject(new Error("Timeout: Did not intercept a response with Tango-RT and Tango-ST within 60 seconds.")));
+            timersPromises
+                .setTimeout(60000)
+                .then(() => reject(new Error("Timeout: Did not intercept a response with Tango-RT and Tango-ST within 60 seconds.")));
         });
 
         logger.info("Initial refresh token found via Puppeteer.");
         return tokens;
-
     } catch (error) {
         logger.error("Failed to extract initial tokens via Puppeteer.", { error });
         throw error;

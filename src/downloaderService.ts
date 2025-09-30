@@ -1,25 +1,25 @@
 // src/downloaderService.ts
-import * as fsPromises from 'fs/promises';
-import * as timersPromises from 'timers/promises';
-import * as path from 'path';
-import * as childProcess from 'child_process';
-import * as url from 'url';
+import * as fsPromises from "fs/promises";
+import * as timersPromises from "timers/promises";
+import * as path from "path";
+import * as childProcess from "child_process";
+import * as url from "url";
 
-import * as config from './config.js';
-import logger from './logger.js';
-import * as storage from './storage.js';
-import * as state from './state.js';
-import * as requests from './requests.js';
-import { Tokens } from './requests.js';
+import * as config from "./config.js";
+import logger from "./logger.js";
+import * as storage from "./storage.js";
+import * as state from "./state.js";
+import * as requests from "./requests.js";
+import { Tokens } from "./requests.js";
 
 // --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..');
+const projectRoot = path.resolve(__dirname, "..");
 
 // --- Local Helpers for Downloader ---
 function getResponseBodyLines(responseBody: string): string[] {
-    return responseBody.split("\n").filter(line => line.trim() !== '');
+    return responseBody.split("\n").filter((line) => line.trim() !== "");
 }
 
 async function readTokensFromSessionFile(): Promise<Tokens | null> {
@@ -28,36 +28,35 @@ async function readTokensFromSessionFile(): Promise<Tokens | null> {
         const sessionFileName = cfg.fileNames.session;
         // FIX: Resolve path from project root, not storagePath
         const sessionFilePath = path.resolve(projectRoot, sessionFileName);
-        
-        const data = await fsPromises.readFile(sessionFilePath, 'utf-8');
+
+        const data = await fsPromises.readFile(sessionFilePath, "utf-8");
         const session = JSON.parse(data);
         if (session.tangoST && session.tt && session.ttu && session.tte) {
             return {
                 st: session.tangoST,
                 tt: session.tt,
                 ttu: session.ttu,
-                tte: session.tte
+                tte: session.tte,
             };
         }
-        logger.warn('Session file is missing some required tokens (st, tt, ttu, tte).');
+        logger.warn("Session file is missing some required tokens (st, tt, ttu, tte).");
         return null;
     } catch (error: any) {
-        if (error.code !== 'ENOENT') {
-            logger.error('Failed to read tokens from session file', { error });
+        if (error.code !== "ENOENT") {
+            logger.error("Failed to read tokens from session file", { error });
         }
         return null;
     }
 }
 
-
 async function updateStatusFile() {
     try {
         const cfg = config.getConfig();
         const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
-        
+
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
-            ...downloadInfo
+            ...downloadInfo,
         }));
 
         const status = {
@@ -66,10 +65,9 @@ async function updateStatusFile() {
         };
         await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
     } catch (error) {
-        logger.error('Failed to write download status to live-status.json', { error });
+        logger.error("Failed to write download status to live-status.json", { error });
     }
 }
-
 
 async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: Tokens): Promise<string | null> {
     try {
@@ -104,7 +102,6 @@ async function getLiveUrlFromMaster(masterPlaylistUrl: string, tokens: Tokens): 
         return null;
     }
 }
-
 
 // --- Core Service Logic ---
 
@@ -156,15 +153,26 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
 
-        const ffmpegProcess = childProcess.spawn('ffmpeg', [
-            '-hide_banner', '-loglevel', 'error', '-stats',
-            '-fflags', '+genpts', '-i', 'pipe:0', '-c', 'copy',
-            '-f', 'mpegts', '-y', tsFilePath
+        const ffmpegProcess = childProcess.spawn("ffmpeg", [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-stats",
+            "-fflags",
+            "+genpts",
+            "-i",
+            "pipe:0",
+            "-c",
+            "copy",
+            "-f",
+            "mpegts",
+            "-y",
+            tsFilePath,
         ]);
-        ffmpegProcess.stderr.on('data', (data) => logger.verbose(`ffmpeg-ts (${path.basename(tsFilePath!)}): ${data.toString()}`));
-        ffmpegProcess.on('error', (err) => logger.error(`Failed to start FFmpeg (ts) for ${alias}. Is ffmpeg installed?`, { error: err }));
-        ffmpegProcess.stdin.on('error', (err: NodeJS.ErrnoException) => {
-            if (err.code === 'EPIPE') {
+        ffmpegProcess.stderr.on("data", (data) => logger.verbose(`ffmpeg-ts (${path.basename(tsFilePath!)}): ${data.toString()}`));
+        ffmpegProcess.on("error", (err) => logger.error(`Failed to start FFmpeg (ts) for ${alias}. Is ffmpeg installed?`, { error: err }));
+        ffmpegProcess.stdin.on("error", (err: NodeJS.ErrnoException) => {
+            if (err.code === "EPIPE") {
                 logger.warn(`ffmpeg-ts (${alias}): Broken pipe. FFmpeg process likely closed prematurely.`);
             } else {
                 logger.error(`ffmpeg-ts (${alias}): stdin stream error.`, { error: err });
@@ -207,8 +215,8 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
                             }
 
                             try {
-                                const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf('/') + 1);
-                                const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf('?'));
+                                const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
+                                const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
                                 const segmentPath = path.join(segmentsDirPath, tsName);
                                 fsPromises.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                             } catch (error) {
@@ -221,22 +229,26 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
                 if (liveResponse.status === 404) {
                     if (first404Timestamp === null) {
                         first404Timestamp = Date.now();
-                        logger.warn(`Received first 404 for playlist of ${alias}. Will stop in ${config.getConfig().timeouts.streamEnd / 1000}s if it persists.`);
+                        logger.warn(
+                            `Received first 404 for playlist of ${alias}. Will stop in ${config.getConfig().timeouts.streamEnd / 1000}s if it persists.`
+                        );
                     }
                 }
             }
-            
+
             if (Date.now() - lastSegmentDownloadedTimestamp > config.getConfig().timeouts.staleStream) {
                 logger.info(`No new segments for ${alias} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
                 break;
             }
 
-            if (first404Timestamp && (Date.now() - first404Timestamp > config.getConfig().timeouts.streamEnd)) {
+            if (first404Timestamp && Date.now() - first404Timestamp > config.getConfig().timeouts.streamEnd) {
                 logger.info(`Stream for ${alias} appears to have ended (persistent 404). Stopping download.`);
                 break;
             }
             if (Date.now() - lastOnline > config.getConfig().timeouts.networkBuffer) {
-                logger.warn(`No successful playlist fetch for ${alias} in ${config.getConfig().timeouts.networkBuffer / 1000}s. Assuming stream/connection loss.`);
+                logger.warn(
+                    `No successful playlist fetch for ${alias} in ${config.getConfig().timeouts.networkBuffer / 1000}s. Assuming stream/connection loss.`
+                );
                 break;
             }
             await timersPromises.setTimeout(config.getConfig().intervals.downloadBuffer);
@@ -246,17 +258,18 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
             ffmpegProcess.stdin.end();
         }
 
-        await new Promise<void>((resolve) => ffmpegProcess.on('close', (code) => {
-            logger.info(`FFmpeg (ts) process for ${alias} finished with code ${code}.`);
-            resolve();
-        }));
+        await new Promise<void>((resolve) =>
+            ffmpegProcess.on("close", (code) => {
+                logger.info(`FFmpeg (ts) process for ${alias} finished with code ${code}.`);
+                resolve();
+            })
+        );
 
         if (totalSegmentsDownloaded === 0) {
             logger.warn(`No segments were downloaded for ${alias}, moving empty directory and file to trash.`);
             if (tsFilePath) await storage.moveToTrash(tsFilePath);
             if (segmentsDirPath) await storage.moveToTrash(segmentsDirPath);
         }
-
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
@@ -267,7 +280,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
 }
 
 export async function startDownloaderService() {
-    logger.info('Starting stream watcher...');
+    logger.info("Starting stream watcher...");
     let lastKnownTotal = -1;
 
     while (true) {
@@ -301,11 +314,11 @@ export async function startDownloaderService() {
                             activeDownloads.set(masterPlaylistUrl, {
                                 streamerId: streamerId,
                                 alias: streamerId,
-                                liveUrl: null
+                                liveUrl: null,
                             });
                             logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
                             await updateStatusFile();
-                            
+
                             initiateAndDownloadStream(streamerId, masterPlaylistUrl, tokens);
                         }
                     }

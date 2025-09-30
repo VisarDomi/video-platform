@@ -1,6 +1,6 @@
 // src/requests.ts
-import logger from './logger.js';
-import { COOKIE_NAMES, HEADERS } from './auth/authConstants.js';
+import logger from "./logger.js";
+import { COOKIE_NAMES, HEADERS } from "./auth/authConstants.js";
 
 export interface Tokens {
     st: string | null;
@@ -27,12 +27,7 @@ function getStreamHeaders(tokens: Tokens): HeadersInit {
 /**
  * A generic, internal helper for making API requests.
  */
-async function makeApiRequest<T>(
-    url: string,
-    method: string,
-    headers: HeadersInit,
-    responseType: 'json' | 'text' | 'arrayBuffer' = 'json'
-): Promise<T | null> {
+async function makeApiRequest<T>(url: string, method: string, headers: HeadersInit, responseType: "json" | "text" | "arrayBuffer" = "json"): Promise<T | null> {
     try {
         const options: RequestInit = { method, headers };
         const response = await fetch(url, options);
@@ -41,9 +36,12 @@ async function makeApiRequest<T>(
             return null;
         }
         switch (responseType) {
-            case 'json': return await response.json();
-            case 'text': return await response.text() as T;
-            case 'arrayBuffer': return await response.arrayBuffer() as T;
+            case "json":
+                return await response.json();
+            case "text":
+                return (await response.text()) as T;
+            case "arrayBuffer":
+                return (await response.arrayBuffer()) as T;
         }
     } catch (error) {
         logger.warn(`API request to ${url} failed with network/parsing error.`, { error: (error as Error).message });
@@ -53,13 +51,13 @@ async function makeApiRequest<T>(
 
 export async function getFollowingResponseBody(tokens: Tokens): Promise<any | null> {
     const headers = getApiHeaders(tokens);
-    return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", headers, 'json');
+    return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", headers, "json");
 }
 
 export async function getStreamerAlias(streamerId: string, tokens: Tokens): Promise<string> {
     const headers = getApiHeaders(tokens);
     const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`;
-    const response = await makeApiRequest<any>(url, "GET", headers, 'json');
+    const response = await makeApiRequest<any>(url, "GET", headers, "json");
     if (response?.basicProfile?.aliases?.[0]?.alias) {
         return response.basicProfile.aliases[0].alias;
     }
@@ -68,21 +66,20 @@ export async function getStreamerAlias(streamerId: string, tokens: Tokens): Prom
 
 export async function getMasterList(masterListUrl: string, tokens: Tokens): Promise<string | null> {
     const headers = getStreamHeaders(tokens);
-    return makeApiRequest<string>(masterListUrl, "GET", headers, 'text');
+    return makeApiRequest<string>(masterListUrl, "GET", headers, "text");
 }
 
-export async function getLiveList(liveUrl: string, tokens: Tokens): Promise<{ success: boolean, data: string | null, status?: number }> {
+export async function getLiveList(liveUrl: string, tokens: Tokens): Promise<{ success: boolean; data: string | null; status?: number }> {
     try {
         const headers = getStreamHeaders(tokens);
         const options: RequestInit = { method: "GET", headers };
         const response = await fetch(liveUrl, options);
-        
+
         if (!response.ok) {
             return { success: false, data: null, status: response.status };
         }
         const data = await response.text();
         return { success: true, data, status: response.status };
-
     } catch (error) {
         logger.warn(`API request to ${liveUrl} failed with network/parsing error.`, { error: (error as Error).message });
         return { success: false, data: null };

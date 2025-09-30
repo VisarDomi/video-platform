@@ -1,25 +1,25 @@
 // src/assembler/assemblerService.ts
-import * as fs from 'fs';
-import * as fsPromises from 'fs/promises';
-import * as timersPromises from 'timers/promises';
-import * as path from 'path';
+import * as fs from "fs";
+import * as fsPromises from "fs/promises";
+import * as timersPromises from "timers/promises";
+import * as path from "path";
 
-import * as config from '../config.js';
-import logger from '../logger.js';
-import * as storage from '../storage.js';
-import { assembleSegmentsIntoMp4 } from './assembler.js';
+import * as config from "../config.js";
+import logger from "../logger.js";
+import * as storage from "../storage.js";
+import { assembleSegmentsIntoMp4 } from "./assembler.js";
 
 async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
     const statusFilePath = path.join(config.getConfig().storagePath, config.getConfig().fileNames.liveStatus);
     try {
-        const data = await fsPromises.readFile(statusFilePath, 'utf-8');
+        const data = await fsPromises.readFile(statusFilePath, "utf-8");
         const status = JSON.parse(data);
         if (status?.activeDownloads && Array.isArray(status.activeDownloads)) {
             const aliases = status.activeDownloads.map((dl: any) => dl.alias);
             return new Set(aliases);
         }
     } catch (error: any) {
-        if (error.code !== 'ENOENT') {
+        if (error.code !== "ENOENT") {
             logger.warn(`[Assembler] Could not read or parse live-status.json.`, { error });
         }
     }
@@ -35,21 +35,16 @@ interface StorageContents {
 async function getStorageContents(storagePath: string): Promise<StorageContents | null> {
     try {
         const entries = await fsPromises.readdir(storagePath, { withFileTypes: true });
-        
-        const potentialFolders = entries.filter(e => e.isDirectory() && storage.parseDownloadFolderName(e.name));
 
-        const mp4FileNames = new Set(
-            entries.filter(e => e.isFile() && e.name.endsWith('.mp4')).map(e => path.parse(e.name).name)
-        );
+        const potentialFolders = entries.filter((e) => e.isDirectory() && storage.parseDownloadFolderName(e.name));
 
-        const tsFileNames = new Set(
-            entries.filter(e => e.isFile() && e.name.endsWith('.ts')).map(e => e.name)
-        );
+        const mp4FileNames = new Set(entries.filter((e) => e.isFile() && e.name.endsWith(".mp4")).map((e) => path.parse(e.name).name));
+
+        const tsFileNames = new Set(entries.filter((e) => e.isFile() && e.name.endsWith(".ts")).map((e) => e.name));
 
         return { potentialFolders, mp4FileNames, tsFileNames };
-
     } catch (error: any) {
-        if (error.code === 'ENOENT') {
+        if (error.code === "ENOENT") {
             logger.warn(`[Assembler] Storage path ${storagePath} does not exist. Skipping scan.`);
         } else {
             logger.error("[Assembler] Failed to scan storage directory.", { error });
@@ -143,7 +138,7 @@ async function processCompletedDownloads() {
         const fullFolderPath = path.join(storageDir, folder.name);
         try {
             const stats = await fsPromises.stat(fullFolderPath);
-            const isStale = (Date.now() - stats.mtime.getTime()) > staleTimeout;
+            const isStale = Date.now() - stats.mtime.getTime() > staleTimeout;
 
             if (isStale) {
                 await processCandidateFolder(fullFolderPath);

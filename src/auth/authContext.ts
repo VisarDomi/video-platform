@@ -1,15 +1,15 @@
 // src/auth/authContext.ts
-import * as fsPromises from 'fs/promises';
-import * as path from 'path';
-import * as url from 'url';
-import logger from '../logger.js';
-import * as config from '../config.js';
-import { HEADERS, COOKIE_NAMES } from './authConstants.js';
-import { RefreshResult, TokenDataResult } from './authClient.js';
+import * as fsPromises from "fs/promises";
+import * as path from "path";
+import * as url from "url";
+import logger from "../logger.js";
+import * as config from "../config.js";
+import { HEADERS, COOKIE_NAMES } from "./authConstants.js";
+import { RefreshResult, TokenDataResult } from "./authClient.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, '..', '..');
+const projectRoot = path.resolve(__dirname, "..", "..");
 
 interface LoginResult {
     tangoRT: string;
@@ -35,11 +35,21 @@ export class AuthContext {
     private tte: string | null = null;
 
     // --- State Getters ---
-    public getTangoRT(): string | null { return this.tangoRT; }
-    public getTangoST(): string | null { return this.tangoST; }
-    public getTt(): string | null { return this.tt; }
-    public getTtu(): string | null { return this.ttu; }
-    public getTte(): string | null { return this.tte; }
+    public getTangoRT(): string | null {
+        return this.tangoRT;
+    }
+    public getTangoST(): string | null {
+        return this.tangoST;
+    }
+    public getTt(): string | null {
+        return this.tt;
+    }
+    public getTtu(): string | null {
+        return this.ttu;
+    }
+    public getTte(): string | null {
+        return this.tte;
+    }
 
     // --- State Update Methods ---
     public updateFromRefresh(result: RefreshResult): boolean {
@@ -87,9 +97,9 @@ export class AuthContext {
     public async loadTokenFromFile(): Promise<boolean> {
         try {
             const filePath = this._getSessionFilePath();
-            const data = await fsPromises.readFile(filePath, 'utf-8');
+            const data = await fsPromises.readFile(filePath, "utf-8");
             const session: Partial<SessionData> = JSON.parse(data);
-            
+
             if (session.tangoRT) {
                 this.tangoRT = session.tangoRT;
                 this.tangoST = session.tangoST ?? null;
@@ -99,8 +109,8 @@ export class AuthContext {
                 return true;
             }
         } catch (error: any) {
-            if (error.code !== 'ENOENT') {
-                logger.error('Failed to read session file', { error });
+            if (error.code !== "ENOENT") {
+                logger.error("Failed to read session file", { error });
             }
         }
         return false;
@@ -115,13 +125,13 @@ export class AuthContext {
                     tangoST: this.tangoST,
                     tt: this.tt,
                     ttu: this.ttu,
-                    tte: this.tte
+                    tte: this.tte,
                 };
                 await fsPromises.writeFile(filePath, JSON.stringify(sessionData, null, 2));
                 logger.verbose(`Session tokens saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
-            logger.error('Failed to save session file', { error });
+            logger.error("Failed to save session file", { error });
         }
     }
 }

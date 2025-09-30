@@ -13,7 +13,7 @@ export class TokenManager {
     constructor() {
         this.authContext = new AuthContext();
     }
-    
+
     public getAuthContext(): AuthContext {
         return this.authContext;
     }
@@ -31,7 +31,7 @@ export class TokenManager {
             }
         }
     }
-    
+
     private async _attemptAuthentication() {
         try {
             await this._tryLoadAndRefreshFromFile();
@@ -42,17 +42,17 @@ export class TokenManager {
             logger.info("Session successfully established via fresh Puppeteer login.");
         }
     }
-    
+
     private async _tryLoadAndRefreshFromFile(): Promise<void> {
         const loaded = await this.authContext.loadTokenFromFile();
         if (!loaded) {
             throw new Error("Session file not found or is invalid.");
         }
-        
+
         logger.info("Tango-RT loaded from file. Attempting to bring all tokens up-to-date...");
         await this._ensureValidTokens();
     }
-    
+
     public startBackgroundJobs() {
         this._refreshShortLivedTokens();
         this._manageTokenLifecycle();
@@ -88,10 +88,10 @@ export class TokenManager {
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
-        
+
         const result = await authClient.refreshSession(username, tangoRT);
         const receivedNewRT = this.authContext.updateFromRefresh(result);
-        
+
         if (receivedNewRT) {
             logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
         } else {
@@ -108,7 +108,7 @@ export class TokenManager {
         const result = await authClient.fetchTokenData(tangoST);
         this.authContext.updateFromTokenData(result);
     }
-    
+
     private async _refreshShortLivedTokens() {
         while (true) {
             try {
@@ -120,7 +120,7 @@ export class TokenManager {
             await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
         }
     }
-    
+
     private async _manageTokenLifecycle() {
         while (true) {
             const refreshInterval = config.getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
@@ -128,7 +128,7 @@ export class TokenManager {
             await this._maintainSession();
         }
     }
-    
+
     private async _maintainSession() {
         try {
             await this._ensureValidTokens();

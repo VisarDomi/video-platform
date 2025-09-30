@@ -13,25 +13,25 @@ const PROCESSED_FILE_PATH = path.join(ROOT_DIR, "processed-by-combiner.txt");
  * Returns an empty set if the file doesn't exist.
  */
 export async function loadProcessedFiles(): Promise<Set<string>> {
-  try {
-    const content = await fsPromises.readFile(PROCESSED_FILE_PATH, "utf-8");
-    const titles = content.split("\n").filter(line => line.trim() !== "");
-    return new Set(titles);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return new Set();
+    try {
+        const content = await fsPromises.readFile(PROCESSED_FILE_PATH, "utf-8");
+        const titles = content.split("\n").filter((line) => line.trim() !== "");
+        return new Set(titles);
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            return new Set();
+        }
+        throw error;
     }
-    throw error;
-  }
 }
 
 /**
  * Appends successfully processed/combined filenames to the tracking file.
  */
 export async function saveProcessedFiles(fileNames: string[]): Promise<void> {
-  if (fileNames.length === 0) return;
-  const content = fileNames.join("\n") + "\n";
-  await fsPromises.appendFile(PROCESSED_FILE_PATH, content);
+    if (fileNames.length === 0) return;
+    const content = fileNames.join("\n") + "\n";
+    await fsPromises.appendFile(PROCESSED_FILE_PATH, content);
 }
 
 /**
@@ -39,5 +39,5 @@ export async function saveProcessedFiles(fileNames: string[]): Promise<void> {
  */
 export async function getLocalVideoFiles(directory: string): Promise<string[]> {
     const allFiles = await fsPromises.readdir(directory);
-    return allFiles.filter(file => file.toLowerCase().endsWith('.mp4'));
+    return allFiles.filter((file) => file.toLowerCase().endsWith(".mp4"));
 }

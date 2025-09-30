@@ -1,17 +1,17 @@
 // src/combiner/combinerService.ts
-import * as timersPromises from 'timers/promises';
-import * as fsPromises from 'fs/promises';
-import * as path from 'path';
-import * as config from '../config.js';
-import logger from '../logger.js';
-import * as fileTracker from '../fileTracker.js';
-import { combineShortVideos } from './combiner.js';
+import * as timersPromises from "timers/promises";
+import * as fsPromises from "fs/promises";
+import * as path from "path";
+import * as config from "../config.js";
+import logger from "../logger.js";
+import * as fileTracker from "../fileTracker.js";
+import { combineShortVideos } from "./combiner.js";
 
 async function runCombinationCycle() {
     logger.info("[Combiner] Starting MP4 combination cycle...");
     const cfg = config.getConfig();
     const baseStorageDir = cfg.storagePath;
-    const editedDir = path.join(baseStorageDir, 'edited'); // The directory to watch
+    const editedDir = path.join(baseStorageDir, "edited"); // The directory to watch
 
     try {
         // Ensure the directory exists before trying to read from it.
@@ -20,7 +20,7 @@ async function runCombinationCycle() {
         const allLocalFiles = await fileTracker.getLocalVideoFiles(editedDir);
         const processedFiles = await fileTracker.loadProcessedFiles();
 
-        const unprocessedFiles = allLocalFiles.filter(file => !processedFiles.has(file));
+        const unprocessedFiles = allLocalFiles.filter((file) => !processedFiles.has(file));
 
         if (unprocessedFiles.length > 0) {
             // combineShortVideos takes the base directory to construct full paths
@@ -28,7 +28,6 @@ async function runCombinationCycle() {
         } else {
             logger.info("[Combiner] No new MP4 files to combine in 'edited' folder.");
         }
-
     } catch (error) {
         logger.error("[Combiner] An unexpected error occurred during the combination cycle.", { error });
     }
@@ -40,9 +39,9 @@ export async function startCombinerService() {
         logger.warn("MP4 Combiner service is disabled via config.");
         return;
     }
-    
+
     logger.info("Starting MP4 combiner service...");
-    
+
     // Run once on startup
     await runCombinationCycle();
 
