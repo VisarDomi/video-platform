@@ -3,10 +3,13 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as url from "url";
 
+import * as utils from "../common/utils.js";
+
+// --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT_DIR = path.resolve(__dirname, "..", "..");
-const PROCESSED_FILE_PATH = path.join(ROOT_DIR, "processed-by-combiner.txt");
+const projectRoot = utils.findProjectRoot(__dirname)
+const PROCESSED_FILE_PATH = path.join(projectRoot, "processed-by-combiner.txt");
 
 /**
  * Reads the processed-by-combiner.txt file and returns a Set of filenames.

@@ -3,16 +3,23 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
+import * as url from "url";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
+import * as utils from "../common/utils.js";
 
 import * as assemblerUtils from "./assemblerUtils.js";
 import { assembleSegmentsIntoMp4 } from "./assembler.js";
 
+// --- Correct Path Resolution ---
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = utils.findProjectRoot(__dirname)
+
 async function getActiveDownloadAliasesFromFile(): Promise<Set<string>> {
-    const statusFilePath = path.join(config.getConfig().storagePath, config.getConfig().fileNames.liveStatus);
+    const statusFilePath = path.join(projectRoot, config.getConfig().fileNames.liveStatus);
     try {
         const data = await fsPromises.readFile(statusFilePath, "utf-8");
         const status = JSON.parse(data);

@@ -4,11 +4,12 @@ import * as url from "url";
 import winston from "winston";
 
 import * as config from "./config.js";
+import * as utils from "./utils.js";
 
-// Get base directory
+// --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", ".."); // Place logs in the root folder
+const projectRoot = utils.findProjectRoot(__dirname)
 
 // Define custom format for console logs
 const consoleFormat = winston.format.combine(
@@ -35,7 +36,7 @@ const logger = winston.createLogger({
         }),
         // 2. A transport to log ERRORS to a file
         new winston.transports.File({
-            filename: path.join(rootDir, config.getConfig().fileNames.errorLog),
+            filename: path.join(projectRoot, config.getConfig().fileNames.errorLog),
             level: "error", // Only log errors to this file
             format: fileFormat,
         }),

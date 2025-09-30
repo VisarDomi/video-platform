@@ -8,9 +8,14 @@ import * as url from "url";
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
-import * as dateUtils from "../common/dateUtils.js";
+import * as utils from "../common/utils.js";
 
 import * as requests from "./requests.js";
+
+// --- Correct Path Resolution ---
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = utils.findProjectRoot(__dirname)
 
 // --- Download State ---
 interface ActiveDownload {
@@ -26,11 +31,6 @@ const _activeDownloads: Map<string, ActiveDownload> = new Map();
 export function getActiveDownloads(): Map<string, ActiveDownload> {
     return _activeDownloads;
 }
-
-// --- Correct Path Resolution ---
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "..");
 
 // --- Local Helpers for Downloader ---
 function getResponseBodyLines(responseBody: string): string[] {
@@ -67,7 +67,7 @@ async function readTokensFromSessionFile(): Promise<requests.Tokens | null> {
 async function updateStatusFile() {
     try {
         const cfg = config.getConfig();
-        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
+        const statusFilePath = path.join(projectRoot, cfg.fileNames.liveStatus);
 
         const activeDownloads = Array.from(getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
@@ -163,7 +163,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${dateUtils.getFormattedDate(startDate)} ${alias} started downloading.`);
+        logger.info(`${utils.getFormattedDate(startDate)} ${alias} started downloading.`);
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
@@ -288,7 +288,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
-        logger.info(`${dateUtils.getFormattedDate()} Finished download process for: ${alias}`);
+        logger.info(`${utils.getFormattedDate()} Finished download process for: ${alias}`);
         getActiveDownloads().delete(masterListUrl);
         await updateStatusFile();
     }

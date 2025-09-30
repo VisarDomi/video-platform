@@ -5,7 +5,7 @@ import * as path from "path";
 
 import * as config from "./config.js";
 import logger from "./logger.js";
-import { getFormattedDate } from "./dateUtils.js";
+import * as utils from "./utils.js";
 
 export interface DownloadPaths {
     tsFilePath: string;
@@ -13,7 +13,7 @@ export interface DownloadPaths {
 }
 
 function generateDownloadBaseName(alias: string, date: Date): string {
-    const formattedDate = getFormattedDate(date);
+    const formattedDate = utils.getFormattedDate(date);
     return `${formattedDate} ${alias}`;
 }
 
