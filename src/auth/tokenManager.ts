@@ -3,9 +3,8 @@ import * as timersPromises from "timers/promises";
 import * as config from "../config.js";
 import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
-import { extractTokensWithPuppeteer } from "./puppeteerLogin.js"; // <-- NEW IMPORT
-
-const COOKIE_KEY = "cookie";
+import { extractTokensWithPuppeteer } from "./puppeteerLogin.js";
+import * as authClient from "./authClient.js"; // <-- NEW IMPORT
 
 export class TokenManager {
     private authContext: AuthContext;
@@ -55,63 +54,14 @@ export class TokenManager {
         this.manageTokenLifecycle();
     }
 
-    private async postRefreshSession(username: string, tangoRT: string): Promise<Response | null> {
-        const refreshHeaders: HeadersInit = {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
-            'Accept': 'application/json',
-            'content-type': 'application/json',
-            'username': username,
-            'Origin': 'https://tango.me',
-            [COOKIE_KEY]: `Tango-RT=${tangoRT}`,
-        };
-        const refreshOptions = { method: "POST", headers: refreshHeaders };
-        try {
-            const response = await fetch("https://gateway.tango.me/proxycador/api/session/refresh", refreshOptions);
-            if (!response.ok) {
-                logger.error(`Failed to refresh session. Tango-RT might be expired.`, { status: response.status });
-                return null;
-            }
-            return response;
-        } catch (error) {
-            logger.error(`Network error during session refresh`, { error });
-            return null;
-        }
-    }
-
-    private async getTokenDataResponse(): Promise<Response | null> {
-        try {
-            const tangoST = this.authContext.getTangoST();
-            if (!tangoST) {
-                throw new Error("Tango-ST not found in auth context");
-            }
-            const options: RequestInit = {
-                method: "GET",
-                headers: {
-                    [COOKIE_KEY]: `Tango-ST=${tangoST}`,
-                }
-            };
-            const response = await fetch("https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData", options);
-            if (!response.ok) {
-                logger.error(`Failed to fetch token data, status: ${response.status}`);
-                return null;
-            }
-            return response;
-        } catch (error) {
-            logger.error(`Network error during token data fetch`, { error });
-            return null;
-        }
-    }
-
     private async extractInitialTokens() {
-        // Delegate the complex puppeteer logic to the new module
         const { tangoRT, tangoST } = await extractTokensWithPuppeteer();
-        
-        // The TokenManager's job is to manage the state
         this.authContext.setTangoRT(tangoRT);
         this.authContext.setTangoST(tangoST);
         await this.authContext.saveTokenToFile();
     }
 
+    // --- REFACTORED: Uses authClient ---
     private async refreshSession() {
         logger.info("Attempting to refresh session using Tango-RT...");
         const tangoRT = this.authContext.getTangoRT();
@@ -123,63 +73,39 @@ export class TokenManager {
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
-        const response = await this.postRefreshSession(username, tangoRT);
-        if (!response) {
-            throw new Error(`Failed to refresh session. The request function has logged the details. Tango-RT might be expired.`);
-        }
-        const allCookies = response.headers.getSetCookie();
-        let newStFound = false;
-        let newRtFound = false;
-        for (const cookieString of allCookies) {
-            const trimmedCookie = cookieString.trim();
-            if (trimmedCookie.startsWith("Tango-ST=")) {
-                const newTangoST = trimmedCookie.split(";")[0].substring("Tango-ST=".length);
-                this.authContext.setTangoST(newTangoST);
-                newStFound = true;
-            } else if (trimmedCookie.startsWith("Tango-RT=")) {
-                const newTangoRT = trimmedCookie.split(";")[0].substring("Tango-RT=".length);
-                this.authContext.setTangoRT(newTangoRT);
-                await this.authContext.saveTokenToFile();
-                newRtFound = true;
-            }
-        }
-        if (!newStFound) {
+        
+        const result = await authClient.refreshSession(username, tangoRT);
+        if (!result || !result.newTangoST) {
             throw new Error("Refresh endpoint did not return a new Tango-ST cookie.");
         }
-        if (newRtFound) {
+
+        this.authContext.setTangoST(result.newTangoST);
+        
+        if (result.newTangoRT) {
+            this.authContext.setTangoRT(result.newTangoRT);
+            await this.authContext.saveTokenToFile();
             logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
         } else {
             logger.warn("Successfully refreshed Tango-ST, but a new Tango-RT was not provided in the response.");
         }
     }
 
+    // --- REFACTORED: Uses authClient ---
     private async setTokenData() {
-        const tokenDataResponse = await this.getTokenDataResponse();
-        if (!tokenDataResponse) {
-            throw new Error(`Failed to fetch token data. The request function has logged the details.`);
+        const tangoST = this.authContext.getTangoST();
+        if (!tangoST) {
+            throw new Error("Cannot fetch token data without Tango-ST.");
         }
-        try {
-            const allCookies = tokenDataResponse.headers.getSetCookie();
-            let tt, ttu, tte;
-            for (const cookieString of allCookies) {
-                const trimmedCookie = cookieString.trim();
-                if (trimmedCookie.startsWith("tt=")) tt = trimmedCookie.split(";")[0];
-                if (trimmedCookie.startsWith("ttu=")) ttu = trimmedCookie.split(";")[0];
-                if (trimmedCookie.startsWith("tte=")) tte = trimmedCookie.split(";")[0];
-            }
-            if (tt && ttu && tte) {
-                this.authContext.setTt(tt.split("=")[1]);
-                this.authContext.setTtu(ttu.split("=")[1]);
-                this.authContext.setTte(tte.split("=")[1]);
-            } else {
-                logger.error("Could not find all required cookies (tt, ttu, tte).");
-                logger.info({ tt, ttu, tte });
-                throw new Error("Missing required cookies from tokenData response.");
-            }
-        } catch (error) {
-            logger.error("Failed to process cookies:", { error });
-            throw error;
+
+        const result = await authClient.fetchTokenData(tangoST);
+        if (!result || !result.tt || !result.ttu || !result.tte) {
+            logger.error("Could not find all required cookies (tt, ttu, tte).", { result });
+            throw new Error("Missing required cookies from tokenData response.");
         }
+
+        this.authContext.setTt(result.tt);
+        this.authContext.setTtu(result.ttu);
+        this.authContext.setTte(result.tte);
     }
 
     private parseJwtPayload(token: string): { [key: string]: any } | null {
