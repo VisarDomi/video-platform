@@ -10,7 +10,7 @@
         "restart": "npm run build && pm2 restart tango-downloader2",
         "stop": "pm2 stop tango-downloader2",
         "logs": "pm2 logs tango-downloader2 -f",
-        "test:login": "dotenv -e .env -- ts-node --esm tests/login.e2e.ts"
+        "test:e2e": "dotenv -e .env -- ts-node --esm tests/e2e.ts"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",

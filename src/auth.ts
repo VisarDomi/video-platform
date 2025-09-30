@@ -344,26 +344,40 @@ async function refreshSession() {
 
 /**
  * Performs the initial authentication, prioritizing stored tokens before falling back to Puppeteer.
+ * This function will now retry indefinitely on failure, ensuring the app doesn't crash on startup
+ * due to network issues.
  */
 export async function initialAuth() {
-    const loaded = await utils.loadTokenFromFile();
-    if (loaded) {
-        logger.info("Tango-RT loaded from file. Attempting to refresh session...");
+    let success = false;
+    while (!success) {
         try {
-            await refreshSession(); // This gets new ST and a new RT
-            await setTokenData();   // This uses the new ST to get session tokens
-            logger.info("Session successfully refreshed using token from file.");
-            return; // Success, initial auth is complete.
+            const loaded = await utils.loadTokenFromFile();
+            if (loaded) {
+                logger.info("Tango-RT loaded from file. Attempting to refresh session...");
+                try {
+                    await refreshSession(); // This gets new ST and a new RT
+                    await setTokenData();   // This uses the new ST to get session tokens
+                    logger.info("Session successfully refreshed using token from file.");
+                    success = true; // Mark as successful to exit the while loop
+                    continue; // Continue to exit the current iteration
+                } catch (error) {
+                    logger.warn("Failed to refresh session using token from file. Falling back to full Puppeteer login.", { error: (error as Error).message });
+                    // Let it fall through to the full login within the same loop iteration
+                }
+            }
+
+            // If load/refresh failed, perform the full login.
+            logger.info("Performing full login via Puppeteer to get new tokens...");
+            await extractInitialTokens();
+            await setTokenData();
+            success = true; // Mark as successful to exit the while loop
+
         } catch (error) {
-            logger.warn("Failed to refresh session using token from file. Falling back to full Puppeteer login.", { error });
-            // Let it fall through to the full login...
+            const errorMessage = (error as Error).message;
+            logger.error(`Initial authentication failed: ${errorMessage}. Retrying in 30 seconds...`);
+            await timersPromises.setTimeout(30000); // Wait 30 seconds before retrying
         }
     }
-
-    // If load/refresh failed, perform the full login.
-    logger.info("Performing full login via Puppeteer to get new tokens...");
-    await extractInitialTokens();
-    await setTokenData();
 }
 
 /**
