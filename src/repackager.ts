@@ -8,8 +8,10 @@ import pLimit from 'p-limit';
 import * as config from './config.js';
 import logger from './logger.js';
 
-// Helper to run a command and get its output/error, with optional real-time logging
-const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
+/**
+ * A helper to run an external command and capture its output.
+ */
+const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr:string }> => {
     return new Promise((resolve, reject) => {
         const process = child_process.spawn(command, args);
         let stdout = '';
@@ -21,7 +23,6 @@ const runCommand = (command: string, args: string[], logPrefix?: string): Promis
             const chunk = data.toString();
             stderr += chunk;
             if (logPrefix) {
-                // Log stderr lines as they come in for progress. Split by newline or carriage return.
                 chunk.trim().split(/[\r\n]+/).forEach((line: string) => {
                     if (line.trim()) logger.verbose(`[${logPrefix}] ${line.trim()}`);
                 });
@@ -42,7 +43,6 @@ const runCommand = (command: string, args: string[], logPrefix?: string): Promis
     });
 };
 
-
 const getVideoResolution = async (filePath: string): Promise<string | null> => {
     try {
         const { stdout } = await runCommand('ffprobe', [
@@ -55,27 +55,31 @@ const getVideoResolution = async (filePath: string): Promise<string | null> => {
         const resolution = stdout.trim().split('\n')[0];
         return resolution || null;
     } catch (error) {
-        return null; // ffprobe fails on corrupted files, which is expected
+        // ffprobe can fail on corrupted files, which is an expected part of validation.
+        return null;
     }
 };
 
 interface CheckResult {
-    status: 'good' | 'bad'; // Simplified status
+    status: 'good' | 'bad';
     path: string;
     reason?: string;
 }
 
+/**
+ * Checks a single .ts segment for corruption and correct resolution.
+ */
 const checkSegment = async (filePath: string, targetResolution: string): Promise<CheckResult> => {
     const reasons: string[] = [];
     
-    // 1. Check for corruption
+    // 1. Check for corruption by attempting a null-output transcode.
     try {
         await runCommand('ffmpeg', ['-nostdin', '-v', 'error', '-i', filePath, '-f', 'null', '-']);
     } catch (error) {
         reasons.push('CORRUPTED');
     }
 
-    // 2. Check resolution
+    // 2. Check resolution.
     const currentResolution = await getVideoResolution(filePath);
     if (!currentResolution) {
         if (!reasons.includes('CORRUPTED')) {
@@ -92,12 +96,9 @@ const checkSegment = async (filePath: string, targetResolution: string): Promise
     }
 };
 
-
 export const repackageFolder = async (inputDir: string): Promise<void> => {
     const repackagerConfig = config.getConfig().repackager;
-
     const inputDirName = path.basename(inputDir);
-    // The output directory is simply the parent of the input (segment) directory.
     const outputDir = path.resolve(inputDir, '..'); 
     const outputFile = path.join(outputDir, `${inputDirName}.mp4`);
 
@@ -105,28 +106,20 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
 
     try {
         await fs.access(outputFile);
-        logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping actual repackaging.`);
-        // Note: The cleanup of the source folder is handled by the calling function.
+        logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
         return;
     } catch (e) {
         // File doesn't exist, proceed.
     }
 
-    let allDirEntries;
-    try {
-        allDirEntries = await fs.readdir(inputDir);
-    } catch (error) {
-        logger.error(`[Repackager] Could not read directory ${path.basename(inputDir)}. It may have been deleted. Skipping.`, { error });
-        return;
-    }
-
+    const allDirEntries = await fs.readdir(inputDir).catch(() => []);
     const tsFiles = allDirEntries
         .filter(f => f.endsWith('.ts'))
         .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
         .map(f => path.join(inputDir, f));
 
     if (tsFiles.length === 0) {
-        logger.warn(`[Repackager] No .ts files found in non-empty directory ${path.basename(inputDir)}. Skipping repackaging to be safe.`);
+        logger.warn(`[Repackager] No .ts files found in directory ${inputDirName}. Skipping repackaging.`);
         return;
     }
 
@@ -135,11 +128,10 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         logger.error(`[Repackager] 'enforceResolution' is not set in config. Aborting for ${inputDirName}.`);
         return;
     }
-    logger.info(`[Repackager] Target resolution set to: ${targetResolution}`);
 
     const limit = pLimit(repackagerConfig.maxWorkers || os.cpus().length);
 
-    logger.info(`[Repackager] Validating ${tsFiles.length} segments...`);
+    logger.info(`[Repackager] Validating ${tsFiles.length} segments with target resolution ${targetResolution}...`);
     const checkPromises = tsFiles.map(file => limit(() => checkSegment(file, targetResolution)));
     const checkResults = await Promise.all(checkPromises);
     
@@ -164,11 +156,6 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         logger.info(`[Repackager] Validation complete: ${goodFiles.length} good, ${badFiles.length} skipped.`);
         logger.info(`[Repackager] Starting ffmpeg to combine ${goodFiles.length} segments into ${path.basename(outputFile)}...`);
 
-        /**
-         * DO NOT REMOVE COMMENT
-         * DO NOT CHANGE FORMATTING OF THE COMMAND
-         * DO NOT CHANGE THE COMMAND - it is this command that does the magic of playing on safari ios
-         */
         await runCommand('ffmpeg', [
             '-nostdin', '-hide_banner', '-loglevel', 'info', '-stats',
             '-f', 'concat',
