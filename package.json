@@ -12,6 +12,7 @@
         "logs": "pm2 logs tango-downloader2 -f",
         "test:puppeteer": "npm run build && dotenv -e .env -- ts-node --esm tests/auth.e2e.ts",
         "test:shorttoken": "npm run build && dotenv -e .env -- cross-env E2E_TEST_NAME='Stream Download' ts-node --esm tests/auth.e2e.ts",
+        "test:downloader": "npm run build && dotenv -e .env -- ts-node --esm tests/downloader.e2e.ts",
         "test:repackager": "npm run build && ts-node --esm tests/repackager.e2e.ts"
     },
     "keywords": [],

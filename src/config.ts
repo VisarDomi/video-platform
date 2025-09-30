@@ -6,10 +6,9 @@ import * as os from 'os';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
+const ROOT_CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
 
-// Define an interface for strong typing that matches the new structure
-interface IConfig {
+export interface IConfig {
   storagePath: string;
   fileNames: {
     session: string;
@@ -37,7 +36,6 @@ interface IConfig {
   };
 }
 
-// Update the default configuration to match the new structure
 const defaultConfig: IConfig = {
   storagePath: "/home/visar/Documents/tango",
   fileNames: {
@@ -61,47 +59,43 @@ const defaultConfig: IConfig = {
   repackager: {
     enabled: true,
     enforceResolution: "720x1280",
-    maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4, // Use 75% of cores, capped at 8.
+    maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4,
     deleteRawOnSuccess: true
   }
 };
 
 function loadConfig(): IConfig {
-    let userConfig: Partial<IConfig> = {};
-    let newConfig: IConfig = defaultConfig;
-    try {
-        if (fs.existsSync(CONFIG_PATH)) {
-            const fileContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
-            userConfig = JSON.parse(fileContent);
-        }
-        // Deep merge the user config over the defaults
-        newConfig = {
-            ...defaultConfig,
-            ...userConfig,
-            fileNames: {
-                ...defaultConfig.fileNames,
-                ...userConfig.fileNames,
-            },
-            intervals: {
-                ...defaultConfig.intervals,
-                ...userConfig.intervals,
-            },
-            timeouts: {
-                ...defaultConfig.timeouts,
-                ...userConfig.timeouts,
-            },
-            repackager: {
-                ...defaultConfig.repackager,
-                ...userConfig.repackager
-            }
-        };
-    } catch (error) {
-        console.error(`Error reading or parsing config.json. Using default settings.`, { error });
-        return defaultConfig;
-    }
+    let mergedConfig = { ...defaultConfig };
 
+    const loadAndMerge = (filePath: string) => {
+        if (fs.existsSync(filePath)) {
+            try {
+                const fileContent = fs.readFileSync(filePath, 'utf-8');
+                const userConfig = JSON.parse(fileContent);
+                // Deep merge logic
+                mergedConfig = {
+                    ...mergedConfig,
+                    ...userConfig,
+                    fileNames: { ...mergedConfig.fileNames, ...userConfig.fileNames },
+                    intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
+                    timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
+                    repackager: { ...mergedConfig.repackager, ...userConfig.repackager }
+                };
+            } catch (error) {
+                console.error(`Error reading or parsing config file at ${filePath}.`, { error });
+            }
+        }
+    };
+
+    // --> FIX: Load in hierarchical order: defaults -> root config -> cwd config
+    // 1. Defaults are already set.
+    // 2. Merge root config file.
+    loadAndMerge(ROOT_CONFIG_PATH);
+    // 3. Merge CWD config file (will override root settings if present, which is what the test needs).
+    loadAndMerge(path.resolve(process.cwd(), "config.json"));
+    
     console.log(`Configuration has been loaded/reloaded.`);
-    return newConfig;
+    return mergedConfig;
 }
 
 let liveConfig = loadConfig();
@@ -111,12 +105,10 @@ export function getConfig(): IConfig {
 }
 
 let debounceTimer: NodeJS.Timeout | null = null;
-
-fs.watch(CONFIG_PATH, (eventType, filename) => {
+// Watch the root config for changes in normal operation
+fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
     if (filename && eventType === 'change') {
-        if (debounceTimer) {
-            clearTimeout(debounceTimer);
-        }
+        if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
             console.log(`config.json changed. Reloading settings...`);
             liveConfig = loadConfig();

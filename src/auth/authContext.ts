@@ -1,10 +1,16 @@
 // src/auth/authContext.ts
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as url from 'url';
 import logger from '../logger.js';
 import * as config from '../config.js';
 import { HEADERS, COOKIE_NAMES } from './authConstants.js';
 import { RefreshResult, TokenDataResult } from './authClient.js';
+
+// --> FIX: Define project root once to resolve paths consistently.
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..', '..');
 
 interface LoginResult {
     tangoRT: string;
@@ -24,17 +30,11 @@ export class AuthContext {
     // --- State Getters ---
     public getTangoRT(): string | null { return this.tangoRT; }
     public getTangoST(): string | null { return this.tangoST; }
-    // --- RE-ADDED GETTERS ---
     public getTt(): string | null { return this.tt; }
     public getTtu(): string | null { return this.ttu; }
     public getTte(): string | null { return this.tte; }
-    // --- END RE-ADDED GETTERS ---
 
     // --- State Update Methods ---
-    /**
-     * Updates the context's state from a successful session refresh response.
-     * @returns `true` if a new Tango-RT was received, otherwise `false`.
-     */
     public updateFromRefresh(result: RefreshResult): boolean {
         this.tangoST = result.newTangoST;
         if (result.newTangoRT) {
@@ -44,18 +44,12 @@ export class AuthContext {
         return false;
     }
 
-    /**
-     * Updates the context's state from a successful token data response.
-     */
     public updateFromTokenData(result: TokenDataResult): void {
         this.tt = result.tt;
         this.ttu = result.ttu;
         this.tte = result.tte;
     }
 
-    /**
-     * Updates the context's state from a successful Puppeteer login.
-     */
     public updateFromLogin(result: LoginResult): void {
         this.tangoRT = result.tangoRT;
         this.tangoST = result.tangoST;
@@ -78,9 +72,16 @@ export class AuthContext {
     }
 
     // --- File Operations ---
+    private _getSessionFilePath(): string {
+        const sessionFile = config.getConfig().fileNames.session;
+        // --> FIX: Resolve relative to project root, not cwd.
+        // path.resolve will correctly handle if sessionFile is already an absolute path.
+        return path.resolve(projectRoot, sessionFile);
+    }
+
     public async loadTokenFromFile(): Promise<boolean> {
         try {
-            const filePath = path.resolve(process.cwd(), config.getConfig().fileNames.session);
+            const filePath = this._getSessionFilePath();
             const data = await fs.readFile(filePath, 'utf-8');
             const session = JSON.parse(data);
             if (session.tangoRT) {
@@ -98,9 +99,9 @@ export class AuthContext {
     public async saveTokenToFile(): Promise<void> {
         try {
             if (this.tangoRT) {
-                const filePath = path.resolve(process.cwd(), config.getConfig().fileNames.session);
+                const filePath = this._getSessionFilePath();
                 await fs.writeFile(filePath, JSON.stringify({ tangoRT: this.tangoRT }, null, 2));
-                logger.info(`Session token (Tango-RT) saved to ${config.getConfig().fileNames.session}`);
+                logger.info(`Session token (Tango-RT) saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
             logger.error('Failed to save session file', { error });
