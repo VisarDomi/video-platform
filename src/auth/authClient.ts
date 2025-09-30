@@ -4,23 +4,22 @@ import logger from '../logger.js';
 const COOKIE_KEY = "cookie";
 
 export interface RefreshResult {
-    newTangoST: string | null;
+    newTangoST: string; // <-- Now non-nullable
     newTangoRT: string | null;
 }
 
 export interface TokenDataResult {
-    tt: string | null;
-    ttu: string | null;
-    tte: string | null;
+    tt: string; // <-- Now non-nullable
+    ttu: string; // <-- Now non-nullable
+    tte: string; // <-- Now non-nullable
 }
 
 /**
  * Calls the session refresh endpoint.
- * @param username The username from the JWT.
- * @param tangoRT The current refresh token.
- * @returns An object containing the new ST and RT if successful.
+ * @throws Will throw an error if the request fails or the response is invalid.
+ * @returns An object containing the new ST and RT.
  */
-export async function refreshSession(username: string, tangoRT: string): Promise<RefreshResult | null> {
+export async function refreshSession(username: string, tangoRT: string): Promise<RefreshResult> {
     const refreshHeaders: HeadersInit = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
         'Accept': 'application/json',
@@ -34,8 +33,7 @@ export async function refreshSession(username: string, tangoRT: string): Promise
     try {
         const response = await fetch("https://gateway.tango.me/proxycador/api/session/refresh", refreshOptions);
         if (!response.ok) {
-            logger.error(`Failed to refresh session. Tango-RT might be expired.`, { status: response.status });
-            return null;
+            throw new Error(`Session refresh failed with status ${response.status}. Tango-RT may be expired.`);
         }
 
         const allCookies = response.headers.getSetCookie();
@@ -50,20 +48,25 @@ export async function refreshSession(username: string, tangoRT: string): Promise
                 newTangoRT = trimmedCookie.split(";")[0].substring("Tango-RT=".length);
             }
         }
+        
+        if (!newTangoST) {
+            throw new Error("Refresh endpoint did not return a new Tango-ST cookie.");
+        }
+
         return { newTangoST, newTangoRT };
 
     } catch (error) {
-        logger.error(`Network error during session refresh`, { error });
-        return null;
+        logger.error(`Network error during session refresh`, { originalError: error });
+        throw new Error(`Network error during session refresh: ${(error as Error).message}`);
     }
 }
 
 /**
  * Fetches the short-lived tokens (tt, ttu, tte).
- * @param tangoST The current session token.
- * @returns An object containing the tt, ttu, and tte cookies if successful.
+ * @throws Will throw an error if the request fails or the response is invalid.
+ * @returns An object containing the tt, ttu, and tte cookies.
  */
-export async function fetchTokenData(tangoST: string): Promise<TokenDataResult | null> {
+export async function fetchTokenData(tangoST: string): Promise<TokenDataResult> {
     try {
         const options: RequestInit = {
             method: "GET",
@@ -72,8 +75,7 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult |
         const response = await fetch("https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData", options);
 
         if (!response.ok) {
-            logger.error(`Failed to fetch token data, status: ${response.status}`);
-            return null;
+            throw new Error(`Token data fetch failed with status ${response.status}`);
         }
         
         const allCookies = response.headers.getSetCookie();
@@ -87,10 +89,15 @@ export async function fetchTokenData(tangoST: string): Promise<TokenDataResult |
             if (trimmedCookie.startsWith("ttu=")) ttu = trimmedCookie.split("=")[1].split(";")[0];
             if (trimmedCookie.startsWith("tte=")) tte = trimmedCookie.split("=")[1].split(";")[0];
         }
+
+        if (!tt || !ttu || !tte) {
+            throw new Error("Token data response was missing one or more required cookies (tt, ttu, tte).");
+        }
+
         return { tt, ttu, tte };
 
     } catch (error) {
-        logger.error(`Network error during token data fetch`, { error });
-        return null;
+        logger.error(`Network error during token data fetch`, { originalError: error });
+        throw new Error(`Network error during token data fetch: ${(error as Error).message}`);
     }
 }

@@ -5,7 +5,7 @@ import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
 import { extractTokensWithPuppeteer } from "./puppeteerLogin.js";
 import * as authClient from "./authClient.js";
-import { parseJwtPayload } from "./authUtils.js"; // <-- NEW IMPORT
+import { parseJwtPayload } from "./authUtils.js";
 
 export class TokenManager {
     private authContext: AuthContext;
@@ -18,14 +18,10 @@ export class TokenManager {
         return this.authContext;
     }
 
-    /**
-     * Orchestrates the initial authentication flow, with retries.
-     */
     public async initialAuth() {
         let success = false;
         while (!success) {
             try {
-                // First, try the "happy path": load a token and refresh it.
                 const refreshed = await this.tryLoadAndRefreshFromFile();
                 if (refreshed) {
                     logger.info("Session successfully refreshed using token from file.");
@@ -33,7 +29,6 @@ export class TokenManager {
                     continue;
                 }
 
-                // If that fails, perform a full login.
                 logger.info("Performing full login via Puppeteer to get new tokens...");
                 await this.performFreshLogin();
                 success = true;
@@ -51,10 +46,6 @@ export class TokenManager {
         this.manageTokenLifecycle();
     }
     
-    /**
-     * Attempts to load a token from session.json and refresh it.
-     * @returns True if successful, false otherwise.
-     */
     private async tryLoadAndRefreshFromFile(): Promise<boolean> {
         const loaded = await this.authContext.loadTokenFromFile();
         if (loaded) {
@@ -74,9 +65,6 @@ export class TokenManager {
         return false;
     }
 
-    /**
-     * Performs a fresh login using Puppeteer to get all new tokens.
-     */
     private async performFreshLogin() {
         await this.extractInitialTokens();
         await this.setTokenData();
@@ -95,21 +83,19 @@ export class TokenManager {
         if (!tangoRT) {
             throw new Error("Tango-RT not found in auth context. Cannot refresh session.");
         }
-        const payload = parseJwtPayload(tangoRT); // <-- USE IMPORTED FUNCTION
+        const payload = parseJwtPayload(tangoRT);
         const username = payload?.username || payload?.sessionId;
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
         
-        const result = await authClient.refreshSession(username, tangoRT);
-        if (!result || !result.newTangoST) {
-            throw new Error("Refresh endpoint did not return a new Tango-ST cookie.");
-        }
+        // This is now much cleaner. We know the result is valid if no error is thrown.
+        const { newTangoST, newTangoRT } = await authClient.refreshSession(username, tangoRT);
 
-        this.authContext.setTangoST(result.newTangoST);
+        this.authContext.setTangoST(newTangoST);
         
-        if (result.newTangoRT) {
-            this.authContext.setTangoRT(result.newTangoRT);
+        if (newTangoRT) {
+            this.authContext.setTangoRT(newTangoRT);
             await this.authContext.saveTokenToFile();
             logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
         } else {
@@ -123,15 +109,12 @@ export class TokenManager {
             throw new Error("Cannot fetch token data without Tango-ST.");
         }
 
-        const result = await authClient.fetchTokenData(tangoST);
-        if (!result || !result.tt || !result.ttu || !result.tte) {
-            logger.error("Could not find all required cookies (tt, ttu, tte).", { result });
-            throw new Error("Missing required cookies from tokenData response.");
-        }
+        // Also much cleaner. All properties are guaranteed to exist.
+        const { tt, ttu, tte } = await authClient.fetchTokenData(tangoST);
 
-        this.authContext.setTt(result.tt);
-        this.authContext.setTtu(result.ttu);
-        this.authContext.setTte(result.tte);
+        this.authContext.setTt(tt);
+        this.authContext.setTtu(ttu);
+        this.authContext.setTte(tte);
     }
     
     private async refreshShortLivedTokens() {
