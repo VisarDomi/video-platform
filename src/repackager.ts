@@ -7,7 +7,6 @@ import pLimit from 'p-limit';
 
 import * as config from './config.js';
 import logger from './logger.js';
-import * as utils from './utils.js';
 
 // Helper to run a command and get its output/error, with optional real-time logging
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {

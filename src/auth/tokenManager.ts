@@ -1,9 +1,9 @@
-// src/tokenManager.ts
+// src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
-import puppeteer, { Browser, Page, HTTPResponse } from "puppeteer";
-import * as config from "./config.js";
-import logger from "./logger.js";
+import * as config from "../config.js";
+import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
+import { extractTokensWithPuppeteer } from "./puppeteerLogin.js"; // <-- NEW IMPORT
 
 const COOKIE_KEY = "cookie";
 
@@ -55,7 +55,6 @@ export class TokenManager {
         this.manageTokenLifecycle();
     }
 
-    // --- NEW: Moved from requests.ts ---
     private async postRefreshSession(username: string, tangoRT: string): Promise<Response | null> {
         const refreshHeaders: HeadersInit = {
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
@@ -102,91 +101,15 @@ export class TokenManager {
             return null;
         }
     }
-    // --- END NEW ---
 
     private async extractInitialTokens() {
-        // ... (rest of the method is unchanged)
-        const email = process.env.GOOGLE_EMAIL;
-        const password = process.env.GOOGLE_PASSWORD;
-        if (!(email && password)) {
-            throw new Error("could not find process.env.GOOGLE_EMAIL. first, check .env");
-        }
-        logger.info(`Puppeteer is using browser executable at: ${puppeteer.executablePath()}`);
-        let browser: Browser | undefined;
-        try {
-            const maxLaunchRetries = 10;
-            const initialLaunchDelay = 2000;
-            for (let attempt = 1; attempt <= maxLaunchRetries; attempt++) {
-                try {
-                    logger.info(`Attempt ${attempt}/${maxLaunchRetries}: Launching browser for automatic login...`);
-                    browser = await puppeteer.launch({
-                        headless: false,
-                        args: ["--disable-blink-features=AutomationControlled", "--window-size=1500,1000"],
-                        defaultViewport: null,
-                    });
-                    logger.info("Browser launched successfully.");
-                    break;
-                } catch (error: any) {
-                    if (error.message.includes("Failed to launch the browser process")) {
-                        if (attempt === maxLaunchRetries) {
-                            logger.error("Failed to launch browser after all retry attempts.", { error });
-                            throw error;
-                        }
-                        const delay = Math.min(initialLaunchDelay * 2 ** (attempt - 1), 300000);
-                        logger.warn(`Failed to launch browser. Retrying in ${delay / 1000} seconds...`, { originalError: error.message.split("\n")[0] });
-                        await timersPromises.setTimeout(delay);
-                    } else {
-                        logger.error("An unexpected error occurred while launching the browser.", { error });
-                        throw error;
-                    }
-                }
-            }
-            if (!browser) {
-                throw new Error("Browser could not be initialized after all attempts. Please check the logs.");
-            }
-            const tango = await browser.newPage();
-            await tango.goto("https://tango.me", { waitUntil: "networkidle2" });
-            
-            await new Promise<void>((resolve, reject) => {
-                tango.on("response", async (response: HTTPResponse) => {
-                    if (response.url() === "https://gateway.tango.me/google-login/auth-code/v1/login") {
-                        let rtFound = false;
-                        let stFound = false;
-                        const headers = response.headers();
-                        const setCookieHeader = headers["set-cookie"];
-                        if (setCookieHeader) {
-                            const cookies = setCookieHeader.split("\n");
-                            for (const cookie of cookies) {
-                                if (cookie.trim().startsWith("Tango-RT=")) {
-                                    const tangoRT = cookie.split(";")[0].substring("Tango-RT=".length);
-                                    this.authContext.setTangoRT(tangoRT);
-                                    await this.authContext.saveTokenToFile();
-                                    rtFound = true;
-                                }
-                                if (cookie.trim().startsWith("Tango-ST=")) {
-                                    const tangoST = cookie.split(";")[0].substring("Tango-ST=".length);
-                                    this.authContext.setTangoST(tangoST);
-                                    stFound = true;
-                                }
-                            }
-                        }
-                        if (rtFound && stFound) {
-                            resolve();
-                        }
-                    }
-                });
-                timersPromises.setTimeout(60000).then(() => reject(new Error("Timeout: Did not intercept a response with Tango-RT and Tango-ST within 60 seconds.")));
-            });
-            logger.info("Initial refresh token found.");
-        } catch (error) {
-            logger.error("Failed to extract initial tokens via Puppeteer.", { error });
-            throw error;
-        } finally {
-            if (browser) {
-                logger.info("Closing browser...");
-                await browser.close();
-            }
-        }
+        // Delegate the complex puppeteer logic to the new module
+        const { tangoRT, tangoST } = await extractTokensWithPuppeteer();
+        
+        // The TokenManager's job is to manage the state
+        this.authContext.setTangoRT(tangoRT);
+        this.authContext.setTangoST(tangoST);
+        await this.authContext.saveTokenToFile();
     }
 
     private async refreshSession() {
@@ -200,7 +123,7 @@ export class TokenManager {
         if (!username) {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
-        const response = await this.postRefreshSession(username, tangoRT); // <-- USE THIS
+        const response = await this.postRefreshSession(username, tangoRT);
         if (!response) {
             throw new Error(`Failed to refresh session. The request function has logged the details. Tango-RT might be expired.`);
         }
@@ -231,7 +154,7 @@ export class TokenManager {
     }
 
     private async setTokenData() {
-        const tokenDataResponse = await this.getTokenDataResponse(); // <-- USE THIS
+        const tokenDataResponse = await this.getTokenDataResponse();
         if (!tokenDataResponse) {
             throw new Error(`Failed to fetch token data. The request function has logged the details.`);
         }

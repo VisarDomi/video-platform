@@ -1,8 +1,8 @@
-// src/authContext.ts
+// src/auth/authContext.ts
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import logger from './logger.js';
-import * as config from './config.js';
+import logger from '../logger.js';
+import * as config from '../config.js';
 
 const getSessionFilePath = () => path.resolve(process.cwd(), config.getConfig().fileNames.session);
 
@@ -27,7 +27,6 @@ export class AuthContext {
     public getTte(): string | null { return this.tte; }
     public setTte(tte: string): void { this.tte = tte; }
 
-    // --- NEW: Moved from utils.ts ---
     public createCookie(): string {
         if (!(this.tt && this.ttu && this.tte)) {
             throw new Error("tt, ttu, tte not found in AuthContext");
@@ -41,7 +40,6 @@ export class AuthContext {
         }
         return `Tango-ST=${this.tangoST}`;
     }
-    // --- END NEW ---
 
     public async loadTokenFromFile(): Promise<boolean> {
         try {

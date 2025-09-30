@@ -8,15 +8,12 @@ import * as config from './config.js';
 import logger from './logger.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
-import { AuthContext } from './authContext.js';
+import { AuthContext } from './auth/authContext.js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const getStatusFilePath = () => path.resolve(__dirname, '..', config.getConfig().fileNames.liveStatus);
 
-/**
- * Writes the current download and authentication state to a file for the web server to read.
- */
 export async function updateStatusFile(authContext: AuthContext) {
     try {
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
@@ -40,9 +37,6 @@ export async function updateStatusFile(authContext: AuthContext) {
     }
 }
 
-/**
- * Fetches and parses a master playlist URL to find the final live playlist URL for the HD stream.
- */
 export async function getLiveUrlFromMaster(masterPlaylistUrl: string, authContext: AuthContext): Promise<string | null> {
     try {
         const masterListBody = await requests.getMasterList(masterPlaylistUrl, authContext);

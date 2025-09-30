@@ -1,6 +1,6 @@
 // src/requests.ts
 import logger from './logger.js';
-import { AuthContext } from './authContext.js';
+import { AuthContext } from './auth/authContext.js';
 
 const COOKIE_KEY = "cookie";
 
@@ -15,7 +15,7 @@ async function makeApiRequest<T>(
     url: string,
     method: string,
     authContext: AuthContext,
-    authType: 'st' | 'full', // 'none' is no longer used by any caller
+    authType: 'st' | 'full',
     responseType: 'json' | 'text' | 'arrayBuffer' = 'json'
 ): Promise<ApiResponse<T>> {
     try {
@@ -69,7 +69,6 @@ export function getLiveList(liveUrl: string, authContext: AuthContext): Promise<
 
 export async function getTsSegment(tsUrl: string): Promise<Buffer | null> {
     try {
-        // This request is unauthenticated, so it doesn't need the helper
         const tsResponse = await fetch(tsUrl);
         if (tsResponse.ok) {
             const tsBuffer = await tsResponse.arrayBuffer();

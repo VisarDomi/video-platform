@@ -10,9 +10,9 @@ import logger from './logger.js';
 import * as utils from './utils.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
-import * as tokenManager from './tokenManager.js';
+import * as tokenManager from './auth/tokenManager.js';
 import * as repackager from './repackager.js';
-import { AuthContext } from './authContext.js';
+import { AuthContext } from './auth/authContext.js';
 
 
 async function pollFollowingStreams(authContext: AuthContext) {
@@ -353,7 +353,6 @@ async function main() {
     const authContext = manager.getAuthContext();
     logger.info("Initial authentication successful.");
     
-    // Pass the auth context to the main loops
     pollFollowingStreams(authContext);
     manageRepackaging();
     
