@@ -1,4 +1,4 @@
-// tests/repackager.e2e.ts
+// tests/assembler.e2e.ts
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -28,8 +28,8 @@ class MemoryTransport extends TransportStream { // <-- EXTEND THE CORRECT CLASS
     }
 }
 
-async function runRepackagingTest() {
-    console.log('\n--- Starting E2E Test: Repackaging Logic ---');
+async function runAssemblerTest() {
+    console.log('\n--- Starting E2E Test: Assembler Logic ---');
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'repack-test-'));
     const downloadFolderName = '2025-01-01 120000 test-streamer';
     const downloadFolderPath = path.join(tempDir, downloadFolderName);
@@ -48,11 +48,11 @@ async function runRepackagingTest() {
         await fs.copyFile(path.join(fixturesDir, 'good_segment_2.ts'), path.join(downloadFolderPath, '5.ts'));
         
         logger.add(memoryTransport);
-        console.log('Test fixtures prepared. Running repackager...');
+        console.log('Test fixtures prepared. Running assembler...');
 
         // --- 2. ACT ---
         await assembleSegmentsIntoMp4(downloadFolderPath);
-        console.log('Repackager finished.');
+        console.log('Assembler finished.');
 
         // --- 3. ASSERT ---
         console.log('Verifying results...');
@@ -79,10 +79,10 @@ async function runRepackagingTest() {
         await fs.access(finalMp4Path);
         console.log('✅ Assertion PASSED: Final MP4 file exists.');
 
-        console.log('\n--- E2E Test PASSED: Repackaging Logic ---');
+        console.log('\n--- E2E Test PASSED: Assembler Logic ---');
 
     } catch (error) {
-        console.error('\n--- E2E Test FAILED: Repackaging Logic ---');
+        console.error('\n--- E2E Test FAILED: Assembler Logic ---');
         console.error(error);
         process.exit(1);
     } finally {
@@ -96,4 +96,4 @@ async function runRepackagingTest() {
     }
 }
 
-runRepackagingTest();
+runAssemblerTest();
