@@ -4,7 +4,7 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as config from "../config.js";
 import logger from "../logger.js";
-import * as fileTracker from "../fileTracker.js";
+import * as fileTracker from "./fileTracker.js";
 import { combineShortVideos } from "./combiner.js";
 
 async function runCombinationCycle() {

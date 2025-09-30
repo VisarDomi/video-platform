@@ -6,7 +6,7 @@ import * as os from "os";
 import pLimit from "p-limit";
 import logger from "../logger.js";
 import * as storage from "../storage.js";
-import * as fileTracker from "../fileTracker.js";
+import * as fileTracker from "./fileTracker.js";
 import * as config from "../config.js";
 
 const getMinDurationSeconds = (): number => config.getConfig().combiner.minDurationMinutes * 60;
