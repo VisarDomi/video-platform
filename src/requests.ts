@@ -2,69 +2,69 @@
 import logger from './logger.js';
 import { AuthContext } from './auth/authContext.js';
 
-const COOKIE_KEY = "cookie";
-
-export interface ApiResponse<T> {
-    success: boolean;
-    data: T | null;
-    status?: number;
-    error?: Error;
-}
-
+/**
+ * A generic, internal helper for making API requests.
+ */
 async function makeApiRequest<T>(
     url: string,
     method: string,
-    authContext: AuthContext,
-    authType: 'st' | 'full',
+    headers: HeadersInit,
     responseType: 'json' | 'text' | 'arrayBuffer' = 'json'
-): Promise<ApiResponse<T>> {
+): Promise<T | null> {
     try {
-        const headers: HeadersInit = {};
-        if (authType === 'st') {
-            headers[COOKIE_KEY] = authContext.createCookieST();
-        } else if (authType === 'full') {
-            headers[COOKIE_KEY] = authContext.createCookie();
-        }
         const options: RequestInit = { method, headers };
         const response = await fetch(url, options);
         if (!response.ok) {
-            const error = new Error(`Request failed with status ${response.status} for URL: ${url}`);
-            return { success: false, data: null, status: response.status, error };
+            logger.warn(`Request to ${url} failed with status ${response.status}`);
+            return null;
         }
-        let body;
         switch (responseType) {
-            case 'json': body = await response.json(); break;
-            case 'text': body = await response.text(); break;
-            case 'arrayBuffer': body = await response.arrayBuffer(); break;
+            case 'json': return await response.json();
+            case 'text': return await response.text() as T;
+            case 'arrayBuffer': return await response.arrayBuffer() as T;
         }
-        return { success: true, data: body as T, status: response.status };
     } catch (error) {
-        const e = error as Error;
-        logger.warn(`API request to ${url} failed with network/parsing error.`, { error: e.message });
-        return { success: false, data: null, error: e };
+        logger.warn(`API request to ${url} failed with network/parsing error.`, { error: (error as Error).message });
+        return null;
     }
 }
 
-export async function getFollowingResponseBody(authContext: AuthContext) {
-    const response = await makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100", "GET", authContext, 'st', 'json');
-    return response.success ? response.data : null;
+export async function getFollowingResponseBody(authContext: AuthContext): Promise<any | null> {
+    const headers = authContext.getApiHeaders();
+    return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=100", "GET", headers, 'json');
 }
 
 export async function getStreamerAlias(streamerId: string, authContext: AuthContext): Promise<string> {
-    const response = await makeApiRequest<any>(`https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`, "GET", authContext, 'st', 'json');
-    if (response.success && response.data?.basicProfile?.aliases?.[0]?.alias) {
-        return response.data.basicProfile.aliases[0].alias;
+    const headers = authContext.getApiHeaders();
+    const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`;
+    const response = await makeApiRequest<any>(url, "GET", headers, 'json');
+    if (response?.basicProfile?.aliases?.[0]?.alias) {
+        return response.basicProfile.aliases[0].alias;
     }
     return streamerId;
 }
 
-export async function getMasterList(masterListUrl: string, authContext: AuthContext) {
-    const response = await makeApiRequest<string>(masterListUrl, "GET", authContext, 'full', 'text');
-    return response.success ? response.data : null;
+export async function getMasterList(masterListUrl: string, authContext: AuthContext): Promise<string | null> {
+    const headers = authContext.getStreamHeaders();
+    return makeApiRequest<string>(masterListUrl, "GET", headers, 'text');
 }
 
-export function getLiveList(liveUrl: string, authContext: AuthContext): Promise<ApiResponse<string>> {
-    return makeApiRequest<string>(liveUrl, "GET", authContext, 'full', 'text');
+export async function getLiveList(liveUrl: string, authContext: AuthContext): Promise<{ success: boolean, data: string | null, status?: number }> {
+    try {
+        const headers = authContext.getStreamHeaders();
+        const options: RequestInit = { method: "GET", headers };
+        const response = await fetch(liveUrl, options);
+        
+        if (!response.ok) {
+            return { success: false, data: null, status: response.status };
+        }
+        const data = await response.text();
+        return { success: true, data, status: response.status };
+
+    } catch (error) {
+        logger.warn(`API request to ${liveUrl} failed with network/parsing error.`, { error: (error as Error).message });
+        return { success: false, data: null };
+    }
 }
 
 export async function getTsSegment(tsUrl: string): Promise<Buffer | null> {

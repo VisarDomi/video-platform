@@ -3,11 +3,10 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import logger from '../logger.js';
 import * as config from '../config.js';
-
-const getSessionFilePath = () => path.resolve(process.cwd(), config.getConfig().fileNames.session);
+import { HEADERS, COOKIE_NAMES } from './authConstants.js';
 
 /**
- * A container for all authentication-related state and formatting logic.
+ * A container for all authentication-related state and header generation logic.
  */
 export class AuthContext {
     private tangoRT: string | null = null;
@@ -27,23 +26,32 @@ export class AuthContext {
     public getTte(): string | null { return this.tte; }
     public setTte(tte: string): void { this.tte = tte; }
 
-    public createCookie(): string {
-        if (!(this.tt && this.ttu && this.tte)) {
-            throw new Error("tt, ttu, tte not found in AuthContext");
+    /**
+     * Generates the headers required for general API calls.
+     * @throws Will throw if the Tango-ST token is missing.
+     */
+    public getApiHeaders(): HeadersInit {
+        if (!this.tangoST) {
+            throw new Error("Cannot create API headers: Tango-ST is missing from AuthContext.");
         }
-        return `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
+        return { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
     }
 
-    public createCookieST(): string {
-        if (!this.tangoST) {
-            throw new Error("Tango-ST not found in AuthContext");
+    /**
+     * Generates the headers required for stream playlist access.
+     * @throws Will throw if tt, ttu, or tte tokens are missing.
+     */
+    public getStreamHeaders(): HeadersInit {
+        if (!this.tt || !this.ttu || !this.tte) {
+            throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from AuthContext.");
         }
-        return `Tango-ST=${this.tangoST}`;
+        const cookie = `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
+        return { [HEADERS.COOKIE]: cookie };
     }
 
     public async loadTokenFromFile(): Promise<boolean> {
         try {
-            const filePath = getSessionFilePath();
+            const filePath = path.resolve(process.cwd(), config.getConfig().fileNames.session);
             const data = await fs.readFile(filePath, 'utf-8');
             const session = JSON.parse(data);
             if (session.tangoRT) {
@@ -61,7 +69,7 @@ export class AuthContext {
     public async saveTokenToFile(): Promise<void> {
         try {
             if (this.tangoRT) {
-                const filePath = getSessionFilePath();
+                const filePath = path.resolve(process.cwd(), config.getConfig().fileNames.session);
                 await fs.writeFile(filePath, JSON.stringify({ tangoRT: this.tangoRT }, null, 2));
                 logger.info(`Session token (Tango-RT) saved to ${config.getConfig().fileNames.session}`);
             }
