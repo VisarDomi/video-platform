@@ -7,7 +7,6 @@ import * as config from '../config.js';
 import { HEADERS, COOKIE_NAMES } from './authConstants.js';
 import { RefreshResult, TokenDataResult } from './authClient.js';
 
-// --> FIX: Define project root once to resolve paths consistently.
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..', '..');
@@ -15,6 +14,14 @@ const projectRoot = path.resolve(__dirname, '..', '..');
 interface LoginResult {
     tangoRT: string;
     tangoST: string;
+}
+
+interface SessionData {
+    tangoRT: string | null;
+    tangoST: string | null;
+    tt: string | null;
+    ttu: string | null;
+    tte: string | null;
 }
 
 /**
@@ -74,8 +81,6 @@ export class AuthContext {
     // --- File Operations ---
     private _getSessionFilePath(): string {
         const sessionFile = config.getConfig().fileNames.session;
-        // --> FIX: Resolve relative to project root, not cwd.
-        // path.resolve will correctly handle if sessionFile is already an absolute path.
         return path.resolve(projectRoot, sessionFile);
     }
 
@@ -83,9 +88,14 @@ export class AuthContext {
         try {
             const filePath = this._getSessionFilePath();
             const data = await fsPromises.readFile(filePath, 'utf-8');
-            const session = JSON.parse(data);
+            const session: Partial<SessionData> = JSON.parse(data);
+            
             if (session.tangoRT) {
                 this.tangoRT = session.tangoRT;
+                this.tangoST = session.tangoST ?? null;
+                this.tt = session.tt ?? null;
+                this.ttu = session.ttu ?? null;
+                this.tte = session.tte ?? null;
                 return true;
             }
         } catch (error: any) {
@@ -100,8 +110,15 @@ export class AuthContext {
         try {
             if (this.tangoRT) {
                 const filePath = this._getSessionFilePath();
-                await fsPromises.writeFile(filePath, JSON.stringify({ tangoRT: this.tangoRT }, null, 2));
-                logger.info(`Session token (Tango-RT) saved to ${path.basename(filePath)}`);
+                const sessionData: SessionData = {
+                    tangoRT: this.tangoRT,
+                    tangoST: this.tangoST,
+                    tt: this.tt,
+                    ttu: this.ttu,
+                    tte: this.tte
+                };
+                await fsPromises.writeFile(filePath, JSON.stringify(sessionData, null, 2));
+                logger.verbose(`Session tokens saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
             logger.error('Failed to save session file', { error });

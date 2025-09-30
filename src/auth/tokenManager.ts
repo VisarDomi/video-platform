@@ -1,7 +1,5 @@
 // src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
-import * as fsPromises from 'fs/promises';
-import * as path from 'path';
 import * as config from "../config.js";
 import logger from "../logger.js";
 import { AuthContext } from "./authContext.js";
@@ -64,19 +62,19 @@ export class TokenManager {
         logger.info("Performing full login via Puppeteer to get new tokens...");
         await this._extractInitialTokens();
         await this._setTokenData();
-        await this._updateStatusFile();
+        await this.authContext.saveTokenToFile(); // Save the complete token set
     }
 
     private async _extractInitialTokens() {
         const tokens = await extractTokensWithPuppeteer();
         this.authContext.updateFromLogin(tokens);
-        await this.authContext.saveTokenToFile();
+        // We save after _setTokenData in _performFreshLogin to have the full set
     }
 
     private async _ensureValidTokens() {
         await this._refreshSession();
         await this._setTokenData();
-        await this._updateStatusFile();
+        await this.authContext.saveTokenToFile();
     }
 
     private async _refreshSession() {
@@ -95,7 +93,6 @@ export class TokenManager {
         const receivedNewRT = this.authContext.updateFromRefresh(result);
         
         if (receivedNewRT) {
-            await this.authContext.saveTokenToFile();
             logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
         } else {
             logger.warn("Successfully refreshed Tango-ST, but a new Tango-RT was not provided in the response.");
@@ -111,42 +108,12 @@ export class TokenManager {
         const result = await authClient.fetchTokenData(tangoST);
         this.authContext.updateFromTokenData(result);
     }
-
-    private async _updateStatusFile(): Promise<void> {
-        const cfg = config.getConfig();
-        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
-        
-        let status: any = {};
-        try {
-            const data = await fsPromises.readFile(statusFilePath, 'utf-8');
-            status = JSON.parse(data);
-        } catch (error: any) {
-            if (error.code !== 'ENOENT') {
-                logger.warn('Could not read live-status.json before token update, will create a new one.', { error });
-            }
-            // If file doesn't exist or is invalid, status remains an empty object, which is fine.
-        }
-
-        status.tokens = {
-            tt: this.authContext.getTt(),
-            ttu: this.authContext.getTtu(),
-            tte: this.authContext.getTte(),
-            st: this.authContext.getTangoST(),
-        };
-        status.lastUpdated = new Date().toISOString();
-
-        try {
-            await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
-        } catch (error) {
-            logger.error('Failed to write tokens to status file', { error });
-        }
-    }
     
     private async _refreshShortLivedTokens() {
         while (true) {
             try {
                 await this._setTokenData();
-                await this._updateStatusFile();
+                await this.authContext.saveTokenToFile(); // Persist the new short-lived tokens
             } catch (error) {
                 logger.error("Failed to refresh short-lived tokens. Waiting for new Tango-ST.", { error });
             }

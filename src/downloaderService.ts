@@ -3,6 +3,7 @@ import * as fsPromises from 'fs/promises';
 import * as timersPromises from 'timers/promises';
 import * as path from 'path';
 import * as childProcess from 'child_process';
+import * as url from 'url';
 
 import * as config from './config.js';
 import logger from './logger.js';
@@ -11,57 +12,61 @@ import * as state from './state.js';
 import * as requests from './requests.js';
 import { Tokens } from './requests.js';
 
+// --- Correct Path Resolution ---
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+
 // --- Local Helpers for Downloader ---
 function getResponseBodyLines(responseBody: string): string[] {
     return responseBody.split("\n").filter(line => line.trim() !== '');
 }
 
-async function readTokensFromStatusFile(): Promise<Tokens | null> {
+async function readTokensFromSessionFile(): Promise<Tokens | null> {
     try {
         const cfg = config.getConfig();
-        const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
-        const data = await fsPromises.readFile(statusFilePath, 'utf-8');
-        const status = JSON.parse(data);
-        if (status.tokens && status.tokens.st) {
-            return status.tokens as Tokens;
+        const sessionFileName = cfg.fileNames.session;
+        // FIX: Resolve path from project root, not storagePath
+        const sessionFilePath = path.resolve(projectRoot, sessionFileName);
+        
+        const data = await fsPromises.readFile(sessionFilePath, 'utf-8');
+        const session = JSON.parse(data);
+        if (session.tangoST && session.tt && session.ttu && session.tte) {
+            return {
+                st: session.tangoST,
+                tt: session.tt,
+                ttu: session.ttu,
+                tte: session.tte
+            };
         }
+        logger.warn('Session file is missing some required tokens (st, tt, ttu, tte).');
         return null;
     } catch (error: any) {
         if (error.code !== 'ENOENT') {
-            // Log error only if it's not a "file not found" error, which is expected on first run.
-            logger.error('Failed to read tokens from status file', { error });
+            logger.error('Failed to read tokens from session file', { error });
         }
         return null;
     }
 }
+
 
 async function updateStatusFile() {
     try {
         const cfg = config.getConfig();
         const statusFilePath = path.join(cfg.storagePath, cfg.fileNames.liveStatus);
         
-        let status: any = {};
-        try {
-            const data = await fsPromises.readFile(statusFilePath, 'utf-8');
-            status = JSON.parse(data);
-        } catch (error: any) {
-            if (error.code !== 'ENOENT') {
-                logger.warn('Could not read live-status.json before download update, will create a new one.', { error });
-            }
-            // If file doesn't exist or is invalid, status remains an empty object, which is fine.
-        }
-
         const activeDownloads = Array.from(state.getActiveDownloads().entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
             ...downloadInfo
         }));
 
-        status.activeDownloads = activeDownloads;
-        status.lastUpdated = new Date().toISOString();
-
+        const status = {
+            activeDownloads,
+            lastUpdated: new Date().toISOString(),
+        };
         await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
     } catch (error) {
-        logger.error('Failed to write download status to file', { error });
+        logger.error('Failed to write download status to live-status.json', { error });
     }
 }
 
@@ -267,9 +272,9 @@ export async function startDownloaderService() {
 
     while (true) {
         try {
-            const tokens = await readTokensFromStatusFile();
+            const tokens = await readTokensFromSessionFile();
             if (!tokens) {
-                logger.warn("Tokens not available in live-status.json. Downloader is waiting for auth service to provide them...");
+                logger.warn("Tokens not available in session.json. Downloader is waiting for auth service to provide them...");
                 await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
                 continue;
             }
