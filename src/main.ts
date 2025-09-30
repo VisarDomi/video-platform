@@ -3,7 +3,7 @@ import 'dotenv/config';
 import logger from './logger.js';
 import * as config from './config.js';
 import { TokenManager } from './auth/tokenManager.js';
-import { startDownloaderService } from './services/downloaderService.js';
+import { startDownloaderService } from './downloaderService.js';
 import { startAssemblerService } from './assembler/assemblerService.js';
 import { startCombinerService } from './combiner/combinerService.js';
 

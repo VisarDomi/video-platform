@@ -1,15 +1,15 @@
-// src/services/downloaderService.ts
+// src/downloaderService.ts
 import * as fsPromises from 'fs/promises';
 import * as timersPromises from 'timers/promises';
 import * as path from 'path';
 import * as childProcess from 'child_process';
 
-import * as config from '../config.js';
-import logger from '../logger.js';
-import * as storage from '../storage.js'; // <-- NEW IMPORT
-import * as state from '../state.js';
-import * as requests from '../requests.js';
-import { AuthContext } from '../auth/authContext.js';
+import * as config from './config.js';
+import logger from './logger.js';
+import * as storage from './storage.js'; // <-- NEW IMPORT
+import * as state from './state.js';
+import * as requests from './requests.js';
+import { AuthContext } from './auth/authContext.js';
 
 // --- Local Helpers for Downloader ---
 function getResponseBodyLines(responseBody: string): string[] {
