@@ -9,7 +9,8 @@
         "start": "npm run build && pm2 start dist/main.js --name tslive-downloader2",
         "restart": "npm run build && pm2 restart tslive-downloader2",
         "stop": "pm2 stop tslive-downloader2",
-        "logs": "pm2 logs tslive-downloader2 -f"
+        "logs": "pm2 logs tslive-downloader2 -f",
+        "test:login": "dotenv -e .env -- ts-node --esm tests/login.e2e.ts"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
