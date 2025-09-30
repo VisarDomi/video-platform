@@ -5,8 +5,8 @@ import * as path from "path";
 import * as os from "os";
 import pLimit from "p-limit";
 
-import * as config from "../config.js";
-import logger from "../logger.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
 
 // --- Low-level FFmpeg Utilities ---
 

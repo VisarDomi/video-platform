@@ -1,8 +1,8 @@
 // src/main.ts
 import "dotenv/config";
 
-import logger from "./logger.js";
-import * as config from "./config.js";
+import logger from "./common/logger.js";
+import * as config from "./common/config.js";
 import { AuthService } from "./auth/authService.js";
 import { startDownloaderService } from "./downloader/downloaderService.js";
 import { startAssemblerService } from "./assembler/assemblerService.js";

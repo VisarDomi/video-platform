@@ -3,9 +3,9 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as url from "url";
 
-import logger from "../logger.js";
-import * as config from "../config.js";
-import * as constants from "../constants.js";
+import logger from "../common/logger.js";
+import * as config from "../common/config.js";
+import * as constants from "../common/constants.js";
 
 import { RefreshResult, TokenDataResult } from "./authClient.js";
 

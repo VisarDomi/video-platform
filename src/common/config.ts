@@ -1,4 +1,4 @@
-// src/config.ts
+// src/common/config.ts
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
@@ -6,7 +6,7 @@ import * as os from "os";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT_CONFIG_PATH = path.resolve(__dirname, "..", "config.json");
+const ROOT_CONFIG_PATH = path.resolve(__dirname, "..", "..", "config.json");
 
 export interface IConfig {
     storagePath: string;

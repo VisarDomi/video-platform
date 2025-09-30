@@ -5,10 +5,10 @@ import * as path from "path";
 import * as os from "os";
 import pLimit from "p-limit";
 
-import logger from "../logger.js";
-import * as config from "../config.js";
+import logger from "../common/logger.js";
+import * as config from "../common/config.js";
 
-import * as storage from "../storage.js";
+import * as storage from "../common/storage.js";
 import * as fileTracker from "./fileTracker.js";
 
 const getMinDurationSeconds = (): number => config.getConfig().combiner.minDurationMinutes * 60;

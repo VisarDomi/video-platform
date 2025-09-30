@@ -1,6 +1,6 @@
-// src/requests.ts
-import logger from "../logger.js";
-import * as constants from "../constants.js";
+// src/downloader/requests.ts
+import logger from "../common/logger.js";
+import * as constants from "../common/constants.js";
 
 export interface Tokens {
     st: string | null;

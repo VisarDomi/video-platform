@@ -4,9 +4,9 @@ import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
-import * as config from "../config.js";
-import logger from "../logger.js";
-import * as storage from "../storage.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
+import * as storage from "../common/storage.js";
 
 import * as assemblerUtils from "./assemblerUtils.js";
 import { assembleSegmentsIntoMp4 } from "./assembler.js";

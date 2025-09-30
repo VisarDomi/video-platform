@@ -3,8 +3,8 @@ import * as timersPromises from "timers/promises";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 
-import * as config from "../config.js";
-import logger from "../logger.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
 
 import * as fileTracker from "./fileTracker.js";
 import * as combiner from "./combiner.js";

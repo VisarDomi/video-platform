@@ -1,8 +1,8 @@
 // src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
 
-import * as config from "../config.js";
-import logger from "../logger.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
 
 import * as authContext from "./authContext.js";
 import * as puppeteerLogin from "./puppeteerLogin.js";

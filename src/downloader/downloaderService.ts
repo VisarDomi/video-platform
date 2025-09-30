@@ -1,15 +1,15 @@
-// src/downloaderService.ts
+// src/downloader/downloaderService.ts
 import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 import * as childProcess from "child_process";
 import * as url from "url";
 
-import * as config from "../config.js";
-import logger from "../logger.js";
-import * as storage from "../storage.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
+import * as storage from "../common/storage.js";
+import * as dateUtils from "../common/dateUtils.js";
 
-import * as downloaderUtils from "./downloaderUtils.js";
 import * as requests from "./requests.js";
 
 // --- Download State ---
@@ -159,11 +159,11 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
         await updateStatusFile();
 
         const startDate = new Date();
-        const paths = downloaderUtils.createDownloadPaths(alias, startDate);
+        const paths = storage.createDownloadPaths(alias, startDate);
         tsFilePath = paths.tsFilePath;
         segmentsDirPath = paths.segmentsDirPath;
 
-        logger.info(`${downloaderUtils.getFormattedDate(startDate)} ${alias} started downloading.`);
+        logger.info(`${dateUtils.getFormattedDate(startDate)} ${alias} started downloading.`);
         logger.info(`- Live URL: ${liveUrl}`);
         logger.info(`- TS (growing): ${tsFilePath}`);
         logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
@@ -288,7 +288,7 @@ async function initiateAndDownloadStream(streamerId: string, masterListUrl: stri
     } catch (error) {
         logger.error(`Download process for ${alias} failed fatally.`, { error });
     } finally {
-        logger.info(`${downloaderUtils.getFormattedDate()} Finished download process for: ${alias}`);
+        logger.info(`${dateUtils.getFormattedDate()} Finished download process for: ${alias}`);
         getActiveDownloads().delete(masterListUrl);
         await updateStatusFile();
     }

@@ -1,9 +1,40 @@
-// src/storage.ts
+// src/common/storage.ts
+import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 
 import * as config from "./config.js";
 import logger from "./logger.js";
+import { getFormattedDate } from "./dateUtils.js";
+
+export interface DownloadPaths {
+    tsFilePath: string;
+    segmentsDirPath: string;
+}
+
+function generateDownloadBaseName(alias: string, date: Date): string {
+    const formattedDate = getFormattedDate(date);
+    return `${formattedDate} ${alias}`;
+}
+
+export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
+    const baseFilename = generateDownloadBaseName(alias, date);
+    const storageLocation = config.getConfig().storagePath;
+
+    if (!fs.existsSync(storageLocation)) {
+        fs.mkdirSync(storageLocation, { recursive: true });
+        logger.info(`Storage folder created at: ${storageLocation}`);
+    }
+
+    const tsFilePath = path.resolve(storageLocation, `${baseFilename}.ts`);
+    const segmentsDirPath = path.resolve(storageLocation, baseFilename);
+
+    if (!fs.existsSync(segmentsDirPath)) {
+        fs.mkdirSync(segmentsDirPath, { recursive: true });
+    }
+
+    return { tsFilePath, segmentsDirPath };
+}
 
 export async function moveToTrash(sourcePath: string) {
     const storagePath = config.getConfig().storagePath;

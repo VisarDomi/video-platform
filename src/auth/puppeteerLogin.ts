@@ -2,8 +2,8 @@
 import puppeteer, { Browser, HTTPResponse } from "puppeteer";
 import * as timersPromises from "timers/promises";
 
-import logger from "../logger.js";
-import { TANGO_URLS, COOKIE_NAMES } from "../constants.js";
+import logger from "../common/logger.js";
+import { TANGO_URLS, COOKIE_NAMES } from "../common/constants.js";
 
 interface InitialTokens {
     tangoRT: string;

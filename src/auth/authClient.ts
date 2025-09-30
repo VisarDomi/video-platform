@@ -1,6 +1,6 @@
 // src/auth/authClient.ts
-import logger from "../logger.js";
-import * as constants from "../constants.js";
+import logger from "../common/logger.js";
+import * as constants from "../common/constants.js";
 
 export interface RefreshResult {
     newTangoST: string;
