@@ -7,6 +7,7 @@ import logger from './logger.js';
 import * as utils from './utils.js';
 import * as state from './state.js';
 import * as requests from './requests.js';
+import * as authContext from './authContext.js'; 
 
 async function extractInitialTokens() {
     const email = process.env.GOOGLE_EMAIL
@@ -348,11 +349,16 @@ async function refreshSession() {
  * due to network issues.
  */
 export async function initialAuth() {
+    const authContextObject = new authContext.AuthContext();
     let success = false;
     while (!success) {
         try {
-            const loaded = await utils.loadTokenFromFile();
+            const loaded = await authContextObject.loadTokenFromFile();
             if (loaded) {
+                const rt = authContextObject.getTangoRT();
+                if (rt) {
+                    state.setTangoRT(rt);
+                }
                 logger.info("Tango-RT loaded from file. Attempting to refresh session...");
                 try {
                     await refreshSession(); // This gets new ST and a new RT
