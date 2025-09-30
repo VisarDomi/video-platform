@@ -8,9 +8,6 @@ import pLimit from 'p-limit';
 import * as config from './config.js';
 import logger from './logger.js';
 
-/**
- * A helper to run an external command and capture its output.
- */
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr:string }> => {
     return new Promise((resolve, reject) => {
         const process = child_process.spawn(command, args);
@@ -18,7 +15,6 @@ const runCommand = (command: string, args: string[], logPrefix?: string): Promis
         let stderr = '';
 
         process.stdout.on('data', (data) => (stdout += data.toString()));
-        
         process.stderr.on('data', (data) => {
             const chunk = data.toString();
             stderr += chunk;
@@ -55,7 +51,6 @@ const getVideoResolution = async (filePath: string): Promise<string | null> => {
         const resolution = stdout.trim().split('\n')[0];
         return resolution || null;
     } catch (error) {
-        // ffprobe can fail on corrupted files, which is an expected part of validation.
         return null;
     }
 };
@@ -72,9 +67,13 @@ interface CheckResult {
 const checkSegment = async (filePath: string, targetResolution: string): Promise<CheckResult> => {
     const reasons: string[] = [];
     
-    // 1. Check for corruption by attempting a null-output transcode.
+    // 1. Check for corruption. A segment is considered corrupt if ffmpeg
+    //    either fails (non-zero exit code) or prints anything to stderr.
     try {
-        await runCommand('ffmpeg', ['-nostdin', '-v', 'error', '-i', filePath, '-f', 'null', '-']);
+        const { stderr } = await runCommand('ffmpeg', ['-nostdin', '-v', 'error', '-i', filePath, '-f', 'null', '-']);
+        if (stderr.trim().length > 0) {
+            reasons.push('CORRUPTED');
+        }
     } catch (error) {
         reasons.push('CORRUPTED');
     }
@@ -108,9 +107,7 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
         await fs.access(outputFile);
         logger.info(`[Repackager] Output file '${path.basename(outputFile)}' already exists. Skipping.`);
         return;
-    } catch (e) {
-        // File doesn't exist, proceed.
-    }
+    } catch (e) { /* File doesn't exist, proceed. */ }
 
     const allDirEntries = await fs.readdir(inputDir).catch(() => []);
     const tsFiles = allDirEntries
@@ -162,7 +159,7 @@ export const repackageFolder = async (inputDir: string): Promise<void> => {
             '-safe', '0',
             '-i', fileListPath,
             '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc', 
+            '-bsf:a', 'aac_adtstoasc',
             '-movflags', '+faststart',
             '-fflags', '+genpts',
             '-y',
