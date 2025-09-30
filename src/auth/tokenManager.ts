@@ -71,9 +71,8 @@ export class TokenManager {
     }
 
     private async _extractInitialTokens() {
-        const { tangoRT, tangoST } = await extractTokensWithPuppeteer();
-        this.authContext.setTangoRT(tangoRT);
-        this.authContext.setTangoST(tangoST);
+        const tokens = await extractTokensWithPuppeteer();
+        this.authContext.updateFromLogin(tokens);
         await this.authContext.saveTokenToFile();
     }
 
@@ -89,12 +88,10 @@ export class TokenManager {
             throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
         }
         
-        const { newTangoST, newTangoRT } = await authClient.refreshSession(username, tangoRT);
-
-        this.authContext.setTangoST(newTangoST);
+        const result = await authClient.refreshSession(username, tangoRT);
+        const receivedNewRT = this.authContext.updateFromRefresh(result);
         
-        if (newTangoRT) {
-            this.authContext.setTangoRT(newTangoRT);
+        if (receivedNewRT) {
             await this.authContext.saveTokenToFile();
             logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
         } else {
@@ -108,11 +105,8 @@ export class TokenManager {
             throw new Error("Cannot fetch token data without Tango-ST.");
         }
 
-        const { tt, ttu, tte } = await authClient.fetchTokenData(tangoST);
-
-        this.authContext.setTt(tt);
-        this.authContext.setTtu(ttu);
-        this.authContext.setTte(tte);
+        const result = await authClient.fetchTokenData(tangoST);
+        this.authContext.updateFromTokenData(result);
     }
     
     private async _refreshShortLivedTokens() {
@@ -126,9 +120,6 @@ export class TokenManager {
         }
     }
 
-    /**
-     * The main background loop for maintaining a valid long-lived session.
-     */
     private async _manageTokenLifecycle() {
         while (true) {
             const refreshInterval = config.getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
@@ -137,17 +128,11 @@ export class TokenManager {
         }
     }
     
-    /**
-     * The core logic for maintaining a session. It first tries a lightweight
-     * refresh and falls back to a full Puppeteer login if necessary.
-     */
     private async _maintainSession() {
         try {
-            // Happy path: lightweight refresh
             await this._refreshSession();
             await this._setTokenData();
         } catch (error) {
-            // Fallback path: full re-authentication
             logger.error("Lightweight session refresh failed. Falling back to full Puppeteer re-authentication.", { error });
             try {
                 await this._performFreshLogin();

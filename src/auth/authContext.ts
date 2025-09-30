@@ -4,9 +4,15 @@ import * as path from 'path';
 import logger from '../logger.js';
 import * as config from '../config.js';
 import { HEADERS, COOKIE_NAMES } from './authConstants.js';
+import { RefreshResult, TokenDataResult } from './authClient.js';
+
+interface LoginResult {
+    tangoRT: string;
+    tangoST: string;
+}
 
 /**
- * A container for all authentication-related state and header generation logic.
+ * A container for all authentication-related state, state transitions, and header generation.
  */
 export class AuthContext {
     private tangoRT: string | null = null;
@@ -15,21 +21,47 @@ export class AuthContext {
     private ttu: string | null = null;
     private tte: string | null = null;
 
+    // --- State Getters ---
     public getTangoRT(): string | null { return this.tangoRT; }
-    public setTangoRT(rt: string): void { this.tangoRT = rt; }
     public getTangoST(): string | null { return this.tangoST; }
-    public setTangoST(st: string): void { this.tangoST = st; }
+    // --- RE-ADDED GETTERS ---
     public getTt(): string | null { return this.tt; }
-    public setTt(tt: string): void { this.tt = tt; }
     public getTtu(): string | null { return this.ttu; }
-    public setTtu(ttu: string): void { this.ttu = ttu; }
     public getTte(): string | null { return this.tte; }
-    public setTte(tte: string): void { this.tte = tte; }
+    // --- END RE-ADDED GETTERS ---
+
+    // --- State Update Methods ---
+    /**
+     * Updates the context's state from a successful session refresh response.
+     * @returns `true` if a new Tango-RT was received, otherwise `false`.
+     */
+    public updateFromRefresh(result: RefreshResult): boolean {
+        this.tangoST = result.newTangoST;
+        if (result.newTangoRT) {
+            this.tangoRT = result.newTangoRT;
+            return true;
+        }
+        return false;
+    }
 
     /**
-     * Generates the headers required for general API calls.
-     * @throws Will throw if the Tango-ST token is missing.
+     * Updates the context's state from a successful token data response.
      */
+    public updateFromTokenData(result: TokenDataResult): void {
+        this.tt = result.tt;
+        this.ttu = result.ttu;
+        this.tte = result.tte;
+    }
+
+    /**
+     * Updates the context's state from a successful Puppeteer login.
+     */
+    public updateFromLogin(result: LoginResult): void {
+        this.tangoRT = result.tangoRT;
+        this.tangoST = result.tangoST;
+    }
+
+    // --- Header Generation ---
     public getApiHeaders(): HeadersInit {
         if (!this.tangoST) {
             throw new Error("Cannot create API headers: Tango-ST is missing from AuthContext.");
@@ -37,10 +69,6 @@ export class AuthContext {
         return { [HEADERS.COOKIE]: `${COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
     }
 
-    /**
-     * Generates the headers required for stream playlist access.
-     * @throws Will throw if tt, ttu, or tte tokens are missing.
-     */
     public getStreamHeaders(): HeadersInit {
         if (!this.tt || !this.ttu || !this.tte) {
             throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from AuthContext.");
@@ -49,6 +77,7 @@ export class AuthContext {
         return { [HEADERS.COOKIE]: cookie };
     }
 
+    // --- File Operations ---
     public async loadTokenFromFile(): Promise<boolean> {
         try {
             const filePath = path.resolve(process.cwd(), config.getConfig().fileNames.session);
