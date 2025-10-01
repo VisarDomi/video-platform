@@ -5,14 +5,7 @@ import * as path from "path";
 
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
-
-export interface Download {
-    streamerId: string;
-    alias: string;
-    liveUrl: string | null;
-    tsFilePath: string | null;
-    segmentsDirPath: string | null;
-}
+import * as interfaces from "../common/interfaces.js";
 
 export class DownloadHandle {
     public readonly masterPlaylistUrl: string;
@@ -23,7 +16,7 @@ export class DownloadHandle {
         this.downloadsManager = downloadsManager;
     }
 
-    public update(updates: Partial<Omit<Download, 'streamerId'>>): Download | undefined {
+    public update(updates: Partial<Omit<interfaces.Download, 'streamerId'>>): interfaces.Download | undefined {
         return this.downloadsManager.update(this.masterPlaylistUrl, updates);
     }
 
@@ -31,13 +24,13 @@ export class DownloadHandle {
         this.downloadsManager.remove(this.masterPlaylistUrl);
     }
 
-    public get state(): Download | undefined {
+    public get state(): interfaces.Download | undefined {
         return this.downloadsManager.get(this.masterPlaylistUrl);
     }
 }
 
 export class DownloadsManager {
-    private downloads: Map<string, Download> = new Map();
+    private downloads: Map<string, interfaces.Download> = new Map();
     private statusFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -61,13 +54,13 @@ export class DownloadsManager {
         return instance;
     }
 
-    public add(masterPlaylistUrl: string, initialData: Omit<Download, 'liveUrl' | 'tsFilePath' | 'segmentsDirPath'>): DownloadHandle | null {
+    public add(masterPlaylistUrl: string, initialData: Omit<interfaces.Download, 'liveUrl' | 'tsFilePath' | 'segmentsDirPath'>): DownloadHandle | null {
         if (this.downloads.has(masterPlaylistUrl)) {
             logger.warn(`Attempted to add an already existing download: ${masterPlaylistUrl}`);
             return null;
         }
         
-        const newDownload: Download = {
+        const newDownload: interfaces.Download = {
             ...initialData,
             liveUrl: null,
             tsFilePath: null,
@@ -79,7 +72,7 @@ export class DownloadsManager {
         return new DownloadHandle(masterPlaylistUrl, this);
     }
 
-    public update(masterPlaylistUrl: string, updates: Partial<Download>): Download | undefined {
+    public update(masterPlaylistUrl: string, updates: Partial<interfaces.Download>): interfaces.Download | undefined {
         const existing = this.downloads.get(masterPlaylistUrl);
         if (!existing) {
             logger.error(`Attempted to update non-existent download: ${masterPlaylistUrl}`);
@@ -98,7 +91,7 @@ export class DownloadsManager {
         }
     }
 
-    public get(masterPlaylistUrl: string): Download | undefined {
+    public get(masterPlaylistUrl: string): interfaces.Download | undefined {
         return this.downloads.get(masterPlaylistUrl);
     }
 

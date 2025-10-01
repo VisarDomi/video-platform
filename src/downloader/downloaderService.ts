@@ -2,11 +2,11 @@
 import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
-import * as childProcess from "child_process";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
+
 import * as requests from "./requests.js";
 import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
 import { findBestStreamUrl } from "./hlsUtils.js";
@@ -164,24 +164,11 @@ export class DownloaderService {
             tsFilePath = paths.tsFilePath;
             segmentsDirPath = paths.segmentsDirPath;
 
-            downloadHandle.update({ tsFilePath });
-            downloadHandle.update({ segmentsDirPath });
+            downloadHandle.update({ tsFilePath, segmentsDirPath });
 
-            logger.info(`${tsFilePath} started downloading.`);
+            logger.info(`${tsFilePath} started downloading segments.`);
             logger.info(`- Live URL: ${liveUrl}`);
-            logger.info(`- TS (growing): ${tsFilePath}`);
             logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
-
-            const ffmpegProcess = childProcess.spawn("ffmpeg", [ "-hide_banner", "-loglevel", "error", "-stats", "-fflags", "+genpts", "-i", "pipe:0", "-c", "copy", "-f", "mpegts", "-y", tsFilePath ]);
-            ffmpegProcess.stderr.on("data", (data) => logger.verbose(`ffmpeg-ts (${path.basename(tsFilePath!)}): ${data.toString()}`));
-            ffmpegProcess.on("error", (err) => logger.error(`Failed to start FFmpeg (ts) for ${tsFilePath}. Is ffmpeg installed?`, { error: err }));
-            ffmpegProcess.stdin.on("error", (err: NodeJS.ErrnoException) => {
-                if (err.code === "EPIPE") {
-                    logger.warn(`ffmpeg-ts (${tsFilePath}): Broken pipe. FFmpeg process likely closed prematurely.`);
-                } else {
-                    logger.error(`ffmpeg-ts (${tsFilePath}): stdin stream error.`, { error: err });
-                }
-            });
 
             const downloadedTsUrls: Set<string> = new Set();
             let lastDownload = Date.now();
@@ -213,7 +200,6 @@ export class DownloaderService {
                         for (const tsUrl of segmentsToDownload) {
                             const tsBuffer = await requests.getTsSegment(tsUrl);
                             if (tsBuffer) {
-                                if (!ffmpegProcess.stdin.destroyed) ffmpegProcess.stdin.write(tsBuffer);
                                 try {
                                     const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
                                     const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
@@ -235,16 +221,6 @@ export class DownloaderService {
 
                 await timersPromises.setTimeout(config.getConfig().intervals.downloadBuffer);
             }
-
-            if (!ffmpegProcess.stdin.destroyed) {
-                ffmpegProcess.stdin.end();
-            }
-
-            await new Promise<void>((resolve) => ffmpegProcess.on('close', (code) => {
-                logger.info(`FFmpeg (ts) process for ${tsFilePath} finished with code ${code}.`);
-                resolve();
-            }));
-
         } catch (error) {
             logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
         } finally {
