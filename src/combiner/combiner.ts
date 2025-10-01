@@ -33,7 +33,7 @@ async function getLocalVideoFiles(directory: string): Promise<string[]> {
     }
 }
 
-const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
+const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr:string }> => {
     return new Promise((resolve, reject) => {
         const process = childProcess.spawn(command, args);
         let stdout = "";
@@ -82,30 +82,33 @@ async function getVideoDuration(filePath: string): Promise<number> {
     }
 }
 
-
-/*
-The Regex Breakdown
-^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)( \d+min)?\.mp4$
-^ : Asserts the start of the string.
-(\d{4}-\d{2}-\d{2} \d{6}) : Capture Group 1 (Timestamp). Matches and captures YYYY-MM-DD HHMMSS.
-  : A literal space character.
-(.+?) : Capture Group 2 (Username). This is the key part.
-. : Matches any character.
-+ : Matches the previous character one or more times.
-? : This is the non-greedy/lazy modifier. It tells the + to match as few characters as possible while still allowing the rest of the regex to find a match.
-( \d+min)? : Capture Group 3 (Optional Duration).
-  : A literal space.
-\d+ : One or more digits.
-min : The literal text "min".
-? : The ? at the end makes this entire group optional. It can appear zero or one time.
-\.mp4$ : Matches the literal text .mp4 at the very end of the string.
-*/
 function parseFileName(fileName: string): { username: string; timestamp: string } | null {
     const match = fileName.match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)( \d+min)?\.mp4$/);
     if (match && match[1] && match[2]) {
         return { timestamp: match[1], username: match[2].trim() };
     }
     return null;
+}
+
+/**
+ * Converts an MP4 file to a temporary MPEG-TS file without re-encoding.
+ * This is a necessary intermediate step for reliable concatenation.
+ */
+async function convertToIntermediateTs(mp4Path: string, tempDir: string): Promise<string> {
+    const tsName = `${path.parse(mp4Path).name}.ts`;
+    const tsPath = path.join(tempDir, tsName);
+    await runCommand("ffmpeg", [
+        "-i",
+        mp4Path,
+        "-c",
+        "copy", // Do not re-encode
+        "-bsf:v",
+        "h264_mp4toannexb", // Bitstream filter to make the video stream compatible with MPEG-TS
+        "-f",
+        "mpegts", // Output format
+        tsPath,
+    ]);
+    return tsPath;
 }
 
 async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise<string> {
@@ -119,10 +122,19 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
     const fileListPath = path.join(tempDir, "filelist.txt");
 
     try {
-        const fileListContent = videoBatch.map((v) => `file '${v.filePath.replace(/'/g, "'\\''")}'`).join("\n");
+        // Step 1: Convert all MP4s in the batch to intermediate .ts files
+        const intermediateTsFiles: string[] = [];
+        for (const video of videoBatch) {
+            const tsPath = await convertToIntermediateTs(video.filePath, tempDir);
+            intermediateTsFiles.push(tsPath);
+        }
+
+        // Step 2: Create a file list of the *new .ts files*
+        const fileListContent = intermediateTsFiles.map((tsPath) => `file '${tsPath.replace(/'/g, "'\\''")}'`).join("\n");
         await fsPromises.writeFile(fileListPath, fileListContent);
         logger.info(`[Combiner] Stitching ${videoBatch.length} videos into ${outputFileName}...`);
 
+        // Step 3: Concatenate the .ts files and package them back into an MP4 container
         await runCommand(
             "ffmpeg",
             [
@@ -132,17 +144,19 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
                 "info",
                 "-stats",
                 "-f",
-                "concat",
+                "concat", // Use the concat demuxer on our list of .ts files
                 "-safe",
                 "0",
                 "-i",
                 fileListPath,
                 "-c",
-                "copy",
-                "-fflags",
-                "+genpts",
+                "copy", // Copy the streams without re-encoding
+                "-bsf:a",
+                "aac_adtstoasc", // This filter is crucial for audio compatibility in the final MP4
                 "-movflags",
                 "+faststart",
+                "-fflags",
+                "+genpts",
                 "-y",
                 outputFile,
             ],
