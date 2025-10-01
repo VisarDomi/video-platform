@@ -10,7 +10,7 @@
         "restart": "npm run build && pm2 restart tslive-downloader",
         "stop": "pm2 stop tslive-downloader",
         "logs": "pm2 logs tslive-downloader -f",
-        "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --detectOpenHandles"
+        "tests": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --detectOpenHandles"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
