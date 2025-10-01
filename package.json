@@ -1,15 +1,15 @@
 {
-    "name": "tango-downloader",
+    "name": "tango-segment-fetcher",
     "type": "module",
     "version": "1.0.0",
-    "description": "Download from tango",
+    "description": "Download 1s .ts files for each of the streamers you follow from tango",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name tango-downloader",
-        "restart": "npm run build && pm2 restart tango-downloader",
-        "stop": "pm2 stop tango-downloader",
-        "logs": "pm2 logs tango-downloader -f",
+        "start": "npm run build && pm2 start dist/main.js --name tango-segment-fetcher",
+        "restart": "npm run build && pm2 restart tango-segment-fetcher",
+        "stop": "pm2 stop tango-segment-fetcher",
+        "logs": "pm2 logs tango-segment-fetcher -f",
         "tests": "cross-env NODE_OPTIONS='--no-warnings --experimental-vm-modules' jest"
     },
     "keywords": [],
