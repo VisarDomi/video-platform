@@ -73,7 +73,7 @@ async function cleanupCompletedAssets(storagePath: string, contents: StorageCont
         }
     }
 
-    if (cfg.repackager.deleteRawOnSuccess) {
+    if (cfg.assembler.deleteRawOnSuccess) {
         for (const folder of contents.potentialFolders) {
             if (contents.mp4FileNames.has(folder.name)) {
                 logger.info(`[Assembler Cleanup] Moving stale segment folder to trash: ${folder.name}`);
@@ -91,7 +91,7 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
         const dirEntries = await fsPromises.readdir(folderPath);
         if (dirEntries.length === 0) {
             logger.warn(`[Assembler] Found empty stale folder '${folderName}'. Moving to trash.`);
-            if (cfg.repackager.deleteRawOnSuccess) {
+            if (cfg.assembler.deleteRawOnSuccess) {
                 await storage.moveToTrash(folderPath);
                 await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
             }
@@ -108,7 +108,7 @@ async function processCandidateFolder(folderPath: string): Promise<void> {
     const mp4Path = path.join(path.dirname(folderPath), `${folderName}.mp4`);
     try {
         await fsPromises.access(mp4Path);
-        if (cfg.repackager.deleteRawOnSuccess) {
+        if (cfg.assembler.deleteRawOnSuccess) {
             logger.info(`[Assembler] Assembly successful. Moving raw assets to trash for '${folderName}'.`);
             await storage.moveToTrash(folderPath);
             await storage.moveToTrash(path.join(path.dirname(folderPath), `${folderName}.ts`));
@@ -163,7 +163,7 @@ async function processCompletedDownloads() {
 
 export async function startAssemblerService() {
     logger.info("Starting segment assembler service...");
-    if (config.getConfig().repackager.enabled) {
+    if (config.getConfig().assembler.enabled) {
         await processCompletedDownloads();
     }
 
@@ -172,7 +172,7 @@ export async function startAssemblerService() {
         await timersPromises.setTimeout(scanInterval);
 
         try {
-            if (config.getConfig().repackager.enabled) {
+            if (config.getConfig().assembler.enabled) {
                 logger.info("Periodic segment assembly scan triggered by manager.");
                 await processCompletedDownloads();
             } else {

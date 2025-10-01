@@ -26,7 +26,7 @@ async function main() {
     }
     
     // ... (rest of the services start as before)
-    if (cfg.repackager.enabled) {
+    if (cfg.assembler.enabled) {
         startAssemblerService();
     } else {
         logger.warn("Segment Assembler service is disabled via config.");

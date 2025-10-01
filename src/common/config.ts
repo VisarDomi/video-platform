@@ -35,7 +35,7 @@ export interface IConfig {
     downloader: {
         enabled: boolean;
     };
-    repackager: {
+    assembler: {
         enabled: boolean;
         enforceResolution: string | null;
         maxWorkers: number;
@@ -71,7 +71,7 @@ const defaultConfig: IConfig = {
     downloader: {
         enabled: true,
     },
-    repackager: {
+    assembler: {
         enabled: true,
         enforceResolution: "720x1280",
         maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4,
@@ -99,7 +99,7 @@ function loadConfig(): IConfig {
                     intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
                     downloader: { ...mergedConfig.downloader, ...userConfig.downloader },
-                    repackager: { ...mergedConfig.repackager, ...userConfig.repackager },
+                    repackager: { ...mergedConfig.assembler, ...userConfig.assembler },
                     combiner: { ...mergedConfig.combiner, ...userConfig.combiner },
                 };
             } catch (error) {

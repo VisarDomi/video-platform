@@ -37,8 +37,8 @@ export function createDownloadPaths(alias: string, date: Date): DownloadPaths {
 }
 
 export async function moveToTrash(sourcePath: string) {
-    const storagePath = config.getConfig().storagePath;
-    const trashDir = path.join(storagePath, "trash");
+    const sourceDir = path.dirname(sourcePath);
+    const trashDir = path.join(sourceDir, "trash");
 
     try {
         await fsPromises.stat(sourcePath);

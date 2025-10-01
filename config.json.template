@@ -18,14 +18,14 @@
         "networkBuffer": 100000,
         "staleStream": 15000
     },
-    "repackager": {
+    "assembler": {
         "enabled": true,
         "enforceResolution": "720x1280",
         "maxWorkers": 8,
         "deleteRawOnSuccess": true
     },
     "combiner": {
-        "enabled": true,
+        "enabled": false,
         "scanIntervalHours": 6,
         "minDurationMinutes": 15
     }

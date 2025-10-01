@@ -211,7 +211,7 @@ async function concatenateSegments(goodFiles: string[], outputFile: string, logP
 // --- Public API ---
 
 export const assembleSegmentsIntoMp4 = async (inputDir: string): Promise<void> => {
-    const { repackager: repackagerConfig } = config.getConfig();
+    const { assembler } = config.getConfig();
     const inputDirName = path.basename(inputDir);
     const outputDir = path.dirname(inputDir);
     const outputFile = path.join(outputDir, `${inputDirName}.mp4`);
@@ -237,7 +237,7 @@ export const assembleSegmentsIntoMp4 = async (inputDir: string): Promise<void> =
         return;
     }
 
-    const { enforceResolution, maxWorkers } = repackagerConfig;
+    const { enforceResolution, maxWorkers } = assembler;
     if (!enforceResolution) {
         logger.error(`[Assembler] 'enforceResolution' is not set in config. Aborting for ${inputDirName}.`);
         return;
