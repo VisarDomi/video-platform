@@ -2,7 +2,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
-import * as os from "os";
 
 import * as utils from "./utils.js";
 
@@ -14,6 +13,7 @@ const ROOT_CONFIG_PATH = path.resolve(projectRoot, "config.json");
 
 export interface IConfig {
     storagePath: string;
+    sharedStatePath: string;
     fileNames: {
         session: string;
         liveStatus: string;
@@ -21,35 +21,17 @@ export interface IConfig {
     };
     intervals: {
         pollFollowing: number;
-        manageDownloads: number;
         shortTokenRefresh: number;
-        longTokenRefreshMinutes: number;
         downloadBuffer: number;
-        repackageScanMinutes: number;
     };
     timeouts: {
-        streamEnd: number;
-        networkBuffer: number;
         staleStream: number;
-    };
-    downloader: {
-        enabled: boolean;
-    };
-    assembler: {
-        enabled: boolean;
-        enforceResolution: string | null;
-        maxWorkers: number;
-        deleteRawOnSuccess: boolean;
-    };
-    combiner: {
-        enabled: boolean;
-        scanIntervalHours: number;
-        minDurationMinutes: number; // <-- NEW
     };
 }
 
 const defaultConfig: IConfig = {
-    storagePath: "/home/visar/Documents/tango",
+    storagePath: "/home/visar/Videos/tango",
+    sharedStatePath: "/home/visar/.local/share/tango-services",
     fileNames: {
         session: "session.json",
         liveStatus: "live-status.json",
@@ -57,30 +39,11 @@ const defaultConfig: IConfig = {
     },
     intervals: {
         pollFollowing: 1000,
-        manageDownloads: 1000,
         shortTokenRefresh: 5000,
-        longTokenRefreshMinutes: 30,
         downloadBuffer: 1000,
-        repackageScanMinutes: 5,
     },
     timeouts: {
-        streamEnd: 10000,
-        networkBuffer: 100000,
         staleStream: 15000,
-    },
-    downloader: {
-        enabled: true,
-    },
-    assembler: {
-        enabled: true,
-        enforceResolution: "720x1280",
-        maxWorkers: Math.min(Math.floor(os.cpus().length * 0.75), 8) || 4,
-        deleteRawOnSuccess: true,
-    },
-    combiner: {
-        enabled: false,
-        scanIntervalHours: 6,
-        minDurationMinutes: 15, // <-- NEW
     },
 };
 
@@ -98,9 +61,6 @@ function loadConfig(): IConfig {
                     fileNames: { ...mergedConfig.fileNames, ...userConfig.fileNames },
                     intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
-                    downloader: { ...mergedConfig.downloader, ...userConfig.downloader },
-                    repackager: { ...mergedConfig.assembler, ...userConfig.assembler },
-                    combiner: { ...mergedConfig.combiner, ...userConfig.combiner },
                 };
             } catch (error) {
                 console.error(`Error reading or parsing config file at ${filePath}.`, { error });

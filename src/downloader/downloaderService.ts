@@ -21,6 +21,7 @@ interface ActiveDownload {
     streamerId: string;
     alias: string;
     liveUrl: string | null;
+    tsFilePath: string | null;
 }
 
 export class DownloaderService {
@@ -46,7 +47,7 @@ export class DownloaderService {
             try {
                 const cfg = config.getConfig();
                 const sessionFileName = cfg.fileNames.session;
-                const sessionFilePath = path.resolve(projectRoot, sessionFileName);
+                const sessionFilePath = path.resolve(cfg.sharedStatePath, sessionFileName);
 
                 const data = await fsPromises.readFile(sessionFilePath, "utf-8");
                 const session = JSON.parse(data);
@@ -108,6 +109,7 @@ export class DownloaderService {
                                     streamerId: streamerId,
                                     alias: streamerId,
                                     liveUrl: null,
+                                    tsFilePath: null,
                                 });
                                 logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
                                 this._updateStatusFile();
@@ -129,17 +131,14 @@ export class DownloaderService {
      * The long-running process for downloading a single stream. It relies on the
      * periodically updated `this.tokens` from the token watcher.
      */
-    private async _initiateAndDownloadStream(streamerId: string, masterListUrl: string) {
+    private async _initiateAndDownloadStream(streamerId: string, masterPlaylistUrl: string) {
         let alias = streamerId;
-        // ... (The rest of this function is nearly identical to before, but it uses `this.tokens`)
-        // The key is that `this.tokens` is automatically kept fresh by `_startTokenWatcher`.
         let tsFilePath: string | null = null;
         let segmentsDirPath: string | null = null;
-        let totalSegmentsDownloaded = 0;
 
-        const downloadState = this.activeDownloads.get(masterListUrl);
+        const downloadState = this.activeDownloads.get(masterPlaylistUrl);
         if (!downloadState) {
-            logger.error(`Could not find state for download with master URL: ${masterListUrl}. Aborting.`);
+            logger.error(`Could not find state for download with master URL: ${masterPlaylistUrl}. Aborting.`);
             return;
         }
 
@@ -156,7 +155,7 @@ export class DownloaderService {
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 if (!this.tokens) throw new Error("Tokens disappeared while resolving live URL.");
-                const resolvedUrl = await this._getLiveUrlFromMaster(masterListUrl);
+                const resolvedUrl = await this._getLiveUrlFromMaster(masterPlaylistUrl, downloadState.tsFilePath);
                 if (resolvedUrl) {
                     liveUrl = resolvedUrl;
                     break;
@@ -171,12 +170,14 @@ export class DownloaderService {
 
             downloadState.liveUrl = liveUrl;
             this._updateStatusFile();
-
-            // ... (FFmpeg setup and the main `while (true)` loop for downloading segments)
-            // The existing `while (true)` loop here is now correct, because `this.tokens` will be fresh on each iteration.
+            
             const startDate = new Date();
             const paths = storage.createDownloadPaths(alias, startDate);
             tsFilePath = paths.tsFilePath;
+
+            downloadState.tsFilePath = tsFilePath;
+            this._updateStatusFile();
+
             segmentsDirPath = paths.segmentsDirPath;
 
             logger.info(`${utils.getFormattedDate(startDate)} ${alias} started downloading.`);
@@ -210,10 +211,8 @@ export class DownloaderService {
                 }
             });
 
-            let lastOnline = Date.now();
-            let first404Timestamp: number | null = null;
             const downloadedTsUrls: Set<string> = new Set();
-            let lastSegmentDownloadedTimestamp = Date.now();
+            let lastDownload = Date.now();
 
             while (true) {
                 if (!this.tokens) {
@@ -223,13 +222,9 @@ export class DownloaderService {
 
                 const liveResponse = await requests.getLiveList(liveUrl, this.tokens);
 
-                // ... (The rest of the segment downloading logic is unchanged)
-                // ...
                 if (liveResponse.success && liveResponse.data) {
-                    lastOnline = Date.now();
-                    first404Timestamp = null;
                     const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
-                    const cinemaApiUrl = masterListUrl.split("/v2/")[0];
+                    const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
 
                     const segmentsToDownload: string[] = [];
                     for (let i = 0; i < liveLines.length; i++) {
@@ -246,59 +241,47 @@ export class DownloaderService {
                         for (const tsUrl of segmentsToDownload) {
                             const tsBuffer = await requests.getTsSegment(tsUrl);
                             if (tsBuffer) {
-                                lastSegmentDownloadedTimestamp = Date.now();
-                                totalSegmentsDownloaded++;
                                 if (!ffmpegProcess.stdin.destroyed) ffmpegProcess.stdin.write(tsBuffer);
                                 try {
                                     const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
                                     const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
                                     const segmentPath = path.join(segmentsDirPath, tsName);
                                     fsPromises.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                                    lastDownload = Date.now();
                                 } catch (error) {
-                                    logger.error(`Failed to save raw segment for ${alias}`, { error });
+                                    logger.error(`Failed to save raw segment for ${tsFilePath} with state ${JSON.stringify(downloadState)}`, { error });
                                 }
                             }
                         }
                     }
-                } else {
-                    if (liveResponse.status === 404) {
-                        if (first404Timestamp === null) {
-                            first404Timestamp = Date.now();
-                            logger.warn(
-                                `Received first 404 for playlist of ${alias}. Will stop in ${config.getConfig().timeouts.streamEnd / 1000}s if it persists.`
-                            );
-                        }
-                    }
                 }
 
-                if (Date.now() - lastSegmentDownloadedTimestamp > config.getConfig().timeouts.staleStream) {
-                    logger.info(`No new segments for ${alias} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
-                    break;
-                }
-                if (first404Timestamp && Date.now() - first404Timestamp > config.getConfig().timeouts.streamEnd) {
-                    logger.info(`Stream for ${alias} appears to have ended (persistent 404). Stopping download.`);
-                    break;
-                }
-                if (Date.now() - lastOnline > config.getConfig().timeouts.networkBuffer) {
-                    logger.warn(
-                        `No successful playlist fetch for ${alias} in ${config.getConfig().timeouts.networkBuffer / 1000}s. Assuming stream/connection loss.`
-                    );
+                if (Date.now() - lastDownload > config.getConfig().timeouts.staleStream) {
+                    logger.info(`No new segments for ${tsFilePath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
                     break;
                 }
 
                 await timersPromises.setTimeout(config.getConfig().intervals.downloadBuffer);
             }
-            // ... (FFmpeg close logic)
+
+            if (!ffmpegProcess.stdin.destroyed) {
+                ffmpegProcess.stdin.end();
+            }
+
+            await new Promise<void>((resolve) => ffmpegProcess.on('close', (code) => {
+                logger.info(`FFmpeg (ts) process for ${tsFilePath} finished with code ${code}.`);
+                resolve();
+            }));
+
         } catch (error) {
-            logger.error(`Download process for ${alias} failed fatally.`, { error });
+            logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
         } finally {
-            logger.info(`${utils.getFormattedDate()} Finished download process for: ${alias}`);
-            this.activeDownloads.delete(masterListUrl);
+            logger.info(`${utils.getFormattedDate()} Finished download process for: ${tsFilePath}`);
+            this.activeDownloads.delete(masterPlaylistUrl);
             this._updateStatusFile();
         }
     }
 
-    // --- Helper Methods ---
     private async _updateStatusFile() {
         try {
             const cfg = config.getConfig();
@@ -314,12 +297,12 @@ export class DownloaderService {
         }
     }
 
-    private async _getLiveUrlFromMaster(masterPlaylistUrl: string): Promise<string | null> {
+    private async _getLiveUrlFromMaster(masterPlaylistUrl: string, tsFilePath: string | null): Promise<string | null> {
         if (!this.tokens) return null;
         try {
             const masterListBody = await requests.getMasterList(masterPlaylistUrl, this.tokens);
             if (!masterListBody) {
-                logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl}`);
+                logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl} for ${tsFilePath}`);
                 return null;
             }
             const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
@@ -331,7 +314,7 @@ export class DownloaderService {
                 }
             }
             if (!relativeLiveUrl) {
-                logger.warn(`Could not find HD stream in master playlist: ${masterPlaylistUrl}`);
+                logger.warn(`Could not find HD stream in master playlist: ${masterPlaylistUrl} for ${tsFilePath}`);
                 return null;
             }
             const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
@@ -341,7 +324,7 @@ export class DownloaderService {
             }
             return livePlaylistUrl;
         } catch (error) {
-            logger.error(`Error resolving live URL from master: ${masterPlaylistUrl}`, { error });
+            logger.error(`Error resolving live URL from master: ${masterPlaylistUrl} for ${tsFilePath}`, { error });
             return null;
         }
     }
