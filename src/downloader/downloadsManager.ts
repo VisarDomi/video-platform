@@ -11,6 +11,7 @@ export interface Download {
     alias: string;
     liveUrl: string | null;
     tsFilePath: string | null;
+    segmentsDirPath: string | null;
 }
 
 export class DownloadHandle {
@@ -60,7 +61,7 @@ export class DownloadsManager {
         return instance;
     }
 
-    public add(masterPlaylistUrl: string, initialData: Omit<Download, 'liveUrl' | 'tsFilePath'>): DownloadHandle | null {
+    public add(masterPlaylistUrl: string, initialData: Omit<Download, 'liveUrl' | 'tsFilePath' | 'segmentsDirPath'>): DownloadHandle | null {
         if (this.downloads.has(masterPlaylistUrl)) {
             logger.warn(`Attempted to add an already existing download: ${masterPlaylistUrl}`);
             return null;
@@ -70,6 +71,7 @@ export class DownloadsManager {
             ...initialData,
             liveUrl: null,
             tsFilePath: null,
+            segmentsDirPath: null,
         };
 
         this.downloads.set(masterPlaylistUrl, newDownload);

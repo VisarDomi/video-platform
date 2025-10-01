@@ -165,6 +165,7 @@ export class DownloaderService {
             segmentsDirPath = paths.segmentsDirPath;
 
             downloadHandle.update({ tsFilePath });
+            downloadHandle.update({ segmentsDirPath });
 
             logger.info(`${tsFilePath} started downloading.`);
             logger.info(`- Live URL: ${liveUrl}`);
