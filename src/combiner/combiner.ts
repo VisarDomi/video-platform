@@ -111,8 +111,6 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
                 "+genpts",
                 "-movflags",
                 "+faststart",
-                "-bsf:a",
-                "aac_adtstoasc",
                 "copy",
                 "-y",
                 outputFile,
