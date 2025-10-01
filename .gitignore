@@ -1,0 +1,14 @@
+/node_modules
+/dist
+.env
+error.log
+temp.txt
+*.har
+repomix-output.xml
+session.json
+live-status.json
+config.json
+tango/
+tango-raw/
+venv/
+processed-by-combiner.txt

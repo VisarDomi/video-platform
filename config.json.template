@@ -1,0 +1,32 @@
+{
+    "storagePath": "/home/visar/Documents/tango",
+    "fileNames": {
+        "session": "session.json",
+        "liveStatus": "live-status.json",
+        "errorLog": "error.log"
+    },
+    "intervals": {
+        "pollFollowing": 1000,
+        "manageDownloads": 1000,
+        "shortTokenRefresh": 5000,
+        "longTokenRefreshMinutes": 30,
+        "downloadBuffer": 1000,
+        "repackageScanMinutes": 5
+    },
+    "timeouts": {
+        "streamEnd": 10000,
+        "networkBuffer": 100000,
+        "staleStream": 15000
+    },
+    "assembler": {
+        "enabled": true,
+        "enforceResolution": "720x1280",
+        "maxWorkers": 8,
+        "deleteRawOnSuccess": true
+    },
+    "combiner": {
+        "enabled": true,
+        "scanIntervalHours": 6,
+        "minDurationMinutes": 15
+    }
+}
