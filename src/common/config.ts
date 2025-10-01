@@ -2,6 +2,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
+import * as os from "os";
 
 import * as utils from "./utils.js";
 
@@ -31,7 +32,9 @@ export interface IConfig {
 
 const defaultConfig: IConfig = {
     storagePath: "/home/visar/Videos/tango",
-    sharedStatePath: "/home/visar/.local/share/tango-services",
+    // Use the XDG Base Directory Specification for user-specific data files.
+    // This is the standard "Linux way" for services running under a specific user.
+    sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
     fileNames: {
         session: "session.json",
         liveStatus: "live-status.json",
@@ -75,7 +78,25 @@ function loadConfig(): IConfig {
     return mergedConfig;
 }
 
+/**
+ * Ensures that the directory for shared state files (like session.json) exists.
+ * This prevents errors when services try to write files for the first time.
+ */
+function ensureSharedPathExists(config: IConfig) {
+    if (config.sharedStatePath) {
+        try {
+            if (!fs.existsSync(config.sharedStatePath)) {
+                fs.mkdirSync(config.sharedStatePath, { recursive: true });
+                console.log(`Created shared state directory: ${config.sharedStatePath}`);
+            }
+        } catch (error) {
+            console.error(`Failed to create shared state directory at ${config.sharedStatePath}`, { error });
+        }
+    }
+}
+
 let liveConfig = loadConfig();
+ensureSharedPathExists(liveConfig); // Run once on startup
 
 export function getConfig(): IConfig {
     return liveConfig;
@@ -83,7 +104,6 @@ export function getConfig(): IConfig {
 
 let debounceTimer: NodeJS.Timeout | null = null;
 
-// --- THIS IS THE FIX ---
 // Only watch for config changes when NOT running in a test environment.
 if (process.env.NODE_ENV !== 'test') {
     fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
@@ -92,6 +112,7 @@ if (process.env.NODE_ENV !== 'test') {
             debounceTimer = setTimeout(() => {
                 console.log(`config.json changed. Reloading settings...`);
                 liveConfig = loadConfig();
+                ensureSharedPathExists(liveConfig); // Also run on reload
                 debounceTimer = null;
             }, 100);
         }

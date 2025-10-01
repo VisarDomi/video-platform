@@ -1,6 +1,5 @@
 {
     "storagePath": "/home/visar/Videos/tango",
-    "sharedStatePath": "/home/visar/.local/share/tango-services",
     "fileNames": {
         "session": "session.json",
         "liveStatus": "live-status.json",

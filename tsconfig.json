@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "strict": true,
     "sourceMap": true,
-    "isolatedModules": true // <-- ADD THIS LINE
+    "isolatedModules": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "**/*.spec.ts"]

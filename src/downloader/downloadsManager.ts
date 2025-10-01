@@ -2,11 +2,9 @@
 
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import * as url from "url";
 
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
-import * as utils from "../common/utils.js";
 
 export interface Download {
     streamerId: string;
@@ -47,10 +45,8 @@ export class DownloadsManager {
      */
     private constructor() {
         const cfg = config.getConfig();
-        const __filename = url.fileURLToPath(import.meta.url);
-        const __dirname = path.dirname(__filename);
-        const projectRoot = utils.findProjectRoot(__dirname)
-        this.statusFilePath = path.join(projectRoot, cfg.fileNames.liveStatus);
+        // Use the sharedStatePath from config for the status file
+        this.statusFilePath = path.join(cfg.sharedStatePath, cfg.fileNames.liveStatus);
         logger.info(`DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 

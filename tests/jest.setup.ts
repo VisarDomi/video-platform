@@ -16,6 +16,15 @@ jest.mock('../src/common/logger.js', () => ({
     },
 }));
 
+// --- NEW MOCK TO SILENCE CONSOLE OUTPUT IN TESTS ---
+// This prevents `console.log` from cluttering your test results.
+global.console = {
+    ...console,
+    log: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+};
 
 // Mock fs.watch globally for all tests to prevent an open handle
 // issue caused by a side-effect in src/common/config.ts.
