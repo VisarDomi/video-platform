@@ -3,13 +3,10 @@ import * as childProcess from "child_process";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as os from "os";
-import pLimit from "p-limit";
 
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
-
 import * as storage from "../common/storage.js";
-import * as fileTracker from "./fileTracker.js";
 
 const getMinDurationSeconds = (): number => config.getConfig().combiner.minDurationMinutes * 60;
 
@@ -18,6 +15,22 @@ interface VideoInfo {
     duration: number; // in seconds
     username: string;
     timestamp: string; // YYYY-MM-DD HHMMSS part
+}
+
+/**
+ * Reads all .mp4 files from the specified directory.
+ */
+async function getLocalVideoFiles(directory: string): Promise<string[]> {
+    try {
+        const allFiles = await fsPromises.readdir(directory);
+        return allFiles.filter((file) => file.toLowerCase().endsWith(".mp4"));
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            logger.warn(`[Combiner] Directory not found, returning no files: ${directory}`);
+            return [];
+        }
+        throw error;
+    }
 }
 
 const runCommand = (command: string, args: string[], logPrefix?: string): Promise<{ stdout: string; stderr: string }> => {
@@ -69,6 +82,24 @@ async function getVideoDuration(filePath: string): Promise<number> {
     }
 }
 
+
+/*
+The Regex Breakdown
+^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)( \d+min)?\.mp4$
+^ : Asserts the start of the string.
+(\d{4}-\d{2}-\d{2} \d{6}) : Capture Group 1 (Timestamp). Matches and captures YYYY-MM-DD HHMMSS.
+  : A literal space character.
+(.+?) : Capture Group 2 (Username). This is the key part.
+. : Matches any character.
++ : Matches the previous character one or more times.
+? : This is the non-greedy/lazy modifier. It tells the + to match as few characters as possible while still allowing the rest of the regex to find a match.
+( \d+min)? : Capture Group 3 (Optional Duration).
+  : A literal space.
+\d+ : One or more digits.
+min : The literal text "min".
+? : The ? at the end makes this entire group optional. It can appear zero or one time.
+\.mp4$ : Matches the literal text .mp4 at the very end of the string.
+*/
 function parseFileName(fileName: string): { username: string; timestamp: string } | null {
     const match = fileName.match(/^(\d{4}-\d{2}-\d{2} \d{6}) (.+?)( \d+min)?\.mp4$/);
     if (match && match[1] && match[2]) {
@@ -107,11 +138,11 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
                 "-i",
                 fileListPath,
                 "-c",
+                "copy",
                 "-fflags",
                 "+genpts",
                 "-movflags",
                 "+faststart",
-                "copy",
                 "-y",
                 outputFile,
             ],
@@ -125,81 +156,93 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
     }
 }
 
-export async function combineShortVideos(unprocessedFiles: string[], baseDir: string): Promise<void> {
-    if (unprocessedFiles.length === 0) {
-        logger.verbose("[Combiner] No new video files to process.");
-        return;
-    }
-
-    const limit = pLimit(os.cpus().length);
-    logger.info(`[Combiner] Analyzing ${unprocessedFiles.length} files...`);
-
-    const promises = unprocessedFiles.map((file) =>
-        limit(async (): Promise<VideoInfo | null> => {
-            const fullPath = path.join(baseDir, file);
-            const metadata = parseFileName(file);
-            if (!metadata) {
-                logger.warn(`[Combiner] Could not parse filename: ${file}. Skipping.`);
-                return null;
-            }
-            const duration = await getVideoDuration(fullPath);
-            return { filePath: fullPath, duration, ...metadata };
-        })
-    );
-
-    const videoInfos: VideoInfo[] = (await Promise.all(promises)).filter((v): v is VideoInfo => v !== null && v.duration > 0);
-
-    logger.info(`[Combiner] Finished analyzing ${videoInfos.length} valid video files.`);
-
-    const videosByUser = new Map<string, VideoInfo[]>();
-    for (const video of videoInfos) {
-        if (!videosByUser.has(video.username)) videosByUser.set(video.username, []);
-        videosByUser.get(video.username)!.push(video);
-    }
-
-    let allSourceFilesToTrash: string[] = [];
-    let allSourceFileNamesToTrack: string[] = [];
-
+/**
+ * Scans the 'edited' directory for videos, finds the first possible batch of short videos
+ * from the same streamer that meets the minimum duration, combines them, and then returns.
+ * @param baseDir The directory to scan for videos (e.g., '.../edited').
+ * @returns {Promise<boolean>} A promise that resolves to `true` if a combination occurred, `false` otherwise.
+ */
+export async function combineShortVideos(baseDir: string): Promise<boolean> {
     const minDurationSeconds = getMinDurationSeconds();
 
-    for (const [username, userVideos] of videosByUser.entries()) {
-        logger.info(`[Combiner] Processing ${userVideos.length} videos for user: ${username}`);
-        userVideos.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    // 1. Get the current list of files in the directory.
+    const filesInDir = (await getLocalVideoFiles(baseDir)).sort(); // Sort chronologically to process in order.
 
-        let remainingVideos = [...userVideos];
-        while (remainingVideos.length > 0) {
-            let batch: VideoInfo[] = [];
-            let batchDuration = 0;
-            let processedCount = 0;
-            for (const video of remainingVideos) {
-                batch.push(video);
-                batchDuration += video.duration;
-                processedCount++;
-                // FIX 1: Only break if we have *more than one* video. This prevents
-                // creating a batch-of-one that fails the `batch.length > 1` check.
-                if (batch.length > 1 && batchDuration >= minDurationSeconds) break;
+    if (filesInDir.length < 2) {
+        logger.verbose("[Combiner] Not enough files to form a batch. Skipping cycle.");
+        return false;
+    }
+
+    // 2. Sequentially scan for a "starting file" (a short video).
+    for (let i = 0; i < filesInDir.length; i++) {
+        const startFileName = filesInDir[i];
+        const startFullPath = path.join(baseDir, startFileName);
+        const startMetadata = parseFileName(startFileName);
+
+        if (!startMetadata) continue;
+
+        const startDuration = await getVideoDuration(startFullPath);
+
+        // Found a potential starting point? (duration is valid and less than the threshold)
+        if (startDuration > 0 && startDuration < minDurationSeconds) {
+            logger.info(`[Combiner] Found potential starting file: ${startFileName} (${Math.round(startDuration)}s) for user ${startMetadata.username}.`);
+
+            // 3. This is our starting file. Initialize a batch with it.
+            const batch: VideoInfo[] = [
+                {
+                    filePath: startFullPath,
+                    duration: startDuration,
+                    username: startMetadata.username,
+                    timestamp: startMetadata.timestamp,
+                },
+            ];
+            let batchDuration = startDuration;
+            const currentStreamer = startMetadata.username;
+
+            // 4. Scan forward from this point to find more files from the same user.
+            for (let j = i + 1; j < filesInDir.length; j++) {
+                const nextFileName = filesInDir[j];
+                const nextMetadata = parseFileName(nextFileName);
+
+                // Is this file from the same streamer?
+                if (nextMetadata && nextMetadata.username === currentStreamer) {
+                    const nextFullPath = path.join(baseDir, nextFileName);
+                    const nextDuration = await getVideoDuration(nextFullPath);
+
+                    if (nextDuration > 0) {
+                        batch.push({
+                            filePath: nextFullPath,
+                            duration: nextDuration,
+                            username: nextMetadata.username,
+                            timestamp: nextMetadata.timestamp,
+                        });
+                        batchDuration += nextDuration;
+                        logger.verbose(`[Combiner] Added ${nextFileName} to batch for ${currentStreamer}. New total duration: ${Math.round(batchDuration)}s`);
+
+                        // 5. Have we met the duration threshold?
+                        if (batchDuration >= minDurationSeconds) {
+                            logger.info(`[Combiner] Batch for ${currentStreamer} met duration threshold (${Math.round(batchDuration / 60)} mins). Combining ${batch.length} files.`);
+
+                            // Combine the videos.
+                            await stitchVideos(batch, baseDir);
+
+                            // On success, move source files to trash.
+                            for (const videoInfo of batch) {
+                                await storage.moveToTrash(videoInfo.filePath);
+                            }
+
+                            return true; // Signal that a combination happened so the service can re-scan.
+                        }
+                    }
+                }
             }
-
-            if (batch.length > 1 && batchDuration >= minDurationSeconds) {
-                logger.info(`[Combiner] Formed a batch of ${batch.length} for ${username} (${Math.round(batchDuration / 60)} mins).`);
-                await stitchVideos(batch, baseDir);
-
-                const sourceFiles = batch.map((v) => v.filePath);
-                allSourceFilesToTrash.push(...sourceFiles);
-                allSourceFileNamesToTrack.push(...sourceFiles.map((f) => path.basename(f)));
-
-                remainingVideos.splice(0, processedCount);
-            } else {
-                logger.info(`[Combiner] Not enough videos for ${username} to meet threshold. ${remainingVideos.length} videos remain.`);
-                // FIX 2: Do not mark videos as processed if they weren't combined.
-                // They should be re-evaluated in the next cycle with any new files.
-                break;
-            }
+            // If the inner loop finishes, it means we scanned all subsequent files but couldn't meet the threshold for this starting file.
+            // The outer loop will continue to the next file, trying it as a new starting point.
+            logger.info(`[Combiner] Scanned all subsequent files for start file ${startFileName}, but threshold not met. Looking for a new starting file.`);
         }
     }
 
-    for (const filePath of allSourceFilesToTrash) {
-        await storage.moveToTrash(filePath);
-    }
-    await fileTracker.saveProcessedFiles(allSourceFileNamesToTrack);
+    // 6. If we get through the whole loop, no combinations were possible in this pass.
+    logger.info("[Combiner] Full scan of files complete. No new batches were formed.");
+    return false;
 }
