@@ -1,14 +1,8 @@
 {
     "storagePath": "/home/visar/Videos/tango",
-    "fileNames": {
-        "session": "session.json",
-        "liveStatus": "live-status.json",
-        "errorLog": "error.log"
-    },
     "intervals": {
         "pollFollowing": 1000,
-        "shortTokenRefresh": 5000,
-        "downloadBuffer": 1000
+        "shortTokenRefresh": 5000
     },
     "timeouts": {
         "staleStream": 15000

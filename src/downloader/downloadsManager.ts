@@ -40,7 +40,7 @@ export class DownloadsManager {
     private constructor() {
         const cfg = config.getConfig();
         // Use the sharedStatePath from config for the status file
-        this.statusFilePath = path.join(cfg.sharedStatePath, cfg.fileNames.liveStatus);
+        this.statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");
         logger.info(`DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 

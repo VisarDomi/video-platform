@@ -15,15 +15,9 @@ const ROOT_CONFIG_PATH = path.resolve(projectRoot, "config.json");
 export interface IConfig {
     storagePath: string;
     sharedStatePath: string;
-    fileNames: {
-        session: string;
-        liveStatus: string;
-        errorLog: string;
-    };
     intervals: {
         pollFollowing: number;
         shortTokenRefresh: number;
-        downloadBuffer: number;
     };
     timeouts: {
         staleStream: number;
@@ -35,15 +29,9 @@ const defaultConfig: IConfig = {
     // Use the XDG Base Directory Specification for user-specific data files.
     // This is the standard "Linux way" for services running under a specific user.
     sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
-    fileNames: {
-        session: "session.json",
-        liveStatus: "live-status.json",
-        errorLog: "error.log",
-    },
     intervals: {
         pollFollowing: 1000,
         shortTokenRefresh: 5000,
-        downloadBuffer: 1000,
     },
     timeouts: {
         staleStream: 15000,
@@ -61,7 +49,6 @@ function loadConfig(): IConfig {
                 mergedConfig = {
                     ...mergedConfig,
                     ...userConfig,
-                    fileNames: { ...mergedConfig.fileNames, ...userConfig.fileNames },
                     intervals: { ...mergedConfig.intervals, ...userConfig.intervals },
                     timeouts: { ...mergedConfig.timeouts, ...userConfig.timeouts },
                 };

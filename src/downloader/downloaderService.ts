@@ -42,8 +42,7 @@ export class DownloaderService {
         while (true) {
             try {
                 const cfg = config.getConfig();
-                const sessionFileName = cfg.fileNames.session;
-                const sessionFilePath = path.resolve(cfg.sharedStatePath, sessionFileName);
+                const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
 
                 const data = await fsPromises.readFile(sessionFilePath, "utf-8");
                 const session = JSON.parse(data);
@@ -218,8 +217,7 @@ export class DownloaderService {
                     logger.info(`No new segments for ${tsFilePath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
                     break;
                 }
-
-                await timersPromises.setTimeout(config.getConfig().intervals.downloadBuffer);
+                await timersPromises.setTimeout(1000);
             }
         } catch (error) {
             logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
