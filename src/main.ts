@@ -2,7 +2,7 @@
 import { DownloaderService } from "./downloader/downloaderService.js";
 
 async function main() {
-    const downloaderService = new DownloaderService();
+    const downloaderService = await DownloaderService.create();
     downloaderService.start();
 }
 

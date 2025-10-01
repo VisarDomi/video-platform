@@ -5,7 +5,6 @@ import * as path from "path";
 
 import * as config from "./config.js";
 import logger from "./logger.js";
-import * as utils from "./utils.js";
 
 export interface DownloadPaths {
     tsFilePath: string;
@@ -13,8 +12,13 @@ export interface DownloadPaths {
 }
 
 function generateDownloadBaseName(alias: string, date: Date): string {
-    const formattedDate = utils.getFormattedDate(date);
-    return `${formattedDate} ${alias}`;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
 }
 
 export function createDownloadPaths(alias: string, date: Date): DownloadPaths {

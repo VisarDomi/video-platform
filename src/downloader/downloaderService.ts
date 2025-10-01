@@ -3,44 +3,40 @@ import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 import * as childProcess from "child_process";
-import * as url from "url";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
-import * as utils from "../common/utils.js";
 import * as requests from "./requests.js";
+import { ActiveDownloadsManager, ActiveDownloadHandle } from "./activeDownloadsManager.js";
 
-// --- Correct Path Resolution ---
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname);
-
-// --- Local Interfaces ---
-interface ActiveDownload {
-    streamerId: string;
-    alias: string;
-    liveUrl: string | null;
-    tsFilePath: string | null;
-}
 
 export class DownloaderService {
-    private activeDownloads: Map<string, ActiveDownload> = new Map();
+    private activeDownloadsManager: ActiveDownloadsManager;
     private tokens: requests.Tokens | null = null;
 
-    constructor() {
+    /**
+     * The constructor is now private. Use the async `create` method instead.
+     */
+    private constructor(manager: ActiveDownloadsManager) {
+        this.activeDownloadsManager = manager;
         logger.info("DownloaderService initialized.");
+    }
+
+    /**
+     * Asynchronously creates and initializes a DownloaderService.
+     */
+    public static async create(): Promise<DownloaderService> {
+        const manager = await ActiveDownloadsManager.create();
+        return new DownloaderService(manager);
     }
 
     public start() {
         logger.info("Starting Downloader Service...");
-        this._startTokenWatcher(); // Start the background token refresher
-        this._startStreamWatcher(); // Start the main stream polling loop
+        this._startTokenWatcher();
+        this._startStreamWatcher();
     }
 
-    /**
-     * Periodically reads the session file and updates the internal token state.
-     */
     private async _startTokenWatcher() {
         const refreshInterval = config.getConfig().intervals.shortTokenRefresh;
         while (true) {
@@ -74,9 +70,6 @@ export class DownloaderService {
         }
     }
 
-    /**
-     * The main loop that polls the 'following' endpoint and manages downloads.
-     */
     private async _startStreamWatcher() {
         let lastKnownTotal = -1;
 
@@ -90,7 +83,7 @@ export class DownloaderService {
 
                 const streamIdsResponseBody = await requests.getFollowingResponseBody(this.tokens);
 
-                const currentTotal = this.activeDownloads.size;
+                const currentTotal = this.activeDownloadsManager.size;
                 if (currentTotal !== lastKnownTotal) {
                     logger.info(`Watching for streams... Total active/pending: ${currentTotal}`);
                     lastKnownTotal = currentTotal;
@@ -104,16 +97,15 @@ export class DownloaderService {
                         const streamerId = stream.broadcasterId;
 
                         if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
-                            if (!this.activeDownloads.has(masterPlaylistUrl)) {
-                                this.activeDownloads.set(masterPlaylistUrl, {
+                            if (!this.activeDownloadsManager.has(masterPlaylistUrl)) {
+                                logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
+                                const downloadHandle = this.activeDownloadsManager.add(masterPlaylistUrl, {
                                     streamerId: streamerId,
                                     alias: streamerId,
-                                    liveUrl: null,
-                                    tsFilePath: null,
                                 });
-                                logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                                this._updateStatusFile();
-                                this._initiateAndDownloadStream(streamerId, masterPlaylistUrl);
+                                if (downloadHandle) {
+                                    this._initiateAndDownloadStream(downloadHandle);
+                                }
                             }
                         }
                     }
@@ -127,27 +119,25 @@ export class DownloaderService {
         }
     }
 
-    /**
-     * The long-running process for downloading a single stream. It relies on the
-     * periodically updated `this.tokens` from the token watcher.
-     */
-    private async _initiateAndDownloadStream(streamerId: string, masterPlaylistUrl: string) {
-        let alias = streamerId;
+    private async _initiateAndDownloadStream(handle: ActiveDownloadHandle) {
         let tsFilePath: string | null = null;
         let segmentsDirPath: string | null = null;
-
-        const downloadState = this.activeDownloads.get(masterPlaylistUrl);
-        if (!downloadState) {
-            logger.error(`Could not find state for download with master URL: ${masterPlaylistUrl}. Aborting.`);
-            return;
-        }
+        let alias: string;
 
         try {
+            const initialState = handle.state;
+            if (!initialState) {
+                logger.error(`Could not find state for download with handle. Aborting.`);
+                return;
+            }
+
+            const { streamerId } = initialState;
+            alias = initialState.alias;
+
             if (!this.tokens) throw new Error(`Tokens not available at start of download for ${streamerId}`);
 
             alias = await requests.getStreamerAlias(streamerId, this.tokens);
-            downloadState.alias = alias;
-            this._updateStatusFile();
+            handle.update({ alias });
 
             let liveUrl: string | null = null;
             const MAX_RETRIES = 3;
@@ -155,7 +145,7 @@ export class DownloaderService {
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 if (!this.tokens) throw new Error("Tokens disappeared while resolving live URL.");
-                const resolvedUrl = await this._getLiveUrlFromMaster(masterPlaylistUrl, downloadState.tsFilePath);
+                const resolvedUrl = await this._getLiveUrlFromMaster(handle.masterPlaylistUrl, handle.state?.tsFilePath ?? null);
                 if (resolvedUrl) {
                     liveUrl = resolvedUrl;
                     break;
@@ -168,39 +158,21 @@ export class DownloaderService {
                 throw new Error(`Could not resolve live playlist URL for ${alias} after ${MAX_RETRIES} attempts.`);
             }
 
-            downloadState.liveUrl = liveUrl;
-            this._updateStatusFile();
+            handle.update({ liveUrl });
             
             const startDate = new Date();
             const paths = storage.createDownloadPaths(alias, startDate);
             tsFilePath = paths.tsFilePath;
-
-            downloadState.tsFilePath = tsFilePath;
-            this._updateStatusFile();
-
             segmentsDirPath = paths.segmentsDirPath;
 
-            logger.info(`${utils.getFormattedDate(startDate)} ${alias} started downloading.`);
+            handle.update({ tsFilePath });
+
+            logger.info(`${tsFilePath} started downloading.`);
             logger.info(`- Live URL: ${liveUrl}`);
             logger.info(`- TS (growing): ${tsFilePath}`);
             logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
 
-            const ffmpegProcess = childProcess.spawn("ffmpeg", [
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-stats",
-                "-fflags",
-                "+genpts",
-                "-i",
-                "pipe:0",
-                "-c",
-                "copy",
-                "-f",
-                "mpegts",
-                "-y",
-                tsFilePath,
-            ]);
+            const ffmpegProcess = childProcess.spawn("ffmpeg", [ "-hide_banner", "-loglevel", "error", "-stats", "-fflags", "+genpts", "-i", "pipe:0", "-c", "copy", "-f", "mpegts", "-y", tsFilePath ]);
             ffmpegProcess.stderr.on("data", (data) => logger.verbose(`ffmpeg-ts (${path.basename(tsFilePath!)}): ${data.toString()}`));
             ffmpegProcess.on("error", (err) => logger.error(`Failed to start FFmpeg (ts) for ${alias}. Is ffmpeg installed?`, { error: err }));
             ffmpegProcess.stdin.on("error", (err: NodeJS.ErrnoException) => {
@@ -224,7 +196,7 @@ export class DownloaderService {
 
                 if (liveResponse.success && liveResponse.data) {
                     const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
-                    const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
+                    const cinemaApiUrl = handle.masterPlaylistUrl.split("/v2/")[0];
 
                     const segmentsToDownload: string[] = [];
                     for (let i = 0; i < liveLines.length; i++) {
@@ -249,7 +221,7 @@ export class DownloaderService {
                                     fsPromises.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                                     lastDownload = Date.now();
                                 } catch (error) {
-                                    logger.error(`Failed to save raw segment for ${tsFilePath} with state ${JSON.stringify(downloadState)}`, { error });
+                                    logger.error(`Failed to save raw segment for ${tsFilePath}`, { error });
                                 }
                             }
                         }
@@ -276,24 +248,8 @@ export class DownloaderService {
         } catch (error) {
             logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
         } finally {
-            logger.info(`${utils.getFormattedDate()} Finished download process for: ${tsFilePath}`);
-            this.activeDownloads.delete(masterPlaylistUrl);
-            this._updateStatusFile();
-        }
-    }
-
-    private async _updateStatusFile() {
-        try {
-            const cfg = config.getConfig();
-            const statusFilePath = path.join(projectRoot, cfg.fileNames.liveStatus);
-            const activeDownloads = Array.from(this.activeDownloads.entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
-                masterPlaylistUrl,
-                ...downloadInfo,
-            }));
-            const status = { activeDownloads, lastUpdated: new Date().toISOString() };
-            await fsPromises.writeFile(statusFilePath, JSON.stringify(status, null, 2));
-        } catch (error) {
-            logger.error("Failed to write download status to live-status.json", { error });
+            logger.info(`Finished download process for: ${tsFilePath}`);
+            handle.remove();
         }
     }
 
