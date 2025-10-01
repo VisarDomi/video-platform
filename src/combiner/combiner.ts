@@ -94,7 +94,29 @@ async function stitchVideos(videoBatch: VideoInfo[], outputDir: string): Promise
 
         await runCommand(
             "ffmpeg",
-            ["-nostdin", "-hide_banner", "-loglevel", "info", "-stats", "-f", "concat", "-safe", "0", "-i", fileListPath, "-c", "copy", "-y", outputFile],
+            [
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "info",
+                "-stats",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                fileListPath,
+                "-c",
+                "-fflags",
+                "+genpts",
+                "-movflags",
+                "+faststart",
+                "-bsf:a",
+                "aac_adtstoasc",
+                "copy",
+                "-y",
+                outputFile,
+            ],
             `Stitch: ${firstVideo.username}`
         );
 
