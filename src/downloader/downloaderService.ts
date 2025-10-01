@@ -9,7 +9,7 @@ import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
 import * as requests from "./requests.js";
 import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
-
+import { findBestStreamUrl } from "./hlsUtils.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
@@ -119,25 +119,24 @@ export class DownloaderService {
         }
     }
 
-    private async _initiateAndDownloadStream(handle: DownloadHandle) {
+    private async _initiateAndDownloadStream(downloadHandle: DownloadHandle) {
         let tsFilePath: string | null = null;
         let segmentsDirPath: string | null = null;
         let alias: string;
 
         try {
-            const initialState = handle.state;
-            if (!initialState) {
+            if (!downloadHandle.state) {
                 logger.error(`Could not find state for download with handle. Aborting.`);
                 return;
             }
 
-            const { streamerId } = initialState;
-            alias = initialState.alias;
+            const { streamerId } = downloadHandle.state;
+            alias = downloadHandle.state.alias;
 
             if (!this.tokens) throw new Error(`Tokens not available at start of download for ${streamerId}`);
 
             alias = await requests.getStreamerAlias(streamerId, this.tokens);
-            handle.update({ alias });
+            downloadHandle.update({ alias });
 
             let liveUrl: string | null = null;
             const MAX_RETRIES = 3;
@@ -145,7 +144,7 @@ export class DownloaderService {
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 if (!this.tokens) throw new Error("Tokens disappeared while resolving live URL.");
-                const resolvedUrl = await this._getLiveUrlFromMaster(handle.masterPlaylistUrl, handle.state?.tsFilePath ?? null);
+                const resolvedUrl = await this._getLiveUrlFromMaster(downloadHandle);
                 if (resolvedUrl) {
                     liveUrl = resolvedUrl;
                     break;
@@ -158,14 +157,14 @@ export class DownloaderService {
                 throw new Error(`Could not resolve live playlist URL for ${alias} after ${MAX_RETRIES} attempts.`);
             }
 
-            handle.update({ liveUrl });
+            downloadHandle.update({ liveUrl });
             
             const startDate = new Date();
             const paths = storage.createDownloadPaths(alias, startDate);
             tsFilePath = paths.tsFilePath;
             segmentsDirPath = paths.segmentsDirPath;
 
-            handle.update({ tsFilePath });
+            downloadHandle.update({ tsFilePath });
 
             logger.info(`${tsFilePath} started downloading.`);
             logger.info(`- Live URL: ${liveUrl}`);
@@ -174,12 +173,12 @@ export class DownloaderService {
 
             const ffmpegProcess = childProcess.spawn("ffmpeg", [ "-hide_banner", "-loglevel", "error", "-stats", "-fflags", "+genpts", "-i", "pipe:0", "-c", "copy", "-f", "mpegts", "-y", tsFilePath ]);
             ffmpegProcess.stderr.on("data", (data) => logger.verbose(`ffmpeg-ts (${path.basename(tsFilePath!)}): ${data.toString()}`));
-            ffmpegProcess.on("error", (err) => logger.error(`Failed to start FFmpeg (ts) for ${alias}. Is ffmpeg installed?`, { error: err }));
+            ffmpegProcess.on("error", (err) => logger.error(`Failed to start FFmpeg (ts) for ${tsFilePath}. Is ffmpeg installed?`, { error: err }));
             ffmpegProcess.stdin.on("error", (err: NodeJS.ErrnoException) => {
                 if (err.code === "EPIPE") {
-                    logger.warn(`ffmpeg-ts (${alias}): Broken pipe. FFmpeg process likely closed prematurely.`);
+                    logger.warn(`ffmpeg-ts (${tsFilePath}): Broken pipe. FFmpeg process likely closed prematurely.`);
                 } else {
-                    logger.error(`ffmpeg-ts (${alias}): stdin stream error.`, { error: err });
+                    logger.error(`ffmpeg-ts (${tsFilePath}): stdin stream error.`, { error: err });
                 }
             });
 
@@ -188,7 +187,7 @@ export class DownloaderService {
 
             while (true) {
                 if (!this.tokens) {
-                    logger.warn(`Tokens became unavailable for ${alias} mid-stream. Assuming stream has ended.`);
+                    logger.warn(`Tokens became unavailable for ${tsFilePath} mid-stream. Assuming stream has ended.`);
                     break;
                 }
 
@@ -196,7 +195,7 @@ export class DownloaderService {
 
                 if (liveResponse.success && liveResponse.data) {
                     const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
-                    const cinemaApiUrl = handle.masterPlaylistUrl.split("/v2/")[0];
+                    const cinemaApiUrl = downloadHandle.masterPlaylistUrl.split("/v2/")[0];
 
                     const segmentsToDownload: string[] = [];
                     for (let i = 0; i < liveLines.length; i++) {
@@ -249,38 +248,33 @@ export class DownloaderService {
             logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
         } finally {
             logger.info(`Finished download process for: ${tsFilePath}`);
-            handle.remove();
+            downloadHandle.remove();
         }
     }
 
-    private async _getLiveUrlFromMaster(masterPlaylistUrl: string, tsFilePath: string | null): Promise<string | null> {
+    private async _getLiveUrlFromMaster(downloadHandle: DownloadHandle): Promise<string | null> {
         if (!this.tokens) return null;
         try {
-            const masterListBody = await requests.getMasterList(masterPlaylistUrl, this.tokens);
+            const masterListBody = await requests.getMasterList(downloadHandle.masterPlaylistUrl, this.tokens);
             if (!masterListBody) {
-                logger.warn(`Could not fetch master playlist body from: ${masterPlaylistUrl} for ${tsFilePath}`);
+                logger.warn(`Could not fetch master playlist body from: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`);
                 return null;
             }
-            const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
-            let relativeLiveUrl;
-            for (let i = 0; i < masterLines.length; i++) {
-                if (masterLines[i].includes("RESOLUTION=1280x720")) {
-                    relativeLiveUrl = masterLines[i + 1];
-                    break;
-                }
-            }
+
+            const relativeLiveUrl = findBestStreamUrl(masterListBody);
+
             if (!relativeLiveUrl) {
-                logger.warn(`Could not find HD stream in master playlist: ${masterPlaylistUrl} for ${tsFilePath}`);
+                logger.warn(`Could not find HD stream in master playlist: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`);
                 return null;
             }
-            const cinemaApiUrl = masterPlaylistUrl.split("/v2/")[0];
+            const cinemaApiUrl = downloadHandle.masterPlaylistUrl.split("/v2/")[0];
             let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
             if (livePlaylistUrl.endsWith("&")) {
                 livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
             }
             return livePlaylistUrl;
         } catch (error) {
-            logger.error(`Error resolving live URL from master: ${masterPlaylistUrl} for ${tsFilePath}`, { error });
+            logger.error(`Error resolving live URL from master: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`, { error });
             return null;
         }
     }
