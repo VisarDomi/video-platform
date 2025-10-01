@@ -8,18 +8,18 @@ import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
 import * as requests from "./requests.js";
-import { ActiveDownloadsManager, ActiveDownloadHandle } from "./activeDownloadsManager.js";
+import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
 
 
 export class DownloaderService {
-    private activeDownloadsManager: ActiveDownloadsManager;
+    private downloadsManager: DownloadsManager;
     private tokens: requests.Tokens | null = null;
 
     /**
      * The constructor is now private. Use the async `create` method instead.
      */
-    private constructor(manager: ActiveDownloadsManager) {
-        this.activeDownloadsManager = manager;
+    private constructor(downloadsManager: DownloadsManager) {
+        this.downloadsManager = downloadsManager;
         logger.info("DownloaderService initialized.");
     }
 
@@ -27,8 +27,8 @@ export class DownloaderService {
      * Asynchronously creates and initializes a DownloaderService.
      */
     public static async create(): Promise<DownloaderService> {
-        const manager = await ActiveDownloadsManager.create();
-        return new DownloaderService(manager);
+        const downloadsManager = await DownloadsManager.create();
+        return new DownloaderService(downloadsManager);
     }
 
     public start() {
@@ -83,7 +83,7 @@ export class DownloaderService {
 
                 const streamIdsResponseBody = await requests.getFollowingResponseBody(this.tokens);
 
-                const currentTotal = this.activeDownloadsManager.size;
+                const currentTotal = this.downloadsManager.size;
                 if (currentTotal !== lastKnownTotal) {
                     logger.info(`Watching for streams... Total active/pending: ${currentTotal}`);
                     lastKnownTotal = currentTotal;
@@ -97,9 +97,9 @@ export class DownloaderService {
                         const streamerId = stream.broadcasterId;
 
                         if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
-                            if (!this.activeDownloadsManager.has(masterPlaylistUrl)) {
+                            if (!this.downloadsManager.has(masterPlaylistUrl)) {
                                 logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
-                                const downloadHandle = this.activeDownloadsManager.add(masterPlaylistUrl, {
+                                const downloadHandle = this.downloadsManager.add(masterPlaylistUrl, {
                                     streamerId: streamerId,
                                     alias: streamerId,
                                 });
@@ -119,7 +119,7 @@ export class DownloaderService {
         }
     }
 
-    private async _initiateAndDownloadStream(handle: ActiveDownloadHandle) {
+    private async _initiateAndDownloadStream(handle: DownloadHandle) {
         let tsFilePath: string | null = null;
         let segmentsDirPath: string | null = null;
         let alias: string;
