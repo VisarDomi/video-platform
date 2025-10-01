@@ -1,6 +1,7 @@
 // src/auth/authClient.ts
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
+
 import * as authQueue from "./authQueue.js";
 
 export interface RefreshResult {

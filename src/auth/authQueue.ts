@@ -1,5 +1,6 @@
 // src/common/requestQueue.ts
 import * as timersPromises from "timers/promises";
+
 import logger from "../common/logger.js";
 
 const REQUEST_DELAY_MS = 1000; // The delay between each request in milliseconds.
