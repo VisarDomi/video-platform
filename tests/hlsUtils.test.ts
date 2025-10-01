@@ -8,39 +8,54 @@ const mockMasterPlaylist = `#EXTM3U
 /v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=low
 #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1280000,RESOLUTION=854x480,CODECS="avc1.4d401f,mp4a.40.2"
 /v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=mid
-#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
-/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high
 #EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5120000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"
 /v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=fullhd
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
+/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high
 `;
 
-describe('HLS Utilities :: findBestStreamUrl (Current Logic)', () => {
+describe('HLS Utilities :: findBestStreamUrl (Robust Logic)', () => {
 
-    it('should find and return the relative URL for the 720p stream', () => {
-        const expectedUrl = '/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high';
+    it('should find and return the URL for the stream with the HIGHEST bandwidth (1080p)', () => {
+        const expectedUrl = '/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=fullhd';
         const result = findBestStreamUrl(mockMasterPlaylist);
         expect(result).toBe(expectedUrl);
     });
 
-    it('should return null if no 720p stream is found in the playlist', () => {
-        const playlistWithout720p = mockMasterPlaylist.replace(/#EXT-X-STREAM-INF:.*RESOLUTION=1280x720.*\s*.*stream=high\s*/, '');
-        const result = findBestStreamUrl(playlistWithout720p);
-        expect(result).toBeNull();
+    it('should correctly select the best stream even if RESOLUTION is missing', () => {
+        const playlistWithoutResolutions = `#EXTM3U
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=448000,CODECS="avc1.42c01e,mp4a.40.2"
+/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=low
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1280000,CODECS="avc1.4d401f,mp4a.40.2"
+/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=mid
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=5120000,CODECS="avc1.640028,mp4a.40.2"
+/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=fullhd
+`;
+        const expectedUrl = '/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=fullhd';
+        const result = findBestStreamUrl(playlistWithoutResolutions);
+        expect(result).toBe(expectedUrl);
+    });
+
+    it('should return the only available stream URL', () => {
+        const singleStreamPlaylist = `#EXTM3U
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
+/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high
+`;
+        const expectedUrl = '/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high';
+        const result = findBestStreamUrl(singleStreamPlaylist);
+        expect(result).toBe(expectedUrl);
+    });
+
+    it('should return null if no stream URLs are found', () => {
+        const playlistWithoutUrls = `#EXTM3U
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=448000,RESOLUTION=426x240
+#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=1280000,RESOLUTION=854x480
+`;
+        expect(findBestStreamUrl(playlistWithoutUrls)).toBeNull();
     });
 
     it('should return null for an empty or invalid playlist string', () => {
         expect(findBestStreamUrl('')).toBeNull();
         expect(findBestStreamUrl('#EXTM3U')).toBeNull();
-    });
-
-    it('should correctly handle a playlist where the 720p stream is the first entry', () => {
-        const reversedPlaylist = `#EXTM3U
-#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=2560000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"
-/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high
-#EXT-X-STREAM-INF:PROGRAM-ID=1,BANDWIDTH=448000,RESOLUTION=426x240,CODECS="avc1.42c01e,mp4a.40.2"
-/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=low`;
-        const expectedUrl = '/v2/broadcaster-sessions/12345/playlist.m3u8?token=abc&stream=high';
-        const result = findBestStreamUrl(reversedPlaylist);
-        expect(result).toBe(expectedUrl);
     });
 });
