@@ -17,29 +17,30 @@ export interface Download {
 
 export class DownloadHandle {
     public readonly masterPlaylistUrl: string;
-    private manager: DownloadsManager;
+    private downloadsManager: DownloadsManager;
 
-    constructor(masterPlaylistUrl: string, manager: DownloadsManager) {
+    constructor(masterPlaylistUrl: string, downloadsManager: DownloadsManager) {
         this.masterPlaylistUrl = masterPlaylistUrl;
-        this.manager = manager;
+        this.downloadsManager = downloadsManager;
     }
 
     public update(updates: Partial<Omit<Download, 'streamerId'>>): Download | undefined {
-        return this.manager.update(this.masterPlaylistUrl, updates);
+        return this.downloadsManager.update(this.masterPlaylistUrl, updates);
     }
 
     public remove(): void {
-        this.manager.remove(this.masterPlaylistUrl);
+        this.downloadsManager.remove(this.masterPlaylistUrl);
     }
 
     public get state(): Download | undefined {
-        return this.manager.get(this.masterPlaylistUrl);
+        return this.downloadsManager.get(this.masterPlaylistUrl);
     }
 }
 
 export class DownloadsManager {
     private downloads: Map<string, Download> = new Map();
     private statusFilePath: string;
+    private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
     /**
      * The constructor is now private. Use the async `create` method instead.
@@ -76,7 +77,7 @@ export class DownloadsManager {
         };
 
         this.downloads.set(masterPlaylistUrl, newDownload);
-        this._updateStatusFile();
+        this._requestStatusFileUpdate();
         return new DownloadHandle(masterPlaylistUrl, this);
     }
 
@@ -89,13 +90,13 @@ export class DownloadsManager {
 
         const updated = { ...existing, ...updates };
         this.downloads.set(masterPlaylistUrl, updated);
-        this._updateStatusFile();
+        this._requestStatusFileUpdate();
         return updated;
     }
 
     public remove(masterPlaylistUrl: string): void {
         if (this.downloads.delete(masterPlaylistUrl)) {
-            this._updateStatusFile();
+            this._requestStatusFileUpdate();
         }
     }
 
@@ -109,6 +110,18 @@ export class DownloadsManager {
 
     public get size(): number {
         return this.downloads.size;
+    }
+
+    /**
+     * Schedules a debounced update to the status file.
+     */
+    private _requestStatusFileUpdate(): void {
+        if (this._updateFileDebounceTimer) {
+            clearTimeout(this._updateFileDebounceTimer);
+        }
+        this._updateFileDebounceTimer = setTimeout(() => {
+            this._updateStatusFile();
+        }, 200); // Wait 200ms before writing
     }
 
     /**
@@ -132,7 +145,11 @@ export class DownloadsManager {
      */
     private async _clearStatusFile(): Promise<void> {
         logger.info("Clearing live-status.json for a fresh start...");
-        this.downloads.clear(); // Ensure in-memory state is also clear
-        await this._updateStatusFile(); // This will write an empty `downloads` array
+        if (this._updateFileDebounceTimer) { // Clear any pending writes
+            clearTimeout(this._updateFileDebounceTimer);
+            this._updateFileDebounceTimer = null;
+        }
+        this.downloads.clear();
+        await this._updateStatusFile(); // Write immediately
     }
 }
