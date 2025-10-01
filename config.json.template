@@ -1,5 +1,5 @@
 {
-    "storagePath": "/home/visar/Downloads/tango",
+    "storagePath": "/home/visar/Documents/tango",
     "fileNames": {
         "session": "session.json",
         "liveStatus": "live-status.json",
