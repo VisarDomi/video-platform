@@ -1,2 +1,2 @@
-# tslive-downloader
-Download from tslive.
+# tslive-segment-fetcher
+Download 1s .ts files for each of the streamers you follow from tslive.
