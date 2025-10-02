@@ -1,8 +1,7 @@
 {
     "storagePath": "/home/visar/Videos/tango",
     "intervals": {
-        "pollFollowing": 1000,
-        "shortTokenRefresh": 5000
+        "pollFollowing": 1000
     },
     "timeouts": {
         "staleStream": 15000
