@@ -1,2 +1,2 @@
-# tslive-downloader
-Download from tslive.
+# tslive-auth
+Get and update tokens used by other tslive microservices.
