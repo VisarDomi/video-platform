@@ -13,3 +13,9 @@ and creates this communication file:
 ```
 sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
 ```
+
+and is coupled to tango-packager with this setting:
+
+```
+config.getConfig().timeouts.staleStream
+```
