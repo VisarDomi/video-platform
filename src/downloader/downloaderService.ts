@@ -9,7 +9,6 @@ import * as storage from "../common/storage.js";
 
 import * as requests from "./requests.js";
 import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
-import { findBestStreamUrl } from "./hlsUtils.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
@@ -234,7 +233,14 @@ export class DownloaderService {
                 return null;
             }
 
-            const relativeLiveUrl = findBestStreamUrl(masterListBody);
+            const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
+            let relativeLiveUrl;
+            for (let i = 0; i < masterLines.length; i++) {
+                if (masterLines[i].includes("RESOLUTION=1280x720")) {
+                    relativeLiveUrl = masterLines[i + 1];
+                    break;
+                }
+            }
 
             if (!relativeLiveUrl) {
                 logger.warn(`Could not find HD stream in master playlist: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`);
