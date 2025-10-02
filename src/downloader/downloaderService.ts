@@ -166,8 +166,6 @@ export class DownloaderService {
             downloadHandle.update({ tsFilePath, segmentsDirPath });
 
             logger.info(`${tsFilePath} started downloading segments.`);
-            logger.info(`- Live URL: ${liveUrl}`);
-            logger.info(`- Segments will be saved to: ${segmentsDirPath}`);
 
             const downloadedTsUrls: Set<string> = new Set();
             let lastDownload = Date.now();

@@ -1,4 +1,5 @@
 // src/downloader/hlsUtils.ts
+import logger from '../common/logger.js'
 
 interface StreamInfo {
     url: string;
@@ -65,5 +66,9 @@ export function findBestStreamUrl(masterPlaylistBody: string): string | null {
     availableStreams.sort((a, b) => b.bandwidth - a.bandwidth);
 
     // The best stream is the first one in the sorted array
-    return availableStreams[0].url;
+    const  bestStream = availableStreams[0];
+    logger.info(`bestStream.bandwidth: ${bestStream.bandwidth}`);
+    logger.info(`bestStream.resolution: ${bestStream.resolution}`);
+    logger.info(`bestStream.url: ${bestStream.url}`);
+    return bestStream.url;
 }
