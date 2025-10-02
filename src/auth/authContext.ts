@@ -87,7 +87,7 @@ export class AuthContext {
 
     // --- File Operations ---
     private _getSessionFilePath(): string {
-        return path.resolve(config.getConfig().sharedStatePath, "session.json");
+        return path.resolve(config.getConfig().sharedStatePath, `session.json`);
     }
 
     public async loadTokenFromFile(): Promise<boolean> {
