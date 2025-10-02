@@ -1,7 +1,7 @@
 {
   "name": "tango-editor",
   "version": "1.0.0",
-  "description": "A web interface for viewing live and archived Tango streams.",
+  "description": "A web interface for viewing and editing Tango videos.",
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
@@ -15,12 +15,6 @@
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^5.1.0",
-    "winston": "^3.13.0"
-  },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
@@ -31,5 +25,11 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "winston": "^3.13.0"
   }
 }

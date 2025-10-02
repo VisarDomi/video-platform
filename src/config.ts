@@ -1,12 +1,13 @@
 // src/config.ts
 import 'dotenv/config';
 import fs from 'fs';
+import logger from './logger.js'
 
 // --- Environment Variable Validation ---
 const VIDEOS_DIRS_RAW = process.env.VIDEOS_DIRS;
 
 if (!VIDEOS_DIRS_RAW) {
-    console.error("FATAL ERROR: VIDEOS_DIRS must be set in the .env file as a comma-separated list of paths.");
+    logger.error("FATAL ERROR: VIDEOS_DIRS must be set in the .env file as a comma-separated list of paths.");
     process.exit(1);
 }
 
@@ -21,13 +22,13 @@ export const PORT = 7998;
 // --- Startup Validation ---
 VIDEO_ROOT_DIRS.forEach(dir => {
     if (!fs.existsSync(dir)) {
-        console.error(`FATAL ERROR: The configured video directory does not exist: ${dir}`);
-        process.exit(1);
+        logger.error(`The configured video directory does not exist. Skipping... ${dir}`);
+        return
     }
     try {
         fs.accessSync(dir, fs.constants.R_OK);
     } catch (err) {
-        console.error(`FATAL ERROR: The configured video directory is not readable: ${dir}`);
-        process.exit(1);
+        logger.error(`The configured video directory is not readable. Skipping... ${dir}`);
+        return
     }
 });
