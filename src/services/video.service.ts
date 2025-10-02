@@ -15,7 +15,7 @@ let isProcessingQueue = false;
 // --- Internal Helper Functions ---
 
 /**
- * Moves a file to a 'trash_edit' subdirectory within its base directory.
+ * Moves a file to a 'trash' subdirectory within its base directory.
  */
 async function moveFileToTrash(filePath: string, baseDir: string) {
     const trashDir = path.join(baseDir, 'trash');
