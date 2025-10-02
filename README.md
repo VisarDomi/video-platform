@@ -13,3 +13,9 @@ and creates this communication file:
 ```
 sharedStatePath: path.join(os.homedir(), ".local", "share", "tslive-services"),
 ```
+
+and is coupled to tslive-packager with this setting:
+
+```
+config.getConfig().timeouts.staleStream
+```
