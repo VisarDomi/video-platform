@@ -1,17 +1,16 @@
 {
-    "name": "tango-downloader",
+    "name": "tango-auth",
     "type": "module",
     "version": "1.0.0",
-    "description": "Download from tango",
+    "description": "Get and update tokens used by other tango microservices",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name tango-downloader",
-        "restart": "npm run build && pm2 restart tango-downloader",
-        "stop": "pm2 stop tango-downloader",
-        "logs": "pm2 logs tango-downloader -f",
-        "test:e2e": "npm run build && dotenv -e .env -- ts-node --esm tests/lifecycle.e2e.ts",
-        "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --detectOpenHandles"
+        "start": "npm run build && pm2 start dist/main.js --name tango-auth",
+        "restart": "npm run build && pm2 restart tango-auth",
+        "stop": "pm2 stop tango-auth",
+        "logs": "pm2 logs tango-auth -f",
+        "tests": "cross-env NODE_OPTIONS='--no-warnings --experimental-vm-modules' jest"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
@@ -29,7 +28,6 @@
     },
     "dependencies": {
         "dotenv": "^17.2.2",
-        "p-limit": "^7.1.1",
         "puppeteer": "23.10.1",
         "winston": "^3.17.0"
     }

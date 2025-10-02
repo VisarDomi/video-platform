@@ -3,7 +3,6 @@ import * as path from "path";
 import * as url from "url";
 import winston from "winston";
 
-import * as config from "./config.js";
 import * as utils from "./utils.js";
 
 // --- Correct Path Resolution ---
@@ -36,7 +35,7 @@ const logger = winston.createLogger({
         }),
         // 2. A transport to log ERRORS to a file
         new winston.transports.File({
-            filename: path.join(projectRoot, config.getConfig().fileNames.errorLog),
+            filename: path.join(projectRoot, "error.log"),
             level: "error", // Only log errors to this file
             format: fileFormat,
         }),

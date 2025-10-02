@@ -1,7 +1,6 @@
 // src/auth/tokenManager.ts
 import * as timersPromises from "timers/promises";
 
-import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 
 import * as authContext from "./authContext.js";
@@ -113,7 +112,7 @@ export class AuthService {
 
     private async _refreshShortLivedTokens() {
         while (true) {
-            const refreshInterval = config.getConfig().intervals.shortTokenRefresh
+            const refreshInterval = 5000
             try {
                 await this._setTokenData();
                 await this.authContext.saveTokenToFile(); // Persist the new short-lived tokens
@@ -126,7 +125,7 @@ export class AuthService {
 
     private async _manageTokenLifecycle() {
         while (true) {
-            const refreshInterval = config.getConfig().intervals.longTokenRefreshMinutes * 60 * 1000;
+            const refreshInterval = 30 * 60 * 1000;
             await timersPromises.setTimeout(refreshInterval);
             await this._maintainSession();
         }

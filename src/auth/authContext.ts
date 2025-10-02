@@ -1,19 +1,12 @@
 // src/auth/authContext.ts
 import * as fsPromises from "fs/promises";
 import * as path from "path";
-import * as url from "url";
 
 import logger from "../common/logger.js";
-import * as config from "../common/config.js";
 import * as constants from "../common/constants.js";
-import * as utils from "../common/utils.js";
+import * as config from "../common/config.js";
 
 import { RefreshResult, TokenDataResult } from "./authClient.js";
-
-// --- Correct Path Resolution ---
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname)
 
 interface LoginResult {
     tangoRT: string;
@@ -94,8 +87,7 @@ export class AuthContext {
 
     // --- File Operations ---
     private _getSessionFilePath(): string {
-        const sessionFile = config.getConfig().fileNames.session;
-        return path.resolve(projectRoot, sessionFile);
+        return path.resolve(config.getConfig().sharedStatePath, "session.json");
     }
 
     public async loadTokenFromFile(): Promise<boolean> {
