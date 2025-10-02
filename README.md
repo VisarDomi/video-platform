@@ -2,7 +2,7 @@
 Get and update tokens used by other tango microservices.
 
 ## note
-this microservice creates and updates this token file:
+this service produces:
 
 `sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),`
 
