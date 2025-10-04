@@ -1,38 +1,38 @@
 {
-  "name": "tango-editor",
-  "version": "1.0.0",
-  "description": "A web interface for viewing and editing Tango videos.",
-  "main": "dist/server/server.js",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build:client": "vite build",
-    "build:server": "rm -rf dist/server && tsc --project tsconfig.server.json",
-    "build": "npm run build:client && npm run build:server",
-    "start": "npm run build && pm2 start dist/server/server.js --name tango-editor",
-    "restart": "npm run build && pm2 restart tango-editor",
-    "stop": "pm2 stop tango-editor",
-    "logs": "pm2 logs tango-editor -f",
-    "test": "vitest"
-  },
-  "author": "",
-  "license": "ISC",
-  "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.3",
-    "@types/node": "^20.12.7",
-    "@vitest/ui": "^3.2.4",
-    "jsdom": "^27.0.0",
-    "nodemon": "^3.1.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.4.5",
-    "vite": "^7.1.9",
-    "vitest": "^3.2.4"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^5.1.0",
-    "winston": "^3.13.0"
-  }
+    "name": "tango-editor",
+    "version": "1.0.0",
+    "description": "A web interface for viewing and editing Tango videos.",
+    "main": "dist/server/server.js",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build:client": "vite build",
+        "build:server": "rm -rf dist/server && tsc --project tsconfig.server.json",
+        "build": "npm run build:client && npm run build:server",
+        "start": "npm run build && pm2 start dist/server/server.js --name tango-editor",
+        "restart": "npm run build && pm2 restart tango-editor",
+        "stop": "pm2 stop tango-editor",
+        "logs": "pm2 logs tango-editor -f",
+        "test": "vitest"
+    },
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^5.0.3",
+        "@types/node": "^20.12.7",
+        "@vitest/ui": "^3.2.4",
+        "jsdom": "^27.0.0",
+        "nodemon": "^3.1.0",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.5",
+        "vite": "^7.1.9",
+        "vitest": "^3.2.4"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^5.1.0",
+        "winston": "^3.13.0"
+    }
 }

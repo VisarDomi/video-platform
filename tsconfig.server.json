@@ -1,14 +1,14 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "outDir": "./dist/server",
-    "module": "ESNext",
-    "moduleResolution": "node",
-    "noEmit": false,
-    "sourceMap": true,
-    "allowImportingTsExtensions": false,
-    "allowSyntheticDefaultImports": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "**/*.spec.ts"]
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "outDir": "./dist/server",
+        "module": "ESNext",
+        "moduleResolution": "node",
+        "noEmit": false,
+        "sourceMap": true,
+        "allowImportingTsExtensions": false,
+        "allowSyntheticDefaultImports": true
+    },
+    "include": ["src"],
+    "exclude": ["node_modules", "**/*.spec.ts"]
 }
