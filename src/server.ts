@@ -1,7 +1,6 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
-import { fileURLToPath } from "url";
 import * as os from "os";
 import logger from "./logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./config.js"; // <-- Import FRONTEND_DIST_PATH
@@ -21,10 +20,6 @@ const logServerInfo = () => {
         });
     });
 };
-
-// --- Path Setup ---
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // --- Express App Setup ---
 const app = express();
