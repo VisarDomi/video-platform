@@ -73,7 +73,7 @@ function handleScrub(e) {
     dom.videoPlayer.currentTime = newTime;
 }
 
-// --- NEW: Hide/show search bar on scroll ---
+// --- Hide/show search bar on scroll ---
 function handleListViewScroll() {
     const currentScrollY = window.scrollY;
 
@@ -198,7 +198,7 @@ function attachEventListeners() {
         lastProgressBarTapTime = currentTime;
     }, { passive: false }); // `passive: false` is critical for `preventDefault()` to work here.
 
-    // --- NEW Scrubbing Logic ---
+    // --- Scrubbing Logic ---
     const onPointerMove = (e) => {
         if (isScrubbing) {
             handleScrub(e);
@@ -271,7 +271,7 @@ function attachEventListeners() {
         }
     });
 
-    // NEW: Add a global scroll listener
+    // Add a global scroll listener
     window.addEventListener('scroll', handleListViewScroll);
 }
 
@@ -283,7 +283,7 @@ function handleTimeUpdate() {
     const { currentTime, duration } = dom.videoPlayer;
 
     ui.updateProgressBar(currentTime, duration);
-    // the format is on purpose like this
+    // DO NOT REMOVE COMMENT: the format is on purpose like this
     dom.timeDisplay.textContent = `${ui.formatTimePrecise(currentTime)} ${ui.formatTimePrecise(duration)}`;
 
     if (!currentVideo) return;
@@ -348,7 +348,7 @@ function initialize() {
         videoView: document.getElementById('videoView'),
         listContainer: document.getElementById('listContainer'),
         videoItemsWrapper: document.getElementById('videoItemsWrapper'),
-        searchContainer: document.getElementById('searchContainer'), // ADDED THIS
+        searchContainer: document.getElementById('searchContainer'),
         videoPlayer: document.getElementById('videoPlayer'),
         streamerNameEl: document.getElementById('streamerName'),
         searchInput: document.getElementById('searchInput'),
@@ -382,9 +382,11 @@ function initialize() {
         if (lastPlayedVideoSrc !== currentSrc) {
             lastPlayedVideoSrc = currentSrc;
             if (state.currentVideo) {
+                document.body.classList.add('video-view-active'); // ADD THIS LINE
                 player.playVideo(state.currentVideo, state.currentVideoStartTime);
                 requestWakeLock();
             } else {
+                document.body.classList.remove('video-view-active'); // ADD THIS LINE
                 player.stopPlayback();
                 releaseWakeLock();
                 // When returning to list, reset scroll and ensure search bar is visible

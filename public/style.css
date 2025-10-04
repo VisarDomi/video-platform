@@ -9,6 +9,11 @@ body, html {
     -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
+/* NEW: Prevents the page from scrolling when the video player is active, preserving the fullscreen state */
+body.video-view-active {
+    overflow: hidden;
+}
+
 .hidden { display: none !important; }
 
 .search-container {
@@ -26,7 +31,6 @@ body, html {
     box-sizing: border-box;
 
     /* REQUIRED FOR iOS: Adds padding ONLY if there's a home bar, etc. */
-    /* On devices without a bottom notch, this value is 0. */
     padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -70,11 +74,9 @@ body, html {
 
 .list-container {
     /* REQUIRED FOR iOS: Adds padding so the FIRST item in the list isn't hidden by the status bar/notch. */
-    /* Subsequent items will scroll under it as desired. */
     padding-top: env(safe-area-inset-top);
 
     /* Adds space at the very bottom of the scroll, so the last item can be scrolled up from behind the search bar. */
-    /* 50px is approx the height of the search bar. */
     padding-bottom: 50px; 
 }
 
