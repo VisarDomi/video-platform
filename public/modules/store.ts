@@ -1,4 +1,5 @@
-// public/modules/store.js
+// public/modules/store.ts
+import { AppState, Video } from '../types.js';
 import * as api from './api.js';
 import { navigateToVideo } from './player.js';
 import { showToast } from './ui.js';
@@ -7,7 +8,7 @@ const STORAGE_KEY_LAST_VIDEO = 'last-played-video';
 const STORAGE_KEY_DURATIONS = 'video-durations';
 
 // --- Private State ---
-let state = {
+let state: AppState = {
     view: 'list', // 'list' or 'video'
     isLoading: true,
     videoList: [],
@@ -19,24 +20,21 @@ let state = {
     playerMode: 'view', // 'view' or 'edit'
 };
 let isFetchingDurations = false;
-let cachedDurations = {};
+let cachedDurations: Record<string, number> = {};
 
 // --- Listener Pattern ---
-// Allows other parts of the app to "subscribe" to state changes
-const listeners = new Set();
+const listeners = new Set<(state: AppState) => void>();
 function notify() {
-    // Pass a read-only copy of the state to listeners
     listeners.forEach(listener => listener({ ...state }));
 }
 
 // --- Internal Logic ---
-function findNextVideoAfterChange(videoToChange, originalList) {
+function findNextVideoAfterChange(videoToChange: Video, originalList: Video[]): Video | null {
     const filter = state.filter;
     const regex = filter ? new RegExp(filter, 'i') : null;
     const currentFilteredList = originalList.filter(video => !regex || regex.test(video.filename));
     const currentIndex = currentFilteredList.findIndex(v => v.filename === videoToChange.filename && v.type === videoToChange.type);
 
-    // Create the new list *after* finding the index in the old one
     const newList = state.videoList.filter(v => !(v.filename === videoToChange.filename && v.type === videoToChange.type));
     const newFilteredList = newList.filter(video => !regex || regex.test(video.filename));
 
@@ -49,35 +47,29 @@ function findNextVideoAfterChange(videoToChange, originalList) {
 
 // --- Public API (Actions & Getters) ---
 export const store = {
-    subscribe(listener) {
+    subscribe(listener: (state: AppState) => void): () => void {
         listeners.add(listener);
         listener({ ...state }); // Immediately notify with current state
         return () => listeners.delete(listener); // Return an unsubscribe function
     },
 
-    getState() {
+    getState(): AppState {
         return { ...state };
     },
 
     actions: {
-        async initialize() {
-            // Load last played video
+        async initialize(): Promise<void> {
             try {
                 const savedLastVideo = localStorage.getItem(STORAGE_KEY_LAST_VIDEO);
-                if (savedLastVideo) {
-                    state.lastPlayedVideo = JSON.parse(savedLastVideo);
-                }
+                if (savedLastVideo) state.lastPlayedVideo = JSON.parse(savedLastVideo);
             } catch (e) {
                 console.error("Failed to load last played video", e);
                 localStorage.removeItem(STORAGE_KEY_LAST_VIDEO);
             }
             
-            // Load cached durations
             try {
                 const savedDurations = localStorage.getItem(STORAGE_KEY_DURATIONS);
-                if (savedDurations) {
-                    cachedDurations = JSON.parse(savedDurations);
-                }
+                if (savedDurations) cachedDurations = JSON.parse(savedDurations);
             } catch (e) {
                 console.error("Failed to load cached durations", e);
                 localStorage.removeItem(STORAGE_KEY_DURATIONS);
@@ -86,12 +78,12 @@ export const store = {
             await this.loadVideoList();
         },
 
-        async loadVideoList() {
+        async loadVideoList(): Promise<void> {
             state.isLoading = true;
             notify();
             try {
-                // Fetch the list and immediately merge cached durations into it
-                state.videoList = (await api.fetchVideos()).map(video => ({
+                const videos = await api.fetchVideos();
+                state.videoList = videos.map(video => ({
                     ...video,
                     duration: cachedDurations[video.filename] || null
                 }));
@@ -103,22 +95,17 @@ export const store = {
             notify();
         },
         
-        async fetchAndApplyDurations() {
+        async fetchAndApplyDurations(): Promise<void> {
             if (isFetchingDurations) {
                 showToast('Already fetching durations.', 'info');
                 return;
             }
-            
             isFetchingDurations = true;
             showToast('Fetching video durations...', 'info', 5000);
-
             try {
                 const newDurations = await api.fetchVideoDurations();
-                // Merge new durations with existing cache, preferring new values
                 cachedDurations = { ...cachedDurations, ...newDurations };
                 localStorage.setItem(STORAGE_KEY_DURATIONS, JSON.stringify(cachedDurations));
-
-                // Apply the newly merged durations to the current video list
                 state.videoList.forEach(video => {
                     if (cachedDurations[video.filename]) {
                         video.duration = cachedDurations[video.filename];
@@ -130,139 +117,101 @@ export const store = {
                 showToast("Could not load video durations.", 'error');
             } finally {
                 isFetchingDurations = false;
-                notify(); // Re-render the list with the new data
+                notify();
             }
         },
 
-        updateVideoDuration(filename, duration) {
+        updateVideoDuration(filename: string, duration: number): void {
             if (!filename || !duration || duration <= 0) return;
-            
             const roundedDuration = Math.round(duration);
-
-            // Update in-memory state for immediate UI consistency if needed
             const videoInList = state.videoList.find(v => v.filename === filename);
-            if (videoInList) {
-                videoInList.duration = roundedDuration;
-            }
-
-            // Update localStorage cache if the value is new or different
+            if (videoInList) videoInList.duration = roundedDuration;
             if (cachedDurations[filename] !== roundedDuration) {
                 cachedDurations[filename] = roundedDuration;
                 localStorage.setItem(STORAGE_KEY_DURATIONS, JSON.stringify(cachedDurations));
             }
         },
 
-        setFilter(newFilter) {
+        setFilter(newFilter: string): void {
             state.filter = newFilter;
             notify();
         },
 
-        playVideo(video, startTime = 0) {
+        playVideo(video: Video, startTime = 0): void {
             if (!video) return;
             state.currentVideo = video;
             state.currentVideoStartTime = startTime;
             state.lastPlayedVideo = video;
             state.segments = [];
             state.view = 'video';
-            // Set default player mode
             state.playerMode = (video.type === 'original') ? 'edit' : 'view';
             localStorage.setItem(STORAGE_KEY_LAST_VIDEO, JSON.stringify(video));
             notify();
         },
 
-        showList() {
-            state.currentVideo = null; // Clear current video when going back to list
+        showList(): void {
+            state.currentVideo = null;
             state.currentVideoStartTime = 0;
             state.view = 'list';
             notify();
         },
 
-        togglePlayerMode() {
+        togglePlayerMode(): void {
             if (state.currentVideo?.type !== 'original') return;
             state.playerMode = state.playerMode === 'edit' ? 'view' : 'edit';
             notify();
         },
 
-        addSegment(time) {
+        addSegment(time: number): void {
             if (!state.currentVideo || state.currentVideo.type !== 'original') return;
             state.segments.push(time);
             state.segments.sort((a, b) => a - b);
             notify();
         },
 
-        removeLastSegment() {
+        removeLastSegment(): void {
             if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length === 0) return;
             state.segments.pop();
             notify();
         },
 
-        deleteCurrentVideo() {
+        deleteCurrentVideo(): void {
             if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length > 0) return;
-            
             const videoToDelete = state.currentVideo;
             const originalList = [...state.videoList];
             const nextVideo = findNextVideoAfterChange(videoToDelete, originalList);
-
-            // Optimistic UI update
             state.videoList = state.videoList.filter(v => !(v.filename === videoToDelete.filename && v.type === videoToDelete.type));
-            
-            if (nextVideo) {
-                navigateToVideo(nextVideo);
-            } else {
-                // CHANGED: Call showList() instead of changing URL
-                this.showList();
-            }
-            
-            // Fire and forget API call
+            if (nextVideo) navigateToVideo(nextVideo);
+            else this.showList();
             api.sendDeleteRequest(videoToDelete).catch(error => {
                 console.error(`Background delete failed for ${videoToDelete.filename}:`, error);
                 showToast(`Failed to delete ${videoToDelete.filename}`, 'error');
             });
         },
 
-        saveCurrentVideo() {
+        saveCurrentVideo(): void {
             if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length > 0) return;
-
             const videoToSave = state.currentVideo;
             const originalList = [...state.videoList];
             const nextVideo = findNextVideoAfterChange(videoToSave, originalList);
-
-            // Optimistic UI update
             state.videoList = state.videoList.filter(v => !(v.filename === videoToSave.filename && v.type === videoToSave.type));
-
-            if (nextVideo) {
-                navigateToVideo(nextVideo);
-            } else {
-                // CHANGED: Call showList() instead of changing URL
-                this.showList();
-            }
-
-            // Fire and forget API call
+            if (nextVideo) navigateToVideo(nextVideo);
+            else this.showList();
             api.sendSaveRequest(videoToSave).catch(error => {
                 console.error(`Background save failed for ${videoToSave.filename}:`, error);
                 showToast(`Failed to save ${videoToSave.filename}`, 'error');
             });
         },
 
-        createEditedVideo() {
+        createEditedVideo(): void {
             if (!state.currentVideo || state.currentVideo.type !== 'original' || state.segments.length === 0 || state.segments.length % 2 !== 0) return;
-
             const videoToEdit = state.currentVideo;
             const segmentsToSave = [...state.segments];
             const originalList = [...state.videoList];
             const nextVideo = findNextVideoAfterChange(videoToEdit, originalList);
-
-            // Optimistic UI update
             state.videoList = state.videoList.filter(v => !(v.filename === videoToEdit.filename && v.type === videoToEdit.type));
-
-            if (nextVideo) {
-                navigateToVideo(nextVideo);
-            } else {
-                // CHANGED: Call showList() instead of changing URL
-                this.showList();
-            }
-
-            // Fire and forget API call
+            if (nextVideo) navigateToVideo(nextVideo);
+            else this.showList();
             api.sendEditRequest(videoToEdit, segmentsToSave).catch(error => {
                 console.error(`Background edit failed for ${videoToEdit.filename}:`, error);
                 showToast(`Failed to create edited version of ${videoToEdit.filename}.`, 'error');

@@ -1,15 +1,16 @@
-// public/modules/player.js
+// public/modules/player.ts
+import { DomElements, Video } from '../types.js';
 import { store } from './store.js';
 
 export const STORAGE_KEY_PREFIX = 'video-progress-';
-let dom = {};
+let dom: Partial<DomElements> = {};
 
-export function initPlayer(elements) {
+export function initPlayer(elements: DomElements): void {
     dom = elements;
 }
 
-export function playVideo(video, startTime = 0) {
-    if (!video) {
+export function playVideo(video: Video, startTime = 0): void {
+    if (!video || !dom.videoPlayer) {
         stopPlayback();
         return;
     }
@@ -19,7 +20,7 @@ export function playVideo(video, startTime = 0) {
     dom.videoPlayer.src = `/video/${video.type}/${encodeURIComponent(video.filename)}`;
     
     const seekOnLoad = () => {
-        if (startTime > 0 && startTime < dom.videoPlayer.duration) {
+        if (dom.videoPlayer && startTime > 0 && startTime < dom.videoPlayer.duration) {
             dom.videoPlayer.currentTime = startTime;
         }
         dom.videoPlayer.removeEventListener('loadedmetadata', seekOnLoad);
@@ -29,26 +30,20 @@ export function playVideo(video, startTime = 0) {
     dom.videoPlayer.play().catch(e => console.error("Autoplay failed:", e));
 }
 
-export function stopPlayback() {
+export function stopPlayback(): void {
     if (!dom.videoPlayer) return;
     dom.videoPlayer.pause();
     dom.videoPlayer.removeAttribute('src');
     dom.videoPlayer.load();
 }
 
-/**
- * NEW, SIMPLIFIED VERSION
- * This function no longer changes the URL. It directly tells the store to play a video,
- * first checking localStorage for any saved progress.
- */
-export function navigateToVideo(video) {
+export function navigateToVideo(video: Video): void {
     const savedTime = localStorage.getItem(STORAGE_KEY_PREFIX + video.filename);
     const startTime = (savedTime && parseFloat(savedTime) > 0) ? Math.round(parseFloat(savedTime)) : 0;
-    // Directly call the action instead of changing the hash
     store.actions.playVideo(video, startTime);
 }
 
-export function navigateVideoInList(direction) {
+export function navigateVideoInList(direction: 1 | -1): void {
     const { videoList, filter, currentVideo, lastPlayedVideo } = store.getState();
     const regex = filter ? new RegExp(filter, 'i') : null;
     const filteredList = videoList.filter(video => !regex || regex.test(video.filename));
@@ -60,7 +55,6 @@ export function navigateVideoInList(direction) {
     
     const nextIndex = currentIndex + direction;
     if (nextIndex >= 0 && nextIndex < filteredList.length) {
-         // This now calls the new, simplified navigateToVideo function
          navigateToVideo(filteredList[nextIndex]);
     }
 }

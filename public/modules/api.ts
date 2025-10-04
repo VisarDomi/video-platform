@@ -1,7 +1,10 @@
+// public/modules/api.ts
+import { Video } from '../types.js';
+
 /**
  * Fetches the list of all available videos from the server.
  */
-export async function fetchVideos() {
+export async function fetchVideos(): Promise<Video[]> {
     const response = await fetch(`/api/videos`);
     if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`);
@@ -12,7 +15,7 @@ export async function fetchVideos() {
 /**
  * Fetches a map of video filenames to their durations.
  */
-export async function fetchVideoDurations() {
+export async function fetchVideoDurations(): Promise<Record<string, number>> {
     const response = await fetch('/api/videos/durations');
     if (!response.ok) {
         throw new Error(`Server responded with ${response.status}`);
@@ -23,7 +26,7 @@ export async function fetchVideoDurations() {
 /**
  * Sends a request to the server to delete a video.
  */
-export async function sendDeleteRequest(video) {
+export async function sendDeleteRequest(video: Video): Promise<any> {
     const response = await fetch(`/api/videos/${video.type}/${encodeURIComponent(video.filename)}`, {
         method: 'DELETE',
     });
@@ -33,7 +36,7 @@ export async function sendDeleteRequest(video) {
 /**
  * Sends a request to the server to edit a video with the given segments.
  */
-export async function sendEditRequest(video, segments) {
+export async function sendEditRequest(video: Video, segments: number[]): Promise<any> {
     const segmentPairs = [];
     for (let i = 0; i < segments.length; i += 2) {
         segmentPairs.push({ start: segments[i], end: segments[i + 1] });
@@ -50,7 +53,7 @@ export async function sendEditRequest(video, segments) {
 /**
  * Sends a request to the server to save a video (move to 'edited' folder).
  */
-export async function sendSaveRequest(video) {
+export async function sendSaveRequest(video: Video): Promise<any> {
     const response = await fetch(`/api/videos/original/${encodeURIComponent(video.filename)}/save`, {
         method: 'POST',
     });
