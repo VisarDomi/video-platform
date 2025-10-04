@@ -2,11 +2,14 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-    // This is the root of our frontend code
-    root: "public",
+    // Why: The root of our frontend code is no longer `public`, but `src/frontend`.
+    // Vite will now run its development server and build process from this directory.
+    root: "src/frontend",
     build: {
-        // This is the directory where the production build will be placed
-        outDir: "../dist/client",
+        // Why: The output path needs to be adjusted relative to the new `root`.
+        // `../../dist/frontend` means: from `src/frontend`, go up to `src`, then up to the
+        // project root, and then into `dist/frontend`.
+        outDir: "../../dist/frontend",
         emptyOutDir: true, // Clean the output directory before building
     },
     server: {

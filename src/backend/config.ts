@@ -1,4 +1,3 @@
-// src/config.ts
 import "dotenv/config";
 import * as fs from "fs"; // <-- FIX: Changed to namespace import
 import logger from "./logger.js";

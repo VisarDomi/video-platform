@@ -1,4 +1,3 @@
-// src/server.ts
 import express, { Request, Response } from "express"; // <-- FIX: Added Request, Response types
 import cors from "cors";
 import path from "path";
@@ -32,8 +31,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json());
-// FIX: Point static server to the new client build output directory
-app.use(express.static(path.join(__dirname, "..", "..", "dist", "client")));
+
+// Why: The server must now serve the static files from the new `dist/frontend` directory.
+// The relative path logic `path.join(__dirname, "..", "..", "dist", "frontend")` still
+// correctly navigates from the compiled `dist/backend/server.js` to the target folder.
+app.use(express.static(path.join(__dirname, "..", "..", "dist", "frontend")));
 
 // --- Routers ---
 app.use("/api", videoApiRouter);
@@ -42,9 +44,9 @@ app.use("/", streamingRouter);
 // --- Serve Frontend ---
 // This catch-all route ensures that any direct navigation to a frontend route
 // is handled by the single-page application.
-// FIX: Added types and renamed unused 'req'
+// Why: This must also point to the `index.html` inside the new `dist/frontend` directory.
 app.get(/.*/, (_req: Request, res: Response) => {
-    res.sendFile(path.join(__dirname, "..", "..", "dist", "client", "index.html"));
+    res.sendFile(path.join(__dirname, "..", "..", "dist", "frontend", "index.html"));
 });
 
 // --- Start Server & Services ---

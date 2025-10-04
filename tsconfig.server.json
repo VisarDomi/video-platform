@@ -1,7 +1,7 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
-        "outDir": "./dist/server",
+        "outDir": "./dist/backend",
         "module": "ESNext",
         "moduleResolution": "node",
         "noEmit": false,
@@ -9,6 +9,6 @@
         "allowImportingTsExtensions": false,
         "allowSyntheticDefaultImports": true
     },
-    "include": ["src"],
+    "include": ["src/backend"],
     "exclude": ["node_modules", "**/*.spec.ts"]
 }

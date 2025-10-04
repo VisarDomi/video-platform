@@ -1,5 +1,3 @@
-// src/errors.ts
-
 /**
  * Custom error to be thrown when a file cannot be found in the configured directories.
  */
