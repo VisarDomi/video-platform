@@ -5,16 +5,16 @@ body, html {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #000000;
     color: #ffffff;
-    /* REMOVED: overflow: hidden; -- This is the key change to allow page scrolling */
     -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
-/* NEW: Prevents the page from scrolling when the video player is active, preserving the fullscreen state */
-body.video-view-active {
-    overflow: hidden;
-}
-
 .hidden { display: none !important; }
+
+/* --- List View is now the base layer, no special rules needed --- */
+#listView {
+    /* Set a base z-index to ensure it's on top by default */
+    z-index: 1; 
+}
 
 .search-container {
     /* --- STICKY FOOTER STYLES --- */
@@ -29,12 +29,8 @@ body.video-view-active {
     display: flex;
     align-items: center;
     box-sizing: border-box;
-
-    /* REQUIRED FOR iOS: Adds padding ONLY if there's a home bar, etc. */
-    padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Class to hide the search bar when scrolling down */
 .search-container--hidden {
     transform: translateY(100%);
 }
@@ -72,26 +68,16 @@ body.video-view-active {
     line-height: 1;
 }
 
-.list-container {
-    /* REQUIRED FOR iOS: Adds padding so the FIRST item in the list isn't hidden by the status bar/notch. */
-    padding-top: env(safe-area-inset-top);
-}
-
 .list-item {
     padding: 8px 15px;
     border-bottom: 1px solid #333;
     cursor: pointer;
-    transition: background-color 0.2s ease;
     display: flex;
     flex-direction: column;
     justify-content: center;
     height: 52px;
     box-sizing: border-box;
     overflow: hidden;
-
-    /* REQUIRED FOR iOS LANDSCAPE: Adds padding to list items to keep text from going into the side notches */
-    padding-left: calc(15px + env(safe-area-inset-left));
-    padding-right: calc(15px + env(safe-area-inset-right));
 }
 .list-item-name {
     font-size: 16px;
@@ -124,8 +110,21 @@ body.video-view-active {
     width: 100vw; height: 100vh;
     background-color: black;
     -webkit-user-select: none; user-select: none;
-    touch-action: manipulation; /* Prevents double-tap to zoom on the whole view */
+    touch-action: manipulation;
+    
+    /* DEFAULT STATE: In the background, invisible, and non-interactive */
+    z-index: -1;
+    opacity: 0;
+    pointer-events: none;
 }
+
+/* NEW: This class brings the video view to the front */
+#videoView.active-view {
+    z-index: 10;
+    opacity: 1;
+    pointer-events: auto;
+}
+
 #videoContainer {
     width: 100%; height: 100%;
     position: relative;
@@ -168,12 +167,6 @@ body.video-view-active {
     z-index: 20;
     /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
     opacity: 0.15;
-    transition: opacity 1s ease;
-
-    /* REQUIRED FOR iOS: Pushes the top bar content down from the status bar */
-    padding-top: calc(15px + env(safe-area-inset-top));
-    padding-left: calc(15px + env(safe-area-inset-left));
-    padding-right: calc(15px + env(safe-area-inset-right));
 }
 
 #streamerName {
@@ -228,7 +221,6 @@ body.video-view-active {
     border-radius: 8px; cursor: pointer;
     min-width: 70px;
     line-height: 1;
-    transition: background-color 0.2s, border-color 0.2s, opacity 0.2s;
 }
 
 @media (hover: hover) and (pointer: fine) {

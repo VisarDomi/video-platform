@@ -331,6 +331,7 @@ function initialize() {
     // 3. Subscribe the UI to state changes.
     let lastPlayedVideoSrc = null;
     store.subscribe(state => {
+        // The render function in ui.js now handles all visual updates
         ui.render(state);
 
         // Control the video player and wake lock based on state changes
@@ -338,11 +339,9 @@ function initialize() {
         if (lastPlayedVideoSrc !== currentSrc) {
             lastPlayedVideoSrc = currentSrc;
             if (state.currentVideo) {
-                document.body.classList.add('video-view-active');
                 player.playVideo(state.currentVideo, state.currentVideoStartTime);
                 requestWakeLock();
             } else {
-                document.body.classList.remove('video-view-active');
                 player.stopPlayback();
                 releaseWakeLock();
                 // When returning to list, reset scroll and ensure search bar is visible

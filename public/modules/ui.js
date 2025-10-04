@@ -281,9 +281,8 @@ export function updateProgressBar(currentTime, duration) {
  * It's responsible for updating the entire UI to match the current state.
  */
 export function render(state) {
-    // 1. Update view visibility
-    dom.listView.classList.toggle('hidden', state.view !== 'list');
-    dom.videoView.classList.toggle('hidden', state.view !== 'video');
+    // 1. Update view visibility using the new z-index method
+    dom.videoView.classList.toggle('active-view', state.view === 'video');
 
     // 2. Update search input and clear button
     if (document.activeElement !== dom.searchInput) {
