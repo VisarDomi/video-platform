@@ -128,7 +128,7 @@ function renderVideoList(state) {
     }
     
     if (filteredList.length === 0) {
-         dom.videoItemsWrapper.innerHTML = '<p class="info-message">No archived videos found.</p>';
+         dom.videoItemsWrapper.innerHTML = '<p class="info-message">No videos found.</p>';
          return;
     }
 
@@ -136,7 +136,7 @@ function renderVideoList(state) {
 
     filteredList.forEach(video => {
         const item = document.createElement('div');
-        item.className = 'list-item archive-item';
+        item.className = 'list-item video-item';
         item.addEventListener('click', () => navigateToVideo(video));
 
         const nameSpan = document.createElement('span');

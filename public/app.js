@@ -84,14 +84,14 @@ function attachEventListeners() {
         store.actions.setFilter(newFilter);
         // If the filter was cleared, scroll to the top of the list
         if (oldFilter && !newFilter) {
-            dom.listContainer.scrollTop = 0;
+            window.scrollTo(0, 0);
         }
     });
 
     dom.clearSearchBtn.addEventListener('click', () => {
         store.actions.setFilter('');
         dom.searchInput.value = '';
-        dom.listContainer.scrollTop = 0;
+        window.scrollTo(0, 0);
         dom.searchInput.focus();
     });
 

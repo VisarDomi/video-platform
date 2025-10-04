@@ -5,7 +5,6 @@ body, html {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #000000;
     color: #ffffff;
-    overflow: hidden;
     -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
@@ -13,8 +12,7 @@ body, html {
 
 /* --- List View --- */
 #listView {
-    /* No longer a flex container */
-    height: 100vh;
+    min-height: 100vh; /* Ensure it at least fills the screen on short lists. */
 }
 
 .main-header {
@@ -36,7 +34,10 @@ body, html {
     display: flex;
     align-items: center;
     gap: 10px;
-    /* This container will now scroll with the list */
+    /* Make the search bar a sticky header. */
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 #searchInput {
     flex-grow: 1;
@@ -69,12 +70,6 @@ body, html {
     border-radius: 5px;
     cursor: pointer;
     line-height: 1;
-}
-.list-container {
-    height: 100%; /* Fill the parent #listView */
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    /* Removed flex-grow as it's no longer a flex item */
 }
 .list-item {
     padding: 8px 15px;
