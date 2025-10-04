@@ -41,11 +41,11 @@ async function moveFileToTrash(filePath: string, baseDir: string) {
  */
 async function getVideosFromDir(dirPath: string, type: "original" | "edited") {
     try {
-        logger.info(`DEBUG: Attempting to scan directory: ${dirPath}`); // DEBUG: Log which directory we're reading
+        // logger.info(`DEBUG: Attempting to scan directory: ${dirPath}`); // DEBUG: Log which directory we're reading
         await fsp.mkdir(dirPath, { recursive: true });
         const files = await fsp.readdir(dirPath);
         const mp4Files = files.filter((file) => path.extname(file).toLowerCase() === ".mp4");
-        logger.info(`DEBUG: Found ${mp4Files.length} MP4 files in ${dirPath}`); // DEBUG: Log how many MP4s were found
+        // logger.info(`DEBUG: Found ${mp4Files.length} MP4 files in ${dirPath}`); // DEBUG: Log how many MP4s were found
         return mp4Files.map((filename) => ({ filename, type }));
     } catch (error) {
         logger.error(`Could not read directory: ${dirPath}`, { error });
@@ -87,7 +87,7 @@ const editQueue = new JobQueue<EditJob>(_processVideoEdit);
 // --- Exported Service Functions ---
 
 export async function getAllVideos() {
-    logger.info(`DEBUG: Configured root directories: ${VIDEO_ROOT_DIRS.join(", ")}`); // DEBUG: Log configured paths
+    // logger.info(`DEBUG: Configured root directories: ${VIDEO_ROOT_DIRS.join(", ")}`); // DEBUG: Log configured paths
     const allFilesPromises = VIDEO_ROOT_DIRS.flatMap((dir) => [getVideosFromDir(dir, "original"), getVideosFromDir(path.join(dir, "edited"), "edited")]);
 
     const fileArrays = await Promise.all(allFilesPromises);

@@ -12,10 +12,10 @@ const router = Router();
  */
 router.get("/videos", async (_req, res) => {
     // <-- FIX: Renamed unused 'req' to '_req'
-    logger.info("DEBUG: Received request for GET /api/videos"); // DEBUG: Log request entry
+    // logger.info("DEBUG: Received request for GET /api/videos"); // DEBUG: Log request entry
     try {
         const allFiles = await videoService.getAllVideos();
-        logger.info(`DEBUG: Sending ${allFiles.length} video items to client.`); // DEBUG: Log success and count
+        // logger.info(`DEBUG: Sending ${allFiles.length} video items to client.`); // DEBUG: Log success and count
         res.json(allFiles);
     } catch (error: any) {
         logger.error(`Error listing video directories:`, { error });
