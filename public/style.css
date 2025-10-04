@@ -106,8 +106,12 @@ body, html {
 
 /* --- Video View --- */
 #videoView {
-    position: fixed; top: 0; left: 0;
-    width: 100vw; height: 100vh;
+    position: fixed;
+    /* THE FIX for the landscape gap: Use corner positioning instead of width/height */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background-color: black;
     -webkit-user-select: none; user-select: none;
     touch-action: manipulation;
@@ -118,7 +122,6 @@ body, html {
     pointer-events: none;
 }
 
-/* NEW: This class brings the video view to the front */
 #videoView.active-view {
     z-index: 10;
     opacity: 1;

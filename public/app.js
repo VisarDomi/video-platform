@@ -296,6 +296,7 @@ function handleTimeUpdate() {
     }
 }
 
+
 // --- Initialization ---
 function initialize() {
     // 1. Cache DOM elements
@@ -344,8 +345,6 @@ function initialize() {
             } else {
                 player.stopPlayback();
                 releaseWakeLock();
-                // When returning to list, reset scroll and ensure search bar is visible
-                window.scrollTo(0,0);
                 dom.searchContainer.classList.remove('search-container--hidden');
                 lastScrollY = 0;
             }
