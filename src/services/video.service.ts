@@ -1,15 +1,24 @@
 // src/services/video.service.ts
 import { promises as fsp } from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
 import { VIDEO_ROOT_DIRS } from '../config.js';
 import { findVideoPath } from '../utils.js';
 import logger from '../logger.js';
-import { FileNotFoundError, FfmpegError } from '../errors.js';
+import { FileNotFoundError } from '../errors.js';
+import * as ffmpeg from './ffmpeg.service.js';
+import { JobQueue } from './queue.service.js';
 
-// --- Video Editing Queue ---
-const editQueue: { filename: string, segments: {start: number, end: number}[] }[] = [];
-let isProcessingQueue = false;
+/**
+ * @fileoverview
+ * This service acts as a facade for all video-related operations.
+ * It coordinates file system tasks, video metadata retrieval (via ffmpeg.service),
+ * and video processing jobs (via queue.service).
+ */
+
+type EditJob = {
+    filename: string,
+    segments: {start: number, end: number}[]
+};
 
 
 // --- Internal Helper Functions ---
@@ -45,68 +54,11 @@ async function getVideosFromDir(dirPath: string, type: 'original' | 'edited') {
 }
 
 /**
- * Builds the complex filter argument for the ffmpeg command.
+ * The core logic for processing a single video edit job. This function is passed
+ * to our job queue to be executed for each item.
  */
-function buildFfmpegArgs(sourcePath: string, outputPath: string, segments: { start: number; end: number }[]): string[] {
-    const filterChains: string[] = [];
-    segments.forEach((seg, i) => {
-        filterChains.push(`[0:v]trim=${seg.start}:${seg.end},setpts=PTS-STARTPTS[v${i}]`);
-        filterChains.push(`[0:a]atrim=${seg.start}:${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
-    });
-
-    const videoConcatInputs = segments.map((_, i) => `[v${i}]`).join('');
-    const audioConcatInputs = segments.map((_, i) => `[a${i}]`).join('');
-    filterChains.push(`${videoConcatInputs}concat=n=${segments.length}:v=1:a=0[v]`);
-    filterChains.push(`${audioConcatInputs}concat=n=${segments.length}:v=0:a=1[a]`);
-    
-    const fullFilterComplex = filterChains.join(';');
-
-    return [
-        '-i', sourcePath,
-        '-filter_complex', fullFilterComplex,
-        '-map', '[v]',
-        '-map', '[a]',
-        '-movflags', '+faststart',
-        '-y',
-        outputPath
-    ];
-}
-
-/**
- * Spawns and manages the ffmpeg child process.
- */
-function executeFfmpegCommand(args: string[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-        logger.info('Executing ffmpeg with args:', { args: JSON.stringify(args) });
-        const ffmpeg = spawn('ffmpeg', args);
-        let stderrOutput = '';
-
-        ffmpeg.stderr.on('data', (data) => {
-            stderrOutput += data.toString();
-            logger.verbose(`ffmpeg stderr: ${data}`);
-        });
-
-        ffmpeg.on('close', (code) => {
-            if (code !== 0) {
-                const fullCommand = `ffmpeg ${args.join(' ')}`;
-                const error = new FfmpegError(`ffmpeg process exited with code ${code}`, stderrOutput);
-                logger.error(error.message, { fullCommand, stderr: stderrOutput });
-                return reject(error);
-            }
-            resolve();
-        });
-
-        ffmpeg.on('error', (err) => {
-            logger.error('Failed to start ffmpeg process.', { error: err });
-            reject(err);
-        });
-    });
-}
-
-/**
- * The core logic for processing a single video edit job.
- */
-async function _processVideoEdit(filename: string, segments: {start: number, end: number}[]) {
+async function _processVideoEdit(job: EditJob) {
+    const { filename, segments } = job;
     const foundVideo = await findVideoPath('original', filename);
     if (!foundVideo) {
         throw new FileNotFoundError(`Original video file not found: ${filename}`);
@@ -118,8 +70,9 @@ async function _processVideoEdit(filename: string, segments: {start: number, end
 
     await fsp.mkdir(editedVideosDir, { recursive: true });
 
-    const ffmpegArgs = buildFfmpegArgs(sourcePath, outputPath, segments);
-    await executeFfmpegCommand(ffmpegArgs);
+    logger.info(`Processing job for: ${filename}`, { segments });
+    const ffmpegArgs = ffmpeg.buildFfmpegArgs(sourcePath, outputPath, segments);
+    await ffmpeg.executeFfmpegCommand(ffmpegArgs);
 
     logger.info(`Successfully created edited video: ${outputPath}`);
 
@@ -127,30 +80,9 @@ async function _processVideoEdit(filename: string, segments: {start: number, end
     await moveFileToTrash(sourcePath, baseDir);
 }
 
-/**
- * Processes the edit queue one job at a time.
- */
-async function processEditQueue() {
-    if (isProcessingQueue) return;
-    isProcessingQueue = true;
-    logger.info(`Starting edit queue processing. Jobs in queue: ${editQueue.length}`);
-
-    while (editQueue.length > 0) {
-        const job = editQueue.shift();
-        if (job) {
-            try {
-                logger.info(`Processing job for: ${job.filename}`, { segments: job.segments });
-                await _processVideoEdit(job.filename, job.segments);
-            } catch (error) {
-                // Log the error but continue processing the rest of the queue
-                logger.error(`Failed to process job for ${job.filename}:`, { error });
-            }
-        }
-    }
-
-    isProcessingQueue = false;
-    logger.info('Edit queue processing finished.');
-}
+// --- Initialize the Video Editing Queue ---
+// We create a single instance of the queue and pass it our processing function.
+const editQueue = new JobQueue<EditJob>(_processVideoEdit);
 
 
 // --- Exported Service Functions ---
@@ -173,13 +105,12 @@ export async function trashVideo(type: 'original' | 'edited', filename: string) 
     await moveFileToTrash(foundVideo.fullPath, foundVideo.baseDir);
 }
 
+/**
+ * Adds a video editing job to the background queue.
+ * This is now a simple one-liner that delegates to the queue service.
+ */
 export function createEditedVideo(filename: string, segments: {start: number, end: number}[]) {
-    editQueue.push({ filename, segments });
-    logger.info(`Added video to edit queue: ${filename}. Queue size: ${editQueue.length}`);
-    
-    // Asynchronously process the queue without blocking the API response.
-    // The 'void' operator indicates we are intentionally not awaiting the promise.
-    void processEditQueue();
+    editQueue.add({ filename, segments });
 }
 
 export async function moveVideoToEdited(type: 'original', filename: string) {
@@ -201,42 +132,9 @@ export async function moveVideoToEdited(type: 'original', filename: string) {
     logger.info(`Moved video to edited folder: ${destinationPath}`);
 }
 
-/**
- * Gets the duration of a single video file using ffprobe.
- */
-function getVideoDuration(filePath: string): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const ffprobe = spawn('ffprobe', [
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            filePath
-        ]);
-
-        let stdout = '';
-        let stderr = '';
-
-        ffprobe.stdout.on('data', (data) => stdout += data.toString());
-        ffprobe.stderr.on('data', (data) => stderr += data.toString());
-
-        ffprobe.on('close', (code) => {
-            if (code !== 0) {
-                logger.warn(`ffprobe failed for ${filePath} with code ${code}`, { stderr });
-                return resolve(0); // Resolve with 0 on error to not fail the whole batch
-            }
-            const duration = parseFloat(stdout.trim());
-            resolve(isNaN(duration) ? 0 : duration);
-        });
-        
-        ffprobe.on('error', (err) => {
-             logger.error(`Failed to start ffprobe for ${filePath}`, { error: err });
-             reject(err); // Reject if the process can't even start
-        });
-    });
-}
 
 /**
- * Gets durations for all video files.
+ * Gets durations for all video files by calling the ffmpeg service.
  */
 export async function getAllVideoDurations(): Promise<Record<string, number>> {
     const allVideos = await getAllVideos();
@@ -245,7 +143,8 @@ export async function getAllVideoDurations(): Promise<Record<string, number>> {
         if (!foundVideo) {
             return { filename: video.filename, duration: 0 };
         }
-        const duration = await getVideoDuration(foundVideo.fullPath);
+        // Delegate the complex part to the ffmpeg service
+        const duration = await ffmpeg.getVideoDuration(foundVideo.fullPath);
         return { filename: video.filename, duration };
     });
 
