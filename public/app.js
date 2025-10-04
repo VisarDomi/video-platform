@@ -99,7 +99,7 @@ function handleListViewScroll() {
 // --- DOM Event Listeners (Dispatch actions to the store) ---
 function attachEventListeners() {
     dom.goBackBtn.addEventListener('click', () => {
-        window.location.hash = '#/';
+        store.actions.showList();
     });
 
     dom.searchInput.addEventListener('input', (e) => {
@@ -296,45 +296,6 @@ function handleTimeUpdate() {
     }
 }
 
-// --- Router (Updates store based on URL) ---
-async function handleRouteChange() {
-    // Make sure the video list is loaded before routing.
-    if (store.getState().isLoading) {
-        // This is a bit of a hack. Ideally the store would handle this loading state.
-        // For this app, it's fine.
-        await store.actions.loadVideoList();
-    }
-
-    const hash = window.location.hash || '#/';
-    const parts = hash.slice(2).split('/');
-    const [type, encodedName, time] = parts;
-    const isVideoRoute = (type === 'original' || type === 'edited') && encodedName;
-
-    let currentVideoState = store.getState().currentVideo;
-
-    if (isVideoRoute) {
-        const videoName = decodeURIComponent(encodedName);
-        const startTime = parseFloat(time) || 0;
-        const targetVideo = store.getState().videoList.find(v => v.filename === videoName && v.type === type);
-
-        if (targetVideo) {
-            // Only dispatch a play action if the video isn't already the current one
-            if (currentVideoState?.filename !== targetVideo.filename || currentVideoState?.type !== targetVideo.type) {
-                store.actions.playVideo(targetVideo, startTime);
-            }
-        } else {
-            // Using the new toast system for errors is better, but this one is rare.
-            ui.showToast(`Could not find video "${videoName}".`, 'error');
-            location.hash = '#/';
-        }
-    } else {
-        // If we are on a video page and the hash changes to '#/', show the list.
-        if (currentVideoState) {
-            store.actions.showList();
-        }
-    }
-}
-
 // --- Initialization ---
 function initialize() {
     // 1. Cache DOM elements
@@ -392,12 +353,9 @@ function initialize() {
         }
     });
 
-    // 4. Set up event listeners and initial routing
+    // 4. Set up event listeners and initial data load
     attachEventListeners();
-    window.addEventListener('hashchange', handleRouteChange);
-    store.actions.initialize().then(() => {
-        handleRouteChange(); // Initial route handling
-    });
+    store.actions.initialize();
 }
 
 document.addEventListener('DOMContentLoaded', initialize);
