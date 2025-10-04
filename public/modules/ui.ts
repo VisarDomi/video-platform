@@ -3,7 +3,7 @@ import { AppState, DomElements } from "../types";
 import { navigateToVideo } from "./player";
 
 let dom: Partial<DomElements> = {};
-// FIX: Use ReturnType<typeof setTimeout> for perfect type inference in any environment.
+// Use ReturnType<typeof setTimeout> for perfect type inference in any environment.
 let topBarFadeTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function initUI(domElements: DomElements): void {
@@ -113,64 +113,91 @@ function renderVideoList(state: AppState) {
 function renderPlayer(state: AppState) {
     const { currentVideo, segments, playerMode } = state;
 
+    // --- ARCHITECTURAL DECISION: Type Safety & Readability ---
+    // Why: By destructuring the potentially undefined properties of the module-level `dom`
+    // object into local constants, we provide a clear signal to both TypeScript and
+    // other developers. The single `if` check below becomes a definitive type guard.
+    // This resolves the "possibly 'undefined'" error because TypeScript's control
+    // flow analysis can confidently track the state of local constants, whereas it
+    // can be less certain about properties on a mutable, shared object.
+    const {
+        quadrantOverlay,
+        progressBar,
+        playerControlsContainer,
+        topBar,
+        streamerNameEl,
+        modeOrUndoBtn,
+        goBackBtn,
+        addPointBtn,
+        deleteOrCutBtn,
+        videoOkBtn,
+        muteBtn,
+        videoPlayer,
+    } = dom;
+
     if (
-        !dom.quadrantOverlay ||
-        !dom.progressBar ||
-        !dom.playerControlsContainer ||
-        !dom.topBar ||
-        !dom.streamerNameEl ||
-        !dom.modeOrUndoBtn ||
-        !dom.goBackBtn ||
-        !dom.addPointBtn ||
-        !dom.deleteOrCutBtn ||
-        !dom.videoOkBtn ||
-        !dom.muteBtn ||
-        !dom.videoPlayer
+        !quadrantOverlay ||
+        !progressBar ||
+        !playerControlsContainer ||
+        !topBar ||
+        !streamerNameEl ||
+        !modeOrUndoBtn ||
+        !goBackBtn ||
+        !addPointBtn ||
+        !deleteOrCutBtn ||
+        !videoOkBtn ||
+        !muteBtn ||
+        !videoPlayer
     ) {
+        // Why: This is a defensive guard clause. If any of the essential DOM elements
+        // aren't found when the app initializes, we immediately exit this render function.
+        // This prevents a cascade of runtime errors and keeps the UI in a stable state.
         return;
     }
 
-    dom.quadrantOverlay.classList.toggle("hidden", !currentVideo);
-    dom.progressBar.classList.toggle("hidden", !currentVideo);
-    dom.playerControlsContainer.classList.toggle("hidden", !currentVideo);
+    // From this point on, we use the local constants (e.g., `videoPlayer`), which
+    // are guaranteed to be defined, making the rest of the function type-safe.
+    quadrantOverlay.classList.toggle("hidden", !currentVideo);
+    progressBar.classList.toggle("hidden", !currentVideo);
+    playerControlsContainer.classList.toggle("hidden", !currentVideo);
     document.getElementById("timeDisplayContainer")?.classList.toggle("hidden", !currentVideo);
 
     if (currentVideo) {
-        dom.streamerNameEl.textContent = `${currentVideo.filename}`;
+        streamerNameEl.textContent = `${currentVideo.filename}`;
         const isOriginal = currentVideo.type === "original";
         const hasSegments = segments.length > 0;
         const isEditMode = playerMode === "edit" && isOriginal;
-        dom.topBar.style.opacity = isEditMode ? "0.15" : "0";
+        topBar.style.opacity = isEditMode ? "0.15" : "0";
 
-        [dom.modeOrUndoBtn, dom.goBackBtn, dom.addPointBtn, dom.deleteOrCutBtn, dom.videoOkBtn, dom.muteBtn].forEach((btn) => btn.classList.add("hidden"));
+        [modeOrUndoBtn, goBackBtn, addPointBtn, deleteOrCutBtn, videoOkBtn, muteBtn].forEach((btn) => btn.classList.add("hidden"));
 
         if (playerMode === "view" || !isOriginal) {
-            dom.muteBtn.classList.remove("hidden");
-            dom.goBackBtn.classList.remove("hidden");
+            muteBtn.classList.remove("hidden");
+            goBackBtn.classList.remove("hidden");
             if (isOriginal) {
-                dom.modeOrUndoBtn.classList.remove("hidden");
-                dom.modeOrUndoBtn.textContent = "✏️";
-                dom.modeOrUndoBtn.title = "Edit Mode";
+                modeOrUndoBtn.classList.remove("hidden");
+                modeOrUndoBtn.textContent = "✏️";
+                modeOrUndoBtn.title = "Edit Mode";
             }
         } else {
-            dom.addPointBtn.classList.remove("hidden");
+            addPointBtn.classList.remove("hidden");
             if (hasSegments) {
-                dom.modeOrUndoBtn.classList.remove("hidden");
-                dom.modeOrUndoBtn.textContent = "↪️";
-                dom.modeOrUndoBtn.title = "Undo Last Point";
-                dom.deleteOrCutBtn.classList.remove("hidden");
-                dom.deleteOrCutBtn.textContent = "✂️";
-                dom.deleteOrCutBtn.title = "Create Cut";
-                dom.deleteOrCutBtn.disabled = segments.length % 2 !== 0;
+                modeOrUndoBtn.classList.remove("hidden");
+                modeOrUndoBtn.textContent = "↪️";
+                modeOrUndoBtn.title = "Undo Last Point";
+                deleteOrCutBtn.classList.remove("hidden");
+                deleteOrCutBtn.textContent = "✂️";
+                deleteOrCutBtn.title = "Create Cut";
+                deleteOrCutBtn.disabled = segments.length % 2 !== 0;
             } else {
-                dom.modeOrUndoBtn.classList.remove("hidden");
-                dom.modeOrUndoBtn.textContent = "👁️";
-                dom.modeOrUndoBtn.title = "View Mode";
-                dom.videoOkBtn.classList.remove("hidden");
-                dom.deleteOrCutBtn.classList.remove("hidden");
-                dom.deleteOrCutBtn.textContent = "🗑️";
-                dom.deleteOrCutBtn.title = "Delete Video";
-                dom.deleteOrCutBtn.disabled = false;
+                modeOrUndoBtn.classList.remove("hidden");
+                modeOrUndoBtn.textContent = "👁️";
+                modeOrUndoBtn.title = "View Mode";
+                videoOkBtn.classList.remove("hidden");
+                deleteOrCutBtn.classList.remove("hidden");
+                deleteOrCutBtn.textContent = "🗑️";
+                deleteOrCutBtn.title = "Delete Video";
+                deleteOrCutBtn.disabled = false;
             }
         }
     }
@@ -179,13 +206,13 @@ function renderPlayer(state: AppState) {
     const segmentContainer = document.getElementById("segmentTextContainer");
     if (segmentContainer) segmentContainer.innerHTML = "";
 
-    if (currentVideo && !isNaN(dom.videoPlayer.duration) && segmentContainer) {
+    if (currentVideo && !isNaN(videoPlayer.duration) && segmentContainer) {
         segments.forEach((point) => {
             const marker = document.createElement("div");
             marker.className = "segment-marker";
-            const percentage = (point / dom.videoPlayer.duration) * 100;
+            const percentage = (point / videoPlayer.duration) * 100;
             marker.style.left = `${percentage}%`;
-            dom.progressBar.appendChild(marker);
+            progressBar.appendChild(marker);
         });
         for (let i = 0; i < segments.length; i += 2) {
             const row = document.createElement("div");
