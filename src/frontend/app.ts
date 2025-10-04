@@ -1,218 +1,227 @@
-// public/app.ts
-import { DomElements } from "./types";
-import { store } from "./modules/store";
-import * as ui from "./modules/ui";
-import * as player from "./modules/player";
+// src/frontend/app.ts
+import { DomElements, Video } from "./types";
+import { Store } from "./modules/store";
+import { UI } from "./modules/ui";
+import { Player, STORAGE_KEY_PREFIX } from "./modules/player";
 
-let dom: DomElements;
-let wakeLock: WakeLockSentinel | null = null;
-let isScrubbing = false;
-let lastScrollY = 0;
+class App {
+    private dom!: DomElements;
+    private store!: Store;
+    private ui!: UI;
+    private player!: Player;
 
-function handleScrub(e: PointerEvent) {
-    if (isNaN(dom.videoPlayer.duration)) return;
-    const rect = dom.progressBar.getBoundingClientRect();
-    const position = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const newTime = dom.videoPlayer.duration * (position / rect.width);
-    ui.updateProgressBar(newTime, dom.videoPlayer.duration);
-    dom.timeDisplay.textContent = `${ui.formatTimePrecise(newTime)} ${ui.formatTimePrecise(dom.videoPlayer.duration)}`;
-    dom.videoPlayer.currentTime = newTime;
-}
+    private wakeLock: WakeLockSentinel | null = null;
+    private isScrubbing = false;
+    private lastScrollY = 0;
+    private lastPlayedVideoSrc: string | null = null;
 
-function handleListViewScroll() {
-    if (store.getState().view !== "list") return;
-    const currentScrollY = window.scrollY;
-    if (Math.abs(currentScrollY - lastScrollY) < 10) return;
-    if (currentScrollY > lastScrollY && currentScrollY > 50) {
-        dom.searchContainer.classList.add("search-container--hidden");
-    } else {
-        dom.searchContainer.classList.remove("search-container--hidden");
+    public init() {
+        this.dom = {
+            listView: document.getElementById("listView") as HTMLElement,
+            videoView: document.getElementById("videoView") as HTMLElement,
+            listContainer: document.getElementById("listContainer") as HTMLElement,
+            videoItemsWrapper: document.getElementById("videoItemsWrapper") as HTMLElement,
+            searchContainer: document.getElementById("searchContainer") as HTMLElement,
+            videoPlayer: document.getElementById("videoPlayer") as HTMLVideoElement,
+            streamerNameEl: document.getElementById("streamerName") as HTMLElement,
+            searchInput: document.getElementById("searchInput") as HTMLInputElement,
+            clearSearchBtn: document.getElementById("clearSearchBtn") as HTMLButtonElement,
+            getDurationsBtn: document.getElementById("getDurationsBtn") as HTMLButtonElement,
+            quadrantOverlay: document.getElementById("quadrantOverlay") as HTMLElement,
+            topBar: document.getElementById("topBar") as HTMLElement,
+            progressBar: document.getElementById("progressBar") as HTMLElement,
+            progressFill: document.getElementById("progressFill") as HTMLElement,
+            playerControlsContainer: document.getElementById("playerControlsContainer") as HTMLElement,
+            muteBtn: document.getElementById("muteBtn") as HTMLButtonElement,
+            addPointBtn: document.getElementById("addPointBtn") as HTMLButtonElement,
+            timeDisplay: document.getElementById("timeDisplay") as HTMLElement,
+            goBackBtn: document.getElementById("goBackBtn") as HTMLButtonElement,
+            modeOrUndoBtn: document.getElementById("modeOrUndoBtn") as HTMLButtonElement,
+            videoOkBtn: document.getElementById("videoOkBtn") as HTMLButtonElement,
+            deleteOrCutBtn: document.getElementById("deleteOrCutBtn") as HTMLButtonElement,
+        };
+
+        this.store = new Store();
+        this.ui = new UI(this.dom);
+        this.player = new Player(this.dom, this.store);
+
+        this.store.subscribe((state) => {
+            this.ui.render(state);
+            const currentSrc = state.currentVideo ? `/video/${state.currentVideo.type}/${encodeURIComponent(state.currentVideo.filename)}` : null;
+
+            if (this.lastPlayedVideoSrc !== currentSrc) {
+                this.lastPlayedVideoSrc = currentSrc;
+                if (state.currentVideo) {
+                    this.player.playVideo(state.currentVideo, state.currentVideoStartTime);
+                    this.requestWakeLock();
+                } else {
+                    this.player.stopPlayback();
+                    this.releaseWakeLock();
+                    this.dom.searchContainer.classList.remove("search-container--hidden");
+                    this.lastScrollY = 0;
+                }
+            }
+        });
+
+        this.attachEventListeners();
+        this.store.initialize();
     }
-    lastScrollY = currentScrollY < 0 ? 0 : currentScrollY;
-}
 
-function attachEventListeners() {
-    dom.goBackBtn.addEventListener("click", () => store.actions.showList());
+    private handleScrub(e: PointerEvent) {
+        if (isNaN(this.dom.videoPlayer.duration)) return;
+        const rect = this.dom.progressBar.getBoundingClientRect();
+        const position = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+        const newTime = this.dom.videoPlayer.duration * (position / rect.width);
+        this.ui.updateProgressBar(newTime, this.dom.videoPlayer.duration);
+        this.dom.timeDisplay.textContent = `${this.ui.formatTimePrecise(newTime)} ${this.ui.formatTimePrecise(this.dom.videoPlayer.duration)}`;
+        this.dom.videoPlayer.currentTime = newTime;
+    }
 
-    dom.searchInput.addEventListener("input", (e) => {
-        const newFilter = (e.target as HTMLInputElement).value;
-        store.actions.setFilter(newFilter);
-    });
-
-    dom.clearSearchBtn.addEventListener("click", () => {
-        store.actions.setFilter("");
-        dom.searchInput.value = "";
-        dom.searchInput.focus();
-    });
-
-    dom.getDurationsBtn.addEventListener("click", () => store.actions.fetchAndApplyDurations());
-
-    dom.videoView.addEventListener("click", (e) => {
-        if ((e.target as HTMLElement).closest("#quadrantOverlay") || (e.target as HTMLElement).closest("#topBar")) {
-            const { currentVideo, playerMode } = store.getState();
-            if (!currentVideo) return;
-            const isEditMode = playerMode === "edit" && currentVideo.type === "original";
-            const finalOpacity = isEditMode ? "0.15" : "0";
-            ui.flashTopBar(finalOpacity);
-        }
-    });
-
-    dom.muteBtn.addEventListener("click", () => {
-        dom.videoPlayer.muted = !dom.videoPlayer.muted;
-        dom.muteBtn.textContent = dom.videoPlayer.muted ? "🔇" : "🔊";
-    });
-
-    dom.quadrantOverlay.addEventListener("pointerdown", (e) => {
-        const action = (e.target as HTMLElement).dataset.action;
-        const SEEK_TIME_SECONDS = 5;
-        switch (action) {
-            case "next":
-                player.navigateVideoInList(1);
-                break;
-            case "prev":
-                player.navigateVideoInList(-1);
-                break;
-            case "seek-forward":
-                dom.videoPlayer.currentTime = Math.min(dom.videoPlayer.duration, dom.videoPlayer.currentTime + SEEK_TIME_SECONDS);
-                break;
-            case "seek-backward":
-                dom.videoPlayer.currentTime = Math.max(0, dom.videoPlayer.currentTime - SEEK_TIME_SECONDS);
-                dom.videoPlayer.play();
-                break;
-        }
-    });
-    dom.quadrantOverlay.addEventListener("contextmenu", (e) => e.preventDefault());
-
-    dom.videoView.addEventListener("dblclick", (e) => e.preventDefault());
-    dom.progressBar.addEventListener("dblclick", (e) => e.preventDefault());
-
-    const onPointerMove = (e: PointerEvent) => {
-        if (isScrubbing) handleScrub(e);
-    };
-    const onPointerUp = () => {
-        if (isScrubbing) {
-            isScrubbing = false;
-            dom.videoPlayer.play();
-            window.removeEventListener("pointermove", onPointerMove);
-            window.removeEventListener("pointerup", onPointerUp);
-        }
-    };
-    dom.progressBar.addEventListener("pointerdown", (e) => {
-        isScrubbing = true;
-        handleScrub(e as PointerEvent);
-        window.addEventListener("pointermove", onPointerMove);
-        window.addEventListener("pointerup", onPointerUp);
-    });
-
-    dom.addPointBtn.addEventListener("click", () => store.actions.addSegment(dom.videoPlayer.currentTime));
-
-    dom.modeOrUndoBtn.addEventListener("click", () => {
-        const { segments, playerMode, currentVideo } = store.getState();
-        if (currentVideo?.type === "original" && playerMode === "edit" && segments.length > 0) {
-            store.actions.removeLastSegment();
-        } else {
-            store.actions.togglePlayerMode();
-        }
-    });
-
-    dom.videoOkBtn.addEventListener("click", () => store.actions.saveCurrentVideo());
-
-    dom.deleteOrCutBtn.addEventListener("click", () => {
-        const { segments } = store.getState();
-        if (segments.length > 0) store.actions.createEditedVideo();
-        else store.actions.deleteCurrentVideo();
-    });
-
-    dom.videoPlayer.addEventListener("timeupdate", handleTimeUpdate);
-    dom.videoPlayer.addEventListener("loadedmetadata", () => {
-        ui.render(store.getState());
-        dom.muteBtn.textContent = dom.videoPlayer.muted ? "🔇" : "🔊";
-        const { currentVideo } = store.getState();
+    private handleTimeUpdate() {
+        if (this.dom.videoPlayer.seeking) return;
+        const { currentTime, duration } = this.dom.videoPlayer;
+        this.ui.updateProgressBar(currentTime, duration);
+        this.dom.timeDisplay.textContent = `${this.ui.formatTimePrecise(currentTime)} ${this.ui.formatTimePrecise(duration)}`;
+        const { currentVideo } = this.store.getState();
         if (currentVideo) {
-            store.actions.updateVideoDuration(currentVideo.filename, dom.videoPlayer.duration);
-        }
-    });
-
-    window.addEventListener("scroll", handleListViewScroll);
-}
-
-function handleTimeUpdate() {
-    if (dom.videoPlayer.seeking) return;
-    const { currentTime, duration } = dom.videoPlayer;
-    ui.updateProgressBar(currentTime, duration);
-    dom.timeDisplay.textContent = `${ui.formatTimePrecise(currentTime)} ${ui.formatTimePrecise(duration)}`;
-    const { currentVideo } = store.getState();
-    if (currentVideo) {
-        localStorage.setItem(player.STORAGE_KEY_PREFIX + currentVideo.filename, String(Math.round(currentTime)));
-    }
-}
-
-async function requestWakeLock() {
-    if ("wakeLock" in navigator) {
-        try {
-            wakeLock = await navigator.wakeLock.request("screen");
-        } catch (err) {
-            console.error("Could not acquire Wake Lock:", err);
+            localStorage.setItem(STORAGE_KEY_PREFIX + currentVideo.filename, String(Math.round(currentTime)));
         }
     }
-}
 
-async function releaseWakeLock() {
-    if (wakeLock) {
-        await wakeLock.release();
-        wakeLock = null;
+    private handleListViewScroll() {
+        if (this.store.getState().view !== "list") return;
+        const currentScrollY = window.scrollY;
+        if (Math.abs(currentScrollY - this.lastScrollY) < 10) return;
+        if (currentScrollY > this.lastScrollY && currentScrollY > 50) {
+            this.dom.searchContainer.classList.add("search-container--hidden");
+        } else {
+            this.dom.searchContainer.classList.remove("search-container--hidden");
+        }
+        this.lastScrollY = currentScrollY < 0 ? 0 : currentScrollY;
     }
-}
 
-function initialize() {
-    dom = {
-        listView: document.getElementById("listView") as HTMLElement,
-        videoView: document.getElementById("videoView") as HTMLElement,
-        listContainer: document.getElementById("listContainer") as HTMLElement,
-        videoItemsWrapper: document.getElementById("videoItemsWrapper") as HTMLElement,
-        searchContainer: document.getElementById("searchContainer") as HTMLElement,
-        videoPlayer: document.getElementById("videoPlayer") as HTMLVideoElement,
-        streamerNameEl: document.getElementById("streamerName") as HTMLElement,
-        searchInput: document.getElementById("searchInput") as HTMLInputElement,
-        clearSearchBtn: document.getElementById("clearSearchBtn") as HTMLButtonElement,
-        getDurationsBtn: document.getElementById("getDurationsBtn") as HTMLButtonElement,
-        quadrantOverlay: document.getElementById("quadrantOverlay") as HTMLElement,
-        topBar: document.getElementById("topBar") as HTMLElement,
-        progressBar: document.getElementById("progressBar") as HTMLElement,
-        progressFill: document.getElementById("progressFill") as HTMLElement,
-        playerControlsContainer: document.getElementById("playerControlsContainer") as HTMLElement,
-        muteBtn: document.getElementById("muteBtn") as HTMLButtonElement,
-        addPointBtn: document.getElementById("addPointBtn") as HTMLButtonElement,
-        timeDisplay: document.getElementById("timeDisplay") as HTMLElement,
-        goBackBtn: document.getElementById("goBackBtn") as HTMLButtonElement,
-        modeOrUndoBtn: document.getElementById("modeOrUndoBtn") as HTMLButtonElement,
-        videoOkBtn: document.getElementById("videoOkBtn") as HTMLButtonElement,
-        deleteOrCutBtn: document.getElementById("deleteOrCutBtn") as HTMLButtonElement,
-    };
+    private attachEventListeners() {
+        // Video List Item Clicks (Event Delegation)
+        this.dom.videoItemsWrapper.addEventListener("click", (e) => {
+            const item = (e.target as HTMLElement).closest<HTMLElement>(".video-item");
+            if (item?.dataset.filename && item.dataset.type) {
+                this.player.navigateToVideo({
+                    filename: item.dataset.filename,
+                    type: item.dataset.type as Video["type"],
+                    duration: null, // Not needed for navigation
+                });
+            }
+        });
 
-    ui.initUI(dom);
-    player.initPlayer(dom);
+        this.dom.goBackBtn.addEventListener("click", () => this.store.showList());
+        this.dom.searchInput.addEventListener("input", (e) => this.store.setFilter((e.target as HTMLInputElement).value));
+        this.dom.clearSearchBtn.addEventListener("click", () => {
+            this.store.setFilter("");
+            this.dom.searchInput.value = "";
+            this.dom.searchInput.focus();
+        });
+        this.dom.getDurationsBtn.addEventListener("click", () => this.store.fetchAndApplyDurations());
+        this.dom.videoView.addEventListener("click", (e) => {
+            if ((e.target as HTMLElement).closest("#quadrantOverlay") || (e.target as HTMLElement).closest("#topBar")) {
+                const { currentVideo, playerMode } = this.store.getState();
+                if (!currentVideo) return;
+                const isEditMode = playerMode === "edit" && currentVideo.type === "original";
+                const finalOpacity = isEditMode ? "0.15" : "0";
+                this.ui.flashTopBar(finalOpacity);
+            }
+        });
+        this.dom.muteBtn.addEventListener("click", () => {
+            this.dom.videoPlayer.muted = !this.dom.videoPlayer.muted;
+            this.dom.muteBtn.textContent = this.dom.videoPlayer.muted ? "🔇" : "🔊";
+        });
+        this.dom.quadrantOverlay.addEventListener("pointerdown", (e) => {
+            const action = (e.target as HTMLElement).dataset.action;
+            switch (action) {
+                case "next":
+                    this.player.navigateVideoInList(1);
+                    break;
+                case "prev":
+                    this.player.navigateVideoInList(-1);
+                    break;
+                case "seek-forward":
+                    this.dom.videoPlayer.currentTime = Math.min(this.dom.videoPlayer.duration, this.dom.videoPlayer.currentTime + 5);
+                    break;
+                case "seek-backward":
+                    this.dom.videoPlayer.currentTime = Math.max(0, this.dom.videoPlayer.currentTime - 5);
+                    this.dom.videoPlayer.play();
+                    break;
+            }
+        });
+        this.dom.quadrantOverlay.addEventListener("contextmenu", (e) => e.preventDefault());
+        this.dom.videoView.addEventListener("dblclick", (e) => e.preventDefault());
+        this.dom.progressBar.addEventListener("dblclick", (e) => e.preventDefault());
 
-    let lastPlayedVideoSrc: string | null = null;
-    store.subscribe((state) => {
-        ui.render(state);
-        const currentSrc = state.currentVideo ? `/video/${state.currentVideo.type}/${encodeURIComponent(state.currentVideo.filename)}` : null;
-        if (lastPlayedVideoSrc !== currentSrc) {
-            lastPlayedVideoSrc = currentSrc;
-            if (state.currentVideo) {
-                player.playVideo(state.currentVideo, state.currentVideoStartTime);
-                requestWakeLock();
+        const onPointerMove = (e: PointerEvent) => {
+            if (this.isScrubbing) this.handleScrub(e);
+        };
+        const onPointerUp = () => {
+            if (this.isScrubbing) {
+                this.isScrubbing = false;
+                this.dom.videoPlayer.play();
+                window.removeEventListener("pointermove", onPointerMove);
+                window.removeEventListener("pointerup", onPointerUp);
+            }
+        };
+        this.dom.progressBar.addEventListener("pointerdown", (e) => {
+            this.isScrubbing = true;
+            this.handleScrub(e as PointerEvent);
+            window.addEventListener("pointermove", onPointerMove);
+            window.addEventListener("pointerup", onPointerUp);
+        });
+
+        this.dom.addPointBtn.addEventListener("click", () => this.store.addSegment(this.dom.videoPlayer.currentTime));
+        this.dom.modeOrUndoBtn.addEventListener("click", () => {
+            const { segments, playerMode, currentVideo } = this.store.getState();
+            if (currentVideo?.type === "original" && playerMode === "edit" && segments.length > 0) {
+                this.store.removeLastSegment();
             } else {
-                player.stopPlayback();
-                releaseWakeLock();
-                dom.searchContainer.classList.remove("search-container--hidden");
-                lastScrollY = 0;
+                this.store.togglePlayerMode();
+            }
+        });
+        this.dom.videoOkBtn.addEventListener("click", () => this.store.saveCurrentVideo());
+        this.dom.deleteOrCutBtn.addEventListener("click", () => {
+            const { segments } = this.store.getState();
+            if (segments.length > 0) this.store.createEditedVideo();
+            else this.store.deleteCurrentVideo();
+        });
+
+        this.dom.videoPlayer.addEventListener("timeupdate", this.handleTimeUpdate.bind(this));
+        this.dom.videoPlayer.addEventListener("loadedmetadata", () => {
+            this.ui.render(this.store.getState());
+            this.dom.muteBtn.textContent = this.dom.videoPlayer.muted ? "🔇" : "🔊";
+            const { currentVideo } = this.store.getState();
+            if (currentVideo) {
+                this.store.updateVideoDuration(currentVideo.filename, this.dom.videoPlayer.duration);
+            }
+        });
+
+        window.addEventListener("scroll", this.handleListViewScroll.bind(this));
+    }
+
+    private async requestWakeLock() {
+        if ("wakeLock" in navigator) {
+            try {
+                this.wakeLock = await navigator.wakeLock.request("screen");
+            } catch (err) {
+                console.error("Could not acquire Wake Lock:", err);
             }
         }
-    });
+    }
 
-    attachEventListeners();
-    store.actions.initialize();
+    private async releaseWakeLock() {
+        if (this.wakeLock) {
+            await this.wakeLock.release();
+            this.wakeLock = null;
+        }
+    }
 }
 
-document.addEventListener("DOMContentLoaded", initialize);
+document.addEventListener("DOMContentLoaded", () => {
+    const app = new App();
+    app.init();
+});

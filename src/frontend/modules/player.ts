@@ -1,63 +1,64 @@
-// public/modules/player.ts
+// src/frontend/modules/player.ts
 import { DomElements, Video } from "../types";
-import { store } from "./store";
+import { Store } from "./store";
 
 export const STORAGE_KEY_PREFIX = "video-progress-";
-let dom: Partial<DomElements> = {};
 
-export function initPlayer(elements: DomElements): void {
-    dom = elements;
-}
+export class Player {
+    private dom: DomElements;
+    private store: Store;
 
-export function playVideo(video: Video, startTime = 0): void {
-    if (!video || !dom.videoPlayer) {
-        stopPlayback();
-        return;
+    constructor(domElements: DomElements, store: Store) {
+        this.dom = domElements;
+        this.store = store;
     }
 
-    dom.videoPlayer.controls = false;
-    dom.videoPlayer.loop = false;
-    dom.videoPlayer.src = `/video/${video.type}/${encodeURIComponent(video.filename)}`;
-
-    const seekOnLoad = () => {
-        // FIX: Added a type guard to ensure dom.videoPlayer exists inside this closure.
-        if (dom.videoPlayer) {
-            if (startTime > 0 && startTime < dom.videoPlayer.duration) {
-                dom.videoPlayer.currentTime = startTime;
-            }
-            dom.videoPlayer.removeEventListener("loadedmetadata", seekOnLoad);
+    public playVideo(video: Video, startTime = 0): void {
+        if (!video) {
+            this.stopPlayback();
+            return;
         }
-    };
-    dom.videoPlayer.addEventListener("loadedmetadata", seekOnLoad);
 
-    dom.videoPlayer.play().catch((e) => console.error("Autoplay failed:", e));
-}
+        this.dom.videoPlayer.controls = false;
+        this.dom.videoPlayer.loop = false;
+        this.dom.videoPlayer.src = `/video/${video.type}/${encodeURIComponent(video.filename)}`;
 
-export function stopPlayback(): void {
-    if (!dom.videoPlayer) return;
-    dom.videoPlayer.pause();
-    dom.videoPlayer.removeAttribute("src");
-    dom.videoPlayer.load();
-}
+        const seekOnLoad = () => {
+            if (startTime > 0 && startTime < this.dom.videoPlayer.duration) {
+                this.dom.videoPlayer.currentTime = startTime;
+            }
+            this.dom.videoPlayer.removeEventListener("loadedmetadata", seekOnLoad);
+        };
+        this.dom.videoPlayer.addEventListener("loadedmetadata", seekOnLoad);
 
-export function navigateToVideo(video: Video): void {
-    const savedTime = localStorage.getItem(STORAGE_KEY_PREFIX + video.filename);
-    const startTime = savedTime && parseFloat(savedTime) > 0 ? Math.round(parseFloat(savedTime)) : 0;
-    store.actions.playVideo(video, startTime);
-}
+        this.dom.videoPlayer.play().catch((e) => console.error("Autoplay failed:", e));
+    }
 
-export function navigateVideoInList(direction: 1 | -1): void {
-    const { videoList, filter, currentVideo, lastPlayedVideo } = store.getState();
-    const regex = filter ? new RegExp(filter, "i") : null;
-    const filteredList = videoList.filter((video) => !regex || regex.test(video.filename));
+    public stopPlayback(): void {
+        this.dom.videoPlayer.pause();
+        this.dom.videoPlayer.removeAttribute("src");
+        this.dom.videoPlayer.load();
+    }
 
-    const activeVideo = currentVideo || lastPlayedVideo;
-    if (!activeVideo) return;
+    public navigateToVideo(video: Video): void {
+        const savedTime = localStorage.getItem(STORAGE_KEY_PREFIX + video.filename);
+        const startTime = savedTime && parseFloat(savedTime) > 0 ? Math.round(parseFloat(savedTime)) : 0;
+        this.store.playVideo(video, startTime);
+    }
 
-    const currentIndex = filteredList.findIndex((v) => v.filename === activeVideo.filename && v.type === activeVideo.type);
+    public navigateVideoInList(direction: 1 | -1): void {
+        const { videoList, filter, currentVideo, lastPlayedVideo } = this.store.getState();
+        const regex = filter ? new RegExp(filter, "i") : null;
+        const filteredList = videoList.filter((video) => !regex || regex.test(video.filename));
 
-    const nextIndex = currentIndex + direction;
-    if (nextIndex >= 0 && nextIndex < filteredList.length) {
-        navigateToVideo(filteredList[nextIndex]);
+        const activeVideo = currentVideo || lastPlayedVideo;
+        if (!activeVideo) return;
+
+        const currentIndex = filteredList.findIndex((v) => v.filename === activeVideo.filename && v.type === activeVideo.type);
+
+        const nextIndex = currentIndex + direction;
+        if (nextIndex >= 0 && nextIndex < filteredList.length) {
+            this.navigateToVideo(filteredList[nextIndex]);
+        }
     }
 }
