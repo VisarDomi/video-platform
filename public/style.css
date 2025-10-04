@@ -11,9 +11,8 @@ body, html {
 
 .hidden { display: none !important; }
 
-
 .search-container {
-    /* --- NEW STICKY FOOTER STYLES --- */
+    /* --- STICKY FOOTER STYLES --- */
     position: sticky;
     bottom: 0;
     left: 0;
@@ -24,10 +23,14 @@ body, html {
     border-top: 1px solid #444;
     display: flex;
     align-items: center;
-    box-sizing: border-box; /* Add this to ensure padding is included in width */
+    box-sizing: border-box;
+
+    /* REQUIRED FOR iOS: Adds padding ONLY if there's a home bar, etc. */
+    /* On devices without a bottom notch, this value is 0. */
+    padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* NEW: Class to hide the search bar when scrolling down */
+/* Class to hide the search bar when scrolling down */
 .search-container--hidden {
     transform: translateY(100%);
 }
@@ -64,6 +67,17 @@ body, html {
     cursor: pointer;
     line-height: 1;
 }
+
+.list-container {
+    /* REQUIRED FOR iOS: Adds padding so the FIRST item in the list isn't hidden by the status bar/notch. */
+    /* Subsequent items will scroll under it as desired. */
+    padding-top: env(safe-area-inset-top);
+
+    /* Adds space at the very bottom of the scroll, so the last item can be scrolled up from behind the search bar. */
+    /* 50px is approx the height of the search bar. */
+    padding-bottom: 50px; 
+}
+
 .list-item {
     padding: 8px 15px;
     border-bottom: 1px solid #333;
@@ -75,6 +89,10 @@ body, html {
     height: 52px;
     box-sizing: border-box;
     overflow: hidden;
+
+    /* REQUIRED FOR iOS LANDSCAPE: Adds padding to list items to keep text from going into the side notches */
+    padding-left: calc(15px + env(safe-area-inset-left));
+    padding-right: calc(15px + env(safe-area-inset-right));
 }
 .list-item-name {
     font-size: 16px;
@@ -151,8 +169,12 @@ body, html {
     z-index: 20;
     /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
     opacity: 0.15;
-    /* CHANGED: Updated duration and easing for the desired effect */
     transition: opacity 1s ease;
+
+    /* REQUIRED FOR iOS: Pushes the top bar content down from the status bar */
+    padding-top: calc(15px + env(safe-area-inset-top));
+    padding-left: calc(15px + env(safe-area-inset-left));
+    padding-right: calc(15px + env(safe-area-inset-right));
 }
 
 #streamerName {
