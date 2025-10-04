@@ -59,6 +59,7 @@ export const store = {
 
     actions: {
         async initialize(): Promise<void> {
+            showToast("DEBUG: App initializing...", "info"); // DEBUG: Confirm app start
             try {
                 const savedLastVideo = localStorage.getItem(STORAGE_KEY_LAST_VIDEO);
                 if (savedLastVideo) state.lastPlayedVideo = JSON.parse(savedLastVideo);
@@ -81,15 +82,17 @@ export const store = {
         async loadVideoList(): Promise<void> {
             state.isLoading = true;
             notify();
+            showToast("DEBUG: Fetching video list...", "info"); // DEBUG: Announce fetch start
             try {
                 const videos = await api.fetchVideos();
+                showToast(`DEBUG: Loaded ${videos.length} videos.`, "success", 5000); // DEBUG: Show success and count
                 state.videoList = videos.map((video) => ({
                     ...video,
                     duration: cachedDurations[video.filename] || null,
                 }));
             } catch (e) {
                 console.error("Failed to fetch videos", e);
-                showToast("Could not load video list.", "error");
+                showToast(`ERROR: Could not load video list.`, "error", 8000); // DEBUG: Show fetch error
             }
             state.isLoading = false;
             notify();
