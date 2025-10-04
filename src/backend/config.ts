@@ -1,12 +1,18 @@
 import "dotenv/config";
-import * as fs from "fs"; // <-- FIX: Changed to namespace import
+import * as fs from "fs";
 import logger from "./logger.js";
 
 // --- Environment Variable Validation ---
 const VIDEOS_DIRS_RAW = process.env.VIDEOS_DIRS;
+export const FRONTEND_DIST_PATH = process.env.FRONTEND_DIST_PATH;
 
 if (!VIDEOS_DIRS_RAW) {
     logger.error("FATAL ERROR: VIDEOS_DIRS must be set in the .env file as a comma-separated list of paths.");
+    process.exit(1);
+}
+
+if (!FRONTEND_DIST_PATH) {
+    logger.error("FATAL ERROR: FRONTEND_DIST_PATH must be set in the .env file.");
     process.exit(1);
 }
 
@@ -31,3 +37,9 @@ VIDEO_ROOT_DIRS.forEach((dir) => {
         return;
     }
 });
+
+// Validate frontend path
+if (!fs.existsSync(FRONTEND_DIST_PATH)) {
+    logger.error(`The configured frontend dist path does not exist: ${FRONTEND_DIST_PATH}`);
+    process.exit(1);
+}
