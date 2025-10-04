@@ -36,13 +36,16 @@ export function stopPlayback() {
     dom.videoPlayer.load();
 }
 
+/**
+ * NEW, SIMPLIFIED VERSION
+ * This function no longer changes the URL. It directly tells the store to play a video,
+ * first checking localStorage for any saved progress.
+ */
 export function navigateToVideo(video) {
     const savedTime = localStorage.getItem(STORAGE_KEY_PREFIX + video.filename);
-    let hash = `#/${video.type}/${encodeURIComponent(video.filename)}`;
-    if (savedTime && parseFloat(savedTime) > 0) {
-        hash += `/${Math.round(parseFloat(savedTime))}`;
-    }
-    location.hash = hash;
+    const startTime = (savedTime && parseFloat(savedTime) > 0) ? Math.round(parseFloat(savedTime)) : 0;
+    // Directly call the action instead of changing the hash
+    store.actions.playVideo(video, startTime);
 }
 
 export function navigateVideoInList(direction) {
@@ -57,6 +60,7 @@ export function navigateVideoInList(direction) {
     
     const nextIndex = currentIndex + direction;
     if (nextIndex >= 0 && nextIndex < filteredList.length) {
+         // This now calls the new, simplified navigateToVideo function
          navigateToVideo(filteredList[nextIndex]);
     }
 }

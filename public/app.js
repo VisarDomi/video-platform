@@ -293,11 +293,6 @@ function handleTimeUpdate() {
         lastHashUpdateTime = now;
         const roundedTime = Math.round(currentTime);
         localStorage.setItem(player.STORAGE_KEY_PREFIX + currentVideo.filename, roundedTime);
-
-        const newHash = `#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}/${roundedTime}`;
-        if (location.hash.startsWith(`#/${currentVideo.type}/${encodeURIComponent(currentVideo.filename)}`)) {
-            history.replaceState(null, '', newHash);
-        }
     }
 }
 
@@ -382,11 +377,11 @@ function initialize() {
         if (lastPlayedVideoSrc !== currentSrc) {
             lastPlayedVideoSrc = currentSrc;
             if (state.currentVideo) {
-                document.body.classList.add('video-view-active'); // ADD THIS LINE
+                document.body.classList.add('video-view-active');
                 player.playVideo(state.currentVideo, state.currentVideoStartTime);
                 requestWakeLock();
             } else {
-                document.body.classList.remove('video-view-active'); // ADD THIS LINE
+                document.body.classList.remove('video-view-active');
                 player.stopPlayback();
                 releaseWakeLock();
                 // When returning to list, reset scroll and ensure search bar is visible

@@ -75,9 +75,6 @@ body.video-view-active {
 .list-container {
     /* REQUIRED FOR iOS: Adds padding so the FIRST item in the list isn't hidden by the status bar/notch. */
     padding-top: env(safe-area-inset-top);
-
-    /* Adds space at the very bottom of the scroll, so the last item can be scrolled up from behind the search bar. */
-    padding-bottom: 50px; 
 }
 
 .list-item {

@@ -209,7 +209,8 @@ export const store = {
             if (nextVideo) {
                 navigateToVideo(nextVideo);
             } else {
-                location.hash = '#/';
+                // CHANGED: Call showList() instead of changing URL
+                this.showList();
             }
             
             // Fire and forget API call
@@ -232,7 +233,8 @@ export const store = {
             if (nextVideo) {
                 navigateToVideo(nextVideo);
             } else {
-                location.hash = '#/';
+                // CHANGED: Call showList() instead of changing URL
+                this.showList();
             }
 
             // Fire and forget API call
@@ -256,7 +258,8 @@ export const store = {
             if (nextVideo) {
                 navigateToVideo(nextVideo);
             } else {
-                location.hash = '#/';
+                // CHANGED: Call showList() instead of changing URL
+                this.showList();
             }
 
             // Fire and forget API call
