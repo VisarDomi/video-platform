@@ -9,6 +9,7 @@ let lastVideoViewTapTime = 0;
 let lastProgressBarTapTime = 0;
 let wakeLock = null;
 let isScrubbing = false;
+let lastScrollY = 0; // For hiding search bar on scroll
 
 
 // --- Screen Wake Lock (for iOS screen dimming) ---
@@ -72,6 +73,29 @@ function handleScrub(e) {
     dom.videoPlayer.currentTime = newTime;
 }
 
+// --- NEW: Hide/show search bar on scroll ---
+function handleListViewScroll() {
+    const currentScrollY = window.scrollY;
+
+    // Only run this logic when in the list view
+    if (store.getState().view !== 'list') return;
+
+    // A small threshold to prevent hiding on minor scrolls or "bounces"
+    if (Math.abs(currentScrollY - lastScrollY) < 10) {
+        return;
+    }
+    
+    // Scrolling down and past a certain point
+    if (currentScrollY > lastScrollY && currentScrollY > 50) {
+        dom.searchContainer.classList.add('search-container--hidden');
+    } else { // Scrolling up
+        dom.searchContainer.classList.remove('search-container--hidden');
+    }
+    
+    lastScrollY = currentScrollY < 0 ? 0 : currentScrollY; // Handle negative scroll on iOS
+}
+
+
 // --- DOM Event Listeners (Dispatch actions to the store) ---
 function attachEventListeners() {
     dom.goBackBtn.addEventListener('click', () => {
@@ -82,16 +106,16 @@ function attachEventListeners() {
         const oldFilter = store.getState().filter;
         const newFilter = e.target.value;
         store.actions.setFilter(newFilter);
-        // If the filter was cleared, scroll to the top of the list
+        // If the filter was cleared, scroll to the top of the page
         if (oldFilter && !newFilter) {
-            window.scrollTo(0, 0);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     });
 
     dom.clearSearchBtn.addEventListener('click', () => {
         store.actions.setFilter('');
         dom.searchInput.value = '';
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
         dom.searchInput.focus();
     });
 
@@ -138,7 +162,7 @@ function attachEventListeners() {
             case 'seek-backward':
                 if (isNaN(dom.videoPlayer.duration)) return;
                 dom.videoPlayer.currentTime = Math.max(0, dom.videoPlayer.currentTime - SEEK_TIME_SECONDS);
-                dom.videoPlayer.play(); // <-- ADD THIS LINE
+                dom.videoPlayer.play();
                 break;
         }
     });
@@ -184,7 +208,7 @@ function attachEventListeners() {
     const onPointerUp = () => {
         if (isScrubbing) {
             isScrubbing = false;
-            dom.videoPlayer.play(); // Resume playback when scrubbing is done
+            dom.videoPlayer.play();
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
         }
@@ -192,7 +216,7 @@ function attachEventListeners() {
 
     dom.progressBar.addEventListener('pointerdown', (e) => {
         isScrubbing = true;
-        handleScrub(e); // Handle the initial click position
+        handleScrub(e);
 
         // Attach listeners to the window to allow dragging outside the progress bar
         window.addEventListener('pointermove', onPointerMove);
@@ -246,6 +270,9 @@ function attachEventListeners() {
             await requestWakeLock();
         }
     });
+
+    // NEW: Add a global scroll listener
+    window.addEventListener('scroll', handleListViewScroll);
 }
 
 // --- App Logic ---
@@ -256,7 +283,7 @@ function handleTimeUpdate() {
     const { currentTime, duration } = dom.videoPlayer;
 
     ui.updateProgressBar(currentTime, duration);
-    // DO NOT REMOVE COMMENT: the format is on purpose like this
+    // the format is on purpose like this
     dom.timeDisplay.textContent = `${ui.formatTimePrecise(currentTime)} ${ui.formatTimePrecise(duration)}`;
 
     if (!currentVideo) return;
@@ -321,20 +348,20 @@ function initialize() {
         videoView: document.getElementById('videoView'),
         listContainer: document.getElementById('listContainer'),
         videoItemsWrapper: document.getElementById('videoItemsWrapper'),
+        searchContainer: document.getElementById('searchContainer'), // ADDED THIS
         videoPlayer: document.getElementById('videoPlayer'),
         streamerNameEl: document.getElementById('streamerName'),
         searchInput: document.getElementById('searchInput'),
         clearSearchBtn: document.getElementById('clearSearchBtn'),
         getDurationsBtn: document.getElementById('getDurationsBtn'),
         quadrantOverlay: document.getElementById('quadrantOverlay'),
-        topBar: document.getElementById('topBar'), // ADDED THIS LINE
+        topBar: document.getElementById('topBar'),
         progressBar: document.getElementById('progressBar'),
         progressFill: document.getElementById('progressFill'),
         playerControlsContainer: document.getElementById('playerControlsContainer'),
         muteBtn: document.getElementById('muteBtn'),
         addPointBtn: document.getElementById('addPointBtn'),
         timeDisplay: document.getElementById('timeDisplay'),
-        // New combined/repurposed buttons
         goBackBtn: document.getElementById('goBackBtn'),
         modeOrUndoBtn: document.getElementById('modeOrUndoBtn'),
         videoOkBtn: document.getElementById('videoOkBtn'),
@@ -346,7 +373,6 @@ function initialize() {
     player.initPlayer(dom);
 
     // 3. Subscribe the UI to state changes.
-    // The `render` function will now be called automatically whenever state is updated.
     let lastPlayedVideoSrc = null;
     store.subscribe(state => {
         ui.render(state);
@@ -361,6 +387,10 @@ function initialize() {
             } else {
                 player.stopPlayback();
                 releaseWakeLock();
+                // When returning to list, reset scroll and ensure search bar is visible
+                window.scrollTo(0,0);
+                dom.searchContainer.classList.remove('search-container--hidden');
+                lastScrollY = 0;
             }
         }
     });

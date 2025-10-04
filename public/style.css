@@ -5,40 +5,33 @@ body, html {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #000000;
     color: #ffffff;
+    /* REMOVED: overflow: hidden; -- This is the key change to allow page scrolling */
     -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
 .hidden { display: none !important; }
 
-/* --- List View --- */
-#listView {
-    min-height: 100vh; /* Ensure it at least fills the screen on short lists. */
-}
-
-.main-header {
-    background-color: #000000;
-    padding: 10px 20px;
-    border-bottom: 1px solid #333;
-    text-align: center;
-}
-.main-header h1 {
-    margin: 0;
-    font-weight: 300;
-    color: #ff5e3a;
-}
 
 .search-container {
-    padding: 10px;
+    /* --- NEW STICKY FOOTER STYLES --- */
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 100;
+    /* --- Existing Styles --- */
     background-color: #000000;
-    border-bottom: 1px solid #444;
+    border-top: 1px solid #444;
     display: flex;
     align-items: center;
-    gap: 10px;
-    /* Make the search bar a sticky header. */
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    box-sizing: border-box; /* Add this to ensure padding is included in width */
 }
+
+/* NEW: Class to hide the search bar when scrolling down */
+.search-container--hidden {
+    transform: translateY(100%);
+}
+
 #searchInput {
     flex-grow: 1;
     padding: 10px;
@@ -100,7 +93,8 @@ body, html {
 .list-item:hover {
     background-color: #2a2a2a;
 }
-.info-message {
+.info-message,
+#loadingMessage { /* Target loading message as well */
     text-align: center;
     padding: 40px;
     font-style: italic;

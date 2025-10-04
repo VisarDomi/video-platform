@@ -10,15 +10,15 @@
 
     <!-- Main List View -->
     <div id="listView">
+        <!-- The list container now only wraps the dynamically generated items -->
         <div id="listContainer" class="list-container">
-            <!-- The search container is now INSIDE the scrollable list -->
-            <div id="searchContainer" class="search-container">
-                <input type="text" id="searchInput" placeholder="Filter (regex)...">
-                <button id="clearSearchBtn" class="hidden" title="Clear filter">❌</button>
-                <button id="getDurationsBtn" title="Fetch all video durations">🕒</button>
-            </div>
-            <!-- Video items will be injected into this wrapper -->
             <div id="videoItemsWrapper"></div>
+        </div>
+        <!-- The search container is moved out to become a sticky footer -->
+        <div id="searchContainer" class="search-container">
+            <input type="text" id="searchInput" placeholder="Filter (regex)...">
+            <button id="clearSearchBtn" class="hidden" title="Clear filter">❌</button>
+            <button id="getDurationsBtn" title="Fetch all video durations">🕒</button>
         </div>
     </div>
 
@@ -65,6 +65,6 @@
     </div>
 
     <div id="toastContainer"></div>
-    <script type="module" src="/app.js?v=77"></script>
+    <script type="module" src="/app.js?v=76"></script>
 </body>
 </html>
