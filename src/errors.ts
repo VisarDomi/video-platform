@@ -6,7 +6,7 @@
 export class FileNotFoundError extends Error {
     constructor(message: string) {
         super(message);
-        this.name = 'FileNotFoundError';
+        this.name = "FileNotFoundError";
     }
 }
 
@@ -16,9 +16,9 @@ export class FileNotFoundError extends Error {
 export class FfmpegError extends Error {
     public stderr: string;
 
-    constructor(message: string, stderr: string = '') {
+    constructor(message: string, stderr: string = "") {
         super(message);
-        this.name = 'FfmpegError';
+        this.name = "FfmpegError";
         this.stderr = stderr;
     }
 }

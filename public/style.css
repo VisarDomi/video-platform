@@ -1,5 +1,6 @@
 /* General */
-body, html {
+body,
+html {
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -8,12 +9,14 @@ body, html {
     -webkit-touch-callout: none; /* Prevents callout on long press, helps with zoom issues */
 }
 
-.hidden { display: none !important; }
+.hidden {
+    display: none !important;
+}
 
 /* --- List View is now the base layer, no special rules needed --- */
 #listView {
     /* Set a base z-index to ensure it's on top by default */
-    z-index: 1; 
+    z-index: 1;
 }
 
 .search-container {
@@ -97,7 +100,8 @@ body, html {
     background-color: #2a2a2a;
 }
 .info-message,
-#loadingMessage { /* Target loading message as well */
+#loadingMessage {
+    /* Target loading message as well */
     text-align: center;
     padding: 40px;
     font-style: italic;
@@ -113,9 +117,10 @@ body, html {
     right: 0;
     bottom: 0;
     background-color: black;
-    -webkit-user-select: none; user-select: none;
+    -webkit-user-select: none;
+    user-select: none;
     touch-action: manipulation;
-    
+
     /* DEFAULT STATE: In the background, invisible, and non-interactive */
     z-index: -1;
     opacity: 0;
@@ -129,21 +134,26 @@ body, html {
 }
 
 #videoContainer {
-    width: 100%; height: 100%;
+    width: 100%;
+    height: 100%;
     position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
 }
 #videoPlayer {
-    width: 100%; height: 100%;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
 }
 
 /* Quadrant Overlay */
 #quadrantOverlay {
-    position: absolute; top: 0; left: 0;
-    width: 100%; height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
@@ -162,11 +172,13 @@ body, html {
 
 /* Top Bar UI */
 #topBar {
-    position: absolute; top: 0; left: 0;
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     padding: 15px;
     box-sizing: border-box;
-    background: linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0));
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
     z-index: 20;
     /* DO NOT REMOVE COMMENT: the opacity is on purpose this way*/
     opacity: 0.15;
@@ -181,7 +193,8 @@ body, html {
 }
 
 #progressBar {
-    width: 100%; height: 100px; 
+    width: 100%;
+    height: 100px;
     background-color: rgba(255, 255, 255, 0.3);
     border-radius: 10px;
     position: relative;
@@ -195,7 +208,8 @@ body, html {
     touch-action: manipulation;
 }
 #progressFill {
-    width: 0; height: 100%;
+    width: 0;
+    height: 100%;
     background-color: #ff5e3a;
     border-radius: 10px;
     position: absolute;
@@ -203,8 +217,10 @@ body, html {
     left: 0;
 }
 .segment-marker {
-    position: absolute; top: 0;
-    width: 4px; height: 100%;
+    position: absolute;
+    top: 0;
+    width: 4px;
+    height: 100%;
     background-color: white;
     transform: translateX(-50%);
     z-index: 3;
@@ -218,10 +234,13 @@ body, html {
     gap: 10px;
 }
 #controls button {
-    padding: 12px 18px; font-size: 36px;
-    background-color: rgba(0,0,0,0.6);
-    color: white; border: 1px solid white;
-    border-radius: 8px; cursor: pointer;
+    padding: 12px 18px;
+    font-size: 36px;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: 1px solid white;
+    border-radius: 8px;
+    cursor: pointer;
     min-width: 70px;
     line-height: 1;
 }
@@ -239,7 +258,7 @@ body, html {
 #controls button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-    background-color: rgba(0,0,0,0.6);
+    background-color: rgba(0, 0, 0, 0.6);
     border-color: #888;
     color: #888;
 }
@@ -282,9 +301,15 @@ body, html {
     opacity: 1;
     transform: translateX(0);
 }
-.toast.success { background-color: #28a745; }
-.toast.error   { background-color: #dc3545; }
-.toast.info    { background-color: #17a2b8; }
+.toast.success {
+    background-color: #28a745;
+}
+.toast.error {
+    background-color: #dc3545;
+}
+.toast.info {
+    background-color: #17a2b8;
+}
 
 /* --- New Time Display Styles --- */
 #timeDisplayContainer {
@@ -296,7 +321,7 @@ body, html {
     background-color: rgba(0, 0, 0, 0.5);
     padding: 4px 12px;
     border-radius: 6px;
-    font-family: 'Courier New', Courier, monospace;
+    font-family: "Courier New", Courier, monospace;
     font-size: 18px;
     font-weight: bold;
     text-shadow: 1px 1px 2px black;
@@ -316,7 +341,7 @@ body, html {
     flex-direction: column;
     z-index: 2;
     pointer-events: none;
-    font-family: 'Courier New', Courier, monospace;
+    font-family: "Courier New", Courier, monospace;
     color: white;
     text-shadow: 2px 2px 4px black;
     font-weight: bold;

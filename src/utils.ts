@@ -1,6 +1,6 @@
-import { promises as fsp } from 'fs';
-import path from 'path';
-import { VIDEO_ROOT_DIRS } from './config.js';
+import { promises as fsp } from "fs";
+import path from "path";
+import { VIDEO_ROOT_DIRS } from "./config.js";
 
 /**
  * Searches all configured directories to find the full path of a given video file.
@@ -9,9 +9,9 @@ import { VIDEO_ROOT_DIRS } from './config.js';
  * @param filename The name of the video file.
  * @returns {Promise<{fullPath: string, baseDir: string} | null>} An object with the full path and base directory, or null if not found.
  */
-export async function findVideoPath(type: 'original' | 'edited', filename: string): Promise<{fullPath: string, baseDir: string} | null> {
+export async function findVideoPath(type: "original" | "edited", filename: string): Promise<{ fullPath: string; baseDir: string } | null> {
     for (const baseDir of VIDEO_ROOT_DIRS) {
-        const searchDir = type === 'original' ? baseDir : path.join(baseDir, 'edited');
+        const searchDir = type === "original" ? baseDir : path.join(baseDir, "edited");
         const fullPath = path.join(searchDir, filename);
         try {
             await fsp.stat(fullPath);

@@ -1,7 +1,7 @@
 // src/services/ffmpeg.service.ts
-import { spawn } from 'child_process';
-import logger from '../logger.js';
-import { FfmpegError } from '../errors.js';
+import { spawn } from "child_process";
+import logger from "../logger.js";
+import { FfmpegError } from "../errors.js";
 
 /**
  * @fileoverview
@@ -24,22 +24,14 @@ export function buildFfmpegArgs(sourcePath: string, outputPath: string, segments
         filterChains.push(`[0:a]atrim=${seg.start}:${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
     });
 
-    const videoConcatInputs = segments.map((_, i) => `[v${i}]`).join('');
-    const audioConcatInputs = segments.map((_, i) => `[a${i}]`).join('');
+    const videoConcatInputs = segments.map((_, i) => `[v${i}]`).join("");
+    const audioConcatInputs = segments.map((_, i) => `[a${i}]`).join("");
     filterChains.push(`${videoConcatInputs}concat=n=${segments.length}:v=1:a=0[v]`);
     filterChains.push(`${audioConcatInputs}concat=n=${segments.length}:v=0:a=1[a]`);
-    
-    const fullFilterComplex = filterChains.join(';');
 
-    return [
-        '-i', sourcePath,
-        '-filter_complex', fullFilterComplex,
-        '-map', '[v]',
-        '-map', '[a]',
-        '-movflags', '+faststart',
-        '-y',
-        outputPath
-    ];
+    const fullFilterComplex = filterChains.join(";");
+
+    return ["-i", sourcePath, "-filter_complex", fullFilterComplex, "-map", "[v]", "-map", "[a]", "-movflags", "+faststart", "-y", outputPath];
 }
 
 /**
@@ -50,18 +42,18 @@ export function buildFfmpegArgs(sourcePath: string, outputPath: string, segments
  */
 export function executeFfmpegCommand(args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-        logger.info('Executing ffmpeg with args:', { args: JSON.stringify(args) });
-        const ffmpeg = spawn('ffmpeg', args);
-        let stderrOutput = '';
+        logger.info("Executing ffmpeg with args:", { args: JSON.stringify(args) });
+        const ffmpeg = spawn("ffmpeg", args);
+        let stderrOutput = "";
 
-        ffmpeg.stderr.on('data', (data) => {
+        ffmpeg.stderr.on("data", (data) => {
             stderrOutput += data.toString();
             logger.verbose(`ffmpeg stderr: ${data}`);
         });
 
-        ffmpeg.on('close', (code) => {
+        ffmpeg.on("close", (code) => {
             if (code !== 0) {
-                const fullCommand = `ffmpeg ${args.join(' ')}`;
+                const fullCommand = `ffmpeg ${args.join(" ")}`;
                 const error = new FfmpegError(`ffmpeg process exited with code ${code}`, stderrOutput);
                 logger.error(error.message, { fullCommand, stderr: stderrOutput });
                 return reject(error);
@@ -69,8 +61,8 @@ export function executeFfmpegCommand(args: string[]): Promise<void> {
             resolve();
         });
 
-        ffmpeg.on('error', (err) => {
-            logger.error('Failed to start ffmpeg process.', { error: err });
+        ffmpeg.on("error", (err) => {
+            logger.error("Failed to start ffmpeg process.", { error: err });
             reject(err);
         });
     });
@@ -83,20 +75,15 @@ export function executeFfmpegCommand(args: string[]): Promise<void> {
  */
 export function getVideoDuration(filePath: string): Promise<number> {
     return new Promise((resolve, reject) => {
-        const ffprobe = spawn('ffprobe', [
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            filePath
-        ]);
+        const ffprobe = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath]);
 
-        let stdout = '';
-        let stderr = '';
+        let stdout = "";
+        let stderr = "";
 
-        ffprobe.stdout.on('data', (data) => stdout += data.toString());
-        ffprobe.stderr.on('data', (data) => stderr += data.toString());
+        ffprobe.stdout.on("data", (data) => (stdout += data.toString()));
+        ffprobe.stderr.on("data", (data) => (stderr += data.toString()));
 
-        ffprobe.on('close', (code) => {
+        ffprobe.on("close", (code) => {
             if (code !== 0) {
                 logger.warn(`ffprobe failed for ${filePath} with code ${code}`, { stderr });
                 return resolve(0); // Resolve with 0 on error to not fail the whole batch
@@ -104,10 +91,10 @@ export function getVideoDuration(filePath: string): Promise<number> {
             const duration = parseFloat(stdout.trim());
             resolve(isNaN(duration) ? 0 : duration);
         });
-        
-        ffprobe.on('error', (err) => {
-             logger.error(`Failed to start ffprobe for ${filePath}`, { error: err });
-             reject(err); // Reject if the process can't even start
+
+        ffprobe.on("error", (err) => {
+            logger.error(`Failed to start ffprobe for ${filePath}`, { error: err });
+            reject(err); // Reject if the process can't even start
         });
     });
 }

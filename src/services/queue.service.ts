@@ -1,5 +1,5 @@
 // src/services/queue.service.ts
-import logger from '../logger.js';
+import logger from "../logger.js";
 
 /**
  * @fileoverview
@@ -60,6 +60,6 @@ export class JobQueue<T> {
         }
 
         this.isProcessing = false;
-        logger.info('Queue processing finished.');
+        logger.info("Queue processing finished.");
     }
 }

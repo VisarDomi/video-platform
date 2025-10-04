@@ -3,7 +3,7 @@
 /**
  * Defines the type of video, either original or an edited version.
  */
-export type VideoType = 'original' | 'edited';
+export type VideoType = "original" | "edited";
 
 /**
  * Represents a single video file in the application.
@@ -18,7 +18,7 @@ export interface Video {
  * Represents the entire state of the frontend application.
  */
 export interface AppState {
-    view: 'list' | 'video';
+    view: "list" | "video";
     isLoading: boolean;
     videoList: Video[];
     filter: string;
@@ -26,7 +26,7 @@ export interface AppState {
     currentVideoStartTime: number;
     lastPlayedVideo: Video | null;
     segments: number[];
-    playerMode: 'view' | 'edit';
+    playerMode: "view" | "edit";
 }
 
 /**

@@ -1,12 +1,12 @@
 // src/services/video.service.ts
-import { promises as fsp } from 'fs';
-import path from 'path';
-import { VIDEO_ROOT_DIRS } from '../config.js';
-import { findVideoPath } from '../utils.js';
-import logger from '../logger.js';
-import { FileNotFoundError } from '../errors.js';
-import * as ffmpeg from './ffmpeg.service.js';
-import { JobQueue } from './queue.service.js';
+import { promises as fsp } from "fs";
+import path from "path";
+import { VIDEO_ROOT_DIRS } from "../config.js";
+import { findVideoPath } from "../utils.js";
+import logger from "../logger.js";
+import { FileNotFoundError } from "../errors.js";
+import * as ffmpeg from "./ffmpeg.service.js";
+import { JobQueue } from "./queue.service.js";
 
 /**
  * @fileoverview
@@ -16,10 +16,9 @@ import { JobQueue } from './queue.service.js';
  */
 
 type EditJob = {
-    filename: string,
-    segments: {start: number, end: number}[]
+    filename: string;
+    segments: { start: number; end: number }[];
 };
-
 
 // --- Internal Helper Functions ---
 
@@ -27,12 +26,12 @@ type EditJob = {
  * Moves a file to a 'trash' subdirectory within its base directory.
  */
 async function moveFileToTrash(filePath: string, baseDir: string) {
-    const trashDir = path.join(baseDir, 'trash');
+    const trashDir = path.join(baseDir, "trash");
     await fsp.mkdir(trashDir, { recursive: true });
-    
+
     const filename = path.basename(filePath);
     const destinationPath = path.join(trashDir, filename);
-    
+
     await fsp.rename(filePath, destinationPath);
     logger.info(`Moved file to trash: ${destinationPath}`);
 }
@@ -40,17 +39,15 @@ async function moveFileToTrash(filePath: string, baseDir: string) {
 /**
  * Reads a directory and returns a list of video file objects.
  */
-async function getVideosFromDir(dirPath: string, type: 'original' | 'edited') {
-  try {
-    await fsp.mkdir(dirPath, { recursive: true });
-    const files = await fsp.readdir(dirPath);
-    return files
-      .filter(file => path.extname(file).toLowerCase() === ".mp4")
-      .map(filename => ({ filename, type }));
-  } catch (error) {
-    logger.error(`Could not read directory: ${dirPath}`, { error });
-    return []; // Return empty array on error
-  }
+async function getVideosFromDir(dirPath: string, type: "original" | "edited") {
+    try {
+        await fsp.mkdir(dirPath, { recursive: true });
+        const files = await fsp.readdir(dirPath);
+        return files.filter((file) => path.extname(file).toLowerCase() === ".mp4").map((filename) => ({ filename, type }));
+    } catch (error) {
+        logger.error(`Could not read directory: ${dirPath}`, { error });
+        return []; // Return empty array on error
+    }
 }
 
 /**
@@ -59,13 +56,13 @@ async function getVideosFromDir(dirPath: string, type: 'original' | 'edited') {
  */
 async function _processVideoEdit(job: EditJob) {
     const { filename, segments } = job;
-    const foundVideo = await findVideoPath('original', filename);
+    const foundVideo = await findVideoPath("original", filename);
     if (!foundVideo) {
         throw new FileNotFoundError(`Original video file not found: ${filename}`);
     }
 
     const { fullPath: sourcePath, baseDir } = foundVideo;
-    const editedVideosDir = path.join(baseDir, 'edited');
+    const editedVideosDir = path.join(baseDir, "edited");
     const outputPath = path.join(editedVideosDir, filename);
 
     await fsp.mkdir(editedVideosDir, { recursive: true });
@@ -84,20 +81,16 @@ async function _processVideoEdit(job: EditJob) {
 // We create a single instance of the queue and pass it our processing function.
 const editQueue = new JobQueue<EditJob>(_processVideoEdit);
 
-
 // --- Exported Service Functions ---
 
 export async function getAllVideos() {
-    const allFilesPromises = VIDEO_ROOT_DIRS.flatMap(dir => [
-      getVideosFromDir(dir, 'original'),
-      getVideosFromDir(path.join(dir, 'edited'), 'edited')
-    ]);
-    
+    const allFilesPromises = VIDEO_ROOT_DIRS.flatMap((dir) => [getVideosFromDir(dir, "original"), getVideosFromDir(path.join(dir, "edited"), "edited")]);
+
     const fileArrays = await Promise.all(allFilesPromises);
     return fileArrays.flat().sort((a, b) => a.filename.localeCompare(b.filename));
 }
 
-export async function trashVideo(type: 'original' | 'edited', filename: string) {
+export async function trashVideo(type: "original" | "edited", filename: string) {
     const foundVideo = await findVideoPath(type, filename);
     if (!foundVideo) {
         throw new FileNotFoundError(`Video file not found: ${filename}`);
@@ -109,29 +102,28 @@ export async function trashVideo(type: 'original' | 'edited', filename: string) 
  * Adds a video editing job to the background queue.
  * This is now a simple one-liner that delegates to the queue service.
  */
-export function createEditedVideo(filename: string, segments: {start: number, end: number}[]) {
+export function createEditedVideo(filename: string, segments: { start: number; end: number }[]) {
     editQueue.add({ filename, segments });
 }
 
-export async function moveVideoToEdited(type: 'original', filename: string) {
-    if (type !== 'original') {
-        throw new Error('Only original videos can be moved to the edited folder.');
+export async function moveVideoToEdited(type: "original", filename: string) {
+    if (type !== "original") {
+        throw new Error("Only original videos can be moved to the edited folder.");
     }
-    
+
     const foundVideo = await findVideoPath(type, filename);
     if (!foundVideo) {
         throw new FileNotFoundError(`Video file not found: ${filename}`);
     }
 
     const { fullPath: sourcePath, baseDir } = foundVideo;
-    const editedVideosDir = path.join(baseDir, 'edited');
+    const editedVideosDir = path.join(baseDir, "edited");
     const destinationPath = path.join(editedVideosDir, filename);
-    
+
     await fsp.mkdir(editedVideosDir, { recursive: true });
     await fsp.rename(sourcePath, destinationPath);
     logger.info(`Moved video to edited folder: ${destinationPath}`);
 }
-
 
 /**
  * Gets durations for all video files by calling the ffmpeg service.
