@@ -1,2 +1,2 @@
-# tango-editor
-A web interface for viewing and editing Tango videos.
+# video-editor
+A web interface for viewing and editing videos.
