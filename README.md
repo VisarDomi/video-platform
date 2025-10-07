@@ -1,2 +1,2 @@
-# tslive-editor
-A web interface for viewing and editing TsLive videos.
+# video-editor
+A web interface for viewing and editing videos.
