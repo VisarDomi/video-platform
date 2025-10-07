@@ -1,5 +1,5 @@
-# tango-segment-fetcher
-Download 1s .ts files for each of the streamers you follow from tango.
+# video-segment-fetcher
+Download 1s .ts files for each of the streamers you follow.
 
 ## note
 ```
@@ -14,4 +14,4 @@ and produces:
 
 `this.statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");`
 
-which gets consumed by both tango-stream-builder and tango-packager
+which gets consumed by both video-stream-builder and video-packager
