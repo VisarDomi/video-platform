@@ -1,5 +1,5 @@
 // src/services/video.service.ts
-import { promises as fsp } from "fs";
+import { promises as fsPromises } from "fs";
 import path from "path";
 import { VIDEO_ROOT_DIRS } from "../config.js";
 import { findVideoPath } from "../utils.js";
@@ -27,12 +27,12 @@ type EditJob = {
  */
 async function moveFileToTrash(filePath: string, baseDir: string) {
     const trashDir = path.join(baseDir, "trash");
-    await fsp.mkdir(trashDir, { recursive: true });
+    await fsPromises.mkdir(trashDir, { recursive: true });
 
     const filename = path.basename(filePath);
     const destinationPath = path.join(trashDir, filename);
 
-    await fsp.rename(filePath, destinationPath);
+    await fsPromises.rename(filePath, destinationPath);
     logger.info(`Moved file to trash: ${destinationPath}`);
 }
 
@@ -41,11 +41,9 @@ async function moveFileToTrash(filePath: string, baseDir: string) {
  */
 async function getVideosFromDir(dirPath: string, type: "original" | "edited") {
     try {
-        // logger.info(`DEBUG: Attempting to scan directory: ${dirPath}`); // DEBUG: Log which directory we're reading
-        await fsp.mkdir(dirPath, { recursive: true });
-        const files = await fsp.readdir(dirPath);
+        await fsPromises.mkdir(dirPath, { recursive: true });
+        const files = await fsPromises.readdir(dirPath);
         const mp4Files = files.filter((file) => path.extname(file).toLowerCase() === ".mp4");
-        // logger.info(`DEBUG: Found ${mp4Files.length} MP4 files in ${dirPath}`); // DEBUG: Log how many MP4s were found
         return mp4Files.map((filename) => ({ filename, type }));
     } catch (error) {
         logger.error(`Could not read directory: ${dirPath}`, { error });
@@ -56,6 +54,11 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited") {
 /**
  * The core logic for processing a single video edit job. This function is passed
  * to our job queue to be executed for each item.
+ *
+ * It now follows the "Safe Temp File" pattern:
+ * 1. FFMPEG writes to a unique temporary file.
+ * 2. If successful, the temp file is atomically renamed to the final destination.
+ * 3. If it fails, the temp file is cleaned up.
  */
 async function _processVideoEdit(job: EditJob) {
     const { filename, segments } = job;
@@ -66,18 +69,38 @@ async function _processVideoEdit(job: EditJob) {
 
     const { fullPath: sourcePath, baseDir } = foundVideo;
     const editedVideosDir = path.join(baseDir, "edited");
-    const outputPath = path.join(editedVideosDir, filename);
 
-    await fsp.mkdir(editedVideosDir, { recursive: true });
+    // 1. Define final path and a unique temporary path
+    const finalOutputPath = path.join(editedVideosDir, filename);
+    const tempOutputPath = `${finalOutputPath}.${Date.now()}.tmp`;
 
-    logger.info(`Processing job for: ${filename}`, { segments });
-    const ffmpegArgs = ffmpeg.buildFfmpegArgs(sourcePath, outputPath, segments);
-    await ffmpeg.executeFfmpegCommand(ffmpegArgs);
+    await fsPromises.mkdir(editedVideosDir, { recursive: true });
 
-    logger.info(`Successfully created edited video: ${outputPath}`);
+    try {
+        logger.info(`Processing job for: ${filename} -> ${tempOutputPath}`, { segments });
 
-    // Auto-move original file to trash on success
-    await moveFileToTrash(sourcePath, baseDir);
+        // 2. FFMPEG now writes to the temporary file
+        const ffmpegArgs = ffmpeg.buildFfmpegArgs(sourcePath, tempOutputPath, segments);
+        await ffmpeg.executeFfmpegCommand(ffmpegArgs);
+
+        // 3. On success, perform the SAFE and INSTANT rename
+        await fsPromises.rename(tempOutputPath, finalOutputPath);
+        logger.info(`Successfully created edited video: ${finalOutputPath}`);
+
+        // 4. Auto-move original file to trash on success
+        await moveFileToTrash(sourcePath, baseDir);
+    } catch (error) {
+        logger.error(`Processing failed for ${filename}. Cleaning up temporary file.`, { job, error });
+        // 5. IMPORTANT: Clean up the failed temp file
+        try {
+            await fsPromises.unlink(tempOutputPath);
+        } catch (cleanupError) {
+            // Log a warning if cleanup fails, but don't crash the whole worker
+            logger.warn(`Could not clean up temporary file: ${tempOutputPath}`, { cleanupError });
+        }
+        // Re-throw the original error so the job queue knows the job failed
+        throw error;
+    }
 }
 
 // --- Initialize the Video Editing Queue ---
@@ -87,7 +110,6 @@ const editQueue = new JobQueue<EditJob>(_processVideoEdit);
 // --- Exported Service Functions ---
 
 export async function getAllVideos() {
-    // logger.info(`DEBUG: Configured root directories: ${VIDEO_ROOT_DIRS.join(", ")}`); // DEBUG: Log configured paths
     const allFilesPromises = VIDEO_ROOT_DIRS.flatMap((dir) => [getVideosFromDir(dir, "original"), getVideosFromDir(path.join(dir, "edited"), "edited")]);
 
     const fileArrays = await Promise.all(allFilesPromises);
@@ -124,8 +146,8 @@ export async function moveVideoToEdited(type: "original", filename: string) {
     const editedVideosDir = path.join(baseDir, "edited");
     const destinationPath = path.join(editedVideosDir, filename);
 
-    await fsp.mkdir(editedVideosDir, { recursive: true });
-    await fsp.rename(sourcePath, destinationPath);
+    await fsPromises.mkdir(editedVideosDir, { recursive: true });
+    await fsPromises.rename(sourcePath, destinationPath);
     logger.info(`Moved video to edited folder: ${destinationPath}`);
 }
 

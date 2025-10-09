@@ -1,4 +1,4 @@
-import { promises as fsp } from "fs";
+import { promises as fsPromises } from "fs";
 import path from "path";
 import { VIDEO_ROOT_DIRS } from "./config.js";
 
@@ -14,7 +14,7 @@ export async function findVideoPath(type: "original" | "edited", filename: strin
         const searchDir = type === "original" ? baseDir : path.join(baseDir, "edited");
         const fullPath = path.join(searchDir, filename);
         try {
-            await fsp.stat(fullPath);
+            await fsPromises.stat(fullPath);
             return { fullPath, baseDir }; // Found it
         } catch (e) {
             // Not found, continue to next directory

@@ -35,25 +35,43 @@ export function buildFfmpegArgs(sourcePath: string, outputPath: string, segments
 }
 
 /**
- * Spawns and manages an ffmpeg child process, returning a promise that resolves on success or rejects on error.
+ * Spawns and manages an ffmpeg child process inside a resource-controlled sandbox,
+ * returning a promise that resolves on success or rejects on error.
  * @param args The command-line arguments for ffmpeg.
  * @returns A promise that resolves when the process completes successfully.
  * @throws {FfmpegError} If the ffmpeg process exits with a non-zero status code.
  */
 export function executeFfmpegCommand(args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-        logger.info("Executing ffmpeg with args:", { args: JSON.stringify(args) });
-        const ffmpeg = spawn("ffmpeg", args);
+        // --- NEW: Define resource limits and build the systemd-run command ---
+        // These limits prevent the ffmpeg process from crashing the entire system.
+        // - MemoryMax=8G: Hard limit on RAM usage. Adjust this based on your system RAM.
+        // - CPUWeight=100: Lower CPU priority (default is 1024). It will yield to other processes.
+        const systemdArgs = [
+            "--scope", // Run in a temporary scope that is cleaned up automatically.
+            "--user", // Run as the current user, not root.
+            "-p",
+            "MemoryMax=24G", // I have 32gb
+            "-p",
+            "CPUWeight=100",
+            "ffmpeg", // The actual command to run
+            ...args, // Pass all the original ffmpeg arguments
+        ];
+
+        logger.info("Executing ffmpeg via systemd-run with args:", { args: JSON.stringify(systemdArgs) });
+
+        // Spawn 'systemd-run' instead of 'ffmpeg' directly.
+        const ffmpegProcess = spawn("systemd-run", systemdArgs);
         let stderrOutput = "";
 
-        ffmpeg.stderr.on("data", (data) => {
+        ffmpegProcess.stderr.on("data", (data) => {
             stderrOutput += data.toString();
             logger.verbose(`ffmpeg stderr: ${data}`);
         });
 
-        ffmpeg.on("close", (code) => {
+        ffmpegProcess.on("close", (code) => {
             if (code !== 0) {
-                const fullCommand = `ffmpeg ${args.join(" ")}`;
+                const fullCommand = `systemd-run ${systemdArgs.join(" ")}`;
                 const error = new FfmpegError(`ffmpeg process exited with code ${code}`, stderrOutput);
                 logger.error(error.message, { fullCommand, stderr: stderrOutput });
                 return reject(error);
@@ -61,8 +79,8 @@ export function executeFfmpegCommand(args: string[]): Promise<void> {
             resolve();
         });
 
-        ffmpeg.on("error", (err) => {
-            logger.error("Failed to start ffmpeg process.", { error: err });
+        ffmpegProcess.on("error", (err) => {
+            logger.error("Failed to start systemd-run process.", { error: err });
             reject(err);
         });
     });

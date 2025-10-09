@@ -1,6 +1,6 @@
 // src/api/streaming.routes.ts
 import { Router } from "express";
-import { promises as fsp } from "fs";
+import { promises as fsPromises } from "fs";
 import * as fs from "fs";
 import path from "path";
 import { findVideoPath } from "../utils.js";
@@ -26,7 +26,7 @@ router.get("/video/:type/:filename", async (req, res) => {
     const videoFilePath = foundVideo.fullPath;
 
     try {
-        const stat = await fsp.stat(videoFilePath);
+        const stat = await fsPromises.stat(videoFilePath);
         const fileSize = stat.size;
         const range = req.headers.range;
         const contentType = "video/mp4";
