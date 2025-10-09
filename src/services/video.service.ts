@@ -37,14 +37,29 @@ async function moveFileToTrash(filePath: string, baseDir: string) {
 }
 
 /**
- * Reads a directory and returns a list of video file objects.
+ * Reads a directory and returns a list of video file objects, including file size.
  */
 async function getVideosFromDir(dirPath: string, type: "original" | "edited") {
     try {
         await fsPromises.mkdir(dirPath, { recursive: true });
         const files = await fsPromises.readdir(dirPath);
         const mp4Files = files.filter((file) => path.extname(file).toLowerCase() === ".mp4");
-        return mp4Files.map((filename) => ({ filename, type }));
+
+        const videoDetails = await Promise.all(
+            mp4Files.map(async (filename) => {
+                const fullPath = path.join(dirPath, filename);
+                try {
+                    const stats = await fsPromises.stat(fullPath);
+                    // Return the full object including the size from stats
+                    return { filename, type, size: stats.size };
+                } catch (statError) {
+                    logger.warn(`Could not get stats for file: ${fullPath}`, { statError });
+                    // Return with size 0 if stats fail for any reason
+                    return { filename, type, size: 0 };
+                }
+            })
+        );
+        return videoDetails;
     } catch (error) {
         logger.error(`Could not read directory: ${dirPath}`, { error });
         return []; // Return empty array on error
