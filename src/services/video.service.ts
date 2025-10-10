@@ -12,8 +12,6 @@ type VideoItem = {
 };
 type MetadataCache = { segments: Record<string, { resolution: string }> };
 
-// ... (getVideosFromDir, findVideoPath, and generateMetadataAndPlaylist helpers are unchanged) ...
-
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<VideoItem[]> {
     const videoItems: VideoItem[] = [];
     try {
@@ -66,6 +64,7 @@ async function findVideoPath(type: "original" | "edited", folderName: string): P
 
 async function generateMetadataAndPlaylist(folderPath: string, folderName: string, tsFiles: string[], originalMetadata: MetadataCache): Promise<void> {
     if (tsFiles.length === 0) return;
+
     const newMetadata: MetadataCache = { segments: {} };
     for (const tsFile of tsFiles) {
         if (originalMetadata.segments[tsFile]) {
@@ -73,12 +72,28 @@ async function generateMetadataAndPlaylist(folderPath: string, folderName: strin
         }
     }
     await fsPromises.writeFile(path.join(folderPath, "metadata.json"), JSON.stringify(newMetadata, null, 2));
-    const segmentLines = tsFiles.flatMap((segment) => [`#EXTINF:1.000,`, `/hls/edited/${folderName}/${segment}`]);
+
+    // WHY THE FIX: This is the critical change. We now iterate through the sorted list of segments
+    // and check if the current segment's index is exactly one greater than the previous one.
+    // If it's not, we've detected a jump (e.g., from 783.ts to 1109.ts) and we must insert
+    // the #EXT-X-DISCONTINUITY tag to tell the player about this non-linear timeline.
+    let lastSegmentIndex = -1;
+    const segmentLines: string[] = [];
+    for (const segment of tsFiles) {
+        const currentSegmentIndex = parseInt(segment, 10);
+        if (lastSegmentIndex !== -1 && currentSegmentIndex !== lastSegmentIndex + 1) {
+            segmentLines.push("#EXT-X-DISCONTINUITY");
+        }
+        segmentLines.push(`#EXTINF:1.000,`);
+        segmentLines.push(`/hls/edited/${folderName}/${segment}`);
+        lastSegmentIndex = currentSegmentIndex;
+    }
+
     const content = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", ...segmentLines, "#EXT-X-ENDLIST"].join("\n");
     await fsPromises.writeFile(path.join(folderPath, "playlist.m3u8"), content);
 }
 
-// ... (getAllVideos, getAllVideoDurations, trashVideo, moveVideoToEdited are unchanged) ...
+// ... (getAllVideos, getAllVideoDurations, trashVideo, moveVideoToEdited, returnVideoToOriginals are unchanged) ...
 
 export async function getAllVideos(): Promise<VideoItem[]> {
     const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
@@ -140,7 +155,6 @@ export async function returnVideoToOriginals(folderName: string): Promise<void> 
     await fsPromises.rename(foundVideo.fullPath, destinationPath);
     logger.info(`Returned video to originals: ${destinationPath}`);
 
-    // WHY THE FIX: After moving the folder, we must rewrite the playlist to use the correct 'original' type in its URLs.
     const playlistPath = path.join(destinationPath, "playlist.m3u8");
     try {
         const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
@@ -181,9 +195,10 @@ export async function createEditedVideo(filename: string, segments: { start: num
     if (badTsFiles.length > 0) {
         const trashFolderPath = path.join(VIDEO_TRASH_PATH, filename);
         await fsPromises.mkdir(trashFolderPath, { recursive: true });
-        const movePromises = badTsFiles.map((file) => fsPromises.rename(path.join(sourceFolderPath, file), path.join(trashFolderPath, file)));
+        const sortedBadTs = badTsFiles.sort((a, b) => parseInt(a) - parseInt(b));
+        const movePromises = sortedBadTs.map((file) => fsPromises.rename(path.join(sourceFolderPath, file), path.join(trashFolderPath, file)));
         await Promise.all(movePromises);
-        await generateMetadataAndPlaylist(trashFolderPath, filename, badTsFiles, originalMetadata);
+        await generateMetadataAndPlaylist(trashFolderPath, filename, sortedBadTs, originalMetadata);
         logger.info(`Moved ${badTsFiles.length} bad segments to ${trashFolderPath}`);
     }
 

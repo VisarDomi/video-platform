@@ -18,17 +18,20 @@ function probeSegmentResolution(filePath: string): Promise<string> {
         let output = "";
         ffprobe.stdout.on("data", (data) => (output += data.toString()));
         const onEnd = () => {
-            if (!output.trim()) {
+            // WHY THE FIX: The output sometimes contains multiple lines or extra newlines.
+            // We split by newline and take the first valid entry to ensure a clean "720x1280" string.
+            const resolution = output.trim().split("\n")[0]?.trim();
+            if (!resolution) {
                 logger.warn(`ffprobe failed for ${filePath}. Defaulting resolution.`);
-                resolve("360x640");
+                resolve("720x1280");
             } else {
-                resolve(output.trim());
+                resolve(resolution);
             }
         };
         ffprobe.on("close", onEnd);
         ffprobe.on("error", () => {
             logger.error(`Failed to start ffprobe for ${filePath}. Defaulting resolution.`);
-            resolve("360x640");
+            resolve("720x1280");
         });
     });
 }
@@ -53,9 +56,6 @@ async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folder
     logger.info(`Performing full generation for: ${folderName}`);
     try {
         const allFilesOnDisk = await fs.readdir(videoFolderPath);
-
-        // --- THE BUG FIX IS HERE ---
-        // WHY: Use a numeric sort instead of a string sort. We parse the integer from the start of the filename.
         const tsFiles = allFilesOnDisk.filter((f) => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
 
         if (tsFiles.length === 0) return;
