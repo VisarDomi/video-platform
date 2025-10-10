@@ -118,7 +118,6 @@ export class DownloaderService {
     }
 
     private async _initiateAndDownloadStream(downloadHandle: DownloadHandle) {
-        let tsFilePath: string | null = null;
         let segmentsDirPath: string | null = null;
         let alias: string;
 
@@ -158,20 +157,18 @@ export class DownloaderService {
             downloadHandle.update({ liveUrl });
             
             const startDate = new Date();
-            const paths = storage.createDownloadPaths(alias, startDate);
-            tsFilePath = paths.tsFilePath;
-            segmentsDirPath = paths.segmentsDirPath;
+            segmentsDirPath = storage.createDownloadPaths(alias, startDate);
 
-            downloadHandle.update({ tsFilePath, segmentsDirPath });
+            downloadHandle.update({ segmentsDirPath });
 
-            logger.info(`${tsFilePath} started downloading segments.`);
+            logger.info(`${segmentsDirPath} started downloading segments.`);
 
             const downloadedTsUrls: Set<string> = new Set();
             let lastDownload = Date.now();
 
             while (true) {
                 if (!this.tokens) {
-                    logger.warn(`Tokens became unavailable for ${tsFilePath} mid-stream. Assuming stream has ended.`);
+                    logger.warn(`Tokens became unavailable for ${segmentsDirPath} mid-stream. Assuming stream has ended.`);
                     break;
                 }
 
@@ -203,7 +200,7 @@ export class DownloaderService {
                                     fsPromises.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                                     lastDownload = Date.now();
                                 } catch (error) {
-                                    logger.error(`Failed to save raw segment for ${tsFilePath}`, { error });
+                                    logger.error(`Failed to save raw segment for ${segmentsDirPath}`, { error });
                                 }
                             }
                         }
@@ -211,15 +208,15 @@ export class DownloaderService {
                 }
 
                 if (Date.now() - lastDownload > config.getConfig().timeouts.staleStream) {
-                    logger.info(`No new segments for ${tsFilePath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
+                    logger.info(`No new segments for ${segmentsDirPath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
                     break;
                 }
                 await timersPromises.setTimeout(1000);
             }
         } catch (error) {
-            logger.error(`Download process for ${tsFilePath} failed fatally.`, { error });
+            logger.error(`Download process for ${segmentsDirPath} failed fatally.`, { error });
         } finally {
-            logger.info(`Finished download process for: ${tsFilePath}`);
+            logger.info(`Finished download process for: ${segmentsDirPath}`);
             downloadHandle.remove();
         }
     }
@@ -229,7 +226,7 @@ export class DownloaderService {
         try {
             const masterListBody = await requests.getMasterList(downloadHandle.masterPlaylistUrl, this.tokens);
             if (!masterListBody) {
-                logger.warn(`Could not fetch master playlist body from: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`);
+                logger.warn(`Could not fetch master playlist body from: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.segmentsDirPath}`);
                 return null;
             }
 
@@ -243,7 +240,7 @@ export class DownloaderService {
             }
 
             if (!relativeLiveUrl) {
-                logger.warn(`Could not find HD stream in master playlist: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`);
+                logger.warn(`Could not find HD stream in master playlist: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.segmentsDirPath}`);
                 return null;
             }
             const cinemaApiUrl = downloadHandle.masterPlaylistUrl.split("/v2/")[0];
@@ -253,7 +250,7 @@ export class DownloaderService {
             }
             return livePlaylistUrl;
         } catch (error) {
-            logger.error(`Error resolving live URL from master: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.tsFilePath}`, { error });
+            logger.error(`Error resolving live URL from master: ${downloadHandle.masterPlaylistUrl} for ${downloadHandle.state?.segmentsDirPath}`, { error });
             return null;
         }
     }
