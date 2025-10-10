@@ -8,6 +8,10 @@ import * as puppeteerLogin from "./puppeteerLogin.js";
 import * as authClient from "./authClient.js";
 import * as authUtils from "./authUtils.js";
 
+// --- NEW CONSTANTS FOR RETRY LOGIC ---
+const REFRESH_RETRY_INTERVAL_MS = 15 * 1000; // 15 seconds
+const REFRESH_RETRY_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+
 export class AuthService {
     private authContext: authContext.AuthContext;
 
@@ -34,20 +38,58 @@ export class AuthService {
     }
 
     private async _attemptAuthentication() {
-        try {
-            const loaded = await this.authContext.loadTokenFromFile();
-            if (!loaded) {
-                throw new Error("Session file not found or is invalid.");
+        const loadedFromFile = await this.authContext.loadTokenFromFile();
+
+        if (loadedFromFile) {
+            logger.info("Tango-RT loaded from file. Attempting to refresh session with retries...");
+
+            const refreshSuccessful = await this._tryRefreshWithRetries();
+            if (refreshSuccessful) {
+                logger.info("Session successfully established using token from file.");
+                return; // SUCCESS: Authentication is complete.
             }
 
-            logger.info("Tango-RT loaded from file. Attempting to bring all tokens up-to-date...");
-            await this._ensureValidTokens();
-            logger.info("Session successfully established using token from file.");
-        } catch (error) {
-            logger.warn(`Could not refresh from file, falling back to Puppeteer. Reason: ${(error as Error).message}`);
-            await this._performFreshLogin();
-            logger.info("Session successfully established via fresh Puppeteer login.");
+            // If we reach here, it means all refresh retries failed.
+            logger.warn(`All refresh attempts failed over ${REFRESH_RETRY_DURATION_MS / 60000} minutes. Falling back to Puppeteer.`);
+        } else {
+            logger.info("No session file found. Proceeding directly to Puppeteer login.");
         }
+
+        // Fallback: This is reached ONLY IF:
+        // 1. The session file didn't exist/was invalid.
+        // 2. The session file existed, but refreshing failed repeatedly for 30 minutes.
+        await this._performFreshLogin();
+        logger.info("Session successfully established via fresh Puppeteer login.");
+    }
+
+    /**
+     * Tries to refresh the session, retrying on failure for a configured duration.
+     * @returns {Promise<boolean>} True if successful, false otherwise.
+     */
+    private async _tryRefreshWithRetries(): Promise<boolean> {
+        const startTime = Date.now();
+        let attempt = 0;
+
+        while (Date.now() - startTime < REFRESH_RETRY_DURATION_MS) {
+            attempt++;
+            try {
+                await this._ensureValidTokens();
+                return true; // Success!
+            } catch (error) {
+                const errorMessage = (error as Error).message;
+                // Check if the error is due to an expired token, which is unrecoverable.
+                // If so, we should stop retrying and proceed to Puppeteer immediately.
+                if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                    logger.warn(`Refresh failed with unrecoverable auth error (e.g., expired token): ${errorMessage}. Stopping retries.`);
+                    return false;
+                }
+
+                logger.warn(`Refresh attempt ${attempt} failed: ${errorMessage}. Retrying in ${REFRESH_RETRY_INTERVAL_MS / 1000}s...`);
+                await timersPromises.setTimeout(REFRESH_RETRY_INTERVAL_MS);
+            }
+        }
+
+        return false; // All retries failed.
     }
 
     public startBackgroundJobs() {
@@ -65,7 +107,6 @@ export class AuthService {
     private async _extractInitialTokens() {
         const tokens = await puppeteerLogin.extractTokensWithPuppeteer();
         this.authContext.updateFromLogin(tokens);
-        // We save after _setTokenData in _performFreshLogin to have the full set
     }
 
     private async _ensureValidTokens() {
