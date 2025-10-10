@@ -29,8 +29,7 @@ class PlaylistGenerator {
     private folderName: string;
     private type: "original" | "edited";
     private memoryReadings: number[] = [];
-    private probeLimiter = pLimit(10);
-
+    private probeLimiter = pLimit(10); // 10 is good and keeps the server serving.
     constructor(videoFolderPath: string, folderName: string, type: "original" | "edited") {
         this.videoFolderPath = videoFolderPath;
         this.folderName = folderName;
