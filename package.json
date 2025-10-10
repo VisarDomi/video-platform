@@ -9,8 +9,7 @@
         "start": "npm run build && pm2 start dist/main.js --name video-segment-fetcher",
         "restart": "npm run build && pm2 restart video-segment-fetcher",
         "stop": "pm2 stop video-segment-fetcher",
-        "logs": "pm2 logs video-segment-fetcher -f",
-        "tests": "cross-env NODE_OPTIONS='--no-warnings --experimental-vm-modules' jest"
+        "logs": "pm2 logs video-segment-fetcher -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
