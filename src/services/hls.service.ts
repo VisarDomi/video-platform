@@ -19,19 +19,19 @@ class HlsService {
 
     private async _runStartupSequence(): Promise<void> {
         // Step 1: Get a definitive snapshot of live streams AT THIS MOMENT.
-        // This is the "do not touch" list for all subsequent backlog operations.
+        // This is the "do not touch" list for the recovery phase.
         const liveStatus = await livestreamService.readLiveStatus();
         const liveFolders = new Set(liveStatus?.downloads.map((d) => path.basename(d.segmentsDirPath)) ?? []);
         if (liveFolders.size > 0) {
-            logger.info(`Found ${liveFolders.size} active live streams. They will be ignored during backlog processing.`);
+            logger.info(`Found ${liveFolders.size} active live streams. They will be ignored during recovery.`);
         }
 
         // Step 2: Recover interrupted streams, IGNORING the ones that are currently live.
         await this.recoverInterruptedStreams(liveFolders);
 
-        // Step 3: Process the VOD backlog, IGNORING the folders that were live at startup.
-        // This will wait until the entire queue is drained.
-        await vodService.processBacklog(liveFolders);
+        // Step 3: Process the VOD backlog. This method now has its own internal live-checking
+        // and will WAIT here until the entire queue is drained before proceeding.
+        await vodService.processBacklog();
 
         // Step 4: ONLY after all historical work is done, begin monitoring for live streams.
         livestreamService.startMonitoring();

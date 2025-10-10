@@ -6,6 +6,7 @@ import pLimit from "p-limit";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
 import { performance } from "perf_hooks";
+import { livestreamService } from "./livestream.service.js";
 
 const PLAYLIST_FILENAME = "playlist.m3u8";
 const METADATA_FILENAME = "metadata.json";
@@ -35,6 +36,15 @@ class PlaylistGenerator {
     }
 
     public async generate(): Promise<void> {
+        // CRITICAL FIX: Perform a last-second check to see if this folder has gone live
+        // while the backlog queue was processing.
+        const liveStatus = await livestreamService.readLiveStatus();
+        const liveFolders = new Set(liveStatus?.downloads.map((d) => path.basename(d.segmentsDirPath)) ?? []);
+        if (liveFolders.has(this.folderName)) {
+            logger.info(`Skipping VOD generation for '${this.folderName}' as it is now live.`);
+            return; // Abort this specific task.
+        }
+
         const startTime = performance.now();
         logger.info(`Starting playlist generation for: ${this.folderName}`);
         try {
@@ -116,7 +126,7 @@ class PlaylistGenerator {
 class VodService {
     private vodGenerationQueue = pLimit(1);
 
-    public async processBacklog(liveFolders: Set<string>): Promise<void> {
+    public async processBacklog(): Promise<void> {
         logger.info("Starting initial scan for VODs needing playlists...");
         const tasksToQueue: { folderName: string; videoFolderPath: string; type: "original" | "edited" }[] = [];
 
@@ -125,12 +135,13 @@ class VodService {
                 try {
                     const entries = await fs.readdir(dirPath, { withFileTypes: true });
                     for (const entry of entries) {
-                        // CRITICAL FIX: Only consider a folder for the backlog if it's NOT in the live list.
-                        if (entry.isDirectory() && !liveFolders.has(entry.name)) {
+                        if (entry.isDirectory()) {
                             const videoFolderPath = path.join(dirPath, entry.name);
                             try {
                                 await fs.access(path.join(videoFolderPath, PLAYLIST_FILENAME));
                             } catch {
+                                // We queue ALL missing playlists. The generator task itself will
+                                // perform the final check to see if it's live.
                                 tasksToQueue.push({ folderName: entry.name, videoFolderPath, type });
                             }
                         }

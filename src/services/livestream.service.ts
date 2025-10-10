@@ -70,19 +70,13 @@ class LivestreamService {
                 const streamInfo = this.activeStreams.get(folderName)!;
                 logger.info(`Stream ended: ${streamInfo.alias}. Finalizing playlist.`);
                 await this.finalizeStream(streamInfo.segmentsDirPath);
-                // FIX: Remove the stream from the active map to prevent re-finalizing.
                 this.activeStreams.delete(folderName);
             }
         }
 
-        // Set the new state for the next cycle, including only the ones that are still live.
-        this.activeStreams = new Map([...this.activeStreams.entries()].filter(([folderName]) => currentLiveStreams.has(folderName)));
-
-        // Add new streams that were not previously tracked
+        // Add new streams that were not previously tracked and update existing ones.
         for (const [folderName, streamInfo] of currentLiveStreams.entries()) {
-            if (!this.activeStreams.has(folderName)) {
-                this.activeStreams.set(folderName, streamInfo);
-            }
+            this.activeStreams.set(folderName, streamInfo);
         }
 
         const updatePromises = Array.from(this.activeStreams.values()).map((streamInfo) => this.updateStream(streamInfo));
