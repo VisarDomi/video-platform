@@ -18,19 +18,28 @@ class HlsService {
     }
 
     private async _runStartupSequence(): Promise<void> {
-        await this.recoverInterruptedStreams();
+        // Step 1: Get a definitive snapshot of live streams AT THIS MOMENT.
+        // This is the "do not touch" list for all subsequent backlog operations.
+        const liveStatus = await livestreamService.readLiveStatus();
+        const liveFolders = new Set(liveStatus?.downloads.map((d) => path.basename(d.segmentsDirPath)) ?? []);
+        if (liveFolders.size > 0) {
+            logger.info(`Found ${liveFolders.size} active live streams. They will be ignored during backlog processing.`);
+        }
 
-        // Fire-and-forget the backlog processing. It will now internally
-        // and continuously check for live streams before processing any folder.
-        void vodService.processBacklog();
+        // Step 2: Recover interrupted streams, IGNORING the ones that are currently live.
+        await this.recoverInterruptedStreams(liveFolders);
 
-        // Begin monitoring for live stream updates immediately.
+        // Step 3: Process the VOD backlog, IGNORING the folders that were live at startup.
+        // This will wait until the entire queue is drained.
+        await vodService.processBacklog(liveFolders);
+
+        // Step 4: ONLY after all historical work is done, begin monitoring for live streams.
         livestreamService.startMonitoring();
 
-        logger.info("HLS service initialization complete.");
+        logger.info("HLS service initialization complete. System is now in live monitoring mode.");
     }
 
-    private async recoverInterruptedStreams(): Promise<void> {
+    private async recoverInterruptedStreams(liveFolders: Set<string>): Promise<void> {
         logger.info("Starting recovery scan for interrupted streams...");
         let recoveryCount = 0;
 
@@ -38,7 +47,8 @@ class HlsService {
             try {
                 const entries = await fs.readdir(dirPath, { withFileTypes: true });
                 for (const entry of entries) {
-                    if (entry.isDirectory()) {
+                    // CRITICAL FIX: If the directory is in our live list, skip it entirely.
+                    if (entry.isDirectory() && !liveFolders.has(entry.name)) {
                         const videoFolderPath = path.join(dirPath, entry.name);
                         const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
                         try {

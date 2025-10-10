@@ -6,7 +6,6 @@ import pLimit from "p-limit";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
 import { performance } from "perf_hooks";
-import { livestreamService } from "./livestream.service.js";
 
 const PLAYLIST_FILENAME = "playlist.m3u8";
 const METADATA_FILENAME = "metadata.json";
@@ -36,14 +35,6 @@ class PlaylistGenerator {
     }
 
     public async generate(): Promise<void> {
-        // CONTINUOUS POLLING: Check for live status at the last possible moment.
-        const liveStatus = await livestreamService.readLiveStatus();
-        const liveFolders = new Set(liveStatus?.downloads.map((d) => path.basename(d.segmentsDirPath)) ?? []);
-        if (liveFolders.has(this.folderName)) {
-            logger.info(`Skipping VOD generation for '${this.folderName}' because it is currently live.`);
-            return; // Abort this task. The livestreamService is handling it.
-        }
-
         const startTime = performance.now();
         logger.info(`Starting playlist generation for: ${this.folderName}`);
         try {
@@ -125,7 +116,7 @@ class PlaylistGenerator {
 class VodService {
     private vodGenerationQueue = pLimit(1);
 
-    public async processBacklog(): Promise<void> {
+    public async processBacklog(liveFolders: Set<string>): Promise<void> {
         logger.info("Starting initial scan for VODs needing playlists...");
         const tasksToQueue: { folderName: string; videoFolderPath: string; type: "original" | "edited" }[] = [];
 
@@ -134,13 +125,12 @@ class VodService {
                 try {
                     const entries = await fs.readdir(dirPath, { withFileTypes: true });
                     for (const entry of entries) {
-                        if (entry.isDirectory()) {
+                        // CRITICAL FIX: Only consider a folder for the backlog if it's NOT in the live list.
+                        if (entry.isDirectory() && !liveFolders.has(entry.name)) {
                             const videoFolderPath = path.join(dirPath, entry.name);
                             try {
                                 await fs.access(path.join(videoFolderPath, PLAYLIST_FILENAME));
                             } catch {
-                                // Queue any folder that's missing a playlist.
-                                // The live-check will happen inside the queued task.
                                 tasksToQueue.push({ folderName: entry.name, videoFolderPath, type });
                             }
                         }
@@ -153,13 +143,20 @@ class VodService {
 
         tasksToQueue.sort((a, b) => a.folderName.localeCompare(b.folderName));
 
-        for (const task of tasksToQueue) {
-            logger.info(`VOD playlist not found for '${task.folderName}'. Queueing generation task.`);
-            const generator = new PlaylistGenerator(task.videoFolderPath, task.folderName, task.type);
-            void this.vodGenerationQueue(() => generator.generate());
+        if (tasksToQueue.length === 0) {
+            logger.info("VOD scan complete. No new playlists needed.");
+            return;
         }
 
-        logger.info(`VOD scan complete. ${tasksToQueue.length} generation tasks queued.`);
+        logger.info(`VOD scan complete. Queueing ${tasksToQueue.length} generation tasks.`);
+
+        const allTasks = tasksToQueue.map((task) => {
+            const generator = new PlaylistGenerator(task.videoFolderPath, task.folderName, task.type);
+            return this.vodGenerationQueue(() => generator.generate());
+        });
+
+        await Promise.all(allTasks);
+        logger.info("All VOD backlog processing is complete.");
     }
 }
 

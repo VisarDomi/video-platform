@@ -64,26 +64,34 @@ class LivestreamService {
         }
 
         const previouslyActiveFolders = new Set(this.activeStreams.keys());
-        const currentlyActiveFolders = new Set(currentLiveStreams.keys());
 
         for (const folderName of previouslyActiveFolders) {
-            if (!currentlyActiveFolders.has(folderName)) {
+            if (!currentLiveStreams.has(folderName)) {
                 const streamInfo = this.activeStreams.get(folderName)!;
                 logger.info(`Stream ended: ${streamInfo.alias}. Finalizing playlist.`);
                 await this.finalizeStream(streamInfo.segmentsDirPath);
+                // FIX: Remove the stream from the active map to prevent re-finalizing.
+                this.activeStreams.delete(folderName);
             }
         }
 
-        const updatePromises = Array.from(currentLiveStreams.values()).map((streamInfo) => this.updateStream(streamInfo));
-        await Promise.all(updatePromises);
+        // Set the new state for the next cycle, including only the ones that are still live.
+        this.activeStreams = new Map([...this.activeStreams.entries()].filter(([folderName]) => currentLiveStreams.has(folderName)));
 
-        this.activeStreams = currentLiveStreams;
+        // Add new streams that were not previously tracked
+        for (const [folderName, streamInfo] of currentLiveStreams.entries()) {
+            if (!this.activeStreams.has(folderName)) {
+                this.activeStreams.set(folderName, streamInfo);
+            }
+        }
+
+        const updatePromises = Array.from(this.activeStreams.values()).map((streamInfo) => this.updateStream(streamInfo));
+        await Promise.all(updatePromises);
     }
 
     public async readLiveStatus(): Promise<LiveStatus | null> {
         try {
             // Use the XDG Base Directory Specification for user-specific data files.
-            // This is the standard "Linux way" for services running under a specific user.
             const sharedStatePath = path.join(os.homedir(), ".local", "share", "tango-services");
             const statusFilePath = path.join(sharedStatePath, LIVE_STATUS_FILENAME);
             const content = await fs.readFile(statusFilePath, "utf-8");
