@@ -34,41 +34,55 @@ export class DownloaderService {
         return new DownloaderService(downloadsManager, aliasManager);
     }
 
-    public start() {
+    public async start() {
         logger.info("Starting Downloader Service...");
+        await this._loadInitialTokens(); // Wait for the first token load
+
+        // Now start the background watchers
         this._startTokenWatcher();
         this._startStreamWatcher();
         this._startAliasUpdater();
     }
 
+    private async _loadInitialTokens(): Promise<boolean> {
+        try {
+            const cfg = config.getConfig();
+            const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
+            const data = await fsPromises.readFile(sessionFilePath, "utf-8");
+            const session = JSON.parse(data);
+
+            if (session.tangoST && session.tt && session.ttu && session.tte) {
+                this.tokens = {
+                    st: session.tangoST,
+                    tt: session.tt,
+                    ttu: session.ttu,
+                    tte: session.tte,
+                };
+                logger.info("Initial tokens loaded successfully.");
+                return true;
+            } else {
+                logger.warn("Initial token load failed: session.json is missing required tokens.");
+                this.tokens = null;
+                return false;
+            }
+        } catch (error: any) {
+            if (error.code === "ENOENT") {
+                logger.warn("Initial token load failed: session.json not found.");
+            } else {
+                logger.error("Failed to read tokens from session file", { error });
+            }
+            this.tokens = null;
+            return false;
+        }
+    }
+
     private async _startTokenWatcher() {
         const refreshInterval = config.getConfig().intervals.shortTokenRefresh;
+        // Wait for the initial interval before the first refresh to avoid immediate re-reading
+        await timersPromises.setTimeout(refreshInterval);
+
         while (true) {
-            try {
-                const cfg = config.getConfig();
-                const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
-
-                const data = await fsPromises.readFile(sessionFilePath, "utf-8");
-                const session = JSON.parse(data);
-
-                if (session.tangoST && session.tt && session.ttu && session.tte) {
-                    this.tokens = {
-                        st: session.tangoST,
-                        tt: session.tt,
-                        ttu: session.ttu,
-                        tte: session.tte,
-                    };
-                } else {
-                    if (this.tokens) logger.warn("Session file is missing required tokens. Clearing internal state.");
-                    this.tokens = null;
-                }
-            } catch (error: any) {
-                if (error.code !== "ENOENT") {
-                    logger.error("Failed to read tokens from session file", { error });
-                }
-                if (this.tokens) logger.warn("Session file not found. Clearing internal token state.");
-                this.tokens = null;
-            }
+            await this._loadInitialTokens(); // Reuse the same logic for refreshing
             await timersPromises.setTimeout(refreshInterval);
         }
     }

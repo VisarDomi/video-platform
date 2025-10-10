@@ -13,7 +13,10 @@ function getApiHeaders(tokens: Tokens): HeadersInit {
     if (!tokens.st) {
         throw new Error("Cannot create API headers: Tango-ST is missing from tokens.");
     }
-    return { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}` };
+    return {
+        [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}`,
+        Accept: "application/json",
+    };
 }
 
 function getStreamHeaders(tokens: Tokens): HeadersInit {
@@ -83,7 +86,7 @@ export async function getAliasesInBatch(streamerIds: string[], tokens: Tokens): 
 
 export async function getStreamerAlias(streamerId: string, tokens: Tokens): Promise<string> {
     const headers = getApiHeaders(tokens);
-    const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=true&followStats=true`;
+    const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
     const response = await makeApiRequest<any>(url, "GET", headers, "json");
     if (response?.basicProfile?.aliases?.[0]?.alias) {
         return response.basicProfile.aliases[0].alias;
