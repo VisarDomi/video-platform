@@ -18,28 +18,25 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
     try {
         await fsPromises.mkdir(dirPath, { recursive: true });
         const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-            if (entry.isDirectory()) {
-                const videoFolderPath = path.join(dirPath, entry.name);
-                const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
-                try {
-                    // WHY THE CHANGE: A video is only considered available if its playlist exists.
-                    // This prevents listing videos that are still being generated in the background.
-                    await fsPromises.access(playlistPath);
 
-                    // If the playlist exists, then we proceed to get the video details.
-                    const files = await fsPromises.readdir(videoFolderPath);
-                    const tsFiles = files.filter((f) => f.endsWith(".ts"));
-                    if (tsFiles.length > 0) {
-                        const duration = tsFiles.length; // Duration is the number of .ts files
-                        videoItems.push({ filename: entry.name, type, size: 0, duration });
+        // WHY THE CHANGE: We now run checks in parallel and only check for playlist existence.
+        // We do not count .ts files here anymore. This is the key to making the initial
+        // video list load extremely fast. Duration is fetched later in a separate request.
+        await Promise.all(
+            entries.map(async (entry) => {
+                if (entry.isDirectory()) {
+                    const videoFolderPath = path.join(dirPath, entry.name);
+                    const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
+                    try {
+                        await fsPromises.access(playlistPath);
+                        // Return with a placeholder duration.
+                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
+                    } catch (err) {
+                        // Skip folders without a playlist. This is expected.
                     }
-                } catch (err) {
-                    // This is not an error that needs logging. It's an expected state for videos
-                    // whose playlists haven't been generated yet. We simply skip them.
                 }
-            }
-        }
+            })
+        );
     } catch (error) {
         logger.error(`Could not read directory: ${dirPath}`, { error });
     }
@@ -104,6 +101,34 @@ export async function getAllVideos(): Promise<VideoItem[]> {
     const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited");
     const [downloadVideos, convertVideos, modifiedVideos] = await Promise.all([downloadPromise, convertPromise, modifiedPromise]);
     return [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.filename.localeCompare(b.filename));
+}
+
+/**
+ * WHY THE CHANGE: This new function gets the duration for a list of videos.
+ * This is the "lazy" part of the loading process. The frontend calls this
+ * after it has already displayed the initial fast list.
+ */
+export async function getVideosDetails(videos: { filename: string; type: "original" | "edited" }[]): Promise<VideoItem[]> {
+    const detailPromises = videos.map(async (video) => {
+        try {
+            const foundVideo = await findVideoPath(video.type, video.filename);
+            if (!foundVideo) return null;
+
+            const files = await fsPromises.readdir(foundVideo.fullPath);
+            const tsFiles = files.filter((f) => f.endsWith(".ts"));
+            return {
+                filename: video.filename,
+                type: video.type,
+                size: 0, // Size is calculated on the frontend
+                duration: tsFiles.length,
+            };
+        } catch (error) {
+            logger.warn(`Could not get details for ${video.filename}`, { error });
+            return null;
+        }
+    });
+    const results = await Promise.all(detailPromises);
+    return results.filter((result): result is VideoItem => result !== null);
 }
 
 export async function trashVideo(type: "original" | "edited", folderName: string): Promise<void> {

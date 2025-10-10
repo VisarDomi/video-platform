@@ -71,4 +71,22 @@ router.post("/videos/edited/:filename/return", async (req, res) => {
     }
 });
 
+/**
+ * WHY THE CHANGE: New route to get detailed information (like duration) for a list of videos.
+ * This enables the two-phase loading strategy on the frontend for an instant UI.
+ */
+router.post("/videos/details", async (req, res) => {
+    try {
+        const videos = req.body.videos;
+        if (!Array.isArray(videos)) {
+            return res.status(400).json({ success: false, message: "Invalid request body: 'videos' array is required." });
+        }
+        const details = await videoService.getVideosDetails(videos);
+        res.json(details);
+    } catch (error) {
+        logger.error("Error getting video details:", { error });
+        res.status(500).json({ success: false, message: "Could not get video details." });
+    }
+});
+
 export default router;
