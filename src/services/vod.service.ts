@@ -50,8 +50,12 @@ class PlaylistGenerator {
         try {
             const allFilesOnDisk = await fs.readdir(this.videoFolderPath);
             const tsFiles = allFilesOnDisk.filter((f) => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
+
+            // WHY THE CHANGE: If a folder has no video segments, it's considered invalid.
+            // Instead of just skipping it, we now delete the folder to clean up.
             if (tsFiles.length === 0) {
-                logger.warn(`No .ts files found in ${this.folderName}, skipping playlist generation.`);
+                logger.warn(`No .ts files found in ${this.folderName}. Deleting empty directory.`);
+                await fs.rm(this.videoFolderPath, { recursive: true, force: true });
                 return;
             }
 
@@ -76,7 +80,13 @@ class PlaylistGenerator {
             const endTime = performance.now();
             const durationSeconds = ((endTime - startTime) / 1000).toFixed(2);
             logger.info(`Successfully generated playlist for: ${this.folderName} in ${durationSeconds}s`);
-        } catch (error) {
+        } catch (error: any) {
+            // Gracefully handle cases where the directory might have been deleted by another process
+            // between queuing and execution.
+            if (error.code === "ENOENT") {
+                logger.info(`Directory ${this.folderName} was removed during processing, skipping.`);
+                return;
+            }
             logger.error(`Error during playlist generation for ${this.folderName}`, { error });
         }
     }
