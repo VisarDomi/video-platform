@@ -44,7 +44,10 @@ async function makeApiRequest<T>(
 
         const response = await fetch(url, options);
         if (!response.ok) {
-            logger.warn(`Request to ${url} failed with status ${response.status}`);
+            logger.error(`API request to ${url} failed`, {
+                status: response.status,
+                statusText: response.statusText,
+            });
             return null;
         }
         switch (responseType) {
@@ -56,7 +59,7 @@ async function makeApiRequest<T>(
                 return (await response.arrayBuffer()) as T;
         }
     } catch (error) {
-        logger.warn(`API request to ${url} failed with network/parsing error.`, { error: (error as Error).message });
+        logger.error(`API request to ${url} failed with network/parsing error.`, { errorMessage: (error as Error).message });
         return null;
     }
 }

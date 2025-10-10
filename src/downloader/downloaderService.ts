@@ -85,31 +85,40 @@ export class DownloaderService {
                 // Step 1: Get all followed account IDs
                 const followingsResponse = await requests.getAllFollowing(this.tokens);
 
-                if (followingsResponse?.followers?.length) {
-                    const streamerIds = followingsResponse.followers.map((f: any) => f.accountId);
-                    logger.info(`Found ${streamerIds.length} followed accounts. Fetching aliases in a batch...`);
+                if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
+                    logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
+                    return;
+                }
 
-                    // Step 2: Get aliases for those IDs in a single batch request
-                    const batchResponse = await requests.getAliasesInBatch(streamerIds, this.tokens);
+                const followers = followingsResponse.followers;
+                logger.info(`Step 1/2 SUCCESS: Fetched ${followers.length} followed accounts from 'allfollow' endpoint.`);
+                const streamerIds = followers.map((f: any) => f.accountId);
 
-                    if (batchResponse) {
-                        const aliasMap: { [key: string]: string } = {};
-                        for (const streamerId in batchResponse) {
-                            const alias = batchResponse[streamerId]?.basicProfile?.aliases?.[0]?.alias;
-                            if (alias) {
-                                aliasMap[streamerId] = alias;
-                            }
-                        }
-                        this.aliasManager.batchSet(aliasMap);
-                        logger.info(`Alias cache updated with ${Object.keys(aliasMap).length} entries.`);
-                    } else {
-                        logger.warn("Batch alias request returned no data.");
+                // Step 2: Get aliases for those IDs in a single batch request
+                const batchResponse = await requests.getAliasesInBatch(streamerIds, this.tokens);
+
+                if (!batchResponse) {
+                    logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
+                    return;
+                }
+                logger.info(`Step 2/2 SUCCESS: Received response from 'batch' endpoint.`);
+
+                const aliasMap: { [key: string]: string } = {};
+                for (const streamerId in batchResponse) {
+                    const alias = batchResponse[streamerId]?.basicProfile?.aliases?.[0]?.alias;
+                    if (alias) {
+                        aliasMap[streamerId] = alias;
                     }
+                }
+
+                if (Object.keys(aliasMap).length > 0) {
+                    this.aliasManager.batchSet(aliasMap);
+                    logger.info(`Alias cache updated with ${Object.keys(aliasMap).length} entries (out of ${streamerIds.length} IDs sent).`);
                 } else {
-                    logger.info("No followers found to update alias cache.");
+                    logger.warn("Could not extract any valid aliases from the batch response. Cache not updated.");
                 }
             } catch (error) {
-                logger.error("Failed to update alias cache.", { error });
+                logger.error("An unexpected error occurred during the alias update process.", { error });
             }
         };
 
