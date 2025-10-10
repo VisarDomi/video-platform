@@ -6,8 +6,6 @@ import { FileNotFoundError } from "../errors.js";
 
 const router = Router();
 
-// ... (GET /videos, GET /videos/durations, DELETE /videos/:type/:filename routes remain the same) ...
-
 router.get("/videos", async (_req, res) => {
     try {
         const allVideos = await videoService.getAllVideos();
@@ -15,16 +13,6 @@ router.get("/videos", async (_req, res) => {
     } catch (error: any) {
         logger.error(`Error listing video directories:`, { error });
         res.status(500).json({ success: false, message: "Could not list video directories." });
-    }
-});
-
-router.get("/videos/durations", async (_req, res) => {
-    try {
-        const durations = await videoService.getAllVideoDurations();
-        res.json(durations);
-    } catch (error: any) {
-        logger.error(`Error getting video durations:`, { error });
-        res.status(500).json({ success: false, message: "Could not retrieve video durations." });
     }
 });
 

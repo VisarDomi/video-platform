@@ -9,6 +9,7 @@ type VideoItem = {
     filename: string;
     type: "original" | "edited";
     size: number;
+    duration: number;
 };
 type MetadataCache = { segments: Record<string, { resolution: string }> };
 
@@ -22,8 +23,10 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
                 const videoFolderPath = path.join(dirPath, entry.name);
                 try {
                     const files = await fsPromises.readdir(videoFolderPath);
-                    if (files.some((f) => f.endsWith(".ts"))) {
-                        videoItems.push({ filename: entry.name, type, size: 0 });
+                    const tsFiles = files.filter((f) => f.endsWith(".ts"));
+                    if (tsFiles.length > 0) {
+                        const duration = tsFiles.length; // Duration is the number of .ts files
+                        videoItems.push({ filename: entry.name, type, size: 0, duration });
                     }
                 } catch (err) {
                     logger.warn(`Could not read subdirectory ${videoFolderPath}`, { err });
@@ -94,31 +97,6 @@ export async function getAllVideos(): Promise<VideoItem[]> {
     const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited");
     const [downloadVideos, convertVideos, modifiedVideos] = await Promise.all([downloadPromise, convertPromise, modifiedPromise]);
     return [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.filename.localeCompare(b.filename));
-}
-
-export async function getAllVideoDurations(): Promise<Record<string, number>> {
-    const allVideos = await getAllVideos();
-    const durations: Record<string, number> = {};
-    for (const video of allVideos) {
-        let videoFolderPath: string;
-        if (video.type === "original") videoFolderPath = path.join(VIDEO_DOWNLOAD_PATH, video.filename);
-        else {
-            const convertPath = path.join(VIDEO_CONVERT_PATH, video.filename);
-            try {
-                await fsPromises.access(convertPath);
-                videoFolderPath = convertPath;
-            } catch {
-                videoFolderPath = path.join(VIDEO_MODIFIED_PATH, video.filename);
-            }
-        }
-        try {
-            const files = await fsPromises.readdir(videoFolderPath);
-            durations[video.filename] = files.filter((f) => f.endsWith(".ts")).length;
-        } catch (err) {
-            logger.warn(`Could not calculate duration for ${video.filename}`, { err });
-        }
-    }
-    return durations;
 }
 
 export async function trashVideo(type: "original" | "edited", folderName: string): Promise<void> {
