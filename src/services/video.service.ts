@@ -1,7 +1,7 @@
 // src/services/video.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH } from "../config.js";
+import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH } from "../config.js";
 import logger from "../logger.js";
 import { FileNotFoundError } from "../errors.js";
 
@@ -51,7 +51,6 @@ async function findVideoPath(type: "original" | "edited", folderName: string): P
             /* not found */
         }
     } else {
-        // For 'edited', check 'convert' first, then 'modified'.
         const convertPath = path.join(VIDEO_CONVERT_PATH, folderName);
         try {
             await fsPromises.access(convertPath);
@@ -123,11 +122,8 @@ export async function trashVideo(type: "original" | "edited", folderName: string
         throw new FileNotFoundError(`Video folder not found: ${folderName}`);
     }
 
-    // Create a 'trash' subdirectory inside the video's current parent directory (e.g., download/trash)
-    const trashDir = path.join(foundVideo.baseDir, "trash");
-    await fsPromises.mkdir(trashDir, { recursive: true });
-
-    const destinationPath = path.join(trashDir, folderName);
+    // WHY THE CHANGE: The destination is now the globally configured trash path, not a subfolder.
+    const destinationPath = path.join(VIDEO_TRASH_PATH, folderName);
     await fsPromises.rename(foundVideo.fullPath, destinationPath);
     logger.info(`Moved folder to trash: ${destinationPath}`);
 }
@@ -141,10 +137,12 @@ export async function moveVideoToEdited(type: "original", folderName: string): P
         throw new FileNotFoundError(`Original video folder not found: ${folderName}`);
     }
 
-    const destinationPath = path.join(VIDEO_MODIFIED_PATH, folderName);
-    await fsPromises.mkdir(VIDEO_MODIFIED_PATH, { recursive: true });
+    // WHY THE CHANGE: The destination for an "OK'd" video is the `convert` directory, not `modified`.
+    // This stages it for potential further processing.
+    const destinationPath = path.join(VIDEO_CONVERT_PATH, folderName);
+    await fsPromises.mkdir(VIDEO_CONVERT_PATH, { recursive: true });
     await fsPromises.rename(foundVideo.fullPath, destinationPath);
-    logger.info(`Moved video to modified folder: ${destinationPath}`);
+    logger.info(`Moved video to convert folder: ${destinationPath}`);
 }
 
 export function createEditedVideo(filename: string, segments: { start: number; end: number }[]): void {
