@@ -58,7 +58,6 @@ export class DownloaderService {
                     ttu: session.ttu,
                     tte: session.tte,
                 };
-                logger.info("Initial tokens loaded successfully.");
                 return true;
             } else {
                 logger.warn("Initial token load failed: session.json is missing required tokens.");
