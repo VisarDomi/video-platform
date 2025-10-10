@@ -1,4 +1,4 @@
-// src/auth/tokenManager.ts
+// src/auth/authService.ts
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
@@ -35,23 +35,19 @@ export class AuthService {
 
     private async _attemptAuthentication() {
         try {
-            await this._tryLoadAndRefreshFromFile();
+            const loaded = await this.authContext.loadTokenFromFile();
+            if (!loaded) {
+                throw new Error("Session file not found or is invalid.");
+            }
+
+            logger.info("Tango-RT loaded from file. Attempting to bring all tokens up-to-date...");
+            await this._ensureValidTokens();
             logger.info("Session successfully established using token from file.");
         } catch (error) {
             logger.warn(`Could not refresh from file, falling back to Puppeteer. Reason: ${(error as Error).message}`);
             await this._performFreshLogin();
             logger.info("Session successfully established via fresh Puppeteer login.");
         }
-    }
-
-    private async _tryLoadAndRefreshFromFile(): Promise<void> {
-        const loaded = await this.authContext.loadTokenFromFile();
-        if (!loaded) {
-            throw new Error("Session file not found or is invalid.");
-        }
-
-        logger.info("Tango-RT loaded from file. Attempting to bring all tokens up-to-date...");
-        await this._ensureValidTokens();
     }
 
     public startBackgroundJobs() {
@@ -112,12 +108,12 @@ export class AuthService {
 
     private async _refreshShortLivedTokens() {
         while (true) {
-            const refreshInterval = 5000
+            const refreshInterval = 5000;
             try {
                 await this._setTokenData();
                 await this.authContext.saveTokenToFile(); // Persist the new short-lived tokens
             } catch (error) {
-                logger.error(`Failed to refresh short-lived tokens. Waiting for new Tango-ST in ${refreshInterval/1000}s.`, { error });
+                logger.error(`Failed to refresh short-lived tokens. Waiting for new Tango-ST in ${refreshInterval / 1000}s.`, { error });
             }
             await timersPromises.setTimeout(refreshInterval);
         }

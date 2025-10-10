@@ -1,4 +1,4 @@
-// src/common/requestQueue.ts
+// src/common/authQueue.ts
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
