@@ -2,10 +2,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import os from "os";
 import pLimit from "p-limit";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
+import { performance } from "perf_hooks";
 
 // --- Constants ---
 const PLAYLIST_FILENAME = "playlist.m3u8";
@@ -24,13 +24,12 @@ function getMemoryUsage(pid: number): Promise<number | null> {
 }
 
 // --- Class: PlaylistGenerator ---
-// WHY: Encapsulates all logic for processing a single video folder. This cleans up the code significantly.
 class PlaylistGenerator {
     private videoFolderPath: string;
     private folderName: string;
     private type: "original" | "edited";
     private memoryReadings: number[] = [];
-    private probeLimiter = pLimit(10); // Limit ffprobe concurrency *within* a single video folder task.
+    private probeLimiter = pLimit(10);
 
     constructor(videoFolderPath: string, folderName: string, type: "original" | "edited") {
         this.videoFolderPath = videoFolderPath;
@@ -39,6 +38,7 @@ class PlaylistGenerator {
     }
 
     public async generate(): Promise<void> {
+        const startTime = performance.now();
         logger.info(`Starting playlist generation for: ${this.folderName}`);
         try {
             const allFilesOnDisk = await fs.readdir(this.videoFolderPath);
@@ -66,7 +66,9 @@ class PlaylistGenerator {
             await fs.writeFile(path.join(this.videoFolderPath, METADATA_FILENAME), JSON.stringify(newMetadata, null, 2));
             await fs.writeFile(path.join(this.videoFolderPath, PLAYLIST_FILENAME), playlistContent);
 
-            logger.info(`Successfully generated playlist for: ${this.folderName}`);
+            const endTime = performance.now();
+            const durationSeconds = ((endTime - startTime) / 1000).toFixed(2);
+            logger.info(`Successfully generated playlist for: ${this.folderName} in ${durationSeconds}s`);
         } catch (error) {
             logger.error(`Error during playlist generation for ${this.folderName}`, { error });
         }
@@ -90,15 +92,12 @@ class PlaylistGenerator {
         });
     }
 
-    // WHY THE FIX: This method now correctly uses the metadata to build the playlist,
-    // handling resolution changes and inserting discontinuity tags. This fixes the
-    // "value never read" error and restores essential functionality.
     private generatePlaylistContent(segments: string[], metadata: { segments: Record<string, { resolution: string }> }): string {
         let previousResolution = "";
         const segmentLines: string[] = [];
         for (const segment of segments) {
             const meta = metadata.segments[segment];
-            if (!meta) continue; // Skip if metadata is missing for some reason
+            if (!meta) continue;
             if (previousResolution && meta.resolution !== previousResolution) {
                 segmentLines.push("#EXT-X-DISCONTINUITY");
             }
@@ -117,9 +116,8 @@ class PlaylistGenerator {
 }
 
 // --- Class: HlsService (Singleton) ---
-// WHY: Manages the overall process, including a heavily throttled queue for generation tasks.
 class HlsService {
-    private taskQueue = pLimit(Math.max(1, os.cpus().length / 2));
+    private taskQueue = pLimit(1);
 
     public initialize(): void {
         this._scanAndQueueTasks().catch((err) => {
@@ -129,7 +127,10 @@ class HlsService {
     }
 
     private async _scanAndQueueTasks(): Promise<void> {
-        logger.info("Starting initial playlist scan and queuing background tasks...");
+        logger.info("Starting initial playlist scan...");
+
+        // Step 1: Collect all tasks that need to be run into a temporary list.
+        const tasksToQueue: { folderName: string; videoFolderPath: string; type: "original" | "edited" }[] = [];
         await Promise.all(
             ALL_VIDEO_PATHS.map(async ({ path: dirPath, type }) => {
                 try {
@@ -140,9 +141,8 @@ class HlsService {
                             try {
                                 await fs.access(path.join(videoFolderPath, PLAYLIST_FILENAME));
                             } catch {
-                                logger.info(`Playlist not found for '${entry.name}'. Queueing generation task.`);
-                                const generator = new PlaylistGenerator(videoFolderPath, entry.name, type);
-                                void this.taskQueue(() => generator.generate());
+                                // Instead of queueing immediately, add it to our list.
+                                tasksToQueue.push({ folderName: entry.name, videoFolderPath, type });
                             }
                         }
                     }
@@ -151,12 +151,22 @@ class HlsService {
                 }
             })
         );
-        logger.info("Initial scan complete. Server is ready. Generation tasks are running in the background.");
+
+        // Step 2: Sort the collected tasks alphabetically by folder name.
+        tasksToQueue.sort((a, b) => a.folderName.localeCompare(b.folderName));
+
+        // Step 3: Add the sorted tasks to the serial queue.
+        for (const task of tasksToQueue) {
+            logger.info(`Playlist not found for '${task.folderName}'. Queueing generation task.`);
+            const generator = new PlaylistGenerator(task.videoFolderPath, task.folderName, task.type);
+            void this.taskQueue(() => generator.generate());
+        }
+
+        logger.info(`Initial scan complete. ${tasksToQueue.length} tasks queued. Server is ready.`);
     }
 
     private runHourlySync(): void {
         logger.info("Running hourly playlist validation sync...");
-        // This can be expanded with more detailed logic later if needed.
     }
 }
 
