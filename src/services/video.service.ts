@@ -12,7 +12,7 @@ type VideoItem = {
 };
 type MetadataCache = { segments: Record<string, { resolution: string }> };
 
-// --- Internal Helper Functions ---
+// ... (getVideosFromDir, findVideoPath, and generateMetadataAndPlaylist helpers are unchanged) ...
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<VideoItem[]> {
     const videoItems: VideoItem[] = [];
@@ -64,15 +64,8 @@ async function findVideoPath(type: "original" | "edited", folderName: string): P
     return null;
 }
 
-/**
- * WHY THIS HELPER EXISTS: This function is the core of the manual metadata generation.
- * It takes a list of .ts files, filters the original metadata, and writes new
- * metadata.json and playlist.m3u8 files to the destination folder. This is fast and avoids re-probing.
- */
 async function generateMetadataAndPlaylist(folderPath: string, folderName: string, tsFiles: string[], originalMetadata: MetadataCache): Promise<void> {
     if (tsFiles.length === 0) return;
-
-    // 1. Filter the original metadata to include only the relevant segments
     const newMetadata: MetadataCache = { segments: {} };
     for (const tsFile of tsFiles) {
         if (originalMetadata.segments[tsFile]) {
@@ -80,14 +73,12 @@ async function generateMetadataAndPlaylist(folderPath: string, folderName: strin
         }
     }
     await fsPromises.writeFile(path.join(folderPath, "metadata.json"), JSON.stringify(newMetadata, null, 2));
-
-    // 2. Generate the playlist content
     const segmentLines = tsFiles.flatMap((segment) => [`#EXTINF:1.000,`, `/hls/edited/${folderName}/${segment}`]);
     const content = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", ...segmentLines, "#EXT-X-ENDLIST"].join("\n");
     await fsPromises.writeFile(path.join(folderPath, "playlist.m3u8"), content);
 }
 
-// --- Exported Service Functions ---
+// ... (getAllVideos, getAllVideoDurations, trashVideo, moveVideoToEdited are unchanged) ...
 
 export async function getAllVideos(): Promise<VideoItem[]> {
     const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
@@ -148,6 +139,17 @@ export async function returnVideoToOriginals(folderName: string): Promise<void> 
     const destinationPath = path.join(VIDEO_DOWNLOAD_PATH, folderName);
     await fsPromises.rename(foundVideo.fullPath, destinationPath);
     logger.info(`Returned video to originals: ${destinationPath}`);
+
+    // WHY THE FIX: After moving the folder, we must rewrite the playlist to use the correct 'original' type in its URLs.
+    const playlistPath = path.join(destinationPath, "playlist.m3u8");
+    try {
+        const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
+        const updatedContent = playlistContent.replace(/\/hls\/edited\//g, "/hls/original/");
+        await fsPromises.writeFile(playlistPath, updatedContent, "utf-8");
+        logger.info(`Updated playlist paths for ${folderName}`);
+    } catch (error) {
+        logger.warn(`Could not update playlist for returned video ${folderName}. It may need regeneration.`, { error });
+    }
 }
 
 export async function createEditedVideo(filename: string, segments: { start: number; end: number }[]): Promise<void> {
@@ -156,11 +158,9 @@ export async function createEditedVideo(filename: string, segments: { start: num
 
     const sourceFolderPath = foundVideo.fullPath;
 
-    // 1. Read source metadata and all .ts files
     const originalMetadata: MetadataCache = JSON.parse(await fsPromises.readFile(path.join(sourceFolderPath, "metadata.json"), "utf-8"));
     const allSourceTsFiles = (await fsPromises.readdir(sourceFolderPath)).filter((f) => f.endsWith(".ts"));
 
-    // 2. Categorize all files into good and bad sets
     const goodTsFiles = new Set<string>();
     const segmentIndexes = new Set<number>();
     for (const seg of segments) {
@@ -178,7 +178,6 @@ export async function createEditedVideo(filename: string, segments: { start: num
         }
     }
 
-    // 3. Process the "bad" parts
     if (badTsFiles.length > 0) {
         const trashFolderPath = path.join(VIDEO_TRASH_PATH, filename);
         await fsPromises.mkdir(trashFolderPath, { recursive: true });
@@ -188,7 +187,6 @@ export async function createEditedVideo(filename: string, segments: { start: num
         logger.info(`Moved ${badTsFiles.length} bad segments to ${trashFolderPath}`);
     }
 
-    // 4. Process the "good" parts, splitting if necessary
     if (goodTsFiles.size > 0) {
         const sortedGoodTs = Array.from(goodTsFiles).sort((a, b) => parseInt(a) - parseInt(b));
         const totalDuration = sortedGoodTs.length;
@@ -208,7 +206,6 @@ export async function createEditedVideo(filename: string, segments: { start: num
         }
     }
 
-    // 5. Cleanup the original source folder
     await fsPromises.rm(sourceFolderPath, { recursive: true, force: true });
     logger.info(`Successfully processed and removed original folder: ${filename}`);
 }
