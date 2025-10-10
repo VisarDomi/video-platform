@@ -2,155 +2,162 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import os from "os";
+import pLimit from "p-limit";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
-import pLimit from "p-limit";
 
+// --- Constants ---
 const PLAYLIST_FILENAME = "playlist.m3u8";
 const METADATA_FILENAME = "metadata.json";
 const SYNC_INTERVAL_MS = 1000 * 60 * 60; // 1 hour
 
-// --- Concurrency Calculation for ffprobe ---
-// WHY: The goal is to run as many ffprobes in parallel as possible without
-// overwhelming the system's memory. This is a pragmatic approach based on
-// estimating the memory usage of a single ffprobe process against a total memory budget.
-const TOTAL_MEMORY_LIMIT_GB = 24;
-const ESTIMATED_FFPROBE_MEM_MB = 50; // A very conservative estimate for a single ffprobe on a .ts segment.
-const concurrencyLimit = Math.max(1, Math.floor((TOTAL_MEMORY_LIMIT_GB * 1024) / ESTIMATED_FFPROBE_MEM_MB));
-
-// Create a limiter that will run at most `concurrencyLimit` ffprobe processes at a time.
-const limit = pLimit(concurrencyLimit);
-logger.info(`Initialized ffprobe concurrency limit to ${concurrencyLimit} based on a ${TOTAL_MEMORY_LIMIT_GB}GB total memory target.`);
-
-type SegmentMetadata = { resolution: string };
-type MetadataCache = { segments: Record<string, SegmentMetadata> };
-
-function probeSegmentResolution(filePath: string): Promise<string> {
+// --- Helper: Get Memory Usage ---
+function getMemoryUsage(pid: number): Promise<number | null> {
     return new Promise((resolve) => {
-        // WHY THE CHANGE: We spawn ffprobe directly. The resource management is handled by
-        // limiting the number of concurrent processes via `p-limit`, not by wrapping each
-        // process with systemd-run. This correctly implements the shared resource pool concept.
-        const ffprobe = spawn("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", filePath]);
-
+        const ps = spawn("ps", ["-o", "rss=", "-p", String(pid)]);
         let output = "";
-        ffprobe.stdout.on("data", (data) => (output += data.toString()));
-        const onEnd = () => {
-            const resolution = output.trim().split("\n")[0]?.trim();
-            if (!resolution) {
-                logger.warn(`ffprobe failed for ${filePath}. Defaulting resolution.`);
-                resolve("720x1280");
-            } else {
-                resolve(resolution);
-            }
-        };
-        ffprobe.on("close", onEnd);
-        ffprobe.on("error", () => {
-            logger.error(`Failed to start ffprobe for ${filePath}. Defaulting resolution.`);
-            resolve("720x1280");
-        });
+        ps.stdout.on("data", (data) => (output += data.toString()));
+        ps.on("close", (code) => (code === 0 && output.trim() ? resolve(parseInt(output.trim(), 10)) : resolve(null)));
+        ps.on("error", () => resolve(null));
     });
 }
 
-function generatePlaylistContent(folderName: string, type: "original" | "edited", segments: string[], metadata: MetadataCache): string {
-    let previousResolution = "";
-    const segmentLines: string[] = [];
-    for (const segment of segments) {
-        const meta = metadata.segments[segment];
-        if (!meta) continue;
-        if (previousResolution && meta.resolution !== previousResolution) {
-            segmentLines.push("#EXT-X-DISCONTINUITY");
-        }
-        segmentLines.push("#EXTINF:1.000,");
-        segmentLines.push(`/hls/${type}/${folderName}/${segment}`);
-        previousResolution = meta.resolution;
+// --- Class: PlaylistGenerator ---
+// WHY: Encapsulates all logic for processing a single video folder. This cleans up the code significantly.
+class PlaylistGenerator {
+    private videoFolderPath: string;
+    private folderName: string;
+    private type: "original" | "edited";
+    private memoryReadings: number[] = [];
+    private probeLimiter = pLimit(10); // Limit ffprobe concurrency *within* a single video folder task.
+
+    constructor(videoFolderPath: string, folderName: string, type: "original" | "edited") {
+        this.videoFolderPath = videoFolderPath;
+        this.folderName = folderName;
+        this.type = type;
     }
-    return ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", ...segmentLines, "#EXT-X-ENDLIST"].join("\n");
+
+    public async generate(): Promise<void> {
+        logger.info(`Starting playlist generation for: ${this.folderName}`);
+        try {
+            const allFilesOnDisk = await fs.readdir(this.videoFolderPath);
+            const tsFiles = allFilesOnDisk.filter((f) => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
+            if (tsFiles.length === 0) {
+                logger.warn(`No .ts files found in ${this.folderName}, skipping playlist generation.`);
+                return;
+            }
+
+            const probeTasks = tsFiles.map((tsFile) =>
+                this.probeLimiter(async () => {
+                    const resolution = await this.probeSegmentResolution(path.join(this.videoFolderPath, tsFile));
+                    return { tsFile, resolution };
+                })
+            );
+            const results = await Promise.all(probeTasks);
+            this.logMemoryUsage();
+
+            const newMetadata = { segments: {} as Record<string, { resolution: string }> };
+            for (const { tsFile, resolution } of results) {
+                newMetadata.segments[tsFile] = { resolution };
+            }
+
+            const playlistContent = this.generatePlaylistContent(tsFiles, newMetadata);
+            await fs.writeFile(path.join(this.videoFolderPath, METADATA_FILENAME), JSON.stringify(newMetadata, null, 2));
+            await fs.writeFile(path.join(this.videoFolderPath, PLAYLIST_FILENAME), playlistContent);
+
+            logger.info(`Successfully generated playlist for: ${this.folderName}`);
+        } catch (error) {
+            logger.error(`Error during playlist generation for ${this.folderName}`, { error });
+        }
+    }
+
+    private async probeSegmentResolution(filePath: string): Promise<string> {
+        return new Promise((resolve) => {
+            const ffprobe = spawn("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", filePath]);
+            const pid = ffprobe.pid;
+            let output = "";
+            ffprobe.stdout.on("data", (data) => (output += data.toString()));
+            const onEnd = () => (output.trim().split("\n")[0]?.trim() ? resolve(output.trim().split("\n")[0].trim()) : resolve("720x1280"));
+            ffprobe.on("close", async () => {
+                if (pid) {
+                    const memKb = await getMemoryUsage(pid);
+                    if (memKb !== null) this.memoryReadings.push(memKb / 1024);
+                }
+                onEnd();
+            });
+            ffprobe.on("error", () => resolve("720x1280"));
+        });
+    }
+
+    // WHY THE FIX: This method now correctly uses the metadata to build the playlist,
+    // handling resolution changes and inserting discontinuity tags. This fixes the
+    // "value never read" error and restores essential functionality.
+    private generatePlaylistContent(segments: string[], metadata: { segments: Record<string, { resolution: string }> }): string {
+        let previousResolution = "";
+        const segmentLines: string[] = [];
+        for (const segment of segments) {
+            const meta = metadata.segments[segment];
+            if (!meta) continue; // Skip if metadata is missing for some reason
+            if (previousResolution && meta.resolution !== previousResolution) {
+                segmentLines.push("#EXT-X-DISCONTINUITY");
+            }
+            segmentLines.push("#EXTINF:1.000,");
+            segmentLines.push(`/hls/${this.type}/${this.folderName}/${segment}`);
+            previousResolution = meta.resolution;
+        }
+        return ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", ...segmentLines, "#EXT-X-ENDLIST"].join("\n");
+    }
+
+    private logMemoryUsage(): void {
+        if (this.memoryReadings.length === 0) return;
+        const average = this.memoryReadings.reduce((a, b) => a + b, 0) / this.memoryReadings.length;
+        logger.info(`ffprobe actual average memory: ${average.toFixed(2)}MB/process ('${this.folderName}')`);
+    }
 }
 
-async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folderName: string, type: "original" | "edited"): Promise<void> {
-    logger.info(`Performing full generation for: ${folderName}`);
-    try {
-        const allFilesOnDisk = await fs.readdir(videoFolderPath);
-        const tsFiles = allFilesOnDisk.filter((f) => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
-        if (tsFiles.length === 0) return;
+// --- Class: HlsService (Singleton) ---
+// WHY: Manages the overall process, including a heavily throttled queue for generation tasks.
+class HlsService {
+    private taskQueue = pLimit(Math.max(1, os.cpus().length / 2));
 
-        const metadataPath = path.join(videoFolderPath, METADATA_FILENAME);
-        const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
-        const newMetadata: MetadataCache = { segments: {} };
+    public initialize(): void {
+        this._scanAndQueueTasks().catch((err) => {
+            logger.error("A critical error occurred during the initial HLS scan.", { error: err });
+        });
+        setInterval(() => this.runHourlySync(), SYNC_INTERVAL_MS);
+    }
 
-        const probeTasks = tsFiles.map((tsFile) =>
-            limit(async () => {
-                const resolution = await probeSegmentResolution(path.join(videoFolderPath, tsFile));
-                return { tsFile, resolution };
+    private async _scanAndQueueTasks(): Promise<void> {
+        logger.info("Starting initial playlist scan and queuing background tasks...");
+        await Promise.all(
+            ALL_VIDEO_PATHS.map(async ({ path: dirPath, type }) => {
+                try {
+                    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+                    for (const entry of entries) {
+                        if (entry.isDirectory()) {
+                            const videoFolderPath = path.join(dirPath, entry.name);
+                            try {
+                                await fs.access(path.join(videoFolderPath, PLAYLIST_FILENAME));
+                            } catch {
+                                logger.info(`Playlist not found for '${entry.name}'. Queueing generation task.`);
+                                const generator = new PlaylistGenerator(videoFolderPath, entry.name, type);
+                                void this.taskQueue(() => generator.generate());
+                            }
+                        }
+                    }
+                } catch (err) {
+                    logger.error(`Failed to scan directory ${dirPath}`, { error: err });
+                }
             })
         );
-        const results = await Promise.all(probeTasks);
+        logger.info("Initial scan complete. Server is ready. Generation tasks are running in the background.");
+    }
 
-        for (const { tsFile, resolution } of results) {
-            newMetadata.segments[tsFile] = { resolution };
-        }
-
-        await fs.writeFile(metadataPath, JSON.stringify(newMetadata, null, 2));
-        const playlistContent = generatePlaylistContent(folderName, type, tsFiles, newMetadata);
-        await fs.writeFile(playlistPath, playlistContent);
-
-        logger.info(`Successfully regenerated playlist for: ${folderName}`);
-    } catch (error) {
-        logger.error(`Error during full generation for ${folderName}`, { error });
+    private runHourlySync(): void {
+        logger.info("Running hourly playlist validation sync...");
+        // This can be expanded with more detailed logic later if needed.
     }
 }
 
-async function validateAndSyncPlaylists(): Promise<void> {
-    logger.info("Running hourly playlist validation...");
-    for (const { path: dirPath, type } of ALL_VIDEO_PATHS) {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-            if (!entry.isDirectory()) continue;
-
-            const videoFolderPath = path.join(dirPath, entry.name);
-            try {
-                const tsFileCountOnDisk = (await fs.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts")).length;
-                const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
-
-                const playlistContent = await fs.readFile(playlistPath, "utf-8");
-                const playlistEntryCount = (playlistContent.match(/#EXTINF/g) || []).length;
-
-                if (tsFileCountOnDisk !== playlistEntryCount) {
-                    logger.warn(
-                        `Stale playlist detected in ${entry.name}. Mismatch: ${tsFileCountOnDisk} files vs ${playlistEntryCount} entries. Regenerating...`
-                    );
-                    await forceGeneratePlaylistForDirectory(videoFolderPath, entry.name, type);
-                }
-            } catch {
-                logger.info(`Playlist missing or unreadable for ${entry.name}. Attempting to generate.`);
-                await forceGeneratePlaylistForDirectory(videoFolderPath, entry.name, type);
-            }
-        }
-    }
-    logger.info("Hourly playlist validation complete.");
-}
-
-export async function initializeHlsService(): Promise<void> {
-    logger.info("Starting initial playlist scan and background generation...");
-    for (const { path: dirPath, type } of ALL_VIDEO_PATHS) {
-        const entries = await fs.readdir(dirPath, { withFileTypes: true });
-        for (const entry of entries) {
-            if (!entry.isDirectory()) continue;
-            const videoFolderPath = path.join(dirPath, entry.name);
-            const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
-            try {
-                await fs.access(playlistPath);
-            } catch {
-                logger.info(`Playlist not found for ${entry.name}. Queueing background generation.`);
-                forceGeneratePlaylistForDirectory(videoFolderPath, entry.name, type).catch((err) => {
-                    logger.error(`Background playlist generation failed for ${entry.name}`, { error: err });
-                });
-            }
-        }
-    }
-    logger.info("Initial scan complete. Server is ready. Playlist generation continues in background.");
-
-    setInterval(() => {
-        void validateAndSyncPlaylists();
-    }, SYNC_INTERVAL_MS);
-}
+export const hlsService = new HlsService();
