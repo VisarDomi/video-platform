@@ -4,23 +4,34 @@ import path from "path";
 import { spawn } from "child_process";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
-// WHY THE CHANGE: Import the p-limit library.
 import pLimit from "p-limit";
 
 const PLAYLIST_FILENAME = "playlist.m3u8";
 const METADATA_FILENAME = "metadata.json";
 const SYNC_INTERVAL_MS = 1000 * 60 * 60; // 1 hour
 
-// WHY THE CHANGE: Create a limiter that will run at most 10 ffprobe processes at a time.
-// This prevents overwhelming the system with too many concurrent processes.
-const limit = pLimit(10);
+// --- Concurrency Calculation for ffprobe ---
+// WHY: The goal is to run as many ffprobes in parallel as possible without
+// overwhelming the system's memory. This is a pragmatic approach based on
+// estimating the memory usage of a single ffprobe process against a total memory budget.
+const TOTAL_MEMORY_LIMIT_GB = 24;
+const ESTIMATED_FFPROBE_MEM_MB = 50; // A very conservative estimate for a single ffprobe on a .ts segment.
+const concurrencyLimit = Math.max(1, Math.floor((TOTAL_MEMORY_LIMIT_GB * 1024) / ESTIMATED_FFPROBE_MEM_MB));
+
+// Create a limiter that will run at most `concurrencyLimit` ffprobe processes at a time.
+const limit = pLimit(concurrencyLimit);
+logger.info(`Initialized ffprobe concurrency limit to ${concurrencyLimit} based on a ${TOTAL_MEMORY_LIMIT_GB}GB total memory target.`);
 
 type SegmentMetadata = { resolution: string };
 type MetadataCache = { segments: Record<string, SegmentMetadata> };
 
 function probeSegmentResolution(filePath: string): Promise<string> {
     return new Promise((resolve) => {
+        // WHY THE CHANGE: We spawn ffprobe directly. The resource management is handled by
+        // limiting the number of concurrent processes via `p-limit`, not by wrapping each
+        // process with systemd-run. This correctly implements the shared resource pool concept.
         const ffprobe = spawn("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", filePath]);
+
         let output = "";
         ffprobe.stdout.on("data", (data) => (output += data.toString()));
         const onEnd = () => {
@@ -39,7 +50,7 @@ function probeSegmentResolution(filePath: string): Promise<string> {
         });
     });
 }
-// ... (generatePlaylistContent is unchanged) ...
+
 function generatePlaylistContent(folderName: string, type: "original" | "edited", segments: string[], metadata: MetadataCache): string {
     let previousResolution = "";
     const segmentLines: string[] = [];
@@ -67,8 +78,6 @@ async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folder
         const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
         const newMetadata: MetadataCache = { segments: {} };
 
-        // WHY THE CHANGE: Wrap each `probeSegmentResolution` call in the limiter.
-        // `p-limit` ensures that no more than 10 of these promises will be running concurrently.
         const probeTasks = tsFiles.map((tsFile) =>
             limit(async () => {
                 const resolution = await probeSegmentResolution(path.join(videoFolderPath, tsFile));
@@ -91,7 +100,6 @@ async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folder
     }
 }
 
-// ... (validateAndSyncPlaylists and initializeHlsService are unchanged) ...
 async function validateAndSyncPlaylists(): Promise<void> {
     logger.info("Running hourly playlist validation...");
     for (const { path: dirPath, type } of ALL_VIDEO_PATHS) {
@@ -123,7 +131,7 @@ async function validateAndSyncPlaylists(): Promise<void> {
 }
 
 export async function initializeHlsService(): Promise<void> {
-    logger.info("Starting initial playlist scan...");
+    logger.info("Starting initial playlist scan and background generation...");
     for (const { path: dirPath, type } of ALL_VIDEO_PATHS) {
         const entries = await fs.readdir(dirPath, { withFileTypes: true });
         for (const entry of entries) {
@@ -133,12 +141,14 @@ export async function initializeHlsService(): Promise<void> {
             try {
                 await fs.access(playlistPath);
             } catch {
-                logger.info(`Playlist not found for ${entry.name}. Generating now.`);
-                await forceGeneratePlaylistForDirectory(videoFolderPath, entry.name, type);
+                logger.info(`Playlist not found for ${entry.name}. Queueing background generation.`);
+                forceGeneratePlaylistForDirectory(videoFolderPath, entry.name, type).catch((err) => {
+                    logger.error(`Background playlist generation failed for ${entry.name}`, { error: err });
+                });
             }
         }
     }
-    logger.info("Initial playlist scan complete.");
+    logger.info("Initial scan complete. Server is ready. Playlist generation continues in background.");
 
     setInterval(() => {
         void validateAndSyncPlaylists();

@@ -21,7 +21,13 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
         for (const entry of entries) {
             if (entry.isDirectory()) {
                 const videoFolderPath = path.join(dirPath, entry.name);
+                const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
                 try {
+                    // WHY THE CHANGE: A video is only considered available if its playlist exists.
+                    // This prevents listing videos that are still being generated in the background.
+                    await fsPromises.access(playlistPath);
+
+                    // If the playlist exists, then we proceed to get the video details.
                     const files = await fsPromises.readdir(videoFolderPath);
                     const tsFiles = files.filter((f) => f.endsWith(".ts"));
                     if (tsFiles.length > 0) {
@@ -29,7 +35,8 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
                         videoItems.push({ filename: entry.name, type, size: 0, duration });
                     }
                 } catch (err) {
-                    logger.warn(`Could not read subdirectory ${videoFolderPath}`, { err });
+                    // This is not an error that needs logging. It's an expected state for videos
+                    // whose playlists haven't been generated yet. We simply skip them.
                 }
             }
         }
