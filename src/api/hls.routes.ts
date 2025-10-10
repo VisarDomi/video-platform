@@ -46,6 +46,18 @@ router.get("/hls/:type/:folderName/playlist.m3u8", async (req, res) => {
         const folderPath = await findVideoFolderPath(type, folderName);
         const playlistPath = path.join(folderPath, "playlist.m3u8");
 
+        try {
+            const playlistContent = await fs.readFile(playlistPath, "utf-8");
+            if (!playlistContent.trim().endsWith("#EXT-X-ENDLIST")) {
+                res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+                res.setHeader("Pragma", "no-cache");
+                res.setHeader("Expires", "0");
+            }
+        } catch (readError) {
+            // If we can't read it, it will fail in sendFile anyway.
+            // This catch is primarily for robustness in case of race conditions.
+        }
+
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
         res.sendFile(playlistPath);
     } catch (error) {
