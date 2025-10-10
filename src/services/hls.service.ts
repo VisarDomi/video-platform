@@ -4,10 +4,16 @@ import path from "path";
 import { spawn } from "child_process";
 import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
+// WHY THE CHANGE: Import the p-limit library.
+import pLimit from "p-limit";
 
 const PLAYLIST_FILENAME = "playlist.m3u8";
 const METADATA_FILENAME = "metadata.json";
 const SYNC_INTERVAL_MS = 1000 * 60 * 60; // 1 hour
+
+// WHY THE CHANGE: Create a limiter that will run at most 10 ffprobe processes at a time.
+// This prevents overwhelming the system with too many concurrent processes.
+const limit = pLimit(10);
 
 type SegmentMetadata = { resolution: string };
 type MetadataCache = { segments: Record<string, SegmentMetadata> };
@@ -18,8 +24,6 @@ function probeSegmentResolution(filePath: string): Promise<string> {
         let output = "";
         ffprobe.stdout.on("data", (data) => (output += data.toString()));
         const onEnd = () => {
-            // WHY THE FIX: The output sometimes contains multiple lines or extra newlines.
-            // We split by newline and take the first valid entry to ensure a clean "720x1280" string.
             const resolution = output.trim().split("\n")[0]?.trim();
             if (!resolution) {
                 logger.warn(`ffprobe failed for ${filePath}. Defaulting resolution.`);
@@ -35,7 +39,7 @@ function probeSegmentResolution(filePath: string): Promise<string> {
         });
     });
 }
-
+// ... (generatePlaylistContent is unchanged) ...
 function generatePlaylistContent(folderName: string, type: "original" | "edited", segments: string[], metadata: MetadataCache): string {
     let previousResolution = "";
     const segmentLines: string[] = [];
@@ -57,17 +61,20 @@ async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folder
     try {
         const allFilesOnDisk = await fs.readdir(videoFolderPath);
         const tsFiles = allFilesOnDisk.filter((f) => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
-
         if (tsFiles.length === 0) return;
 
         const metadataPath = path.join(videoFolderPath, METADATA_FILENAME);
         const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
         const newMetadata: MetadataCache = { segments: {} };
 
-        const probeTasks = tsFiles.map(async (tsFile) => {
-            const resolution = await probeSegmentResolution(path.join(videoFolderPath, tsFile));
-            return { tsFile, resolution };
-        });
+        // WHY THE CHANGE: Wrap each `probeSegmentResolution` call in the limiter.
+        // `p-limit` ensures that no more than 10 of these promises will be running concurrently.
+        const probeTasks = tsFiles.map((tsFile) =>
+            limit(async () => {
+                const resolution = await probeSegmentResolution(path.join(videoFolderPath, tsFile));
+                return { tsFile, resolution };
+            })
+        );
         const results = await Promise.all(probeTasks);
 
         for (const { tsFile, resolution } of results) {
@@ -84,6 +91,7 @@ async function forceGeneratePlaylistForDirectory(videoFolderPath: string, folder
     }
 }
 
+// ... (validateAndSyncPlaylists and initializeHlsService are unchanged) ...
 async function validateAndSyncPlaylists(): Promise<void> {
     logger.info("Running hourly playlist validation...");
     for (const { path: dirPath, type } of ALL_VIDEO_PATHS) {
@@ -120,7 +128,6 @@ export async function initializeHlsService(): Promise<void> {
         const entries = await fs.readdir(dirPath, { withFileTypes: true });
         for (const entry of entries) {
             if (!entry.isDirectory()) continue;
-
             const videoFolderPath = path.join(dirPath, entry.name);
             const playlistPath = path.join(videoFolderPath, PLAYLIST_FILENAME);
             try {

@@ -22,7 +22,9 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
                 const videoFolderPath = path.join(dirPath, entry.name);
                 try {
                     const files = await fsPromises.readdir(videoFolderPath);
-                    if (files.some((f) => f.endsWith(".ts"))) videoItems.push({ filename: entry.name, type, size: 0 });
+                    if (files.some((f) => f.endsWith(".ts"))) {
+                        videoItems.push({ filename: entry.name, type, size: 0 });
+                    }
                 } catch (err) {
                     logger.warn(`Could not read subdirectory ${videoFolderPath}`, { err });
                 }
@@ -64,7 +66,6 @@ async function findVideoPath(type: "original" | "edited", folderName: string): P
 
 async function generateMetadataAndPlaylist(folderPath: string, folderName: string, tsFiles: string[], originalMetadata: MetadataCache): Promise<void> {
     if (tsFiles.length === 0) return;
-
     const newMetadata: MetadataCache = { segments: {} };
     for (const tsFile of tsFiles) {
         if (originalMetadata.segments[tsFile]) {
@@ -72,11 +73,6 @@ async function generateMetadataAndPlaylist(folderPath: string, folderName: strin
         }
     }
     await fsPromises.writeFile(path.join(folderPath, "metadata.json"), JSON.stringify(newMetadata, null, 2));
-
-    // WHY THE FIX: This is the critical change. We now iterate through the sorted list of segments
-    // and check if the current segment's index is exactly one greater than the previous one.
-    // If it's not, we've detected a jump (e.g., from 783.ts to 1109.ts) and we must insert
-    // the #EXT-X-DISCONTINUITY tag to tell the player about this non-linear timeline.
     let lastSegmentIndex = -1;
     const segmentLines: string[] = [];
     for (const segment of tsFiles) {
@@ -88,12 +84,9 @@ async function generateMetadataAndPlaylist(folderPath: string, folderName: strin
         segmentLines.push(`/hls/edited/${folderName}/${segment}`);
         lastSegmentIndex = currentSegmentIndex;
     }
-
     const content = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", ...segmentLines, "#EXT-X-ENDLIST"].join("\n");
     await fsPromises.writeFile(path.join(folderPath, "playlist.m3u8"), content);
 }
-
-// ... (getAllVideos, getAllVideoDurations, trashVideo, moveVideoToEdited, returnVideoToOriginals are unchanged) ...
 
 export async function getAllVideos(): Promise<VideoItem[]> {
     const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
@@ -137,13 +130,25 @@ export async function trashVideo(type: "original" | "edited", folderName: string
 }
 
 export async function moveVideoToEdited(type: "original", folderName: string): Promise<void> {
-    if (type !== "original") throw new Error("Only original videos can be moved.");
+    if (type !== "original") {
+        throw new Error("Only original videos can be moved.");
+    }
     const foundVideo = await findVideoPath(type, folderName);
-    if (!foundVideo) throw new FileNotFoundError(`Original video folder not found: ${folderName}`);
-    const destinationPath = path.join(VIDEO_CONVERT_PATH, folderName);
-    await fsPromises.mkdir(VIDEO_CONVERT_PATH, { recursive: true });
-    await fsPromises.rename(foundVideo.fullPath, destinationPath);
-    logger.info(`Moved video to convert folder: ${destinationPath}`);
+    if (!foundVideo) {
+        throw new FileNotFoundError(`Original video folder not found: ${folderName}`);
+    }
+
+    const files = await fsPromises.readdir(foundVideo.fullPath);
+    const duration = files.filter((f) => f.endsWith(".ts")).length;
+    if (duration === 0) {
+        logger.warn(`Cannot save video ${folderName} as it has no segments, trashing instead.`);
+        await trashVideo("original", folderName);
+        return;
+    }
+
+    const fullSegment = { start: 0, end: duration };
+    await createEditedVideo(folderName, [fullSegment]);
+    logger.info(`Saved full video ${folderName} by treating it as a single-cut segment.`);
 }
 
 export async function returnVideoToOriginals(folderName: string): Promise<void> {
@@ -171,7 +176,6 @@ export async function createEditedVideo(filename: string, segments: { start: num
     if (!foundVideo) throw new FileNotFoundError(`Original video file not found: ${filename}`);
 
     const sourceFolderPath = foundVideo.fullPath;
-
     const originalMetadata: MetadataCache = JSON.parse(await fsPromises.readFile(path.join(sourceFolderPath, "metadata.json"), "utf-8"));
     const allSourceTsFiles = (await fsPromises.readdir(sourceFolderPath)).filter((f) => f.endsWith(".ts"));
 
