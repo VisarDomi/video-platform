@@ -40,7 +40,8 @@
       "live-status.json",
       "tango/**",
       "tango-raw/**",
-      "tests/fixtures/*.ts"
+      "tests/fixtures/*.ts",
+      "postman/**"
     ]
   }
 }

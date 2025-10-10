@@ -1,0 +1,171 @@
+{
+	"info": {
+		"_postman_id": "e34ab43d-34be-4c19-a7e8-1f61755f172c",
+		"name": "tango frontend",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "5158126"
+	},
+	"item": [
+		{
+			"name": "batch alias",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "cookie",
+						"value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg",
+						"type": "text"
+					},
+					{
+						"key": "Accept-Encoding",
+						"value": "gzip, deflate, br, zstd",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "[\"VKGL9haplIsNBVjqS0a-uA\", \"ys5IF2AOFpUh8t3BukvB1A\", \"iofHFBuRwPXzREqGJC1xXQ\"]",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false",
+					"protocol": "https",
+					"host": [
+						"gateway",
+						"tango",
+						"me"
+					],
+					"path": [
+						"proxycador",
+						"api",
+						"public",
+						"v1",
+						"profiles",
+						"v2",
+						"batch"
+					],
+					"query": [
+						{
+							"key": "basicProfile",
+							"value": "true"
+						},
+						{
+							"key": "liveStats",
+							"value": "false"
+						},
+						{
+							"key": "followStats",
+							"value": "false"
+						}
+					]
+				}
+			},
+			"response": [
+				{
+					"name": "batch alias",
+					"originalRequest": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "cookie",
+								"value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg",
+								"type": "text"
+							},
+							{
+								"key": "Accept-Encoding",
+								"value": "gzip, deflate, br, zstd",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "[\"VKGL9haplIsNBVjqS0a-uA\", \"ys5IF2AOFpUh8t3BukvB1A\", \"iofHFBuRwPXzREqGJC1xXQ\"]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false",
+							"protocol": "https",
+							"host": [
+								"gateway",
+								"tango",
+								"me"
+							],
+							"path": [
+								"proxycador",
+								"api",
+								"public",
+								"v1",
+								"profiles",
+								"v2",
+								"batch"
+							],
+							"query": [
+								{
+									"key": "basicProfile",
+									"value": "true"
+								},
+								{
+									"key": "liveStats",
+									"value": "false"
+								},
+								{
+									"key": "followStats",
+									"value": "false"
+								}
+							]
+						}
+					},
+					"status": "OK",
+					"code": 200,
+					"_postman_previewlanguage": "",
+					"header": [
+						{
+							"key": "x-b3-traceid",
+							"value": "199cf94bd42bce1bcb98528ffb0"
+						},
+						{
+							"key": "content-type",
+							"value": "application/json;charset=UTF-8"
+						},
+						{
+							"key": "date",
+							"value": "Fri, 10 Oct 2025 19:24:15 GMT"
+						},
+						{
+							"key": "via",
+							"value": "1.1 google"
+						},
+						{
+							"key": "Alt-Svc",
+							"value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+						},
+						{
+							"key": "Transfer-Encoding",
+							"value": "chunked"
+						}
+					],
+					"cookie": [],
+					"body": "{\n    \"ys5IF2AOFpUh8t3BukvB1A\": {\n        \"encryptedAccountId\": \"ys5IF2AOFpUh8t3BukvB1A\",\n        \"basicProfile\": {\n            \"firstName\": \"🍓 Fresa 🍓 Forever 🍓\",\n            \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/ZOtZxQAAYMRnLw40q4UZWg/aOYem9mm\",\n            \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/ZOtZxQAAYMRnLw40q4UZWg/aOYem9mm/thumbnail\",\n            \"gender\": \"FEMALE\",\n            \"verified\": true,\n            \"aliases\": [\n                {\n                    \"alias\": \"fresssssa\",\n                    \"created\": 1700279045522,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"jnjnjnn\",\n                    \"created\": 1698576926118,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"flcf\",\n                    \"created\": 1693144038542,\n                    \"creator\": \"USER\"\n                }\n            ]\n        },\n        \"profileDetails\": {\n            \"backgroundUrl\": \"https://cget.tango.me/contentserver/download/X6AXtAAAIiF44VJUmlPZAQ/OM9jv9wh\",\n            \"status\": \"Minding my own business ✌\"\n        }\n    },\n    \"VKGL9haplIsNBVjqS0a-uA\": {\n        \"encryptedAccountId\": \"VKGL9haplIsNBVjqS0a-uA\",\n        \"basicProfile\": {\n            \"firstName\": \".•* AFI🐈⬛\",\n            \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFoki7sAAAbROd6sA4J7amvAAAAAJs5Wmg/5UDjbaDj\",\n            \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFoki7sAAAbROd6sA4J7amvAAAAAJs5Wmg/5UDjbaDj/thumbnail\",\n            \"gender\": \"FEMALE\",\n            \"verified\": true,\n            \"aliases\": [\n                {\n                    \"alias\": \"affi7\",\n                    \"created\": 1743187072336,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"affik\",\n                    \"created\": 1668256647283,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"afffifatal\",\n                    \"created\": 1666385517737,\n                    \"creator\": \"USER\"\n                }\n            ]\n        },\n        \"profileDetails\": {\n            \"backgroundUrl\": \"https://surprises.tango.me/ts/pb0009_v3.jpg\",\n            \"status\": \"🦦\"\n        }\n    },\n    \"iofHFBuRwPXzREqGJC1xXQ\": {\n        \"encryptedAccountId\": \"iofHFBuRwPXzREqGJC1xXQ\",\n        \"basicProfile\": {\n            \"firstName\": \"Black mamba\",\n            \"profilePictureUrl\": \"https://cget.tango.me/contentserver/download/AAFo0ZGAAACN6C3EXbtkE4o2AAAAANMdnIE/2KFy4r1F\",\n            \"profileThumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFo0ZGAAACN6C3EXbtkE4o2AAAAANMdnIE/2KFy4r1F/thumbnail\",\n            \"gender\": \"NONE\",\n            \"verified\": true,\n            \"aliases\": [\n                {\n                    \"alias\": \"fff85\",\n                    \"created\": 1758375809776,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"fiesta999\",\n                    \"created\": 1748014669950,\n                    \"creator\": \"USER\"\n                },\n                {\n                    \"alias\": \"itseuphoria\",\n                    \"created\": 1735422717362,\n                    \"creator\": \"USER\"\n                }\n            ]\n        },\n        \"profileDetails\": {\n            \"backgroundUrl\": \"https://surprises.tango.me/ts/pb5.jpg\",\n            \"status\": \"🐍\"\n        }\n    }\n}"
+				}
+			]
+		}
+	]
+}

@@ -9,16 +9,19 @@ import * as storage from "../common/storage.js";
 
 import * as requests from "./requests.js";
 import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
+import { AliasManager } from "../common/aliasManager.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
+    private aliasManager: AliasManager;
     private tokens: requests.Tokens | null = null;
 
     /**
      * The constructor is now private. Use the async `create` method instead.
      */
-    private constructor(downloadsManager: DownloadsManager) {
+    private constructor(downloadsManager: DownloadsManager, aliasManager: AliasManager) {
         this.downloadsManager = downloadsManager;
+        this.aliasManager = aliasManager;
         logger.info("DownloaderService initialized.");
     }
 
@@ -27,13 +30,15 @@ export class DownloaderService {
      */
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
-        return new DownloaderService(downloadsManager);
+        const aliasManager = await AliasManager.create();
+        return new DownloaderService(downloadsManager, aliasManager);
     }
 
     public start() {
         logger.info("Starting Downloader Service...");
         this._startTokenWatcher();
         this._startStreamWatcher();
+        this._startAliasUpdater();
     }
 
     private async _startTokenWatcher() {
@@ -68,6 +73,53 @@ export class DownloaderService {
         }
     }
 
+    private _startAliasUpdater() {
+        const updateAliases = async () => {
+            while (!this.tokens) {
+                logger.info("Alias updater waiting for tokens...");
+                await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
+            }
+
+            logger.info("Performing hourly alias cache update...");
+            try {
+                // Step 1: Get all followed account IDs
+                const followingsResponse = await requests.getAllFollowing(this.tokens);
+
+                if (followingsResponse?.followers?.length) {
+                    const streamerIds = followingsResponse.followers.map((f: any) => f.accountId);
+                    logger.info(`Found ${streamerIds.length} followed accounts. Fetching aliases in a batch...`);
+
+                    // Step 2: Get aliases for those IDs in a single batch request
+                    const batchResponse = await requests.getAliasesInBatch(streamerIds, this.tokens);
+
+                    if (batchResponse) {
+                        const aliasMap: { [key: string]: string } = {};
+                        for (const streamerId in batchResponse) {
+                            const alias = batchResponse[streamerId]?.basicProfile?.aliases?.[0]?.alias;
+                            if (alias) {
+                                aliasMap[streamerId] = alias;
+                            }
+                        }
+                        this.aliasManager.batchSet(aliasMap);
+                        logger.info(`Alias cache updated with ${Object.keys(aliasMap).length} entries.`);
+                    } else {
+                        logger.warn("Batch alias request returned no data.");
+                    }
+                } else {
+                    logger.info("No followers found to update alias cache.");
+                }
+            } catch (error) {
+                logger.error("Failed to update alias cache.", { error });
+            }
+        };
+
+        // Fire-and-forget initial update
+        updateAliases();
+
+        // Schedule subsequent updates every hour
+        setInterval(updateAliases, 60 * 60 * 1000);
+    }
+
     private async _startStreamWatcher() {
         let lastKnownTotal = -1;
 
@@ -96,12 +148,24 @@ export class DownloaderService {
 
                         if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
                             if (!this.downloadsManager.has(masterPlaylistUrl)) {
-                                logger.info(`Discovered new stream from ${streamerId}. Initiating download...`);
+                                logger.info(`Discovered new stream from ${streamerId}.`);
+
+                                let alias = this.aliasManager.get(streamerId);
+                                if (!alias && this.tokens) {
+                                    logger.info(`Alias for ${streamerId} not in cache. Fetching from API...`);
+                                    alias = await requests.getStreamerAlias(streamerId, this.tokens);
+                                    if (alias && alias !== streamerId) {
+                                        this.aliasManager.set(streamerId, alias);
+                                    }
+                                }
+
                                 const downloadHandle = this.downloadsManager.add(masterPlaylistUrl, {
                                     streamerId: streamerId,
-                                    alias: streamerId,
+                                    alias: alias || streamerId,
                                 });
+
                                 if (downloadHandle) {
+                                    logger.info(`Initiating download for ${alias || streamerId}...`);
                                     this._initiateAndDownloadStream(downloadHandle);
                                 }
                             }
@@ -127,13 +191,9 @@ export class DownloaderService {
                 return;
             }
 
-            const { streamerId } = downloadHandle.state;
             alias = downloadHandle.state.alias;
 
-            if (!this.tokens) throw new Error(`Tokens not available at start of download for ${streamerId}`);
-
-            alias = await requests.getStreamerAlias(streamerId, this.tokens);
-            downloadHandle.update({ alias });
+            if (!this.tokens) throw new Error(`Tokens not available at start of download for ${alias}`);
 
             let liveUrl: string | null = null;
             const MAX_RETRIES = 3;
@@ -155,7 +215,7 @@ export class DownloaderService {
             }
 
             downloadHandle.update({ liveUrl });
-            
+
             const startDate = new Date();
             segmentsDirPath = storage.createDownloadPaths(alias, startDate);
 
