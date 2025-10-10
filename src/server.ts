@@ -1,11 +1,13 @@
+// src/server.ts
 import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
 import * as os from "os";
 import logger from "./logger.js";
-import { PORT, FRONTEND_DIST_PATH } from "./config.js"; // <-- Import FRONTEND_DIST_PATH
+import { PORT, FRONTEND_DIST_PATH } from "./config.js";
 import videoApiRouter from "./api/video.routes.js";
-import streamingRouter from "./api/streaming.routes.js";
+import hlsRouter from "./api/hls.routes.js"; // Renamed from streamingRouter
+import { initializeHlsService } from "./services/hls.service.js"; // Import the HLS service initializer
 
 // --- Helper Functions ---
 const logServerInfo = () => {
@@ -21,28 +23,36 @@ const logServerInfo = () => {
     });
 };
 
-// --- Express App Setup ---
-const app = express();
-app.use(cors());
-app.use(express.json());
+// --- Main Server Function ---
+async function startServer() {
+    // --- Initialize Services ---
+    await initializeHlsService();
 
-// Why: The server now serves static files from the path defined in the .env file.
-// This decouples the backend from the frontend's location.
-app.use(express.static(FRONTEND_DIST_PATH!));
+    // --- Express App Setup ---
+    const app = express();
+    app.use(cors()); // Kept for good practice, even if not strictly needed now
+    app.use(express.json());
 
-// --- Routers ---
-app.use("/api", videoApiRouter);
-app.use("/", streamingRouter);
+    // Serve static frontend files
+    app.use(express.static(FRONTEND_DIST_PATH!));
 
-// --- Serve Frontend ---
-// This catch-all route ensures that any direct navigation to a frontend route
-// is handled by the single-page application.
-// Why: This must also point to the index.html inside the configured dist path.
-app.get(/.*/, (_req: Request, res: Response) => {
-    res.sendFile(path.join(FRONTEND_DIST_PATH!, "index.html"));
-});
+    // --- Routers ---
+    app.use("/api", videoApiRouter);
+    app.use("/", hlsRouter); // Use the new HLS router
 
-// --- Start Server & Services ---
-app.listen(PORT, "0.0.0.0", () => {
-    logServerInfo();
+    // --- Serve Frontend Catch-all ---
+    app.get(/.*/, (_req: Request, res: Response) => {
+        res.sendFile(path.join(FRONTEND_DIST_PATH!, "index.html"));
+    });
+
+    // --- Start Listening ---
+    app.listen(PORT, "0.0.0.0", () => {
+        logServerInfo();
+    });
+}
+
+// --- Start the server ---
+void startServer().catch((err) => {
+    logger.error("Failed to start server", { err });
+    process.exit(1);
 });
