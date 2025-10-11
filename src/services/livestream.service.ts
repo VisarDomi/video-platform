@@ -59,13 +59,11 @@ class LivestreamService {
 
         const currentLiveStreams = new Map<string, LiveStreamInfo>();
         for (const stream of liveStatus.downloads) {
-            // FIX: Guard against null or undefined segmentsDirPath from live-status.json.
-            // A stream entry might exist before its directory is created/known.
             if (stream.segmentsDirPath) {
                 const folderName = path.basename(stream.segmentsDirPath);
                 currentLiveStreams.set(folderName, stream);
             } else {
-                logger.warn("Skipping a stream from live-status.json because its segmentsDirPath is null.", { streamAlias: stream.alias });
+                logger.warn(`Trying again after ${BACKGROUND_TASK_INTERVAL_MS} milliseconds.`, { streamAlias: stream.alias });
             }
         }
 
