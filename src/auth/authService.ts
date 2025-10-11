@@ -4,7 +4,7 @@ import * as timersPromises from "timers/promises";
 import logger from "../common/logger.js";
 
 import * as authContext from "./authContext.js";
-import * as puppeteerLogin from "./puppeteerLogin.js";
+import * as browserLogin from "../browser/browserLogin.js";
 import * as authClient from "./authClient.js";
 import * as authUtils from "./authUtils.js";
 
@@ -105,7 +105,7 @@ export class AuthService {
     }
 
     private async _extractInitialTokens() {
-        const tokens = await puppeteerLogin.extractTokensWithPuppeteer();
+        const tokens = await browserLogin.extractTokens();
         this.authContext.updateFromLogin(tokens);
     }
 

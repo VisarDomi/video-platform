@@ -5,13 +5,9 @@ import * as path from "path";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
 import * as config from "../common/config.js";
+import * as types from "../common/types.js";
 
 import { RefreshResult, TokenDataResult } from "./authClient.js";
-
-interface LoginResult {
-    tangoRT: string;
-    tangoST: string;
-}
 
 interface SessionData {
     tangoRT: string | null;
@@ -64,7 +60,7 @@ export class AuthContext {
         this.tte = result.tte;
     }
 
-    public updateFromLogin(result: LoginResult): void {
+    public updateFromLogin(result: types.LoginResult): void {
         this.tangoRT = result.tangoRT;
         this.tangoST = result.tangoST;
     }

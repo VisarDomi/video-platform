@@ -3,17 +3,13 @@ import puppeteer, { Browser, HTTPResponse, Page, Target } from "puppeteer";
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
-import { TANGO_URLS, COOKIE_NAMES } from "../common/constants.js";
-
-interface InitialTokens {
-    tangoRT: string;
-    tangoST: string;
-}
+import * as constants from "../common/constants.js";
+import * as types from "../common/types.js";
 
 /**
  * Launches Puppeteer to perform a full browser login and intercept the initial tokens.
  */
-export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
+export async function extractTokens(): Promise<types.LoginResult> {
     const email = process.env.GOOGLE_EMAIL;
     const password = process.env.GOOGLE_PASSWORD;
     if (!(email && password)) {
@@ -57,9 +53,9 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
         const page = await browser.newPage();
 
         // This promise will resolve when the tokens are intercepted after a successful login.
-        const tokenPromise = new Promise<InitialTokens>((resolve, reject) => {
+        const tokenPromise = new Promise<types.LoginResult>((resolve, reject) => {
             page.on("response", async (response: HTTPResponse) => {
-                if (response.url() === TANGO_URLS.GOOGLE_LOGIN) {
+                if (response.url() === constants.TANGO_URLS.GOOGLE_LOGIN) {
                     let foundRT: string | null = null;
                     let foundST: string | null = null;
                     const headers = response.headers();
@@ -67,11 +63,11 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
                     if (setCookieHeader) {
                         const cookies = setCookieHeader.split("\n");
                         for (const cookie of cookies) {
-                            if (cookie.trim().startsWith(COOKIE_NAMES.TANGO_RT_PREFIX)) {
-                                foundRT = cookie.split(";")[0].substring(COOKIE_NAMES.TANGO_RT_PREFIX.length);
+                            if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
+                                foundRT = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
                             }
-                            if (cookie.trim().startsWith(COOKIE_NAMES.TANGO_ST_PREFIX)) {
-                                foundST = cookie.split(";")[0].substring(COOKIE_NAMES.TANGO_ST_PREFIX.length);
+                            if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
+                                foundST = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
                             }
                         }
                     }
@@ -85,7 +81,7 @@ export async function extractTokensWithPuppeteer(): Promise<InitialTokens> {
             timersPromises.setTimeout(120000).then(() => reject(new Error("Timeout: Did not complete Google login and intercept tokens within 120 seconds.")));
         });
 
-        await page.goto(TANGO_URLS.HOME, { waitUntil: "networkidle2" });
+        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "networkidle2" });
         await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
 
         // Step 1: Click "Continue with Google" button, trying multiple selectors for robustness.

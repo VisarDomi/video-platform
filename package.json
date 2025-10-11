@@ -9,25 +9,20 @@
         "start": "npm run build && pm2 start dist/main.js --name tango-auth",
         "restart": "npm run build && pm2 restart tango-auth",
         "stop": "pm2 stop tango-auth",
-        "logs": "pm2 logs tango-auth -f",
-        "tests": "cross-env NODE_OPTIONS='--no-warnings --experimental-vm-modules' jest"
+        "logs": "pm2 logs tango-auth -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
     "license": "MIT",
     "devDependencies": {
-        "@types/jest": "^29.5.14",
         "@types/node": "20.8.10",
-        "cross-env": "^10.1.0",
-        "dotenv-cli": "^10.0.0",
-        "jest": "^29.7.0",
         "nodemon": "^3.1.10",
-        "ts-jest": "^29.4.4",
         "ts-node": "^10.9.2",
         "typescript": "5.2.2"
     },
     "dependencies": {
         "dotenv": "^17.2.2",
+        "playwright": "^1.56.0",
         "puppeteer": "23.10.1",
         "winston": "^3.17.0"
     }
