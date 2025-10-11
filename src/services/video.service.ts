@@ -4,24 +4,23 @@ import path from "path";
 import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH } from "../config.js";
 import logger from "../logger.js";
 import { FileNotFoundError } from "../errors.js";
+import { livestreamService } from "./livestream.service.js";
 
 type VideoItem = {
     filename: string;
     type: "original" | "edited";
     size: number;
     duration: number;
+    isLive: boolean;
 };
 type MetadataCache = { segments: Record<string, { resolution: string }> };
 
-async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<VideoItem[]> {
+async function getVideosFromDir(dirPath: string, type: "original" | "edited", liveFolders: Set<string>): Promise<VideoItem[]> {
     const videoItems: VideoItem[] = [];
     try {
         await fsPromises.mkdir(dirPath, { recursive: true });
         const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
 
-        // WHY THE CHANGE: We now run checks in parallel and only check for playlist existence.
-        // We do not count .ts files here anymore. This is the key to making the initial
-        // video list load extremely fast. Duration is fetched later in a separate request.
         await Promise.all(
             entries.map(async (entry) => {
                 if (entry.isDirectory()) {
@@ -29,8 +28,8 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
                     const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
                     try {
                         await fsPromises.access(playlistPath);
-                        // Return with a placeholder duration.
-                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
+                        const isLive = type === "original" && liveFolders.has(entry.name);
+                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0, isLive });
                     } catch (err) {
                         // Skip folders without a playlist. This is expected.
                     }
@@ -96,19 +95,17 @@ async function generateMetadataAndPlaylist(folderPath: string, folderName: strin
 }
 
 export async function getAllVideos(): Promise<VideoItem[]> {
-    const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
-    const convertPromise = getVideosFromDir(VIDEO_CONVERT_PATH, "edited");
-    const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited");
+    const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original", new Set());
+    const convertPromise = getVideosFromDir(VIDEO_CONVERT_PATH, "edited", new Set());
+    const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited", new Set());
     const [downloadVideos, convertVideos, modifiedVideos] = await Promise.all([downloadPromise, convertPromise, modifiedPromise]);
     return [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.filename.localeCompare(b.filename));
 }
 
-/**
- * WHY THE CHANGE: This new function gets the duration for a list of videos.
- * This is the "lazy" part of the loading process. The frontend calls this
- * after it has already displayed the initial fast list.
- */
 export async function getVideosDetails(videos: { filename: string; type: "original" | "edited" }[]): Promise<VideoItem[]> {
+    const liveStatus = await livestreamService.readLiveStatus();
+    const liveFolders = new Set(liveStatus?.downloads.map((d) => path.basename(d.segmentsDirPath)) ?? []);
+
     const detailPromises = videos.map(async (video) => {
         try {
             const foundVideo = await findVideoPath(video.type, video.filename);
@@ -116,11 +113,14 @@ export async function getVideosDetails(videos: { filename: string; type: "origin
 
             const files = await fsPromises.readdir(foundVideo.fullPath);
             const tsFiles = files.filter((f) => f.endsWith(".ts"));
+            const isLive = video.type === "original" && liveFolders.has(video.filename);
+
             return {
                 filename: video.filename,
                 type: video.type,
                 size: 0, // Size is calculated on the frontend
                 duration: tsFiles.length,
+                isLive,
             };
         } catch (error) {
             logger.warn(`Could not get details for ${video.filename}`, { error });
