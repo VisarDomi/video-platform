@@ -3,7 +3,7 @@ import * as playwrightLogin from "./playwrightLogin.js";
 import * as puppeteerLogin from "./puppeteerLogin.js";
 
 // TODO: use a better pattern
-const usePlaywright = true
+const usePlaywright = false
 export async function extractTokens(): Promise<types.LoginResult> {
     if (usePlaywright) {
         return await playwrightLogin.extractTokens();

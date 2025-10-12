@@ -50,16 +50,16 @@ export class AuthService {
             }
 
             // If we reach here, it means all refresh retries failed.
-            logger.warn(`All refresh attempts failed over ${REFRESH_RETRY_DURATION_MS / 60000} minutes. Falling back to Puppeteer.`);
+            logger.warn(`All refresh attempts failed over ${REFRESH_RETRY_DURATION_MS / 60000} minutes. Falling back to browser.`);
         } else {
-            logger.info("No session file found. Proceeding directly to Puppeteer login.");
+            logger.info("No session file found. Proceeding directly to browser login.");
         }
 
         // Fallback: This is reached ONLY IF:
         // 1. The session file didn't exist/was invalid.
         // 2. The session file existed, but refreshing failed repeatedly for 30 minutes.
         await this._performFreshLogin();
-        logger.info("Session successfully established via fresh Puppeteer login.");
+        logger.info("Session successfully established via fresh browser login.");
     }
 
     /**
@@ -78,7 +78,7 @@ export class AuthService {
             } catch (error) {
                 const errorMessage = (error as Error).message;
                 // Check if the error is due to an expired token, which is unrecoverable.
-                // If so, we should stop retrying and proceed to Puppeteer immediately.
+                // If so, we should stop retrying and proceed to browser immediately.
                 if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
                     logger.warn(`Refresh failed with unrecoverable auth error (e.g., expired token): ${errorMessage}. Stopping retries.`);
                     return false;
@@ -98,7 +98,7 @@ export class AuthService {
     }
 
     private async _performFreshLogin() {
-        logger.info("Performing full login via Puppeteer to get new tokens...");
+        logger.info("Performing full login via a browser to get new tokens...");
         await this._extractInitialTokens();
         await this._setTokenData();
         await this.authContext.saveTokenToFile(); // Save the complete token set
@@ -172,12 +172,12 @@ export class AuthService {
         try {
             await this._ensureValidTokens();
         } catch (error) {
-            logger.error("Lightweight session refresh failed. Falling back to full Puppeteer re-authentication.", { error });
+            logger.error("Lightweight session refresh failed. Falling back to full browser re-authentication.", { error });
             try {
                 await this._performFreshLogin();
-                logger.info("Successfully re-authenticated via Puppeteer and refreshed all tokens.");
+                logger.info("Successfully re-authenticated via browser and refreshed all tokens.");
             } catch (fatalError) {
-                logger.error("CRITICAL: The fallback Puppeteer re-authentication also failed.", { fatalError });
+                logger.error("CRITICAL: The fallback browser re-authentication also failed.", { fatalError });
             }
         }
     }
