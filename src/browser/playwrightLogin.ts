@@ -1,7 +1,5 @@
 // src/browser/playwrightLogin.ts
-import { chromium, Browser, Page } from "playwright";
-import * as timersPromises from "timers/promises";
-
+import { chromium } from "playwright";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
 import * as types from "../common/types.js";
@@ -10,216 +8,136 @@ import * as types from "../common/types.js";
  * Launches Playwright to perform a full browser login and intercept the initial tokens.
  */
 export async function extractTokens(): Promise<types.LoginResult> {
-    // --- Step 1: Setup and Environment Variables ---
-    // This is identical to the Puppeteer setup. We get the credentials from environment
-    // variables to avoid hardcoding them.
     const email = process.env.GOOGLE_EMAIL;
     const password = process.env.GOOGLE_PASSWORD;
     if (!(email && password)) {
-        throw new Error("Could not find GOOGLE_EMAIL or GOOGLE_PASSWORD in environment variables.");
+        throw new Error("Could not find GOOGLE_EMAIL and/or GOOGLE_PASSWORD in environment variables. First, check .env");
     }
 
-    let browser: Browser | undefined;
+    logger.info(`playwright is using browser executable at: ${chromium.executablePath()}`);
+    const browser = await chromium.launch({
+        headless: false,
+        args: ["--disable-blink-features=AutomationControlled"],
+    });
 
-    // The main try...finally block ensures that the browser is always closed,
-    // even if an error occurs during the login process.
+    const context = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        viewport: null, // This makes the viewport adapt to the window size, like in your puppeteer script
+    });
+
+    const page = await context.newPage();
+
     try {
-        // --- Step 2: Launching the Browser ---
-        // Here, we launch a Chromium browser instance.
-        // Why this choice?
-        // - `chromium.launch()` is Playwright's equivalent of `puppeteer.launch()`.
-        // - `headless: false` makes the browser UI visible, which is essential for debugging.
-        // - `args: ["--disable-blink-features=AutomationControlled"]` helps the browser appear less like an automated bot.
-        //
-        // Playwright vs. Puppeteer:
-        // - Playwright can also launch Firefox (`firefox.launch()`) and WebKit (`webkit.launch()`),
-        //   while Puppeteer primarily focuses on Chromium.
-        // - The launch options are very similar between the two libraries.
-        logger.info("Playwright: Launching browser for automatic login...");
-        browser = await chromium.launch({
-            headless: false,
-            args: ["--disable-blink-features=AutomationControlled"],
-        });
+        // --- Step 1: Set up listeners BEFORE taking actions ---
+        // Playwright can wait for a specific response. This is cleaner than wrapping listeners in a manual Promise.
+        const responsePromise = page.waitForResponse(constants.TANGO_URLS.GOOGLE_LOGIN, { timeout: 60000 });
 
-        // --- Step 3: Creating a Browser Context and Page ---
-        // This is a key difference from Puppeteer. Playwright introduces the concept of a "Browser Context".
-        // Why this choice?
-        // - A Browser Context is like an isolated "incognito" session. It doesn't share cookies or cache
-        //   with other contexts. This is great for running tests or tasks in parallel without interference.
-        // - We can set options like viewport size and user agent directly on the context, which is a cleaner
-        //   approach than setting them on the page later.
-        //
-        // Playwright vs. Puppeteer:
-        // - Puppeteer creates pages directly from the browser instance (`browser.newPage()`).
-        // - Playwright's flow is `browser -> newContext() -> newPage()`, providing better isolation.
-        const context = await browser.newContext({
-            viewport: { width: 1500, height: 1000 },
-            userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        });
-        const page: Page = await context.newPage();
+        // Similarly, we can wait for a popup window to be created.
+        const popupPromise = page.waitForEvent("popup", { timeout: 30000 });
 
-        // --- Step 4: Setting up Token Interception ---
-        // This logic is crucial for capturing the authentication tokens. We listen for network responses.
-        //
-        // Why this choice?
-        // - The `page.on('response', ...)` event listener fires for every HTTP response the page receives.
-        // - We check if the response URL matches the one we expect after a successful Google login.
-        // - `response.headersArray()` is the most robust way to get all headers, as it correctly handles
-        //   multiple 'set-cookie' headers, which is a common occurrence.
-        //
-        // Playwright vs. Puppeteer:
-        // - The event listener API is almost identical.
-        // - Puppeteer's `response.headers()['set-cookie']` returns a single string that might contain newlines,
-        //   requiring manual splitting. Playwright's `response.headersArray()` is more structured and reliable
-        //   for this specific task.
-        const tokenPromise = new Promise<types.LoginResult>((resolve, reject) => {
-            page.on("response", async (response) => {
-                if (response.url() === constants.TANGO_URLS.GOOGLE_LOGIN) {
-                    let foundRT: string | null = null;
-                    let foundST: string | null = null;
+        // --- Step 2: Navigate and initiate login ---
+        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-                    const headers = await response.headersArray();
-                    const setCookieHeaders = headers.filter((h) => h.name.toLowerCase() === "set-cookie").map((h) => h.value);
-
-                    for (const cookie of setCookieHeaders) {
-                        if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
-                            foundRT = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
-                        }
-                        if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
-                            foundST = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
-                        }
-                    }
-
-                    if (foundRT && foundST) {
-                        logger.info("Playwright intercepted Tango-RT and Tango-ST tokens.");
-                        resolve({ tangoRT: foundRT, tangoST: foundST });
-                    }
-                }
-            });
-            timersPromises.setTimeout(120000).then(() => reject(new Error("Timeout: Did not complete login within 120 seconds.")));
-        });
-
-        // --- Step 5: Navigation and Initial Login Click ---
-        // We navigate to the homepage and begin the login process.
-        //
-        // Why this choice?
-        // - `page.goto()` navigates the page. `waitUntil: 'networkidle'` waits until network activity has ceased,
-        //   ensuring the page and its scripts are fully loaded.
-        // - We use Playwright's "Locators" (`page.getByTestId`, `page.getByRole`). Locators are the modern,
-        //   preferred way to interact with elements. They automatically wait for elements to be ready,
-        //   making the script much more stable and removing the need for manual waits (`setTimeout`).
-        // - The logic first checks for the direct Google button. If it's not found, it clicks the more general
-        //   "Log in" button to reveal it. The `.or()` chain is a powerful way to handle multiple possible selectors.
-        //
-        // Playwright vs. Puppeteer:
-        // - Playwright's Locators and auto-waiting are its biggest advantages. Puppeteer requires more manual
-        //   `waitForSelector` and `try-catch` blocks for the same level of robustness.
-        // - The `.or()` method for locators is unique to Playwright and simplifies handling UI variations.
-        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "networkidle" });
-        await timersPromises.setTimeout(5000); // A small static wait can still be helpful for client-side frameworks to initialize.
-
-        const googleButton = page.getByTestId("GOOGLE");
+        // --- Step 3: Click the Google login button with fallbacks ---
+        // Playwright's locators auto-wait, so the 5-second arbitrary wait from the Puppeteer script is no longer needed.
         try {
-            await googleButton.waitFor({ state: "visible", timeout: 5000 });
-        } catch (e) {
-            logger.warn("Direct Google login button not found, trying the main login flow...");
-            const loginButton = page.getByTestId("home-page-login-register-button").or(page.getByRole("button", { name: /Log in \/ Sign up/i }));
-            await loginButton.click();
+            await page.getByTestId("GOOGLE").click({ timeout: 15000 });
+        } catch (ignore1) {
+            logger.warn(`button[data-testid="GOOGLE"] is not there, trying another button...`);
+            try {
+                await page.getByTestId("home-page-login-register-button").click({ timeout: 10000 });
+                await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+            } catch (ignore2) {
+                logger.warn(`home-page-login-register-button not found, trying the last way...`);
+                await page.locator('//button[.//span[contains(., "Log in / Sign up")]]').click({ timeout: 10000 });
+                await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+            }
         }
 
-        // --- Step 6: Handling the Google Login Popup ---
-        // This is the idiomatic Playwright way to handle new windows or tabs.
-        //
-        // Why this choice?
-        // - `page.waitForEvent('popup')` sets up a listener for the popup *before* we click the button that opens it.
-        // - `Promise.all` waits for both the event and the click action to happen concurrently. This is a race-condition-free
-        //   way to guarantee we capture the popup page object.
-        //
-        // Playwright vs. Puppeteer:
-        // - This is far simpler and more reliable than Puppeteer's `browser.waitForTarget()`, which is more verbose
-        //   and involves manually checking target URLs.
-        logger.info("Clicking Google login button and waiting for popup...");
-        const [popup] = await Promise.all([
-            page.waitForEvent("popup"), // Wait for the popup to open
-            googleButton.click(), // The action that opens the popup
-        ]);
-
-        await popup.waitForLoadState(); // Ensure the popup page is fully loaded
+        // --- Step 4: Handle the Google Authentication Popup ---
+        const googlePopup = await popupPromise;
         logger.info("Google popup detected. Starting authentication process...");
 
-        // --- Step 7: Interacting with the Popup and Submitting Credentials ---
-        // This block handles the multi-step Google login form.
-        //
-        // Why this choice?
-        // - We use a `for` loop for retries, which is a good pattern for handling network flakiness during login.
-        // - We use locators like `getByRole` and `locator('#identifierId')` for interaction. `fill` is used for typing,
-        //   as it's faster and more reliable than simulating individual key presses.
-        // - We check if an element is visible before interacting with it (`.isVisible()`). This handles cases where
-        //   Google remembers the email and skips directly to the password or "Continue" step.
-        // - `popup.waitForEvent('close')` is a clean way to confirm the login was successful and the popup has closed.
-        //
-        // Playwright vs. Puppeteer:
-        // - Again, Playwright's auto-waiting locators shine. We don't need manual `setTimeout` calls between actions
-        //   like typing and clicking, as Playwright waits for the element to be ready automatically. This makes the
-        //   script faster and less brittle.
-        // - Puppeteer's `locator("::-p-aria(Next)")` is a non-standard syntax. Playwright's `getByRole('button', { name: 'Next' })`
-        //   is based on accessibility standards and is more readable.
         const maxGoogleRetries = 3;
-        for (let attempt = 1; attempt <= maxGoogleRetries; attempt++) {
+        for (let googleAttempt = 1; googleAttempt <= maxGoogleRetries; googleAttempt++) {
             try {
-                logger.info(`Google login attempt ${attempt}/${maxGoogleRetries}...`);
+                logger.info(`Google login attempt ${googleAttempt}/${maxGoogleRetries}...`);
 
-                const emailInput = popup.locator("#identifierId");
-                if (await emailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+                // Email Step
+                try {
+                    // fill() is generally faster and more reliable for inputs than type().
+                    // We also use a more readable locator for the 'Next' button.
+                    await googlePopup.locator("#identifierId").fill(email, { timeout: 5000 });
                     logger.info("Email input found. Entering email.");
-                    await emailInput.fill(email);
-                    await popup.getByRole("button", { name: "Next" }).click();
-                } else {
-                    logger.info("Email input not found, skipping to next step.");
+                    await googlePopup.getByRole("button", { name: "Next" }).click();
+                } catch (e) {
+                    logger.info("Email input not found, assuming we are already on the password or continue step.");
                 }
 
-                const passwordInput = popup.locator('input[type="password"]');
-                if (await passwordInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+                // Password Step
+                try {
+                    await googlePopup.locator('input[type="password"]').fill(password, { timeout: 5000 });
                     logger.info("Password input found. Entering password.");
-                    await passwordInput.fill(password);
-                    await popup.getByRole("button", { name: "Next" }).click();
-                } else {
-                    logger.info("Password input not found, skipping to next step.");
+                    await googlePopup.getByRole("button", { name: "Next" }).click();
+                } catch (e) {
+                    logger.info("Password input not found, assuming we are on the consent/continue step.");
                 }
 
-                logger.info("Looking for 'Continue' button...");
-                await popup.getByRole("button", { name: "Continue" }).click({ timeout: 15000 });
-
+                // Continue/Consent Step
+                await googlePopup.getByRole("button", { name: "Continue" }).click({ timeout: 15000 });
+                logger.info("Continue button found. Clicking it.");
                 logger.info("Clicked 'Continue'. Waiting for popup to close...");
-                await popup.waitForEvent("close", { timeout: 20000 });
 
+                // Wait for the popup to close itself, which signals a successful login.
+                await googlePopup.waitForEvent("close", { timeout: 20000 });
                 logger.info("Google popup closed successfully. Authentication complete.");
                 break; // Success!
-            } catch (error) {
-                logger.error(`Google login attempt ${attempt} failed.`, { error: (error as Error).message });
-                if (attempt === maxGoogleRetries) {
+            } catch (error: any) {
+                logger.error(`Google login attempt ${googleAttempt} failed.`, { error: error.message });
+                if (googleAttempt === maxGoogleRetries) {
                     throw new Error(`Failed to log in via Google after ${maxGoogleRetries} attempts.`);
                 }
-                if (!popup.isClosed()) {
+                if (!googlePopup.isClosed()) {
                     logger.warn("Popup is still open. Reloading it for the next attempt...");
-                    await popup.reload({ waitUntil: "networkidle" });
+                    await googlePopup.reload({ waitUntil: "domcontentloaded" });
                 } else {
-                    throw new Error("Google popup closed unexpectedly. Cannot retry.");
+                    throw new Error("Google popup crashed and closed unexpectedly. Cannot retry.");
                 }
             }
         }
 
-        // --- Step 8: Finalizing ---
-        // We await the promise that has been listening for tokens all along.
-        const tokens = await tokenPromise;
-        logger.info("Initial refresh token found via Playwright.");
-        return tokens;
+        // --- Step 5: Process the response and extract tokens ---
+        const response = await responsePromise;
+        const setCookieHeader = await response.headerValue("set-cookie");
+
+        if (!setCookieHeader) {
+            throw new Error("Login response did not contain set-cookie header.");
+        }
+
+        let foundRT: string | null = null;
+        let foundST: string | null = null;
+        const cookies = setCookieHeader.split("\n");
+        for (const cookie of cookies) {
+            if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
+                foundRT = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
+            }
+            if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
+                foundST = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
+            }
+        }
+
+        if (!foundRT || !foundST) {
+            throw new Error("Could not find Tango-RT and/or Tango-ST in login response cookies.");
+        }
+
+        logger.info("Initial tokens found via Playwright.");
+        return { tangoRT: foundRT, tangoST: foundST };
     } catch (error) {
         logger.error("Failed to extract initial tokens via Playwright.", { error });
+        // Taking a screenshot on failure is a powerful debugging tool.
+        await page.screenshot({ path: "playwright-error-screenshot.png", fullPage: true });
         throw error;
     } finally {
-        // --- Step 9: Closing the Browser ---
-        // This is critical to prevent orphaned browser processes from consuming resources.
         if (browser) {
             logger.info("Closing browser...");
             await browser.close();
