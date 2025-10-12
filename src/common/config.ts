@@ -8,7 +8,9 @@ export interface IConfig {
 }
 
 const defaultConfig: IConfig = {
-    sharedStatePath: path.join(os.tmpdir()),
+    // Use the XDG Base Directory Specification for user-specific data files.
+    // This is the standard "Linux way" for services running under a specific user.
+    sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
 };
 
 /**
