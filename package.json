@@ -1,15 +1,15 @@
 {
-    "name": "tango-auth",
+    "name": "tango-auth-dev",
     "type": "module",
     "version": "1.0.0",
     "description": "Get and update tokens used by other tango microservices",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name tango-auth",
-        "restart": "npm run build && pm2 restart tango-auth",
-        "stop": "pm2 stop tango-auth",
-        "logs": "pm2 logs tango-auth -f"
+        "start": "npm run build && pm2 start dist/main.js --name tango-auth-dev",
+        "restart": "npm run build && pm2 restart tango-auth-dev",
+        "stop": "pm2 stop tango-auth-dev",
+        "logs": "pm2 logs tango-auth-dev -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
