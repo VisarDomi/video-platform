@@ -1,15 +1,15 @@
 {
-    "name": "tslive-auth",
+    "name": "tslive-auth-dev",
     "type": "module",
     "version": "1.0.0",
     "description": "Get and update tokens used by other tslive microservices",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name tslive-auth",
-        "restart": "npm run build && pm2 restart tslive-auth",
-        "stop": "pm2 stop tslive-auth",
-        "logs": "pm2 logs tslive-auth -f"
+        "start": "npm run build && pm2 start dist/main.js --name tslive-auth-dev",
+        "restart": "npm run build && pm2 restart tslive-auth-dev",
+        "stop": "pm2 stop tslive-auth-dev",
+        "logs": "pm2 logs tslive-auth-dev -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",
