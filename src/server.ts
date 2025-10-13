@@ -34,7 +34,11 @@ async function startServer() {
     // --- Express App Setup ---
     const app = express();
     app.use(cors());
-    app.use(express.json());
+    // WHY THE CHANGE: Increase the JSON body size limit. The default is 100kb.
+    // The frontend sends a list of all video identifiers to get details,
+    // which can exceed 100kb if the video library is large, causing a
+    // "PayloadTooLargeError". Setting a higher limit (e.g., 10mb) fixes this.
+    app.use(express.json({ limit: "10mb" }));
 
     // Serve static frontend files
     app.use(express.static(FRONTEND_DIST_PATH!));
