@@ -138,24 +138,29 @@ export async function createEditedVideo(filename: string, segments: string[]): P
 async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
     const durations: Map<string, number> = await getDurations(filename);
 
-    // Identify cache misses
     const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
 
     if (cacheMisses.length > 0) {
         logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations in parallel.`);
-        // Create promises to get duration for each cache miss
         const durationPromises = cacheMisses.map((tsFile) => getDuration(path.join(videoPath, tsFile)));
-
-        // Await all promises to resolve in parallel
         const newDurations = await Promise.all(durationPromises);
 
-        // Update the main durations map with the new data
         cacheMisses.forEach((tsFile, index) => {
             durations.set(tsFile, newDurations[index]);
         });
+
+        // Write the updated durations back to the cache file.
+        try {
+            const metadataPath = path.join(config.CACHE_PATH, `${filename}.json`);
+            const durationData = Object.fromEntries(durations);
+            await fsPromises.writeFile(metadataPath, JSON.stringify(durationData, null, 2), "utf-8");
+            logger.info(`Successfully updated duration cache for ${filename}.`);
+        } catch (error) {
+            logger.error(`Failed to write duration cache for ${filename}.`, { error });
+            // This is a non-critical error, so we just log it and continue.
+        }
     }
 
-    // Now, chunk the tsFiles using the fully populated durations map
     const parts: string[][] = [];
     if (tsFiles.length === 0) {
         return parts;
@@ -165,9 +170,7 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     let totalDuration = 0;
 
     for (const tsFile of tsFiles) {
-        // We can safely assume the duration exists. Use 0 as a fallback just in case.
         const tsDuration = durations.get(tsFile) || 0;
-
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
 
@@ -178,9 +181,8 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
         }
     }
 
-    // Add the last remaining chunk if it's not empty
     if (tsChunk.length > 0) {
-        parts.push(tsChunk);
+        parts.push([...tsChunk]);
     }
 
     return parts;
