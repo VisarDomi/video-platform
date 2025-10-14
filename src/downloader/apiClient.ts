@@ -127,51 +127,75 @@ export class ApiClient {
     }
 
     public async getFollowingResponseBody(): Promise<any | null> {
-        const tokens = await this._getTokensForRequest();
-        const headers = this._getApiHeaders(tokens);
-        return this._makeApiRequest<any>(
-            "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200",
-            "GET",
-            headers,
-            "json"
-        );
+        try {
+            const tokens = await this._getTokensForRequest();
+            const headers = this._getApiHeaders(tokens);
+            return this._makeApiRequest<any>(
+                "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200",
+                "GET",
+                headers,
+                "json"
+            );
+        } catch (error) {
+            logger.error(`Unexpected error in getFollowingResponseBody`, { error: (error as Error).message });
+            return null;
+        }
     }
 
     public async getAllFollowing(): Promise<any | null> {
-        const tokens = await this._getTokensForRequest();
-        const headers = this._getApiHeaders(tokens);
-        const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
-        return this._makeApiRequest<any>(url, "GET", headers, "json");
+        try {
+            const tokens = await this._getTokensForRequest();
+            const headers = this._getApiHeaders(tokens);
+            const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
+            return this._makeApiRequest<any>(url, "GET", headers, "json");
+        } catch (error) {
+            logger.error(`Unexpected error in getAllFollowing`, { error: (error as Error).message });
+            return null;
+        }
     }
 
     public async getAliasesInBatch(streamerIds: string[]): Promise<any | null> {
-        const tokens = await this._getTokensForRequest();
-        const headers = this._getApiHeaders(tokens);
-        const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
-        return this._makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
+        try {
+            const tokens = await this._getTokensForRequest();
+            const headers = this._getApiHeaders(tokens);
+            const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
+            return this._makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
+        } catch (error) {
+            logger.error(`Unexpected error in getAliasesInBatch`, { error: (error as Error).message });
+            return null;
+        }
     }
 
     public async getStreamerAlias(streamerId: string): Promise<string> {
-        const tokens = await this._getTokensForRequest();
-        const headers = this._getApiHeaders(tokens);
-        const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
-        const response = await this._makeApiRequest<any>(url, "GET", headers, "json");
-        if (response?.basicProfile?.aliases?.[0]?.alias) {
-            return response.basicProfile.aliases[0].alias;
+        try {
+            const tokens = await this._getTokensForRequest();
+            const headers = this._getApiHeaders(tokens);
+            const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
+            const response = await this._makeApiRequest<any>(url, "GET", headers, "json");
+            if (response?.basicProfile?.aliases?.[0]?.alias) {
+                return response.basicProfile.aliases[0].alias;
+            }
+            return streamerId;
+        } catch (error) {
+            logger.error(`Unexpected error in getStreamerAlias for ${streamerId}`, { error: (error as Error).message });
+            return streamerId; // Return original ID on failure
         }
-        return streamerId;
     }
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
-        const tokens = await this._getTokensForRequest();
-        const headers = this._getStreamHeaders(tokens);
-        return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
+        try {
+            const tokens = await this._getTokensForRequest();
+            const headers = this._getStreamHeaders(tokens);
+            return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
+        } catch (error) {
+            logger.error(`Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
+            return null;
+        }
     }
 
     public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
-        const tokens = await this._getTokensForRequest();
-
         try {
+            const tokens = await this._getTokensForRequest();
             const headers = this._getStreamHeaders(tokens);
             const options: RequestInit = { method: "GET", headers };
             const response = await fetch(liveUrl, options);

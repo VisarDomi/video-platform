@@ -1,9 +1,9 @@
 // src/common/storage.ts
-import * as fs from "fs";
 import * as path from "path";
 
 import * as config from "./config.js";
 import logger from "./logger.js";
+import { FileSystemManager } from "./fileSystemManager.js";
 
 function generateDownloadBaseName(alias: string, date: Date): string {
     const year = date.getFullYear();
@@ -15,19 +15,22 @@ function generateDownloadBaseName(alias: string, date: Date): string {
     return `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
 }
 
-export function createDownloadPaths(alias: string, date: Date): string {
+export async function createDownloadPaths(alias: string, date: Date): Promise<string | null> {
     const baseFilename = generateDownloadBaseName(alias, date);
     const storageLocation = config.getConfig().storagePath;
 
-    if (!fs.existsSync(storageLocation)) {
-        fs.mkdirSync(storageLocation, { recursive: true });
-        logger.info(`Storage folder created at: ${storageLocation}`);
+    const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
+    if (!storageLocationExists) {
+        logger.error(`Could not create or access storage folder at: ${storageLocation}`);
+        return null;
     }
 
     const segmentsDirPath = path.resolve(storageLocation, baseFilename);
 
-    if (!fs.existsSync(segmentsDirPath)) {
-        fs.mkdirSync(segmentsDirPath, { recursive: true });
+    const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
+    if (!segmentsDirExists) {
+        logger.error(`Could not create segments folder at: ${segmentsDirPath}`);
+        return null;
     }
 
     return segmentsDirPath;

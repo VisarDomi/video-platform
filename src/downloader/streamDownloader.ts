@@ -20,92 +20,95 @@ export class StreamDownloader {
 
     public async start() {
         let segmentsDirPath: string | null = null;
-        let alias: string;
 
-        try {
-            if (!this.downloadHandle.state) {
-                logger.error(`Could not find state for download with handle. Aborting.`);
-                return;
-            }
-
-            alias = this.downloadHandle.state.alias;
-
-            let liveUrl: string | null = null;
-            const MAX_RETRIES = 3;
-            const RETRY_DELAY = 5000;
-
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                const resolvedUrl = await this._getLiveUrlFromMaster();
-                if (resolvedUrl) {
-                    liveUrl = resolvedUrl;
-                    break;
-                }
-                logger.warn(`Failed to resolve live URL for ${alias} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY / 1000}s...`);
-                if (attempt < MAX_RETRIES) await timersPromises.setTimeout(RETRY_DELAY);
-            }
-
-            if (!liveUrl) {
-                throw new Error(`Could not resolve live playlist URL for ${alias} after ${MAX_RETRIES} attempts.`);
-            }
-
-            this.downloadHandle.update({ liveUrl });
-
-            const startDate = new Date();
-            segmentsDirPath = storage.createDownloadPaths(alias, startDate);
-
-            this.downloadHandle.update({ segmentsDirPath });
-
-            logger.info(`${segmentsDirPath} started downloading segments.`);
-
-            const downloadedTsUrls: Set<string> = new Set();
-            let lastDownload = Date.now();
-
-            while (true) {
-                const liveResponse = await this.apiClient.getLiveList(liveUrl);
-
-                if (liveResponse.success && liveResponse.data) {
-                    const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
-                    const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-
-                    const segmentsToDownload: string[] = [];
-                    for (let i = 0; i < liveLines.length; i++) {
-                        if (liveLines[i].startsWith("/v2/")) {
-                            const tsUrl = `${cinemaApiUrl}${liveLines[i]}`;
-                            if (!downloadedTsUrls.has(tsUrl)) {
-                                segmentsToDownload.push(tsUrl);
-                                downloadedTsUrls.add(tsUrl);
-                            }
-                        }
-                    }
-
-                    if (segmentsToDownload.length > 0) {
-                        for (const tsUrl of segmentsToDownload) {
-                            const tsBuffer = await this.apiClient.getTsSegment(tsUrl);
-                            if (tsBuffer) {
-                                const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
-                                const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
-                                const segmentPath = path.join(segmentsDirPath, tsName);
-                                const success = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
-                                if (success) {
-                                    lastDownload = Date.now();
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (Date.now() - lastDownload > config.getConfig().timeouts.staleStream) {
-                    logger.info(`No new segments for ${segmentsDirPath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
-                    break;
-                }
-                await timersPromises.setTimeout(1000);
-            }
-        } catch (error) {
-            logger.error(`Download process for ${segmentsDirPath || this.downloadHandle.state?.alias} failed fatally.`, { error });
-        } finally {
-            logger.info(`Finished download process for: ${segmentsDirPath || this.downloadHandle.state?.alias}`);
-            this.downloadHandle.remove();
+        if (!this.downloadHandle.state) {
+            logger.error(`Could not find state for download with handle. Aborting.`);
+            return;
         }
+
+        const alias = this.downloadHandle.state.alias;
+
+        let liveUrl: string | null = null;
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY = 5000;
+
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            const resolvedUrl = await this._getLiveUrlFromMaster();
+            if (resolvedUrl) {
+                liveUrl = resolvedUrl;
+                break;
+            }
+            logger.warn(`Failed to resolve live URL for ${alias} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY / 1000}s...`);
+            if (attempt < MAX_RETRIES) await timersPromises.setTimeout(RETRY_DELAY);
+        }
+
+        if (!liveUrl) {
+            logger.error(`Could not resolve live playlist URL for ${alias} after ${MAX_RETRIES} attempts. Aborting download.`);
+            this.downloadHandle.remove();
+            return;
+        }
+
+        this.downloadHandle.update({ liveUrl });
+
+        const startDate = new Date();
+        segmentsDirPath = await storage.createDownloadPaths(alias, startDate);
+
+        if (!segmentsDirPath) {
+            logger.error(`Failed to create download paths for ${alias}. Aborting download.`);
+            this.downloadHandle.remove();
+            return;
+        }
+
+        this.downloadHandle.update({ segmentsDirPath });
+
+        logger.info(`${segmentsDirPath} started downloading segments.`);
+
+        const downloadedTsUrls: Set<string> = new Set();
+        let lastDownload = Date.now();
+
+        while (true) {
+            const liveResponse = await this.apiClient.getLiveList(liveUrl);
+
+            if (liveResponse.success && liveResponse.data) {
+                const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
+                const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
+
+                const segmentsToDownload: string[] = [];
+                for (let i = 0; i < liveLines.length; i++) {
+                    if (liveLines[i].startsWith("/v2/")) {
+                        const tsUrl = `${cinemaApiUrl}${liveLines[i]}`;
+                        if (!downloadedTsUrls.has(tsUrl)) {
+                            segmentsToDownload.push(tsUrl);
+                            downloadedTsUrls.add(tsUrl);
+                        }
+                    }
+                }
+
+                if (segmentsToDownload.length > 0) {
+                    for (const tsUrl of segmentsToDownload) {
+                        const tsBuffer = await this.apiClient.getTsSegment(tsUrl);
+                        if (tsBuffer) {
+                            const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
+                            const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
+                            const segmentPath = path.join(segmentsDirPath, tsName);
+                            const success = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                            if (success) {
+                                lastDownload = Date.now();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (Date.now() - lastDownload > config.getConfig().timeouts.staleStream) {
+                logger.info(`No new segments for ${segmentsDirPath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
+                break;
+            }
+            await timersPromises.setTimeout(1000);
+        }
+
+        logger.info(`Finished download process for: ${segmentsDirPath}`);
+        this.downloadHandle.remove();
     }
 
     private async _getLiveUrlFromMaster(): Promise<string | null> {

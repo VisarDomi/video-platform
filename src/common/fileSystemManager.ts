@@ -46,4 +46,14 @@ export class FileSystemManager {
             return false;
         }
     }
+
+    public static async ensureDirExists(dirPath: string): Promise<boolean> {
+        try {
+            await fsPromises.mkdir(dirPath, { recursive: true });
+            return true;
+        } catch (error: any) {
+            logger.error(`Failed to create directory: ${dirPath}`, { error: error.message });
+            return false;
+        }
+    }
 }
