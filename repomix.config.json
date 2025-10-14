@@ -37,7 +37,7 @@
             "convert.sh",
             "session.json",
             "live-status.json",
-            "tango userscript.postman_collection.json"
+            "postman/**"
         ]
     }
 }

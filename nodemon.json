@@ -11,7 +11,7 @@
         "session.json",
         "error.log",
         "live-status.json",
-        "tango userscript.postman_collection.json"
+        "postman/*"
     ],
     "exec": "repomix --config repomix.config.json",
     "verbose": false

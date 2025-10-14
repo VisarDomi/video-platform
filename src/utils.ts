@@ -28,25 +28,25 @@ export function findProjectRoot(startDir: string): string {
     }
 }
 
-export async function findVideoPath(folderName: string): Promise<string> {
+export async function findVideoPath(filename: string): Promise<string> {
     let finalPath = null;
     try {
-        const fullPath = path.join(VIDEO_DOWNLOAD_PATH, folderName);
+        const fullPath = path.join(VIDEO_DOWNLOAD_PATH, filename);
         await fsPromises.access(fullPath);
         finalPath = fullPath;
     } catch {}
     try {
-        const convertPath = path.join(VIDEO_CONVERT_PATH, folderName);
+        const convertPath = path.join(VIDEO_CONVERT_PATH, filename);
         await fsPromises.access(convertPath);
         finalPath = convertPath;
     } catch {}
     try {
-        const modifiedPath = path.join(VIDEO_MODIFIED_PATH, folderName);
+        const modifiedPath = path.join(VIDEO_MODIFIED_PATH, filename);
         await fsPromises.access(modifiedPath);
         finalPath = modifiedPath;
     } catch {}
     if (finalPath === null) {
-        throw new FileNotFoundError(`Video not found: ${folderName}`);
+        throw new FileNotFoundError(`Video not found: ${filename}`);
     }
     return finalPath;
 }
