@@ -8,6 +8,7 @@ import { DownloadPathManager } from "./downloadPathManager.js";
 import { ApiClient } from "../api/apiClient.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
+import { PlaylistManager } from "./playlistManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -19,8 +20,6 @@ export class StreamDownloader {
     }
 
     public async start() {
-        let segmentsDirPath: string | null = null;
-
         if (!this.downloadHandle.state) {
             logger.error(`Could not find state for download with handle. Aborting.`);
             return;
@@ -51,7 +50,7 @@ export class StreamDownloader {
         this.downloadHandle.update({ liveUrl });
 
         const startDate = new Date();
-        segmentsDirPath = await DownloadPathManager.createDownloadPaths(alias, startDate);
+        const segmentsDirPath = await DownloadPathManager.createDownloadPaths(alias, startDate);
 
         if (!segmentsDirPath) {
             logger.error(`Failed to create download paths for ${alias}. Aborting download.`);
@@ -60,37 +59,23 @@ export class StreamDownloader {
         }
 
         this.downloadHandle.update({ segmentsDirPath });
-
         logger.info(`${segmentsDirPath} started downloading segments.`);
 
-        const downloadedTsUrls: Set<string> = new Set();
+        const playlistManager = new PlaylistManager(segmentsDirPath);
         let lastDownload = Date.now();
 
         while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
             const liveResponse = await this.apiClient.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
-                const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
                 const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-
-                const segmentsToDownload: string[] = [];
-                for (let i = 0; i < liveLines.length; i++) {
-                    if (liveLines[i].startsWith("/v2/")) {
-                        const tsUrl = `${cinemaApiUrl}${liveLines[i]}`;
-                        if (!downloadedTsUrls.has(tsUrl)) {
-                            segmentsToDownload.push(tsUrl);
-                            downloadedTsUrls.add(tsUrl);
-                        }
-                    }
-                }
+                const segmentsToDownload = await playlistManager.processLivePlaylist(liveResponse.data, cinemaApiUrl);
 
                 if (segmentsToDownload.length > 0) {
-                    for (const tsUrl of segmentsToDownload) {
-                        const tsBuffer = await this.apiClient.getTsSegment(tsUrl);
+                    for (const segment of segmentsToDownload) {
+                        const tsBuffer = await this.apiClient.getTsSegment(segment.remoteUrl);
                         if (tsBuffer) {
-                            const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
-                            const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
-                            const segmentPath = path.join(segmentsDirPath, tsName);
+                            const segmentPath = path.join(segmentsDirPath, segment.localName);
                             const success = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                             if (success) {
                                 lastDownload = Date.now();
