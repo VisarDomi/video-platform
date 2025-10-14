@@ -77,8 +77,8 @@ export class StreamDownloader {
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
-                            logger.warn(`Skipping segment due to download failure: ${segment.localName}`, { remoteUrl: segment.remoteUrl, segmentPath });
-                            continue; // Skip this segment and try the next one
+                            logger.warn(`Pausing segment processing due to download failure: ${segment.localName}`, { remoteUrl: segment.remoteUrl });
+                            break; // The next poll will re-attempt this failed segment first.
                         }
 
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
@@ -88,7 +88,8 @@ export class StreamDownloader {
                             await playlistManager.appendSegmentToPlaylist(segment);
                             lastDownload = Date.now(); // Update timestamp on success
                         } else {
-                            logger.error(`Failed to write segment to disk: ${segment.localName}`, { segmentPath });
+                            logger.error(`Failed to write segment to disk, pausing processing: ${segment.localName}`, { segmentPath });
+                            break; // filesystem issues
                         }
                     }
                 }
