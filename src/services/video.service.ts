@@ -1,12 +1,16 @@
 // src/services/video.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH } from "../config.js";
 import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
 import * as errors from "../errors.js";
 import * as config from "../config.js";
+
+const execFileAsync = promisify(execFile);
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<types.VideoItem[]> {
     const videoItems: types.VideoItem[] = [];
@@ -51,14 +55,14 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             //TODO: the video-cacher calculates and caches every detail except for live. for live we always calculate on the fly.
             // caching is done using ffprobe or ffmpeg to get the necessary data, like duration
             // to cache: each segment length - delete all those with bitrate bigger than 20MB - those are broken - add discontinuities to the playlist
-            const metadataPath = path.join(config.CACHE_PATH, video.filename);
+            const metadataPath = path.join(config.CACHE_PATH, `${video.filename}.json`);
             const temp = `visar@z440:~/Videos/tango/download/2025-10-03 011231 queensara5$ ffprobe -i 8.ts 
             Input #0, mpegts, from '8.ts':
             Duration: 00:00:01.06, start: 753.331000, bitrate: 2271 kb/s
             Program 1 
             Stream #0:0[0x100]: Video: h264 (Main) ([27][0][0][0] / 0x001B), yuv420p(progressive), 720x1280, 30 tbr, 90k tbn
             Stream #0:1[0x101]: Audio: aac (LC) ([15][0][0][0] / 0x000F), 44100 Hz, mono, fltp, 66 kb/s
-            `
+            `;
 
             const duration = 0;
             const size = 0;
@@ -113,14 +117,14 @@ export async function createEditedVideo(filename: string, segments: string[]): P
 
     if (goodTsFiles.size > 0) {
         const sortedGoodTs = Array.from(goodTsFiles).sort((a, b) => parseInt(a.split(".ts")[0]) - parseInt(b.split(".ts")[0]));
-        const parts: string[][] = await getParts(filename, sortedGoodTs); // the duration has been cached by video-cacher, we use that to split
+        const parts: string[][] = await getParts(videoPath, filename, sortedGoodTs);
 
         for (let i = 0; i < parts.length; i++) {
             const tsChunk = parts[i];
             const partFolderName = parts.length > 1 ? `${filename} part${i + 1}` : filename;
             const destinationPath = path.join(VIDEO_CONVERT_PATH, partFolderName);
             await fsPromises.mkdir(destinationPath, { recursive: true });
-            const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(filename, file), path.join(destinationPath, file)));
+            const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file)));
             await Promise.all(movePromises);
             await createPlaylist(filename, tsChunk, destinationPath);
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
@@ -131,22 +135,26 @@ export async function createEditedVideo(filename: string, segments: string[]): P
     logger.info(`Successfully processed and removed original folder: ${filename}`);
 }
 
-async function getParts(filename: string, tsFiles: string[]) {
+async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
     const durations: Map<string, number> = await getDurations(filename);
     let totalDuration = 0;
     const parts: string[][] = [];
     let tsChunk: string[] = [];
     for (const tsFile of tsFiles) {
-        let tsDuration;
-        if (durations.has(tsFile)) {
-            tsDuration = durations.get(tsFile);
+        let tsDuration: number;
+        const cachedDuration = durations.get(tsFile);
+        if (cachedDuration !== undefined) {
+            tsDuration = cachedDuration;
         } else {
-            tsDuration = await getDuration(path.join(filename, tsFile));
+            // TODO: use parallelism here for cache misses
+            tsDuration = await getDuration(path.join(videoPath, tsFile));
         }
+
         tsChunk.push(tsFile);
-        totalDuration += tsDuration!; // TODO: remove !. why does typescript not pickup durations.has(tsFile)
+        totalDuration += tsDuration;
         if (totalDuration > 30 * 60) {
-            parts.push(Array.from(tsChunk)) // TODO: there should be a better way than this hack
+            // TODO: there should be a better way than this hack
+            parts.push(Array.from(tsChunk));
             tsChunk = [];
             totalDuration = 0;
         }
@@ -154,82 +162,99 @@ async function getParts(filename: string, tsFiles: string[]) {
     return parts;
 }
 
-async function getDurations(filename: string) {
-    // get the duration of each tsFile from cache
-    // read file... parse file + create data structure... seen this one before -> should refactor
-
-    // ok, but what should the interface look like?
-    // fullTsPath -> duration?
-    const metadataPath = path.join(config.CACHE_PATH, filename);
-
-
-
+async function getDurations(filename: string): Promise<Map<string, number>> {
+    const metadataPath = path.join(config.CACHE_PATH, `${filename}.json`);
     const durations = new Map<string, number>();
 
-
-
+    try {
+        const fileContent = await fsPromises.readFile(metadataPath, "utf-8");
+        const durationData = JSON.parse(fileContent) as Record<string, number>;
+        for (const [tsFile, duration] of Object.entries(durationData)) {
+            durations.set(tsFile, duration);
+        }
+    } catch (error: any) {
+        if (error?.code === "ENOENT") {
+            logger.info(`Duration cache not found for ${filename} at ${metadataPath}. This is expected if it's the first time processing this video.`);
+        } else {
+            logger.warn(`Could not read or parse duration cache for ${filename} from ${metadataPath}. Will proceed without cache.`, { error });
+        }
+    }
 
     return durations;
 }
 
-async function getDuration(tsFilename: string) {
-    // get the duration of a tsFile from cache
-    // we get here only if the tsFile is not already cached... should not happen
-    // read file... parse file + create data structure... seen this one before -> should refactor
-    const duration = 0;
-    return duration;
+async function getDuration(tsFilePath: string): Promise<number> {
+    logger.warn(`Cache miss for duration of ${tsFilePath}. Calculating with ffprobe.`);
+    try {
+        const { stdout } = await execFileAsync("ffprobe", [
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            tsFilePath,
+        ]);
+        const duration = parseFloat(stdout.trim());
+        if (isNaN(duration)) {
+            logger.error(`ffprobe output for ${tsFilePath} is not a number: ${stdout}`);
+            return 0;
+        }
+        return duration;
+    } catch (error) {
+        logger.error(`Failed to get duration for ${tsFilePath} using ffprobe.`, { error });
+        return 0;
+    }
 }
 
-async function createPlaylist(filename: string, tsChunk: string[], destinationPath: string) {
-    // copies the original playlist in memory, modifies it to add discontinuations, then places it at the destination
-    // read file... parse file + create data structure... seen this one before -> should refactor
+async function createPlaylist(filename: string, tsChunk: string[], destinationPath: string): Promise<void> {
+    interface PlaylistSegment {
+        tags: string[];
+        filename: string;
+    }
 
-    // copying things is not a good habbit
-    const videoPath = await utils.findVideoPath(filename); 
+    const videoPath = await utils.findVideoPath(filename);
     const playlistPath = path.join(videoPath, "playlist.m3u8");
     const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
-    
-    const lines = playlistContent.split('\n')
 
-    const temp = `
-#EXTM3U
-#EXT-X-VERSION:7
-#EXT-X-MEDIA-SEQUENCE:93
-#EXT-X-TARGETDURATION:4
-#EXT-X-DISCONTINUITY
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:41.400Z
-#EXTINF:4.060,
-93.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:45.460Z
-#EXTINF:0.200,
-94.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:45.660Z
-#EXTINF:1.960,
-95.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:47.620Z
-#EXTINF:2.040,
-96.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:49.660Z
-#EXTINF:2.020,
-97.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:51.680Z
-#EXTINF:2.000,
-98.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:53.680Z
-#EXTINF:1.480,
-99.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:55.160Z
-#EXTINF:2.101,
-100.ts
-#EXT-X-PROGRAM-DATE-TIME:2025-10-14T21:56:57.261Z
-#EXTINF:2.099,
-101.ts
-`
+    const lines = playlistContent.split("\n");
+    const headerLines: string[] = [];
+    const segments: PlaylistSegment[] = [];
 
-    const tsFiles = new Set(tsChunk); // let's say it's a set of 96.ts and 97.ts
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]; // let's say we are at line 95.ts... what happens?
-        // we do some wizardry and modify the playlist like a surgeon
-        // TODO: how to implement
+    let headerDone = false;
+    let currentTags: string[] = [];
+    for (const line of lines) {
+        if (line.trim() === "" || line.startsWith("#EXT-X-ENDLIST")) continue;
+
+        if (!headerDone && !line.startsWith("#EXTINF")) {
+            headerLines.push(line);
+        } else {
+            headerDone = true;
+            if (line.startsWith("#")) {
+                currentTags.push(line);
+            } else if (line.trim().endsWith(".ts")) {
+                segments.push({ tags: currentTags, filename: line.trim() });
+                currentTags = [];
+            }
+        }
     }
+
+    const tsFiles = new Set(tsChunk);
+    const newPlaylistLines = [...headerLines];
+
+    if (tsChunk.length > 0) {
+        newPlaylistLines.push("#EXT-X-DISCONTINUITY");
+    }
+
+    for (const segment of segments) {
+        if (tsFiles.has(segment.filename)) {
+            newPlaylistLines.push(...segment.tags, segment.filename);
+        }
+    }
+
+    newPlaylistLines.push("#EXT-X-ENDLIST");
+
+    const newPlaylistContent = newPlaylistLines.join("\n");
+    const newPlaylistPath = path.join(destinationPath, "playlist.m3u8");
+    await fsPromises.writeFile(newPlaylistPath, newPlaylistContent, "utf-8");
 }
