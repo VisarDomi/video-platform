@@ -137,28 +137,52 @@ export async function createEditedVideo(filename: string, segments: string[]): P
 
 async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
     const durations: Map<string, number> = await getDurations(filename);
-    let totalDuration = 0;
+
+    // Identify cache misses
+    const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
+
+    if (cacheMisses.length > 0) {
+        logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations in parallel.`);
+        // Create promises to get duration for each cache miss
+        const durationPromises = cacheMisses.map((tsFile) => getDuration(path.join(videoPath, tsFile)));
+
+        // Await all promises to resolve in parallel
+        const newDurations = await Promise.all(durationPromises);
+
+        // Update the main durations map with the new data
+        cacheMisses.forEach((tsFile, index) => {
+            durations.set(tsFile, newDurations[index]);
+        });
+    }
+
+    // Now, chunk the tsFiles using the fully populated durations map
     const parts: string[][] = [];
+    if (tsFiles.length === 0) {
+        return parts;
+    }
+
     let tsChunk: string[] = [];
+    let totalDuration = 0;
+
     for (const tsFile of tsFiles) {
-        let tsDuration: number;
-        const cachedDuration = durations.get(tsFile);
-        if (cachedDuration !== undefined) {
-            tsDuration = cachedDuration;
-        } else {
-            // TODO: use parallelism here for cache misses
-            tsDuration = await getDuration(path.join(videoPath, tsFile));
-        }
+        // We can safely assume the duration exists. Use 0 as a fallback just in case.
+        const tsDuration = durations.get(tsFile) || 0;
 
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
+
         if (totalDuration > 30 * 60) {
-            // TODO: there should be a better way than this hack
-            parts.push(Array.from(tsChunk));
+            parts.push([...tsChunk]); // i don't trust passing references, better create a copy.
             tsChunk = [];
             totalDuration = 0;
         }
     }
+
+    // Add the last remaining chunk if it's not empty
+    if (tsChunk.length > 0) {
+        parts.push(tsChunk);
+    }
+
     return parts;
 }
 
@@ -184,7 +208,7 @@ async function getDurations(filename: string): Promise<Map<string, number>> {
 }
 
 async function getDuration(tsFilePath: string): Promise<number> {
-    logger.warn(`Cache miss for duration of ${tsFilePath}. Calculating with ffprobe.`);
+    logger.warn(`Cache miss for duration of ${path.basename(tsFilePath)}. Calculating with ffprobe.`);
     try {
         const { stdout } = await execFileAsync("ffprobe", [
             "-v",
