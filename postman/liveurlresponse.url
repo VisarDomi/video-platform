@@ -1,0 +1,44 @@
+HTTP/2 200 
+content-type: application/vnd.apple.mpegurl
+content-encoding: gzip
+via: 1.1 varnish, 1.1 varnish
+cache-control: max-age=0, no-cache
+accept-ranges: bytes
+age: 0
+date: Tue, 14 Oct 2025 12:35:11 GMT
+x-served-by: cache-fra-eddf8230099-FRA, cache-mxp6957-MXP
+x-cache: HIT, MISS
+x-cache-hits: 1, 0
+vary: Accept-Encoding
+x-tango-req-start: 1760445311629
+x-tango-req-end: 1760445311640
+access-control-expose-headers: x-tango-req-start, x-tango-req-end
+access-control-allow-credentials: true
+access-control-allow-origin: https://tango.me
+strict-transport-security: max-age=300
+content-length: 342
+X-Firefox-Spdy: h2
+
+
+#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-MEDIA-SEQUENCE:472
+#EXT-X-TARGETDURATION:1
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:03.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/ca3c800dff48d94f81397c4176ac79e7/472.ts?tech=hls
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:04.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/cc900c3b5a6aa5f7b7ea8a2f220f6c69/473.ts?tech=hls
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:05.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/a92d487687a03f3e24a018b37a6dd61a/474.ts?tech=hls
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:06.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/8fb447e8f1df11fb7df7d65efead20ae/475.ts?tech=hls
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:07.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/41c8f23163a653c8c6be7da21619d733/476.ts?tech=hls
+#EXT-X-PROGRAM-DATE-TIME:2025-10-14T12:35:08.960Z
+#EXTINF:1.000,
+/v2/ss/a7f59ea8c9131664a3abf7da5adf2a58/b214a2654d9e22c58acdcd8307d90a08/477.ts?tech=hls

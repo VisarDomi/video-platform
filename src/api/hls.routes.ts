@@ -1,67 +1,28 @@
 // src/api/hls.routes.ts
 import { Router } from "express";
 import path from "path";
-import { promises as fs } from "fs";
-// WHY: Import specific paths from config
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH } from "../config.js";
+import * as fsPromises from "fs/promises";
 import logger from "../logger.js";
-import { FileNotFoundError } from "../errors.js";
+import * as utils from "../utils.js";
+import * as errors from "../errors.js";
 
 const router = Router();
 
-/**
- * Finds the full path to a video folder based on its type.
- */
-async function findVideoFolderPath(type: "original" | "edited", folderName: string): Promise<string> {
-    if (type === "original") {
-        const fullPath = path.join(VIDEO_DOWNLOAD_PATH, folderName);
-        try {
-            await fs.access(fullPath);
-            return fullPath;
-        } catch {
-            throw new FileNotFoundError(`Original video folder not found: ${folderName}`);
-        }
-    } else {
-        // For 'edited', check 'convert' first, then 'modified'.
-        const convertPath = path.join(VIDEO_CONVERT_PATH, folderName);
-        try {
-            await fs.access(convertPath);
-            return convertPath;
-        } catch {
-            // Not in convert, try modified
-            const modifiedPath = path.join(VIDEO_MODIFIED_PATH, folderName);
-            try {
-                await fs.access(modifiedPath);
-                return modifiedPath;
-            } catch {
-                throw new FileNotFoundError(`Edited video folder not found in convert or modified: ${folderName}`);
-            }
-        }
-    }
-}
-
-router.get("/hls/:type/:folderName/playlist.m3u8", async (req, res) => {
+router.get("/hls/:filename/playlist.m3u8", async (req, res) => {
     try {
-        const { type, folderName } = req.params as { type: "original" | "edited"; folderName: string };
-        const folderPath = await findVideoFolderPath(type, folderName);
-        const playlistPath = path.join(folderPath, "playlist.m3u8");
-
-        try {
-            const playlistContent = await fs.readFile(playlistPath, "utf-8");
-            if (!playlistContent.trim().endsWith("#EXT-X-ENDLIST")) {
-                res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-                res.setHeader("Pragma", "no-cache");
-                res.setHeader("Expires", "0");
-            }
-        } catch (readError) {
-            // If we can't read it, it will fail in sendFile anyway.
-            // This catch is primarily for robustness in case of race conditions.
+        const { filename } = req.params as { filename: string };
+        const videoPath = await utils.findVideoPath(filename);
+        const playlistPath = path.join(videoPath, "playlist.m3u8");
+        const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
+        if (!playlistContent.trim().endsWith("#EXT-X-ENDLIST")) {
+            res.setHeader("Cache-Control", "max-age=0, no-cache");
+            res.setHeader("age", "0");
         }
 
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
         res.sendFile(playlistPath);
     } catch (error) {
-        if (error instanceof FileNotFoundError) {
+        if (error instanceof errors.FileNotFoundError) {
             logger.warn(error.message);
             return res.status(404).send(error.message);
         }
@@ -70,20 +31,21 @@ router.get("/hls/:type/:folderName/playlist.m3u8", async (req, res) => {
     }
 });
 
-router.get("/hls/:type/:folderName/:segmentName", async (req, res) => {
+router.get("/hls/:filename/:segmentName", async (req, res) => {
     if (!req.params.segmentName.endsWith(".ts")) {
         return res.status(400).send("Invalid segment name");
     }
 
     try {
-        const { type, folderName, segmentName } = req.params as { type: "original" | "edited"; folderName: string; segmentName: string };
-        const folderPath = await findVideoFolderPath(type, folderName);
+        const { filename, segmentName } = req.params as { filename: string; segmentName: string };
+        const folderPath = await utils.findVideoPath(filename);
         const segmentPath = path.join(folderPath, segmentName);
 
         res.setHeader("Content-Type", "video/mp2t");
         res.sendFile(segmentPath);
     } catch (error) {
-        if (error instanceof FileNotFoundError) {
+        if (error instanceof errors.FileNotFoundError) {
+            logger.warn(error.message);
             return res.status(404).send(error.message);
         }
         logger.error("Failed to serve segment", { error });

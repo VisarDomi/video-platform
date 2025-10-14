@@ -2,7 +2,8 @@
 import { Router } from "express";
 import * as videoService from "../services/video.service.js";
 import logger from "../logger.js";
-import { FileNotFoundError } from "../errors.js";
+import * as errors from "../errors.js";
+import * as types from "../types.js";
 
 const router = Router();
 
@@ -16,22 +17,8 @@ router.get("/videos", async (_req, res) => {
     }
 });
 
-router.delete("/videos/:type/:filename", async (req, res) => {
-    const { type, filename } = req.params as { type: "original" | "edited"; filename: string };
-    if (!filename || (type !== "original" && type !== "edited")) {
-        return res.status(400).json({ success: false, message: "Invalid request parameters." });
-    }
-    try {
-        await videoService.trashVideo(type, filename);
-        res.json({ success: true, message: "Video moved to trash successfully." });
-    } catch (err: any) {
-        if (err instanceof FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
-        res.status(500).json({ success: false, message: "Failed to move video to trash." });
-    }
-});
-
 router.post("/edit", async (req, res) => {
-    const { filename, segments }: { filename: string; segments: { start: number; end: number }[] } = req.body;
+    const { filename, segments }: { filename: string; segments: string[] } = req.body;
 
     if (!filename || !segments || segments.length === 0) {
         return res.status(400).json({ success: false, message: "Invalid request: filename and segments are required." });
@@ -41,43 +28,26 @@ router.post("/edit", async (req, res) => {
         await videoService.createEditedVideo(filename, segments);
         res.json({ success: true, message: "Video edit job completed." });
     } catch (error: any) {
+        if (error instanceof errors.SegmentError) return res.status(404).json({ success: false, message: error.message });
         logger.error(`Failed to handle video processing for ${filename}:`, { error });
         res.status(500).json({ success: false, message: "Failed to handle video processing." });
     }
 });
 
-router.post("/videos/original/:filename/save", async (req, res) => {
-    const { filename } = req.params;
+router.post("/videos/:filename/:destination", async (req, res) => {
+    const { filename, destination } = req.params as { filename: string; destination: "trash" | "original" };
     try {
-        await videoService.moveVideoToEdited("original", filename);
-        res.json({ success: true, message: "Video moved to convert folder successfully." });
-    } catch (err: any) {
-        if (err instanceof FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
-        res.status(500).json({ success: false, message: "Failed to move video." });
-    }
-});
-
-/**
- * WHY THE CHANGE: New route to handle returning an edited video back to the originals folder.
- */
-router.post("/videos/edited/:filename/return", async (req, res) => {
-    const { filename } = req.params;
-    try {
-        await videoService.returnVideoToOriginals(filename);
+        await videoService.moveVideo(filename, destination);
         res.json({ success: true, message: "Video returned to originals successfully." });
     } catch (err: any) {
-        if (err instanceof FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
+        if (err instanceof errors.FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
         res.status(500).json({ success: false, message: "Failed to return video." });
     }
 });
 
-/**
- * WHY THE CHANGE: New route to get detailed information (like duration) for a list of videos.
- * This enables the two-phase loading strategy on the frontend for an instant UI.
- */
 router.post("/videos/details", async (req, res) => {
     try {
-        const videos = req.body.videos;
+        const videos: types.VideoItem[] = req.body.videos;
         if (!Array.isArray(videos)) {
             return res.status(400).json({ success: false, message: "Invalid request body: 'videos' array is required." });
         }

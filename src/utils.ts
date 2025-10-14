@@ -1,6 +1,9 @@
 // src/common/utils.ts
 import fs from "fs";
+import fsPromises from "fs/promises";
 import path from "path";
+import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH } from "./config.js";
+import { FileNotFoundError } from "./errors.js";
 
 /**
  * Finds the project root by searching upwards from the given directory for a package.json file.
@@ -23,4 +26,27 @@ export function findProjectRoot(startDir: string): string {
         }
         currentDir = parentDir;
     }
+}
+
+export async function findVideoPath(folderName: string): Promise<string> {
+    let finalPath = null;
+    try {
+        const fullPath = path.join(VIDEO_DOWNLOAD_PATH, folderName);
+        await fsPromises.access(fullPath);
+        finalPath = fullPath;
+    } catch {}
+    try {
+        const convertPath = path.join(VIDEO_CONVERT_PATH, folderName);
+        await fsPromises.access(convertPath);
+        finalPath = convertPath;
+    } catch {}
+    try {
+        const modifiedPath = path.join(VIDEO_MODIFIED_PATH, folderName);
+        await fsPromises.access(modifiedPath);
+        finalPath = modifiedPath;
+    } catch {}
+    if (finalPath === null) {
+        throw new FileNotFoundError(`Video not found: ${folderName}`);
+    }
+    return finalPath;
 }
