@@ -56,14 +56,10 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             const durations = await cacheDurations(videoPath, video.filename, tsFiles);
 
             let totalDuration = 0;
-
             for (const tsFile of tsFiles) {
-                let tsDuration = durations.get(tsFile)
-                if (!tsDuration) {
-                    tsDuration = await getDuration(tsFile);
-                }
-                totalDuration += tsDuration;
+                totalDuration += durations.get(tsFile) || 0;
             }
+
             return {
                 filename: video.filename,
                 type: video.type,
@@ -133,7 +129,7 @@ export async function createEditedVideo(filename: string, segments: string[]): P
     logger.info(`Successfully processed and removed original folder: ${filename}`);
 }
 
-async function cacheDurations(videoPath: string, filename: string, tsFiles: string[]) {
+async function cacheDurations(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, number>> {
     const durations: Map<string, number> = await getDurations(filename);
 
     const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
@@ -174,11 +170,7 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     let totalDuration = 0;
 
     for (const tsFile of tsFiles) {
-        let tsDuration = durations.get(tsFile)
-        if (!tsDuration) {
-            tsDuration = await getDuration(tsFile);
-        }
-
+        const tsDuration = durations.get(tsFile) || 0;
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
 
