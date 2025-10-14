@@ -1,5 +1,5 @@
 // src/main.ts
-import { DownloaderService } from "./downloader/downloaderService.js";
+import { DownloaderService } from "./services/downloaderService.js";
 
 async function main() {
     const downloaderService = await DownloaderService.create();
