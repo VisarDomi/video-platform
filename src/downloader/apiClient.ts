@@ -1,5 +1,4 @@
 // src/downloader/apiClient.ts
-import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
@@ -7,6 +6,7 @@ import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
 import { Tokens } from "../common/interfaces.js";
+import { FileSystemManager } from "../common/fileSystemManager.js";
 
 export class ApiClient {
     private tokens: Tokens | null = null;
@@ -34,40 +34,40 @@ export class ApiClient {
     }
 
     private async _loadTokens(): Promise<boolean> {
-        try {
-            const cfg = config.getConfig();
-            const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
-            const data = await fsPromises.readFile(sessionFilePath, "utf-8");
-            const session = JSON.parse(data);
+        const cfg = config.getConfig();
+        const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
+        const session = await FileSystemManager.readJsonFile<any>(sessionFilePath);
 
-            if (session.tangoST && session.tt && session.ttu && session.tte) {
-                this.tokens = {
-                    st: session.tangoST,
-                    tt: session.tt,
-                    ttu: session.ttu,
-                    tte: session.tte,
-                };
-                return true;
-            } else {
-                logger.warn("Token load failed: session.json is missing required tokens.");
-                this.tokens = null;
-                return false;
+        if (!session) {
+            if (this.tokens) {
+                logger.warn("Tokens became invalid: session.json not found or is invalid.");
             }
-        } catch (error: any) {
-            if (error.code === "ENOENT") {
-                logger.warn("Token load failed: session.json not found.");
-            } else {
-                logger.error("Failed to read tokens from session file", { error });
-            }
+            this.tokens = null;
+            return false;
+        }
+
+        if (session.tangoST && session.tt && session.ttu && session.tte) {
+            this.tokens = {
+                st: session.tangoST,
+                tt: session.tt,
+                ttu: session.ttu,
+                tte: session.tte,
+            };
+            return true;
+        } else {
+            logger.warn("Token load failed: session.json is missing required tokens.");
             this.tokens = null;
             return false;
         }
     }
 
-    private _getTokensForRequest(): Tokens | null {
-        if (!this.tokens) {
-            logger.warn("Cannot make request: Tokens are not available.");
-            return null;
+    private async _getTokensForRequest(): Promise<Tokens> {
+        while (!this.tokens) {
+            logger.warn("Tokens not available. Waiting for session.json to be populated...");
+            const loaded = await this._loadTokens();
+            if (!loaded) {
+                await timersPromises.setTimeout(5000); // wait 5s before retrying
+            }
         }
         return this.tokens;
     }
@@ -127,8 +127,7 @@ export class ApiClient {
     }
 
     public async getFollowingResponseBody(): Promise<any | null> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return null;
+        const tokens = await this._getTokensForRequest();
         const headers = this._getApiHeaders(tokens);
         return this._makeApiRequest<any>(
             "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200",
@@ -139,24 +138,21 @@ export class ApiClient {
     }
 
     public async getAllFollowing(): Promise<any | null> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return null;
+        const tokens = await this._getTokensForRequest();
         const headers = this._getApiHeaders(tokens);
         const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
         return this._makeApiRequest<any>(url, "GET", headers, "json");
     }
 
     public async getAliasesInBatch(streamerIds: string[]): Promise<any | null> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return null;
+        const tokens = await this._getTokensForRequest();
         const headers = this._getApiHeaders(tokens);
         const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
         return this._makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
     }
 
     public async getStreamerAlias(streamerId: string): Promise<string> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return streamerId;
+        const tokens = await this._getTokensForRequest();
         const headers = this._getApiHeaders(tokens);
         const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
         const response = await this._makeApiRequest<any>(url, "GET", headers, "json");
@@ -167,15 +163,13 @@ export class ApiClient {
     }
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return null;
+        const tokens = await this._getTokensForRequest();
         const headers = this._getStreamHeaders(tokens);
         return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null; }> {
-        const tokens = this._getTokensForRequest();
-        if (!tokens) return { success: false, data: null };
+    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+        const tokens = await this._getTokensForRequest();
 
         try {
             const headers = this._getStreamHeaders(tokens);

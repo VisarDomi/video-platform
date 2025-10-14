@@ -1,11 +1,11 @@
 // src/downloader/downloadsManager.ts
 
-import * as fsPromises from "fs/promises";
 import * as path from "path";
 
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
 import * as interfaces from "../common/interfaces.js";
+import { FileSystemManager } from "../common/fileSystemManager.js";
 
 export class DownloadHandle {
     public readonly masterPlaylistUrl: string;
@@ -118,16 +118,12 @@ export class DownloadsManager {
      * Writes the current state of active downloads to the status file.
      */
     private async _updateStatusFile(): Promise<void> {
-        try {
-            const downloads = Array.from(this.downloads.entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
-                masterPlaylistUrl,
-                ...downloadInfo,
-            }));
-            const status = { downloads, lastUpdated: new Date().toISOString() };
-            await fsPromises.writeFile(this.statusFilePath, JSON.stringify(status, null, 2));
-        } catch (error) {
-            logger.error("Failed to write download status to live-status.json", { error });
-        }
+        const downloads = Array.from(this.downloads.entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
+            masterPlaylistUrl,
+            ...downloadInfo,
+        }));
+        const status = { downloads, lastUpdated: new Date().toISOString() };
+        await FileSystemManager.writeJsonFile(this.statusFilePath, status);
     }
 
     /**

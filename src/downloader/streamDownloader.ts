@@ -1,5 +1,4 @@
 // src/downloader/streamDownloader.ts
-import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
@@ -8,6 +7,7 @@ import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
 import { ApiClient } from "./apiClient.js";
 import { DownloadHandle } from "./downloadsManager.js";
+import { FileSystemManager } from "../common/fileSystemManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -82,14 +82,12 @@ export class StreamDownloader {
                         for (const tsUrl of segmentsToDownload) {
                             const tsBuffer = await this.apiClient.getTsSegment(tsUrl);
                             if (tsBuffer) {
-                                try {
-                                    const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
-                                    const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
-                                    const segmentPath = path.join(segmentsDirPath, tsName);
-                                    fsPromises.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                                const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
+                                const tsName = tsNameHls.substring(0, tsNameHls.lastIndexOf("?"));
+                                const segmentPath = path.join(segmentsDirPath, tsName);
+                                const success = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                                if (success) {
                                     lastDownload = Date.now();
-                                } catch (error) {
-                                    logger.error(`Failed to save raw segment for ${segmentsDirPath}`, { error });
                                 }
                             }
                         }
@@ -111,41 +109,34 @@ export class StreamDownloader {
     }
 
     private async _getLiveUrlFromMaster(): Promise<string | null> {
-        try {
-            const masterListBody = await this.apiClient.getMasterList(this.downloadHandle.masterPlaylistUrl);
-            if (!masterListBody) {
-                logger.warn(
-                    `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
-                );
-                return null;
-            }
-
-            const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
-            let relativeLiveUrl;
-            for (let i = 0; i < masterLines.length; i++) {
-                if (masterLines[i].includes("RESOLUTION=1280x720")) {
-                    relativeLiveUrl = masterLines[i + 1];
-                    break;
-                }
-            }
-
-            if (!relativeLiveUrl) {
-                logger.warn(
-                    `Could not find HD stream in master playlist: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
-                );
-                return null;
-            }
-            const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-            let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
-            if (livePlaylistUrl.endsWith("&")) {
-                livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
-            }
-            return livePlaylistUrl;
-        } catch (error) {
-            logger.error(`Error resolving live URL from master: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`, {
-                error,
-            });
+        const masterListBody = await this.apiClient.getMasterList(this.downloadHandle.masterPlaylistUrl);
+        if (!masterListBody) {
+            logger.warn(
+                `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
+            );
             return null;
         }
+
+        const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
+        let relativeLiveUrl;
+        for (let i = 0; i < masterLines.length; i++) {
+            if (masterLines[i].includes("RESOLUTION=1280x720")) {
+                relativeLiveUrl = masterLines[i + 1];
+                break;
+            }
+        }
+
+        if (!relativeLiveUrl) {
+            logger.warn(
+                `Could not find HD stream in master playlist: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
+            );
+            return null;
+        }
+        const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
+        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
+        if (livePlaylistUrl.endsWith("&")) {
+            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
+        }
+        return livePlaylistUrl;
     }
 }

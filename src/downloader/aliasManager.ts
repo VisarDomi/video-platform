@@ -1,8 +1,8 @@
 // src/common/aliasManager.ts
-import * as fsPromises from "fs/promises";
 import * as path from "path";
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
+import { FileSystemManager } from "../common/fileSystemManager.js";
 
 export class AliasManager {
     private aliases: Map<string, string> = new Map();
@@ -22,17 +22,12 @@ export class AliasManager {
     }
 
     private async _loadAliases(): Promise<void> {
-        try {
-            const data = await fsPromises.readFile(this.aliasesFilePath, "utf-8");
-            const aliasesJson = JSON.parse(data);
+        const aliasesJson = await FileSystemManager.readJsonFile<{ [key: string]: string }>(this.aliasesFilePath);
+        if (aliasesJson) {
             this.aliases = new Map(Object.entries(aliasesJson));
             logger.info(`Loaded ${this.aliases.size} aliases from cache.`);
-        } catch (error: any) {
-            if (error.code === "ENOENT") {
-                logger.info("aliases.json not found. Starting with an empty cache.");
-            } else {
-                logger.error("Failed to load aliases from file.", { error });
-            }
+        } else {
+            logger.info("aliases.json not found or is invalid. Starting with an empty cache.");
         }
     }
 
@@ -66,11 +61,7 @@ export class AliasManager {
     }
 
     private async _updateAliasesFile(): Promise<void> {
-        try {
-            const aliasesObj = Object.fromEntries(this.aliases);
-            await fsPromises.writeFile(this.aliasesFilePath, JSON.stringify(aliasesObj, null, 2));
-        } catch (error) {
-            logger.error("Failed to write aliases to aliases.json", { error });
-        }
+        const aliasesObj = Object.fromEntries(this.aliases);
+        await FileSystemManager.writeJsonFile(this.aliasesFilePath, aliasesObj);
     }
 }
