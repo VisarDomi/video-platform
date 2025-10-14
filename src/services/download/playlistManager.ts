@@ -75,10 +75,22 @@ export class PlaylistManager {
                 // Find the metadata lines for this segment that came before it
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
-                    if (liveLines[j].startsWith("#")) {
-                        segmentMetadata.unshift(liveLines[j]);
+                    const metaLine = liveLines[j];
+                    if (metaLine.startsWith("#")) {
+                        // ** THE FIX IS HERE **
+                        // Check if it's a playlist-level header tag. If so, stop.
+                        const isHeaderTag =
+                            metaLine.startsWith("#EXTM3U") ||
+                            metaLine.startsWith("#EXT-X-VERSION") ||
+                            metaLine.startsWith("#EXT-X-TARGETDURATION") ||
+                            metaLine.startsWith("#EXT-X-MEDIA-SEQUENCE");
+
+                        if (isHeaderTag) {
+                            break; // Stop collecting metadata; we've hit the main header.
+                        }
+                        segmentMetadata.unshift(metaLine);
                     } else {
-                        break;
+                        break; // We hit the previous segment file, so stop.
                     }
                 }
                 newPlaylistEntries.push(...segmentMetadata, localName);
