@@ -9,7 +9,7 @@ import * as storage from "../common/storage.js";
 
 import * as requests from "./requests.js";
 import { DownloadsManager, DownloadHandle } from "./downloadsManager.js";
-import { AliasManager } from "../common/aliasManager.js";
+import { AliasManager } from "./aliasManager.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
