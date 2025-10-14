@@ -3,6 +3,7 @@ import { promises as fsPromises } from "fs";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import pLimit from "p-limit";
 import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH } from "../config.js";
 import logger from "../logger.js";
 import * as utils from "../utils.js";
@@ -11,6 +12,7 @@ import * as errors from "../errors.js";
 import * as config from "../config.js";
 
 const execFileAsync = promisify(execFile);
+const limit = pLimit(10); // Limit concurrency to 10 ffprobe processes at a time
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<types.VideoItem[]> {
     const videoItems: types.VideoItem[] = [];
@@ -136,7 +138,10 @@ async function cacheDurations(videoPath: string, filename: string, tsFiles: stri
 
     if (cacheMisses.length > 0) {
         logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations in parallel.`);
-        const durationPromises = cacheMisses.map((tsFile) => getDuration(path.join(videoPath, tsFile)));
+        const durationPromises = cacheMisses.map((tsFile) => {
+            const fullPath = path.join(videoPath, tsFile);
+            return limit(() => getDuration(fullPath));
+        });
         const newDurations = await Promise.all(durationPromises);
 
         cacheMisses.forEach((tsFile, index) => {
@@ -200,7 +205,7 @@ async function getDurations(filename: string): Promise<Map<string, number>> {
         }
     } catch (error: any) {
         if (error?.code === "ENOENT") {
-            logger.info(`Duration cache not found for ${filename} at ${metadataPath}. This is expected if it's the first time processing this video.`);
+            // This is expected, so no log is needed here as cacheDurations will log it.
         } else {
             logger.warn(`Could not read or parse duration cache for ${filename} from ${metadataPath}. Will proceed without cache.`, { error });
         }
