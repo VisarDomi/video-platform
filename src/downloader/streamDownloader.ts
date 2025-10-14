@@ -4,7 +4,7 @@ import * as path from "path";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
-import * as storage from "./storage.js";
+import { DownloadPathManager } from "./downloadPathManager.js";
 import { ApiClient } from "./apiClient.js";
 import { DownloadHandle } from "./downloadsManager.js";
 import { FileSystemManager } from "./fileSystemManager.js";
@@ -51,7 +51,7 @@ export class StreamDownloader {
         this.downloadHandle.update({ liveUrl });
 
         const startDate = new Date();
-        segmentsDirPath = await storage.createDownloadPaths(alias, startDate);
+        segmentsDirPath = await DownloadPathManager.createDownloadPaths(alias, startDate);
 
         if (!segmentsDirPath) {
             logger.error(`Failed to create download paths for ${alias}. Aborting download.`);
