@@ -4,43 +4,35 @@ import * as timersPromises from "timers/promises";
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 
-import * as requests from "./requests.js";
+import { ApiClient } from "./apiClient.js";
 import { DownloadsManager } from "./downloadsManager.js";
 import { AliasManager } from "./aliasManager.js";
 import { StreamDownloader } from "./streamDownloader.js";
-import { TokenManager } from "./tokenManager.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
     private aliasManager: AliasManager;
-    private tokenManager: TokenManager;
+    private apiClient: ApiClient;
 
-    /**
-     * The constructor is now private. Use the async `create` method instead.
-     */
-    private constructor(downloadsManager: DownloadsManager, aliasManager: AliasManager, tokenManager: TokenManager) {
+    private constructor(downloadsManager: DownloadsManager, aliasManager: AliasManager, apiClient: ApiClient) {
         this.downloadsManager = downloadsManager;
         this.aliasManager = aliasManager;
-        this.tokenManager = tokenManager;
+        this.apiClient = apiClient;
         logger.info("DownloaderService initialized.");
     }
 
-    /**
-     * Asynchronously creates and initializes a DownloaderService.
-     */
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
         const aliasManager = await AliasManager.create();
-        const tokenManager = await TokenManager.create();
-        requests.initRequests(tokenManager);
-        return new DownloaderService(downloadsManager, aliasManager, tokenManager);
+        const apiClient = await ApiClient.create();
+        return new DownloaderService(downloadsManager, aliasManager, apiClient);
     }
 
     public async start() {
         logger.info("Starting Downloader Service...");
 
         // Start the background watchers
-        this.tokenManager.startWatcher();
+        this.apiClient.startTokenWatcher();
         this._startStreamWatcher();
         this._startAliasUpdater();
     }
@@ -50,7 +42,7 @@ export class DownloaderService {
             logger.info("Performing hourly alias cache update...");
             try {
                 // Step 1: Get all followed account IDs
-                const followingsResponse = await requests.getAllFollowing();
+                const followingsResponse = await this.apiClient.getAllFollowing();
 
                 if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
                     logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
@@ -62,7 +54,7 @@ export class DownloaderService {
                 const streamerIds = followers.map((f: any) => f.accountId);
 
                 // Step 2: Get aliases for those IDs in a single batch request
-                const batchResponse = await requests.getAliasesInBatch(streamerIds);
+                const batchResponse = await this.apiClient.getAliasesInBatch(streamerIds);
 
                 if (!batchResponse) {
                     logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
@@ -101,7 +93,7 @@ export class DownloaderService {
 
         while (true) {
             try {
-                const streamIdsResponseBody = await requests.getFollowingResponseBody();
+                const streamIdsResponseBody = await this.apiClient.getFollowingResponseBody();
 
                 const currentTotal = this.downloadsManager.size;
                 if (currentTotal !== lastKnownTotal) {
@@ -123,7 +115,7 @@ export class DownloaderService {
                                 let alias = this.aliasManager.get(streamerId);
                                 if (!alias) {
                                     logger.info(`Alias for ${streamerId} not in cache. Fetching from API...`);
-                                    alias = await requests.getStreamerAlias(streamerId);
+                                    alias = await this.apiClient.getStreamerAlias(streamerId);
                                     if (alias && alias !== streamerId) {
                                         this.aliasManager.set(streamerId, alias);
                                     }
@@ -136,7 +128,7 @@ export class DownloaderService {
 
                                 if (downloadHandle) {
                                     logger.info(`Initiating download for ${alias || streamerId}...`);
-                                    const streamDownloader = new StreamDownloader(downloadHandle);
+                                    const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
                                     streamDownloader.start(); // Fire-and-forget
                                 }
                             }

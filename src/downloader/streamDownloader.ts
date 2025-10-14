@@ -6,14 +6,16 @@ import * as path from "path";
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
-import * as requests from "./requests.js";
+import { ApiClient } from "./apiClient.js";
 import { DownloadHandle } from "./downloadsManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
+    private apiClient: ApiClient;
 
-    constructor(downloadHandle: DownloadHandle) {
+    constructor(downloadHandle: DownloadHandle, apiClient: ApiClient) {
         this.downloadHandle = downloadHandle;
+        this.apiClient = apiClient;
     }
 
     public async start() {
@@ -59,7 +61,7 @@ export class StreamDownloader {
             let lastDownload = Date.now();
 
             while (true) {
-                const liveResponse = await requests.getLiveList(liveUrl);
+                const liveResponse = await this.apiClient.getLiveList(liveUrl);
 
                 if (liveResponse.success && liveResponse.data) {
                     const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
@@ -78,7 +80,7 @@ export class StreamDownloader {
 
                     if (segmentsToDownload.length > 0) {
                         for (const tsUrl of segmentsToDownload) {
-                            const tsBuffer = await requests.getTsSegment(tsUrl);
+                            const tsBuffer = await this.apiClient.getTsSegment(tsUrl);
                             if (tsBuffer) {
                                 try {
                                     const tsNameHls = tsUrl.substring(tsUrl.lastIndexOf("/") + 1);
@@ -110,7 +112,7 @@ export class StreamDownloader {
 
     private async _getLiveUrlFromMaster(): Promise<string | null> {
         try {
-            const masterListBody = await requests.getMasterList(this.downloadHandle.masterPlaylistUrl);
+            const masterListBody = await this.apiClient.getMasterList(this.downloadHandle.masterPlaylistUrl);
             if (!masterListBody) {
                 logger.warn(
                     `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
