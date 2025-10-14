@@ -1,12 +1,35 @@
 // src/downloader/requests.ts
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
+import { TokenManager } from "./tokenManager.js";
 
 export interface Tokens {
     st: string | null;
     tt: string | null;
     ttu: string | null;
     tte: string | null;
+}
+
+let tokenManager: TokenManager;
+
+export function initRequests(tm: TokenManager) {
+    tokenManager = tm;
+}
+
+/**
+ * Gets the current tokens. If not available, it logs a warning and returns null.
+ * This is the central point for token acquisition for requests.
+ */
+function getTokensForRequest(): Tokens | null {
+    if (!tokenManager) {
+        throw new Error("Requests module has not been initialized. Call initRequests() first.");
+    }
+    const tokens = tokenManager.getTokens();
+    if (!tokens) {
+        logger.warn("Cannot make request: Tokens are not available.");
+        return null;
+    }
+    return tokens;
 }
 
 function getApiHeaders(tokens: Tokens): HeadersInit {
@@ -67,24 +90,32 @@ async function makeApiRequest<T>(
     }
 }
 
-export async function getFollowingResponseBody(tokens: Tokens): Promise<any | null> {
+export async function getFollowingResponseBody(): Promise<any | null> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return null;
     const headers = getApiHeaders(tokens);
     return makeApiRequest<any>("https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200", "GET", headers, "json");
 }
 
-export async function getAllFollowing(tokens: Tokens): Promise<any | null> {
+export async function getAllFollowing(): Promise<any | null> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return null;
     const headers = getApiHeaders(tokens);
     const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
     return makeApiRequest<any>(url, "GET", headers, "json");
 }
 
-export async function getAliasesInBatch(streamerIds: string[], tokens: Tokens): Promise<any | null> {
+export async function getAliasesInBatch(streamerIds: string[]): Promise<any | null> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return null;
     const headers = getApiHeaders(tokens);
     const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
     return makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
 }
 
-export async function getStreamerAlias(streamerId: string, tokens: Tokens): Promise<string> {
+export async function getStreamerAlias(streamerId: string): Promise<string> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return streamerId;
     const headers = getApiHeaders(tokens);
     const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
     const response = await makeApiRequest<any>(url, "GET", headers, "json");
@@ -94,12 +125,17 @@ export async function getStreamerAlias(streamerId: string, tokens: Tokens): Prom
     return streamerId;
 }
 
-export async function getMasterList(masterListUrl: string, tokens: Tokens): Promise<string | null> {
+export async function getMasterList(masterListUrl: string): Promise<string | null> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return null;
     const headers = getStreamHeaders(tokens);
     return makeApiRequest<string>(masterListUrl, "GET", headers, "text");
 }
 
-export async function getLiveList(liveUrl: string, tokens: Tokens): Promise<{ success: boolean; data: string | null; status?: number }> {
+export async function getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null; status?: number }> {
+    const tokens = getTokensForRequest();
+    if (!tokens) return { success: false, data: null };
+
     try {
         const headers = getStreamHeaders(tokens);
         const options: RequestInit = { method: "GET", headers };

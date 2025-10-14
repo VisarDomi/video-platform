@@ -32,6 +32,7 @@ export class DownloaderService {
         const downloadsManager = await DownloadsManager.create();
         const aliasManager = await AliasManager.create();
         const tokenManager = await TokenManager.create();
+        requests.initRequests(tokenManager);
         return new DownloaderService(downloadsManager, aliasManager, tokenManager);
     }
 
@@ -46,17 +47,10 @@ export class DownloaderService {
 
     private _startAliasUpdater() {
         const updateAliases = async () => {
-            let tokens = this.tokenManager.getTokens();
-            while (!tokens) {
-                logger.info("Alias updater waiting for tokens...");
-                await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
-                tokens = this.tokenManager.getTokens();
-            }
-
             logger.info("Performing hourly alias cache update...");
             try {
                 // Step 1: Get all followed account IDs
-                const followingsResponse = await requests.getAllFollowing(tokens);
+                const followingsResponse = await requests.getAllFollowing();
 
                 if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
                     logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
@@ -68,7 +62,7 @@ export class DownloaderService {
                 const streamerIds = followers.map((f: any) => f.accountId);
 
                 // Step 2: Get aliases for those IDs in a single batch request
-                const batchResponse = await requests.getAliasesInBatch(streamerIds, tokens);
+                const batchResponse = await requests.getAliasesInBatch(streamerIds);
 
                 if (!batchResponse) {
                     logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
@@ -107,14 +101,7 @@ export class DownloaderService {
 
         while (true) {
             try {
-                const tokens = this.tokenManager.getTokens();
-                if (!tokens) {
-                    logger.warn("Tokens not available. Downloader is waiting for auth service to provide them...");
-                    await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
-                    continue;
-                }
-
-                const streamIdsResponseBody = await requests.getFollowingResponseBody(tokens);
+                const streamIdsResponseBody = await requests.getFollowingResponseBody();
 
                 const currentTotal = this.downloadsManager.size;
                 if (currentTotal !== lastKnownTotal) {
@@ -134,10 +121,9 @@ export class DownloaderService {
                                 logger.info(`Discovered new stream from ${streamerId}.`);
 
                                 let alias = this.aliasManager.get(streamerId);
-                                const currentTokens = this.tokenManager.getTokens();
-                                if (!alias && currentTokens) {
+                                if (!alias) {
                                     logger.info(`Alias for ${streamerId} not in cache. Fetching from API...`);
-                                    alias = await requests.getStreamerAlias(streamerId, currentTokens);
+                                    alias = await requests.getStreamerAlias(streamerId);
                                     if (alias && alias !== streamerId) {
                                         this.aliasManager.set(streamerId, alias);
                                     }
@@ -150,14 +136,16 @@ export class DownloaderService {
 
                                 if (downloadHandle) {
                                     logger.info(`Initiating download for ${alias || streamerId}...`);
-                                    const streamDownloader = new StreamDownloader(downloadHandle, this.tokenManager.getTokens.bind(this.tokenManager));
+                                    const streamDownloader = new StreamDownloader(downloadHandle);
                                     streamDownloader.start(); // Fire-and-forget
                                 }
                             }
                         }
                     }
                 } else {
-                    logger.verbose("Poll complete: No stream entities found in the response.");
+                    // This covers cases where response is null (no tokens/error) or valid but empty.
+                    // The requests module already logs specifics about token/network errors.
+                    logger.verbose("Poll complete: No new streams found or unable to fetch.");
                 }
             } catch (error) {
                 logger.error("Failed to poll for following streams.", { error });

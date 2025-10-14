@@ -16,7 +16,7 @@ export class DownloadHandle {
         this.downloadsManager = downloadsManager;
     }
 
-    public update(updates: Partial<Omit<interfaces.Download, 'streamerId'>>): interfaces.Download | undefined {
+    public update(updates: Partial<Omit<interfaces.Download, "streamerId">>): interfaces.Download | undefined {
         return this.downloadsManager.update(this.masterPlaylistUrl, updates);
     }
 
@@ -54,12 +54,12 @@ export class DownloadsManager {
         return instance;
     }
 
-    public add(masterPlaylistUrl: string, initialData: Omit<interfaces.Download, 'liveUrl' | 'segmentsDirPath'>): DownloadHandle | null {
+    public add(masterPlaylistUrl: string, initialData: Omit<interfaces.Download, "liveUrl" | "segmentsDirPath">): DownloadHandle | null {
         if (this.downloads.has(masterPlaylistUrl)) {
             logger.warn(`Attempted to add an already existing download: ${masterPlaylistUrl}`);
             return null;
         }
-        
+
         const newDownload: interfaces.Download = {
             ...initialData,
             liveUrl: null,
@@ -135,7 +135,8 @@ export class DownloadsManager {
      */
     private async _clearStatusFile(): Promise<void> {
         logger.info("Clearing live-status.json for a fresh start...");
-        if (this._updateFileDebounceTimer) { // Clear any pending writes
+        if (this._updateFileDebounceTimer) {
+            // Clear any pending writes
             clearTimeout(this._updateFileDebounceTimer);
             this._updateFileDebounceTimer = null;
         }

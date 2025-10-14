@@ -8,7 +8,7 @@ import * as utils from "./utils.js";
 // --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname)
+const projectRoot = utils.findProjectRoot(__dirname);
 
 // Define custom format for console logs
 const consoleFormat = winston.format.combine(

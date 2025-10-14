@@ -11,11 +11,9 @@ import { DownloadHandle } from "./downloadsManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
-    private getToken: () => requests.Tokens | null;
 
-    constructor(downloadHandle: DownloadHandle, getToken: () => requests.Tokens | null) {
+    constructor(downloadHandle: DownloadHandle) {
         this.downloadHandle = downloadHandle;
-        this.getToken = getToken;
     }
 
     public async start() {
@@ -23,7 +21,6 @@ export class StreamDownloader {
         let alias: string;
 
         try {
-            const tokensAtStart = this.getToken();
             if (!this.downloadHandle.state) {
                 logger.error(`Could not find state for download with handle. Aborting.`);
                 return;
@@ -31,14 +28,11 @@ export class StreamDownloader {
 
             alias = this.downloadHandle.state.alias;
 
-            if (!tokensAtStart) throw new Error(`Tokens not available at start of download for ${alias}`);
-
             let liveUrl: string | null = null;
             const MAX_RETRIES = 3;
             const RETRY_DELAY = 5000;
 
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                if (!this.getToken()) throw new Error("Tokens disappeared while resolving live URL.");
                 const resolvedUrl = await this._getLiveUrlFromMaster();
                 if (resolvedUrl) {
                     liveUrl = resolvedUrl;
@@ -65,13 +59,7 @@ export class StreamDownloader {
             let lastDownload = Date.now();
 
             while (true) {
-                const currentTokens = this.getToken();
-                if (!currentTokens) {
-                    logger.warn(`Tokens became unavailable for ${segmentsDirPath} mid-stream. Assuming stream has ended.`);
-                    break;
-                }
-
-                const liveResponse = await requests.getLiveList(liveUrl, currentTokens);
+                const liveResponse = await requests.getLiveList(liveUrl);
 
                 if (liveResponse.success && liveResponse.data) {
                     const liveLines = liveResponse.data.split("\n").filter((line) => line.trim() !== "");
@@ -113,18 +101,16 @@ export class StreamDownloader {
                 await timersPromises.setTimeout(1000);
             }
         } catch (error) {
-            logger.error(`Download process for ${segmentsDirPath} failed fatally.`, { error });
+            logger.error(`Download process for ${segmentsDirPath || this.downloadHandle.state?.alias} failed fatally.`, { error });
         } finally {
-            logger.info(`Finished download process for: ${segmentsDirPath}`);
+            logger.info(`Finished download process for: ${segmentsDirPath || this.downloadHandle.state?.alias}`);
             this.downloadHandle.remove();
         }
     }
 
     private async _getLiveUrlFromMaster(): Promise<string | null> {
-        const tokens = this.getToken();
-        if (!tokens) return null;
         try {
-            const masterListBody = await requests.getMasterList(this.downloadHandle.masterPlaylistUrl, tokens);
+            const masterListBody = await requests.getMasterList(this.downloadHandle.masterPlaylistUrl);
             if (!masterListBody) {
                 logger.warn(
                     `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`

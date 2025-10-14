@@ -9,7 +9,7 @@ import * as utils from "./utils.js";
 // --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname)
+const projectRoot = utils.findProjectRoot(__dirname);
 const ROOT_CONFIG_PATH = path.resolve(projectRoot, "config.json");
 
 export interface IConfig {
@@ -92,7 +92,7 @@ export function getConfig(): IConfig {
 let debounceTimer: NodeJS.Timeout | null = null;
 
 // Only watch for config changes when NOT running in a test environment.
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== "test") {
     fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
         if (filename && eventType === "change") {
             if (debounceTimer) clearTimeout(debounceTimer);
