@@ -156,10 +156,13 @@ export class ApiClient {
             if (tsResponse.ok) {
                 const tsBuffer = await tsResponse.arrayBuffer();
                 return Buffer.from(tsBuffer);
+            } else {
+                // It's common for a segment to 404 just before a stream ends. This isn't a critical error.
+                logger.warn(`Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
             }
         } catch (error: any) {
             if (error?.message !== "terminated") {
-                logger.error(`error-ts-segment, tsUrl: ${tsUrl}`, { error });
+                logger.warn(`Network error downloading TS segment: ${error.message}`, { tsUrl });
             }
         }
         return null;

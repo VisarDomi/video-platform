@@ -3,9 +3,10 @@ import * as path from "path";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 
-export interface SegmentToDownload {
+export interface SegmentInfo {
     remoteUrl: string;
     localName: string;
+    metadata: string[];
 }
 
 export class PlaylistManager {
@@ -32,14 +33,12 @@ export class PlaylistManager {
         return segments;
     }
 
-    public async processLivePlaylist(livePlaylistContent: string, cinemaApiUrl: string): Promise<SegmentToDownload[]> {
+    public async identifyNewSegments(livePlaylistContent: string, cinemaApiUrl: string): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
-        const segmentsToDownload: SegmentToDownload[] = [];
-        const newPlaylistEntries: string[] = [];
+        const newSegments: SegmentInfo[] = [];
 
         const fileExists = await FileSystemManager.pathExists(this.fullPlaylistPath);
 
-        // If playlist file doesn't exist, create it with a header.
         if (!fileExists) {
             const headerLines = liveLines.filter(
                 (line) =>
@@ -52,57 +51,44 @@ export class PlaylistManager {
             await FileSystemManager.writeFile(this.fullPlaylistPath, header);
         }
 
-        // Use the file as the source of truth to see what we've already saved.
         const existingSegments = await this.getExistingLocalSegments();
 
-        // Process segments from the live playlist
         for (let i = 0; i < liveLines.length; i++) {
             const line = liveLines[i];
             if (line.trim() === "" || line.startsWith("#")) {
                 continue;
             }
 
-            // `line` is a relative segment URL
             const remoteTsUrl = line.startsWith("/") ? `${cinemaApiUrl}${line}` : line;
-
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
             if (!existingSegments.has(localName)) {
-                // This is a new segment, let's add it.
-                segmentsToDownload.push({ remoteUrl: remoteTsUrl, localName });
-
-                // Find the metadata lines for this segment that came before it
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j];
                     if (metaLine.startsWith("#")) {
-                        // ** THE FIX IS HERE **
-                        // Check if it's a playlist-level header tag. If so, stop.
                         const isHeaderTag =
                             metaLine.startsWith("#EXTM3U") ||
                             metaLine.startsWith("#EXT-X-VERSION") ||
                             metaLine.startsWith("#EXT-X-TARGETDURATION") ||
                             metaLine.startsWith("#EXT-X-MEDIA-SEQUENCE");
-
-                        if (isHeaderTag) {
-                            break; // Stop collecting metadata; we've hit the main header.
-                        }
+                        if (isHeaderTag) break;
                         segmentMetadata.unshift(metaLine);
                     } else {
-                        break; // We hit the previous segment file, so stop.
+                        break;
                     }
                 }
-                newPlaylistEntries.push(...segmentMetadata, localName);
+                newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata });
             }
         }
 
-        if (newPlaylistEntries.length > 0) {
-            const appendData = newPlaylistEntries.join("\n") + "\n";
-            await FileSystemManager.appendFile(this.fullPlaylistPath, appendData);
-        }
+        return newSegments;
+    }
 
-        return segmentsToDownload;
+    public async appendSegmentToPlaylist(segment: SegmentInfo): Promise<void> {
+        const entry = [...segment.metadata, segment.localName].join("\n") + "\n";
+        await FileSystemManager.appendFile(this.fullPlaylistPath, entry);
     }
 
     public async finalizePlaylist(): Promise<void> {

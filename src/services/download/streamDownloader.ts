@@ -69,17 +69,26 @@ export class StreamDownloader {
 
             if (liveResponse.success && liveResponse.data) {
                 const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-                const segmentsToDownload = await playlistManager.processLivePlaylist(liveResponse.data, cinemaApiUrl);
+                const segmentsToProcess = await playlistManager.identifyNewSegments(liveResponse.data, cinemaApiUrl);
 
-                if (segmentsToDownload.length > 0) {
-                    for (const segment of segmentsToDownload) {
+                if (segmentsToProcess.length > 0) {
+                    for (const segment of segmentsToProcess) {
                         const tsBuffer = await this.apiClient.getTsSegment(segment.remoteUrl);
-                        if (tsBuffer) {
-                            const segmentPath = path.join(segmentsDirPath, segment.localName);
-                            const success = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
-                            if (success) {
-                                lastDownload = Date.now();
-                            }
+                        const segmentPath = path.join(segmentsDirPath, segment.localName);
+
+                        if (!tsBuffer) {
+                            logger.warn(`Skipping segment due to download failure: ${segment.localName}`, { remoteUrl: segment.remoteUrl, segmentPath });
+                            continue; // Skip this segment and try the next one
+                        }
+
+                        const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+
+                        if (writeSuccess) {
+                            // Only append to playlist AFTER the file is successfully written.
+                            await playlistManager.appendSegmentToPlaylist(segment);
+                            lastDownload = Date.now(); // Update timestamp on success
+                        } else {
+                            logger.error(`Failed to write segment to disk: ${segment.localName}`, { segmentPath });
                         }
                     }
                 }
