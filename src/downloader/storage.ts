@@ -1,9 +1,9 @@
 // src/common/storage.ts
 import * as path from "path";
 
-import * as config from "./config.js";
-import logger from "./logger.js";
-import { FileSystemManager } from "../downloader/fileSystemManager.js";
+import * as config from "../common/config.js";
+import logger from "../common/logger.js";
+import { FileSystemManager } from "./fileSystemManager.js";
 
 function generateDownloadBaseName(alias: string, date: Date): string {
     const year = date.getFullYear();

@@ -4,7 +4,7 @@ import * as path from "path";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
-import * as storage from "../common/storage.js";
+import * as storage from "./storage.js";
 import { ApiClient } from "./apiClient.js";
 import { DownloadHandle } from "./downloadsManager.js";
 import { FileSystemManager } from "./fileSystemManager.js";
