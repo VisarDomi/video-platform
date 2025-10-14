@@ -66,7 +66,7 @@ export class StreamDownloader {
         const downloadedTsUrls: Set<string> = new Set();
         let lastDownload = Date.now();
 
-        while (true) {
+        while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
             const liveResponse = await this.apiClient.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
@@ -100,10 +100,6 @@ export class StreamDownloader {
                 }
             }
 
-            if (Date.now() - lastDownload > config.getConfig().timeouts.staleStream) {
-                logger.info(`No new segments for ${segmentsDirPath} in ${config.getConfig().timeouts.staleStream / 1000}s. Assuming stream has ended.`);
-                break;
-            }
             await timersPromises.setTimeout(1000);
         }
 
