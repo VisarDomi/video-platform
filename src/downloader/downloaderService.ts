@@ -1,7 +1,5 @@
 // src/downloader/downloaderService.ts
-import * as fsPromises from "fs/promises";
 import * as timersPromises from "timers/promises";
-import * as path from "path";
 
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
@@ -10,18 +8,20 @@ import * as requests from "./requests.js";
 import { DownloadsManager } from "./downloadsManager.js";
 import { AliasManager } from "./aliasManager.js";
 import { StreamDownloader } from "./streamDownloader.js";
+import { TokenManager } from "./tokenManager.js";
 
 export class DownloaderService {
     private downloadsManager: DownloadsManager;
     private aliasManager: AliasManager;
-    private tokens: requests.Tokens | null = null;
+    private tokenManager: TokenManager;
 
     /**
      * The constructor is now private. Use the async `create` method instead.
      */
-    private constructor(downloadsManager: DownloadsManager, aliasManager: AliasManager) {
+    private constructor(downloadsManager: DownloadsManager, aliasManager: AliasManager, tokenManager: TokenManager) {
         this.downloadsManager = downloadsManager;
         this.aliasManager = aliasManager;
+        this.tokenManager = tokenManager;
         logger.info("DownloaderService initialized.");
     }
 
@@ -31,72 +31,32 @@ export class DownloaderService {
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
         const aliasManager = await AliasManager.create();
-        return new DownloaderService(downloadsManager, aliasManager);
+        const tokenManager = await TokenManager.create();
+        return new DownloaderService(downloadsManager, aliasManager, tokenManager);
     }
 
     public async start() {
         logger.info("Starting Downloader Service...");
-        await this._loadInitialTokens(); // Wait for the first token load
 
-        // Now start the background watchers
-        this._startTokenWatcher();
+        // Start the background watchers
+        this.tokenManager.startWatcher();
         this._startStreamWatcher();
         this._startAliasUpdater();
     }
 
-    private async _loadInitialTokens(): Promise<boolean> {
-        try {
-            const cfg = config.getConfig();
-            const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
-            const data = await fsPromises.readFile(sessionFilePath, "utf-8");
-            const session = JSON.parse(data);
-
-            if (session.tangoST && session.tt && session.ttu && session.tte) {
-                this.tokens = {
-                    st: session.tangoST,
-                    tt: session.tt,
-                    ttu: session.ttu,
-                    tte: session.tte,
-                };
-                return true;
-            } else {
-                logger.warn("Initial token load failed: session.json is missing required tokens.");
-                this.tokens = null;
-                return false;
-            }
-        } catch (error: any) {
-            if (error.code === "ENOENT") {
-                logger.warn("Initial token load failed: session.json not found.");
-            } else {
-                logger.error("Failed to read tokens from session file", { error });
-            }
-            this.tokens = null;
-            return false;
-        }
-    }
-
-    private async _startTokenWatcher() {
-        const refreshInterval = config.getConfig().intervals.shortTokenRefresh;
-        // Wait for the initial interval before the first refresh to avoid immediate re-reading
-        await timersPromises.setTimeout(refreshInterval);
-
-        while (true) {
-            await this._loadInitialTokens(); // Reuse the same logic for refreshing
-            await timersPromises.setTimeout(refreshInterval);
-        }
-    }
-
     private _startAliasUpdater() {
         const updateAliases = async () => {
-            while (!this.tokens) {
+            let tokens = this.tokenManager.getTokens();
+            while (!tokens) {
                 logger.info("Alias updater waiting for tokens...");
                 await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
+                tokens = this.tokenManager.getTokens();
             }
 
             logger.info("Performing hourly alias cache update...");
             try {
                 // Step 1: Get all followed account IDs
-                const followingsResponse = await requests.getAllFollowing(this.tokens);
+                const followingsResponse = await requests.getAllFollowing(tokens);
 
                 if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
                     logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
@@ -108,7 +68,7 @@ export class DownloaderService {
                 const streamerIds = followers.map((f: any) => f.accountId);
 
                 // Step 2: Get aliases for those IDs in a single batch request
-                const batchResponse = await requests.getAliasesInBatch(streamerIds, this.tokens);
+                const batchResponse = await requests.getAliasesInBatch(streamerIds, tokens);
 
                 if (!batchResponse) {
                     logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
@@ -147,13 +107,14 @@ export class DownloaderService {
 
         while (true) {
             try {
-                if (!this.tokens) {
+                const tokens = this.tokenManager.getTokens();
+                if (!tokens) {
                     logger.warn("Tokens not available. Downloader is waiting for auth service to provide them...");
                     await timersPromises.setTimeout(config.getConfig().intervals.shortTokenRefresh);
                     continue;
                 }
 
-                const streamIdsResponseBody = await requests.getFollowingResponseBody(this.tokens);
+                const streamIdsResponseBody = await requests.getFollowingResponseBody(tokens);
 
                 const currentTotal = this.downloadsManager.size;
                 if (currentTotal !== lastKnownTotal) {
@@ -173,9 +134,10 @@ export class DownloaderService {
                                 logger.info(`Discovered new stream from ${streamerId}.`);
 
                                 let alias = this.aliasManager.get(streamerId);
-                                if (!alias && this.tokens) {
+                                const currentTokens = this.tokenManager.getTokens();
+                                if (!alias && currentTokens) {
                                     logger.info(`Alias for ${streamerId} not in cache. Fetching from API...`);
-                                    alias = await requests.getStreamerAlias(streamerId, this.tokens);
+                                    alias = await requests.getStreamerAlias(streamerId, currentTokens);
                                     if (alias && alias !== streamerId) {
                                         this.aliasManager.set(streamerId, alias);
                                     }
@@ -188,7 +150,7 @@ export class DownloaderService {
 
                                 if (downloadHandle) {
                                     logger.info(`Initiating download for ${alias || streamerId}...`);
-                                    const streamDownloader = new StreamDownloader(downloadHandle, () => this.tokens);
+                                    const streamDownloader = new StreamDownloader(downloadHandle, this.tokenManager.getTokens.bind(this.tokenManager));
                                     streamDownloader.start(); // Fire-and-forget
                                 }
                             }
