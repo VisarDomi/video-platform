@@ -44,8 +44,8 @@ export const PORT = 7973;
 // WHY THE CHANGE: Add the new trash path to the list of directories to validate on startup.
 [VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH].forEach((dir) => {
     if (!fs.existsSync(dir)) {
-        logger.error(`The configured video directory does not exist: ${dir}`);
-        process.exit(1);
+        fs.mkdirSync(dir);
+        logger.info(`created: ${dir}`);
     }
     try {
         fs.accessSync(dir, fs.constants.R_OK);
