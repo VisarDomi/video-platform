@@ -52,25 +52,23 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             const videoPath = await utils.findVideoPath(video.filename);
             if (!videoPath) return null;
 
-            //TODO: the video-cacher calculates and caches every detail except for live. for live we always calculate on the fly.
-            // caching is done using ffprobe or ffmpeg to get the necessary data, like duration
-            // to cache: each segment length - delete all those with bitrate bigger than 20MB - those are broken - add discontinuities to the playlist
-            const metadataPath = path.join(config.CACHE_PATH, `${video.filename}.json`);
-            const temp = `visar@z440:~/Videos/tango/download/2025-10-03 011231 queensara5$ ffprobe -i 8.ts 
-            Input #0, mpegts, from '8.ts':
-            Duration: 00:00:01.06, start: 753.331000, bitrate: 2271 kb/s
-            Program 1 
-            Stream #0:0[0x100]: Video: h264 (Main) ([27][0][0][0] / 0x001B), yuv420p(progressive), 720x1280, 30 tbr, 90k tbn
-            Stream #0:1[0x101]: Audio: aac (LC) ([15][0][0][0] / 0x000F), 44100 Hz, mono, fltp, 66 kb/s
-            `;
+            const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
+            const durations = await cacheDurations(videoPath, video.filename, tsFiles);
 
-            const duration = 0;
-            const size = 0;
+            let totalDuration = 0;
+
+            for (const tsFile of tsFiles) {
+                let tsDuration = durations.get(tsFile)
+                if (!tsDuration) {
+                    tsDuration = await getDuration(tsFile);
+                }
+                totalDuration += tsDuration;
+            }
             return {
                 filename: video.filename,
                 type: video.type,
-                size,
-                duration,
+                size: 0, // calculated on the frontend - we already have the bitrate 2300kbps and totalDuration
+                duration: totalDuration,
             };
         } catch (error) {
             logger.warn(`Could not get details for ${video.filename}`, { error });
@@ -135,7 +133,7 @@ export async function createEditedVideo(filename: string, segments: string[]): P
     logger.info(`Successfully processed and removed original folder: ${filename}`);
 }
 
-async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
+async function cacheDurations(videoPath: string, filename: string, tsFiles: string[]) {
     const durations: Map<string, number> = await getDurations(filename);
 
     const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
@@ -161,6 +159,12 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
         }
     }
 
+    return durations;
+}
+
+async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
+    const durations = await cacheDurations(videoPath, filename, tsFiles);
+
     const parts: string[][] = [];
     if (tsFiles.length === 0) {
         return parts;
@@ -170,7 +174,11 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     let totalDuration = 0;
 
     for (const tsFile of tsFiles) {
-        const tsDuration = durations.get(tsFile) || 0;
+        let tsDuration = durations.get(tsFile)
+        if (!tsDuration) {
+            tsDuration = await getDuration(tsFile);
+        }
+
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
 
