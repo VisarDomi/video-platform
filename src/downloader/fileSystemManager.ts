@@ -1,6 +1,6 @@
 // src/common/fileSystemManager.ts
 import * as fsPromises from "fs/promises";
-import logger from "./logger.js";
+import logger from "../common/logger.js";
 
 export class FileSystemManager {
     public static async readFile(filePath: string): Promise<string | null> {

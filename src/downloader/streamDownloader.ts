@@ -7,7 +7,7 @@ import logger from "../common/logger.js";
 import * as storage from "../common/storage.js";
 import { ApiClient } from "./apiClient.js";
 import { DownloadHandle } from "./downloadsManager.js";
-import { FileSystemManager } from "../common/fileSystemManager.js";
+import { FileSystemManager } from "./fileSystemManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;

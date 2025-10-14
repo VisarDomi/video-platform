@@ -6,7 +6,7 @@ import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
 import { Tokens } from "../common/interfaces.js";
-import { FileSystemManager } from "../common/fileSystemManager.js";
+import { FileSystemManager } from "./fileSystemManager.js";
 
 export class ApiClient {
     private tokens: Tokens | null = null;
