@@ -5,8 +5,14 @@ import * as path from "path";
 import * as config from "../common/config.js";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
-import { Tokens } from "../common/interfaces.js";
 import { FileSystemManager } from "./fileSystemManager.js";
+
+interface Tokens {
+    st: string | null;
+    tt: string | null;
+    ttu: string | null;
+    tte: string | null;
+}
 
 export class ApiClient {
     private tokens: Tokens | null = null;
