@@ -6,6 +6,7 @@ import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
 import * as errors from "../errors.js";
+import * as config from "../config.js";
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<types.VideoItem[]> {
     const videoItems: types.VideoItem[] = [];
@@ -50,6 +51,7 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             //TODO: the video-cacher calculates and caches every detail except for live. for live we always calculate on the fly.
             // caching is done using ffprobe or ffmpeg to get the necessary data, like duration
             // to cache: each segment length - delete all those with bitrate bigger than 20MB - those are broken - add discontinuities to the playlist
+            const metadataPath = path.join(config.CACHE_PATH, video.filename);
             const temp = `visar@z440:~/Videos/tango/download/2025-10-03 011231 queensara5$ ffprobe -i 8.ts 
             Input #0, mpegts, from '8.ts':
             Duration: 00:00:01.06, start: 753.331000, bitrate: 2271 kb/s
@@ -158,6 +160,7 @@ async function getDurations(filename: string) {
 
     // ok, but what should the interface look like?
     // fullTsPath -> duration?
+    const metadataPath = path.join(config.CACHE_PATH, filename);
 
 
 
