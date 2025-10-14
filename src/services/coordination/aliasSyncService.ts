@@ -1,7 +1,7 @@
 // src/downloader/aliasSyncService.ts
-import logger from "../common/logger.js";
-import { ApiClient } from "./apiClient.js";
-import { AliasManager } from "./aliasManager.js";
+import logger from "../../common/logger.js";
+import { ApiClient } from "../api/apiClient.js";
+import { AliasManager } from "../state/aliasManager.js";
 
 export class AliasSyncService {
     private apiClient: ApiClient;

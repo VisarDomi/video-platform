@@ -2,9 +2,9 @@
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
-import * as config from "../common/config.js";
-import logger from "../common/logger.js";
-import { FileSystemManager } from "./fileSystemManager.js";
+import * as config from "../../common/config.js";
+import logger from "../../common/logger.js";
+import { FileSystemManager } from "../../common/fileSystemManager.js";
 
 export interface Tokens {
     st: string | null;

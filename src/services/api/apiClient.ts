@@ -1,6 +1,6 @@
 // src/downloader/apiClient.ts
-import logger from "../common/logger.js";
-import * as constants from "../common/constants.js";
+import logger from "../../common/logger.js";
+import * as constants from "../../common/constants.js";
 import { TokenManager, Tokens } from "./tokenManager.js";
 
 export class ApiClient {

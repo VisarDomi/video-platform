@@ -2,12 +2,12 @@
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
-import * as config from "../common/config.js";
-import logger from "../common/logger.js";
+import * as config from "../../common/config.js";
+import logger from "../../common/logger.js";
 import { DownloadPathManager } from "./downloadPathManager.js";
-import { ApiClient } from "./apiClient.js";
-import { DownloadHandle } from "./downloadsManager.js";
-import { FileSystemManager } from "./fileSystemManager.js";
+import { ApiClient } from "../api/apiClient.js";
+import { DownloadHandle } from "../state/downloadsManager.js";
+import { FileSystemManager } from "../../common/fileSystemManager.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;

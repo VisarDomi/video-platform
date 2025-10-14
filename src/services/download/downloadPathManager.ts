@@ -1,9 +1,9 @@
 // src/downloader/downloadPathManager.ts
 import * as path from "path";
 
-import * as config from "../common/config.js";
-import logger from "../common/logger.js";
-import { FileSystemManager } from "./fileSystemManager.js";
+import * as config from "../../common/config.js";
+import logger from "../../common/logger.js";
+import { FileSystemManager } from "../../common/fileSystemManager.js";
 
 export class DownloadPathManager {
     private static generateDownloadBaseName(alias: string, date: Date): string {

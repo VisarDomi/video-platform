@@ -1,12 +1,12 @@
 // src/downloader/streamDiscoveryService.ts
 import * as timersPromises from "timers/promises";
 
-import * as config from "../common/config.js";
-import logger from "../common/logger.js";
-import { ApiClient } from "./apiClient.js";
-import { DownloadsManager } from "./downloadsManager.js";
-import { AliasManager } from "./aliasManager.js";
-import { StreamDownloader } from "./streamDownloader.js";
+import * as config from "../../common/config.js";
+import logger from "../../common/logger.js";
+import { ApiClient } from "../api/apiClient.js";
+import { DownloadsManager } from "../state/downloadsManager.js";
+import { AliasManager } from "../state/aliasManager.js";
+import { StreamDownloader } from "../download/streamDownloader.js";
 
 export class StreamDiscoveryService {
     private apiClient: ApiClient;

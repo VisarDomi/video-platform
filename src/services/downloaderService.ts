@@ -1,11 +1,11 @@
 // src/downloader/downloaderService.ts
 import logger from "../common/logger.js";
-import { ApiClient } from "./apiClient.js";
-import { DownloadsManager } from "./downloadsManager.js";
-import { AliasManager } from "./aliasManager.js";
-import { TokenManager } from "./tokenManager.js";
-import { AliasSyncService } from "./aliasSyncService.js";
-import { StreamDiscoveryService } from "./streamDiscoveryService.js";
+import { ApiClient } from "./api/apiClient.js";
+import { DownloadsManager } from "./state/downloadsManager.js";
+import { AliasManager } from "./state/aliasManager.js";
+import { TokenManager } from "./api/tokenManager.js";
+import { AliasSyncService } from "./coordination/aliasSyncService.js";
+import { StreamDiscoveryService } from "./coordination/streamDiscoveryService.js";
 
 export class DownloaderService {
     private tokenManager: TokenManager;
