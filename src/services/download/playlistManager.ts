@@ -1,6 +1,7 @@
 // src/services/download/playlistManager.ts
 import * as path from "path";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
+import logger from "../../common/logger.js";
 
 export interface SegmentToDownload {
     remoteUrl: string;
@@ -9,55 +10,92 @@ export interface SegmentToDownload {
 
 export class PlaylistManager {
     private segmentsDirPath: string;
-    private localPlaylistPath: string;
-    private processedRemoteTsUrls: Set<string> = new Set();
+    private fullPlaylistPath: string;
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;
-        this.localPlaylistPath = path.join(this.segmentsDirPath, "playlist.m3u8");
+        this.fullPlaylistPath = path.join(this.segmentsDirPath, "playlist.m3u8");
     }
 
-    /**
-     * Processes the live HLS playlist content from the server.
-     * It writes a local version of the playlist with relative paths and
-     * returns a list of new, remote .ts segment URLs that need to be downloaded.
-     * @param livePlaylistContent - The raw text content of the live playlist.
-     * @param cinemaApiUrl - The base URL for constructing full segment URLs.
-     * @returns A promise that resolves to an array of objects representing segments to download.
-     */
+    private async getExistingLocalSegments(): Promise<Set<string>> {
+        const content = await FileSystemManager.readFile(this.fullPlaylistPath);
+        if (!content) {
+            return new Set();
+        }
+        const lines = content.split("\n");
+        const segments = new Set<string>();
+        for (const line of lines) {
+            if (line.trim() !== "" && !line.startsWith("#")) {
+                segments.add(line);
+            }
+        }
+        return segments;
+    }
+
     public async processLivePlaylist(livePlaylistContent: string, cinemaApiUrl: string): Promise<SegmentToDownload[]> {
         const liveLines = livePlaylistContent.split("\n");
-
         const segmentsToDownload: SegmentToDownload[] = [];
-        const localPlaylistLines: string[] = [];
+        const newPlaylistEntries: string[] = [];
 
-        for (const line of liveLines) {
-            if (line.trim() === "") continue;
+        const fileExists = await FileSystemManager.pathExists(this.fullPlaylistPath);
 
-            if (line.startsWith("#")) {
-                localPlaylistLines.push(line);
-            } else {
-                // This is a segment URL.
-                const remoteTsUrl = line.startsWith("/") ? `${cinemaApiUrl}${line}` : line;
+        // If playlist file doesn't exist, create it with a header.
+        if (!fileExists) {
+            const headerLines = liveLines.filter(
+                (line) =>
+                    line.startsWith("#EXTM3U") ||
+                    line.startsWith("#EXT-X-VERSION") ||
+                    line.startsWith("#EXT-X-TARGETDURATION") ||
+                    line.startsWith("#EXT-X-MEDIA-SEQUENCE")
+            );
+            const header = headerLines.join("\n") + "\n";
+            await FileSystemManager.writeFile(this.fullPlaylistPath, header);
+        }
 
-                // For the local playlist, we just want the filename.
-                // e.g., from .../12345.ts?query=param -> 12345.ts
-                const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
-                const tsName = tsNameWithQuery.split("?")[0];
-                localPlaylistLines.push(tsName);
+        // Use the file as the source of truth to see what we've already saved.
+        const existingSegments = await this.getExistingLocalSegments();
 
-                // Check if we need to download it.
-                if (!this.processedRemoteTsUrls.has(remoteTsUrl)) {
-                    segmentsToDownload.push({ remoteUrl: remoteTsUrl, localName: tsName });
-                    this.processedRemoteTsUrls.add(remoteTsUrl);
+        // Process segments from the live playlist
+        for (let i = 0; i < liveLines.length; i++) {
+            const line = liveLines[i];
+            if (line.trim() === "" || line.startsWith("#")) {
+                continue;
+            }
+
+            // `line` is a relative segment URL
+            const remoteTsUrl = line.startsWith("/") ? `${cinemaApiUrl}${line}` : line;
+
+            const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
+            const localName = tsNameWithQuery.split("?")[0];
+
+            if (!existingSegments.has(localName)) {
+                // This is a new segment, let's add it.
+                segmentsToDownload.push({ remoteUrl: remoteTsUrl, localName });
+
+                // Find the metadata lines for this segment that came before it
+                const segmentMetadata: string[] = [];
+                for (let j = i - 1; j >= 0; j--) {
+                    if (liveLines[j].startsWith("#")) {
+                        segmentMetadata.unshift(liveLines[j]);
+                    } else {
+                        break;
+                    }
                 }
+                newPlaylistEntries.push(...segmentMetadata, localName);
             }
         }
 
-        const localPlaylistData = localPlaylistLines.join("\n");
-        // This write operation is the core of the future playlist manager feature.
-        await FileSystemManager.writeFile(this.localPlaylistPath, localPlaylistData);
+        if (newPlaylistEntries.length > 0) {
+            const appendData = newPlaylistEntries.join("\n") + "\n";
+            await FileSystemManager.appendFile(this.fullPlaylistPath, appendData);
+        }
 
         return segmentsToDownload;
+    }
+
+    public async finalizePlaylist(): Promise<void> {
+        logger.info(`Finalizing playlist: ${this.fullPlaylistPath}`);
+        const endTag = "#EXT-X-ENDLIST\n";
+        await FileSystemManager.appendFile(this.fullPlaylistPath, endTag);
     }
 }

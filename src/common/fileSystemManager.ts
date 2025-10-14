@@ -24,6 +24,29 @@ export class FileSystemManager {
         }
     }
 
+    public static async appendFile(filePath: string, data: string): Promise<boolean> {
+        try {
+            await fsPromises.appendFile(filePath, data);
+            return true;
+        } catch (error: any) {
+            logger.error(`Failed to append to file: ${filePath}`, { error: error.message });
+            return false;
+        }
+    }
+
+    public static async pathExists(filePath: string): Promise<boolean> {
+        try {
+            await fsPromises.access(filePath);
+            return true;
+        } catch (error: any) {
+            if (error.code === "ENOENT") {
+                return false;
+            }
+            logger.error(`Error checking path existence: ${filePath}`, { error: error.message });
+            return false;
+        }
+    }
+
     public static async readJsonFile<T>(filePath: string): Promise<T | null> {
         const fileContent = await this.readFile(filePath);
         if (fileContent === null) {

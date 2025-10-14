@@ -88,6 +88,8 @@ export class StreamDownloader {
             await timersPromises.setTimeout(1000);
         }
 
+        await playlistManager.finalizePlaylist();
+
         logger.info(`Finished download process for: ${segmentsDirPath}`);
         this.downloadHandle.remove();
     }
