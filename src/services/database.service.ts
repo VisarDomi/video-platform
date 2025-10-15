@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS durations (
     PRIMARY KEY (video_filename, ts_filename)
 );`;
 
+const createFixedPlaylistsTableQuery = `
+CREATE TABLE IF NOT EXISTS fixed_playlists (
+    video_filename TEXT PRIMARY KEY
+);`;
+
 db.serialize(() => {
     db.run(createTableQuery, (err) => {
         if (err) {
@@ -49,4 +54,51 @@ db.serialize(() => {
             });
         }
     });
+
+    db.run(createFixedPlaylistsTableQuery, (err) => {
+        if (err) {
+            logger.error("Error creating fixed_playlists table", { error: err.message });
+            process.exit(1);
+        }
+        logger.info("Database table 'fixed_playlists' is ready.");
+    });
 });
+
+export function isPlaylistFixed(video_filename: string): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+        const sql = `SELECT 1 FROM fixed_playlists WHERE video_filename = ?`;
+        db.get(sql, [video_filename], (err, row) => {
+            if (err) {
+                logger.error(`Failed to check fixed_playlists for ${video_filename}`, { error: err });
+                return reject(err);
+            }
+            resolve(!!row);
+        });
+    });
+}
+
+export function addFixedPlaylistEntry(video_filename: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const sql = `INSERT OR IGNORE INTO fixed_playlists (video_filename) VALUES (?)`;
+        db.run(sql, [video_filename], function (err) {
+            if (err) {
+                logger.error(`Failed to add fixed_playlists entry for ${video_filename}`, { error: err });
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}
+
+export function removeFixedPlaylistEntry(video_filename: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const sql = `DELETE FROM fixed_playlists WHERE video_filename = ?`;
+        db.run(sql, [video_filename], function (err) {
+            if (err) {
+                logger.error(`Failed to remove fixed_playlists entry for ${video_filename}`, { error: err });
+                return reject(err);
+            }
+            resolve();
+        });
+    });
+}

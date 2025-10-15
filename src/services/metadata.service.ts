@@ -11,7 +11,6 @@ import * as databaseService from "./database.service.js";
 
 const execFileAsync = promisify(execFile);
 const limit = pLimit(10); // Limit concurrency to 10 ffprobe processes at a time
-const cachingInProgress = new Set<string>(); // In-memory lock
 
 export interface SegmentMetadata {
     duration: number;
@@ -69,7 +68,6 @@ export async function cacheMetadata(videoPath: string, filename: string, tsFiles
             metadata.set(tsFile, newMetadata[index]);
         });
 
-        // Write the updated metadata back to the database.
         const stmt = databaseService.db.prepare("INSERT OR REPLACE INTO durations (video_filename, ts_filename, duration, resolution) VALUES (?, ?, ?, ?)");
         databaseService.db.serialize(() => {
             databaseService.db.run("BEGIN TRANSACTION");
@@ -91,35 +89,20 @@ export async function cacheMetadata(videoPath: string, filename: string, tsFiles
 export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
     const videoDetailsPromises = videos.map(async (video): Promise<types.VideoItem> => {
         try {
-            if (cachingInProgress.has(video.filename)) {
-                logger.info(`Caching already in progress for ${video.filename}. Skipping duplicate request.`);
+            const isFixed = await databaseService.isPlaylistFixed(video.filename);
+            if (!isFixed) {
                 return { ...video, size: 0, duration: 0 };
             }
 
             const videoPath = await utils.findVideoPath(video.filename);
             const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
-
             const metadata = await getMetadata(video.filename);
-            const cacheMisses = tsFiles.filter((tsFile) => !metadata.has(tsFile) || !metadata.get(tsFile)?.resolution);
 
-            if (cacheMisses.length > 0) {
-                cachingInProgress.add(video.filename);
-                cacheMetadata(videoPath, video.filename, tsFiles)
-                    .catch((error) => {
-                        logger.error(`Background metadata caching failed for ${video.filename}`, { error });
-                    })
-                    .finally(() => {
-                        cachingInProgress.delete(video.filename);
-                    });
-
-                return { ...video, size: 0, duration: 0 };
-            } else {
-                let totalDuration = 0;
-                for (const tsFile of tsFiles) {
-                    totalDuration += metadata.get(tsFile)?.duration || 0;
-                }
-                return { ...video, size: 0, duration: totalDuration };
+            let totalDuration = 0;
+            for (const tsFile of tsFiles) {
+                totalDuration += metadata.get(tsFile)?.duration || 0;
             }
+            return { ...video, size: 0, duration: totalDuration };
         } catch (error) {
             logger.warn(`Could not get details for ${video.filename}, returning duration 0.`, { error });
             return { ...video, size: 0, duration: 0 };
