@@ -8,12 +8,18 @@ import * as types from "../types.js";
 import * as errors from "../errors.js";
 import * as metadataService from "./metadata.service.js";
 import * as databaseService from "./database.service.js";
+import * as hlsService from "./hls.service.js";
 
 let isFixerRunning = false;
 let videoListCache: types.VideoItem[] = [];
+const videoPathCache = new Map<string, string>();
 
 export function getAllVideos(): types.VideoItem[] {
     return videoListCache;
+}
+
+export function getKnownVideoPath(filename: string): string | undefined {
+    return videoPathCache.get(filename);
 }
 
 async function getLiveFolders(): Promise<Set<string>> {
@@ -85,6 +91,7 @@ async function fixAndCachePlaylist(videoPath: string, filename: string): Promise
         const playlistPath = path.join(videoPath, "playlist.m3u8");
         await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
         await databaseService.addFixedPlaylistEntry(filename);
+        await hlsService.updatePlaylistCache(filename, videoPath);
 
         let totalDuration = 0;
         for (const tsFile of tsFiles) {
@@ -140,9 +147,11 @@ export async function startPlaylistFixerWorker() {
 
         const allFolders = [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.item.filename.localeCompare(b.item.filename));
 
-        // Step 2: Update the in-memory cache for the /videos endpoint
+        // Step 2: Update the in-memory caches for video list and video paths
         videoListCache = allFolders.map((f) => f.item);
-        logger.info(`Video list cache updated with ${videoListCache.length} items.`);
+        videoPathCache.clear();
+        allFolders.forEach((f) => videoPathCache.set(f.item.filename, f.fullPath));
+        logger.info(`Video list/path caches updated with ${videoListCache.length} items.`);
 
         // Step 3: Process each folder for playlist fixing and details caching
         const liveFolders = await getLiveFolders();
@@ -152,11 +161,13 @@ export async function startPlaylistFixerWorker() {
             const folderPath = folder.fullPath;
 
             if (liveFolders.has(folderName)) {
-                logger.info(`Skipping folder ${folderName} because it is currently live.`);
+                await hlsService.updatePlaylistCache(folderName, folderPath);
+                logger.info(`Skipping playlist fix for live folder ${folderName}, but refreshing HLS cache.`);
                 continue;
             }
 
             if (databaseService.isPlaylistFixed(folderName)) {
+                await hlsService.updatePlaylistCache(folderName, folderPath);
                 if (!metadataService.isVideoDetailsCached(folderName)) {
                     try {
                         const tsFiles = (await fsPromises.readdir(folderPath)).filter((f) => f.endsWith(".ts"));
@@ -219,6 +230,8 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
         await fsPromises.rename(videoPath, destinationPath);
         await databaseService.removeFixedPlaylistEntry(filename);
         metadataService.removeVideoDetailsFromCache(filename);
+        hlsService.removePlaylistFromCache(filename);
+        videoPathCache.delete(filename);
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from caches.`);
         await startPlaylistFixerWorker();
     } else {
