@@ -58,7 +58,6 @@ export async function cacheDurations(videoPath: string, filename: string, tsFile
     const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
 
     if (cacheMisses.length > 0) {
-        logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations.`);
         const durationPromises = cacheMisses.map((tsFile) => {
             const fullPath = path.join(videoPath, tsFile);
             return limit(() => getDuration(fullPath));
@@ -79,8 +78,6 @@ export async function cacheDurations(videoPath: string, filename: string, tsFile
             databaseService.db.run("COMMIT", (err) => {
                 if (err) {
                     logger.error(`Failed to commit duration cache for ${filename}.`, { error: err });
-                } else {
-                    logger.info(`Successfully updated duration cache for ${filename}.`);
                 }
             });
         });
@@ -105,14 +102,12 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
 
             if (cacheMisses.length > 0) {
                 cachingInProgress.add(video.filename);
-                logger.info(`Starting background duration caching for ${video.filename}.`);
                 cacheDurations(videoPath, video.filename, tsFiles)
                     .catch((error) => {
                         logger.error(`Background duration caching failed for ${video.filename}`, { error });
                     })
                     .finally(() => {
                         cachingInProgress.delete(video.filename);
-                        logger.info(`Finished background duration caching for ${video.filename}.`);
                     });
 
                 return { ...video, size: 0, duration: 0 };
