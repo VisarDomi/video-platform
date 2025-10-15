@@ -37,13 +37,14 @@ router.post("/edit", async (req, res) => {
 });
 
 router.post("/videos/:filename/:destination", async (req, res) => {
-    const { filename, destination } = req.params as { filename: string; destination: "trash" | "original" };
+    const { filename, destination } = req.params as { filename: string; destination: "trash" | "original" | "convert" };
     try {
         await videoService.moveVideo(filename, destination);
-        res.json({ success: true, message: "Video returned to originals successfully." });
+        res.json({ success: true, message: "Video moved successfully." });
     } catch (err: any) {
         if (err instanceof errors.FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
-        res.status(500).json({ success: false, message: "Failed to return video." });
+        if (err instanceof errors.MoveError) return res.status(400).json({ success: false, message: err.message });
+        res.status(500).json({ success: false, message: "Failed to move video." });
     }
 });
 

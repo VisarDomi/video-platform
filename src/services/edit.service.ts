@@ -38,14 +38,13 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     return parts;
 }
 
-async function createPlaylist(filename: string, tsChunk: string[], destinationPath: string): Promise<void> {
+async function createPlaylist(sourceVideoPath: string, tsChunk: string[], destinationPath: string): Promise<void> {
     interface PlaylistSegment {
         tags: string[];
         filename: string;
     }
 
-    const videoPath = await utils.findVideoPath(filename);
-    const playlistPath = path.join(videoPath, "playlist.m3u8");
+    const playlistPath = path.join(sourceVideoPath, "playlist.m3u8");
     const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
 
     const lines = playlistContent.split("\n");
@@ -113,7 +112,7 @@ export async function createEditedVideo(filename: string, segments: string[]): P
             await fsPromises.mkdir(destinationPath, { recursive: true });
             const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file)));
             await Promise.all(movePromises);
-            await createPlaylist(filename, tsChunk, destinationPath);
+            await createPlaylist(videoPath, tsChunk, destinationPath);
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
     }

@@ -41,23 +41,25 @@ export async function getAllVideos(): Promise<types.VideoItem[]> {
     return [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.filename.localeCompare(b.filename));
 }
 
-export async function moveVideo(filename: string, destination: "trash" | "original"): Promise<void> {
+export async function moveVideo(filename: string, destination: "trash" | "original" | "convert"): Promise<void> {
     let newPath: string;
-    if (destination !== "trash" && destination !== "original") {
-        throw new errors.MoveError("destination can only have the values trash or original");
+    if (destination === "trash") {
+        newPath = VIDEO_TRASH_PATH;
+    } else if (destination === "original") {
+        newPath = VIDEO_DOWNLOAD_PATH;
+    } else if (destination === "convert") {
+        newPath = VIDEO_CONVERT_PATH;
     } else {
-        if (destination === "trash") {
-            newPath = VIDEO_TRASH_PATH;
-        } else {
-            newPath = VIDEO_DOWNLOAD_PATH;
-        }
+        throw new errors.MoveError("Destination can only be trash, original, or convert.");
     }
+
     const videoPath = await utils.findVideoPath(filename);
     if (!videoPath) throw new errors.FileNotFoundError(`Video folder not found: ${filename}`);
-    if (!videoPath.includes(newPath)) {
+
+    if (!videoPath.startsWith(newPath)) {
         const destinationPath = path.join(newPath, filename);
         await fsPromises.rename(videoPath, destinationPath);
-        logger.info(`Moved folder to: ${destinationPath}`);
+        logger.info(`Moved folder from ${videoPath} to: ${destinationPath}`);
     } else {
         throw new errors.MoveError("File is already at the destination.");
     }
