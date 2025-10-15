@@ -57,7 +57,22 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
     if (!videoPath) throw new errors.FileNotFoundError(`Video folder not found: ${filename}`);
 
     if (!videoPath.startsWith(newPath)) {
-        const destinationPath = path.join(newPath, filename);
+        let destinationFilename = filename;
+        let destinationPath = path.join(newPath, destinationFilename);
+        let counter = 1;
+
+        while (true) {
+            try {
+                await fsPromises.access(destinationPath);
+                // Path exists, so we need to find a new name
+                destinationFilename = `${filename} (${counter++})`;
+                destinationPath = path.join(newPath, destinationFilename);
+            } catch (error) {
+                // Path does not exist, we've found a unique name.
+                break;
+            }
+        }
+
         await fsPromises.rename(videoPath, destinationPath);
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath}`);
     } else {
