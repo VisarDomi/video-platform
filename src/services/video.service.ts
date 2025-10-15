@@ -20,10 +20,11 @@ async function getLiveFolders(): Promise<Set<string>> {
     try {
         const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
         const liveData = JSON.parse(content);
-        if (Array.isArray(liveData)) {
-            return new Set(liveData);
+        if (liveData && Array.isArray(liveData.downloads)) {
+            const liveFolderNames = liveData.downloads.map((download: { segmentsDirPath: string }) => path.basename(download.segmentsDirPath));
+            return new Set(liveFolderNames);
         }
-        logger.warn("live-status.json is not an array, ignoring.");
+        logger.warn("live-status.json format is invalid or has no 'downloads' array, ignoring.");
         return new Set();
     } catch (error: any) {
         if (error.code !== "ENOENT") {
