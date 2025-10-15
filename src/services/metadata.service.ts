@@ -89,49 +89,50 @@ export async function cacheDurations(videoPath: string, filename: string, tsFile
 }
 
 export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
-    // Step 1: Perform lightweight I/O in parallel to get video paths and file lists.
-    const videoInfoPromises = videos.map(async (video) => {
+    const videoDetailsPromises = videos.map(async (video): Promise<types.VideoItem> => {
         try {
             const videoPath = await utils.findVideoPath(video.filename);
-            if (!videoPath) {
-                logger.warn(`Could not find path for video ${video.filename} in getVideosDetails`);
-                return null;
-            }
             const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
-            return { video, videoPath, tsFiles };
+
+            // Read existing cache without triggering new calculations yet
+            const durations = await getDurations(video.filename);
+
+            const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
+
+            if (cacheMisses.length > 0) {
+                // There are cache misses. Return 0 duration and trigger background caching.
+                // Fire-and-forget promise for caching
+                cacheDurations(videoPath, video.filename, tsFiles).catch((error) => {
+                    logger.error(`Background duration caching failed for ${video.filename}`, { error });
+                });
+
+                return {
+                    ...video,
+                    size: 0, // calculated on the frontend
+                    duration: 0,
+                };
+            } else {
+                // All durations are cached. Calculate total duration and return it.
+                let totalDuration = 0;
+                for (const tsFile of tsFiles) {
+                    totalDuration += durations.get(tsFile) || 0;
+                }
+                return {
+                    ...video,
+                    size: 0, // calculated on the frontend
+                    duration: totalDuration,
+                };
+            }
         } catch (error) {
-            logger.warn(`Error getting initial details for ${video.filename}`, { error });
-            return null;
+            logger.warn(`Could not get details for ${video.filename}, returning duration 0.`, { error });
+            // Return with duration 0 on error
+            return {
+                ...video,
+                size: 0,
+                duration: 0,
+            };
         }
     });
 
-    const allVideoInfo = (await Promise.all(videoInfoPromises)).filter(
-        (info): info is { video: types.VideoItem; videoPath: string; tsFiles: string[] } => info !== null
-    );
-
-    // Step 2: Process the expensive caching part serially for each video.
-    const finalResults: types.VideoItem[] = [];
-    for (const info of allVideoInfo) {
-        try {
-            const { video, videoPath, tsFiles } = info;
-            const durations = await cacheDurations(videoPath, video.filename, tsFiles);
-
-            let totalDuration = 0;
-            for (const tsFile of tsFiles) {
-                totalDuration += durations.get(tsFile) || 0;
-            }
-
-            finalResults.push({
-                filename: video.filename,
-                type: video.type,
-                size: 0, // calculated on the frontend
-                duration: totalDuration,
-            });
-        } catch (error) {
-            // Log the error for the specific video but continue processing others.
-            logger.warn(`Could not process durations for ${info.video.filename}`, { error });
-        }
-    }
-
-    return finalResults;
+    return Promise.all(videoDetailsPromises);
 }
