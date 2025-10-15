@@ -3,7 +3,7 @@
         "download": "/home/visar/Videos/tango/download",
         "convert": "/home/visar/Videos/tango/convert",
         "modified": "/home/visar/Videos/tango/modified",
-        "trash": "/home/visar/Videos/tango/trash-edit"
+        "trash": "/home/visar/Videos/tango/trash"
     },
     "frontendDistPath": "/home/visar/Documents/tango-repos/video-editor-frontend/dist"
 }
