@@ -5,7 +5,6 @@ import * as editService from "../services/edit.service.js";
 import * as metadataService from "../services/metadata.service.js";
 import logger from "../logger.js";
 import * as errors from "../errors.js";
-import * as types from "../types.js";
 
 const router = Router();
 

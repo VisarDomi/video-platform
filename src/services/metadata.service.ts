@@ -19,7 +19,6 @@ const videoDetailsCache = new Map<string, { duration: number }>();
 
 export function updateVideoDetailsCache(filename: string, duration: number): void {
     videoDetailsCache.set(filename, { duration });
-    logger.info(`Updated in-memory cache for ${filename}: duration ${duration.toFixed(2)}s`);
 }
 
 export function removeVideoDetailsFromCache(filename: string): void {
