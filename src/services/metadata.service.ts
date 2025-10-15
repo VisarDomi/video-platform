@@ -89,8 +89,7 @@ export async function cacheMetadata(videoPath: string, filename: string, tsFiles
 export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
     const videoDetailsPromises = videos.map(async (video): Promise<types.VideoItem> => {
         try {
-            const isFixed = await databaseService.isPlaylistFixed(video.filename);
-            if (!isFixed) {
+            if (!databaseService.isPlaylistFixed(video.filename)) {
                 return { ...video, size: 0, duration: 0 };
             }
 

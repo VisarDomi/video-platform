@@ -114,8 +114,7 @@ async function startPlaylistFixerWorker() {
                 continue;
             }
 
-            const isFixed = await databaseService.isPlaylistFixed(folder.name);
-            if (isFixed) {
+            if (databaseService.isPlaylistFixed(folder.name)) {
                 continue;
             }
 

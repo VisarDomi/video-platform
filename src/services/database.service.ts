@@ -12,6 +12,8 @@ export const db = new verboseSqlite.Database(DB_PATH, (err) => {
     logger.info("Connected to the SQLite database.");
 });
 
+const fixedPlaylistsCache = new Set<string>();
+
 const createTableQuery = `
 CREATE TABLE IF NOT EXISTS durations (
     video_filename TEXT NOT NULL,
@@ -62,19 +64,20 @@ db.serialize(() => {
         }
         logger.info("Database table 'fixed_playlists' is ready.");
     });
+
+    // Initialize the cache
+    db.all("SELECT video_filename FROM fixed_playlists", [], (err, rows: { video_filename: string }[]) => {
+        if (err) {
+            logger.error("Failed to load fixed_playlists into cache", { error: err });
+            process.exit(1);
+        }
+        rows.forEach((row) => fixedPlaylistsCache.add(row.video_filename));
+        logger.info(`Loaded ${fixedPlaylistsCache.size} fixed playlists into memory cache.`);
+    });
 });
 
-export function isPlaylistFixed(video_filename: string): Promise<boolean> {
-    return new Promise((resolve, reject) => {
-        const sql = `SELECT 1 FROM fixed_playlists WHERE video_filename = ?`;
-        db.get(sql, [video_filename], (err, row) => {
-            if (err) {
-                logger.error(`Failed to check fixed_playlists for ${video_filename}`, { error: err });
-                return reject(err);
-            }
-            resolve(!!row);
-        });
-    });
+export function isPlaylistFixed(video_filename: string): boolean {
+    return fixedPlaylistsCache.has(video_filename);
 }
 
 export function addFixedPlaylistEntry(video_filename: string): Promise<void> {
@@ -85,6 +88,7 @@ export function addFixedPlaylistEntry(video_filename: string): Promise<void> {
                 logger.error(`Failed to add fixed_playlists entry for ${video_filename}`, { error: err });
                 return reject(err);
             }
+            fixedPlaylistsCache.add(video_filename);
             resolve();
         });
     });
@@ -98,6 +102,7 @@ export function removeFixedPlaylistEntry(video_filename: string): Promise<void> 
                 logger.error(`Failed to remove fixed_playlists entry for ${video_filename}`, { error: err });
                 return reject(err);
             }
+            fixedPlaylistsCache.delete(video_filename);
             resolve();
         });
     });
