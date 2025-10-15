@@ -11,6 +11,7 @@ import * as databaseService from "./database.service.js";
 
 const execFileAsync = promisify(execFile);
 const limit = pLimit(10); // Limit concurrency to 10 ffprobe processes at a time
+const cachingInProgress = new Set<string>(); // In-memory lock
 
 async function getDuration(tsFilePath: string): Promise<number> {
     try {
@@ -91,6 +92,11 @@ export async function cacheDurations(videoPath: string, filename: string, tsFile
 export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
     const videoDetailsPromises = videos.map(async (video): Promise<types.VideoItem> => {
         try {
+            if (cachingInProgress.has(video.filename)) {
+                logger.info(`Caching already in progress for ${video.filename}. Skipping duplicate request.`);
+                return { ...video, size: 0, duration: 0 };
+            }
+
             const videoPath = await utils.findVideoPath(video.filename);
             const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
 
@@ -98,9 +104,16 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
 
             if (cacheMisses.length > 0) {
-                cacheDurations(videoPath, video.filename, tsFiles).catch((error) => {
-                    logger.error(`Background duration caching failed for ${video.filename}`, { error });
-                });
+                cachingInProgress.add(video.filename);
+                logger.info(`Starting background duration caching for ${video.filename}.`);
+                cacheDurations(videoPath, video.filename, tsFiles)
+                    .catch((error) => {
+                        logger.error(`Background duration caching failed for ${video.filename}`, { error });
+                    })
+                    .finally(() => {
+                        cachingInProgress.delete(video.filename);
+                        logger.info(`Finished background duration caching for ${video.filename}.`);
+                    });
 
                 return { ...video, size: 0, duration: 0 };
             } else {
