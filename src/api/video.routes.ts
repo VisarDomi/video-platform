@@ -9,9 +9,9 @@ import * as types from "../types.js";
 
 const router = Router();
 
-router.get("/videos", async (_req, res) => {
+router.get("/videos", (_req, res) => {
     try {
-        const allVideos = await videoService.getAllVideos();
+        const allVideos = videoService.getAllVideos();
         res.json(allVideos);
     } catch (error: any) {
         logger.error(`Error listing video directories:`, { error });

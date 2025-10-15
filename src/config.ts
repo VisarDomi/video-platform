@@ -102,10 +102,4 @@ export const CACHE_PATH: string = config.cachePath;
 export const DB_PATH: string = path.join(CACHE_PATH, "durations.sqlite");
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, "live-status.json");
 
-// --- Path Constants ---
-export const ALL_VIDEO_PATHS = [
-    { path: VIDEO_DOWNLOAD_PATH, type: "original" as const },
-    { path: VIDEO_CONVERT_PATH, type: "edited" as const },
-    { path: VIDEO_MODIFIED_PATH, type: "edited" as const },
-];
 export const PORT = 7973;

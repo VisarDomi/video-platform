@@ -34,9 +34,12 @@ async function startServer() {
     });
     app.listen(PORT, "0.0.0.0", () => {
         logServerInfo();
-        startPlaylistFixerWorker().catch((err) => logger.error("Initial playlist fixer worker failed", { err }));
+        // Run the worker once on startup to populate caches.
+        startPlaylistFixerWorker().catch((err) => logger.error("Initial background worker failed", { err }));
+
+        // Set an interval to run the worker periodically.
         setInterval(() => {
-            startPlaylistFixerWorker().catch((err) => logger.error("Periodic playlist fixer worker failed", { err }));
+            startPlaylistFixerWorker().catch((err) => logger.error("Periodic background worker failed", { err }));
         }, 5 * 60 * 1000);
     });
 }
