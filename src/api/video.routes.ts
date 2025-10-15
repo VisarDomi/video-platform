@@ -1,6 +1,7 @@
 // src/api/video.routes.ts
 import { Router } from "express";
 import * as videoService from "../services/video.service.js";
+import * as metadataService from "../services/metadata.service.js";
 import logger from "../logger.js";
 import * as errors from "../errors.js";
 import * as types from "../types.js";
@@ -51,7 +52,7 @@ router.post("/videos/details", async (req, res) => {
         if (!Array.isArray(videos)) {
             return res.status(400).json({ success: false, message: "Invalid request body: 'videos' array is required." });
         }
-        const details = await videoService.getVideosDetails(videos);
+        const details = await metadataService.getVideosDetails(videos);
         res.json(details);
     } catch (error) {
         logger.error("Error getting video details:", { error });
