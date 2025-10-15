@@ -8,53 +8,69 @@ import * as types from "../types.js";
 import * as errors from "../errors.js";
 import * as metadataService from "./metadata.service.js";
 
-async function fixPlaylist(videoPath: string, filename: string): Promise<void> {
-    const tsFiles = (await fsPromises.readdir(videoPath))
-        .filter((f) => f.endsWith(".ts"))
-        .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
+const fixingInProgress = new Set<string>();
 
-    if (tsFiles.length === 0) {
+async function fixPlaylist(videoPath: string, filename: string): Promise<void> {
+    if (fixingInProgress.has(filename)) {
+        logger.info(`Playlist fixing already in progress for ${filename}, skipping.`);
         return;
     }
 
-    const metadata = await metadataService.cacheMetadata(videoPath, filename, tsFiles);
+    try {
+        fixingInProgress.add(filename);
+        logger.info(`Starting playlist fix for ${filename}`);
 
-    const durations = Array.from(metadata.values())
-        .map((m) => m.duration)
-        .filter((d) => d > 0);
-    const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
+        const tsFiles = (await fsPromises.readdir(videoPath))
+            .filter((f) => f.endsWith(".ts"))
+            .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
 
-    const playlistLines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-MEDIA-SEQUENCE:0", `#EXT-X-TARGETDURATION:${targetDuration}`];
-
-    let lastSegmentNumber: number | null = null;
-    let lastResolution: string | null = null;
-
-    for (const tsFile of tsFiles) {
-        const segmentNumber = parseInt(tsFile.replace(".ts", ""), 10);
-        const segmentMeta = metadata.get(tsFile);
-        if (!segmentMeta) continue;
-
-        if (lastSegmentNumber === null) {
-            // First segment
-            playlistLines.push("#EXT-X-DISCONTINUITY");
-        } else {
-            if (segmentNumber !== lastSegmentNumber + 1 || (lastResolution && segmentMeta.resolution && lastResolution !== segmentMeta.resolution)) {
-                playlistLines.push("#EXT-X-DISCONTINUITY");
-            }
+        if (tsFiles.length === 0) {
+            return;
         }
 
-        playlistLines.push(`#EXTINF:${segmentMeta.duration.toFixed(3)},`);
-        playlistLines.push(tsFile);
+        const metadata = await metadataService.cacheMetadata(videoPath, filename, tsFiles);
 
-        lastSegmentNumber = segmentNumber;
-        lastResolution = segmentMeta.resolution;
+        const durations = Array.from(metadata.values())
+            .map((m) => m.duration)
+            .filter((d) => d > 0);
+        const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
+
+        const playlistLines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-MEDIA-SEQUENCE:0", `#EXT-X-TARGETDURATION:${targetDuration}`];
+
+        let lastSegmentNumber: number | null = null;
+        let lastResolution: string | null = null;
+
+        for (const tsFile of tsFiles) {
+            const segmentNumber = parseInt(tsFile.replace(".ts", ""), 10);
+            const segmentMeta = metadata.get(tsFile);
+            if (!segmentMeta) continue;
+
+            if (lastSegmentNumber === null) {
+                // First segment
+                playlistLines.push("#EXT-X-DISCONTINUITY");
+            } else {
+                if (segmentNumber !== lastSegmentNumber + 1 || (lastResolution && segmentMeta.resolution && lastResolution !== segmentMeta.resolution)) {
+                    playlistLines.push("#EXT-X-DISCONTINUITY");
+                }
+            }
+
+            playlistLines.push(`#EXTINF:${segmentMeta.duration.toFixed(3)},`);
+            playlistLines.push(tsFile);
+
+            lastSegmentNumber = segmentNumber;
+            lastResolution = segmentMeta.resolution;
+        }
+
+        playlistLines.push("#EXT-X-ENDLIST");
+
+        const playlistPath = path.join(videoPath, "playlist.m3u8");
+        await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
+        logger.info(`Fixed playlist for ${filename}`);
+    } catch (error) {
+        logger.error(`Failed to fix playlist for ${filename}`, { error });
+    } finally {
+        fixingInProgress.delete(filename);
     }
-
-    playlistLines.push("#EXT-X-ENDLIST");
-
-    const playlistPath = path.join(videoPath, "playlist.m3u8");
-    await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
-    logger.info(`Fixed playlist for ${filename}`);
 }
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<types.VideoItem[]> {
@@ -70,7 +86,9 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
                     try {
                         const tsFiles = (await fsPromises.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts"));
                         if (tsFiles.length > 0) {
-                            await fixPlaylist(videoFolderPath, entry.name);
+                            fixPlaylist(videoFolderPath, entry.name).catch((error) => {
+                                logger.error(`Background playlist fix failed for ${entry.name}`, { error });
+                            });
                             videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
                         }
                     } catch (error) {
