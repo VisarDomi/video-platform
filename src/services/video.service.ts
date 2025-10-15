@@ -1,7 +1,7 @@
 // src/services/video.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { ALL_VIDEO_PATHS, VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH } from "../config.js";
+import { ALL_VIDEO_PATHS, VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH, LIVE_STATUS_PATH } from "../config.js";
 import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
@@ -10,6 +10,23 @@ import * as metadataService from "./metadata.service.js";
 import * as databaseService from "./database.service.js";
 
 let isFixerRunning = false;
+
+async function getLiveFolders(): Promise<Set<string>> {
+    try {
+        const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
+        const liveData = JSON.parse(content);
+        if (Array.isArray(liveData)) {
+            return new Set(liveData);
+        }
+        logger.warn("live-status.json is not an array, ignoring.");
+        return new Set();
+    } catch (error: any) {
+        if (error.code !== "ENOENT") {
+            logger.error("Failed to read or parse live-status.json", { error });
+        }
+        return new Set();
+    }
+}
 
 async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
     try {
@@ -75,6 +92,7 @@ async function startPlaylistFixerWorker() {
     logger.info("Starting background playlist fixer worker.");
 
     try {
+        const liveFolders = await getLiveFolders();
         let allFolders: { name: string; fullPath: string }[] = [];
         for (const dir of ALL_VIDEO_PATHS) {
             try {
@@ -91,6 +109,11 @@ async function startPlaylistFixerWorker() {
         allFolders.sort((a, b) => a.name.localeCompare(b.name));
 
         for (const folder of allFolders) {
+            if (liveFolders.has(folder.name)) {
+                logger.info(`Skipping folder ${folder.name} because it is currently live.`);
+                continue;
+            }
+
             const isFixed = await databaseService.isPlaylistFixed(folder.name);
             if (isFixed) {
                 continue;

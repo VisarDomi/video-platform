@@ -100,6 +100,7 @@ export const VIDEO_TRASH_PATH: string = config.videoPaths.trash;
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
 export const CACHE_PATH: string = config.cachePath;
 export const DB_PATH: string = path.join(CACHE_PATH, "durations.sqlite");
+export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, "live-status.json");
 
 // --- Path Constants ---
 export const ALL_VIDEO_PATHS = [
