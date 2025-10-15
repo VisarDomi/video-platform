@@ -6,6 +6,56 @@ import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
 import * as errors from "../errors.js";
+import * as metadataService from "./metadata.service.js";
+
+async function fixPlaylist(videoPath: string, filename: string): Promise<void> {
+    const tsFiles = (await fsPromises.readdir(videoPath))
+        .filter((f) => f.endsWith(".ts"))
+        .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
+
+    if (tsFiles.length === 0) {
+        return;
+    }
+
+    const metadata = await metadataService.cacheMetadata(videoPath, filename, tsFiles);
+
+    const durations = Array.from(metadata.values())
+        .map((m) => m.duration)
+        .filter((d) => d > 0);
+    const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
+
+    const playlistLines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-MEDIA-SEQUENCE:0", `#EXT-X-TARGETDURATION:${targetDuration}`];
+
+    let lastSegmentNumber: number | null = null;
+    let lastResolution: string | null = null;
+
+    for (const tsFile of tsFiles) {
+        const segmentNumber = parseInt(tsFile.replace(".ts", ""), 10);
+        const segmentMeta = metadata.get(tsFile);
+        if (!segmentMeta) continue;
+
+        if (lastSegmentNumber === null) {
+            // First segment
+            playlistLines.push("#EXT-X-DISCONTINUITY");
+        } else {
+            if (segmentNumber !== lastSegmentNumber + 1 || (lastResolution && segmentMeta.resolution && lastResolution !== segmentMeta.resolution)) {
+                playlistLines.push("#EXT-X-DISCONTINUITY");
+            }
+        }
+
+        playlistLines.push(`#EXTINF:${segmentMeta.duration.toFixed(3)},`);
+        playlistLines.push(tsFile);
+
+        lastSegmentNumber = segmentNumber;
+        lastResolution = segmentMeta.resolution;
+    }
+
+    playlistLines.push("#EXT-X-ENDLIST");
+
+    const playlistPath = path.join(videoPath, "playlist.m3u8");
+    await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
+    logger.info(`Fixed playlist for ${filename}`);
+}
 
 async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<types.VideoItem[]> {
     const videoItems: types.VideoItem[] = [];
@@ -17,12 +67,14 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
             entries.map(async (entry) => {
                 if (entry.isDirectory()) {
                     const videoFolderPath = path.join(dirPath, entry.name);
-                    const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
                     try {
-                        await fsPromises.access(playlistPath);
-                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
-                    } catch (err) {
-                        // Skip folders without a playlist, they can't be played by the frontend's hls.js
+                        const tsFiles = (await fsPromises.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts"));
+                        if (tsFiles.length > 0) {
+                            await fixPlaylist(videoFolderPath, entry.name);
+                            videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
+                        }
+                    } catch (error) {
+                        logger.warn(`Could not process directory ${entry.name}, skipping.`, { error });
                     }
                 }
             })

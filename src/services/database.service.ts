@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS durations (
     video_filename TEXT NOT NULL,
     ts_filename TEXT NOT NULL,
     duration REAL NOT NULL,
+    resolution TEXT,
     PRIMARY KEY (video_filename, ts_filename)
 );`;
 
@@ -27,5 +28,25 @@ db.serialize(() => {
             process.exit(1);
         }
         logger.info("Database table 'durations' is ready.");
+    });
+
+    // Check for resolution column and add it if it doesn't exist
+    db.all("PRAGMA table_info(durations)", (err, columns: { name: string }[]) => {
+        if (err) {
+            logger.error("Error getting table info for 'durations'", { error: err.message });
+            return;
+        }
+
+        const hasResolutionColumn = columns.some((column) => column.name === "resolution");
+
+        if (!hasResolutionColumn) {
+            db.run("ALTER TABLE durations ADD COLUMN resolution TEXT", (alterErr) => {
+                if (alterErr) {
+                    logger.error("Error adding 'resolution' column to 'durations' table", { error: alterErr.message });
+                } else {
+                    logger.info("Added 'resolution' column to 'durations' table.");
+                }
+            });
+        }
     });
 });

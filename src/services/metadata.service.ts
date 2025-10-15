@@ -13,77 +13,79 @@ const execFileAsync = promisify(execFile);
 const limit = pLimit(10); // Limit concurrency to 10 ffprobe processes at a time
 const cachingInProgress = new Set<string>(); // In-memory lock
 
-async function getDuration(tsFilePath: string): Promise<number> {
+export interface SegmentMetadata {
+    duration: number;
+    resolution: string | null;
+}
+
+async function getSegmentMetadata(tsFilePath: string): Promise<SegmentMetadata> {
     try {
-        const { stdout } = await execFileAsync("ffprobe", [
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            tsFilePath,
-        ]);
-        const duration = parseFloat(stdout.trim());
+        const { stdout } = await execFileAsync("ffprobe", ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", tsFilePath]);
+        const data = JSON.parse(stdout);
+        const duration = parseFloat(data.format.duration);
+        const videoStream = data.streams.find((s: any) => s.codec_type === "video");
+        const resolution = videoStream ? `${videoStream.width}x${videoStream.height}` : null;
+
         if (isNaN(duration)) {
-            logger.error(`ffprobe output for ${tsFilePath} is not a number: ${stdout}`);
-            return 0;
+            logger.error(`ffprobe output for ${tsFilePath} has invalid duration: ${data.format.duration}`);
+            return { duration: 0, resolution };
         }
-        return duration;
+        return { duration, resolution };
     } catch (error) {
-        logger.error(`Failed to get duration for ${tsFilePath} using ffprobe.`, { error });
-        return 0;
+        logger.error(`Failed to get metadata for ${tsFilePath} using ffprobe.`, { error });
+        return { duration: 0, resolution: null };
     }
 }
 
-async function getDurations(filename: string): Promise<Map<string, number>> {
+async function getMetadata(filename: string): Promise<Map<string, SegmentMetadata>> {
     return new Promise((resolve, reject) => {
-        const sql = `SELECT ts_filename, duration FROM durations WHERE video_filename = ?`;
-        databaseService.db.all(sql, [filename], (err, rows: { ts_filename: string; duration: number }[]) => {
+        const sql = `SELECT ts_filename, duration, resolution FROM durations WHERE video_filename = ?`;
+        databaseService.db.all(sql, [filename], (err, rows: { ts_filename: string; duration: number; resolution: string | null }[]) => {
             if (err) {
-                logger.error(`Failed to get durations for ${filename} from database.`, { error: err });
+                logger.error(`Failed to get metadata for ${filename} from database.`, { error: err });
                 return reject(err);
             }
-            const durations = new Map<string, number>();
+            const metadata = new Map<string, SegmentMetadata>();
             rows.forEach((row) => {
-                durations.set(row.ts_filename, row.duration);
+                metadata.set(row.ts_filename, { duration: row.duration, resolution: row.resolution });
             });
-            resolve(durations);
+            resolve(metadata);
         });
     });
 }
 
-export async function cacheDurations(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, number>> {
-    const durations: Map<string, number> = await getDurations(filename);
-    const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
+export async function cacheMetadata(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, SegmentMetadata>> {
+    const metadata: Map<string, SegmentMetadata> = await getMetadata(filename);
+    const cacheMisses = tsFiles.filter((tsFile) => !metadata.has(tsFile) || !metadata.get(tsFile)?.resolution);
 
     if (cacheMisses.length > 0) {
-        const durationPromises = cacheMisses.map((tsFile) => {
+        const metadataPromises = cacheMisses.map((tsFile) => {
             const fullPath = path.join(videoPath, tsFile);
-            return limit(() => getDuration(fullPath));
+            return limit(() => getSegmentMetadata(fullPath));
         });
-        const newDurations = await Promise.all(durationPromises);
+        const newMetadata = await Promise.all(metadataPromises);
 
         cacheMisses.forEach((tsFile, index) => {
-            durations.set(tsFile, newDurations[index]);
+            metadata.set(tsFile, newMetadata[index]);
         });
 
-        // Write the updated durations back to the database.
-        const stmt = databaseService.db.prepare("INSERT INTO durations (video_filename, ts_filename, duration) VALUES (?, ?, ?)");
+        // Write the updated metadata back to the database.
+        const stmt = databaseService.db.prepare("INSERT OR REPLACE INTO durations (video_filename, ts_filename, duration, resolution) VALUES (?, ?, ?, ?)");
         databaseService.db.serialize(() => {
             databaseService.db.run("BEGIN TRANSACTION");
             cacheMisses.forEach((tsFile, index) => {
-                stmt.run(filename, tsFile, newDurations[index]);
+                const meta = newMetadata[index];
+                stmt.run(filename, tsFile, meta.duration, meta.resolution);
             });
             databaseService.db.run("COMMIT", (err) => {
                 if (err) {
-                    logger.error(`Failed to commit duration cache for ${filename}.`, { error: err });
+                    logger.error(`Failed to commit metadata cache for ${filename}.`, { error: err });
                 }
             });
         });
         stmt.finalize();
     }
-    return durations;
+    return metadata;
 }
 
 export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
@@ -97,14 +99,14 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             const videoPath = await utils.findVideoPath(video.filename);
             const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
 
-            const durations = await getDurations(video.filename);
-            const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
+            const metadata = await getMetadata(video.filename);
+            const cacheMisses = tsFiles.filter((tsFile) => !metadata.has(tsFile) || !metadata.get(tsFile)?.resolution);
 
             if (cacheMisses.length > 0) {
                 cachingInProgress.add(video.filename);
-                cacheDurations(videoPath, video.filename, tsFiles)
+                cacheMetadata(videoPath, video.filename, tsFiles)
                     .catch((error) => {
-                        logger.error(`Background duration caching failed for ${video.filename}`, { error });
+                        logger.error(`Background metadata caching failed for ${video.filename}`, { error });
                     })
                     .finally(() => {
                         cachingInProgress.delete(video.filename);
@@ -114,7 +116,7 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             } else {
                 let totalDuration = 0;
                 for (const tsFile of tsFiles) {
-                    totalDuration += durations.get(tsFile) || 0;
+                    totalDuration += metadata.get(tsFile)?.duration || 0;
                 }
                 return { ...video, size: 0, duration: totalDuration };
             }

@@ -8,9 +8,7 @@ import * as errors from "../errors.js";
 import * as metadataService from "./metadata.service.js";
 import { moveVideo } from "./video.service.js";
 
-async function getParts(videoPath: string, filename: string, tsFiles: string[]): Promise<string[][]> {
-    const durations = await metadataService.cacheDurations(videoPath, filename, tsFiles);
-
+async function getParts(tsFiles: string[], metadata: Map<string, metadataService.SegmentMetadata>): Promise<string[][]> {
     const parts: string[][] = [];
     if (tsFiles.length === 0) {
         return parts;
@@ -20,7 +18,7 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     let totalDuration = 0;
 
     for (const tsFile of tsFiles) {
-        const tsDuration = durations.get(tsFile) || 0;
+        const tsDuration = metadata.get(tsFile)?.duration || 0;
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
 
@@ -38,7 +36,12 @@ async function getParts(videoPath: string, filename: string, tsFiles: string[]):
     return parts;
 }
 
-async function createPlaylist(sourceVideoPath: string, tsChunk: string[], destinationPath: string): Promise<void> {
+async function createPlaylist(
+    sourceVideoPath: string,
+    tsChunk: string[],
+    destinationPath: string,
+    metadata: Map<string, metadataService.SegmentMetadata>
+): Promise<void> {
     interface PlaylistSegment {
         tags: string[];
         filename: string;
@@ -79,11 +82,14 @@ async function createPlaylist(sourceVideoPath: string, tsChunk: string[], destin
         const firstKeptSegmentIndex = segments.findIndex((s) => s.filename === keptSegments[0].filename);
 
         let lastSegmentNumber: number;
+        let lastResolution: string | null = null;
+
         if (firstKeptSegmentIndex > 0) {
             // If it's not the first segment of the original video, we get the number of the segment before it
             // to check for continuity.
             const segmentBefore = segments[firstKeptSegmentIndex - 1];
             lastSegmentNumber = parseInt(segmentBefore.filename.split(".ts")[0], 10);
+            lastResolution = metadata.get(segmentBefore.filename)?.resolution || null;
         } else {
             // It is the first segment. To avoid an initial discontinuity, we prime lastSegmentNumber
             // as if the previous segment was numbered one less than the first.
@@ -93,13 +99,15 @@ async function createPlaylist(sourceVideoPath: string, tsChunk: string[], destin
 
         for (const segment of keptSegments) {
             const currentSegmentNumber = parseInt(segment.filename.split(".ts")[0], 10);
+            const currentResolution = metadata.get(segment.filename)?.resolution || null;
 
-            if (currentSegmentNumber !== lastSegmentNumber + 1) {
+            if (currentSegmentNumber !== lastSegmentNumber + 1 || (lastResolution && currentResolution && lastResolution !== currentResolution)) {
                 newPlaylistLines.push("#EXT-X-DISCONTINUITY");
             }
 
             newPlaylistLines.push(...segment.tags, segment.filename);
             lastSegmentNumber = currentSegmentNumber;
+            lastResolution = currentResolution;
         }
     }
 
@@ -124,7 +132,8 @@ export async function createEditedVideo(filename: string, segments: string[]): P
 
     if (goodTsFiles.size > 0) {
         const sortedGoodTs = Array.from(goodTsFiles).sort((a, b) => parseInt(a.split(".ts")[0]) - parseInt(b.split(".ts")[0]));
-        const parts: string[][] = await getParts(videoPath, filename, sortedGoodTs);
+        const metadata = await metadataService.cacheMetadata(videoPath, filename, sortedGoodTs);
+        const parts: string[][] = await getParts(sortedGoodTs, metadata);
 
         for (let i = 0; i < parts.length; i++) {
             const tsChunk = parts[i];
@@ -133,7 +142,7 @@ export async function createEditedVideo(filename: string, segments: string[]): P
             await fsPromises.mkdir(destinationPath, { recursive: true });
             const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file)));
             await Promise.all(movePromises);
-            await createPlaylist(videoPath, tsChunk, destinationPath);
+            await createPlaylist(videoPath, tsChunk, destinationPath, metadata);
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
 
