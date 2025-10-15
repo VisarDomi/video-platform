@@ -79,24 +79,25 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
         await fsPromises.mkdir(dirPath, { recursive: true });
         const entries = await fsPromises.readdir(dirPath, { withFileTypes: true, recursive: false });
 
-        await Promise.all(
-            entries.map(async (entry) => {
-                if (entry.isDirectory()) {
-                    const videoFolderPath = path.join(dirPath, entry.name);
-                    try {
-                        const tsFiles = (await fsPromises.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts"));
-                        if (tsFiles.length > 0) {
-                            fixPlaylist(videoFolderPath, entry.name).catch((error) => {
-                                logger.error(`Background playlist fix failed for ${entry.name}`, { error });
-                            });
-                            videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
-                        }
-                    } catch (error) {
-                        logger.warn(`Could not process directory ${entry.name}, skipping.`, { error });
+        // Sort entries alphabetically by name to ensure consistent processing order
+        entries.sort((a, b) => a.name.localeCompare(b.name));
+
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                const videoFolderPath = path.join(dirPath, entry.name);
+                try {
+                    const tsFiles = (await fsPromises.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts"));
+                    if (tsFiles.length > 0) {
+                        fixPlaylist(videoFolderPath, entry.name).catch((error) => {
+                            logger.error(`Background playlist fix failed for ${entry.name}`, { error });
+                        });
+                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
                     }
+                } catch (error) {
+                    logger.warn(`Could not process directory ${entry.name}, skipping.`, { error });
                 }
-            })
-        );
+            }
+        }
     } catch (error) {
         logger.error(`Could not read directory: ${dirPath}`, { error });
     }
