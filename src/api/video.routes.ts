@@ -1,6 +1,7 @@
 // src/api/video.routes.ts
 import { Router } from "express";
 import * as videoService from "../services/video.service.js";
+import * as editService from "../services/edit.service.js";
 import * as metadataService from "../services/metadata.service.js";
 import logger from "../logger.js";
 import * as errors from "../errors.js";
@@ -26,7 +27,7 @@ router.post("/edit", async (req, res) => {
     }
 
     try {
-        await videoService.createEditedVideo(filename, segments);
+        await editService.createEditedVideo(filename, segments);
         res.json({ success: true, message: "Video edit job completed." });
     } catch (error: any) {
         if (error instanceof errors.SegmentError) return res.status(404).json({ success: false, message: error.message });
