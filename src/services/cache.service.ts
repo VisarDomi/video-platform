@@ -10,14 +10,33 @@ import * as databaseService from "./database.service.js";
 const videoCache = new Map<string, types.VideoItem>();
 let isFixerRunning = false;
 
+interface LiveDownload {
+    segmentsDirPath: string;
+}
+
+interface LiveStatus {
+    downloads: LiveDownload[];
+}
+
 async function getLiveFolders(): Promise<Set<string>> {
     try {
         const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
-        const liveData = JSON.parse(content);
-        if (Array.isArray(liveData)) {
-            return new Set(liveData);
+        const liveData: LiveStatus = JSON.parse(content);
+
+        if (liveData && Array.isArray(liveData.downloads)) {
+            const liveFolderNames = liveData.downloads
+                .map((download) => {
+                    if (typeof download.segmentsDirPath === "string") {
+                        return path.basename(download.segmentsDirPath);
+                    }
+                    return null;
+                })
+                .filter((name): name is string => name !== null);
+
+            return new Set(liveFolderNames);
         }
-        logger.warn("live-status.json is not an array, ignoring.");
+
+        logger.warn("live-status.json does not contain a valid 'downloads' array, ignoring.");
         return new Set();
     } catch (error: any) {
         if (error.code !== "ENOENT") {
