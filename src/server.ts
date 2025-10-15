@@ -7,6 +7,7 @@ import logger from "./logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
+import { startPlaylistFixerWorker } from "./services/video.service.js";
 
 const logServerInfo = () => {
     logger.info(`✓ Tango Dashboard server running.`);
@@ -33,6 +34,10 @@ async function startServer() {
     });
     app.listen(PORT, "0.0.0.0", () => {
         logServerInfo();
+        startPlaylistFixerWorker().catch((err) => logger.error("Initial playlist fixer worker failed", { err }));
+        setInterval(() => {
+            startPlaylistFixerWorker().catch((err) => logger.error("Periodic playlist fixer worker failed", { err }));
+        }, 5 * 60 * 1000);
     });
 }
 

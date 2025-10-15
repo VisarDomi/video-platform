@@ -84,7 +84,7 @@ async function fixAndCachePlaylist(videoPath: string, filename: string): Promise
     }
 }
 
-async function startPlaylistFixerWorker() {
+export async function startPlaylistFixerWorker() {
     if (isFixerRunning) {
         return;
     }
@@ -163,8 +163,6 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
 }
 
 export async function getAllVideos(): Promise<types.VideoItem[]> {
-    startPlaylistFixerWorker().catch((err) => logger.error("Unhandled error in playlist fixer trigger", { err }));
-
     const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
     const convertPromise = getVideosFromDir(VIDEO_CONVERT_PATH, "edited");
     const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited");
