@@ -7,7 +7,7 @@ import pLimit from "p-limit";
 import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
-import * as config from "../config.js";
+import * as databaseService from "./database.service.js";
 
 const execFileAsync = promisify(execFile);
 const limit = pLimit(10); // Limit concurrency to 10 ffprobe processes at a time
@@ -36,33 +36,28 @@ async function getDuration(tsFilePath: string): Promise<number> {
 }
 
 async function getDurations(filename: string): Promise<Map<string, number>> {
-    const metadataPath = path.join(config.CACHE_PATH, `${filename}.json`);
-    const durations = new Map<string, number>();
-
-    try {
-        const fileContent = await fsPromises.readFile(metadataPath, "utf-8");
-        const durationData = JSON.parse(fileContent) as Record<string, number>;
-        for (const [tsFile, duration] of Object.entries(durationData)) {
-            durations.set(tsFile, duration);
-        }
-    } catch (error: any) {
-        if (error?.code === "ENOENT") {
-            // This is expected, so no log is needed here as cacheDurations will log it.
-        } else {
-            logger.warn(`Could not read or parse duration cache for ${filename} from ${metadataPath}. Will proceed without cache.`, { error });
-        }
-    }
-
-    return durations;
+    return new Promise((resolve, reject) => {
+        const sql = `SELECT ts_filename, duration FROM durations WHERE video_filename = ?`;
+        databaseService.db.all(sql, [filename], (err, rows: { ts_filename: string; duration: number }[]) => {
+            if (err) {
+                logger.error(`Failed to get durations for ${filename} from database.`, { error: err });
+                return reject(err);
+            }
+            const durations = new Map<string, number>();
+            rows.forEach((row) => {
+                durations.set(row.ts_filename, row.duration);
+            });
+            resolve(durations);
+        });
+    });
 }
 
 export async function cacheDurations(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, number>> {
     const durations: Map<string, number> = await getDurations(filename);
-
     const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
 
     if (cacheMisses.length > 0) {
-        logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations in parallel.`);
+        logger.info(`Found ${cacheMisses.length} cache misses for video ${filename}. Fetching durations.`);
         const durationPromises = cacheMisses.map((tsFile) => {
             const fullPath = path.join(videoPath, tsFile);
             return limit(() => getDuration(fullPath));
@@ -73,18 +68,23 @@ export async function cacheDurations(videoPath: string, filename: string, tsFile
             durations.set(tsFile, newDurations[index]);
         });
 
-        // Write the updated durations back to the cache file.
-        try {
-            const metadataPath = path.join(config.CACHE_PATH, `${filename}.json`);
-            const durationData = Object.fromEntries(durations);
-            await fsPromises.writeFile(metadataPath, JSON.stringify(durationData, null, 2), "utf-8");
-            logger.info(`Successfully updated duration cache for ${filename}.`);
-        } catch (error) {
-            logger.error(`Failed to write duration cache for ${filename}.`, { error });
-            // This is a non-critical error, so we just log it and continue.
-        }
+        // Write the updated durations back to the database.
+        const stmt = databaseService.db.prepare("INSERT INTO durations (video_filename, ts_filename, duration) VALUES (?, ?, ?)");
+        databaseService.db.serialize(() => {
+            databaseService.db.run("BEGIN TRANSACTION");
+            cacheMisses.forEach((tsFile, index) => {
+                stmt.run(filename, tsFile, newDurations[index]);
+            });
+            databaseService.db.run("COMMIT", (err) => {
+                if (err) {
+                    logger.error(`Failed to commit duration cache for ${filename}.`, { error: err });
+                } else {
+                    logger.info(`Successfully updated duration cache for ${filename}.`);
+                }
+            });
+        });
+        stmt.finalize();
     }
-
     return durations;
 }
 
@@ -94,43 +94,25 @@ export async function getVideosDetails(videos: types.VideoItem[]): Promise<types
             const videoPath = await utils.findVideoPath(video.filename);
             const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
 
-            // Read existing cache without triggering new calculations yet
             const durations = await getDurations(video.filename);
-
             const cacheMisses = tsFiles.filter((tsFile) => !durations.has(tsFile));
 
             if (cacheMisses.length > 0) {
-                // There are cache misses. Return 0 duration and trigger background caching.
-                // Fire-and-forget promise for caching
                 cacheDurations(videoPath, video.filename, tsFiles).catch((error) => {
                     logger.error(`Background duration caching failed for ${video.filename}`, { error });
                 });
 
-                return {
-                    ...video,
-                    size: 0, // calculated on the frontend
-                    duration: 0,
-                };
+                return { ...video, size: 0, duration: 0 };
             } else {
-                // All durations are cached. Calculate total duration and return it.
                 let totalDuration = 0;
                 for (const tsFile of tsFiles) {
                     totalDuration += durations.get(tsFile) || 0;
                 }
-                return {
-                    ...video,
-                    size: 0, // calculated on the frontend
-                    duration: totalDuration,
-                };
+                return { ...video, size: 0, duration: totalDuration };
             }
         } catch (error) {
             logger.warn(`Could not get details for ${video.filename}, returning duration 0.`, { error });
-            // Return with duration 0 on error
-            return {
-                ...video,
-                size: 0,
-                duration: 0,
-            };
+            return { ...video, size: 0, duration: 0 };
         }
     });
 
