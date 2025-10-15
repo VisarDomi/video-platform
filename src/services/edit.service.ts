@@ -72,13 +72,34 @@ async function createPlaylist(sourceVideoPath: string, tsChunk: string[], destin
     const tsFiles = new Set(tsChunk);
     const newPlaylistLines = [...headerLines];
 
-    if (tsChunk.length > 0) {
-        newPlaylistLines.push("#EXT-X-DISCONTINUITY");
-    }
+    const keptSegments = segments.filter((segment) => tsFiles.has(segment.filename));
 
-    for (const segment of segments) {
-        if (tsFiles.has(segment.filename)) {
+    if (keptSegments.length > 0) {
+        // Find the index of the first kept segment in the original segments list.
+        const firstKeptSegmentIndex = segments.findIndex((s) => s.filename === keptSegments[0].filename);
+
+        let lastSegmentNumber: number;
+        if (firstKeptSegmentIndex > 0) {
+            // If it's not the first segment of the original video, we get the number of the segment before it
+            // to check for continuity.
+            const segmentBefore = segments[firstKeptSegmentIndex - 1];
+            lastSegmentNumber = parseInt(segmentBefore.filename.split(".ts")[0], 10);
+        } else {
+            // It is the first segment. To avoid an initial discontinuity, we prime lastSegmentNumber
+            // as if the previous segment was numbered one less than the first.
+            const firstSegmentNumber = parseInt(keptSegments[0].filename.split(".ts")[0], 10);
+            lastSegmentNumber = firstSegmentNumber - 1;
+        }
+
+        for (const segment of keptSegments) {
+            const currentSegmentNumber = parseInt(segment.filename.split(".ts")[0], 10);
+
+            if (currentSegmentNumber !== lastSegmentNumber + 1) {
+                newPlaylistLines.push("#EXT-X-DISCONTINUITY");
+            }
+
             newPlaylistLines.push(...segment.tags, segment.filename);
+            lastSegmentNumber = currentSegmentNumber;
         }
     }
 
