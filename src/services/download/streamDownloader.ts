@@ -77,7 +77,7 @@ export class StreamDownloader {
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
-                            logger.warn(`Pausing segment processing due to download failure: ${segment.localName}`, { remoteUrl: segment.remoteUrl });
+                            logger.warn(`Pausing segment processing due to download failure:`, {segmentPath});
                             break; // The next poll will re-attempt this failed segment first.
                         }
 
@@ -88,7 +88,7 @@ export class StreamDownloader {
                             await playlistManager.appendSegmentToPlaylist(segment);
                             lastDownload = Date.now(); // Update timestamp on success
                         } else {
-                            logger.error(`Failed to write segment to disk, pausing processing: ${segment.localName}`, { segmentPath });
+                            logger.error(`Failed to write segment to disk, pausing processing:`, {segmentPath});
                             break; // filesystem issues
                         }
                     }
