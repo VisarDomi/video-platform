@@ -124,13 +124,13 @@ async function getVideosFromDir(dirPath: string, type: "original" | "edited"): P
         for (const entry of entries) {
             if (entry.isDirectory()) {
                 const videoFolderPath = path.join(dirPath, entry.name);
+                const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
                 try {
-                    const tsFiles = (await fsPromises.readdir(videoFolderPath)).filter((f) => f.endsWith(".ts"));
-                    if (tsFiles.length > 0) {
-                        videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
-                    }
+                    await fsPromises.access(playlistPath);
+                    videoItems.push({ filename: entry.name, type, size: 0, duration: 0 });
                 } catch (err) {
-                    // Ignore errors for subdirectories, e.g. permission denied
+                    // Skip folders without a playlist, they can't be played by the frontend.
+                    // The background worker will handle creating the playlist.
                 }
             }
         }
