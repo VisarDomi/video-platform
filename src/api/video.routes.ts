@@ -48,13 +48,13 @@ router.post("/videos/:filename/:destination", async (req, res) => {
     }
 });
 
-router.post("/videos/details", async (req, res) => {
+router.post("/videos/details", (req, res) => {
     try {
         const videos: types.VideoItem[] = req.body.videos;
         if (!Array.isArray(videos)) {
             return res.status(400).json({ success: false, message: "Invalid request body: 'videos' array is required." });
         }
-        const details = await metadataService.getVideosDetails(videos);
+        const details = metadataService.getVideosDetails(videos);
         res.json(details);
     } catch (error) {
         logger.error("Error getting video details:", { error });

@@ -38,6 +38,7 @@ async function fixAndCachePlaylist(videoPath: string, filename: string): Promise
 
         if (tsFiles.length === 0) {
             await databaseService.addFixedPlaylistEntry(filename);
+            metadataService.updateVideoDetailsCache(filename, 0);
             return;
         }
 
@@ -78,6 +79,13 @@ async function fixAndCachePlaylist(videoPath: string, filename: string): Promise
         const playlistPath = path.join(videoPath, "playlist.m3u8");
         await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
         await databaseService.addFixedPlaylistEntry(filename);
+
+        let totalDuration = 0;
+        for (const tsFile of tsFiles) {
+            totalDuration += metadata.get(tsFile)?.duration || 0;
+        }
+        metadataService.updateVideoDetailsCache(filename, totalDuration);
+
         logger.info(`Fixed playlist for ${filename}`);
     } catch (error) {
         logger.error(`Failed to fix playlist for ${filename}`, { error });
@@ -115,18 +123,25 @@ export async function startPlaylistFixerWorker() {
             }
 
             if (databaseService.isPlaylistFixed(folder.name)) {
-                continue;
-            }
-
-            try {
-                const files = await fsPromises.readdir(folder.fullPath);
-                if (files.some((f) => f.endsWith(".ts"))) {
-                    await fixAndCachePlaylist(folder.fullPath, folder.name);
-                } else {
-                    await databaseService.addFixedPlaylistEntry(folder.name);
+                if (!metadataService.isVideoDetailsCached(folder.name)) {
+                    try {
+                        const tsFiles = (await fsPromises.readdir(folder.fullPath)).filter((f) => f.endsWith(".ts"));
+                        if (tsFiles.length === 0) {
+                            metadataService.updateVideoDetailsCache(folder.name, 0);
+                            continue;
+                        }
+                        const metadata = await metadataService.getMetadataFromDb(folder.name);
+                        let totalDuration = 0;
+                        for (const tsFile of tsFiles) {
+                            totalDuration += metadata.get(tsFile)?.duration || 0;
+                        }
+                        metadataService.updateVideoDetailsCache(folder.name, totalDuration);
+                    } catch (error) {
+                        logger.error(`Error populating memory cache for ${folder.name}`, { error });
+                    }
                 }
-            } catch (error) {
-                logger.error(`Error processing folder ${folder.name} in fixer worker`, { error });
+            } else {
+                await fixAndCachePlaylist(folder.fullPath, folder.name);
             }
         }
     } catch (error) {
@@ -202,7 +217,8 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
 
         await fsPromises.rename(videoPath, destinationPath);
         await databaseService.removeFixedPlaylistEntry(filename);
-        logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
+        metadataService.removeVideoDetailsFromCache(filename);
+        logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from caches.`);
     } else {
         throw new errors.MoveError("File is already at the destination.");
     }

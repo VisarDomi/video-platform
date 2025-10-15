@@ -1,11 +1,9 @@
 // src/services/metadata.service.ts
-import { promises as fsPromises } from "fs";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import pLimit from "p-limit";
 import logger from "../logger.js";
-import * as utils from "../utils.js";
 import * as types from "../types.js";
 import * as databaseService from "./database.service.js";
 
@@ -16,6 +14,25 @@ export interface SegmentMetadata {
     duration: number;
     resolution: string | null;
 }
+
+// --- New in-memory cache for video details ---
+const videoDetailsCache = new Map<string, { duration: number }>();
+
+export function updateVideoDetailsCache(filename: string, duration: number): void {
+    videoDetailsCache.set(filename, { duration });
+}
+
+export function removeVideoDetailsFromCache(filename: string): void {
+    if (videoDetailsCache.has(filename)) {
+        videoDetailsCache.delete(filename);
+        logger.info(`Removed ${filename} from in-memory cache.`);
+    }
+}
+
+export function isVideoDetailsCached(filename: string): boolean {
+    return videoDetailsCache.has(filename);
+}
+// --- End new cache section ---
 
 async function getSegmentMetadata(tsFilePath: string): Promise<SegmentMetadata> {
     try {
@@ -36,7 +53,7 @@ async function getSegmentMetadata(tsFilePath: string): Promise<SegmentMetadata> 
     }
 }
 
-async function getMetadata(filename: string): Promise<Map<string, SegmentMetadata>> {
+export async function getMetadataFromDb(filename: string): Promise<Map<string, SegmentMetadata>> {
     return new Promise((resolve, reject) => {
         const sql = `SELECT ts_filename, duration, resolution FROM durations WHERE video_filename = ?`;
         databaseService.db.all(sql, [filename], (err, rows: { ts_filename: string; duration: number; resolution: string | null }[]) => {
@@ -54,7 +71,7 @@ async function getMetadata(filename: string): Promise<Map<string, SegmentMetadat
 }
 
 export async function cacheMetadata(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, SegmentMetadata>> {
-    const metadata: Map<string, SegmentMetadata> = await getMetadata(filename);
+    const metadata: Map<string, SegmentMetadata> = await getMetadataFromDb(filename);
     const cacheMisses = tsFiles.filter((tsFile) => !metadata.has(tsFile) || !metadata.get(tsFile)?.resolution);
 
     if (cacheMisses.length > 0) {
@@ -86,27 +103,14 @@ export async function cacheMetadata(videoPath: string, filename: string, tsFiles
     return metadata;
 }
 
-export async function getVideosDetails(videos: types.VideoItem[]): Promise<types.VideoItem[]> {
-    const videoDetailsPromises = videos.map(async (video): Promise<types.VideoItem> => {
-        try {
-            if (!databaseService.isPlaylistFixed(video.filename)) {
-                return { ...video, size: 0, duration: 0 };
-            }
-
-            const videoPath = await utils.findVideoPath(video.filename);
-            const tsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));
-            const metadata = await getMetadata(video.filename);
-
-            let totalDuration = 0;
-            for (const tsFile of tsFiles) {
-                totalDuration += metadata.get(tsFile)?.duration || 0;
-            }
-            return { ...video, size: 0, duration: totalDuration };
-        } catch (error) {
-            logger.warn(`Could not get details for ${video.filename}, returning duration 0.`, { error });
-            return { ...video, size: 0, duration: 0 };
+export function getVideosDetails(videos: types.VideoItem[]): types.VideoItem[] {
+    return videos.map((video) => {
+        const cachedDetails = videoDetailsCache.get(video.filename);
+        if (cachedDetails) {
+            return { ...video, duration: cachedDetails.duration, size: 0 };
         }
+        // If not in cache, return duration 0 as requested.
+        // The frontend will poll, and the background worker will eventually populate the cache.
+        return { ...video, duration: 0, size: 0 };
     });
-
-    return Promise.all(videoDetailsPromises);
 }
