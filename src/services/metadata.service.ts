@@ -4,7 +4,6 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import pLimit from "p-limit";
 import logger from "../logger.js";
-import * as types from "../types.js";
 import * as databaseService from "./database.service.js";
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +19,7 @@ const videoDetailsCache = new Map<string, { duration: number }>();
 
 export function updateVideoDetailsCache(filename: string, duration: number): void {
     videoDetailsCache.set(filename, { duration });
+    logger.info(`Updated in-memory cache for ${filename}: duration ${duration.toFixed(2)}s`);
 }
 
 export function removeVideoDetailsFromCache(filename: string): void {
@@ -31,6 +31,10 @@ export function removeVideoDetailsFromCache(filename: string): void {
 
 export function isVideoDetailsCached(filename: string): boolean {
     return videoDetailsCache.has(filename);
+}
+
+export function getAllCachedDetails(): Record<string, { duration: number }> {
+    return Object.fromEntries(videoDetailsCache);
 }
 // --- End new cache section ---
 
@@ -101,16 +105,4 @@ export async function cacheMetadata(videoPath: string, filename: string, tsFiles
         stmt.finalize();
     }
     return metadata;
-}
-
-export function getVideosDetails(videos: types.VideoItem[]): types.VideoItem[] {
-    return videos.map((video) => {
-        const cachedDetails = videoDetailsCache.get(video.filename);
-        if (cachedDetails) {
-            return { ...video, duration: cachedDetails.duration, size: 0 };
-        }
-        // If not in cache, return duration 0 as requested.
-        // The frontend will poll, and the background worker will eventually populate the cache.
-        return { ...video, duration: 0, size: 0 };
-    });
 }
