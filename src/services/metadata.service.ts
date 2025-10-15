@@ -14,29 +14,6 @@ export interface SegmentMetadata {
     resolution: string | null;
 }
 
-// --- New in-memory cache for video details ---
-const videoDetailsCache = new Map<string, { duration: number }>();
-
-export function updateVideoDetailsCache(filename: string, duration: number): void {
-    videoDetailsCache.set(filename, { duration });
-}
-
-export function removeVideoDetailsFromCache(filename: string): void {
-    if (videoDetailsCache.has(filename)) {
-        videoDetailsCache.delete(filename);
-        logger.info(`Removed ${filename} from in-memory cache.`);
-    }
-}
-
-export function isVideoDetailsCached(filename: string): boolean {
-    return videoDetailsCache.has(filename);
-}
-
-export function getAllCachedDetails(): Record<string, { duration: number }> {
-    return Object.fromEntries(videoDetailsCache);
-}
-// --- End new cache section ---
-
 async function getSegmentMetadata(tsFilePath: string): Promise<SegmentMetadata> {
     try {
         const { stdout } = await execFileAsync("ffprobe", ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", tsFilePath]);
@@ -56,7 +33,7 @@ async function getSegmentMetadata(tsFilePath: string): Promise<SegmentMetadata> 
     }
 }
 
-export async function getMetadataFromDb(filename: string): Promise<Map<string, SegmentMetadata>> {
+async function getMetadata(filename: string): Promise<Map<string, SegmentMetadata>> {
     return new Promise((resolve, reject) => {
         const sql = `SELECT ts_filename, duration, resolution FROM durations WHERE video_filename = ?`;
         databaseService.db.all(sql, [filename], (err, rows: { ts_filename: string; duration: number; resolution: string | null }[]) => {
@@ -73,8 +50,21 @@ export async function getMetadataFromDb(filename: string): Promise<Map<string, S
     });
 }
 
+export async function getVideoDuration(filename: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const sql = `SELECT SUM(duration) as totalDuration FROM durations WHERE video_filename = ?`;
+        databaseService.db.get(sql, [filename], (err, row: { totalDuration: number | null }) => {
+            if (err) {
+                logger.error(`Failed to get total duration for ${filename} from database.`, { error: err });
+                return reject(err);
+            }
+            resolve(row?.totalDuration || 0);
+        });
+    });
+}
+
 export async function cacheMetadata(videoPath: string, filename: string, tsFiles: string[]): Promise<Map<string, SegmentMetadata>> {
-    const metadata: Map<string, SegmentMetadata> = await getMetadataFromDb(filename);
+    const metadata: Map<string, SegmentMetadata> = await getMetadata(filename);
     const cacheMisses = tsFiles.filter((tsFile) => !metadata.has(tsFile) || !metadata.get(tsFile)?.resolution);
 
     if (cacheMisses.length > 0) {

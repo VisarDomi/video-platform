@@ -7,7 +7,7 @@ import logger from "./logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
-import { startPlaylistFixerWorker } from "./services/video.service.js";
+import { initializeCache } from "./services/cache.service.js";
 
 const logServerInfo = () => {
     logger.info(`✓ Tango Dashboard server running.`);
@@ -32,19 +32,16 @@ async function startServer() {
     app.get(/.*/, (_req: Request, res: Response) => {
         res.sendFile(path.join(FRONTEND_DIST_PATH!, "index.html"));
     });
+
+    // Initialize the cache service which will run in the background
+    initializeCache();
+
     app.listen(PORT, "0.0.0.0", () => {
         logServerInfo();
-        // Run the worker once on startup to populate caches.
-        startPlaylistFixerWorker().catch((err) => logger.error("Initial background worker failed", { err }));
-
-        // Set an interval to run the worker periodically.
-        setInterval(() => {
-            startPlaylistFixerWorker().catch((err) => logger.error("Periodic background worker failed", { err }));
-        }, 5 * 60 * 1000);
     });
 }
 
-void startServer().catch((err) => {
+void startServer().catch((err: any) => {
     logger.error("Failed to start server", { err });
     process.exit(1);
 });

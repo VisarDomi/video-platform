@@ -1,200 +1,16 @@
 // src/services/video.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, VIDEO_TRASH_PATH, LIVE_STATUS_PATH } from "../config.js";
+import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_TRASH_PATH } from "../config.js";
 import logger from "../logger.js";
 import * as utils from "../utils.js";
 import * as types from "../types.js";
 import * as errors from "../errors.js";
-import * as metadataService from "./metadata.service.js";
 import * as databaseService from "./database.service.js";
-import * as hlsService from "./hls.service.js";
+import * as cacheService from "./cache.service.js";
 
-let isFixerRunning = false;
-let videoListCache: types.VideoItem[] = [];
-const videoPathCache = new Map<string, string>();
-
-export function getAllVideos(): types.VideoItem[] {
-    return videoListCache;
-}
-
-export function getKnownVideoPath(filename: string): string | undefined {
-    return videoPathCache.get(filename);
-}
-
-async function getLiveFolders(): Promise<Set<string>> {
-    try {
-        const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
-        const liveData = JSON.parse(content);
-        if (liveData && Array.isArray(liveData.downloads)) {
-            const liveFolderNames = liveData.downloads.map((download: { segmentsDirPath: string }) => path.basename(download.segmentsDirPath));
-            return new Set(liveFolderNames);
-        }
-        logger.warn("live-status.json format is invalid or has no 'downloads' array, ignoring.");
-        return new Set();
-    } catch (error: any) {
-        if (error.code !== "ENOENT") {
-            logger.error("Failed to read or parse live-status.json", { error });
-        }
-        return new Set();
-    }
-}
-
-async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
-    try {
-        logger.info(`Starting playlist fix for ${filename}`);
-
-        const tsFiles = (await fsPromises.readdir(videoPath))
-            .filter((f) => f.endsWith(".ts"))
-            .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
-
-        if (tsFiles.length === 0) {
-            await databaseService.addFixedPlaylistEntry(filename);
-            metadataService.updateVideoDetailsCache(filename, 0);
-            return;
-        }
-
-        const metadata = await metadataService.cacheMetadata(videoPath, filename, tsFiles);
-
-        const durations = Array.from(metadata.values())
-            .map((m) => m.duration)
-            .filter((d) => d > 0);
-        const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
-
-        const playlistLines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-MEDIA-SEQUENCE:0", `#EXT-X-TARGETDURATION:${targetDuration}`];
-
-        let lastSegmentNumber: number | null = null;
-        let lastResolution: string | null = null;
-
-        for (const tsFile of tsFiles) {
-            const segmentNumber = parseInt(tsFile.replace(".ts", ""), 10);
-            const segmentMeta = metadata.get(tsFile);
-            if (!segmentMeta) continue;
-
-            if (lastSegmentNumber === null) {
-                playlistLines.push("#EXT-X-DISCONTINUITY");
-            } else {
-                if (segmentNumber !== lastSegmentNumber + 1 || (lastResolution && segmentMeta.resolution && lastResolution !== segmentMeta.resolution)) {
-                    playlistLines.push("#EXT-X-DISCONTINUITY");
-                }
-            }
-
-            playlistLines.push(`#EXTINF:${segmentMeta.duration.toFixed(3)},`);
-            playlistLines.push(tsFile);
-
-            lastSegmentNumber = segmentNumber;
-            lastResolution = segmentMeta.resolution;
-        }
-
-        playlistLines.push("#EXT-X-ENDLIST");
-
-        const playlistPath = path.join(videoPath, "playlist.m3u8");
-        await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
-        await databaseService.addFixedPlaylistEntry(filename);
-        await hlsService.updatePlaylistCache(filename, videoPath);
-
-        let totalDuration = 0;
-        for (const tsFile of tsFiles) {
-            totalDuration += metadata.get(tsFile)?.duration || 0;
-        }
-        metadataService.updateVideoDetailsCache(filename, totalDuration);
-
-        logger.info(`Fixed playlist for ${filename}`);
-    } catch (error) {
-        logger.error(`Failed to fix playlist for ${filename}`, { error });
-    }
-}
-
-async function getVideosFromDir(dirPath: string, type: "original" | "edited"): Promise<{ item: types.VideoItem; fullPath: string }[]> {
-    const videoItems: { item: types.VideoItem; fullPath: string }[] = [];
-    try {
-        await fsPromises.mkdir(dirPath, { recursive: true });
-        const entries = await fsPromises.readdir(dirPath, { withFileTypes: true, recursive: false });
-
-        for (const entry of entries) {
-            if (entry.isDirectory()) {
-                const videoFolderPath = path.join(dirPath, entry.name);
-                const playlistPath = path.join(videoFolderPath, "playlist.m3u8");
-                try {
-                    await fsPromises.access(playlistPath);
-                    videoItems.push({ item: { filename: entry.name, type, size: 0, duration: 0 }, fullPath: videoFolderPath });
-                } catch (err) {
-                    // Skip folders without a playlist, they can't be played by the frontend.
-                    // The background worker will handle creating the playlist.
-                }
-            }
-        }
-    } catch (error) {
-        logger.error(`Could not read directory: ${dirPath}`, { error });
-    }
-    return videoItems;
-}
-
-export async function startPlaylistFixerWorker() {
-    if (isFixerRunning) {
-        logger.info("Fixer worker already running, skipping this cycle.");
-        return;
-    }
-    isFixerRunning = true;
-    logger.info("Starting background worker to update caches and fix playlists.");
-
-    try {
-        // Step 1: Scan all video directories from disk
-        const downloadPromise = getVideosFromDir(VIDEO_DOWNLOAD_PATH, "original");
-        const convertPromise = getVideosFromDir(VIDEO_CONVERT_PATH, "edited");
-        const modifiedPromise = getVideosFromDir(VIDEO_MODIFIED_PATH, "edited");
-        const [downloadVideos, convertVideos, modifiedVideos] = await Promise.all([downloadPromise, convertPromise, modifiedPromise]);
-
-        const allFolders = [...downloadVideos, ...convertVideos, ...modifiedVideos].sort((a, b) => a.item.filename.localeCompare(b.item.filename));
-
-        // Step 2: Update the in-memory caches for video list and video paths
-        videoListCache = allFolders.map((f) => f.item);
-        videoPathCache.clear();
-        allFolders.forEach((f) => videoPathCache.set(f.item.filename, f.fullPath));
-        logger.info(`Video list/path caches updated with ${videoListCache.length} items.`);
-
-        // Step 3: Process each folder for playlist fixing and details caching
-        const liveFolders = await getLiveFolders();
-
-        for (const folder of allFolders) {
-            const folderName = folder.item.filename;
-            const folderPath = folder.fullPath;
-
-            if (liveFolders.has(folderName)) {
-                await hlsService.updatePlaylistCache(folderName, folderPath);
-                logger.info(`Skipping playlist fix for live folder ${folderName}, but refreshing HLS cache.`);
-                continue;
-            }
-
-            if (databaseService.isPlaylistFixed(folderName)) {
-                await hlsService.updatePlaylistCache(folderName, folderPath);
-                if (!metadataService.isVideoDetailsCached(folderName)) {
-                    try {
-                        const tsFiles = (await fsPromises.readdir(folderPath)).filter((f) => f.endsWith(".ts"));
-                        if (tsFiles.length === 0) {
-                            metadataService.updateVideoDetailsCache(folderName, 0);
-                            continue;
-                        }
-                        const metadata = await metadataService.getMetadataFromDb(folderName);
-                        let totalDuration = 0;
-                        for (const tsFile of tsFiles) {
-                            totalDuration += metadata.get(tsFile)?.duration || 0;
-                        }
-                        metadataService.updateVideoDetailsCache(folderName, totalDuration);
-                    } catch (error) {
-                        logger.error(`Error populating memory cache for ${folderName}`, { error });
-                    }
-                }
-            } else {
-                await fixAndCachePlaylist(folderPath, folderName);
-            }
-        }
-    } catch (error) {
-        logger.error("Playlist fixer worker encountered a critical error.", { error });
-    } finally {
-        isFixerRunning = false;
-        logger.info("Background playlist fixer worker finished.");
-    }
+export async function getAllVideos(): Promise<types.VideoItem[]> {
+    return cacheService.getVideosFromCache();
 }
 
 export async function moveVideo(filename: string, destination: "trash" | "original" | "convert", sourcePath?: string): Promise<void> {
@@ -229,11 +45,9 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
 
         await fsPromises.rename(videoPath, destinationPath);
         await databaseService.removeFixedPlaylistEntry(filename);
-        metadataService.removeVideoDetailsFromCache(filename);
-        hlsService.removePlaylistFromCache(filename);
-        videoPathCache.delete(filename);
-        logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from caches.`);
-        await startPlaylistFixerWorker();
+        logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
+        // Immediately trigger a cache update after the move
+        await cacheService.triggerCacheUpdate();
     } else {
         throw new errors.MoveError("File is already at the destination.");
     }

@@ -3,4 +3,5 @@ export type VideoItem = {
     type: "original" | "edited";
     size: number;
     duration: number;
+    isLive: boolean;
 };

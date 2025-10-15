@@ -2,15 +2,14 @@
 import { Router } from "express";
 import * as videoService from "../services/video.service.js";
 import * as editService from "../services/edit.service.js";
-import * as metadataService from "../services/metadata.service.js";
 import logger from "../logger.js";
 import * as errors from "../errors.js";
 
 const router = Router();
 
-router.get("/videos", (_req, res) => {
+router.get("/videos", async (_req, res) => {
     try {
-        const allVideos = videoService.getAllVideos();
+        const allVideos = await videoService.getAllVideos();
         res.json(allVideos);
     } catch (error: any) {
         logger.error(`Error listing video directories:`, { error });
@@ -44,16 +43,6 @@ router.post("/videos/:filename/:destination", async (req, res) => {
         if (err instanceof errors.FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
         if (err instanceof errors.MoveError) return res.status(400).json({ success: false, message: err.message });
         res.status(500).json({ success: false, message: "Failed to move video." });
-    }
-});
-
-router.get("/videos/details", (_req, res) => {
-    try {
-        const details = metadataService.getAllCachedDetails();
-        res.json(details);
-    } catch (error) {
-        logger.error("Error getting video details:", { error });
-        res.status(500).json({ success: false, message: "Could not get video details." });
     }
 });
 
