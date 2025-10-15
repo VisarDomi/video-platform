@@ -115,8 +115,8 @@ export async function createEditedVideo(filename: string, segments: string[]): P
             await createPlaylist(videoPath, tsChunk, destinationPath);
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
-    }
 
-    await moveVideo(filename, "trash");
-    logger.info(`Successfully processed and removed original folder: ${filename}`);
+        await moveVideo(filename, "trash", videoPath);
+        logger.info(`Successfully processed and removed original folder: ${filename}`);
+    }
 }
