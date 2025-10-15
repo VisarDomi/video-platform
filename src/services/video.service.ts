@@ -234,7 +234,6 @@ async function getDurations(filename: string): Promise<Map<string, number>> {
 }
 
 async function getDuration(tsFilePath: string): Promise<number> {
-    logger.warn(`Cache miss for duration of ${path.basename(tsFilePath)}. Calculating with ffprobe.`);
     try {
         const { stdout } = await execFileAsync("ffprobe", [
             "-v",
