@@ -8,6 +8,7 @@ import { PORT, FRONTEND_DIST_PATH } from "./config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { initializeCache } from "./services/cache.service.js";
+import { initializeHlsCache } from "./services/hls.service.js";
 
 const logServerInfo = () => {
     logger.info(`✓ Tango Dashboard server running.`);
@@ -35,6 +36,7 @@ async function startServer() {
 
     // Initialize the cache service which will run in the background
     initializeCache();
+    initializeHlsCache();
 
     app.listen(PORT, "0.0.0.0", () => {
         logServerInfo();

@@ -1,50 +1,16 @@
 // src/services/cache.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { ALL_VIDEO_PATHS, LIVE_STATUS_PATH } from "../config.js";
+import { ALL_VIDEO_PATHS } from "../config.js";
 import logger from "../logger.js";
 import * as types from "../types.js";
 import * as metadataService from "./metadata.service.js";
 import * as databaseService from "./database.service.js";
+import * as utils from "../utils.js";
+import * as hlsService from "./hls.service.js";
 
 const videoCache = new Map<string, types.VideoItem>();
 let isFixerRunning = false;
-
-interface LiveDownload {
-    segmentsDirPath: string;
-}
-
-interface LiveStatus {
-    downloads: LiveDownload[];
-}
-
-async function getLiveFolders(): Promise<Set<string>> {
-    try {
-        const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
-        const liveData: LiveStatus = JSON.parse(content);
-
-        if (liveData && Array.isArray(liveData.downloads)) {
-            const liveFolderNames = liveData.downloads
-                .map((download) => {
-                    if (typeof download.segmentsDirPath === "string") {
-                        return path.basename(download.segmentsDirPath);
-                    }
-                    return null;
-                })
-                .filter((name): name is string => name !== null);
-
-            return new Set(liveFolderNames);
-        }
-
-        logger.warn("live-status.json does not contain a valid 'downloads' array, ignoring.");
-        return new Set();
-    } catch (error: any) {
-        if (error.code !== "ENOENT") {
-            logger.error("Failed to read or parse live-status.json", { error });
-        }
-        return new Set();
-    }
-}
 
 async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
     try {
@@ -89,6 +55,7 @@ async function fixAndCachePlaylist(videoPath: string, filename: string): Promise
         playlistLines.push("#EXT-X-ENDLIST");
         const playlistPath = path.join(videoPath, "playlist.m3u8");
         await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
+        await hlsService.updatePlaylistCache(filename, videoPath);
         await databaseService.addFixedPlaylistEntry(filename);
         logger.info(`Fixed playlist for ${filename}`);
     } catch (error) {
@@ -102,7 +69,7 @@ async function startPlaylistFixerWorker() {
     logger.info("Starting background playlist fixer worker.");
 
     try {
-        const liveFolders = await getLiveFolders();
+        const liveFolders = await utils.getLiveFolders();
         let allFolders: { name: string; fullPath: string }[] = [];
         for (const dir of ALL_VIDEO_PATHS) {
             try {
@@ -145,7 +112,7 @@ async function startPlaylistFixerWorker() {
 async function updateVideoCache() {
     logger.info("Updating in-memory video cache...");
     const newCache = new Map<string, types.VideoItem>();
-    const liveFolders = await getLiveFolders();
+    const liveFolders = await utils.getLiveFolders();
 
     const allVideoDirs: { path: string; type: "original" | "edited" }[] = [];
     for (const dir of ALL_VIDEO_PATHS) {
@@ -185,6 +152,17 @@ async function updateVideoCache() {
                 isLive,
             };
             newCache.set(filename, videoItem);
+        }
+
+        if (!isLive) {
+            try {
+                const videoPath = await utils.findVideoPath(filename);
+                await hlsService.updatePlaylistCache(filename, videoPath);
+            } catch (err: any) {
+                if (err.name !== "FileNotFoundError") {
+                    logger.warn(`Could not process playlist for ${filename} during cache update`, { error: err });
+                }
+            }
         }
     });
 

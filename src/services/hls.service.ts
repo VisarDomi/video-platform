@@ -2,6 +2,7 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
 import logger from "../logger.js";
+import * as utils from "../utils.js";
 
 interface HlsCacheEntry {
     content: string;
@@ -16,8 +17,10 @@ export async function updatePlaylistCache(filename: string, videoPath: string): 
         const content = await fsPromises.readFile(playlistPath, "utf-8");
         const isLive = !content.trim().endsWith("#EXT-X-ENDLIST");
         hlsPlaylistCache.set(filename, { content, isLive });
-    } catch (error) {
-        logger.error(`Failed to update HLS playlist cache for ${filename}`, { error });
+    } catch (error: any) {
+        if (error.code !== "ENOENT") {
+            logger.error(`Failed to update HLS playlist cache for ${filename}`, { error });
+        }
         // If we can't read it, remove it to avoid serving stale data
         hlsPlaylistCache.delete(filename);
     }
@@ -32,4 +35,27 @@ export function removePlaylistFromCache(filename: string): void {
 
 export function getPlaylistFromCache(filename: string): HlsCacheEntry | undefined {
     return hlsPlaylistCache.get(filename);
+}
+
+async function updateLivePlaylists() {
+    const liveFolders = await utils.getLiveFolders();
+    if (liveFolders.size === 0) return;
+
+    const updatePromises = Array.from(liveFolders).map(async (filename) => {
+        try {
+            const videoPath = await utils.findVideoPath(filename);
+            await updatePlaylistCache(filename, videoPath);
+        } catch (error: any) {
+            if (error.name !== "FileNotFoundError") {
+                logger.warn(`Could not update playlist cache for live video ${filename}`, { error });
+            }
+        }
+    });
+
+    await Promise.all(updatePromises);
+}
+
+export function initializeHlsCache(): void {
+    logger.info("Initializing HLS playlist cache service...");
+    setInterval(updateLivePlaylists, 500);
 }
