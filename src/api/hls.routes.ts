@@ -1,55 +1,64 @@
 // src/api/hls.routes.ts
 import { Router } from "express";
 import path from "path";
-import * as fsPromises from "fs/promises";
 import logger from "../logger.js";
-import * as utils from "../utils.js";
-import * as errors from "../errors.js";
+import * as hlsService from "../services/hls.service.js";
+import * as cacheService from "../services/cache.service.js";
 
 const router = Router();
 
-router.get("/hls/:filename/playlist.m3u8", async (req, res) => {
+router.get("/hls/:filename/playlist.m3u8", (req, res) => {
     try {
         const { filename } = req.params as { filename: string };
-        const videoPath = await utils.findVideoPath(filename);
-        const playlistPath = path.join(videoPath, "playlist.m3u8");
-        const playlistContent = await fsPromises.readFile(playlistPath, "utf-8");
-        if (!playlistContent.trim().endsWith("#EXT-X-ENDLIST")) {
-            res.setHeader("Cache-Control", "max-age=0, no-cache");
-            res.setHeader("age", "0");
-        }
+        const cachedPlaylist = hlsService.getPlaylistFromCache(filename);
 
-        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-        res.sendFile(playlistPath);
-    } catch (error) {
-        if (error instanceof errors.FileNotFoundError) {
-            logger.warn(error.message);
-            return res.status(404).send(error.message);
+        if (cachedPlaylist) {
+            if (cachedPlaylist.isLive) {
+                res.setHeader("Cache-Control", "max-age=0, no-cache, no-store, must-revalidate");
+            }
+            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+            res.send(cachedPlaylist.content);
+        } else {
+            res.status(404).send("Playlist not found. It might still be processing.");
         }
-        logger.error("Failed to serve playlist", { error });
+    } catch (error) {
+        logger.error("Failed to serve playlist from cache", { error });
         res.status(500).send("Could not serve playlist.");
     }
 });
 
-router.get("/hls/:filename/:segmentName", async (req, res) => {
+router.get("/hls/:filename/:segmentName", (req, res) => {
     if (!req.params.segmentName.endsWith(".ts")) {
         return res.status(400).send("Invalid segment name");
     }
 
     try {
         const { filename, segmentName } = req.params as { filename: string; segmentName: string };
-        const folderPath = await utils.findVideoPath(filename);
+        const folderPath = cacheService.getVideoPathFromCache(filename);
+
+        if (!folderPath) {
+            logger.warn(`Video path not found in cache for filename: ${filename}`);
+            return res.status(404).send("Video not found.");
+        }
+
         const segmentPath = path.join(folderPath, segmentName);
 
         res.setHeader("Content-Type", "video/mp2t");
-        res.sendFile(segmentPath);
+        res.sendFile(segmentPath, (err) => {
+            if (!err) return;
+            if ((err as any).code === "ENOENT") {
+                logger.warn(`Segment not found on disk: ${segmentPath}`);
+                if (!res.headersSent) res.status(404).send("Segment not found.");
+            } else {
+                logger.error(`Error sending segment file: ${segmentPath}`, { error: err });
+                if (!res.headersSent) res.status(500).send("Could not serve segment.");
+            }
+        });
     } catch (error) {
-        if (error instanceof errors.FileNotFoundError) {
-            logger.warn(error.message);
-            return res.status(404).send(error.message);
+        logger.error("Failed to initiate segment serving", { error });
+        if (!res.headersSent) {
+            res.status(500).send("Could not serve segment.");
         }
-        logger.error("Failed to serve segment", { error });
-        res.status(500).send("Could not serve segment.");
     }
 });
 

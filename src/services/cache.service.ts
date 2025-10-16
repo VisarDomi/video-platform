@@ -10,6 +10,7 @@ import * as utils from "../utils.js";
 import * as hlsService from "./hls.service.js";
 
 const videoCache = new Map<string, types.VideoItem>();
+const videoPathCache = new Map<string, string>();
 let isFixerRunning = false;
 
 async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
@@ -112,15 +113,16 @@ async function startPlaylistFixerWorker() {
 async function updateVideoCache() {
     logger.info("Updating in-memory video cache...");
     const newCache = new Map<string, types.VideoItem>();
+    const newPathCache = new Map<string, string>();
     const liveFolders = await utils.getLiveFolders();
 
-    const allVideoDirs: { path: string; type: "original" | "edited" }[] = [];
+    const allVideoDirs: { name: string; fullPath: string; type: "original" | "edited" }[] = [];
     for (const dir of ALL_VIDEO_PATHS) {
         try {
             const entries = await fsPromises.readdir(dir.path, { withFileTypes: true });
             for (const entry of entries) {
                 if (entry.isDirectory()) {
-                    allVideoDirs.push({ path: entry.name, type: dir.type });
+                    allVideoDirs.push({ name: entry.name, fullPath: path.join(dir.path, entry.name), type: dir.type });
                 }
             }
         } catch (error) {
@@ -128,10 +130,11 @@ async function updateVideoCache() {
         }
     }
 
-    const uniqueVideos = Array.from(new Map(allVideoDirs.map((v) => [v.path, v])).values());
+    const uniqueVideos = Array.from(new Map(allVideoDirs.map((v) => [v.name, v])).values());
 
     const cacheUpdatePromises = uniqueVideos.map(async (videoDir) => {
-        const filename = videoDir.path;
+        const filename = videoDir.name;
+        newPathCache.set(filename, videoDir.fullPath);
         const isLive = liveFolders.has(filename);
         if (databaseService.isPlaylistFixed(filename)) {
             const duration = await metadataService.getVideoDuration(filename);
@@ -156,8 +159,7 @@ async function updateVideoCache() {
 
         if (!isLive) {
             try {
-                const videoPath = await utils.findVideoPath(filename);
-                await hlsService.updatePlaylistCache(filename, videoPath);
+                await hlsService.updatePlaylistCache(filename, videoDir.fullPath);
             } catch (err: any) {
                 if (err.name !== "FileNotFoundError") {
                     logger.warn(`Could not process playlist for ${filename} during cache update`, { error: err });
@@ -168,8 +170,12 @@ async function updateVideoCache() {
 
     await Promise.all(cacheUpdatePromises);
     videoCache.clear();
+    videoPathCache.clear();
     for (const [key, value] of newCache.entries()) {
         videoCache.set(key, value);
+    }
+    for (const [key, value] of newPathCache.entries()) {
+        videoPathCache.set(key, value);
     }
     logger.info(`In-memory video cache updated with ${videoCache.size} items.`);
     startPlaylistFixerWorker().catch((err) => logger.error("Unhandled error in playlist fixer trigger", { err }));
@@ -183,6 +189,10 @@ export function initializeCache(): void {
 
 export function getVideosFromCache(): types.VideoItem[] {
     return Array.from(videoCache.values()).sort((a, b) => a.filename.localeCompare(b.filename));
+}
+
+export function getVideoPathFromCache(filename: string): string | undefined {
+    return videoPathCache.get(filename);
 }
 
 export async function triggerCacheUpdate(): Promise<void> {
