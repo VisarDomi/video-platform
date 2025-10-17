@@ -1,5 +1,3 @@
-// src/downloader/downloadsManager.ts
-
 import * as path from "path";
 
 import logger from "../../common/logger.js";
@@ -40,23 +38,15 @@ export class DownloadsManager {
     private statusFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
-    /**
-     * The constructor is now private. Use the async `create` method instead.
-     */
     private constructor() {
         const cfg = config.getConfig();
-        // Use the sharedStatePath from config for the status file
         this.statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");
         logger.info(`DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 
-    /**
-     * Asynchronously creates and initializes an DownloadsManager.
-     * This method ensures the live status file is cleared on application startup.
-     */
     public static async create(): Promise<DownloadsManager> {
         const instance = new DownloadsManager();
-        await instance._clearStatusFile(); // Clear the file on startup
+        await instance._clearStatusFile();
         return instance;
     }
 
@@ -108,21 +98,15 @@ export class DownloadsManager {
         return this.downloads.size;
     }
 
-    /**
-     * Schedules a debounced update to the status file.
-     */
     private _requestStatusFileUpdate(): void {
         if (this._updateFileDebounceTimer) {
             clearTimeout(this._updateFileDebounceTimer);
         }
         this._updateFileDebounceTimer = setTimeout(() => {
             this._updateStatusFile();
-        }, 200); // Wait 200ms before writing
+        }, 200);
     }
 
-    /**
-     * Writes the current state of active downloads to the status file.
-     */
     private async _updateStatusFile(): Promise<void> {
         const downloads = Array.from(this.downloads.entries()).map(([masterPlaylistUrl, downloadInfo]) => ({
             masterPlaylistUrl,
@@ -132,13 +116,9 @@ export class DownloadsManager {
         await FileSystemManager.writeJsonFile(this.statusFilePath, status);
     }
 
-    /**
-     * Clears the status file by writing an empty state. This is called once on startup.
-     */
     private async _clearStatusFile(): Promise<void> {
         logger.info("Clearing live-status.json for a fresh start...");
         if (this._updateFileDebounceTimer) {
-            // Clear any pending writes
             clearTimeout(this._updateFileDebounceTimer);
             this._updateFileDebounceTimer = null;
         }

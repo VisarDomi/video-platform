@@ -1,4 +1,3 @@
-// src/downloader/tokenManager.ts
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
@@ -35,7 +34,7 @@ export class TokenManager {
                 await timersPromises.setTimeout(refreshInterval);
             }
         };
-        watch(); // Fire-and-forget
+        watch();
     }
 
     private async _loadTokens(): Promise<boolean> {

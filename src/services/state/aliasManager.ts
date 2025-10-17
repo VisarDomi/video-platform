@@ -1,4 +1,3 @@
-// src/common/aliasManager.ts
 import * as path from "path";
 import logger from "../../common/logger.js";
 import * as config from "../../common/config.js";
@@ -37,14 +36,13 @@ export class AliasManager {
 
     public set(streamerId: string, alias: string): void {
         if (this.aliases.get(streamerId) === alias) {
-            return; // No change
+            return;
         }
         this.aliases.set(streamerId, alias);
         this._requestFileUpdate();
     }
 
     public batchSet(newAliases: { [key: string]: string }): void {
-        // We merge, prioritizing new aliases
         for (const [streamerId, alias] of Object.entries(newAliases)) {
             this.aliases.set(streamerId, alias);
         }
@@ -57,7 +55,7 @@ export class AliasManager {
         }
         this._updateFileDebounceTimer = setTimeout(() => {
             this._updateAliasesFile();
-        }, 500); // Wait 500ms before writing
+        }, 500);
     }
 
     private async _updateAliasesFile(): Promise<void> {

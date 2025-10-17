@@ -1,4 +1,3 @@
-// src/common/fileSystemManager.ts
 import * as fsPromises from "fs/promises";
 import logger from "./logger.js";
 

@@ -1,4 +1,3 @@
-// src/downloader/apiClient.ts
 import logger from "../../common/logger.js";
 import * as constants from "../../common/constants.js";
 import { TokenManager, Tokens } from "./tokenManager.js";
@@ -117,7 +116,7 @@ export class ApiClient {
             return streamerId;
         } catch (error) {
             logger.error(`Unexpected error in getStreamerAlias for ${streamerId}`, { error: (error as Error).message });
-            return streamerId; // Return original ID on failure
+            return streamerId;
         }
     }
 
@@ -157,7 +156,6 @@ export class ApiClient {
                 const tsBuffer = await tsResponse.arrayBuffer();
                 return Buffer.from(tsBuffer);
             } else {
-                // It's common for a segment to 404 just before a stream ends. This isn't a critical error.
                 logger.warn(`Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
             }
         } catch (error: any) {

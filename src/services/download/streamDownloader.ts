@@ -1,10 +1,9 @@
-// src/downloader/streamDownloader.ts
 import * as timersPromises from "timers/promises";
 import * as path from "path";
 
 import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
-import { DownloadPathManager } from "./downloadPathManager.js";
+import { DownloadPathManager } from "./tango/downloadPathManager.js";
 import { ApiClient } from "../api/apiClient.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
@@ -77,19 +76,18 @@ export class StreamDownloader {
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
-                            logger.warn(`Pausing segment processing due to download failure:`, {segmentPath});
-                            break; // The next poll will re-attempt this failed segment first.
+                            logger.warn(`Pausing segment processing due to download failure:`, { segmentPath });
+                            break;
                         }
 
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
 
                         if (writeSuccess) {
-                            // Only append to playlist AFTER the file is successfully written.
                             await playlistManager.appendSegmentToPlaylist(segment);
-                            lastDownload = Date.now(); // Update timestamp on success
+                            lastDownload = Date.now();
                         } else {
-                            logger.error(`Failed to write segment to disk, pausing processing:`, {segmentPath});
-                            break; // filesystem issues
+                            logger.error(`Failed to write segment to disk, pausing processing:`, { segmentPath });
+                            break;
                         }
                     }
                 }

@@ -10,7 +10,6 @@ interface LiveStatus {
 
 export class OrphanStreamFinalizer {
     public static run(): void {
-        // fire and forget
         (async () => {
             logger.info("Starting orphan stream finalizer check...");
             const cfg = config.getConfig();
@@ -21,7 +20,6 @@ export class OrphanStreamFinalizer {
 
             const liveStatus = await FileSystemManager.readJsonFile<LiveStatus>(statusFilePath);
             if (liveStatus && liveStatus.downloads) {
-                // Filter out null/undefined paths just in case
                 liveStreamPaths = new Set(liveStatus.downloads.map((d) => d.segmentsDirPath).filter(Boolean) as string[]);
             } else {
                 liveStreamPaths = new Set();

@@ -1,4 +1,3 @@
-// src/downloader/streamDiscoveryService.ts
 import * as timersPromises from "timers/promises";
 
 import * as config from "../../common/config.js";
@@ -60,14 +59,12 @@ export class StreamDiscoveryService {
                             if (downloadHandle) {
                                 logger.info(`Initiating download for ${alias || streamerId}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
-                                streamDownloader.start(); // Fire-and-forget
+                                streamDownloader.start();
                             }
                         }
                     }
                 }
             } else {
-                // This covers cases where response is null (no tokens/error) or valid but empty.
-                // The requests module already logs specifics about token/network errors.
                 logger.verbose("Poll complete: No new streams found or unable to fetch.");
             }
             await timersPromises.setTimeout(config.getConfig().intervals.pollFollowing);

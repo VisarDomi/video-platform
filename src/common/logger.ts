@@ -1,16 +1,13 @@
-// src/common/logger.ts
 import * as path from "path";
 import * as url from "url";
 import winston from "winston";
 
 import * as utils from "./utils.js";
 
-// --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = utils.findProjectRoot(__dirname);
 
-// Define custom format for console logs
 const consoleFormat = winston.format.combine(
     winston.format.colorize(),
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
@@ -20,23 +17,17 @@ const consoleFormat = winston.format.combine(
     })
 );
 
-// Define custom format for file logs
-const fileFormat = winston.format.combine(
-    winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    winston.format.json() // Log in JSON format to the file
-);
+const fileFormat = winston.format.combine(winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), winston.format.json());
 
 const logger = winston.createLogger({
-    level: "info", // Log 'info' level and above (info, warn, error)
+    level: "info",
     transports: [
-        // 1. A transport to log to the CONSOLE
         new winston.transports.Console({
             format: consoleFormat,
         }),
-        // 2. A transport to log ERRORS to a file
         new winston.transports.File({
             filename: path.join(projectRoot, "error.log"),
-            level: "error", // Only log errors to this file
+            level: "error",
             format: fileFormat,
         }),
     ],

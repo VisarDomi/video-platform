@@ -1,4 +1,3 @@
-// src/downloader/aliasSyncService.ts
 import logger from "../../common/logger.js";
 import { ApiClient } from "../api/apiClient.js";
 import { AliasManager } from "../state/aliasManager.js";
@@ -17,21 +16,16 @@ export class AliasSyncService {
         const performSync = async () => {
             logger.info("Performing hourly alias cache update...");
 
-            // Step 1: Get all followed account IDs
             const followingsResponse = await this.apiClient.getAllFollowing();
-
             if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
                 logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
                 return;
             }
-
             const followers = followingsResponse.followers;
             logger.info(`Step 1/2 SUCCESS: Fetched ${followers.length} followed accounts from 'allfollow' endpoint.`);
             const streamerIds = followers.map((f: any) => f.accountId);
 
-            // Step 2: Get aliases for those IDs in a single batch request
             const batchResponse = await this.apiClient.getAliasesInBatch(streamerIds);
-
             if (!batchResponse) {
                 logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
                 return;
@@ -54,10 +48,8 @@ export class AliasSyncService {
             }
         };
 
-        // Fire-and-forget initial update
         performSync();
 
-        // Schedule subsequent updates every hour
         setInterval(performSync, 60 * 60 * 1000);
     }
 }

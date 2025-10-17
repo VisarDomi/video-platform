@@ -1,4 +1,3 @@
-// src/main.ts
 import { DownloaderService } from "./services/downloaderService.js";
 
 async function main() {

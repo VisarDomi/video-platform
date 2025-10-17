@@ -1,4 +1,3 @@
-// src/downloader/downloaderService.ts
 import logger from "../common/logger.js";
 import { ApiClient } from "./api/apiClient.js";
 import { DownloadsManager } from "./state/downloadsManager.js";
@@ -21,12 +20,10 @@ export class DownloaderService {
     }
 
     public static async create(): Promise<DownloaderService> {
-        // Instantiate managers
         const downloadsManager = await DownloadsManager.create();
         const aliasManager = await AliasManager.create();
         const tokenManager = await TokenManager.create();
 
-        // Instantiate clients and services with their dependencies
         const apiClient = new ApiClient(tokenManager);
         const aliasSyncService = new AliasSyncService(apiClient, aliasManager);
         const streamDiscoveryService = new StreamDiscoveryService(apiClient, aliasManager, downloadsManager);

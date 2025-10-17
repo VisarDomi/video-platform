@@ -1,5 +1,5 @@
 {
-    "storagePath": "/home/visar/Videos/tango/download",
+    "storagePath": "/home/visar/Videos/downloads",
     "intervals": {
         "pollFollowing": 1000
     },

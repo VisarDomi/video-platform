@@ -1,4 +1,3 @@
-// src/common/config.ts
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
@@ -6,7 +5,6 @@ import * as os from "os";
 
 import * as utils from "./utils.js";
 
-// --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = utils.findProjectRoot(__dirname);
@@ -25,9 +23,7 @@ export interface IConfig {
 }
 
 const defaultConfig: IConfig = {
-    storagePath: "/home/visar/Videos/tango",
-    // Use the XDG Base Directory Specification for user-specific data files.
-    // This is the standard "Linux way" for services running under a specific user.
+    storagePath: "/home/visar/Videos/downloads",
     sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
     intervals: {
         pollFollowing: 1000,
@@ -65,10 +61,6 @@ function loadConfig(): IConfig {
     return mergedConfig;
 }
 
-/**
- * Ensures that the directory for shared state files (like session.json) exists.
- * This prevents errors when services try to write files for the first time.
- */
 function ensureSharedPathExists(config: IConfig) {
     if (config.sharedStatePath) {
         try {
@@ -83,7 +75,7 @@ function ensureSharedPathExists(config: IConfig) {
 }
 
 let liveConfig = loadConfig();
-ensureSharedPathExists(liveConfig); // Run once on startup
+ensureSharedPathExists(liveConfig);
 
 export function getConfig(): IConfig {
     return liveConfig;
@@ -91,7 +83,6 @@ export function getConfig(): IConfig {
 
 let debounceTimer: NodeJS.Timeout | null = null;
 
-// Only watch for config changes when NOT running in a test environment.
 if (process.env.NODE_ENV !== "test") {
     fs.watch(ROOT_CONFIG_PATH, (eventType, filename) => {
         if (filename && eventType === "change") {
@@ -99,7 +90,7 @@ if (process.env.NODE_ENV !== "test") {
             debounceTimer = setTimeout(() => {
                 console.log(`config.json changed. Reloading settings...`);
                 liveConfig = loadConfig();
-                ensureSharedPathExists(liveConfig); // Also run on reload
+                ensureSharedPathExists(liveConfig);
                 debounceTimer = null;
             }, 100);
         }

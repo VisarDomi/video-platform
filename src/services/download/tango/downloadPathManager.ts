@@ -1,9 +1,8 @@
-// src/downloader/downloadPathManager.ts
 import * as path from "path";
 
-import * as config from "../../common/config.js";
-import logger from "../../common/logger.js";
-import { FileSystemManager } from "../../common/fileSystemManager.js";
+import * as config from "../../../common/config.js";
+import logger from "../../../common/logger.js";
+import { FileSystemManager } from "../../../common/fileSystemManager.js";
 
 export class DownloadPathManager {
     private static generateDownloadBaseName(alias: string, date: Date): string {
@@ -18,7 +17,7 @@ export class DownloadPathManager {
 
     public static async createDownloadPaths(alias: string, date: Date): Promise<string | null> {
         const baseFilename = this.generateDownloadBaseName(alias, date);
-        const storageLocation = config.getConfig().storagePath;
+        const storageLocation = path.join(config.getConfig().storagePath, "tango", "downloader");
 
         const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
         if (!storageLocationExists) {
