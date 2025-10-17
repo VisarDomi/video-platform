@@ -1,4 +1,4 @@
-import { ERROR_NAMES } from "./constants.js";
+import { ERROR_NAMES, MISC } from "./constants.js";
 
 export class FileNotFoundError extends Error {
     constructor(message: string) {
@@ -10,7 +10,7 @@ export class FileNotFoundError extends Error {
 export class FfmpegError extends Error {
     public stderr: string;
 
-    constructor(message: string, stderr: string = "") {
+    constructor(message: string, stderr: string = MISC.EMPTY_STRING) {
         super(message);
         this.name = ERROR_NAMES.FFMPEG;
         this.stderr = stderr;
@@ -20,7 +20,7 @@ export class FfmpegError extends Error {
 export class MoveError extends Error {
     public stderr: string;
 
-    constructor(message: string, stderr: string = "") {
+    constructor(message: string, stderr: string = MISC.EMPTY_STRING) {
         super(message);
         this.name = ERROR_NAMES.MOVE;
         this.stderr = stderr;
@@ -30,7 +30,7 @@ export class MoveError extends Error {
 export class SegmentError extends Error {
     public stderr: string;
 
-    constructor(message: string, stderr: string = "") {
+    constructor(message: string, stderr: string = MISC.EMPTY_STRING) {
         super(message);
         this.name = ERROR_NAMES.SEGMENT;
         this.stderr = stderr;

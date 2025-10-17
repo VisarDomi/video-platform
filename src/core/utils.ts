@@ -54,7 +54,7 @@ export async function getLiveFolders(): Promise<Set<string>> {
         if (liveData && Array.isArray(liveData.downloads)) {
             const liveFolderNames = liveData.downloads
                 .map((download) => {
-                    if (typeof download.segmentsDirPath === "string") {
+                    if (typeof download.segmentsDirPath === constants.MISC.JS_TYPES.STRING) {
                         return path.basename(download.segmentsDirPath);
                     }
                     return null;

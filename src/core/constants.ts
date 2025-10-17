@@ -140,6 +140,9 @@ export const MISC = {
         ENOENT: "ENOENT",
         ECONNABORTED: "ECONNABORTED",
     },
+    JS_TYPES: {
+        STRING: "string",
+    },
     EMPTY_STRING: "",
     RADIX_DECIMAL: 10,
     JSON_INDENT: 2,
