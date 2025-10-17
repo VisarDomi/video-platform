@@ -2,6 +2,7 @@
 import { Router } from "express";
 import * as videoService from "../services/video.service.js";
 import * as editService from "../services/edit.service.js";
+import * as cacheService from "../services/cache.service.js";
 import logger from "../logger.js";
 
 const router = Router();
@@ -9,7 +10,7 @@ const router = Router();
 router.get("/videos", async (_req, res) => {
     const allVideos = videoService.getAllVideos();
     res.json(allVideos);
-    cache.update()
+    cacheService.requestThrottledCacheUpdate();
 });
 
 router.post("/edit", async (req, res) => {
@@ -18,12 +19,11 @@ router.post("/edit", async (req, res) => {
     if (!filename || !segments || segments.length === 0) {
         return res.status(400).send("Invalid request: filename and segments are required.");
     }
-    
+
     const editPromise = editService.editVideo(filename, segments);
     res.status(200);
     try {
         await editPromise;
-        cache.update()
     } catch (error: any) {
         logger.error(`Error editing:`, { message: error.message });
     }
@@ -38,7 +38,6 @@ router.post("/videos/:filename/:destination", async (req, res) => {
     res.status(200);
     try {
         await movePromise;
-        cache.update()
     } catch (error: any) {
         logger.error(`Error moving:`, { message: error.message });
     }
