@@ -73,6 +73,7 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
 async function startPlaylistFixerWorker() {
     if (isFixerRunning) return;
     isFixerRunning = true;
+    logger.info("Starting playlist fixer worker...");
 
     try {
         const liveFolders = await utils.getLiveFolders();
@@ -110,6 +111,7 @@ async function startPlaylistFixerWorker() {
         logger.error("Playlist fixer worker encountered a critical error.", { error });
     } finally {
         isFixerRunning = false;
+        logger.info("Playlist fixer worker finished.");
     }
 }
 
@@ -185,7 +187,6 @@ async function updateVideoCache() {
         for (const [key, value] of newPathCache.entries()) {
             videoPathCache.set(key, value);
         }
-        startPlaylistFixerWorker().catch((err) => logger.error("Unhandled error in playlist fixer trigger", { err }));
     } finally {
         isCacheUpdating = false;
     }
@@ -193,7 +194,10 @@ async function updateVideoCache() {
 
 export function initializeCache(): void {
     updateVideoCache().catch((err) => logger.error("Initial cache population failed.", { err }));
+    // Main cache updates every 30 seconds
     setInterval(updateVideoCache, 30000);
+    // Playlist fixer runs less frequently and is not tied to API calls
+    setInterval(() => startPlaylistFixerWorker().catch((err) => logger.error("Playlist fixer interval failed.", { err })), 60000);
 }
 
 export function getVideosFromCache(): types.VideoItem[] {

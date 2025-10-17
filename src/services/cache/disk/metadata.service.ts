@@ -7,7 +7,7 @@ import * as databaseService from "./database.service.js";
 import { DATABASE, FFMPEG } from "../../../core/constants.js";
 
 const execFileAsync = promisify(execFile);
-const limit = pLimit(10);
+const limit = pLimit(5);
 
 export interface SegmentMetadata {
     duration: number;
