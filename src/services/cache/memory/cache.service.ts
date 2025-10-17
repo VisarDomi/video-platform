@@ -8,6 +8,7 @@ import * as databaseService from "../disk/database.service.js";
 import * as utils from "../../../core/utils.js";
 import * as hlsService from "./hls.service.js";
 import { FILE_EXTENSIONS, FILE_NAMES, HLS, MISC } from "../../../core/constants.js";
+import * as errors from "../../../core/errors.js";
 
 const videoCache = new Map<string, types.VideoItem>();
 const videoPathCache = new Map<string, string>();
@@ -20,7 +21,11 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
     try {
         const tsFiles = (await fsPromises.readdir(videoPath))
             .filter((f) => f.endsWith(FILE_EXTENSIONS.TS))
-            .sort((a, b) => parseInt(a.replace(FILE_EXTENSIONS.TS, ""), 10) - parseInt(b.replace(FILE_EXTENSIONS.TS, ""), 10));
+            .sort(
+                (a, b) =>
+                    parseInt(a.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL) -
+                    parseInt(b.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL)
+            );
 
         if (tsFiles.length === 0) {
             await databaseService.addFixedPlaylistEntry(filename);
@@ -38,7 +43,7 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
         let lastResolution: string | null = null;
 
         for (const tsFile of tsFiles) {
-            const segmentNumber = parseInt(tsFile.replace(FILE_EXTENSIONS.TS, ""), 10);
+            const segmentNumber = parseInt(tsFile.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL);
             const segmentMeta = metadata.get(tsFile);
             if (!segmentMeta) continue;
 
@@ -57,7 +62,7 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
         }
         playlistLines.push(HLS.ENDLIST);
         const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
-        await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), MISC.ENCODING_UTF8);
+        await fsPromises.writeFile(playlistPath, playlistLines.join(MISC.NEW_LINE), MISC.ENCODING_UTF8);
         await hlsService.updatePlaylistCache(filename, videoPath);
         await databaseService.addFixedPlaylistEntry(filename);
     } catch (error) {
@@ -164,7 +169,7 @@ async function updateVideoCache() {
                 try {
                     await hlsService.updatePlaylistCache(filename, videoDir.fullPath);
                 } catch (err: any) {
-                    if (err.name !== "FileNotFoundError") {
+                    if (err.name !== errors.FileNotFoundError.name) {
                         logger.warn(`Could not process playlist for ${filename} during cache update`, { error: err });
                     }
                 }

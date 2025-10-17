@@ -21,11 +21,24 @@ export const FILE_NAMES = {
     LIVE_STATUS: "live-status.json",
     ERROR_LOG: "error.log",
     HLS_PLAYLIST: "playlist.m3u8",
+    INDEX_HTML: "index.html",
 } as const;
 
 export const DIRECTORIES = {
     SHARED_STATE_BASE: ".local/share/video-services",
     CACHE: "cache",
+} as const;
+
+export const DEFAULT_PATHS = {
+    HOME_VIDEOS: "Videos",
+    DOWNLOADS: "downloads",
+    TANGO: "tango",
+    DOWNLOADER: "downloader",
+    EDITOR: "editor",
+    EDITED: "edited",
+    TRASH: "trash",
+    CONVERTER: "converter",
+    CONVERTED: "converted",
 } as const;
 
 export const FILE_EXTENSIONS = {
@@ -76,6 +89,7 @@ export const DATABASE = {
 export const API = {
     PORT: 7973,
     HOST: "0.0.0.0",
+    JSON_LIMIT: "10mb",
     MESSAGES: {
         INVALID_REQUEST_FILENAME_REQUIRED: "Invalid request: filename is required.",
         INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED: "Invalid request: filename and segments are required.",
@@ -107,6 +121,13 @@ export const LOGS = {
     },
 } as const;
 
+export const ERROR_NAMES = {
+    FILE_NOT_FOUND: "FileNotFoundError",
+    FFMPEG: "FfmpegError",
+    MOVE: "MoveError",
+    SEGMENT: "SegmentError",
+} as const;
+
 export const MISC = {
     ENCODING_UTF8: "utf-8",
     NETWORK_INTERFACE_IPV4: "IPv4",
@@ -116,4 +137,9 @@ export const MISC = {
         ECONNABORTED: "ECONNABORTED",
     },
     EMPTY_STRING: "",
+    RADIX_DECIMAL: 10,
+    JSON_INDENT: 2,
+    MAX_EDIT_CHUNK_DURATION_SECONDS: 30 * 60,
+    NEW_LINE: "\n",
+    HASH_SYMBOL: "#",
 } as const;

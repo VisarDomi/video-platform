@@ -3,6 +3,7 @@ import path from "path";
 import logger from "../../../core/logger.js";
 import * as utils from "../../../core/utils.js";
 import { FILE_NAMES, HLS, MISC } from "../../../core/constants.js";
+import * as errors from "../../../core/errors.js";
 
 interface HlsCacheEntry {
     content: string;
@@ -44,7 +45,7 @@ async function updateLivePlaylists() {
             const videoPath = await utils.findVideoPath(filename);
             await updatePlaylistCache(filename, videoPath);
         } catch (error: any) {
-            if (error.name !== "FileNotFoundError") {
+            if (error.name !== errors.FileNotFoundError.name) {
                 logger.warn(`Could not update playlist cache for live video ${filename}`, { error });
             }
         }

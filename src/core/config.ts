@@ -25,12 +25,39 @@ interface IConfig {
 
 const defaultConfig: Omit<IConfig, "cachePath"> = {
     videoPaths: {
-        downloader: path.join(os.homedir(), "Videos", "downloads", "tango", "downloader"),
-        edited: path.join(os.homedir(), "Videos", "downloads", "tango", "editor", "edited"),
-        trash: path.join(os.homedir(), "Videos", "downloads", "tango", "editor", "trash"),
-        converted: path.join(os.homedir(), "Videos", "downloads", "tango", "converter", "converted"),
+        downloader: path.join(
+            os.homedir(),
+            constants.DEFAULT_PATHS.HOME_VIDEOS,
+            constants.DEFAULT_PATHS.DOWNLOADS,
+            constants.DEFAULT_PATHS.TANGO,
+            constants.DEFAULT_PATHS.DOWNLOADER
+        ),
+        edited: path.join(
+            os.homedir(),
+            constants.DEFAULT_PATHS.HOME_VIDEOS,
+            constants.DEFAULT_PATHS.DOWNLOADS,
+            constants.DEFAULT_PATHS.TANGO,
+            constants.DEFAULT_PATHS.EDITOR,
+            constants.DEFAULT_PATHS.EDITED
+        ),
+        trash: path.join(
+            os.homedir(),
+            constants.DEFAULT_PATHS.HOME_VIDEOS,
+            constants.DEFAULT_PATHS.DOWNLOADS,
+            constants.DEFAULT_PATHS.TANGO,
+            constants.DEFAULT_PATHS.EDITOR,
+            constants.DEFAULT_PATHS.TRASH
+        ),
+        converted: path.join(
+            os.homedir(),
+            constants.DEFAULT_PATHS.HOME_VIDEOS,
+            constants.DEFAULT_PATHS.DOWNLOADS,
+            constants.DEFAULT_PATHS.TANGO,
+            constants.DEFAULT_PATHS.CONVERTER,
+            constants.DEFAULT_PATHS.CONVERTED
+        ),
     },
-    frontendDistPath: "/home/visar/Documents/tango-repos/video-editor-frontend/dist",
+    frontendDistPath: constants.MISC.EMPTY_STRING,
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
 };
 
@@ -39,7 +66,7 @@ function loadConfig(): IConfig {
 
     if (fs.existsSync(ROOT_CONFIG_PATH)) {
         try {
-            const fileContent = fs.readFileSync(ROOT_CONFIG_PATH, "utf-8");
+            const fileContent = fs.readFileSync(ROOT_CONFIG_PATH, constants.MISC.ENCODING_UTF8);
             const userConfig = JSON.parse(fileContent);
 
             mergedConfig = {

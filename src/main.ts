@@ -8,7 +8,7 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { initializeCache } from "./services/cache/memory/cache.service.js";
 import { initializeHlsCache } from "./services/cache/memory/hls.service.js";
-import { API, LOGS, MISC } from "./core/constants.js";
+import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 const logServerInfo = () => {
     const networkInterfaces = os.networkInterfaces();
@@ -24,12 +24,18 @@ const logServerInfo = () => {
 async function startServer() {
     const app = express();
     app.use(cors());
-    app.use(express.json({ limit: "10mb" }));
-    app.use(express.static(FRONTEND_DIST_PATH!));
+    app.use(express.json({ limit: API.JSON_LIMIT }));
+
+    if (!FRONTEND_DIST_PATH) {
+        logger.error("FATAL ERROR: frontendDistPath is not configured. Exiting.");
+        process.exit(1);
+    }
+
+    app.use(express.static(FRONTEND_DIST_PATH));
     app.use("/api", videoApiRouter);
     app.use("/", hlsRouter);
     app.get(/.*/, (_req: Request, res: Response) => {
-        res.sendFile(path.join(FRONTEND_DIST_PATH!, "index.html"));
+        res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));
     });
 
     initializeCache();

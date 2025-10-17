@@ -17,7 +17,7 @@ export function findProjectRoot(startDir: string): string {
 
         const parentDir = path.dirname(currentDir);
         if (parentDir === currentDir) {
-            throw new Error("Could not find project root containing a package.json.");
+            throw new Error(`Could not find project root containing ${constants.FILE_NAMES.PACKAGE_JSON}`);
         }
         currentDir = parentDir;
     }
@@ -64,11 +64,11 @@ export async function getLiveFolders(): Promise<Set<string>> {
             return new Set(liveFolderNames);
         }
 
-        logger.warn("live-status.json does not contain a valid 'downloads' array, ignoring.");
+        logger.warn(`${LIVE_STATUS_PATH} does not contain a valid 'downloads' array, ignoring.`);
         return new Set();
     } catch (error: any) {
         if (error.code !== constants.MISC.ERROR_CODE.ENOENT) {
-            logger.error("Failed to read or parse live-status.json", { error });
+            logger.error(`Failed to read or parse ${LIVE_STATUS_PATH}`, { error });
         }
         return new Set();
     }

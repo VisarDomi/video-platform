@@ -13,7 +13,7 @@ const consoleFormat = winston.format.combine(
     winston.format.colorize(),
     winston.format.timestamp({ format: constants.LOGS.TIMESTAMP_FORMAT }),
     winston.format.printf(({ timestamp, level, message, ...meta }) => {
-        const metaString = Object.keys(meta).length ? JSON.stringify(meta, null, 2) : "";
+        const metaString = Object.keys(meta).length ? JSON.stringify(meta, null, constants.MISC.JSON_INDENT) : constants.MISC.EMPTY_STRING;
         return `${timestamp} ${level}: ${message} ${metaString}`;
     })
 );

@@ -23,7 +23,7 @@ async function getParts(tsFiles: string[], metadata: Map<string, metadataService
         tsChunk.push(tsFile);
         totalDuration += tsDuration;
 
-        if (totalDuration > 30 * 60) {
+        if (totalDuration > MISC.MAX_EDIT_CHUNK_DURATION_SECONDS) {
             parts.push([...tsChunk]);
             tsChunk = [];
             totalDuration = 0;
@@ -51,7 +51,7 @@ async function createPlaylist(
     const playlistPath = path.join(sourceVideoPath, FILE_NAMES.HLS_PLAYLIST);
     const playlistContent = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
 
-    const lines = playlistContent.split("\n");
+    const lines = playlistContent.split(MISC.NEW_LINE);
     const headerLines: string[] = [];
     const segments: PlaylistSegment[] = [];
 
@@ -64,7 +64,7 @@ async function createPlaylist(
             headerLines.push(line);
         } else {
             headerDone = true;
-            if (line.startsWith("#")) {
+            if (line.startsWith(MISC.HASH_SYMBOL)) {
                 currentTags.push(line);
             } else if (line.trim().endsWith(FILE_EXTENSIONS.TS)) {
                 segments.push({ tags: currentTags, filename: line.trim() });
@@ -86,15 +86,15 @@ async function createPlaylist(
 
         if (firstKeptSegmentIndex > 0) {
             const segmentBefore = segments[firstKeptSegmentIndex - 1];
-            lastSegmentNumber = parseInt(segmentBefore.filename.split(FILE_EXTENSIONS.TS)[0], 10);
+            lastSegmentNumber = parseInt(segmentBefore.filename.split(FILE_EXTENSIONS.TS)[0], MISC.RADIX_DECIMAL);
             lastResolution = metadata.get(segmentBefore.filename)?.resolution || null;
         } else {
-            const firstSegmentNumber = parseInt(keptSegments[0].filename.split(FILE_EXTENSIONS.TS)[0], 10);
+            const firstSegmentNumber = parseInt(keptSegments[0].filename.split(FILE_EXTENSIONS.TS)[0], MISC.RADIX_DECIMAL);
             lastSegmentNumber = firstSegmentNumber - 1;
         }
 
         for (const segment of keptSegments) {
-            const currentSegmentNumber = parseInt(segment.filename.split(FILE_EXTENSIONS.TS)[0], 10);
+            const currentSegmentNumber = parseInt(segment.filename.split(FILE_EXTENSIONS.TS)[0], MISC.RADIX_DECIMAL);
             const currentResolution = metadata.get(segment.filename)?.resolution || null;
 
             if (currentSegmentNumber !== lastSegmentNumber + 1 || (lastResolution && currentResolution && lastResolution !== currentResolution)) {
@@ -109,7 +109,7 @@ async function createPlaylist(
 
     newPlaylistLines.push(HLS.ENDLIST);
 
-    const newPlaylistContent = newPlaylistLines.join("\n");
+    const newPlaylistContent = newPlaylistLines.join(MISC.NEW_LINE);
     const newPlaylistPath = path.join(destinationPath, FILE_NAMES.HLS_PLAYLIST);
     await fsPromises.writeFile(newPlaylistPath, newPlaylistContent, MISC.ENCODING_UTF8);
 }
@@ -127,7 +127,9 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
     }
 
     if (goodTsFiles.size > 0) {
-        const sortedGoodTs = Array.from(goodTsFiles).sort((a, b) => parseInt(a.split(FILE_EXTENSIONS.TS)[0]) - parseInt(b.split(FILE_EXTENSIONS.TS)[0]));
+        const sortedGoodTs = Array.from(goodTsFiles).sort(
+            (a, b) => parseInt(a.split(FILE_EXTENSIONS.TS)[0], MISC.RADIX_DECIMAL) - parseInt(b.split(FILE_EXTENSIONS.TS)[0], MISC.RADIX_DECIMAL)
+        );
         const metadata = await metadataService.cacheMetadata(videoPath, filename, sortedGoodTs);
         const parts: string[][] = await getParts(sortedGoodTs, metadata);
 
