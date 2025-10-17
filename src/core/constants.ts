@@ -57,6 +57,8 @@ export const HLS = {
     INF_PREFIX: "#EXTINF:",
     DISCONTINUITY: "#EXT-X-DISCONTINUITY",
     ENDLIST: "#EXT-X-ENDLIST",
+    DEFAULT_TARGET_DURATION: 10,
+    DURATION_DECIMAL_PRECISION: 3,
 } as const;
 
 export const FFMPEG = {

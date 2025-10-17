@@ -14,7 +14,7 @@ const videoCache = new Map<string, types.VideoItem>();
 const videoPathCache = new Map<string, string>();
 let isCacheUpdating = false;
 let lastThrottledUpdateTime = 0;
-const CACHE_UPDATE_THROTTLE_MS = 10000; // 10 seconds
+const CACHE_UPDATE_THROTTLE_MS = 10000;
 let isFixerRunning = false;
 
 export async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
@@ -36,7 +36,7 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
         const durations = Array.from(metadata.values())
             .map((m) => m.duration)
             .filter((d) => d > 0);
-        const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
+        const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : HLS.DEFAULT_TARGET_DURATION;
         const playlistLines = [HLS.HEADER, HLS.VERSION, HLS.MEDIA_SEQUENCE, `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`];
 
         let lastSegmentNumber: number | null = null;
@@ -55,7 +55,7 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
                 }
             }
 
-            playlistLines.push(`${HLS.INF_PREFIX}${segmentMeta.duration.toFixed(3)},`);
+            playlistLines.push(`${HLS.INF_PREFIX}${segmentMeta.duration.toFixed(HLS.DURATION_DECIMAL_PRECISION)},`);
             playlistLines.push(tsFile);
             lastSegmentNumber = segmentNumber;
             lastResolution = segmentMeta.resolution;
