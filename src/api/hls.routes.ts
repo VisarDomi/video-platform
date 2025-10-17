@@ -3,6 +3,7 @@ import path from "path";
 import logger from "../logger.js";
 import * as hlsService from "../services/cache/memory/hls.service.js";
 import * as cacheService from "../services/cache/memory/cache.service.js";
+import * as segmentService from "../services/cache/memory/segment.service.js";
 
 const router = Router();
 
@@ -26,6 +27,14 @@ router.get("/hls/:filename/:segmentName", (req, res) => {
     if (!filename || !segmentName.endsWith(".ts")) {
         return res.status(400).send("Invalid request: filename is required and segment name should end in .ts");
     }
+
+    res.setHeader("Content-Type", "video/mp2t");
+
+    const cachedSegment = segmentService.getSegment(filename, segmentName);
+    if (cachedSegment) {
+        return res.send(cachedSegment);
+    }
+
     const folderPath = cacheService.getVideoPathFromCache(filename);
 
     if (!folderPath) {
@@ -35,7 +44,6 @@ router.get("/hls/:filename/:segmentName", (req, res) => {
 
     const segmentPath = path.join(folderPath, segmentName);
 
-    res.setHeader("Content-Type", "video/mp2t");
     res.sendFile(segmentPath, (err) => {
         if (!err) return;
         if ((err as any).code === "ENOENT") {
