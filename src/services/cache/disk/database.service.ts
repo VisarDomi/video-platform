@@ -1,6 +1,7 @@
 import sqlite3 from "sqlite3";
 import { DB_PATH } from "../../../core/config.js";
 import logger from "../../../core/logger.js";
+import { DATABASE } from "../../../core/constants.js";
 
 const verboseSqlite = sqlite3.verbose();
 export const db = new verboseSqlite.Database(DB_PATH, (err) => {
@@ -13,17 +14,17 @@ export const db = new verboseSqlite.Database(DB_PATH, (err) => {
 const fixedPlaylistsCache = new Set<string>();
 
 const createTableQuery = `
-CREATE TABLE IF NOT EXISTS durations (
-    video_filename TEXT NOT NULL,
-    ts_filename TEXT NOT NULL,
-    duration REAL NOT NULL,
-    resolution TEXT,
-    PRIMARY KEY (video_filename, ts_filename)
+CREATE TABLE IF NOT EXISTS ${DATABASE.TABLES.DURATIONS} (
+    ${DATABASE.COLUMNS.VIDEO_FILENAME} TEXT NOT NULL,
+    ${DATABASE.COLUMNS.TS_FILENAME} TEXT NOT NULL,
+    ${DATABASE.COLUMNS.DURATION} REAL NOT NULL,
+    ${DATABASE.COLUMNS.RESOLUTION} TEXT,
+    PRIMARY KEY (${DATABASE.COLUMNS.VIDEO_FILENAME}, ${DATABASE.COLUMNS.TS_FILENAME})
 );`;
 
 const createFixedPlaylistsTableQuery = `
-CREATE TABLE IF NOT EXISTS fixed_playlists (
-    video_filename TEXT PRIMARY KEY
+CREATE TABLE IF NOT EXISTS ${DATABASE.TABLES.FIXED_PLAYLISTS} (
+    ${DATABASE.COLUMNS.VIDEO_FILENAME} TEXT PRIMARY KEY
 );`;
 
 db.serialize(() => {
@@ -34,18 +35,18 @@ db.serialize(() => {
         }
     });
 
-    db.all("PRAGMA table_info(durations)", (err, columns: { name: string }[]) => {
+    db.all(`PRAGMA table_info(${DATABASE.TABLES.DURATIONS})`, (err, columns: { name: string }[]) => {
         if (err) {
-            logger.error("Error getting table info for 'durations'", { error: err.message });
+            logger.error(`Error getting table info for '${DATABASE.TABLES.DURATIONS}'`, { error: err.message });
             return;
         }
 
-        const hasResolutionColumn = columns.some((column) => column.name === "resolution");
+        const hasResolutionColumn = columns.some((column) => column.name === DATABASE.COLUMNS.RESOLUTION);
 
         if (!hasResolutionColumn) {
-            db.run("ALTER TABLE durations ADD COLUMN resolution TEXT", (alterErr) => {
+            db.run(`ALTER TABLE ${DATABASE.TABLES.DURATIONS} ADD COLUMN ${DATABASE.COLUMNS.RESOLUTION} TEXT`, (alterErr) => {
                 if (alterErr) {
-                    logger.error("Error adding 'resolution' column to 'durations' table", { error: alterErr.message });
+                    logger.error(`Error adding '${DATABASE.COLUMNS.RESOLUTION}' column to '${DATABASE.TABLES.DURATIONS}' table`, { error: alterErr.message });
                 }
             });
         }
@@ -53,14 +54,14 @@ db.serialize(() => {
 
     db.run(createFixedPlaylistsTableQuery, (err) => {
         if (err) {
-            logger.error("Error creating fixed_playlists table", { error: err.message });
+            logger.error(`Error creating ${DATABASE.TABLES.FIXED_PLAYLISTS} table`, { error: err.message });
             process.exit(1);
         }
     });
 
-    db.all("SELECT video_filename FROM fixed_playlists", [], (err, rows: { video_filename: string }[]) => {
+    db.all(`SELECT ${DATABASE.COLUMNS.VIDEO_FILENAME} FROM ${DATABASE.TABLES.FIXED_PLAYLISTS}`, [], (err, rows: { video_filename: string }[]) => {
         if (err) {
-            logger.error("Failed to load fixed_playlists into cache", { error: err });
+            logger.error(`Failed to load ${DATABASE.TABLES.FIXED_PLAYLISTS} into cache`, { error: err });
             process.exit(1);
         }
         rows.forEach((row) => fixedPlaylistsCache.add(row.video_filename));
@@ -73,10 +74,10 @@ export function isPlaylistFixed(video_filename: string): boolean {
 
 export function addFixedPlaylistEntry(video_filename: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        const sql = `INSERT OR IGNORE INTO fixed_playlists (video_filename) VALUES (?)`;
+        const sql = `INSERT OR IGNORE INTO ${DATABASE.TABLES.FIXED_PLAYLISTS} (${DATABASE.COLUMNS.VIDEO_FILENAME}) VALUES (?)`;
         db.run(sql, [video_filename], function (err) {
             if (err) {
-                logger.error(`Failed to add fixed_playlists entry for ${video_filename}`, { error: err });
+                logger.error(`Failed to add ${DATABASE.TABLES.FIXED_PLAYLISTS} entry for ${video_filename}`, { error: err });
                 return reject(err);
             }
             fixedPlaylistsCache.add(video_filename);
@@ -87,10 +88,10 @@ export function addFixedPlaylistEntry(video_filename: string): Promise<void> {
 
 export function removeFixedPlaylistEntry(video_filename: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        const sql = `DELETE FROM fixed_playlists WHERE video_filename = ?`;
+        const sql = `DELETE FROM ${DATABASE.TABLES.FIXED_PLAYLISTS} WHERE ${DATABASE.COLUMNS.VIDEO_FILENAME} = ?`;
         db.run(sql, [video_filename], function (err) {
             if (err) {
-                logger.error(`Failed to remove fixed_playlists entry for ${video_filename}`, { error: err });
+                logger.error(`Failed to remove ${DATABASE.TABLES.FIXED_PLAYLISTS} entry for ${video_filename}`, { error: err });
                 return reject(err);
             }
             fixedPlaylistsCache.delete(video_filename);
@@ -101,10 +102,10 @@ export function removeFixedPlaylistEntry(video_filename: string): Promise<void> 
 
 export function removeDurationsEntry(video_filename: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        const sql = `DELETE FROM durations WHERE video_filename = ?`;
+        const sql = `DELETE FROM ${DATABASE.TABLES.DURATIONS} WHERE ${DATABASE.COLUMNS.VIDEO_FILENAME} = ?`;
         db.run(sql, [video_filename], function (err) {
             if (err) {
-                logger.error(`Failed to remove durations entry for ${video_filename}`, { error: err });
+                logger.error(`Failed to remove ${DATABASE.TABLES.DURATIONS} entry for ${video_filename}`, { error: err });
                 return reject(err);
             }
             resolve();

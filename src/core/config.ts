@@ -4,11 +4,12 @@ import * as url from "url";
 import * as os from "os";
 import * as utils from "./utils.js";
 import logger from "./logger.js";
+import * as constants from "./constants.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = utils.findProjectRoot(__dirname);
-const ROOT_CONFIG_PATH = path.resolve(projectRoot, "config.json");
+const ROOT_CONFIG_PATH = path.resolve(projectRoot, constants.FILE_NAMES.CONFIG);
 
 interface IConfig {
     videoPaths: {
@@ -30,7 +31,7 @@ const defaultConfig: Omit<IConfig, "cachePath"> = {
         converted: path.join(os.homedir(), "Videos", "downloads", "tango", "converter", "converted"),
     },
     frontendDistPath: "/home/visar/Documents/tango-repos/video-editor-frontend/dist",
-    sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
+    sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
 };
 
 function loadConfig(): IConfig {
@@ -51,10 +52,10 @@ function loadConfig(): IConfig {
             mergedConfig = { ...defaultConfig };
         }
     } else {
-        logger.warn(`config.json not found at ${ROOT_CONFIG_PATH}. Using default configuration.`);
+        logger.warn(`${constants.FILE_NAMES.CONFIG} not found at ${ROOT_CONFIG_PATH}. Using default configuration.`);
     }
 
-    const cachePath = path.join(mergedConfig.sharedStatePath, "cache");
+    const cachePath = path.join(mergedConfig.sharedStatePath, constants.DIRECTORIES.CACHE);
 
     return { ...mergedConfig, cachePath } as IConfig;
 }
@@ -62,7 +63,7 @@ function loadConfig(): IConfig {
 const config = loadConfig();
 
 if (!config.frontendDistPath) {
-    logger.error(`FATAL ERROR: frontendDistPath must be set in config.json.`);
+    logger.error(`FATAL ERROR: frontendDistPath must be set in ${constants.FILE_NAMES.CONFIG}.`);
     process.exit(1);
 }
 
@@ -92,13 +93,13 @@ export const VIDEO_CONVERTED_PATH: string = config.videoPaths.converted;
 export const VIDEO_TRASH_PATH: string = config.videoPaths.trash;
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
 export const CACHE_PATH: string = config.cachePath;
-export const DB_PATH: string = path.join(CACHE_PATH, "tango.sqlite");
-export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, "live-status.json");
+export const DB_PATH: string = path.join(CACHE_PATH, constants.FILE_NAMES.SQLITE_DB);
+export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, constants.FILE_NAMES.LIVE_STATUS);
 
 export const ALL_VIDEO_PATHS = [
-    { path: VIDEO_DOWNLOADER_PATH, type: "original" as const },
-    { path: VIDEO_EDITED_PATH, type: "edited" as const },
-    { path: VIDEO_CONVERTED_PATH, type: "edited" as const },
+    { path: VIDEO_DOWNLOADER_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
+    { path: VIDEO_EDITED_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
+    { path: VIDEO_CONVERTED_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
 ];
 
-export const PORT = 7973;
+export const PORT = constants.API.PORT;

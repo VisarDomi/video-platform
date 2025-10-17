@@ -3,7 +3,7 @@ import path from "path";
 import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import * as utils from "../../core/utils.js";
-import * as constants from "../../core/constants.js";
+import { DESTINATIONS, LOGS } from "../../core/constants.js";
 import * as types from "../../core/types.js";
 import * as errors from "../../core/errors.js";
 import * as databaseService from "../cache/disk/database.service.js";
@@ -11,14 +11,14 @@ import * as cacheService from "../cache/memory/cache.service.js";
 
 export async function moveVideo(filename: string, destination: types.Destination, sourcePath?: string): Promise<void> {
     let newPath: string;
-    if (destination === constants.TRASH) {
+    if (destination === DESTINATIONS.TRASH) {
         newPath = VIDEO_TRASH_PATH;
-    } else if (destination === constants.ORIGINAL) {
+    } else if (destination === DESTINATIONS.ORIGINAL) {
         newPath = VIDEO_DOWNLOADER_PATH;
-    } else if (destination === constants.EDITED) {
+    } else if (destination === DESTINATIONS.EDITED) {
         newPath = VIDEO_EDITED_PATH;
     } else {
-        throw new errors.MoveError("Destination can only be trash, original, or edited.");
+        throw new errors.MoveError(LOGS.MESSAGES.DESTINATION_ERROR);
     }
 
     const videoPath = sourcePath ?? (await utils.findVideoPath(filename));
@@ -45,6 +45,6 @@ export async function moveVideo(filename: string, destination: types.Destination
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
         await cacheService.triggerCacheUpdate();
     } else {
-        throw new errors.MoveError("File is already at the destination.");
+        throw new errors.MoveError(LOGS.MESSAGES.MOVE_ERROR);
     }
 }

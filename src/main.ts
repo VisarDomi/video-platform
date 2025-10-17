@@ -8,13 +8,14 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { initializeCache } from "./services/cache/memory/cache.service.js";
 import { initializeHlsCache } from "./services/cache/memory/hls.service.js";
+import { API, LOGS, MISC } from "./core/constants.js";
 
 const logServerInfo = () => {
     const networkInterfaces = os.networkInterfaces();
     Object.keys(networkInterfaces).forEach((ifaceName) => {
         networkInterfaces[ifaceName]?.forEach((iface: os.NetworkInterfaceInfo) => {
-            if (iface.family === "IPv4" && !iface.internal) {
-                logger.info(`LAN Access: http://${iface.address}:${PORT}`);
+            if (iface.family === MISC.NETWORK_INTERFACE_IPV4 && !iface.internal) {
+                logger.info(LOGS.MESSAGES.LAN_ACCESS(iface.address, PORT));
             }
         });
     });
@@ -34,7 +35,7 @@ async function startServer() {
     initializeCache();
     initializeHlsCache();
 
-    app.listen(PORT, "0.0.0.0", () => {
+    app.listen(PORT, API.HOST, () => {
         logServerInfo();
     });
 }

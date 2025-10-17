@@ -5,11 +5,12 @@ import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_CONVERTED_PATH, LIVE_ST
 import { FileNotFoundError } from "./errors.js";
 import logger from "./logger.js";
 import * as types from "./types.js";
+import * as constants from "./constants.js";
 
 export function findProjectRoot(startDir: string): string {
     let currentDir = startDir;
     while (true) {
-        const packageJsonPath = path.join(currentDir, "package.json");
+        const packageJsonPath = path.join(currentDir, constants.FILE_NAMES.PACKAGE_JSON);
         if (fs.existsSync(packageJsonPath)) {
             return currentDir;
         }
@@ -47,7 +48,7 @@ export async function findVideoPath(filename: string): Promise<string> {
 
 export async function getLiveFolders(): Promise<Set<string>> {
     try {
-        const content = await fsPromises.readFile(LIVE_STATUS_PATH, "utf-8");
+        const content = await fsPromises.readFile(LIVE_STATUS_PATH, constants.MISC.ENCODING_UTF8);
         const liveData: types.LiveStatus = JSON.parse(content);
 
         if (liveData && Array.isArray(liveData.downloads)) {
@@ -66,7 +67,7 @@ export async function getLiveFolders(): Promise<Set<string>> {
         logger.warn("live-status.json does not contain a valid 'downloads' array, ignoring.");
         return new Set();
     } catch (error: any) {
-        if (error.code !== "ENOENT") {
+        if (error.code !== constants.MISC.ERROR_CODE.ENOENT) {
             logger.error("Failed to read or parse live-status.json", { error });
         }
         return new Set();

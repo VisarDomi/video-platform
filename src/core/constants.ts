@@ -1,6 +1,119 @@
-// TODO: i don't like strings, so there should be exactly 0 strings outside of constants.ts
+export const VIDEO_TYPES = {
+    ORIGINAL: "original",
+    EDITED: "edited",
+} as const;
 
-export const TRASH = "trash"
-export const ORIGINAL = "original"
-export const EDITED = "edited"
+export const DESTINATIONS = {
+    TRASH: "trash",
+    ORIGINAL: VIDEO_TYPES.ORIGINAL,
+    EDITED: VIDEO_TYPES.EDITED,
+} as const;
 
+export const ALL_VIDEO_PATHS_TYPES = {
+    ORIGINAL: VIDEO_TYPES.ORIGINAL,
+    EDITED: VIDEO_TYPES.EDITED,
+} as const;
+
+export const FILE_NAMES = {
+    CONFIG: "config.json",
+    PACKAGE_JSON: "package.json",
+    SQLITE_DB: "tango.sqlite",
+    LIVE_STATUS: "live-status.json",
+    ERROR_LOG: "error.log",
+    HLS_PLAYLIST: "playlist.m3u8",
+} as const;
+
+export const DIRECTORIES = {
+    SHARED_STATE_BASE: ".local/share/video-services",
+    CACHE: "cache",
+} as const;
+
+export const FILE_EXTENSIONS = {
+    TS: ".ts",
+} as const;
+
+export const HLS = {
+    HEADER: "#EXTM3U",
+    VERSION: "#EXT-X-VERSION:7",
+    MEDIA_SEQUENCE: "#EXT-X-MEDIA-SEQUENCE:0",
+    TARGET_DURATION_PREFIX: "#EXT-X-TARGETDURATION:",
+    INF_PREFIX: "#EXTINF:",
+    DISCONTINUITY: "#EXT-X-DISCONTINUITY",
+    ENDLIST: "#EXT-X-ENDLIST",
+} as const;
+
+export const FFMPEG = {
+    COMMAND: "ffprobe",
+    ARGS: {
+        QUIET: "-v",
+        QUIET_LEVEL: "quiet",
+        PRINT_FORMAT: "-print_format",
+        FORMAT_JSON: "json",
+        SHOW_FORMAT: "-show_format",
+        SHOW_STREAMS: "-show_streams",
+    },
+    CODEC_TYPE_VIDEO: "video",
+} as const;
+
+export const DATABASE = {
+    TABLES: {
+        DURATIONS: "durations",
+        FIXED_PLAYLISTS: "fixed_playlists",
+    },
+    COLUMNS: {
+        VIDEO_FILENAME: "video_filename",
+        TS_FILENAME: "ts_filename",
+        DURATION: "duration",
+        RESOLUTION: "resolution",
+        TOTAL_DURATION: "totalDuration",
+    },
+    QUERIES: {
+        BEGIN_TRANSACTION: "BEGIN TRANSACTION",
+        COMMIT: "COMMIT",
+    },
+} as const;
+
+export const API = {
+    PORT: 7973,
+    HOST: "0.0.0.0",
+    MESSAGES: {
+        INVALID_REQUEST_FILENAME_REQUIRED: "Invalid request: filename is required.",
+        INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED: "Invalid request: filename and segments are required.",
+        INVALID_REQUEST_DESTINATION: "Invalid request: filename and destination are required. destination can only have the values trash, original, edited",
+        INVALID_REQUEST_SEGMENT_NAME: "Invalid request: filename is required and segment name should end in .ts",
+        VIDEO_NOT_FOUND: "Video not found.",
+        SEGMENT_NOT_FOUND: "Segment not found.",
+        COULD_NOT_SERVE_SEGMENT: "Could not serve segment.",
+    },
+    HEADERS: {
+        CONTENT_TYPE: "Content-Type",
+        CACHE_CONTROL: "Cache-Control",
+        HLS_CONTENT_TYPE: "application/vnd.apple.mpegurl",
+        TS_CONTENT_TYPE: "video/mp2t",
+        NO_CACHE: "max-age=0, no-cache, no-store, must-revalidate",
+    },
+} as const;
+
+export const LOGS = {
+    LEVELS: {
+        INFO: "info",
+        ERROR: "error",
+    },
+    TIMESTAMP_FORMAT: "YYYY-MM-DD HH:mm:ss",
+    MESSAGES: {
+        LAN_ACCESS: (address: string, port: number) => `LAN Access: http://${address}:${port}`,
+        MOVE_ERROR: "File is already at the destination.",
+        DESTINATION_ERROR: "Destination can only be trash, original, or edited.",
+    },
+} as const;
+
+export const MISC = {
+    ENCODING_UTF8: "utf-8",
+    NETWORK_INTERFACE_IPV4: "IPv4",
+    EDITED_VIDEO_PART_SUFFIX: (index: number) => ` part${index}`,
+    ERROR_CODE: {
+        ENOENT: "ENOENT",
+        ECONNABORTED: "ECONNABORTED",
+    },
+    EMPTY_STRING: "",
+} as const;

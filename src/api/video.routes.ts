@@ -4,7 +4,7 @@ import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as cacheService from "../services/cache/memory/cache.service.js";
 import logger from "../core/logger.js";
-import * as constants from "../core/constants.js";
+import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
 
 const router = Router();
@@ -19,7 +19,7 @@ router.post("/edit", async (req, res) => {
     const { filename, segments }: { filename: string; segments: string[] } = req.body;
 
     if (!filename || !segments || segments.length === 0) {
-        return res.status(400).send("Invalid request: filename and segments are required.");
+        return res.status(400).send(API.MESSAGES.INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED);
     }
 
     const editPromise = editService.editVideo(filename, segments);
@@ -33,8 +33,8 @@ router.post("/edit", async (req, res) => {
 
 router.post("/videos/:filename/:destination", async (req, res) => {
     const { filename, destination } = req.params as { filename: string; destination: types.Destination };
-    if (!filename || !(destination === constants.TRASH || destination === constants.ORIGINAL || destination === constants.EDITED)) {
-        return res.status(400).send("Invalid request: filename and destination are required. destination can only have the values trash, original, edited");
+    if (!filename || !(destination === DESTINATIONS.TRASH || destination === DESTINATIONS.ORIGINAL || destination === DESTINATIONS.EDITED)) {
+        return res.status(400).send(API.MESSAGES.INVALID_REQUEST_DESTINATION);
     }
     const movePromise = moveService.moveVideo(filename, destination);
     res.status(200);

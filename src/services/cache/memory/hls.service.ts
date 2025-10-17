@@ -2,6 +2,7 @@ import { promises as fsPromises } from "fs";
 import path from "path";
 import logger from "../../../core/logger.js";
 import * as utils from "../../../core/utils.js";
+import { FILE_NAMES, HLS, MISC } from "../../../core/constants.js";
 
 interface HlsCacheEntry {
     content: string;
@@ -12,12 +13,12 @@ const hlsPlaylistCache = new Map<string, HlsCacheEntry>();
 
 export async function updatePlaylistCache(filename: string, videoPath: string): Promise<void> {
     try {
-        const playlistPath = path.join(videoPath, "playlist.m3u8");
-        const content = await fsPromises.readFile(playlistPath, "utf-8");
-        const isLive = !content.trim().endsWith("#EXT-X-ENDLIST");
+        const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
+        const content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
+        const isLive = !content.trim().endsWith(HLS.ENDLIST);
         hlsPlaylistCache.set(filename, { content, isLive });
     } catch (error: any) {
-        if (error.code !== "ENOENT") {
+        if (error.code !== MISC.ERROR_CODE.ENOENT) {
             logger.error(`Failed to update HLS playlist cache for ${filename}`, { error });
         }
         hlsPlaylistCache.delete(filename);

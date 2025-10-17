@@ -7,6 +7,7 @@ import * as metadataService from "../disk/metadata.service.js";
 import * as databaseService from "../disk/database.service.js";
 import * as utils from "../../../core/utils.js";
 import * as hlsService from "./hls.service.js";
+import { FILE_EXTENSIONS, FILE_NAMES, HLS, MISC } from "../../../core/constants.js";
 
 const videoCache = new Map<string, types.VideoItem>();
 const videoPathCache = new Map<string, string>();
@@ -18,8 +19,8 @@ let isFixerRunning = false;
 export async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
     try {
         const tsFiles = (await fsPromises.readdir(videoPath))
-            .filter((f) => f.endsWith(".ts"))
-            .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
+            .filter((f) => f.endsWith(FILE_EXTENSIONS.TS))
+            .sort((a, b) => parseInt(a.replace(FILE_EXTENSIONS.TS, ""), 10) - parseInt(b.replace(FILE_EXTENSIONS.TS, ""), 10));
 
         if (tsFiles.length === 0) {
             await databaseService.addFixedPlaylistEntry(filename);
@@ -31,32 +32,32 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
             .map((m) => m.duration)
             .filter((d) => d > 0);
         const targetDuration = durations.length > 0 ? Math.ceil(Math.max(...durations)) : 10;
-        const playlistLines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-MEDIA-SEQUENCE:0", `#EXT-X-TARGETDURATION:${targetDuration}`];
+        const playlistLines = [HLS.HEADER, HLS.VERSION, HLS.MEDIA_SEQUENCE, `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`];
 
         let lastSegmentNumber: number | null = null;
         let lastResolution: string | null = null;
 
         for (const tsFile of tsFiles) {
-            const segmentNumber = parseInt(tsFile.replace(".ts", ""), 10);
+            const segmentNumber = parseInt(tsFile.replace(FILE_EXTENSIONS.TS, ""), 10);
             const segmentMeta = metadata.get(tsFile);
             if (!segmentMeta) continue;
 
             if (lastSegmentNumber === null) {
-                playlistLines.push("#EXT-X-DISCONTINUITY");
+                playlistLines.push(HLS.DISCONTINUITY);
             } else {
                 if (segmentNumber !== lastSegmentNumber + 1 || (lastResolution && segmentMeta.resolution && lastResolution !== segmentMeta.resolution)) {
-                    playlistLines.push("#EXT-X-DISCONTINUITY");
+                    playlistLines.push(HLS.DISCONTINUITY);
                 }
             }
 
-            playlistLines.push(`#EXTINF:${segmentMeta.duration.toFixed(3)},`);
+            playlistLines.push(`${HLS.INF_PREFIX}${segmentMeta.duration.toFixed(3)},`);
             playlistLines.push(tsFile);
             lastSegmentNumber = segmentNumber;
             lastResolution = segmentMeta.resolution;
         }
-        playlistLines.push("#EXT-X-ENDLIST");
-        const playlistPath = path.join(videoPath, "playlist.m3u8");
-        await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
+        playlistLines.push(HLS.ENDLIST);
+        const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
+        await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), MISC.ENCODING_UTF8);
         await hlsService.updatePlaylistCache(filename, videoPath);
         await databaseService.addFixedPlaylistEntry(filename);
     } catch (error) {
@@ -91,7 +92,7 @@ async function startPlaylistFixerWorker() {
             if (databaseService.isPlaylistFixed(folder.name)) continue;
             try {
                 const files = await fsPromises.readdir(folder.fullPath);
-                if (files.some((f) => f.endsWith(".ts"))) {
+                if (files.some((f) => f.endsWith(FILE_EXTENSIONS.TS))) {
                     await fixAndCachePlaylist(folder.fullPath, folder.name);
                 } else {
                     await databaseService.addFixedPlaylistEntry(folder.name);
@@ -118,7 +119,7 @@ async function updateVideoCache() {
         const newPathCache = new Map<string, string>();
         const liveFolders = await utils.getLiveFolders();
 
-        const allVideoDirs: { name: string; fullPath: string; type: "original" | "edited" }[] = [];
+        const allVideoDirs: { name: string; fullPath: string; type: types.VideoType }[] = [];
         for (const dir of ALL_VIDEO_PATHS) {
             try {
                 const entries = await fsPromises.readdir(dir.path, { withFileTypes: true });
