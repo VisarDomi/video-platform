@@ -118,7 +118,7 @@ async function createPlaylist(
     await fsPromises.writeFile(newPlaylistPath, newPlaylistContent, "utf-8");
 }
 
-export async function createEditedVideo(filename: string, segments: string[]): Promise<void> {
+export async function editVideo(filename: string, segments: string[]): Promise<void> {
     const videoPath = await utils.findVideoPath(filename);
     if (!videoPath) throw new errors.FileNotFoundError(`Video folder not found: ${filename}`);
     const allSourceTsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(".ts"));

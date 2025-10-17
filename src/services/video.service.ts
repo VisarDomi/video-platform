@@ -9,7 +9,7 @@ import * as errors from "../errors.js";
 import * as databaseService from "./database.service.js";
 import * as cacheService from "./cache.service.js";
 
-export async function getAllVideos(): Promise<types.VideoItem[]> {
+export function getAllVideos(): types.VideoItem[] {
     return cacheService.getVideosFromCache();
 }
 

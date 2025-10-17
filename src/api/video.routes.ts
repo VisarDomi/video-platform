@@ -3,46 +3,44 @@ import { Router } from "express";
 import * as videoService from "../services/video.service.js";
 import * as editService from "../services/edit.service.js";
 import logger from "../logger.js";
-import * as errors from "../errors.js";
 
 const router = Router();
 
 router.get("/videos", async (_req, res) => {
-    try {
-        const allVideos = await videoService.getAllVideos();
-        res.json(allVideos);
-    } catch (error: any) {
-        logger.error(`Error listing video directories:`, { error });
-        res.status(500).json({ success: false, message: "Could not list video directories." });
-    }
+    const allVideos = videoService.getAllVideos();
+    res.json(allVideos);
+    cache.update()
 });
 
 router.post("/edit", async (req, res) => {
     const { filename, segments }: { filename: string; segments: string[] } = req.body;
 
     if (!filename || !segments || segments.length === 0) {
-        return res.status(400).json({ success: false, message: "Invalid request: filename and segments are required." });
+        return res.status(400).send("Invalid request: filename and segments are required.");
     }
-
+    
+    const editPromise = editService.editVideo(filename, segments);
+    res.status(200);
     try {
-        await editService.createEditedVideo(filename, segments);
-        res.json({ success: true, message: "Video edit job completed." });
+        await editPromise;
+        cache.update()
     } catch (error: any) {
-        if (error instanceof errors.SegmentError) return res.status(404).json({ success: false, message: error.message });
-        logger.error(`Failed to handle video processing for ${filename}:`, { error });
-        res.status(500).json({ success: false, message: "Failed to handle video processing." });
+        logger.error(`Error editing:`, { message: error.message });
     }
 });
 
 router.post("/videos/:filename/:destination", async (req, res) => {
     const { filename, destination } = req.params as { filename: string; destination: "trash" | "original" | "convert" };
+    if (!filename || !(destination === "trash" || destination === "original" || destination === "convert")) {
+        return res.status(400).send("Invalid request: filename and destination are required. destination can only have the values trash, original, convert");
+    }
+    const movePromise = videoService.moveVideo(filename, destination);
+    res.status(200);
     try {
-        await videoService.moveVideo(filename, destination);
-        res.json({ success: true, message: "Video moved successfully." });
-    } catch (err: any) {
-        if (err instanceof errors.FileNotFoundError) return res.status(404).json({ success: false, message: err.message });
-        if (err instanceof errors.MoveError) return res.status(400).json({ success: false, message: err.message });
-        res.status(500).json({ success: false, message: "Failed to move video." });
+        await movePromise;
+        cache.update()
+    } catch (error: any) {
+        logger.error(`Error moving:`, { message: error.message });
     }
 });
 
