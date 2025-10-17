@@ -38,6 +38,7 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
         }
 
         await fsPromises.rename(videoPath, destinationPath);
+        await databaseService.removeDurationsEntry(filename);
         await databaseService.removeFixedPlaylistEntry(filename);
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
         await cacheService.triggerCacheUpdate();

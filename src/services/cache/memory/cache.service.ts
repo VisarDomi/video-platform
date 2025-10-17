@@ -15,7 +15,7 @@ let lastThrottledUpdateTime = 0;
 const CACHE_UPDATE_THROTTLE_MS = 10000; // 10 seconds
 let isFixerRunning = false;
 
-async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
+export async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
     try {
         logger.info(`Starting playlist fix for ${filename}`);
         const tsFiles = (await fsPromises.readdir(videoPath))

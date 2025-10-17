@@ -104,3 +104,17 @@ export function removeFixedPlaylistEntry(video_filename: string): Promise<void> 
         });
     });
 }
+
+export function removeDurationsEntry(video_filename: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const sql = `DELETE FROM durations WHERE video_filename = ?`;
+        db.run(sql, [video_filename], function (err) {
+            if (err) {
+                logger.error(`Failed to remove durations entry for ${video_filename}`, { error: err });
+                return reject(err);
+            }
+            logger.info(`Removed duration entries for ${video_filename} from database.`);
+            resolve();
+        });
+    });
+}

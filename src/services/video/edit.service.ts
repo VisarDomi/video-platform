@@ -6,6 +6,7 @@ import * as utils from "../../utils.js";
 import * as errors from "../../errors.js";
 import * as metadataService from "../cache/disk/metadata.service.js";
 import * as moveService from "./move.service.js";
+import { fixAndCachePlaylist } from "../cache/memory/cache.service.js";
 
 async function getParts(tsFiles: string[], metadata: Map<string, metadataService.SegmentMetadata>): Promise<string[][]> {
     const parts: string[][] = [];
@@ -137,6 +138,7 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
             const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file)));
             await Promise.all(movePromises);
             await createPlaylist(videoPath, tsChunk, destinationPath, metadata);
+            await fixAndCachePlaylist(destinationPath, partFolderName);
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
 
