@@ -20,6 +20,7 @@ export const FILE_NAMES = {
     SQLITE_DB: "tango.sqlite",
     LIVE_STATUS: "live-status.json",
     ERROR_LOG: "error.log",
+    PROFILING_LOG: "profiling.log",
     HLS_PLAYLIST: "playlist.m3u8",
     INDEX_HTML: "index.html",
 } as const;
@@ -112,6 +113,10 @@ export const API = {
         TS_CONTENT_TYPE: "video/mp2t",
         NO_CACHE: "max-age=0, no-cache, no-store, must-revalidate",
     },
+} as const;
+
+export const PROFILING = {
+    SLOW_REQUEST_THRESHOLD_MS: 50,
 } as const;
 
 export const LOGS = {

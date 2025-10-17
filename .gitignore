@@ -2,6 +2,7 @@
 /dist
 .env
 error.log
+profiling.log
 temp.txt
 *.har
 repomix-output.xml

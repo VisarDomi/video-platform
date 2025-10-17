@@ -34,4 +34,17 @@ const logger = winston.createLogger({
     ],
 });
 
+export const profilingLogger = winston.createLogger({
+    level: constants.LOGS.LEVELS.INFO,
+    format: winston.format.combine(
+        winston.format.timestamp({ format: constants.LOGS.TIMESTAMP_FORMAT }),
+        winston.format.printf(({ timestamp, message }) => `${timestamp} - ${message}`)
+    ),
+    transports: [
+        new winston.transports.File({
+            filename: path.join(projectRoot, constants.FILE_NAMES.PROFILING_LOG),
+        }),
+    ],
+});
+
 export default logger;
