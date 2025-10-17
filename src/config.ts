@@ -12,10 +12,10 @@ const ROOT_CONFIG_PATH = path.resolve(projectRoot, "config.json");
 
 interface IConfig {
     videoPaths: {
-        downloads: string;
+        downloader: string;
         edited: string;
-        converted: string;
         trash: string;
+        converted: string;
     };
     frontendDistPath: string;
     sharedStatePath: string;
@@ -24,10 +24,10 @@ interface IConfig {
 
 const defaultConfig: Omit<IConfig, "cachePath"> = {
     videoPaths: {
-        downloads: path.join(os.homedir(), "Videos", "downloads"),
-        edited: path.join(os.homedir(), "Videos", "editor", "edited"),
-        converted: path.join(os.homedir(), "Videos", "converter", "converted"),
-        trash: path.join(os.homedir(), "Videos", "editor", "trash"),
+        downloader: path.join(os.homedir(), "Videos", "downloads", "tango", "downloader"),
+        edited: path.join(os.homedir(), "Videos", "downloads", "tango", "editor", "edited"),
+        trash: path.join(os.homedir(), "Videos", "downloads", "tango", "editor", "trash"),
+        converted: path.join(os.homedir(), "Videos", "downloads", "tango", "converter", "converted"),
     },
     frontendDistPath: "/home/visar/Documents/tango-repos/video-editor-frontend/dist",
     sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
@@ -66,7 +66,7 @@ if (!config.frontendDistPath) {
     process.exit(1);
 }
 
-const pathsToValidate = [config.videoPaths.downloads, config.videoPaths.edited, config.videoPaths.converted, config.videoPaths.trash, config.frontendDistPath];
+const pathsToValidate = [config.videoPaths.downloader, config.videoPaths.edited, config.videoPaths.converted, config.videoPaths.trash, config.frontendDistPath];
 
 pathsToValidate.forEach((dir) => {
     if (!fs.existsSync(dir)) {
@@ -88,7 +88,7 @@ pathsToValidate.forEach((dir) => {
     }
 });
 
-export const VIDEO_DOWNLOADS_PATH: string = config.videoPaths.downloads;
+export const VIDEO_DOWNLOADER_PATH: string = config.videoPaths.downloader;
 export const VIDEO_EDITED_PATH: string = config.videoPaths.edited;
 export const VIDEO_CONVERTED_PATH: string = config.videoPaths.converted;
 export const VIDEO_TRASH_PATH: string = config.videoPaths.trash;
@@ -98,7 +98,7 @@ export const DB_PATH: string = path.join(CACHE_PATH, "tango.sqlite");
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, "live-status.json");
 
 export const ALL_VIDEO_PATHS = [
-    { path: VIDEO_DOWNLOADS_PATH, type: "original" as const },
+    { path: VIDEO_DOWNLOADER_PATH, type: "original" as const },
     { path: VIDEO_EDITED_PATH, type: "edited" as const },
     { path: VIDEO_CONVERTED_PATH, type: "edited" as const },
 ];

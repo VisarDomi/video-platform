@@ -1,7 +1,7 @@
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
-import { VIDEO_DOWNLOADS_PATH, VIDEO_EDITED_PATH, VIDEO_CONVERTED_PATH, LIVE_STATUS_PATH } from "./config.js";
+import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_CONVERTED_PATH, LIVE_STATUS_PATH } from "./config.js";
 import { FileNotFoundError } from "./errors.js";
 import logger from "./logger.js";
 import * as types from "./types.js";
@@ -25,7 +25,7 @@ export function findProjectRoot(startDir: string): string {
 export async function findVideoPath(filename: string): Promise<string> {
     let finalPath = null;
     try {
-        const fullPath = path.join(VIDEO_DOWNLOADS_PATH, filename);
+        const fullPath = path.join(VIDEO_DOWNLOADER_PATH, filename);
         await fsPromises.access(fullPath);
         finalPath = fullPath;
     } catch {}
