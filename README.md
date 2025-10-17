@@ -20,7 +20,9 @@ exactly after:
     - if the requested segment is from a new filename, we invalidate all segments of the oldest filename, and cache all segments of the new filename
     - cache does not throttle itself
 
-2. res.json(allVideos);
+2. centralize cache - right now it's spread in multiple files
+
+3. res.json(allVideos);
     - cache invalidation request. it throttles itself to once per 10s to not spam the disk
-    - the frontend should always be optimistic on create and move (this just means removing the modified video from the listview/videoview)
-    - it becomes pessimistic once every 10s and gets the source of truth then - it updates the listview/videoview
+    - (frontend) the frontend should always be optimistic on create and move (this just means removing the modified video from the listview/videoview)
+    - (frontend) it becomes pessimistic once every 10s and gets the source of truth then - it updates the listview/videoview
