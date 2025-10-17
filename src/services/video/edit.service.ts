@@ -1,12 +1,11 @@
-// src/services/edit.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_CONVERT_PATH } from "../config.js";
-import logger from "../logger.js";
-import * as utils from "../utils.js";
-import * as errors from "../errors.js";
-import * as metadataService from "./metadata.service.js";
-import { moveVideo } from "./video.service.js";
+import { VIDEO_CONVERT_PATH } from "../../config.js";
+import logger from "../../logger.js";
+import * as utils from "../../utils.js";
+import * as errors from "../../errors.js";
+import * as metadataService from "../cache/disk/metadata.service.js";
+import * as moveService from "./move.service.js";
 
 async function getParts(tsFiles: string[], metadata: Map<string, metadataService.SegmentMetadata>): Promise<string[][]> {
     const parts: string[][] = [];
@@ -23,7 +22,7 @@ async function getParts(tsFiles: string[], metadata: Map<string, metadataService
         totalDuration += tsDuration;
 
         if (totalDuration > 30 * 60) {
-            parts.push([...tsChunk]); // i don't trust passing references, better create a copy.
+            parts.push([...tsChunk]);
             tsChunk = [];
             totalDuration = 0;
         }
@@ -78,21 +77,16 @@ async function createPlaylist(
     const keptSegments = segments.filter((segment) => tsFiles.has(segment.filename));
 
     if (keptSegments.length > 0) {
-        // Find the index of the first kept segment in the original segments list.
         const firstKeptSegmentIndex = segments.findIndex((s) => s.filename === keptSegments[0].filename);
 
         let lastSegmentNumber: number;
         let lastResolution: string | null = null;
 
         if (firstKeptSegmentIndex > 0) {
-            // If it's not the first segment of the original video, we get the number of the segment before it
-            // to check for continuity.
             const segmentBefore = segments[firstKeptSegmentIndex - 1];
             lastSegmentNumber = parseInt(segmentBefore.filename.split(".ts")[0], 10);
             lastResolution = metadata.get(segmentBefore.filename)?.resolution || null;
         } else {
-            // It is the first segment. To avoid an initial discontinuity, we prime lastSegmentNumber
-            // as if the previous segment was numbered one less than the first.
             const firstSegmentNumber = parseInt(keptSegments[0].filename.split(".ts")[0], 10);
             lastSegmentNumber = firstSegmentNumber - 1;
         }
@@ -146,7 +140,7 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
 
-        await moveVideo(filename, "trash", videoPath);
+        await moveService.moveVideo(filename, "trash", videoPath);
         logger.info(`Successfully processed and removed original folder: ${filename}`);
     }
 }

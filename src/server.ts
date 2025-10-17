@@ -1,4 +1,3 @@
-// src/server.ts
 import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
@@ -7,8 +6,8 @@ import logger from "./logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
-import { initializeCache } from "./services/cache.service.js";
-import { initializeHlsCache } from "./services/hls.service.js";
+import { initializeCache } from "./services/cache/memory/cache.service.js";
+import { initializeHlsCache } from "./services/cache/memory/hls.service.js";
 
 const logServerInfo = () => {
     logger.info(`✓ Tango Dashboard server running.`);
@@ -34,7 +33,6 @@ async function startServer() {
         res.sendFile(path.join(FRONTEND_DIST_PATH!, "index.html"));
     });
 
-    // Initialize the cache service which will run in the background
     initializeCache();
     initializeHlsCache();
 

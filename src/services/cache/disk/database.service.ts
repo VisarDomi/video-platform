@@ -1,7 +1,6 @@
-// src/services/database.service.ts
 import sqlite3 from "sqlite3";
-import { DB_PATH } from "../config.js";
-import logger from "../logger.js";
+import { DB_PATH } from "../../../config.js";
+import logger from "../../../logger.js";
 
 const verboseSqlite = sqlite3.verbose();
 export const db = new verboseSqlite.Database(DB_PATH, (err) => {
@@ -37,7 +36,6 @@ db.serialize(() => {
         logger.info("Database table 'durations' is ready.");
     });
 
-    // Check for resolution column and add it if it doesn't exist
     db.all("PRAGMA table_info(durations)", (err, columns: { name: string }[]) => {
         if (err) {
             logger.error("Error getting table info for 'durations'", { error: err.message });
@@ -65,7 +63,6 @@ db.serialize(() => {
         logger.info("Database table 'fixed_playlists' is ready.");
     });
 
-    // Initialize the cache
     db.all("SELECT video_filename FROM fixed_playlists", [], (err, rows: { video_filename: string }[]) => {
         if (err) {
             logger.error("Failed to load fixed_playlists into cache", { error: err });

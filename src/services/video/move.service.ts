@@ -1,17 +1,11 @@
-// src/services/video.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_TRASH_PATH } from "../config.js";
-import logger from "../logger.js";
-import * as utils from "../utils.js";
-import * as types from "../types.js";
-import * as errors from "../errors.js";
-import * as databaseService from "./database.service.js";
-import * as cacheService from "./cache.service.js";
-
-export function getAllVideos(): types.VideoItem[] {
-    return cacheService.getVideosFromCache();
-}
+import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_TRASH_PATH } from "../../config.js";
+import logger from "../../logger.js";
+import * as utils from "../../utils.js";
+import * as errors from "../../errors.js";
+import * as databaseService from "../cache/disk/database.service.js";
+import * as cacheService from "../cache/memory/cache.service.js";
 
 export async function moveVideo(filename: string, destination: "trash" | "original" | "convert", sourcePath?: string): Promise<void> {
     let newPath: string;
@@ -46,7 +40,6 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
         await fsPromises.rename(videoPath, destinationPath);
         await databaseService.removeFixedPlaylistEntry(filename);
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
-        // Immediately trigger a cache update after the move
         await cacheService.triggerCacheUpdate();
     } else {
         throw new errors.MoveError("File is already at the destination.");

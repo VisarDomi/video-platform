@@ -1,8 +1,7 @@
-// src/services/hls.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import logger from "../logger.js";
-import * as utils from "../utils.js";
+import logger from "../../../logger.js";
+import * as utils from "../../../utils.js";
 
 interface HlsCacheEntry {
     content: string;
@@ -21,7 +20,6 @@ export async function updatePlaylistCache(filename: string, videoPath: string): 
         if (error.code !== "ENOENT") {
             logger.error(`Failed to update HLS playlist cache for ${filename}`, { error });
         }
-        // If we can't read it, remove it to avoid serving stale data
         hlsPlaylistCache.delete(filename);
     }
 }

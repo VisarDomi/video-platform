@@ -1,9 +1,8 @@
-// src/api/hls.routes.ts
 import { Router } from "express";
 import path from "path";
 import logger from "../logger.js";
-import * as hlsService from "../services/hls.service.js";
-import * as cacheService from "../services/cache.service.js";
+import * as hlsService from "../services/cache/memory/hls.service.js";
+import * as cacheService from "../services/cache/memory/cache.service.js";
 
 const router = Router();
 

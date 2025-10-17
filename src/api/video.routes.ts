@@ -1,14 +1,14 @@
-// src/api/video.routes.ts
 import { Router } from "express";
-import * as videoService from "../services/video.service.js";
-import * as editService from "../services/edit.service.js";
-import * as cacheService from "../services/cache.service.js";
+import * as retrieveService from "../services/video/retrieve.service.js";
+import * as moveService from "../services/video/move.service.js";
+import * as editService from "../services/video/edit.service.js";
+import * as cacheService from "../services/cache/memory/cache.service.js";
 import logger from "../logger.js";
 
 const router = Router();
 
 router.get("/videos", async (_req, res) => {
-    const allVideos = videoService.getAllVideos();
+    const allVideos = retrieveService.getAllVideos();
     res.json(allVideos);
     cacheService.requestThrottledCacheUpdate();
 });
@@ -34,7 +34,7 @@ router.post("/videos/:filename/:destination", async (req, res) => {
     if (!filename || !(destination === "trash" || destination === "original" || destination === "convert")) {
         return res.status(400).send("Invalid request: filename and destination are required. destination can only have the values trash, original, convert");
     }
-    const movePromise = videoService.moveVideo(filename, destination);
+    const movePromise = moveService.moveVideo(filename, destination);
     res.status(200);
     try {
         await movePromise;

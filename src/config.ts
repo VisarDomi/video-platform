@@ -1,4 +1,3 @@
-// src/config.ts
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
@@ -6,7 +5,6 @@ import * as os from "os";
 import * as utils from "./utils.js";
 import logger from "./logger.js";
 
-// --- Correct Path Resolution ---
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = utils.findProjectRoot(__dirname);
@@ -63,7 +61,6 @@ function loadConfig(): IConfig {
 
 const config = loadConfig();
 
-// --- Startup Validation ---
 if (!config.frontendDistPath) {
     logger.error(`FATAL ERROR: frontendDistPath must be set in config.json.`);
     process.exit(1);
@@ -84,7 +81,6 @@ pathsToValidate.forEach((dir) => {
     }
 });
 
-// Ensure shared state and cache paths exist
 [config.sharedStatePath, config.cachePath].forEach((dir) => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -92,7 +88,6 @@ pathsToValidate.forEach((dir) => {
     }
 });
 
-// --- Export Guaranteed Constants ---
 export const VIDEO_DOWNLOAD_PATH: string = config.videoPaths.download;
 export const VIDEO_CONVERT_PATH: string = config.videoPaths.convert;
 export const VIDEO_MODIFIED_PATH: string = config.videoPaths.modified;
@@ -102,7 +97,6 @@ export const CACHE_PATH: string = config.cachePath;
 export const DB_PATH: string = path.join(CACHE_PATH, "durations.sqlite");
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, "live-status.json");
 
-// --- Path Constants ---
 export const ALL_VIDEO_PATHS = [
     { path: VIDEO_DOWNLOAD_PATH, type: "original" as const },
     { path: VIDEO_CONVERT_PATH, type: "edited" as const },

@@ -1,12 +1,11 @@
-// src/services/cache.service.ts
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { ALL_VIDEO_PATHS } from "../config.js";
-import logger from "../logger.js";
-import * as types from "../types.js";
-import * as metadataService from "./metadata.service.js";
-import * as databaseService from "./database.service.js";
-import * as utils from "../utils.js";
+import { ALL_VIDEO_PATHS } from "../../../config.js";
+import logger from "../../../logger.js";
+import * as types from "../../../types.js";
+import * as metadataService from "../disk/metadata.service.js";
+import * as databaseService from "../disk/database.service.js";
+import * as utils from "../../../utils.js";
 import * as hlsService from "./hls.service.js";
 
 const videoCache = new Map<string, types.VideoItem>();
