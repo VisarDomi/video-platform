@@ -4,7 +4,7 @@ Get and update tokens used by other tango microservices.
 ## note
 this service produces:
 
-`sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),`
+`sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),`
 
 `
 return path.resolve(config.getConfig().sharedStatePath, `session.json`);
