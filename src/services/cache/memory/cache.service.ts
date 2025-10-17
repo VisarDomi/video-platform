@@ -17,7 +17,6 @@ let isFixerRunning = false;
 
 export async function fixAndCachePlaylist(videoPath: string, filename: string): Promise<void> {
     try {
-        logger.info(`Starting playlist fix for ${filename}`);
         const tsFiles = (await fsPromises.readdir(videoPath))
             .filter((f) => f.endsWith(".ts"))
             .sort((a, b) => parseInt(a.replace(".ts", ""), 10) - parseInt(b.replace(".ts", ""), 10));
@@ -69,7 +68,6 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
 async function startPlaylistFixerWorker() {
     if (isFixerRunning) return;
     isFixerRunning = true;
-    logger.info("Starting background playlist fixer worker.");
 
     try {
         const liveFolders = await utils.getLiveFolders();
@@ -89,7 +87,6 @@ async function startPlaylistFixerWorker() {
 
         for (const folder of allFolders) {
             if (liveFolders.has(folder.name)) {
-                logger.info(`Skipping folder ${folder.name} because it is currently live.`);
                 continue;
             }
             if (databaseService.isPlaylistFixed(folder.name)) continue;
@@ -108,19 +105,16 @@ async function startPlaylistFixerWorker() {
         logger.error("Playlist fixer worker encountered a critical error.", { error });
     } finally {
         isFixerRunning = false;
-        logger.info("Background playlist fixer worker finished.");
     }
 }
 
 async function updateVideoCache() {
     if (isCacheUpdating) {
-        logger.info("Cache update already in progress, skipping this run.");
         return;
     }
     isCacheUpdating = true;
 
     try {
-        logger.info("Updating in-memory video cache...");
         const newCache = new Map<string, types.VideoItem>();
         const newPathCache = new Map<string, string>();
         const liveFolders = await utils.getLiveFolders();
@@ -186,7 +180,6 @@ async function updateVideoCache() {
         for (const [key, value] of newPathCache.entries()) {
             videoPathCache.set(key, value);
         }
-        logger.info(`In-memory video cache updated with ${videoCache.size} items.`);
         startPlaylistFixerWorker().catch((err) => logger.error("Unhandled error in playlist fixer trigger", { err }));
     } finally {
         isCacheUpdating = false;

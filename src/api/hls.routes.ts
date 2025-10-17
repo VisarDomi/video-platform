@@ -41,6 +41,7 @@ router.get("/hls/:filename/:segmentName", (req, res) => {
         if ((err as any).code === "ENOENT") {
             logger.warn(`Segment not found on disk: ${segmentPath}`);
             if (!res.headersSent) res.status(404).send("Segment not found.");
+        } else if ((err as any).code === "ECONNABORTED") {
         } else {
             logger.error(`Error sending segment file: ${segmentPath}`, { error: err });
             if (!res.headersSent) res.status(500).send("Could not serve segment.");
