@@ -23,7 +23,7 @@ interface IConfig {
     cachePath: string;
 }
 
-const defaultConfig: Omit<IConfig, "cachePath"> = {
+const defaultConfig: Omit<IConfig, typeof constants.CONFIG_KEYS.CACHE_PATH> = {
     videoPaths: {
         downloader: path.join(
             os.homedir(),

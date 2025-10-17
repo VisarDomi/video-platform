@@ -41,6 +41,10 @@ export const DEFAULT_PATHS = {
     CONVERTED: "converted",
 } as const;
 
+export const CONFIG_KEYS = {
+    CACHE_PATH: "cachePath",
+} as const;
+
 export const FILE_EXTENSIONS = {
     TS: ".ts",
 } as const;
