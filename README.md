@@ -2,9 +2,7 @@
 Download 1s .ts files for each of the streamers you follow.
 
 ## note
-```
-sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
-```
+`sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),`
 
 this service consumes:
 

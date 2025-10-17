@@ -28,7 +28,7 @@ const defaultConfig: IConfig = {
     storagePath: "/home/visar/Videos/tango",
     // Use the XDG Base Directory Specification for user-specific data files.
     // This is the standard "Linux way" for services running under a specific user.
-    sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
+    sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
     intervals: {
         pollFollowing: 1000,
         shortTokenRefresh: 5000,
