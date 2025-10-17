@@ -1,7 +1,7 @@
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_MODIFIED_PATH, LIVE_STATUS_PATH } from "./config.js";
+import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_CONVERTED_PATH, LIVE_STATUS_PATH } from "./config.js";
 import { FileNotFoundError } from "./errors.js";
 import logger from "./logger.js";
 import * as types from "./types.js";
@@ -35,7 +35,7 @@ export async function findVideoPath(filename: string): Promise<string> {
         finalPath = convertPath;
     } catch {}
     try {
-        const modifiedPath = path.join(VIDEO_MODIFIED_PATH, filename);
+        const modifiedPath = path.join(VIDEO_CONVERTED_PATH, filename);
         await fsPromises.access(modifiedPath);
         finalPath = modifiedPath;
     } catch {}
