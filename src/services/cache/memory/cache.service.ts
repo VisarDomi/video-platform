@@ -1,11 +1,11 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { ALL_VIDEO_PATHS } from "../../../config.js";
-import logger from "../../../logger.js";
-import * as types from "../../../types.js";
+import { ALL_VIDEO_PATHS } from "../../../core/config.js";
+import logger from "../../../core/logger.js";
+import * as types from "../../../core/types.js";
 import * as metadataService from "../disk/metadata.service.js";
 import * as databaseService from "../disk/database.service.js";
-import * as utils from "../../../utils.js";
+import * as utils from "../../../core/utils.js";
 import * as hlsService from "./hls.service.js";
 
 const videoCache = new Map<string, types.VideoItem>();
@@ -59,7 +59,6 @@ export async function fixAndCachePlaylist(videoPath: string, filename: string): 
         await fsPromises.writeFile(playlistPath, playlistLines.join("\n"), "utf-8");
         await hlsService.updatePlaylistCache(filename, videoPath);
         await databaseService.addFixedPlaylistEntry(filename);
-        logger.info(`Fixed playlist for ${filename}`);
     } catch (error) {
         logger.error(`Failed to fix playlist for ${filename}`, { error });
     }
@@ -187,7 +186,6 @@ async function updateVideoCache() {
 }
 
 export function initializeCache(): void {
-    logger.info("Initializing video cache service...");
     updateVideoCache().catch((err) => logger.error("Initial cache population failed.", { err }));
     setInterval(updateVideoCache, 30000);
 }
@@ -207,10 +205,8 @@ export async function triggerCacheUpdate(): Promise<void> {
 export function requestThrottledCacheUpdate(): void {
     const now = Date.now();
     if (now - lastThrottledUpdateTime < CACHE_UPDATE_THROTTLE_MS) {
-        logger.info("Throttled cache update request skipped as it's within the throttle period.");
         return;
     }
     lastThrottledUpdateTime = now;
-    logger.info("Throttled cache update triggered.");
     updateVideoCache().catch((err) => logger.error("Throttled cache update failed", { err }));
 }

@@ -71,7 +71,6 @@ const pathsToValidate = [config.videoPaths.downloader, config.videoPaths.edited,
 pathsToValidate.forEach((dir) => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
-        logger.info(`Created directory: ${dir}`);
     }
     try {
         fs.accessSync(dir, fs.constants.R_OK);
@@ -84,7 +83,6 @@ pathsToValidate.forEach((dir) => {
 [config.sharedStatePath, config.cachePath].forEach((dir) => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
-        logger.info(`Created directory: ${dir}`);
     }
 });
 

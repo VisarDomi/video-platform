@@ -2,7 +2,7 @@ import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import pLimit from "p-limit";
-import logger from "../../../logger.js";
+import logger from "../../../core/logger.js";
 import * as databaseService from "./database.service.js";
 
 const execFileAsync = promisify(execFile);

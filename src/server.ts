@@ -2,16 +2,14 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
 import * as os from "os";
-import logger from "./logger.js";
-import { PORT, FRONTEND_DIST_PATH } from "./config.js";
+import logger from "./core/logger.js";
+import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { initializeCache } from "./services/cache/memory/cache.service.js";
 import { initializeHlsCache } from "./services/cache/memory/hls.service.js";
 
 const logServerInfo = () => {
-    logger.info(`✓ Tango Dashboard server running.`);
-    logger.info(`   Listening on port: ${PORT}`);
     const networkInterfaces = os.networkInterfaces();
     Object.keys(networkInterfaces).forEach((ifaceName) => {
         networkInterfaces[ifaceName]?.forEach((iface: os.NetworkInterfaceInfo) => {

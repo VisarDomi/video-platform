@@ -1,7 +1,7 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import logger from "../../../logger.js";
-import * as utils from "../../../utils.js";
+import logger from "../../../core/logger.js";
+import * as utils from "../../../core/utils.js";
 
 interface HlsCacheEntry {
     content: string;
@@ -27,7 +27,6 @@ export async function updatePlaylistCache(filename: string, videoPath: string): 
 export function removePlaylistFromCache(filename: string): void {
     if (hlsPlaylistCache.has(filename)) {
         hlsPlaylistCache.delete(filename);
-        logger.info(`Removed HLS playlist for ${filename} from cache.`);
     }
 }
 
@@ -54,6 +53,5 @@ async function updateLivePlaylists() {
 }
 
 export function initializeHlsCache(): void {
-    logger.info("Initializing HLS playlist cache service...");
     setInterval(updateLivePlaylists, 500);
 }

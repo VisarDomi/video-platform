@@ -1,22 +1,28 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../config.js";
-import logger from "../../logger.js";
-import * as utils from "../../utils.js";
-import * as errors from "../../errors.js";
+import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../core/config.js";
+import logger from "../../core/logger.js";
+import * as utils from "../../core/utils.js";
+import * as errors from "../../core/errors.js";
 import * as databaseService from "../cache/disk/database.service.js";
 import * as cacheService from "../cache/memory/cache.service.js";
 
-export async function moveVideo(filename: string, destination: "trash" | "original" | "convert", sourcePath?: string): Promise<void> {
+// TODO: i don't like strings, we should use constants. and this should be part of the config
+export const TRASH = "trash"
+export const ORIGINAL = "original"
+export const EDITED = "edited"
+export type Destination = "trash" | "original" | "edited"
+
+export async function moveVideo(filename: string, destination: Destination, sourcePath?: string): Promise<void> {
     let newPath: string;
-    if (destination === "trash") {
+    if (destination === TRASH) {
         newPath = VIDEO_TRASH_PATH;
-    } else if (destination === "original") {
+    } else if (destination === ORIGINAL) {
         newPath = VIDEO_DOWNLOADER_PATH;
-    } else if (destination === "convert") {
+    } else if (destination === EDITED) {
         newPath = VIDEO_EDITED_PATH;
     } else {
-        throw new errors.MoveError("Destination can only be trash, original, or convert.");
+        throw new errors.MoveError("Destination can only be trash, original, or edited.");
     }
 
     const videoPath = sourcePath ?? (await utils.findVideoPath(filename));

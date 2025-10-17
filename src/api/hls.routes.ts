@@ -1,6 +1,6 @@
 import { Router } from "express";
 import path from "path";
-import logger from "../logger.js";
+import logger from "../core/logger.js";
 import * as hlsService from "../services/cache/memory/hls.service.js";
 import * as cacheService from "../services/cache/memory/cache.service.js";
 
