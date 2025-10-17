@@ -30,7 +30,7 @@ const defaultConfig: Omit<IConfig, "cachePath"> = {
         trash: path.join(os.homedir(), "Videos", "tango", "trash"),
     },
     frontendDistPath: "/home/visar/Documents/tango-repos/video-editor-frontend/dist",
-    sharedStatePath: path.join(os.homedir(), ".local", "share", "tango-services"),
+    sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
 };
 
 function loadConfig(): IConfig {
