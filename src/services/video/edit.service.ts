@@ -1,6 +1,6 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_CONVERT_PATH } from "../../config.js";
+import { VIDEO_EDITED_PATH } from "../../config.js";
 import logger from "../../logger.js";
 import * as utils from "../../utils.js";
 import * as errors from "../../errors.js";
@@ -133,7 +133,7 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
         for (let i = 0; i < parts.length; i++) {
             const tsChunk = parts[i];
             const partFolderName = parts.length > 1 ? `${filename} part${i + 1}` : filename;
-            const destinationPath = path.join(VIDEO_CONVERT_PATH, partFolderName);
+            const destinationPath = path.join(VIDEO_EDITED_PATH, partFolderName);
             await fsPromises.mkdir(destinationPath, { recursive: true });
             const movePromises = tsChunk.map((file) => fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file)));
             await Promise.all(movePromises);

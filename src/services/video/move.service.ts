@@ -1,6 +1,6 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOAD_PATH, VIDEO_CONVERT_PATH, VIDEO_TRASH_PATH } from "../../config.js";
+import { VIDEO_DOWNLOADS_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../config.js";
 import logger from "../../logger.js";
 import * as utils from "../../utils.js";
 import * as errors from "../../errors.js";
@@ -12,9 +12,9 @@ export async function moveVideo(filename: string, destination: "trash" | "origin
     if (destination === "trash") {
         newPath = VIDEO_TRASH_PATH;
     } else if (destination === "original") {
-        newPath = VIDEO_DOWNLOAD_PATH;
+        newPath = VIDEO_DOWNLOADS_PATH;
     } else if (destination === "convert") {
-        newPath = VIDEO_CONVERT_PATH;
+        newPath = VIDEO_EDITED_PATH;
     } else {
         throw new errors.MoveError("Destination can only be trash, original, or convert.");
     }
