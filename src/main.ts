@@ -13,8 +13,8 @@ const logServerInfo = () => {
     const networkInterfaces = os.networkInterfaces();
     Object.keys(networkInterfaces).forEach((ifaceName) => {
         networkInterfaces[ifaceName]?.forEach((iface: os.NetworkInterfaceInfo) => {
-            if ("IPv4" === iface.family && !iface.internal) {
-                logger.info(`   LAN Access: http://${iface.address}:${PORT}`);
+            if (iface.family === "IPv4" && !iface.internal) {
+                logger.info(`LAN Access: http://${iface.address}:${PORT}`);
             }
         });
     });

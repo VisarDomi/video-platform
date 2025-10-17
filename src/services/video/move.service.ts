@@ -3,23 +3,19 @@ import path from "path";
 import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import * as utils from "../../core/utils.js";
+import * as constants from "../../core/constants.js";
+import * as types from "../../core/types.js";
 import * as errors from "../../core/errors.js";
 import * as databaseService from "../cache/disk/database.service.js";
 import * as cacheService from "../cache/memory/cache.service.js";
 
-// TODO: i don't like strings, we should use constants. and this should be part of the config
-export const TRASH = "trash"
-export const ORIGINAL = "original"
-export const EDITED = "edited"
-export type Destination = "trash" | "original" | "edited"
-
-export async function moveVideo(filename: string, destination: Destination, sourcePath?: string): Promise<void> {
+export async function moveVideo(filename: string, destination: types.Destination, sourcePath?: string): Promise<void> {
     let newPath: string;
-    if (destination === TRASH) {
+    if (destination === constants.TRASH) {
         newPath = VIDEO_TRASH_PATH;
-    } else if (destination === ORIGINAL) {
+    } else if (destination === constants.ORIGINAL) {
         newPath = VIDEO_DOWNLOADER_PATH;
-    } else if (destination === EDITED) {
+    } else if (destination === constants.EDITED) {
         newPath = VIDEO_EDITED_PATH;
     } else {
         throw new errors.MoveError("Destination can only be trash, original, or edited.");

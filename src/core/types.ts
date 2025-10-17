@@ -1,3 +1,5 @@
+
+
 export type VideoItem = {
     filename: string;
     type: "original" | "edited";
@@ -13,3 +15,5 @@ export interface LiveDownload {
 export interface LiveStatus {
     downloads: LiveDownload[];
 }
+
+export type Destination = "trash" | "original" | "edited"

@@ -4,6 +4,8 @@ import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as cacheService from "../services/cache/memory/cache.service.js";
 import logger from "../core/logger.js";
+import * as constants from "../core/constants.js";
+import * as types from "../core/types.js";
 
 const router = Router();
 
@@ -30,8 +32,8 @@ router.post("/edit", async (req, res) => {
 });
 
 router.post("/videos/:filename/:destination", async (req, res) => {
-    const { filename, destination } = req.params as { filename: string; destination: moveService.Destination };
-    if (!filename || !(destination === moveService.TRASH || destination === moveService.ORIGINAL || destination === moveService.EDITED)) {
+    const { filename, destination } = req.params as { filename: string; destination: types.Destination };
+    if (!filename || !(destination === constants.TRASH || destination === constants.ORIGINAL || destination === constants.EDITED)) {
         return res.status(400).send("Invalid request: filename and destination are required. destination can only have the values trash, original, edited");
     }
     const movePromise = moveService.moveVideo(filename, destination);

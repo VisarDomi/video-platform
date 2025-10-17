@@ -4,6 +4,7 @@ import { VIDEO_EDITED_PATH } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import * as utils from "../../core/utils.js";
 import * as errors from "../../core/errors.js";
+import * as constants from "../../core/constants.js";
 import * as metadataService from "../cache/disk/metadata.service.js";
 import * as moveService from "./move.service.js";
 import { fixAndCachePlaylist } from "../cache/memory/cache.service.js";
@@ -142,7 +143,7 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
 
-        await moveService.moveVideo(filename, moveService.TRASH, videoPath);
+        await moveService.moveVideo(filename, constants.TRASH, videoPath);
         logger.info(`Successfully processed and removed original folder: ${filename}`);
     }
 }
