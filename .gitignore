@@ -12,3 +12,4 @@ tango/
 tango-raw/
 venv/
 processed-by-combiner.txt
+*.png

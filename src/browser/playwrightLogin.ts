@@ -135,7 +135,7 @@ export async function extractTokens(): Promise<types.LoginResult> {
     } catch (error) {
         logger.error("Failed to extract initial tokens via Playwright.", { error });
         // Taking a screenshot on failure is a powerful debugging tool.
-        await page.screenshot({ path: "playwright-error-screenshot.png", fullPage: true });
+        await page.screenshot({ path: `${Date.now()} error.png`, fullPage: true });
         throw error;
     } finally {
         if (browser) {

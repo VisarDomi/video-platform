@@ -172,6 +172,7 @@ export class AuthService {
         try {
             await this._ensureValidTokens();
         } catch (error) {
+            // TODO: find if we can end up here if we don't have internet. fix if we do
             logger.error("Lightweight session refresh failed. Falling back to full browser re-authentication.", { error });
             try {
                 await this._performFreshLogin();

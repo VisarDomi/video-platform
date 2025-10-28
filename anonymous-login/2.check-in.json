@@ -1,0 +1,206 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_2",
+        "pageTimings": {
+          "onContentLoad": 665,
+          "onLoad": 916
+        },
+        "startedDateTime": "2025-10-28T23:12:02.852+01:00",
+        "title": "https://tango.me/"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2025-10-28T23:12:02.852+01:00",
+        "request": {
+          "bodySize": 0,
+          "method": "POST",
+          "url": "https://gateway.tango.me/visitor-lobby/api/public/visitors/v1/check-in?appId=tango",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "foreground-id",
+              "value": "214cfdd5-854a-4246-b145-880ffce3f897"
+            },
+            {
+              "name": "interaction-id",
+              "value": "132172be-7aab-41df-bc8d-cf78e7eb1e34"
+            },
+            {
+              "name": "username",
+              "value": "null"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-GPC",
+              "value": "1"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Cookie",
+              "value": "Tango-DeviceId=3ff20244c1db4cc68780602ee1b9f573"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-DeviceId",
+              "value": "3ff20244c1db4cc68780602ee1b9f573"
+            }
+          ],
+          "queryString": [
+            {
+              "name": "appId",
+              "value": "tango"
+            }
+          ],
+          "headersSize": 0
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "vary",
+              "value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "x-b3-traceid",
+              "value": "19a2ce0d411f64b450538752858"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-RT=CLEARED; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:10 GMT; Path=/proxycador/api/session/refresh; Secure; HttpOnly"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-VT=eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg; Max-Age=15552000; Expires=Sun, 26 Apr 2026 22:12:03 GMT; Path=/; HttpOnly"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-SD=eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0=; Max-Age=15552000; Expires=Sun, 26 Apr 2026 22:12:03 GMT; Path=/"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Oct 2025 22:12:03 GMT"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-RT",
+              "value": "CLEARED"
+            },
+            {
+              "name": "Tango-VT",
+              "value": "eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0="
+            }
+          ],
+          "content": {
+            "mimeType": "application/json",
+            "size": 70,
+            "text": "{\"analyticsKey\":\"7221bfaafdad49d4acdca26b47aca3b2\",\"countryCode\":\"AL\"}"
+          },
+          "redirectURL": "",
+          "headersSize": 1987,
+          "bodySize": 2057
+        },
+        "cache": {},
+        "timings": {
+          "blocked": 0,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 231,
+          "receive": 1
+        },
+        "time": 232,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_2"
+      }
+    ]
+  }
+}

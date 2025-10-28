@@ -1,0 +1,254 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_3",
+        "pageTimings": {
+          "onContentLoad": 665,
+          "onLoad": 916
+        },
+        "startedDateTime": "2025-10-28T23:12:08.325+01:00",
+        "title": "https://tango.me/"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2025-10-28T23:12:08.325+01:00",
+        "request": {
+          "bodySize": 354,
+          "method": "POST",
+          "url": "https://gateway.tango.me/device-login/public/login/v1/web",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "354"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "foreground-id",
+              "value": "214cfdd5-854a-4246-b145-880ffce3f897"
+            },
+            {
+              "name": "interaction-id",
+              "value": "132172be-7aab-41df-bc8d-cf78e7eb1e34"
+            },
+            {
+              "name": "x-app-client-session-id",
+              "value": "34f91602-a943-4892-a45a-a363b08f38c8"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-GPC",
+              "value": "1"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            },
+            {
+              "name": "username",
+              "value": ""
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Cookie",
+              "value": "Tango-DeviceId=3ff20244c1db4cc68780602ee1b9f573; Tango-VT=eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg; Tango-SD=eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0=; tt=ZGViODAwMmZmNGUwM2UxMDVkODdkMzUzMmY2NjBhMDM2NTQ3OTdlYmNmNzAyMjQ5NmE0MWI4NGIzOTc4MTg5OQ; ttu=7221bfaafdad49d4acdca26b47aca3b2; tte=1761689534"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-DeviceId",
+              "value": "3ff20244c1db4cc68780602ee1b9f573"
+            },
+            {
+              "name": "Tango-VT",
+              "value": "eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0="
+            },
+            {
+              "name": "tt",
+              "value": "ZGViODAwMmZmNGUwM2UxMDVkODdkMzUzMmY2NjBhMDM2NTQ3OTdlYmNmNzAyMjQ5NmE0MWI4NGIzOTc4MTg5OQ"
+            },
+            {
+              "name": "ttu",
+              "value": "7221bfaafdad49d4acdca26b47aca3b2"
+            },
+            {
+              "name": "tte",
+              "value": "1761689534"
+            }
+          ],
+          "queryString": [],
+          "headersSize": 0,
+          "postData": {
+            "mimeType": "application/json",
+            "params": [],
+            "text": "{\"webClient\":{\"capabilities\":[\"device.linking\",\"tcalttext\",\"acme.v1\",\"tc21\",\"tc.stranger\",\"groupmessage\",\"ndigit.sms.validation\",\"social.v6\",\"live.social.notification:1\",\"live.social.private\",\"live.social.private:2\",\"live.social.pullevents\",\"externalmessage\"],\"locale\":\"en\",\"osVersion\":\"x86_64 (Firefox-142)\",\"appVersion\":\"11.27.6-647cd7f-202510280737\"}}"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "x-b3-traceid",
+              "value": "19a2ce0ecc0935357def4cc7f9c"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-VT=eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:10 GMT; Path=/"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-SD=eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:10 GMT; Path=/"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6ImdhdGV3YXkiLCJhY2NvdW50SWQiOiJ5dXlzVXJpYUJrcWRVVjVRSDVpM1d3IiwiYXBwSWQiOiJ0YW5nbyIsImd1ZXN0Ijp0cnVlLCJleHAiOjE3NjE2OTMxMjksImlhdCI6MTc2MTY4OTUyOSwianRpIjoiNzI0OTJkODYtMmI1NC00ZjQ1LTgxNzAtMTQ1MjliN2Q3NTliIiwidXNlcm5hbWUiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiJ9.1FbBodSBAP8CZQQaJwZ0UF6Z4vH05piCkc2IcdiiemCMdTRmKRiEkdpIMF1oFT41B7yUWHDK8upukUKbnbVaCA; Max-Age=3599; Expires=Tue, 28 Oct 2025 23:12:08 GMT; Path=/; Secure; HttpOnly"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-WST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6ImdhdGV3YXkiLCJhY2NvdW50SWQiOiJ5dXlzVXJpYUJrcWRVVjVRSDVpM1d3IiwiYXBwSWQiOiJ0YW5nbyIsImd1ZXN0Ijp0cnVlLCJleHAiOjE3NjE2OTMxMjksImlhdCI6MTc2MTY4OTUyOSwianRpIjoiNzI0OTJkODYtMmI1NC00ZjQ1LTgxNzAtMTQ1MjliN2Q3NTliIiwidXNlcm5hbWUiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiJ9.1FbBodSBAP8CZQQaJwZ0UF6Z4vH05piCkc2IcdiiemCMdTRmKRiEkdpIMF1oFT41B7yUWHDK8upukUKbnbVaCA; Max-Age=3599; Expires=Tue, 28 Oct 2025 23:12:08 GMT; Domain=gateway.tango.me; Path=/; Secure; HttpOnly"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-RT=eyJraWQiOiJhOGQxOGRlZS01OTI3LTRlNjctYmFmNS1jZDQ1ZGNlYTdjYTciLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6InNlc3Npb24tc2VydmljZSIsImFjY291bnRJZCI6Inl1eXNVcmlhQmtxZFVWNVFINWkzV3ciLCJhcHBJZCI6InRhbmdvIiwiZ3Vlc3QiOnRydWUsImV4cCI6MTc2OTQ2NTUyOSwiaWF0IjoxNzYxNjg5NTI5LCJqdGkiOiI4NTY2NWM3NS02N2ZjLTQ5ZDAtODJjNy02NWY0NTkzYTM2MzYiLCJ1c2VybmFtZSI6ImQwNWQxNzQxZDdkNjRjNjdiYTFhNzcwNmFiMzRiZTNmIn0.oShMy7S2mw_Qlb3Skblnq9YPFQUMlin8Hz0x_IMSajE1xWK_VvG9scE3hO2gNp0GgiSqm5kH3nokqeXVMakMAw; Max-Age=7775999; Expires=Mon, 26 Jan 2026 22:12:08 GMT; Path=/proxycador/api/session/refresh; Secure; HttpOnly"
+            },
+            {
+              "name": "set-cookie",
+              "value": "Tango-SD=eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NjE2OTMxMjgsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Njk0NjU1MjgsImFjY291bnRJZCI6Inl1eXNVcmlhQmtxZFVWNVFINWkzV3cifQ==; Max-Age=7775999; Expires=Mon, 26 Jan 2026 22:12:08 GMT; Path=/"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "date",
+              "value": "Tue, 28 Oct 2025 22:12:09 GMT"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-VT",
+              "value": "eyJraWQiOiJjOWZiMjU4OS1mNDQxLTRlNTMtYTgyNC1jY2NmNGJmMThmNmYiLCJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwibWFya2V0aW5nIjpmYWxzZSwiYW5hbHl0aWNzS2V5IjoiNzIyMWJmYWFmZGFkNDlkNGFjZGNhMjZiNDdhY2EzYjIiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImV4cCI6MTc3NzI0MTUyMywiaWF0IjoxNzYxNjg5NTIzLCJqdGkiOiIzODY3ODIwMy0wZDE4LTRjZjYtODNlMS1lMjc4YjJjZGFjMDYiLCJ1c2VybmFtZSI6IjlkMjk5MTM1YzQ5ZDQ3M2I4YzJlZjJiYTI3ODcyMDYzIn0.ZnXU8vGhNI_qlAqAI2KEQmQs7uxcxZN4St3Z0clbg0kN-pYmqCMsKkcMPpW4m3XFTai1yiR65-cHyRp-rQl6jyvK1CoRWHoETw173vKTqNM8J22rbFs2H3spHpRIOWqY9yBubDJp1diNdrrHUeL4Vg8Eci9pj4L43r6oKMEzhog73iWym64tcV-4xhR2Ju1yeIN2i7OuVPvGcj5PSGJ9v-G6PlD0Ql_VKOHdQhlRvYWHOeAWcR8lO3L8AfVAr2NKifXAgFbbqo1QhbCCdlwmXIq_6E5xixDIK0Sv66-N4K9mg4clQ6S8rYP_2wGViGQqmMsnAODMR7ZT5_j7AswKJ1EMzthI-2pfK9ywyKRTLG--HujVw5xQONsHhGyf7GuES3jkNxrt_iZBry5t3I4XQnsylxUtwjGc6RBjyl26cWtpOde5-v2HwlWIGcZNwZuIt1UIK1UEOCczBm7tmZc6Ftn8JjdgMUSLpawj6STP13IgIxeqFzYcpkUV-ePie7Y0Om28tR0O7oNppQB_HVYO3XD_IB-ZYy-ex_biGs2teZtsYBQeFR9UYEh9pMAiBnO6frkEzo8ZmS-mAFpQ3am58PugHJyd5cAgZTxNvdE2AyjL0N6K_hsqtupGXwx_7RWMyx2qIoARdGHJwtj2DWLCf9dAT3lbsqvic_a-lfoUGFg"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IlZJU0lUT1IiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzcyNDE1MjMsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjAsImFjY291bnRJZCI6bnVsbH0="
+            },
+            {
+              "name": "Tango-ST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6ImdhdGV3YXkiLCJhY2NvdW50SWQiOiJ5dXlzVXJpYUJrcWRVVjVRSDVpM1d3IiwiYXBwSWQiOiJ0YW5nbyIsImd1ZXN0Ijp0cnVlLCJleHAiOjE3NjE2OTMxMjksImlhdCI6MTc2MTY4OTUyOSwianRpIjoiNzI0OTJkODYtMmI1NC00ZjQ1LTgxNzAtMTQ1MjliN2Q3NTliIiwidXNlcm5hbWUiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiJ9.1FbBodSBAP8CZQQaJwZ0UF6Z4vH05piCkc2IcdiiemCMdTRmKRiEkdpIMF1oFT41B7yUWHDK8upukUKbnbVaCA"
+            },
+            {
+              "name": "Tango-WST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6ImdhdGV3YXkiLCJhY2NvdW50SWQiOiJ5dXlzVXJpYUJrcWRVVjVRSDVpM1d3IiwiYXBwSWQiOiJ0YW5nbyIsImd1ZXN0Ijp0cnVlLCJleHAiOjE3NjE2OTMxMjksImlhdCI6MTc2MTY4OTUyOSwianRpIjoiNzI0OTJkODYtMmI1NC00ZjQ1LTgxNzAtMTQ1MjliN2Q3NTliIiwidXNlcm5hbWUiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiJ9.1FbBodSBAP8CZQQaJwZ0UF6Z4vH05piCkc2IcdiiemCMdTRmKRiEkdpIMF1oFT41B7yUWHDK8upukUKbnbVaCA"
+            },
+            {
+              "name": "Tango-RT",
+              "value": "eyJraWQiOiJhOGQxOGRlZS01OTI3LTRlNjctYmFmNS1jZDQ1ZGNlYTdjYTciLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiJkMDVkMTc0MWQ3ZDY0YzY3YmExYTc3MDZhYjM0YmUzZiIsInBsYXRmb3JtIjpudWxsLCJzdXNwZW5kZWQiOm51bGwsImF1ZCI6InNlc3Npb24tc2VydmljZSIsImFjY291bnRJZCI6Inl1eXNVcmlhQmtxZFVWNVFINWkzV3ciLCJhcHBJZCI6InRhbmdvIiwiZ3Vlc3QiOnRydWUsImV4cCI6MTc2OTQ2NTUyOSwiaWF0IjoxNzYxNjg5NTI5LCJqdGkiOiI4NTY2NWM3NS02N2ZjLTQ5ZDAtODJjNy02NWY0NTkzYTM2MzYiLCJ1c2VybmFtZSI6ImQwNWQxNzQxZDdkNjRjNjdiYTFhNzcwNmFiMzRiZTNmIn0.oShMy7S2mw_Qlb3Skblnq9YPFQUMlin8Hz0x_IMSajE1xWK_VvG9scE3hO2gNp0GgiSqm5kH3nokqeXVMakMAw"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOiI3MjIxYmZhYWZkYWQ0OWQ0YWNkY2EyNmI0N2FjYTNiMiIsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NjE2OTMxMjgsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Njk0NjU1MjgsImFjY291bnRJZCI6Inl1eXNVcmlhQmtxZFVWNVFINWkzV3cifQ=="
+            }
+          ],
+          "content": {
+            "mimeType": "application/json",
+            "size": 206,
+            "text": "{\"accountId\":\"yuysUriaBkqdUV5QH5i3Ww\",\"username\":\"d05d1741d7d64c67ba1a7706ab34be3f\",\"deviceToken\":\"eb556335a24cbcccc39b7f3f982cfa38\",\"analyticsKey\":\"7221bfaafdad49d4acdca26b47aca3b2\",\"newRegistration\":true}"
+          },
+          "redirectURL": "",
+          "headersSize": 4424,
+          "bodySize": 4630
+        },
+        "cache": {},
+        "timings": {
+          "blocked": -1,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 913,
+          "receive": 0
+        },
+        "time": 913,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_3"
+      }
+    ]
+  }
+}
