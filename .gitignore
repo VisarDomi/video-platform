@@ -12,3 +12,4 @@ tslive/
 tslive-raw/
 venv/
 processed-by-combiner.txt
+*.png
