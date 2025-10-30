@@ -5,5 +5,5 @@
         "trash": "/home/visar/Videos/downloads/tango/editor/trash",
         "converted": "/home/visar/Videos/downloads/tango/converter/converted"
     },
-    "frontendDistPath": "/home/visar/Documents/tango-repos/video-editor-frontend/dist"
+    "frontendDistPath": "/home/visar/Documents/tango-repos/tango-video-editor-frontend/dist"
 }
