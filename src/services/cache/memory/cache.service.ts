@@ -194,10 +194,10 @@ async function updateVideoCache() {
 
 export function initializeCache(): void {
     updateVideoCache().catch((err) => logger.error("Initial cache population failed.", { err }));
-    // Main cache updates every 30 seconds
-    setInterval(updateVideoCache, 30000);
+    // Main cache updates every 60 seconds
+    setInterval(updateVideoCache, 60 * 1000);
     // Playlist fixer runs less frequently and is not tied to API calls
-    setInterval(() => startPlaylistFixerWorker().catch((err) => logger.error("Playlist fixer interval failed.", { err })), 60000);
+    setInterval(() => startPlaylistFixerWorker().catch((err) => logger.error("Playlist fixer interval failed.", { err })), 60 * 60 * 1000);
 }
 
 export function getVideosFromCache(): types.VideoItem[] {
