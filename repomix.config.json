@@ -1,6 +1,6 @@
 {
   "output": {
-    "filePath": "repomix-output.xml",
+    "filePath": "repomix/repomix-output.xml",
     "style": "xml"
   },
   "include": [

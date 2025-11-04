@@ -41,16 +41,23 @@ export async function extractTokens(): Promise<types.LoginResult> {
         // --- Step 3: Click the Google login button with fallbacks ---
         // Playwright's locators auto-wait, so the 5-second arbitrary wait from the Puppeteer script is no longer needed.
         try {
-            await page.getByTestId("GOOGLE").click({ timeout: 15000 });
+            await page.getByTestId("join-now").click({ timeout: 10000 });
+            await page.getByTestId("GOOGLE").click({ timeout: 10000 });
         } catch (ignore1) {
-            logger.warn(`button[data-testid="GOOGLE"] is not there, trying another button...`);
+            logger.warn(`join-now is not there, trying another button...`);
             try {
                 await page.getByTestId("home-page-login-register-button").click({ timeout: 10000 });
                 await page.getByTestId("GOOGLE").click({ timeout: 10000 });
             } catch (ignore2) {
-                logger.warn(`home-page-login-register-button not found, trying the last way...`);
-                await page.locator('//button[.//span[contains(., "Log in / Sign up")]]').click({ timeout: 10000 });
-                await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+                logger.warn(`home-page-login-register-button not found, trying again...`);
+                try {
+                    await page.locator('//button[.//span[contains(., "Log in / Sign up")]]').click({ timeout: 10000 });
+                    await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+                } catch (ignore3) {
+                    logger.warn(`Log in / Sign up not found, trying for the last time...`);
+                    await page.locator('//button[.//span[contains(., "Sign in")]]').click({ timeout: 10000 });
+                    await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+                }
             }
         }
 
