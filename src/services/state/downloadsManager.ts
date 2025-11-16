@@ -35,7 +35,7 @@ export class DownloadHandle {
 
 export class DownloadsManager {
     private downloads: Map<string, Download> = new Map();
-    private statusFilePath: string;
+    private readonly statusFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
@@ -103,7 +103,7 @@ export class DownloadsManager {
             clearTimeout(this._updateFileDebounceTimer);
         }
         this._updateFileDebounceTimer = setTimeout(() => {
-            this._updateStatusFile();
+            void this._updateStatusFile();
         }, 200);
     }
 

@@ -8,7 +8,7 @@ import { AliasManager } from "../state/aliasManager.js";
 import { StreamDownloader } from "../download/streamDownloader.js";
 
 export class StreamDiscoveryService {
-    private apiClient: ApiClient;
+    private readonly apiClient: ApiClient;
     private aliasManager: AliasManager;
     private downloadsManager: DownloadsManager;
 
@@ -59,7 +59,7 @@ export class StreamDiscoveryService {
                             if (downloadHandle) {
                                 logger.info(`Initiating download for ${alias || streamerId}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
-                                streamDownloader.start();
+                                void streamDownloader.start();
                             }
                         }
                     }

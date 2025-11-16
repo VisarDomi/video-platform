@@ -9,8 +9,8 @@ export interface SegmentInfo {
 }
 
 export class PlaylistManager {
-    private segmentsDirPath: string;
-    private fullPlaylistPath: string;
+    private readonly segmentsDirPath: string;
+    private readonly fullPlaylistPath: string;
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;

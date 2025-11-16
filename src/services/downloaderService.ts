@@ -38,6 +38,6 @@ export class DownloaderService {
 
         this.tokenManager.startTokenWatcher();
         this.aliasSyncService.start();
-        this.streamDiscoveryService.start();
+        void this.streamDiscoveryService.start();
     }
 }

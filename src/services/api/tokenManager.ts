@@ -34,12 +34,12 @@ export class TokenManager {
                 await timersPromises.setTimeout(refreshInterval);
             }
         };
-        watch();
+        void watch();
     }
 
     private async _loadTokens(): Promise<boolean> {
         const cfg = config.getConfig();
-        const sessionFilePath = path.resolve(cfg.sharedStatePath, "session.json");
+        const sessionFilePath = path.resolve(cfg.sharedStatePath, "session", "diusminus@gmail.com.json");
         const session = await FileSystemManager.readJsonFile<any>(sessionFilePath);
 
         if (!session) {

@@ -48,7 +48,7 @@ export class AliasSyncService {
             }
         };
 
-        performSync();
+        void performSync();
 
         setInterval(performSync, 60 * 60 * 1000);
     }

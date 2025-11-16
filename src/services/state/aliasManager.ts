@@ -5,7 +5,7 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 
 export class AliasManager {
     private aliases: Map<string, string> = new Map();
-    private aliasesFilePath: string;
+    private readonly aliasesFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
@@ -54,7 +54,7 @@ export class AliasManager {
             clearTimeout(this._updateFileDebounceTimer);
         }
         this._updateFileDebounceTimer = setTimeout(() => {
-            this._updateAliasesFile();
+            void this._updateAliasesFile();
         }, 500);
     }
 

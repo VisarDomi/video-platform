@@ -5,4 +5,4 @@ async function main() {
     await downloaderService.start();
 }
 
-main();
+void main();
