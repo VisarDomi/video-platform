@@ -1,6 +1,6 @@
 {
   "output": {
-    "filePath": "repomix-output.xml",
+    "filePath": "repomix/repomix-output.xml",
     "style": "xml"
   },
   "include": [
@@ -28,7 +28,7 @@
       "build/**",
       "coverage/**",
       "package-lock.json",
-      "repomix-output.xml",
+      "repomix/repomix-output.xml",
       "repomix.config.json",
       "nodemon.json",
       ".gitignore",

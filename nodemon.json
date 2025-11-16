@@ -6,7 +6,7 @@
     "node_modules/**/node_modules",
     "dist/*",
     "build/*",
-    "repomix-output.xml",
+    "repomix/repomix-output.xml",
     "convert.sh",
     "session.json",
     "error.log",
