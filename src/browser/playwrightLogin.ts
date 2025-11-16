@@ -1,4 +1,3 @@
-// src/browser/playwrightLogin.ts
 import { chromium, Browser, Page } from "playwright";
 import logger from "../common/logger.js";
 import * as constants from "../common/constants.js";
@@ -99,23 +98,30 @@ async function runLoginFlow(browser: Browser, account: types.Account): Promise<t
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: null,
     });
-
     const page = await context.newPage();
 
-    const responsePromise = page.waitForResponse(constants.TANGO_URLS.GOOGLE_LOGIN, { timeout: 60000 });
-    const popupPromise = page.waitForEvent("popup", { timeout: 30000 });
+    try {
+        const responsePromise = page.waitForResponse(constants.TANGO_URLS.GOOGLE_LOGIN, { timeout: 60000 });
+        const popupPromise = page.waitForEvent("popup", { timeout: 30000 });
 
-    await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    await findAndClickLoginButton(page, account);
-    const googlePopup = await popupPromise;
-    await handleGoogleLogin(googlePopup, account);
+        await findAndClickLoginButton(page, account);
+        const googlePopup = await popupPromise;
+        await handleGoogleLogin(googlePopup, account);
 
-    const response = await responsePromise;
-    const tokens = await extractLoginTokensFromResponse(response, account.email);
+        const response = await responsePromise;
+        const tokens = await extractLoginTokensFromResponse(response, account.email);
 
-    logger.info(`Initial tokens successfully extracted for ${account.email}.`);
-    return tokens;
+        logger.info(`Initial tokens successfully extracted for ${account.email}.`);
+        return tokens;
+    } catch (error) {
+        // This catch is for taking a screenshot on failure. The error is then re-thrown.
+        if (!page.isClosed()) {
+            await page.screenshot({ path: `${Date.now()}-${account.email}-error.png`, fullPage: true });
+        }
+        throw error; // Propagate the error to the outer handler
+    }
 }
 
 export async function extractTokens(account: types.Account): Promise<types.LoginResult> {
@@ -123,30 +129,28 @@ export async function extractTokens(account: types.Account): Promise<types.Login
     let browser: Browser | null = null;
 
     try {
+        // Phase 1: Acquire the resource
         browser = await chromium.launch({
             headless: false,
             args: ["--disable-blink-features=AutomationControlled"],
         });
 
-        return await runLoginFlow(browser, account);
-    } catch (error: any) {
-        const errorMessage = `Playwright flow failed for ${account.email}.`;
-        logger.error(errorMessage, { originalError: error.message });
-
-        // This check is now logically sound and clear to the IDE.
-        // It handles the case where the flow fails AFTER the browser has been launched.
-        if (browser) {
-            const pages = browser.contexts().flatMap(c => c.pages());
-            if (pages.length > 0 && !pages[0].isClosed()) {
-                await pages[0].screenshot({ path: `${Date.now()}-${account.email}-error.png`, fullPage: true });
-            }
-        }
-
-        throw new Error(errorMessage, { cause: error });
-    } finally {
-        if (browser) {
+        // Phase 2: Use the resource and guarantee its release
+        // This nested structure is key. If runLoginFlow fails, the finally block
+        // will still execute to close the browser before the outer catch is hit.
+        try {
+            return await runLoginFlow(browser, account);
+        } finally {
             await browser.close();
             logger.info(`Browser released for ${account.email}.`);
         }
+    } catch (error: any) {
+        // This block now only catches errors from the login flow or if launch failed.
+        // We no longer need to check if 'browser' is null, because if launch failed,
+        // we would have already thrown and exited. If the flow failed, the finally
+        // block already closed it.
+        const errorMessage = `Playwright flow failed for ${account.email}.`;
+        logger.error(errorMessage, { originalError: error.message });
+        throw new Error(errorMessage, { cause: error });
     }
 }
