@@ -7,3 +7,6 @@ temp.md
 *.har
 repomix-output.xml
 config.json
+.idea/
+.vscode/
+repomix/
