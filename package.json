@@ -23,7 +23,6 @@
     "dependencies": {
         "dotenv": "^17.2.2",
         "playwright": "^1.56.0",
-        "puppeteer": "23.10.1",
         "winston": "^3.17.0"
     }
 }

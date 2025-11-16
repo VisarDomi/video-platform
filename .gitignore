@@ -13,3 +13,7 @@ tango-raw/
 venv/
 processed-by-combiner.txt
 *.png
+credentials.json
+repomix/
+.idea/
+.vscode/

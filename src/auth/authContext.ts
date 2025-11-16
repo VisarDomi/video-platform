@@ -1,4 +1,3 @@
-// src/auth/authContext.ts
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 
@@ -17,17 +16,18 @@ interface SessionData {
     tte: string | null;
 }
 
-/**
- * A container for all authentication-related state, state transitions, and header generation.
- */
 export class AuthContext {
+    private readonly email: string;
     private tangoRT: string | null = null;
     private tangoST: string | null = null;
     private tt: string | null = null;
     private ttu: string | null = null;
     private tte: string | null = null;
 
-    // --- State Getters ---
+    constructor(email: string) {
+        this.email = email;
+    }
+
     public getTangoRT(): string | null {
         return this.tangoRT;
     }
@@ -44,7 +44,6 @@ export class AuthContext {
         return this.tte;
     }
 
-    // --- State Update Methods ---
     public updateFromRefresh(result: RefreshResult): boolean {
         this.tangoST = result.newTangoST;
         if (result.newTangoRT) {
@@ -65,30 +64,29 @@ export class AuthContext {
         this.tangoST = result.tangoST;
     }
 
-    // --- Header Generation ---
     public getApiHeaders(): HeadersInit {
         if (!this.tangoST) {
-            throw new Error("Cannot create API headers: Tango-ST is missing from AuthContext.");
+            throw new Error(`Cannot create API headers for ${this.email}: Tango-ST is missing.`);
         }
         return { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
     }
 
     public getStreamHeaders(): HeadersInit {
         if (!this.tt || !this.ttu || !this.tte) {
-            throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from AuthContext.");
+            throw new Error(`Cannot create stream headers for ${this.email}: tt, ttu, or tte are missing.`);
         }
         const cookie = `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
         return { [constants.HEADERS.COOKIE]: cookie };
     }
 
-    // --- File Operations ---
-    private _getSessionFilePath(): string {
-        return path.resolve(config.getConfig().sharedStatePath, `session.json`);
+    private getSessionFilePath(): string {
+        const sessionFilename = `${this.email}.json`;
+        return path.resolve(config.getConfig().sessionPath, sessionFilename);
     }
 
     public async loadTokenFromFile(): Promise<boolean> {
+        const filePath = this.getSessionFilePath();
         try {
-            const filePath = this._getSessionFilePath();
             const data = await fsPromises.readFile(filePath, "utf-8");
             const session: Partial<SessionData> = JSON.parse(data);
 
@@ -102,16 +100,16 @@ export class AuthContext {
             }
         } catch (error: any) {
             if (error.code !== "ENOENT") {
-                logger.error("Failed to read session file", { error });
+                logger.error(`Failed to read session file for ${this.email} at ${filePath}`, { error });
             }
         }
         return false;
     }
 
     public async saveTokenToFile(): Promise<void> {
+        const filePath = this.getSessionFilePath();
         try {
             if (this.tangoRT) {
-                const filePath = this._getSessionFilePath();
                 const sessionData: SessionData = {
                     tangoRT: this.tangoRT,
                     tangoST: this.tangoST,
@@ -120,10 +118,10 @@ export class AuthContext {
                     tte: this.tte,
                 };
                 await fsPromises.writeFile(filePath, JSON.stringify(sessionData, null, 2));
-                logger.verbose(`Session tokens saved to ${path.basename(filePath)}`);
+                logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
-            logger.error("Failed to save session file", { error });
+            logger.error(`Failed to save session file for ${this.email} at ${filePath}`, { error });
         }
     }
 }

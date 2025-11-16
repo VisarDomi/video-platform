@@ -1,25 +1,25 @@
-// src/auth/authService.ts
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
-
-import * as authContext from "./authContext.js";
-import * as browserLogin from "../browser/browserLogin.js";
+import * as types from "../common/types.js";
+import { AuthContext } from "./authContext.js";
+import { loginQueue } from "../browser/loginQueue.js";
 import * as authClient from "./authClient.js";
 import * as authUtils from "./authUtils.js";
 
-// --- NEW CONSTANTS FOR RETRY LOGIC ---
-const REFRESH_RETRY_INTERVAL_MS = 15 * 1000; // 15 seconds
-const REFRESH_RETRY_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+const REFRESH_RETRY_INTERVAL_MS = 15 * 1000;
+const REFRESH_RETRY_DURATION_MS = 30 * 60 * 1000;
 
 export class AuthService {
-    private authContext: authContext.AuthContext;
+    private readonly account: types.Account;
+    private readonly authContext: AuthContext;
 
-    constructor() {
-        this.authContext = new authContext.AuthContext();
+    constructor(account: types.Account) {
+        this.account = account;
+        this.authContext = new AuthContext(account.email);
     }
 
-    public getAuthContext(): authContext.AuthContext {
+    public getAuthContext(): AuthContext {
         return this.authContext;
     }
 
@@ -27,159 +27,131 @@ export class AuthService {
         let success = false;
         while (!success) {
             try {
-                await this._attemptAuthentication();
+                await this.attemptAuthentication();
                 success = true;
             } catch (error) {
                 const errorMessage = (error as Error).message;
-                logger.error(`Catastrophic authentication failure: ${errorMessage}. Retrying in 30 seconds...`);
+                logger.error(`Catastrophic auth failure for ${this.account.email}: ${errorMessage}. Retrying in 30 seconds...`);
                 await timersPromises.setTimeout(30000);
             }
         }
     }
 
-    private async _attemptAuthentication() {
+    private async attemptAuthentication() {
         const loadedFromFile = await this.authContext.loadTokenFromFile();
 
         if (loadedFromFile) {
-            logger.info("Tango-RT loaded from file. Attempting to refresh session with retries...");
+            logger.info(`Tango-RT for ${this.account.email} loaded from file. Attempting to refresh session...`);
 
-            const refreshSuccessful = await this._tryRefreshWithRetries();
+            const refreshSuccessful = await this.tryRefreshWithRetries();
             if (refreshSuccessful) {
-                logger.info("Session successfully established using token from file.");
-                return; // SUCCESS: Authentication is complete.
+                logger.info(`Session successfully established for ${this.account.email} using token from file.`);
+                return;
             }
-
-            // If we reach here, it means all refresh retries failed.
-            logger.warn(`All refresh attempts failed over ${REFRESH_RETRY_DURATION_MS / 60000} minutes. Falling back to browser.`);
+            logger.warn(`Refresh attempts failed for ${this.account.email}. Falling back to browser login.`);
         } else {
-            logger.info("No session file found. Proceeding directly to browser login.");
+            logger.info(`No session file for ${this.account.email}. Proceeding to browser login.`);
         }
 
-        // Fallback: This is reached ONLY IF:
-        // 1. The session file didn't exist/was invalid.
-        // 2. The session file existed, but refreshing failed repeatedly for 30 minutes.
-        await this._performFreshLogin();
-        logger.info("Session successfully established via fresh browser login.");
+        await this.performFreshLogin();
+        logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
     }
 
-    /**
-     * Tries to refresh the session, retrying on failure for a configured duration.
-     * @returns {Promise<boolean>} True if successful, false otherwise.
-     */
-    private async _tryRefreshWithRetries(): Promise<boolean> {
+    private async tryRefreshWithRetries(): Promise<boolean> {
         const startTime = Date.now();
         let attempt = 0;
 
         while (Date.now() - startTime < REFRESH_RETRY_DURATION_MS) {
             attempt++;
             try {
-                await this._ensureValidTokens();
-                return true; // Success!
+                await this.ensureValidTokens();
+                return true;
             } catch (error) {
                 const errorMessage = (error as Error).message;
-                // Check if the error is due to an expired token, which is unrecoverable.
-                // If so, we should stop retrying and proceed to browser immediately.
                 if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
-                    logger.warn(`Refresh failed with unrecoverable auth error (e.g., expired token): ${errorMessage}. Stopping retries.`);
+                    logger.warn(`Unrecoverable auth error for ${this.account.email}. Stopping retries.`, { error: errorMessage });
                     return false;
                 }
-
-                logger.warn(`Refresh attempt ${attempt} failed: ${errorMessage}. Retrying in ${REFRESH_RETRY_INTERVAL_MS / 1000}s...`);
+                logger.warn(`Refresh attempt ${attempt} for ${this.account.email} failed. Retrying...`, { error: errorMessage });
                 await timersPromises.setTimeout(REFRESH_RETRY_INTERVAL_MS);
             }
         }
-
-        return false; // All retries failed.
+        return false;
     }
 
     public startBackgroundJobs() {
-        this._refreshShortLivedTokens();
-        this._manageTokenLifecycle();
+        void this.refreshShortLivedTokens();
+        void this.manageTokenLifecycle();
     }
 
-    private async _performFreshLogin() {
-        logger.info("Performing full login via a browser to get new tokens...");
-        await this._extractInitialTokens();
-        await this._setTokenData();
-        await this.authContext.saveTokenToFile(); // Save the complete token set
-    }
-
-    private async _extractInitialTokens() {
-        const tokens = await browserLogin.extractTokens();
+    private async performFreshLogin() {
+        logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
+        const tokens = await loginQueue.add(this.account);
         this.authContext.updateFromLogin(tokens);
-    }
-
-    private async _ensureValidTokens() {
-        await this._refreshSession();
-        await this._setTokenData();
+        await this.setTokenData();
         await this.authContext.saveTokenToFile();
     }
 
-    private async _refreshSession() {
-        logger.info("Attempting to refresh session using Tango-RT...");
+    private async ensureValidTokens() {
+        await this.refreshSession();
+        await this.setTokenData();
+        await this.authContext.saveTokenToFile();
+    }
+
+    private async refreshSession() {
+        logger.info(`Attempting to refresh session for ${this.account.email} using Tango-RT...`);
         const tangoRT = this.authContext.getTangoRT();
         if (!tangoRT) {
-            throw new Error("Tango-RT not found in auth context. Cannot refresh session.");
+            throw new Error(`Tango-RT not found for ${this.account.email}.`);
         }
         const payload = authUtils.parseJwtPayload(tangoRT);
         const username = payload?.username || payload?.sessionId;
         if (!username) {
-            throw new Error("Could not extract username/sessionId from Tango-RT JWT.");
+            throw new Error(`Could not extract username from Tango-RT for ${this.account.email}.`);
         }
 
         const result = await authClient.refreshSession(username, tangoRT);
         const receivedNewRT = this.authContext.updateFromRefresh(result);
 
         if (receivedNewRT) {
-            logger.info("Successfully refreshed Tango-ST and received a new Tango-RT.");
+            logger.info(`Successfully refreshed ST and RT for ${this.account.email}.`);
         } else {
-            logger.warn("Successfully refreshed Tango-ST, but a new Tango-RT was not provided in the response.");
+            logger.warn(`Refreshed ST, but no new RT was provided for ${this.account.email}.`);
         }
     }
 
-    private async _setTokenData() {
+    private async setTokenData() {
         const tangoST = this.authContext.getTangoST();
         if (!tangoST) {
-            throw new Error("Cannot fetch token data without Tango-ST.");
+            throw new Error(`Cannot fetch token data for ${this.account.email} without Tango-ST.`);
         }
-
         const result = await authClient.fetchTokenData(tangoST);
         this.authContext.updateFromTokenData(result);
     }
 
-    private async _refreshShortLivedTokens() {
+    private async refreshShortLivedTokens() {
         while (true) {
             const refreshInterval = 5000;
-            try {
-                await this._setTokenData();
-                await this.authContext.saveTokenToFile(); // Persist the new short-lived tokens
-            } catch (error) {
-                logger.error(`Failed to refresh short-lived tokens. Waiting for new Tango-ST in ${refreshInterval / 1000}s.`, { error });
-            }
+            await this.setTokenData();
+            await this.authContext.saveTokenToFile();
             await timersPromises.setTimeout(refreshInterval);
         }
     }
 
-    private async _manageTokenLifecycle() {
+    private async manageTokenLifecycle() {
         while (true) {
             const refreshInterval = 30 * 60 * 1000;
             await timersPromises.setTimeout(refreshInterval);
-            await this._maintainSession();
+            await this.maintainSession();
         }
     }
 
-    private async _maintainSession() {
+    private async maintainSession() {
         try {
-            await this._ensureValidTokens();
+            await this.ensureValidTokens();
         } catch (error) {
-            // TODO: find if we can end up here if we don't have internet. fix if we do
-            logger.error("Lightweight session refresh failed. Falling back to full browser re-authentication.", { error });
-            try {
-                await this._performFreshLogin();
-                logger.info("Successfully re-authenticated via browser and refreshed all tokens.");
-            } catch (fatalError) {
-                logger.error("CRITICAL: The fallback browser re-authentication also failed.", { fatalError });
-            }
+            logger.error(`Session maintenance failed for ${this.account.email}. Re-authenticating.`, { error });
+            await this.performFreshLogin();
         }
     }
 }

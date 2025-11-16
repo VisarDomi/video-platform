@@ -1,5 +1,3 @@
-// src/common/constants.ts
-
 /**
  * URLs for the Tango authentication and API gateways.
  */

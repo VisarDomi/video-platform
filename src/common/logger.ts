@@ -1,14 +1,9 @@
-// src/common/logger.ts
 import * as path from "path";
-import * as url from "url";
 import winston from "winston";
 
 import * as utils from "./utils.js";
 
-// --- Correct Path Resolution ---
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname)
+const projectRoot = utils.findProjectRoot()
 
 // Define custom format for console logs
 const consoleFormat = winston.format.combine(
@@ -29,11 +24,9 @@ const fileFormat = winston.format.combine(
 const logger = winston.createLogger({
     level: "info", // Log 'info' level and above (info, warn, error)
     transports: [
-        // 1. A transport to log to the CONSOLE
         new winston.transports.Console({
             format: consoleFormat,
         }),
-        // 2. A transport to log ERRORS to a file
         new winston.transports.File({
             filename: path.join(projectRoot, "error.log"),
             level: "error", // Only log errors to this file

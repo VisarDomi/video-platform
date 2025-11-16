@@ -1,4 +1,3 @@
-// src/common/authQueue.ts
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
@@ -28,7 +27,7 @@ class RequestQueue {
             
             // If the queue isn't currently being processed, start it.
             if (!this.isProcessing) {
-                this._processQueue();
+                void this._processQueue();
             }
         });
     }
@@ -66,7 +65,7 @@ class RequestQueue {
         } finally {
             // Wait for the specified delay before processing the next item.
             await timersPromises.setTimeout(REQUEST_DELAY_MS);
-            this._processQueue(); // Process the next item
+            void this._processQueue(); // Process the next item
         }
     }
 }

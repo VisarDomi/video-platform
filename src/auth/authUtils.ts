@@ -1,4 +1,3 @@
-// src/auth/authUtils.ts
 import logger from "../common/logger.js";
 
 /**

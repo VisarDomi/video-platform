@@ -1,6 +1,6 @@
-// src/common/utils.ts
 import fs from 'fs';
 import path from 'path';
+import url from "url";
 
 /**
  * Finds the project root by searching upwards from the given directory for a package.json file.
@@ -8,8 +8,10 @@ import path from 'path';
  * @returns {string} The absolute path to the project root.
  * @throws {Error} If package.json is not found.
  */
-export function findProjectRoot(startDir: string): string {
-  let currentDir = startDir;
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+export function findProjectRoot(): string {
+  let currentDir = __dirname;
   while (true) {
     const packageJsonPath = path.join(currentDir, 'package.json');
     if (fs.existsSync(packageJsonPath)) {
