@@ -116,41 +116,24 @@ async function runLoginFlow(browser: Browser, account: types.Account): Promise<t
         logger.info(`Initial tokens successfully extracted for ${account.email}.`);
         return tokens;
     } catch (error) {
-        // This catch is for taking a screenshot on failure. The error is then re-thrown.
         if (!page.isClosed()) {
             await page.screenshot({ path: `${Date.now()}-${account.email}-error.png`, fullPage: true });
         }
-        throw error; // Propagate the error to the outer handler
+        throw error;
     }
 }
 
 export async function extractTokens(account: types.Account): Promise<types.LoginResult> {
     logger.info(`Acquiring browser for ${account.email}`);
-    let browser: Browser | null = null;
-
+    let browser: Browser;
+    browser = await chromium.launch({
+        headless: false,
+        args: ["--disable-blink-features=AutomationControlled"],
+    });
     try {
-        // Phase 1: Acquire the resource
-        browser = await chromium.launch({
-            headless: false,
-            args: ["--disable-blink-features=AutomationControlled"],
-        });
-
-        // Phase 2: Use the resource and guarantee its release
-        // This nested structure is key. If runLoginFlow fails, the finally block
-        // will still execute to close the browser before the outer catch is hit.
-        try {
-            return await runLoginFlow(browser, account);
-        } finally {
-            await browser.close();
-            logger.info(`Browser released for ${account.email}.`);
-        }
-    } catch (error: any) {
-        // This block now only catches errors from the login flow or if launch failed.
-        // We no longer need to check if 'browser' is null, because if launch failed,
-        // we would have already thrown and exited. If the flow failed, the finally
-        // block already closed it.
-        const errorMessage = `Playwright flow failed for ${account.email}.`;
-        logger.error(errorMessage, { originalError: error.message });
-        throw new Error(errorMessage, { cause: error });
+        return await runLoginFlow(browser, account);
+    } finally {
+        await browser.close();
+        logger.info(`Browser released for ${account.email}.`);
     }
 }
