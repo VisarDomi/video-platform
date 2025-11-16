@@ -2,7 +2,6 @@ import * as fsPromises from "fs/promises";
 import * as path from "path";
 
 import logger from "../common/logger.js";
-import * as constants from "../common/constants.js";
 import * as config from "../common/config.js";
 import * as types from "../common/types.js";
 
@@ -34,15 +33,6 @@ export class AuthContext {
     public getTangoST(): string | null {
         return this.tangoST;
     }
-    public getTt(): string | null {
-        return this.tt;
-    }
-    public getTtu(): string | null {
-        return this.ttu;
-    }
-    public getTte(): string | null {
-        return this.tte;
-    }
 
     public updateFromRefresh(result: RefreshResult): boolean {
         this.tangoST = result.newTangoST;
@@ -62,21 +52,6 @@ export class AuthContext {
     public updateFromLogin(result: types.LoginResult): void {
         this.tangoRT = result.tangoRT;
         this.tangoST = result.tangoST;
-    }
-
-    public getApiHeaders(): HeadersInit {
-        if (!this.tangoST) {
-            throw new Error(`Cannot create API headers for ${this.email}: Tango-ST is missing.`);
-        }
-        return { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${this.tangoST}` };
-    }
-
-    public getStreamHeaders(): HeadersInit {
-        if (!this.tt || !this.ttu || !this.tte) {
-            throw new Error(`Cannot create stream headers for ${this.email}: tt, ttu, or tte are missing.`);
-        }
-        const cookie = `tt=${this.tt};ttu=${this.ttu};tte=${this.tte}`;
-        return { [constants.HEADERS.COOKIE]: cookie };
     }
 
     private getSessionFilePath(): string {

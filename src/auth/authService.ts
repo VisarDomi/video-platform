@@ -19,10 +19,6 @@ export class AuthService {
         this.authContext = new AuthContext(account.email);
     }
 
-    public getAuthContext(): AuthContext {
-        return this.authContext;
-    }
-
     public async initiateAuth() {
         let success = false;
         while (!success) {
