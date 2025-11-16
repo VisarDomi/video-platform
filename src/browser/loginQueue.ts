@@ -41,7 +41,11 @@ class LoginQueue {
 
         try {
             const result = await extractTokens(request.account);
-            request.resolve(result);
+            if (result) {
+                request.resolve(result);
+            } else {
+                request.reject("yeah, no, i ate the error");
+            }
         } catch (error) {
             request.reject(error);
         } finally {

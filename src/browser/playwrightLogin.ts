@@ -123,7 +123,7 @@ async function runLoginFlow(browser: Browser, account: types.Account): Promise<t
     }
 }
 
-export async function extractTokens(account: types.Account): Promise<types.LoginResult> {
+export async function extractTokens(account: types.Account): Promise<types.LoginResult | null> {
     logger.info(`Acquiring browser for ${account.email}`);
     let browser: Browser;
     browser = await chromium.launch({
@@ -132,6 +132,9 @@ export async function extractTokens(account: types.Account): Promise<types.Login
     });
     try {
         return await runLoginFlow(browser, account);
+    } catch (ignoredError) {
+        // is it really ok to eat errors...
+        return null;
     } finally {
         await browser.close();
         logger.info(`Browser released for ${account.email}.`);
