@@ -1,13 +1,17 @@
 # tslive-auth
 Get and update tokens used by other tslive microservices.
 
-## note
-this service produces:
+## usage
 
-`sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),`
-
-`
-return path.resolve(config.getConfig().sharedStatePath, `session.json`);
-`
-
-hence, don't activate two instances with different credentials, as they will write to the same file. this case needs more development
+`{
+    "accounts": [
+        {
+            "email": "email-here@gmail.com",
+            "password": "password-here"
+        },
+        {
+            "email": "email-here-2@gmail.com",
+            "password": "password-here-2"
+        }
+    ]
+}`
