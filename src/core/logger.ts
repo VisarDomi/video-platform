@@ -1,13 +1,10 @@
 import * as path from "path";
-import * as url from "url";
 import winston from "winston";
 
 import * as utils from "./utils.js";
 import * as constants from "./constants.js";
 
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const projectRoot = utils.findProjectRoot(__dirname);
+const projectRoot = utils.findProjectRoot();
 
 const consoleFormat = winston.format.combine(
     winston.format.colorize(),

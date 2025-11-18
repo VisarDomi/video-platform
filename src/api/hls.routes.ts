@@ -4,19 +4,16 @@ import path from "path";
 import logger from "../core/logger.js";
 import * as hlsService from "../services/cache/memory/hls.service.js";
 import * as cacheService from "../services/cache/memory/cache.service.js";
-import * as profilingService from "../services/profiling.service.js";
 import { API, FILE_EXTENSIONS, MISC } from "../core/constants.js";
 
 const router = Router();
 
 router.get("/hls/:filename/playlist.m3u8", (req, res) => {
-    profilingService.lap(req.id, "route_handler_start");
     const { filename } = req.params as { filename: string };
     if (!filename) {
         return res.status(400).json({ success: false, message: API.MESSAGES.INVALID_REQUEST_FILENAME_REQUIRED });
     }
     const cachedPlaylist = hlsService.getPlaylistFromCache(filename);
-    profilingService.lap(req.id, "cache_lookup_end");
     if (cachedPlaylist) {
         if (cachedPlaylist.isLive) {
             res.setHeader(API.HEADERS.CACHE_CONTROL, API.HEADERS.NO_CACHE);
@@ -30,14 +27,12 @@ router.get("/hls/:filename/playlist.m3u8", (req, res) => {
 });
 
 router.get("/hls/:filename/:segmentName", async (req: Request, res) => {
-    profilingService.lap(req.id, "route_handler_start");
     const { filename, segmentName } = req.params as { filename: string; segmentName: string };
     if (!filename || !segmentName.endsWith(FILE_EXTENSIONS.TS)) {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_SEGMENT_NAME);
     }
 
     const folderPath = cacheService.getVideoPathFromCache(filename);
-    profilingService.lap(req.id, "cache_lookup_end");
 
     if (!folderPath) {
         logger.warn(`Video path not found in cache for filename: ${filename}`);
@@ -47,9 +42,7 @@ router.get("/hls/:filename/:segmentName", async (req: Request, res) => {
     const segmentPath = path.join(folderPath, segmentName);
 
     try {
-        profilingService.lap(req.id, "file_read_start");
         const data = await fs.readFile(segmentPath);
-        profilingService.lap(req.id, "file_read_end");
         res.setHeader(API.HEADERS.CONTENT_TYPE, API.HEADERS.TS_CONTENT_TYPE);
         res.send(data);
     } catch (err: any) {

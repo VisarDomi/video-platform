@@ -6,9 +6,12 @@ import { FileNotFoundError } from "./errors.js";
 import logger from "./logger.js";
 import * as types from "./types.js";
 import * as constants from "./constants.js";
+import url from "url";
 
-export function findProjectRoot(startDir: string): string {
-    let currentDir = startDir;
+const __filename = url.fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+export function findProjectRoot(): string {
+    let currentDir = __dirname;
     while (true) {
         const packageJsonPath = path.join(currentDir, constants.FILE_NAMES.PACKAGE_JSON);
         if (fs.existsSync(packageJsonPath)) {
