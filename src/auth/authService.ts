@@ -7,8 +7,7 @@ import { loginQueue } from "../browser/loginQueue.js";
 import * as authClient from "./authClient.js";
 import * as authUtils from "./authUtils.js";
 
-const REFRESH_RETRY_INTERVAL_MS = 15 * 1000;
-const REFRESH_RETRY_DURATION_MS = 30 * 60 * 1000;
+const AUTH_RETRY_INTERVAL_MS = 30 * 1000;
 const BACKGROUND_JOB_FAILURE_RETRY_MS = 15 * 1000;
 
 export class AuthService {
@@ -21,59 +20,40 @@ export class AuthService {
     }
 
     public async initiateAuth() {
-        let success = false;
-        while (!success) {
-            try {
-                await this.attemptAuthentication();
-                success = true;
-            } catch (error) {
-                const errorMessage = (error as Error).message;
-                logger.error(`Catastrophic auth failure for ${this.account.email}: ${errorMessage}. Retrying in 30 seconds...`);
-                await timersPromises.setTimeout(30000);
-            }
-        }
-    }
-
-    private async attemptAuthentication() {
         const loadedFromFile = await this.authContext.loadTokenFromFile();
 
         if (loadedFromFile) {
-            logger.info(`Tango-RT for ${this.account.email} loaded from file. Attempting to refresh session...`);
-
-            const refreshSuccessful = await this.tryRefreshWithRetries();
-            if (refreshSuccessful) {
-                logger.info(`Session successfully established for ${this.account.email} using token from file.`);
-                return;
+            logger.info(`Tango-RT for ${this.account.email} loaded from file. Attempting to establish session...`);
+            while (true) {
+                try {
+                    await this.ensureValidTokens();
+                    logger.info(`Session successfully established for ${this.account.email} using token from file.`);
+                    return;
+                } catch (error) {
+                    const errorMessage = (error as Error).message;
+                    if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                        logger.warn(`Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
+                        break;
+                    } else {
+                        logger.error(`Failed to establish session for ${this.account.email}: ${errorMessage}. Retrying...`);
+                        await timersPromises.setTimeout(AUTH_RETRY_INTERVAL_MS);
+                    }
+                }
             }
-            logger.warn(`Refresh attempts failed for ${this.account.email}. Falling back to browser login.`);
-        } else {
-            logger.info(`No session file for ${this.account.email}. Proceeding to browser login.`);
         }
 
-        await this.performFreshLogin();
-        logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
-    }
-
-    private async tryRefreshWithRetries(): Promise<boolean> {
-        const startTime = Date.now();
-        let attempt = 0;
-
-        while (Date.now() - startTime < REFRESH_RETRY_DURATION_MS) {
-            attempt++;
+        logger.info(`Proceeding to browser login for ${this.account.email}.`);
+        while (true) {
             try {
-                await this.ensureValidTokens();
-                return true;
+                await this.performFreshLogin();
+                logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
+                return;
             } catch (error) {
                 const errorMessage = (error as Error).message;
-                if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
-                    logger.warn(`Unrecoverable auth error for ${this.account.email}. Stopping retries.`, { error: errorMessage });
-                    return false;
-                }
-                logger.warn(`Refresh attempt ${attempt} for ${this.account.email} failed. Retrying...`, { error: errorMessage });
-                await timersPromises.setTimeout(REFRESH_RETRY_INTERVAL_MS);
+                logger.error(`Browser login failed for ${this.account.email}: ${errorMessage}. Retrying...`);
+                await timersPromises.setTimeout(AUTH_RETRY_INTERVAL_MS);
             }
         }
-        return false;
     }
 
     public startBackgroundJobs() {
@@ -142,22 +122,34 @@ export class AuthService {
 
     private async manageTokenLifecycle() {
         while (true) {
-            try {
-                const refreshInterval = 30 * 60 * 1000;
-                await timersPromises.setTimeout(refreshInterval);
-                await this.maintainSession();
-            } catch (error) {
-                logger.error(`An unexpected error occurred during session lifecycle management for ${this.account.email}. The loop will continue.`, { error: (error as Error).message });
-            }
+            const refreshInterval = 30 * 60 * 1000;
+            await timersPromises.setTimeout(refreshInterval);
+            await this.maintainSession();
         }
     }
 
     private async maintainSession() {
-        try {
-            await this.ensureValidTokens();
-        } catch (error) {
-            logger.error(`Session maintenance failed for ${this.account.email}. Attempting to re-authenticate.`, { error: (error as Error).message });
-            await this.performFreshLogin();
+        while (true) {
+            try {
+                await this.ensureValidTokens();
+                logger.info(`Session successfully maintained for ${this.account.email}.`);
+                return;
+            } catch (error) {
+                const errorMessage = (error as Error).message;
+                if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                    logger.warn(`Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
+                    try {
+                        await this.performFreshLogin();
+                        logger.info(`Successfully re-authenticated via browser login for ${this.account.email}.`);
+                        return;
+                    } catch (loginError) {
+                        logger.error(`Browser login failed during maintenance. Retrying after delay.`, { error: (loginError as Error).message });
+                    }
+                } else {
+                    logger.warn(`Session maintenance failed for ${this.account.email}. Retrying after delay.`, { error: errorMessage });
+                }
+            }
+            await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
         }
     }
 }
