@@ -9,6 +9,7 @@ import * as authUtils from "./authUtils.js";
 
 const REFRESH_RETRY_INTERVAL_MS = 15 * 1000;
 const REFRESH_RETRY_DURATION_MS = 30 * 60 * 1000;
+const BACKGROUND_JOB_FAILURE_RETRY_MS = 15 * 1000;
 
 export class AuthService {
     private readonly account: types.Account;
@@ -127,18 +128,27 @@ export class AuthService {
 
     private async refreshShortLivedTokens() {
         while (true) {
-            const refreshInterval = 5000;
-            await this.setTokenData();
-            await this.authContext.saveTokenToFile();
-            await timersPromises.setTimeout(refreshInterval);
+            try {
+                const refreshInterval = 5000;
+                await this.setTokenData();
+                await this.authContext.saveTokenToFile();
+                await timersPromises.setTimeout(refreshInterval);
+            } catch (error) {
+                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. Retrying after delay.`, { error: (error as Error).message });
+                await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
+            }
         }
     }
 
     private async manageTokenLifecycle() {
         while (true) {
-            const refreshInterval = 30 * 60 * 1000;
-            await timersPromises.setTimeout(refreshInterval);
-            await this.maintainSession();
+            try {
+                const refreshInterval = 30 * 60 * 1000;
+                await timersPromises.setTimeout(refreshInterval);
+                await this.maintainSession();
+            } catch (error) {
+                logger.error(`An unexpected error occurred during session lifecycle management for ${this.account.email}. The loop will continue.`, { error: (error as Error).message });
+            }
         }
     }
 
@@ -146,7 +156,7 @@ export class AuthService {
         try {
             await this.ensureValidTokens();
         } catch (error) {
-            logger.error(`Session maintenance failed for ${this.account.email}. Re-authenticating.`, { error });
+            logger.error(`Session maintenance failed for ${this.account.email}. Attempting to re-authenticate.`, { error: (error as Error).message });
             await this.performFreshLogin();
         }
     }
