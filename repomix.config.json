@@ -1,43 +1,15 @@
 {
     "output": {
-        "filePath": "repomix/repomix-output.xml",
-        "style": "xml"
+        "filePath": "repomix/repomix-output.md",
+        "style": "plain",
+        "copyToClipboard": false
     },
     "include": [
-        "**/*.js",
-        "**/*.jsx",
+        "**/*.svelte",
         "**/*.ts",
-        "**/*.tsx",
         "**/*.html",
         "**/*.css",
-        "**/*.scss",
-        "**/*.json",
         "**/*.md",
-        "**/Dockerfile",
-        "**/*.yml",
-        ".env.template"
-    ],
-    "ignore": {
-        "useGitignore": true,
-        "useDefaultPatterns": true,
-        "customPatterns": [
-            "node_modules/**",
-            ".git/**",
-            "dist/**",
-            "build/**",
-            "coverage/**",
-            "package-lock.json",
-            "repomix/repomix-output.xml",
-            "repomix.config.json",
-            "nodemon.json",
-            ".gitignore",
-            "LICENSE",
-            "temp.txt",
-            "*.mp4",
-            "convert.sh",
-            "session.json",
-            "live-status.json",
-            "postman/**"
-        ]
-    }
+        "**/*.docs"
+    ]
 }

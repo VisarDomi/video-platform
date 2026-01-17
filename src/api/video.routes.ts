@@ -2,7 +2,6 @@ import { Router } from "express";
 import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
-import * as cacheService from "../services/cache/memory/cache.service.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
@@ -10,9 +9,13 @@ import * as types from "../core/types.js";
 const router = Router();
 
 router.get("/videos", async (_req, res) => {
-    const allVideos = retrieveService.getAllVideos();
-    res.json(allVideos);
-    cacheService.requestThrottledCacheUpdate();
+    try {
+        const allVideos = await retrieveService.getAllVideos();
+        res.json(allVideos);
+    } catch (error: any) {
+        logger.error("Failed to retrieve videos", { error });
+        res.status(500).json({ error: "Failed to retrieve videos" });
+    }
 });
 
 router.post("/edit", async (req, res) => {
