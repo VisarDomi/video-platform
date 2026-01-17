@@ -17,7 +17,6 @@ export const ALL_VIDEO_PATHS_TYPES = {
 export const FILE_NAMES = {
     CONFIG: "config.json",
     PACKAGE_JSON: "package.json",
-    SQLITE_DB: "tango.sqlite",
     LIVE_STATUS: "live-status.json",
     ERROR_LOG: "error.log",
     PROFILING_LOG: "profiling.log",
@@ -27,7 +26,6 @@ export const FILE_NAMES = {
 
 export const DIRECTORIES = {
     SHARED_STATE_BASE: ".local/share/video-services",
-    CACHE: "cache",
 } as const;
 
 export const DEFAULT_PATHS = {
@@ -40,10 +38,6 @@ export const DEFAULT_PATHS = {
     TRASH: "trash",
     CONVERTER: "converter",
     CONVERTED: "converted",
-} as const;
-
-export const CONFIG_KEYS = {
-    CACHE_PATH: "cachePath",
 } as const;
 
 export const FILE_EXTENSIONS = {
@@ -75,24 +69,6 @@ export const FFMPEG = {
     CODEC_TYPE_VIDEO: "video",
 } as const;
 
-export const DATABASE = {
-    TABLES: {
-        DURATIONS: "durations",
-        FIXED_PLAYLISTS: "fixed_playlists",
-    },
-    COLUMNS: {
-        VIDEO_FILENAME: "video_filename",
-        TS_FILENAME: "ts_filename",
-        DURATION: "duration",
-        RESOLUTION: "resolution",
-        TOTAL_DURATION: "totalDuration",
-    },
-    QUERIES: {
-        BEGIN_TRANSACTION: "BEGIN TRANSACTION",
-        COMMIT: "COMMIT",
-    },
-} as const;
-
 export const API = {
     PORT: 7973,
     HOST: "0.0.0.0",
@@ -113,10 +89,6 @@ export const API = {
         TS_CONTENT_TYPE: "video/mp2t",
         NO_CACHE: "max-age=0, no-cache, no-store, must-revalidate",
     },
-} as const;
-
-export const PROFILING = {
-    SLOW_REQUEST_THRESHOLD_MS: 50,
 } as const;
 
 export const LOGS = {
