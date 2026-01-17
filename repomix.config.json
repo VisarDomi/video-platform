@@ -1,46 +1,15 @@
 {
-  "output": {
-    "filePath": "repomix/repomix-output.xml",
-    "style": "xml"
-  },
-  "include": [
-    "**/*.js",
-    "**/*.py",
-    "**/*.jsx",
-    "**/*.ts",
-    "**/*.tsx",
-    "**/*.html",
-    "**/*.css",
-    "**/*.scss",
-    "**/*.json",
-    "**/*.md",
-    "**/Dockerfile",
-    "**/*.yml",
-    "tests/fixtures/readme.txt"
-  ],
-  "ignore": {
-    "useGitignore": true,
-    "useDefaultPatterns": true,
-    "customPatterns": [
-      "node_modules/**",
-      ".git/**",
-      "dist/**",
-      "build/**",
-      "coverage/**",
-      "package-lock.json",
-      "repomix/repomix-output.xml",
-      "repomix.config.json",
-      "nodemon.json",
-      ".gitignore",
-      "LICENSE",
-      "temp.txt",
-      "*.mp4",
-      "convert.sh",
-      "session.json",
-      "live-status.json",
-      "tango/**",
-      "tango-raw/**",
-      "tests/fixtures/*.ts"
+    "output": {
+        "filePath": "repomix/repomix-output.md",
+        "style": "plain",
+        "copyToClipboard": false
+    },
+    "include": [
+        "**/*.svelte",
+        "**/*.ts",
+        "**/*.html",
+        "**/*.css",
+        "**/*.md",
+        "**/*.docs"
     ]
-  }
 }

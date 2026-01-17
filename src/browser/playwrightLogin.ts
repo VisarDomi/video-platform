@@ -131,9 +131,15 @@ export async function extractTokens(account: types.Account): Promise<types.Login
         args: ["--disable-blink-features=AutomationControlled"],
     });
     try {
-        return await runLoginFlow(browser, account);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error("Browser login flow exceeded 30 seconds limit")), 30000);
+        });
+
+        return await Promise.race([
+            runLoginFlow(browser, account),
+            timeoutPromise
+        ]);
     } catch (ignoredError) {
-        // is it really ok to eat errors...
         return null;
     } finally {
         await browser.close();
