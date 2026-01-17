@@ -6,8 +6,6 @@ import logger from "./core/logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
-import { initializeCache } from "./services/cache/memory/cache.service.js";
-import { initializeHlsCache } from "./services/cache/memory/hls.service.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 declare module "express-serve-static-core" {
@@ -44,9 +42,6 @@ async function startServer() {
     app.get(/.*/, (_req: Request, res: Response) => {
         res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));
     });
-
-    initializeCache();
-    initializeHlsCache();
 
     app.listen(PORT, API.HOST, () => {
         logServerInfo();

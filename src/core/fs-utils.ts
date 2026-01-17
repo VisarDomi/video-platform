@@ -9,7 +9,7 @@ import { FILE_EXTENSIONS, FILE_NAMES, FFMPEG, HLS, MISC } from "./constants.js";
 const execFileAsync = promisify(execFile);
 const limit = pLimit(5); // Process 5 segments at a time
 
-async function getSegmentDuration(tsFilePath: string): Promise<number> {
+export async function getSegmentDuration(tsFilePath: string): Promise<number> {
     try {
         const { stdout } = await execFileAsync(FFMPEG.COMMAND, [
             FFMPEG.ARGS.QUIET,
