@@ -6,8 +6,6 @@ import * as utils from "../../core/utils.js";
 import { DESTINATIONS, LOGS } from "../../core/constants.js";
 import * as types from "../../core/types.js";
 import * as errors from "../../core/errors.js";
-import * as databaseService from "../cache/disk/database.service.js";
-import * as cacheService from "../cache/memory/cache.service.js";
 
 export async function moveVideo(filename: string, destination: types.Destination, sourcePath?: string): Promise<void> {
     let newPath: string;
@@ -40,10 +38,11 @@ export async function moveVideo(filename: string, destination: types.Destination
         }
 
         await fsPromises.rename(videoPath, destinationPath);
-        await databaseService.removeDurationsEntry(filename);
-        await databaseService.removeFixedPlaylistEntry(filename);
-        logger.info(`Moved folder from ${videoPath} to: ${destinationPath} and removed from fixed playlist cache.`);
-        await cacheService.triggerCacheUpdate();
+
+        // No database or cache cleanup needed anymore.
+        // If the video is moved back, the retrieve service will just read it from the new location on next request.
+
+        logger.info(`Moved folder from ${videoPath} to: ${destinationPath}`);
     } else {
         throw new errors.MoveError(LOGS.MESSAGES.MOVE_ERROR);
     }
