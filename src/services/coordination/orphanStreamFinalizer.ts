@@ -1,8 +1,12 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
 import * as config from "../../common/config.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
+
+const execAsync = promisify(exec);
 
 interface LiveStatus {
     downloads: { segmentsDirPath: string | null }[];
@@ -21,7 +25,6 @@ export class OrphanStreamFinalizer {
 
             const liveStatus = await FileSystemManager.readJsonFile<LiveStatus>(statusFilePath);
             if (liveStatus && liveStatus.downloads) {
-                // Ensure we compare absolute paths or consistent relative paths
                 liveStreamPaths = new Set(
                     liveStatus.downloads
                         .map((d) => d.segmentsDirPath)
@@ -29,10 +32,6 @@ export class OrphanStreamFinalizer {
                 );
             } else {
                 liveStreamPaths = new Set();
-            }
-
-            if (liveStreamPaths.size > 0) {
-                logger.info(`Found ${liveStreamPaths.size} live streams to ignore during finalization.`);
             }
 
             try {
@@ -45,8 +44,7 @@ export class OrphanStreamFinalizer {
 
                 const streamDirs = await fs.readdir(streamsLocation, { withFileTypes: true });
                 let processedCount = 0;
-                let fixedCount = 0;
-                let renamedFilesCount = 0;
+                let repairedCount = 0;
 
                 for (const dirent of streamDirs) {
                     if (dirent.isDirectory()) {
@@ -66,91 +64,86 @@ export class OrphanStreamFinalizer {
                         }
 
                         if (liveStreamPaths.has(streamPath) && !isStale) {
-                            logger.verbose(`Skipping active stream: ${streamPath}`);
                             continue;
                         }
 
-                        // 1. CLEANUP FILE NAMES (Remove trailing \r)
+                        processedCount++;
+
+                        // Check for "Bad Duration" issue (26h duration artifact)
+                        // We check the first available .ts file
                         try {
                             const files = await fs.readdir(streamPath);
-                            for (const file of files) {
-                                if (file.endsWith("\r")) {
-                                    const oldPath = path.join(streamPath, file);
-                                    const newPath = path.join(streamPath, file.trim()); // trim removes \r
-                                    await fs.rename(oldPath, newPath);
-                                    renamedFilesCount++;
+                            const tsFiles = files.filter(f => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
+
+                            if (tsFiles.length > 0) {
+                                const firstSegment = tsFiles[0];
+                                const firstSegmentPath = path.join(streamPath, firstSegment);
+
+                                const isBad = await this.checkIfSegmentIsBad(firstSegmentPath);
+                                if (isBad) {
+                                    logger.warn(`Detected corrupt timestamps (26h bug) in ${dirent.name}. Starting repair of ${tsFiles.length} segments...`);
+                                    await this.repairSegments(streamPath, tsFiles);
+                                    repairedCount++;
+
+                                    // After repair, we MUST force playlist regeneration because previous durations were wrong
+                                    const playlistPath = path.join(streamPath, "playlist.m3u8");
+                                    const backupPath = path.join(streamPath, "playlist.m3u8.bak");
+                                    try {
+                                        await fs.rename(playlistPath, backupPath);
+                                        logger.info(`Backed up playlist for ${dirent.name} to force regeneration after repair.`);
+                                    } catch (e) { /* ignore if missing */ }
                                 }
                             }
                         } catch (err: any) {
-                            logger.warn(`Failed to cleanup filenames in ${streamPath}: ${err.message}`);
-                        }
-
-                        // 2. FINALIZE PLAYLIST
-                        processedCount++;
-                        const playlistPath = path.join(streamPath, "playlist.m3u8");
-                        const content = await FileSystemManager.readFile(playlistPath);
-
-                        if (content) {
-                            let shouldRewrite = false;
-                            // Split by newline, handling \r gracefully by trimming lines later
-                            let lines = content.split("\n");
-
-                            // Check if any line has \r that needs stripping
-                            const hasCR = content.includes("\r");
-                            if (hasCR) {
-                                shouldRewrite = true;
-                                lines = lines.map(l => l.trim());
-                            }
-
-                            let maxDuration = 0;
-                            let currentTarget = 0;
-
-                            // Scan for Max Duration and Current Target
-                            for (const line of lines) {
-                                const trimmed = line.trim();
-                                if (trimmed.startsWith("#EXTINF:")) {
-                                    const valStr = trimmed.substring(8).replace(",", "").trim();
-                                    const duration = parseFloat(valStr);
-                                    if (!isNaN(duration) && duration > maxDuration) {
-                                        maxDuration = duration;
-                                    }
-                                } else if (trimmed.startsWith("#EXT-X-TARGETDURATION:")) {
-                                    currentTarget = parseInt(trimmed.split(":")[1], 10);
-                                }
-                            }
-
-                            const necessaryTarget = Math.ceil(maxDuration);
-
-                            if (necessaryTarget > 0 && necessaryTarget > currentTarget) {
-                                logger.info(`Fixing TARGETDURATION for ${dirent.name}: ${currentTarget} -> ${necessaryTarget} (Max segment: ${maxDuration})`);
-                                lines = lines.map(line => {
-                                    if (line.startsWith("#EXT-X-TARGETDURATION:")) {
-                                        return `#EXT-X-TARGETDURATION:${necessaryTarget}`;
-                                    }
-                                    return line;
-                                });
-                                shouldRewrite = true;
-                            }
-
-                            if (!content.includes("#EXT-X-ENDLIST")) {
-                                logger.info(`Finalizing orphaned stream playlist (missing ENDLIST): ${dirent.name}`);
-                                lines.push("#EXT-X-ENDLIST");
-                                shouldRewrite = true;
-                            }
-
-                            if (shouldRewrite) {
-                                // Join with \n, ensuring last line ends with \n
-                                const newContent = lines.join("\n").trim() + "\n";
-                                await FileSystemManager.writeFile(playlistPath, newContent);
-                                fixedCount++;
-                            }
+                            logger.error(`Error checking/repairing stream ${dirent.name}`, { error: err.message });
                         }
                     }
                 }
-                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders. Fixed ${fixedCount} playlists. Renamed ${renamedFilesCount} files.`);
+                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders. Repaired ${repairedCount} streams.`);
             } catch (error: any) {
                 logger.error("Error during orphan stream finalization check:", { errorMessage: error.message });
             }
         })();
+    }
+
+    private static async checkIfSegmentIsBad(filePath: string): Promise<boolean> {
+        try {
+            // Use ffprobe to get duration.
+            // Output format: duration="1234.56"
+            const cmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`;
+            const { stdout } = await execAsync(cmd);
+            const duration = parseFloat(stdout.trim());
+
+            // If duration is > 300 seconds (5 mins) for a single TS segment, it's likely the 26h bug.
+            // Normal segments are ~1-10s.
+            if (!isNaN(duration) && duration > 300) {
+                return true;
+            }
+            return false;
+        } catch (error) {
+            // If ffprobe fails, we assume it's weird or we can't check.
+            // Safest to NOT touch it if we aren't sure.
+            return false;
+        }
+    }
+
+    private static async repairSegments(streamPath: string, tsFiles: string[]): Promise<void> {
+        // We process in batches to avoid overwhelming the system, but sequentially is safer for simple scripts.
+        for (const file of tsFiles) {
+            const filePath = path.join(streamPath, file);
+            const tempPath = path.join(streamPath, `${file}.temp.ts`);
+
+            try {
+                // -c copy rewrites container timestamps
+                await execAsync(`ffmpeg -y -v error -i "${filePath}" -c copy "${tempPath}"`);
+
+                // Overwrite original
+                await fs.rename(tempPath, filePath);
+            } catch (error: any) {
+                logger.error(`Failed to repair segment ${file}`, { error: error.message });
+                // Clean up temp if exists
+                try { await fs.unlink(tempPath); } catch {}
+            }
+        }
     }
 }
