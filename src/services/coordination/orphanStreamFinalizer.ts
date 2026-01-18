@@ -69,23 +69,22 @@ export class OrphanStreamFinalizer {
 
                         processedCount++;
 
-                        // Check for "Bad Duration" issue (26h duration artifact)
-                        // We check the first available .ts file
                         try {
                             const files = await fs.readdir(streamPath);
                             const tsFiles = files.filter(f => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
 
                             if (tsFiles.length > 0) {
+                                // Check the first segment for "Bad Duration" issue (> 1 hour)
                                 const firstSegment = tsFiles[0];
                                 const firstSegmentPath = path.join(streamPath, firstSegment);
 
                                 const isBad = await this.checkIfSegmentIsBad(firstSegmentPath);
                                 if (isBad) {
-                                    logger.warn(`Detected corrupt timestamps (26h bug) in ${dirent.name}. Starting repair of ${tsFiles.length} segments...`);
+                                    logger.warn(`Detected corrupt timestamps (>1h duration) in ${dirent.name}. Starting repair of ${tsFiles.length} segments...`);
                                     await this.repairSegments(streamPath, tsFiles);
                                     repairedCount++;
 
-                                    // After repair, we MUST force playlist regeneration because previous durations were wrong
+                                    // Backup playlist to force regeneration by backend
                                     const playlistPath = path.join(streamPath, "playlist.m3u8");
                                     const backupPath = path.join(streamPath, "playlist.m3u8.bak");
                                     try {
@@ -108,40 +107,36 @@ export class OrphanStreamFinalizer {
 
     private static async checkIfSegmentIsBad(filePath: string): Promise<boolean> {
         try {
-            // Use ffprobe to get duration.
-            // Output format: duration="1234.56"
+            // ffprobe to get duration.
+            // -show_entries format=duration output is: duration=1234.56
             const cmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`;
             const { stdout } = await execAsync(cmd);
             const duration = parseFloat(stdout.trim());
 
-            // If duration is > 300 seconds (5 mins) for a single TS segment, it's likely the 26h bug.
-            // Normal segments are ~1-10s.
-            if (!isNaN(duration) && duration > 300) {
+            // If duration > 3600 seconds (1 hour), it is definitely a timestamp bug for a TS segment
+            if (!isNaN(duration) && duration > 3600) {
                 return true;
             }
             return false;
         } catch (error) {
-            // If ffprobe fails, we assume it's weird or we can't check.
-            // Safest to NOT touch it if we aren't sure.
+            // If probe fails, we can't determine. Safest to leave it alone.
             return false;
         }
     }
 
     private static async repairSegments(streamPath: string, tsFiles: string[]): Promise<void> {
-        // We process in batches to avoid overwhelming the system, but sequentially is safer for simple scripts.
         for (const file of tsFiles) {
             const filePath = path.join(streamPath, file);
             const tempPath = path.join(streamPath, `${file}.temp.ts`);
 
             try {
-                // -c copy rewrites container timestamps
+                // -c copy rewrites container timestamps without re-encoding
                 await execAsync(`ffmpeg -y -v error -i "${filePath}" -c copy "${tempPath}"`);
 
-                // Overwrite original
+                // Atomic replace
                 await fs.rename(tempPath, filePath);
             } catch (error: any) {
                 logger.error(`Failed to repair segment ${file}`, { error: error.message });
-                // Clean up temp if exists
                 try { await fs.unlink(tempPath); } catch {}
             }
         }
