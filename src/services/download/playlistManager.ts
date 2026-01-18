@@ -46,7 +46,19 @@ export class PlaylistManager {
                     line.startsWith("#EXT-X-TARGETDURATION") ||
                     line.startsWith("#EXT-X-MEDIA-SEQUENCE")
             );
-            const header = headerLines.join("\n") + "\n";
+
+            // BUMP TARGET DURATION: Intercept and increase by 1s
+            const safeHeaderLines = headerLines.map((line) => {
+                if (line.startsWith("#EXT-X-TARGETDURATION:")) {
+                    const originalDuration = parseInt(line.split(":")[1], 10);
+                    if (!isNaN(originalDuration)) {
+                        return `#EXT-X-TARGETDURATION:${originalDuration + 1}`;
+                    }
+                }
+                return line;
+            });
+
+            const header = safeHeaderLines.join("\n") + "\n";
             await FileSystemManager.writeFile(this.fullPlaylistPath, header);
         }
 
