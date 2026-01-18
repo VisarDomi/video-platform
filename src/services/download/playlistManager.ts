@@ -25,8 +25,9 @@ export class PlaylistManager {
         const lines = content.split("\n");
         const segments = new Set<string>();
         for (const line of lines) {
-            if (line.trim() !== "" && !line.startsWith("#")) {
-                segments.add(line);
+            const trimmed = line.trim();
+            if (trimmed !== "" && !trimmed.startsWith("#")) {
+                segments.add(trimmed);
             }
         }
         return segments;
@@ -55,7 +56,7 @@ export class PlaylistManager {
                         return `#EXT-X-TARGETDURATION:${originalDuration + 1}`;
                     }
                 }
-                return line;
+                return line.trim();
             });
 
             const header = safeHeaderLines.join("\n") + "\n";
@@ -65,8 +66,8 @@ export class PlaylistManager {
         const existingSegments = await this.getExistingLocalSegments();
 
         for (let i = 0; i < liveLines.length; i++) {
-            const line = liveLines[i];
-            if (line.trim() === "" || line.startsWith("#")) {
+            const line = liveLines[i].trim();
+            if (line === "" || line.startsWith("#")) {
                 continue;
             }
 
@@ -77,7 +78,7 @@ export class PlaylistManager {
             if (!existingSegments.has(localName)) {
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
-                    const metaLine = liveLines[j];
+                    const metaLine = liveLines[j].trim();
                     if (metaLine.startsWith("#")) {
                         const isHeaderTag =
                             metaLine.startsWith("#EXTM3U") ||

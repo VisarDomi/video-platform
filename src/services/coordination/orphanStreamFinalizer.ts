@@ -14,7 +14,6 @@ export class OrphanStreamFinalizer {
             logger.info("Starting orphan stream finalizer check...");
             const cfg = config.getConfig();
 
-            // FIX: Point to the actual stream location, not just the root storage path
             const streamsLocation = path.join(cfg.storagePath, "tango", "downloader");
             const statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");
 
@@ -22,7 +21,12 @@ export class OrphanStreamFinalizer {
 
             const liveStatus = await FileSystemManager.readJsonFile<LiveStatus>(statusFilePath);
             if (liveStatus && liveStatus.downloads) {
-                liveStreamPaths = new Set(liveStatus.downloads.map((d) => d.segmentsDirPath).filter(Boolean) as string[]);
+                // Ensure we compare absolute paths or consistent relative paths
+                liveStreamPaths = new Set(
+                    liveStatus.downloads
+                        .map((d) => d.segmentsDirPath)
+                        .filter(Boolean) as string[]
+                );
             } else {
                 liveStreamPaths = new Set();
             }
@@ -32,7 +36,6 @@ export class OrphanStreamFinalizer {
             }
 
             try {
-                // Check if directory exists first
                 try {
                     await fs.access(streamsLocation);
                 } catch {
@@ -43,12 +46,13 @@ export class OrphanStreamFinalizer {
                 const streamDirs = await fs.readdir(streamsLocation, { withFileTypes: true });
                 let processedCount = 0;
                 let fixedCount = 0;
+                let renamedFilesCount = 0;
 
                 for (const dirent of streamDirs) {
                     if (dirent.isDirectory()) {
                         const streamPath = path.join(streamsLocation, dirent.name);
 
-                        // STALE CHECK: If it claims to be live, but hasn't been touched in 10 mins, force finalize it.
+                        // STALE CHECK
                         let isStale = false;
                         if (liveStreamPaths.has(streamPath)) {
                             try {
@@ -58,7 +62,7 @@ export class OrphanStreamFinalizer {
                                     isStale = true;
                                     logger.warn(`Stream marked as live but is stale (>10m old). Force finalizing: ${streamPath}`);
                                 }
-                            } catch (e) { /* ignore stat error */ }
+                            } catch (e) { /* ignore */ }
                         }
 
                         if (liveStreamPaths.has(streamPath) && !isStale) {
@@ -66,35 +70,57 @@ export class OrphanStreamFinalizer {
                             continue;
                         }
 
+                        // 1. CLEANUP FILE NAMES (Remove trailing \r)
+                        try {
+                            const files = await fs.readdir(streamPath);
+                            for (const file of files) {
+                                if (file.endsWith("\r")) {
+                                    const oldPath = path.join(streamPath, file);
+                                    const newPath = path.join(streamPath, file.trim()); // trim removes \r
+                                    await fs.rename(oldPath, newPath);
+                                    renamedFilesCount++;
+                                }
+                            }
+                        } catch (err: any) {
+                            logger.warn(`Failed to cleanup filenames in ${streamPath}: ${err.message}`);
+                        }
+
+                        // 2. FINALIZE PLAYLIST
                         processedCount++;
                         const playlistPath = path.join(streamPath, "playlist.m3u8");
                         const content = await FileSystemManager.readFile(playlistPath);
 
                         if (content) {
                             let shouldRewrite = false;
+                            // Split by newline, handling \r gracefully by trimming lines later
                             let lines = content.split("\n");
+
+                            // Check if any line has \r that needs stripping
+                            const hasCR = content.includes("\r");
+                            if (hasCR) {
+                                shouldRewrite = true;
+                                lines = lines.map(l => l.trim());
+                            }
+
                             let maxDuration = 0;
                             let currentTarget = 0;
 
-                            // 1. Scan for Max Duration and Current Target
+                            // Scan for Max Duration and Current Target
                             for (const line of lines) {
-                                if (line.startsWith("#EXTINF:")) {
-                                    // Remove #EXTINF: and trailing comma if present
-                                    const valStr = line.substring(8).replace(",", "").trim();
+                                const trimmed = line.trim();
+                                if (trimmed.startsWith("#EXTINF:")) {
+                                    const valStr = trimmed.substring(8).replace(",", "").trim();
                                     const duration = parseFloat(valStr);
                                     if (!isNaN(duration) && duration > maxDuration) {
                                         maxDuration = duration;
                                     }
-                                } else if (line.startsWith("#EXT-X-TARGETDURATION:")) {
-                                    currentTarget = parseInt(line.split(":")[1], 10);
+                                } else if (trimmed.startsWith("#EXT-X-TARGETDURATION:")) {
+                                    currentTarget = parseInt(trimmed.split(":")[1], 10);
                                 }
                             }
 
-                            // 2. Determine necessary target
-                            // Math.ceil(1.001) -> 2. If target is 1, 2 > 1, so update.
                             const necessaryTarget = Math.ceil(maxDuration);
 
-                            // 3. Update Target Duration if necessary
                             if (necessaryTarget > 0 && necessaryTarget > currentTarget) {
                                 logger.info(`Fixing TARGETDURATION for ${dirent.name}: ${currentTarget} -> ${necessaryTarget} (Max segment: ${maxDuration})`);
                                 lines = lines.map(line => {
@@ -106,7 +132,6 @@ export class OrphanStreamFinalizer {
                                 shouldRewrite = true;
                             }
 
-                            // 4. Ensure ENDLIST exists
                             if (!content.includes("#EXT-X-ENDLIST")) {
                                 logger.info(`Finalizing orphaned stream playlist (missing ENDLIST): ${dirent.name}`);
                                 lines.push("#EXT-X-ENDLIST");
@@ -114,6 +139,7 @@ export class OrphanStreamFinalizer {
                             }
 
                             if (shouldRewrite) {
+                                // Join with \n, ensuring last line ends with \n
                                 const newContent = lines.join("\n").trim() + "\n";
                                 await FileSystemManager.writeFile(playlistPath, newContent);
                                 fixedCount++;
@@ -121,7 +147,7 @@ export class OrphanStreamFinalizer {
                         }
                     }
                 }
-                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders in ${streamsLocation}. Fixed/Updated ${fixedCount} playlists.`);
+                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders. Fixed ${fixedCount} playlists. Renamed ${renamedFilesCount} files.`);
             } catch (error: any) {
                 logger.error("Error during orphan stream finalization check:", { errorMessage: error.message });
             }
