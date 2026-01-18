@@ -44,7 +44,7 @@ export class OrphanStreamFinalizer {
 
                 const streamDirs = await fs.readdir(streamsLocation, { withFileTypes: true });
                 let processedCount = 0;
-                let repairedCount = 0;
+                let deletedBadSegments = 0;
 
                 for (const dirent of streamDirs) {
                     if (dirent.isDirectory()) {
@@ -69,76 +69,94 @@ export class OrphanStreamFinalizer {
 
                         processedCount++;
 
+                        // Check for bad segments (0kb/s or insane duration)
                         try {
                             const files = await fs.readdir(streamPath);
                             const tsFiles = files.filter(f => f.endsWith(".ts")).sort((a, b) => parseInt(a) - parseInt(b));
 
-                            if (tsFiles.length > 0) {
-                                // Check the first segment for "Bad Duration" issue (> 1 hour)
-                                const firstSegment = tsFiles[0];
-                                const firstSegmentPath = path.join(streamPath, firstSegment);
+                            let hasDeletions = false;
 
-                                const isBad = await this.checkIfSegmentIsBad(firstSegmentPath);
+                            for (const file of tsFiles) {
+                                const filePath = path.join(streamPath, file);
+                                const isBad = await this.checkIfSegmentIsBad(filePath);
+
                                 if (isBad) {
-                                    logger.warn(`Detected corrupt timestamps (>1h duration) in ${dirent.name}. Starting repair of ${tsFiles.length} segments...`);
-                                    await this.repairSegments(streamPath, tsFiles);
-                                    repairedCount++;
-
-                                    // Backup playlist to force regeneration by backend
-                                    const playlistPath = path.join(streamPath, "playlist.m3u8");
-                                    const backupPath = path.join(streamPath, "playlist.m3u8.bak");
-                                    try {
-                                        await fs.rename(playlistPath, backupPath);
-                                        logger.info(`Backed up playlist for ${dirent.name} to force regeneration after repair.`);
-                                    } catch (e) { /* ignore if missing */ }
+                                    logger.warn(`Deleting corrupt segment (0kb/s or bad duration): ${file} in ${dirent.name}`);
+                                    await fs.unlink(filePath);
+                                    deletedBadSegments++;
+                                    hasDeletions = true;
                                 }
                             }
+
+                            // If we deleted segments, we MUST force playlist regeneration to remove references to them
+                            if (hasDeletions) {
+                                const playlistPath = path.join(streamPath, "playlist.m3u8");
+                                const backupPath = path.join(streamPath, "playlist.m3u8.bak");
+                                try {
+                                    if (await FileSystemManager.pathExists(playlistPath)) {
+                                        await fs.rename(playlistPath, backupPath);
+                                        logger.info(`Backed up playlist for ${dirent.name} to force regeneration after cleanup.`);
+                                    }
+                                } catch (e) { /* ignore */ }
+                            }
                         } catch (err: any) {
-                            logger.error(`Error checking/repairing stream ${dirent.name}`, { error: err.message });
+                            logger.error(`Error processing stream ${dirent.name}`, { error: err.message });
                         }
                     }
                 }
-                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders. Repaired ${repairedCount} streams.`);
+                logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} folders. Deleted ${deletedBadSegments} corrupt segments.`);
             } catch (error: any) {
                 logger.error("Error during orphan stream finalization check:", { errorMessage: error.message });
             }
         })();
     }
 
-    private static async checkIfSegmentIsBad(filePath: string): Promise<boolean> {
+    public static async checkIfSegmentIsBad(filePath: string): Promise<boolean> {
         try {
-            // ffprobe to get duration.
-            // -show_entries format=duration output is: duration=1234.56
-            const cmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`;
+            // Check bitrate and duration
+            const cmd = `ffprobe -v error -show_entries format=duration,bit_rate -of default=noprint_wrappers=1:nokey=1 "${filePath}"`;
             const { stdout } = await execAsync(cmd);
-            const duration = parseFloat(stdout.trim());
+            const lines = stdout.trim().split('\n');
 
-            // If duration > 3600 seconds (1 hour), it is definitely a timestamp bug for a TS segment
+            // Output order depends on ffprobe version/file, but usually:
+            // duration
+            // bit_rate
+            // We parse all numbers found.
+
+            // NOTE: ffprobe output might be just one line if one is missing.
+            // Safe parsing:
+            const values = lines.map(l => parseFloat(l)).filter(n => !isNaN(n));
+
+            // We expect at least one value.
+            // If bit_rate is missing or "N/A", it might not be parsed.
+            // If bitrate is 0, it's bad.
+            // If duration > 3600, it's bad.
+
+            // Standard approach: check if string output contains "bit_rate=N/A" or value 0.
+            // Actually, with :nokey=1, we just get numbers.
+            // Let's use JSON format for robustness.
+            const jsonCmd = `ffprobe -v error -show_format -of json "${filePath}"`;
+            const { stdout: jsonStdout } = await execAsync(jsonCmd);
+            const data = JSON.parse(jsonStdout);
+
+            const duration = parseFloat(data.format.duration);
+            const bitRate = parseFloat(data.format.bit_rate);
+
+            // Condition 1: Bitrate is effectively 0 or N/A (NaN)
+            // Note: valid TS files usually have > 100k bitrate.
+            if (isNaN(bitRate) || bitRate < 1000) { // < 1kbps
+                return true;
+            }
+
+            // Condition 2: Insane Duration (> 1 hour) for a segment
             if (!isNaN(duration) && duration > 3600) {
                 return true;
             }
+
             return false;
         } catch (error) {
-            // If probe fails, we can't determine. Safest to leave it alone.
-            return false;
-        }
-    }
-
-    private static async repairSegments(streamPath: string, tsFiles: string[]): Promise<void> {
-        for (const file of tsFiles) {
-            const filePath = path.join(streamPath, file);
-            const tempPath = path.join(streamPath, `${file}.temp.ts`);
-
-            try {
-                // -c copy rewrites container timestamps without re-encoding
-                await execAsync(`ffmpeg -y -v error -i "${filePath}" -c copy "${tempPath}"`);
-
-                // Atomic replace
-                await fs.rename(tempPath, filePath);
-            } catch (error: any) {
-                logger.error(`Failed to repair segment ${file}`, { error: error.message });
-                try { await fs.unlink(tempPath); } catch {}
-            }
+            // If ffprobe fails completely (corrupt file header), treat as bad.
+            return true;
         }
     }
 }

@@ -1,5 +1,6 @@
 import * as timersPromises from "timers/promises";
 import * as path from "path";
+import * as fs from "fs/promises"; // Added for unlink
 
 import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
@@ -8,6 +9,7 @@ import { ApiClient } from "../api/apiClient.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
+import { OrphanStreamFinalizer } from "../coordination/orphanStreamFinalizer.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -83,8 +85,39 @@ export class StreamDownloader {
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
 
                         if (writeSuccess) {
-                            await playlistManager.appendSegmentToPlaylist(segment);
-                            lastDownload = Date.now();
+                            // Validate the segment immediately
+                            const isBad = await OrphanStreamFinalizer.checkIfSegmentIsBad(segmentPath);
+
+                            if (isBad) {
+                                logger.warn(`Downloaded segment is corrupt (0kb/s). Deleting and skipping: ${segment.localName}`);
+                                await fs.unlink(segmentPath).catch(() => {});
+                                // We treat this as "processed" so we don't try to download it again loop after loop,
+                                // but we do NOT append it to the playlist.
+                                // However, playlistManager relies on 'existingSegments' which reads from playlist.
+                                // If we don't add it to playlist, identifyNewSegments will try to download it again next loop!
+                                // To fix this loop, we must either:
+                                // 1. Add it to playlist but comment it out? (HLS doesn't support comment-out segments easily).
+                                // 2. Keep it in memory in PlaylistManager?
+                                // 3. Or just acknowledge that for this session, we skip it.
+                                // Actually, if we delete it, identifyNewSegments will see it's missing from "existingSegments" (which checks Playlist file).
+                                // So it WILL try again.
+                                // If the server keeps serving the bad segment, we loop downloading/deleting.
+                                // Solution: Append it to the playlist as a "DISCONTINUITY" tag only? No.
+                                // Solution: We simply append it to the playlist but maybe point to a dummy/empty file? No.
+                                // Best Solution: If it's bad, we just don't write it to disk, but we DO add it to the playlist? No, player will 404.
+
+                                // Proper Solution: PlaylistManager needs to know about "Bad/Skipped" segments to avoid re-downloading.
+                                // But PlaylistManager is stateless per loop (reads file).
+                                // Since this is a live stream downloader, the live playlist window moves.
+                                // Eventually the bad segment falls out of the live window (usually 3-5 segments).
+                                // So we might re-download it 3-5 times. This is acceptable waste to ensure quality.
+
+                                // Update lastDownload to keep stream alive even if we skip bad segments
+                                lastDownload = Date.now();
+                            } else {
+                                await playlistManager.appendSegmentToPlaylist(segment);
+                                lastDownload = Date.now();
+                            }
                         } else {
                             logger.error(`Failed to write segment to disk, pausing processing:`, { segmentPath });
                             break;
