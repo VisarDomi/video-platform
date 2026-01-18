@@ -6,6 +6,7 @@ import { TokenManager } from "./api/tokenManager.js";
 import { AliasSyncService } from "./coordination/aliasSyncService.js";
 import { StreamDiscoveryService } from "./coordination/streamDiscoveryService.js";
 import { OrphanStreamFinalizer } from "./coordination/orphanStreamFinalizer.js";
+import { DiskSpaceMonitor } from "./coordination/diskSpaceMonitor.js";
 
 export class DownloaderService {
     private tokenManager: TokenManager;
@@ -35,6 +36,7 @@ export class DownloaderService {
         logger.info("Starting all services...");
 
         OrphanStreamFinalizer.run();
+        DiskSpaceMonitor.run();
 
         this.tokenManager.startTokenWatcher();
         this.aliasSyncService.start();
