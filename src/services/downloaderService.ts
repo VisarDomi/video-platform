@@ -15,6 +15,11 @@ import { TargetManager } from "./fc2/discovery/targetManager.js";
 import { Fc2Client } from "./fc2/api/fc2Client.js";
 import { Fc2DiscoveryService } from "./fc2/discovery/discoveryService.js";
 
+// SC Specific Imports
+import { ScTargetManager } from "./sc/discovery/targetManager.js";
+import { ScClient } from "./sc/api/scClient.js";
+import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
+
 export class DownloaderService {
     // Tango Services
     private tokenManager: TokenManager;
@@ -24,6 +29,9 @@ export class DownloaderService {
     // FC2 Services
     private fc2DiscoveryService: Fc2DiscoveryService;
 
+    // SC Services
+    private scDiscoveryService: ScDiscoveryService;
+
     // Core Services
     private orphanStreamFinalizer: OrphanStreamFinalizer;
 
@@ -32,12 +40,14 @@ export class DownloaderService {
         aliasSyncService: AliasSyncService,
         streamDiscoveryService: StreamDiscoveryService,
         fc2DiscoveryService: Fc2DiscoveryService,
+        scDiscoveryService: ScDiscoveryService,
         orphanStreamFinalizer: OrphanStreamFinalizer
     ) {
         this.tokenManager = tokenManager;
         this.aliasSyncService = aliasSyncService;
         this.streamDiscoveryService = streamDiscoveryService;
         this.fc2DiscoveryService = fc2DiscoveryService;
+        this.scDiscoveryService = scDiscoveryService;
         this.orphanStreamFinalizer = orphanStreamFinalizer;
         logger.info("[General] DownloaderService initialized as a composition root.");
     }
@@ -59,6 +69,12 @@ export class DownloaderService {
         const fc2DiscoveryService = new Fc2DiscoveryService(targetManager, fc2Client, downloadsManager);
         // --------------------------
 
+        // --- SC Initialization ---
+        const scTargetManager = ScTargetManager.create();
+        const scClient = new ScClient();
+        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
+        // -------------------------
+
         const orphanStreamFinalizer = new OrphanStreamFinalizer(downloadsManager);
 
         return new DownloaderService(
@@ -66,6 +82,7 @@ export class DownloaderService {
             aliasSyncService,
             streamDiscoveryService,
             fc2DiscoveryService,
+            scDiscoveryService,
             orphanStreamFinalizer
         );
     }
@@ -83,5 +100,8 @@ export class DownloaderService {
 
         // Start FC2 Services
         this.fc2DiscoveryService.start();
+
+        // Start SC Services
+        this.scDiscoveryService.start();
     }
 }
