@@ -15,7 +15,6 @@ export const ALL_VIDEO_PATHS_TYPES = {
 } as const;
 
 export const FILE_NAMES = {
-    CONFIG: "config.json",
     PACKAGE_JSON: "package.json",
     LIVE_STATUS: "live-status.json",
     ERROR_LOG: "error.log",

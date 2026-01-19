@@ -1,7 +1,7 @@
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
-import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_CONVERTED_PATH, LIVE_STATUS_PATH } from "./config.js";
+import { getAllSearchPaths, LIVE_STATUS_PATH } from "./config.js";
 import { FileNotFoundError } from "./errors.js";
 import logger from "./logger.js";
 import * as types from "./types.js";
@@ -26,26 +26,17 @@ export function findProjectRoot(): string {
 }
 
 export async function findVideoPath(filename: string): Promise<string> {
-    let finalPath = null;
-    try {
-        const fullPath = path.join(VIDEO_DOWNLOADER_PATH, filename);
-        await fsPromises.access(fullPath);
-        finalPath = fullPath;
-    } catch {}
-    try {
-        const convertPath = path.join(VIDEO_EDITED_PATH, filename);
-        await fsPromises.access(convertPath);
-        finalPath = convertPath;
-    } catch {}
-    try {
-        const modifiedPath = path.join(VIDEO_CONVERTED_PATH, filename);
-        await fsPromises.access(modifiedPath);
-        finalPath = modifiedPath;
-    } catch {}
-    if (finalPath === null) {
-        throw new FileNotFoundError(`Video not found: ${filename}`);
+    const searchPaths = getAllSearchPaths();
+
+    for (const { path: basePath } of searchPaths) {
+        try {
+            const fullPath = path.join(basePath, filename);
+            await fsPromises.access(fullPath);
+            return fullPath;
+        } catch {}
     }
-    return finalPath;
+
+    throw new FileNotFoundError(`Video not found: ${filename}`);
 }
 
 export async function getLiveFolders(): Promise<Set<string>> {

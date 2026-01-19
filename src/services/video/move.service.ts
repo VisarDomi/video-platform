@@ -1,20 +1,22 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_DOWNLOADER_PATH, VIDEO_EDITED_PATH, VIDEO_TRASH_PATH } from "../../core/config.js";
+import { getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import * as utils from "../../core/utils.js";
 import { DESTINATIONS, LOGS } from "../../core/constants.js";
 import * as types from "../../core/types.js";
 import * as errors from "../../core/errors.js";
 
-export async function moveVideo(filename: string, destination: types.Destination, sourcePath?: string): Promise<void> {
+export async function moveVideo(filename: string, destination: types.Destination, provider: string, sourcePath?: string): Promise<void> {
+    const paths = getProviderPaths(provider);
+
     let newPath: string;
     if (destination === DESTINATIONS.TRASH) {
-        newPath = VIDEO_TRASH_PATH;
+        newPath = paths.trash;
     } else if (destination === DESTINATIONS.ORIGINAL) {
-        newPath = VIDEO_DOWNLOADER_PATH;
+        newPath = paths.downloader;
     } else if (destination === DESTINATIONS.EDITED) {
-        newPath = VIDEO_EDITED_PATH;
+        newPath = paths.edited;
     } else {
         throw new errors.MoveError(LOGS.MESSAGES.DESTINATION_ERROR);
     }

@@ -1,9 +1,0 @@
-{
-    "videoPaths": {
-        "downloader": "/home/visar/Videos/downloads/tango/downloader",
-        "edited": "/home/visar/Videos/downloads/tango/editor/edited",
-        "trash": "/home/visar/Videos/downloads/tango/editor/trash",
-        "converted": "/home/visar/Videos/downloads/tango/converter/converted"
-    },
-    "frontendDistPath": "/home/visar/Documents/video-repos/tango-video-editor-frontend/dist"
-}

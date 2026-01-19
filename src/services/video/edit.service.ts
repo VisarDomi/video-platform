@@ -1,6 +1,6 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { VIDEO_EDITED_PATH } from "../../core/config.js";
+import { getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import * as utils from "../../core/utils.js";
 import * as errors from "../../core/errors.js";
@@ -46,7 +46,8 @@ async function getParts(videoPath: string, tsFiles: string[]): Promise<string[][
     return parts;
 }
 
-export async function editVideo(filename: string, segments: string[]): Promise<void> {
+export async function editVideo(filename: string, segments: string[], provider: string): Promise<void> {
+    const paths = getProviderPaths(provider);
     const videoPath = await utils.findVideoPath(filename);
     if (!videoPath) throw new errors.FileNotFoundError(`Video folder not found: ${filename}`);
 
@@ -62,14 +63,14 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
     });
 
     if (validSegments.length > 0) {
-        logger.info(`Editing ${filename}: processing ${validSegments.length} segments...`);
+        logger.info(`Editing ${filename} [${provider}]: processing ${validSegments.length} segments...`);
 
         const parts = await getParts(videoPath, validSegments);
 
         for (let i = 0; i < parts.length; i++) {
             const tsChunk = parts[i];
             const partFolderName = parts.length > 1 ? `${filename}${MISC.EDITED_VIDEO_PART_SUFFIX(i + 1)}` : filename;
-            const destinationPath = path.join(VIDEO_EDITED_PATH, partFolderName);
+            const destinationPath = path.join(paths.edited, partFolderName);
 
             await fsPromises.mkdir(destinationPath, { recursive: true });
 
@@ -84,7 +85,7 @@ export async function editVideo(filename: string, segments: string[]): Promise<v
             logger.info(`Created part ${i + 1} for ${filename} with ${tsChunk.length} segments at ${destinationPath}`);
         }
 
-        await moveService.moveVideo(filename, DESTINATIONS.TRASH, videoPath);
+        await moveService.moveVideo(filename, DESTINATIONS.TRASH, provider, videoPath);
         logger.info(`Successfully processed and removed original folder: ${filename}`);
     }
 }

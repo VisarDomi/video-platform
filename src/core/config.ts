@@ -6,33 +6,36 @@ import logger from "./logger.js";
 import * as constants from "./constants.js";
 
 const projectRoot = utils.findProjectRoot();
-const ROOT_CONFIG_PATH = path.resolve(projectRoot, constants.FILE_NAMES.CONFIG);
+
+interface PathConfig {
+    downloader: string;
+    edited: string;
+    trash: string;
+    converted: string;
+}
 
 interface IConfig {
-    videoPaths: {
-        downloader: string;
-        edited: string;
-        trash: string;
-        converted: string;
-    };
+    providers: Record<string, PathConfig>;
     frontendDistPath: string;
     sharedStatePath: string;
 }
 
-const defaultConfig: IConfig = {
-    videoPaths: {
+const DEFAULT_PROVIDERS = ["tango", "fc2"];
+
+function generateDefaultPaths(providerName: string): PathConfig {
+    return {
         downloader: path.join(
             os.homedir(),
             constants.DEFAULT_PATHS.HOME_VIDEOS,
             constants.DEFAULT_PATHS.DOWNLOADS,
-            constants.DEFAULT_PATHS.TANGO,
+            providerName,
             constants.DEFAULT_PATHS.DOWNLOADER
         ),
         edited: path.join(
             os.homedir(),
             constants.DEFAULT_PATHS.HOME_VIDEOS,
             constants.DEFAULT_PATHS.DOWNLOADS,
-            constants.DEFAULT_PATHS.TANGO,
+            providerName,
             constants.DEFAULT_PATHS.EDITOR,
             constants.DEFAULT_PATHS.EDITED
         ),
@@ -40,7 +43,7 @@ const defaultConfig: IConfig = {
             os.homedir(),
             constants.DEFAULT_PATHS.HOME_VIDEOS,
             constants.DEFAULT_PATHS.DOWNLOADS,
-            constants.DEFAULT_PATHS.TANGO,
+            providerName,
             constants.DEFAULT_PATHS.EDITOR,
             constants.DEFAULT_PATHS.TRASH
         ),
@@ -48,75 +51,68 @@ const defaultConfig: IConfig = {
             os.homedir(),
             constants.DEFAULT_PATHS.HOME_VIDEOS,
             constants.DEFAULT_PATHS.DOWNLOADS,
-            constants.DEFAULT_PATHS.TANGO,
+            providerName,
             constants.DEFAULT_PATHS.CONVERTER,
             constants.DEFAULT_PATHS.CONVERTED
         ),
-    },
-    frontendDistPath: constants.MISC.EMPTY_STRING,
+    };
+}
+
+const config: IConfig = {
+    providers: DEFAULT_PROVIDERS.reduce((acc, provider) => {
+        acc[provider] = generateDefaultPaths(provider);
+        return acc;
+    }, {} as Record<string, PathConfig>),
+    frontendDistPath: path.join(projectRoot, "..", "video-editor-frontend", "dist"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
 };
 
-function loadConfig(): IConfig {
-    let mergedConfig = { ...defaultConfig };
-
-    if (fs.existsSync(ROOT_CONFIG_PATH)) {
-        try {
-            const fileContent = fs.readFileSync(ROOT_CONFIG_PATH, constants.MISC.ENCODING_UTF8);
-            const userConfig = JSON.parse(fileContent);
-
-            mergedConfig = {
-                ...mergedConfig,
-                ...userConfig,
-                videoPaths: { ...mergedConfig.videoPaths, ...userConfig.videoPaths },
-            };
-        } catch (error) {
-            logger.error(`Error reading or parsing config file at ${ROOT_CONFIG_PATH}. Using defaults.`, { error });
-            mergedConfig = { ...defaultConfig };
+// Validate all paths for all providers
+Object.values(config.providers).forEach(paths => {
+    [paths.downloader, paths.edited, paths.converted, paths.trash].forEach((dir) => {
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
         }
-    } else {
-        logger.warn(`${constants.FILE_NAMES.CONFIG} not found at ${ROOT_CONFIG_PATH}. Using default configuration.`);
-    }
-
-    return mergedConfig;
-}
-
-const config = loadConfig();
-
-if (!config.frontendDistPath) {
-    logger.error(`FATAL ERROR: frontendDistPath must be set in ${constants.FILE_NAMES.CONFIG}.`);
-    process.exit(1);
-}
-
-const pathsToValidate = [config.videoPaths.downloader, config.videoPaths.edited, config.videoPaths.converted, config.videoPaths.trash, config.frontendDistPath];
-
-pathsToValidate.forEach((dir) => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-    try {
-        fs.accessSync(dir, fs.constants.R_OK);
-    } catch (err) {
-        logger.error(`The configured directory is not readable or does not exist: ${dir}`);
-        process.exit(1);
-    }
+        try {
+            fs.accessSync(dir, fs.constants.R_OK);
+        } catch (err) {
+            logger.error(`The configured directory is not readable or does not exist: ${dir}`);
+            process.exit(1);
+        }
+    });
 });
+
+if (!fs.existsSync(config.frontendDistPath)) {
+    // We create it to prevent crash, but if it's empty the UI won't load.
+    // In a dev environment this might be expected if build hasn't run.
+    fs.mkdirSync(config.frontendDistPath, { recursive: true });
+}
 
 if (!fs.existsSync(config.sharedStatePath)) {
     fs.mkdirSync(config.sharedStatePath, { recursive: true });
 }
 
-export const VIDEO_DOWNLOADER_PATH: string = config.videoPaths.downloader;
-export const VIDEO_EDITED_PATH: string = config.videoPaths.edited;
-export const VIDEO_CONVERTED_PATH: string = config.videoPaths.converted;
-export const VIDEO_TRASH_PATH: string = config.videoPaths.trash;
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, constants.FILE_NAMES.LIVE_STATUS);
-
-export const ALL_VIDEO_PATHS = [
-    { path: VIDEO_DOWNLOADER_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
-    { path: VIDEO_EDITED_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
-    { path: VIDEO_CONVERTED_PATH, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
-];
-
 export const PORT = constants.API.PORT;
+
+export function getProviderPaths(provider: string): PathConfig {
+    const paths = config.providers[provider];
+    if (!paths) {
+        throw new Error(`Unknown provider: ${provider}`);
+    }
+    return paths;
+}
+
+export function getAllProviders(): string[] {
+    return Object.keys(config.providers);
+}
+
+// Helper to get all possible paths for search operations
+export function getAllSearchPaths() {
+    return Object.values(config.providers).flatMap(paths => [
+        { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
+        { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
+        { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
+    ]);
+}

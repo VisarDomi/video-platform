@@ -3,13 +3,21 @@ import path from "path";
 import * as types from "../../core/types.js";
 import * as config from "../../core/config.js";
 import * as utils from "../../core/utils.js";
+import * as constants from "../../core/constants.js";
 
-export async function getAllVideos(): Promise<types.VideoItem[]> {
+export async function getAllVideos(provider: string = "tango"): Promise<types.VideoItem[]> {
     const liveFolders = await utils.getLiveFolders();
     const videos: types.VideoItem[] = [];
 
+    const paths = config.getProviderPaths(provider);
+    const providerPaths = [
+        { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
+        { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
+        { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
+    ];
+
     // Process all video directories in parallel
-    const dirPromises = config.ALL_VIDEO_PATHS.map(async (dirConfig) => {
+    const dirPromises = providerPaths.map(async (dirConfig) => {
         try {
             const entries = await fsPromises.readdir(dirConfig.path, { withFileTypes: true });
 
