@@ -5,8 +5,17 @@ import logger from "../../../common/logger.js";
 import { IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 
+interface Fc2Session {
+    ws: WebSocket;
+    channelId: string;
+    lastAccess: number;
+    heartbeatInterval: NodeJS.Timeout;
+}
+
 export class Fc2Client implements IStreamProvider {
     private msgId = 0;
+    private sessions: Map<string, Fc2Session> = new Map();
+    private cleanupInterval: NodeJS.Timeout;
 
     private readonly HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -19,6 +28,31 @@ export class Fc2Client implements IStreamProvider {
 
     constructor() {
         logger.info("[FC2] Client initialized.");
+        // Check for stale sessions every 30 seconds
+        this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
+    }
+
+    private _cleanupStaleSessions() {
+        const now = Date.now();
+        const TIMEOUT_MS = 60000; // 60 seconds without access = stale
+
+        for (const [channelId, session] of this.sessions.entries()) {
+            if (now - session.lastAccess > TIMEOUT_MS) {
+                logger.info(`[FC2] Session for ${channelId} timed out. Closing WebSocket.`);
+                this._closeSession(channelId);
+            }
+        }
+    }
+
+    private _closeSession(channelId: string) {
+        const session = this.sessions.get(channelId);
+        if (session) {
+            clearInterval(session.heartbeatInterval);
+            try {
+                session.ws.close();
+            } catch (e) { /* ignore */ }
+            this.sessions.delete(channelId);
+        }
     }
 
     private async _request(url: string, options: RequestInit = {}): Promise<Response> {
@@ -46,7 +80,6 @@ export class Fc2Client implements IStreamProvider {
 
             const json: any = await response.json();
 
-            // TRUNCATED LOG: Only show is_publish status to reduce bloat
             logger.debug(`[FC2] memberApi response for ${channelId}: is_publish=${json?.data?.channel_data?.is_publish}`);
 
             const isPublish = json?.data?.channel_data?.is_publish > 0;
@@ -60,7 +93,94 @@ export class Fc2Client implements IStreamProvider {
         }
     }
 
-    // ... [Rest of the class remains unchanged: getHlsUrl, _performWsHandshake, etc] ...
+    private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {
+        return new Promise((resolve) => {
+            // Close existing session if any
+            this._closeSession(channelId);
+
+            const ws = new WebSocket(wsUrl);
+            let isResolved = false;
+
+            const safeResolve = (val: string | null) => {
+                if (!isResolved) {
+                    isResolved = true;
+                    if (!val) {
+                        // If failed, close the socket
+                        try { ws.close(); } catch (e) {}
+                    }
+                    resolve(val);
+                }
+            };
+
+            const timeout = setTimeout(() => {
+                if (!isResolved) {
+                    logger.warn(`[FC2] WebSocket handshake timed out for ${channelId}`);
+                    safeResolve(null);
+                }
+            }, 15000);
+
+            ws.onopen = () => {
+                logger.debug(`[FC2] WebSocket connected for ${channelId}`);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data as string);
+                    if (msg.name === "connect_complete") {
+                        this.msgId++;
+                        ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
+                    } else if (msg.name === "_response_" && msg.id === this.msgId) {
+                        const lists = msg.arguments.playlists || msg.arguments.playlists_middle_latency || msg.arguments.playlists_high_latency;
+                        const url = lists?.[0]?.url || null;
+
+                        if (url) {
+                            logger.info(`[FC2] Resolved HLS URL for ${channelId}`);
+
+                            // Start Heartbeat
+                            const heartbeatInterval = setInterval(() => {
+                                try {
+                                    this.msgId++;
+                                    ws.send(JSON.stringify({ name: "heartbeat", arguments: {}, id: this.msgId }));
+                                } catch (e) {
+                                    logger.warn(`[FC2] Failed to send heartbeat for ${channelId}`);
+                                }
+                            }, 30000);
+
+                            // Store Session
+                            this.sessions.set(channelId, {
+                                ws,
+                                channelId,
+                                lastAccess: Date.now(),
+                                heartbeatInterval
+                            });
+
+                            clearTimeout(timeout);
+                            safeResolve(url);
+                        } else {
+                            logger.warn(`[FC2] No playlists found in WS response for ${channelId}`);
+                            clearTimeout(timeout);
+                            safeResolve(null);
+                        }
+                    }
+                } catch (err) {
+                    logger.error(`[FC2] WS Parse Error`, { err });
+                }
+            };
+
+            ws.onerror = (e) => {
+                logger.error(`[FC2] WebSocket error for ${channelId}`, { error: (e as any).message });
+                safeResolve(null);
+            };
+
+            ws.onclose = () => {
+                if (this.sessions.has(channelId)) {
+                    logger.info(`[FC2] WebSocket closed remotely for ${channelId}`);
+                    this._closeSession(channelId);
+                }
+                safeResolve(null);
+            };
+        });
+    }
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
         try {
@@ -95,66 +215,9 @@ export class Fc2Client implements IStreamProvider {
         }
     }
 
-    private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {
-        return new Promise((resolve) => {
-            const ws = new WebSocket(wsUrl);
-            let isResolved = false;
-
-            const safeResolve = (val: string | null) => {
-                if (!isResolved) {
-                    isResolved = true;
-                    resolve(val);
-                    ws.close();
-                }
-            };
-
-            const timeout = setTimeout(() => {
-                if (!isResolved) {
-                    logger.warn(`[FC2] WebSocket handshake timed out for ${channelId}`);
-                    safeResolve(null);
-                }
-            }, 15000);
-
-            ws.onopen = () => {
-                logger.debug(`[FC2] WebSocket connected for ${channelId}`);
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const msg = JSON.parse(event.data as string);
-                    if (msg.name === "connect_complete") {
-                        this.msgId++;
-                        ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
-                    } else if (msg.name === "_response_" && msg.id === this.msgId) {
-                        const lists = msg.arguments.playlists || msg.arguments.playlists_middle_latency || msg.arguments.playlists_high_latency;
-                        const url = lists?.[0]?.url || null;
-
-                        if (url) {
-                            logger.info(`[FC2] Resolved HLS URL for ${channelId}`);
-                        } else {
-                            logger.warn(`[FC2] No playlists found in WS response for ${channelId}`);
-                        }
-
-                        safeResolve(url);
-                        clearTimeout(timeout);
-                    }
-                } catch (err) {
-                    logger.error(`[FC2] WS Parse Error`, { err });
-                }
-            };
-
-            ws.onerror = (e) => {
-                logger.error(`[FC2] WebSocket error for ${channelId}`, { error: (e as any).message });
-                safeResolve(null);
-            };
-            ws.onclose = () => safeResolve(null);
-        });
-    }
-
-    // --- IStreamProvider Implementation ---
-
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
+            this._touchSession(masterListUrl);
             const response = await this._request(masterListUrl);
             if (!response.ok) return null;
             return await response.text();
@@ -166,17 +229,23 @@ export class Fc2Client implements IStreamProvider {
 
     public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
         try {
+            this._touchSession(liveUrl);
             const response = await this._request(liveUrl);
-            if (!response.ok) return { success: false, data: null };
+            if (!response.ok) {
+                logger.error(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`, { liveUrl });
+                return { success: false, data: null };
+            }
             const data = await response.text();
             return { success: true, data };
         } catch (error: any) {
+            logger.error(`[FC2] getLiveList exception`, { error: error.message, liveUrl });
             return { success: false, data: null };
         }
     }
 
     public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
         try {
+            this._touchSession(tsUrl);
             const response = await this._request(tsUrl);
             if (response.ok) {
                 const arr = await response.arrayBuffer();
@@ -185,6 +254,21 @@ export class Fc2Client implements IStreamProvider {
             logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
             return null;
         } catch (error) { return null; }
+    }
+
+    /**
+     * Extracts Channel ID from URL and updates lastAccess for the active session.
+     */
+    private _touchSession(url: string) {
+        // Expected format: /stream/53302993/
+        const match = url.match(/\/stream\/(\d+)\//);
+        if (match && match[1]) {
+            const channelId = match[1];
+            const session = this.sessions.get(channelId);
+            if (session) {
+                session.lastAccess = Date.now();
+            }
+        }
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
