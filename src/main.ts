@@ -6,6 +6,7 @@ import logger from "./core/logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
+import fc2Router from "./api/fc2.routes.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 declare module "express-serve-static-core" {
@@ -36,9 +37,15 @@ async function startServer() {
         process.exit(1);
     }
 
-    app.use(express.static(FRONTEND_DIST_PATH));
+    // Register routes
+    app.use("/", fc2Router); // fc2Router handles /fc2 and /api/fc2
     app.use("/api", videoApiRouter);
     app.use("/", hlsRouter);
+
+    // Serve static frontend
+    app.use(express.static(FRONTEND_DIST_PATH));
+
+    // Fallback to index.html for SPA routing
     app.get(/.*/, (_req: Request, res: Response) => {
         res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));
     });

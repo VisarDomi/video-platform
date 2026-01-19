@@ -18,6 +18,7 @@ interface IConfig {
     providers: Record<string, PathConfig>;
     frontendDistPath: string;
     sharedStatePath: string;
+    fc2FilePath: string;
 }
 
 const DEFAULT_PROVIDERS = ["tango", "fc2"];
@@ -65,6 +66,7 @@ const config: IConfig = {
     }, {} as Record<string, PathConfig>),
     frontendDistPath: path.join(projectRoot, "..", "video-editor-frontend", "dist"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
+    fc2FilePath: path.join(projectRoot, "..", "video-downloader", "fc2.txt"),
 };
 
 // Validate all paths for all providers
@@ -94,6 +96,7 @@ if (!fs.existsSync(config.sharedStatePath)) {
 
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, constants.FILE_NAMES.LIVE_STATUS);
+export const FC2_FILE_PATH: string = config.fc2FilePath;
 export const PORT = constants.API.PORT;
 
 export function getProviderPaths(provider: string): PathConfig {
