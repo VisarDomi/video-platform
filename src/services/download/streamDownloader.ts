@@ -8,6 +8,7 @@ import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { IStreamProvider } from "../core/interfaces.js";
+import { StreamQualityMonitor } from "./streamQualityMonitor.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -60,6 +61,22 @@ export class StreamDownloader {
         logger.info(`${segmentsDirPath} started downloading segments.`);
 
         const playlistManager = new PlaylistManager(segmentsDirPath);
+
+        // Initialize Quality Monitor
+        const qualityMonitor = new StreamQualityMonitor(
+            this.streamProvider,
+            this.downloadHandle.masterPlaylistUrl,
+            liveUrl,
+            async (newUrl) => {
+                logger.info(`[StreamDownloader] Switching quality for ${alias}`);
+                await playlistManager.insertDiscontinuity();
+                liveUrl = newUrl;
+                this.downloadHandle.update({ liveUrl });
+            },
+            10000 // Poll every 10 seconds
+        );
+        qualityMonitor.start();
+
         let lastDownload = Date.now();
 
         while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
@@ -67,8 +84,7 @@ export class StreamDownloader {
 
             if (liveResponse.success && liveResponse.data) {
 
-                // UNCOMMENTED DEBUG LOG
-                logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
+                // logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
 
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
@@ -91,7 +107,7 @@ export class StreamDownloader {
                             const isValid = await this.streamProvider.validateSegment(segmentPath);
 
                             if (!isValid) {
-                                logger.warn(`Downloaded segment is corrupt (validation failed). Deleting and skipping: ${segmentPath}`);
+                                // logger.warn(`Downloaded segment is corrupt (validation failed). Deleting and skipping: ${segmentPath}`);
                                 await fs.unlink(segmentPath).catch(() => {});
                                 playlistManager.addIgnoredSegment(segment.localName);
                                 lastDownload = Date.now();
@@ -110,6 +126,7 @@ export class StreamDownloader {
             await timersPromises.setTimeout(1000);
         }
 
+        qualityMonitor.stop();
         await playlistManager.finalizePlaylist();
 
         logger.info(`Finished download process for: ${segmentsDirPath}`);

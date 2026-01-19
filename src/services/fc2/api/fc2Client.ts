@@ -4,12 +4,14 @@ import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
+import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 
 interface Fc2Session {
     ws: WebSocket;
     channelId: string;
     lastAccess: number;
     heartbeatInterval: NodeJS.Timeout;
+    pendingRequests: Map<number, (data: any) => void>;
 }
 
 export class Fc2Client implements IStreamProvider {
@@ -100,6 +102,7 @@ export class Fc2Client implements IStreamProvider {
 
             const ws = new WebSocket(wsUrl);
             let isResolved = false;
+            const pendingRequests = new Map<number, (data: any) => void>();
 
             const safeResolve = (val: string | null) => {
                 if (!isResolved) {
@@ -126,40 +129,57 @@ export class Fc2Client implements IStreamProvider {
             ws.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data as string);
+
                     if (msg.name === "connect_complete") {
                         this.msgId++;
+                        // Store the ID for the initial handshake request so we can track it if needed,
+                        // though here we just rely on _response_ logic below for the handshake
                         ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
-                    } else if (msg.name === "_response_" && msg.id === this.msgId) {
-                        const lists = msg.arguments.playlists || msg.arguments.playlists_middle_latency || msg.arguments.playlists_high_latency;
-                        const url = lists?.[0]?.url || null;
+                    }
+                    else if (msg.name === "_response_") {
+                        const reqId = msg.id;
 
-                        if (url) {
-                            logger.info(`[FC2] Resolved HLS URL for ${channelId}`);
+                        // Check if this is a pending request for polling
+                        if (pendingRequests.has(reqId)) {
+                            const callback = pendingRequests.get(reqId);
+                            if (callback) callback(msg.arguments);
+                            pendingRequests.delete(reqId);
+                            return;
+                        }
 
-                            // Start Heartbeat
-                            const heartbeatInterval = setInterval(() => {
-                                try {
-                                    this.msgId++;
-                                    ws.send(JSON.stringify({ name: "heartbeat", arguments: {}, id: this.msgId }));
-                                } catch (e) {
-                                    logger.warn(`[FC2] Failed to send heartbeat for ${channelId}`);
-                                }
-                            }, 30000);
+                        // Handle Initial Handshake Response
+                        if (reqId === this.msgId && !isResolved) {
+                            const best = Fc2QualitySelector.selectBestPlaylist(msg.arguments);
 
-                            // Store Session
-                            this.sessions.set(channelId, {
-                                ws,
-                                channelId,
-                                lastAccess: Date.now(),
-                                heartbeatInterval
-                            });
+                            if (best) {
+                                logger.info(`[FC2] Resolved HLS URL for ${channelId}: ${best.url}`);
 
-                            clearTimeout(timeout);
-                            safeResolve(url);
-                        } else {
-                            logger.warn(`[FC2] No playlists found in WS response for ${channelId}`);
-                            clearTimeout(timeout);
-                            safeResolve(null);
+                                // Start Heartbeat
+                                const heartbeatInterval = setInterval(() => {
+                                    try {
+                                        this.msgId++;
+                                        ws.send(JSON.stringify({ name: "heartbeat", arguments: {}, id: this.msgId }));
+                                    } catch (e) {
+                                        logger.warn(`[FC2] Failed to send heartbeat for ${channelId}`);
+                                    }
+                                }, 30000);
+
+                                // Store Session
+                                this.sessions.set(channelId, {
+                                    ws,
+                                    channelId,
+                                    lastAccess: Date.now(),
+                                    heartbeatInterval,
+                                    pendingRequests
+                                });
+
+                                clearTimeout(timeout);
+                                safeResolve(best.url);
+                            } else {
+                                logger.warn(`[FC2] No suitable playlists found in WS response for ${channelId}`);
+                                clearTimeout(timeout);
+                                safeResolve(null);
+                            }
                         }
                     }
                 } catch (err) {
@@ -271,7 +291,66 @@ export class Fc2Client implements IStreamProvider {
         }
     }
 
+    private _extractChannelId(url: string): string | null {
+        // Handle https://live.fc2.com/123456/ (Discovery) or HLS URL structure
+        const match = url.match(/live\.fc2\.com\/(\d+)/) || url.match(/\/stream\/(\d+)\//);
+        return match ? match[1] : null;
+    }
+
+    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
+        // For FC2, masterUrl in our system is usually the channel/stream HLS Base,
+        // but we can extract channel ID from it or the currentLiveUrl.
+        const channelId = this._extractChannelId(masterUrl) || this._extractChannelId(currentLiveUrl);
+
+        if (!channelId) return null;
+
+        const session = this.sessions.get(channelId);
+        if (!session) return null; // No active WS session
+
+        session.lastAccess = Date.now();
+
+        return new Promise((resolve) => {
+            this.msgId++;
+            const reqId = this.msgId;
+
+            // Timeout for poll
+            const timeout = setTimeout(() => {
+                session.pendingRequests.delete(reqId);
+                resolve(null);
+            }, 5000);
+
+            session.pendingRequests.set(reqId, (args: any) => {
+                clearTimeout(timeout);
+                const best = Fc2QualitySelector.selectBestPlaylist(args);
+                if (best && best.url !== currentLiveUrl) {
+                    resolve(best.url);
+                } else {
+                    resolve(null);
+                }
+            });
+
+            try {
+                session.ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: reqId }));
+            } catch (e) {
+                session.pendingRequests.delete(reqId);
+                resolve(null);
+            }
+        });
+    }
+
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
+        // Logic handled in getHlsUrl (which performs the WS handshake and selection)
+        // If masterUrl comes in as a standard http URL, we might treat it normally,
+        // but for FC2 in this architecture, the 'masterUrl' passed to StreamDownloader
+        // was actually the result of `getHlsUrl` (which is the variant).
+        // However, if we are adhering to the interface strictly:
+
+        // If it looks like an FC2 HLS URL already, return it.
+        if (masterUrl.includes(".m3u8")) {
+            return masterUrl;
+        }
+
+        // Otherwise try to download as text
         const content = await this.getMasterList(masterUrl);
         if (!content) return null;
 

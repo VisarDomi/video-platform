@@ -116,6 +116,12 @@ export class PlaylistManager {
         await FileSystemManager.appendFile(this.fullPlaylistPath, entry);
     }
 
+    public async insertDiscontinuity(): Promise<void> {
+        const tag = "#EXT-X-DISCONTINUITY\n";
+        await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
+        logger.debug(`[PlaylistManager] Inserted discontinuity tag.`);
+    }
+
     public async finalizePlaylist(): Promise<void> {
         logger.info(`Finalizing playlist: ${this.fullPlaylistPath}`);
         const endTag = "#EXT-X-ENDLIST\n";

@@ -200,6 +200,11 @@ export class ApiClient implements IStreamProvider {
         return livePlaylistUrl;
     }
 
+    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
+        // Tango currently does not support dynamic quality switching in this downloader context
+        return null;
+    }
+
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
         if (segmentLine.startsWith("/")) {
             const urlObj = new URL(baseUrl);

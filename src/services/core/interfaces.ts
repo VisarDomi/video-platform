@@ -6,6 +6,12 @@ export interface IStreamProvider {
     parseMasterPlaylist(masterUrl: string): Promise<string | null>;
 
     /**
+     * Poll the provider to check if a better variant (quality) is available.
+     * Returns the new URL if different, or null if no change/not supported.
+     */
+    pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null>;
+
+    /**
      * Download the content of a playlist.
      */
     getMasterList(url: string): Promise<string | null>;
