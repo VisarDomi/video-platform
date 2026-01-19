@@ -44,7 +44,30 @@ export class TargetManager {
             for (const line of lines) {
                 const trimmed = line.trim();
                 if (trimmed && !trimmed.startsWith("#")) {
-                    newTargets.add(trimmed);
+                    // PARSING LOGIC:
+                    // Supports:
+                    // 12345678
+                    // https://live.fc2.com/12345678/
+                    // https://live.fc2.com/12345678
+
+                    let targetId: string | null = null;
+
+                    if (trimmed.includes("live.fc2.com")) {
+                        // Extract ID from URL structure
+                        const match = trimmed.match(/live\.fc2\.com\/(\d+)/);
+                        if (match) {
+                            targetId = match[1];
+                        }
+                    } else if (/^\d+$/.test(trimmed)) {
+                        // It's a raw numeric ID
+                        targetId = trimmed;
+                    }
+
+                    if (targetId) {
+                        newTargets.add(targetId);
+                    } else {
+                        logger.warn(`[FC2] Could not parse Channel ID from line: "${trimmed}"`);
+                    }
                 }
             }
 
