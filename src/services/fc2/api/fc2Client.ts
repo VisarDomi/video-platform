@@ -8,7 +8,6 @@ import { MediaValidator } from "../../../common/mediaValidator.js";
 export class Fc2Client implements IStreamProvider {
     private msgId = 0;
 
-    // Mimic the reference implementation headers
     private readonly HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://live.fc2.com/",
@@ -22,9 +21,6 @@ export class Fc2Client implements IStreamProvider {
         logger.info("[FC2] Client initialized.");
     }
 
-    /**
-     * Helper to make requests with consistent headers
-     */
     private async _request(url: string, options: RequestInit = {}): Promise<Response> {
         const headers = { ...this.HEADERS, ...(options.headers || {}) };
         return fetch(url, { ...options, headers });
@@ -49,8 +45,6 @@ export class Fc2Client implements IStreamProvider {
             }
 
             const json: any = await response.json();
-
-            // Log the raw response if debug is enabled, similar to reference code's trace
             logger.debug(`[FC2] memberApi response for ${channelId}:`, { data: json?.data?.channel_data });
 
             const isPublish = json?.data?.channel_data?.is_publish > 0;
@@ -99,8 +93,6 @@ export class Fc2Client implements IStreamProvider {
 
     private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {
         return new Promise((resolve) => {
-            // Note: Node's global WebSocket doesn't easily support headers in constructor without agents,
-            // but the handshake token usually authenticates enough.
             const ws = new WebSocket(wsUrl);
             let isResolved = false;
 
@@ -159,7 +151,6 @@ export class Fc2Client implements IStreamProvider {
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
-            // Use _request to ensure headers
             const response = await this._request(masterListUrl);
             if (!response.ok) return null;
             return await response.text();
@@ -182,7 +173,6 @@ export class Fc2Client implements IStreamProvider {
 
     public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
         try {
-            // CRITICAL: Use _request to include User-Agent for the CDN
             const response = await this._request(tsUrl);
             if (response.ok) {
                 const arr = await response.arrayBuffer();
@@ -194,6 +184,38 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
+        // Fetch the content to check if it is a Master Playlist
+        const content = await this.getMasterList(masterUrl);
+        if (!content) return null;
+
+        if (content.includes("#EXT-X-STREAM-INF")) {
+            logger.info(`[FC2] Detected Master Playlist. Parsing for best variant...`);
+            // Parse Master Playlist
+            const lines = content.split("\n");
+            let bestVariantUrl: string | null = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
+                    // The next line is the URL
+                    if (i + 1 < lines.length) {
+                        const variantLine = lines[i+1].trim();
+                        if (variantLine && !variantLine.startsWith("#")) {
+                            bestVariantUrl = this.getSegmentUrl(masterUrl, variantLine);
+                            break; // Just pick the first one (highest quality usually listed first in Adaptive)
+                        }
+                    }
+                }
+            }
+
+            if (bestVariantUrl) {
+                logger.info(`[FC2] Selected variant: ${bestVariantUrl}`);
+                return bestVariantUrl;
+            } else {
+                logger.warn(`[FC2] Failed to parse variant from Master Playlist. Using original URL.`);
+            }
+        }
+
+        // If not a master playlist, or failed to parse, assume it's a Media Playlist
         return masterUrl;
     }
 
