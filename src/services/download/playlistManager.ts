@@ -82,6 +82,9 @@ export class PlaylistManager {
             // USE THE RESOLVER CALLBACK
             const remoteTsUrl = urlResolver(line);
 
+            // Debug if we are seeing empty segments or issues
+            // logger.debug(`[PlaylistManager] Processing line: ${line} -> ${remoteTsUrl}`);
+
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 

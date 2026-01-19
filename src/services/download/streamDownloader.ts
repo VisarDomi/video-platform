@@ -69,6 +69,10 @@ export class StreamDownloader {
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
+
+                // DEBUG: Log the raw playlist content (first 500 chars)
+                // logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
+
                 // Use the provider-specific URL resolver
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
