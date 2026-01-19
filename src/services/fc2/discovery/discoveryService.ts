@@ -43,33 +43,34 @@ export class Fc2DiscoveryService {
         const channelId = targets[this.queueIndex];
         this.queueIndex++;
 
-        // Skip if already downloading
-        // Note: FC2 HLS URLs change, so we key by the channel ID for now if possible,
-        // but DownloadsManager uses URL as key. We will handle this mapping better
-        // when we have the real URL. for now, we just check if the ID is online.
-
         try {
             const isLive = await this.fc2Client.isOnline(channelId);
 
             if (isLive) {
-                // TODO: When isOnline is implemented, it should return the masterPlaylistUrl
-                // For now, this block is unreachable due to the mock returning false.
-                logger.info(`FC2 Channel ${channelId} is LIVE! (Mock logic hit)`);
+                // Fetch the Master Playlist URL
+                const masterUrl = await this.fc2Client.getHlsUrl(channelId);
 
-                /*
-                // Implementation Logic for next step:
-                const masterUrl = ...;
-                if (!this.downloadsManager.has(masterUrl)) {
-                     const handle = this.downloadsManager.add(masterUrl, {
-                        streamerId: channelId,
-                        alias: channelId // FC2 doesn't have aliases yet
-                     });
-                     if (handle) {
-                         const downloader = new StreamDownloader(handle, this.fc2Client);
-                         void downloader.start();
-                     }
+                if (masterUrl) {
+                    // Check if we are already downloading this URL
+                    if (!this.downloadsManager.has(masterUrl)) {
+                        logger.info(`FC2 Channel ${channelId} is LIVE. Starting download...`);
+
+                        const handle = this.downloadsManager.add(masterUrl, {
+                            streamerId: channelId,
+                            alias: channelId // FC2 doesn't have aliases in this implementation yet
+                        });
+
+                        if (handle) {
+                            // Inject the Fc2Client as the IStreamProvider
+                            const downloader = new StreamDownloader(handle, this.fc2Client);
+                            void downloader.start();
+                        }
+                    } else {
+                        // Already downloading, nothing to do
+                    }
+                } else {
+                    logger.warn(`FC2 Channel ${channelId} is online but failed to retrieve HLS URL.`);
                 }
-                */
             }
         } catch (error: any) {
             logger.error(`Error checking status for FC2 channel ${channelId}`, { error: error.message });
