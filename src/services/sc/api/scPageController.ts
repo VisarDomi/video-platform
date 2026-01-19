@@ -4,29 +4,37 @@ import logger from "../../../common/logger.js";
 export class ScPageController {
     private browser: Browser | null = null;
     private page: Page | null = null;
-    private channelName: string;
+    public readonly channelName: string;
 
     // State
-    private latestPlaylistUrl: string | null = null;
-    private latestPlaylistContent: string | null = null;
+    public targetDuration: number = 2; // Default from HAR
+    private segmentQueue: Buffer[] = [];
 
-    // Store segments: Url -> Buffer
-    // We use a simple map. In a long running stream, we rely on read-and-delete
-    // or a primitive cleanup to avoid OOM.
-    private segmentBuffer: Map<string, Buffer> = new Map();
-    private lastActivity: number = Date.now();
+    // Counter for unique segment names
+    private producedSegmentCount: number = 0;
+
+    // We expose a snapshot of currently available segments
+    // Each element is { id: number, buffer: Buffer }?
+    // No, we keep it simple. The queue holds buffers.
+    // We track the 'sequence' of the HEAD of the queue.
+    private headSequence: number = 0;
 
     constructor(channelName: string) {
         this.channelName = channelName;
     }
 
     public async start(): Promise<void> {
-        logger.info(`[SC] [${this.channelName}] Launching browser instance...`);
+        logger.info(`[SC] [${this.channelName}] Launching browser instance (Headful)...`);
 
         try {
             this.browser = await chromium.launch({
-                headless: true,
-                args: ["--no-sandbox", "--disable-setuid-sandbox", "--mute-audio"],
+                headless: false,
+                args: [
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--mute-audio",
+                    "--window-size=1280,720"
+                ],
             });
 
             const context = await this.browser.newContext({
@@ -39,45 +47,38 @@ export class ScPageController {
             // Setup Interception
             this.page.on("response", async (response) => {
                 const url = response.url();
-                const type = response.request().resourceType();
                 const status = response.status();
 
                 if (status !== 200) return;
 
-                // 1. Intercept Playlist (M3U8)
-                // Do not intercept master playlists (usually contain /master/), only variants
-                if ((url.includes(".m3u8") || response.headers()["content-type"] === "application/vnd.apple.mpegurl") && !url.includes("/master/")) {
+                // 1. Sniff Target Duration
+                if (url.includes(".m3u8") || response.headers()["content-type"] === "application/vnd.apple.mpegurl") {
                     try {
                         const content = await response.text();
-                        if (content.includes("#EXTINF")) {
-                            this.latestPlaylistUrl = url;
-                            this.latestPlaylistContent = content;
-                            this.lastActivity = Date.now();
-                            // logger.debug(`[SC] [${this.channelName}] Intercepted playlist.`);
+                        const match = content.match(/#EXT-X-TARGETDURATION:(\d+(\.\d+)?)/);
+                        if (match && match[1]) {
+                            this.targetDuration = parseFloat(match[1]);
                         }
-                    } catch (e) {
-                        // ignore
-                    }
+                    } catch (e) {}
                 }
 
-                // 2. Intercept Segments (MP4)
+                // 2. Intercept Segments
                 if (url.includes(".mp4") || response.headers()["content-type"] === "video/mp4") {
                     try {
-                        // Buffer the segment
                         const buffer = await response.body();
-                        this.segmentBuffer.set(url, buffer);
-                        this.lastActivity = Date.now();
+                        // Filter very small files (e.g. init segments < 1KB)
+                        if (buffer.length > 1000) {
+                            this.segmentQueue.push(buffer);
+                            this.producedSegmentCount++;
+                            logger.debug(`[SC] [${this.channelName}] Queued segment #${this.producedSegmentCount}. Queue size: ${this.segmentQueue.length}`);
 
-                        // Safety: Prune old segments if map gets too big (stuck consumer)
-                        if (this.segmentBuffer.size > 50) {
-                            const firstKey = this.segmentBuffer.keys().next().value;
-                            if (firstKey) this.segmentBuffer.delete(firstKey);
+                            // Safety limit
+                            if (this.segmentQueue.length > 50) {
+                                this.segmentQueue.shift();
+                                this.headSequence++; // We dropped one, so head moves
+                            }
                         }
-
-                        logger.debug(`[SC] [${this.channelName}] Intercepted segment: ${url.split('/').pop()}`);
-                    } catch (e) {
-                        // ignore
-                    }
+                    } catch (e) {}
                 }
             });
 
@@ -86,16 +87,12 @@ export class ScPageController {
 
             await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-            // Handle Age Gate
             try {
                 const enterBtn = this.page.locator('button:has-text("Enter")').first();
                 if (await enterBtn.isVisible({ timeout: 5000 })) {
-                    logger.info(`[SC] [${this.channelName}] Clicking Age Gate 'Enter'...`);
                     await enterBtn.click();
                 }
-            } catch (e) {
-                // Ignore, might not exist
-            }
+            } catch (e) {}
 
         } catch (error: any) {
             logger.error(`[SC] [${this.channelName}] Browser startup failed`, { error: error.message });
@@ -103,35 +100,44 @@ export class ScPageController {
         }
     }
 
-    public getLatestPlaylist(): { url: string, content: string } | null {
-        if (this.latestPlaylistUrl && this.latestPlaylistContent) {
-            return {
-                url: this.latestPlaylistUrl,
-                content: this.latestPlaylistContent
-            };
+    public getAvailableSegments(): number[] {
+        // Return ID/Sequence numbers for current queue items
+        const available: number[] = [];
+        for (let i = 0; i < this.segmentQueue.length; i++) {
+            available.push(this.headSequence + i);
+        }
+        return available;
+    }
+
+    public popSegment(sequenceId: number): Buffer | null {
+        // We only support popping the HEAD.
+        // If the requested ID is < headSequence, it's gone.
+        // If it's > headSequence, we are out of sync/it's not ready.
+        // Ideally, we just check if sequenceId matches headSequence.
+
+        if (sequenceId === this.headSequence) {
+            const buf = this.segmentQueue.shift();
+            if (buf) {
+                this.headSequence++;
+                return buf;
+            }
         }
         return null;
     }
 
-    public getSegment(url: string): Buffer | null {
-        // Precise match first
-        if (this.segmentBuffer.has(url)) {
-            const buf = this.segmentBuffer.get(url)!;
-            this.segmentBuffer.delete(url); // Delete on read to save memory
-            return buf;
-        }
-        return null;
+    // For "greedy" popping regardless of ID (fallback)
+    public popNext(): Buffer | null {
+        const buf = this.segmentQueue.shift();
+        if (buf) this.headSequence++;
+        return buf || null;
     }
 
     public async stop(): Promise<void> {
         if (this.browser) {
-            logger.info(`[SC] [${this.channelName}] Closing browser.`);
-            try {
-                await this.browser.close();
-            } catch (e) {}
+            try { await this.browser.close(); } catch (e) {}
             this.browser = null;
             this.page = null;
-            this.segmentBuffer.clear();
+            this.segmentQueue = [];
         }
     }
 
