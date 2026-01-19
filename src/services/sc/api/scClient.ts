@@ -1,33 +1,30 @@
 import * as path from "path";
-import * as fs from "fs/promises";
 import * as config from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
-import { ScBrowserService, ScSniffResult } from "./scBrowserService.js";
+import { ScPageController } from "./scPageController.js";
 
 export class ScClient implements IStreamProvider {
-    private browserService: ScBrowserService;
-    // Store headers per channel to use for segments
-    private sessionHeaders: Map<string, Record<string, string>> = new Map();
-
-    private readonly DEFAULT_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://stripchat.com/",
-        "Origin": "https://stripchat.com",
-    };
+    // Map channelId -> Controller
+    private controllers: Map<string, ScPageController> = new Map();
+    // Helper to map a playlist/segment URL back to a channel ID if needed
+    // (though currently we handle mapping via logic)
 
     constructor() {
-        this.browserService = ScBrowserService.getInstance();
-        logger.info("[SC] Client initialized.");
+        logger.info("[SC] Client initialized (Persistent Browser Mode).");
     }
 
     public async isOnline(channelId: string): Promise<boolean> {
-        // Quick API check first to avoid heavy browser launch if offline
+        // Keep the lightweight API check for Discovery
         try {
             const url = `https://stripchat.com/api/front/v2/models/username/${channelId}/cam`;
-            const response = await fetch(url, { headers: this.DEFAULT_HEADERS });
+            const response = await fetch(url, {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
+                }
+            });
             if (!response.ok) return false;
 
             const data = await response.json();
@@ -45,85 +42,115 @@ export class ScClient implements IStreamProvider {
     }
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
-        // Use Playwright to get the exact URL the player uses (with pkey, etc.)
-        const result = await this.browserService.sniffPlaylist(channelId);
-
-        if (result) {
-            this.sessionHeaders.set(channelId, result.headers);
-            return result.url;
-        }
-        return null;
-    }
-
-    // Helper to get headers for a request, falling back to default
-    private getHeaders(url: string): Record<string, string> {
-        // Attempt to match URL to a known session (this is imperfect if URLs change significantly)
-        // Ideally we pass context, but IStreamProvider interface doesn't support state well yet.
-        // We will return the most recently sniffed headers + defaults
-        // For now, let's mix in the defaults
-        return this.DEFAULT_HEADERS;
+        // We return the Channel ID (or Page URL) as the "Master URL".
+        // The Downloader will pass this back to parseMasterPlaylist.
+        return channelId;
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        // Since we sniffed the live URL directly (likely), just return it.
-        // The sniffer regex looks for .m3u8.
-        // If it's a master playlist, we might parse it.
+        // In this architecture, 'masterUrl' is the channelId we returned in getHlsUrl
+        const channelId = masterUrl;
 
-        // If the URL contains "master", it's a master playlist
-        if (masterUrl.includes("/master/")) {
-            const content = await this.getMasterList(masterUrl);
-            if (!content) return null;
+        let controller = this.controllers.get(channelId);
 
-            const lines = content.split("\n");
-            for (let i = 0; i < lines.length; i++) {
-                if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
-                    if (i + 1 < lines.length) {
-                        return this.getSegmentUrl(masterUrl, lines[i+1].trim());
-                    }
-                }
-            }
+        if (!controller || !controller.isActive()) {
+            controller = new ScPageController(channelId);
+            this.controllers.set(channelId, controller);
+            await controller.start();
         }
 
-        // It might already be a variant playlist
-        return masterUrl;
+        // Wait for the first playlist interception
+        // Poll for 30 seconds
+        for (let i = 0; i < 30; i++) {
+            const data = controller.getLatestPlaylist();
+            if (data) {
+                logger.info(`[SC] [${channelId}] Locked onto playlist: ${data.url}`);
+                return data.url;
+            }
+            await new Promise(r => setTimeout(r, 1000));
+        }
+
+        logger.warn(`[SC] [${channelId}] Timed out waiting for browser to intercept M3U8.`);
+        await controller.stop();
+        this.controllers.delete(channelId);
+        return null;
     }
 
     public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        // No polling implemented for SC yet
+        // Not used in this mode, logic handled internally by the browser
         return null;
     }
 
     public async getMasterList(url: string): Promise<string | null> {
-        try {
-            const res = await fetch(url, { headers: this.DEFAULT_HEADERS });
-            return res.ok ? await res.text() : null;
-        } catch { return null; }
+        // Not used
+        return null;
     }
 
     public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
-        try {
-            const response = await fetch(liveUrl, { headers: this.DEFAULT_HEADERS });
-            if (!response.ok) {
-                return { success: false, data: null };
+        // We need to find which controller owns this URL.
+        // Since we don't store the mapping explicitly in a global map,
+        // we iterate active controllers. There are usually very few (0-10).
+
+        for (const [channelId, controller] of this.controllers) {
+            const data = controller.getLatestPlaylist();
+            // We return the content regardless of URL match strictly,
+            // assuming the StreamDownloader is asking for the stream we are tracking.
+            // But to be safe, we check if the controller is active.
+            if (data) {
+                // If we want to be strict: if (data.url === liveUrl) ...
+                // But the liveUrl might change due to token rotation.
+                // We rely on the fact that StreamDownloader calls this for a specific handle.
+                // However, StreamDownloader doesn't pass the handle here, just the URL.
+
+                // Heuristic: If the liveUrl matches the one the controller has, OR
+                // if we just assume 1:1 mapping if the URL is part of the same domain.
+                // Let's iterate and see if the controller's latest URL matches.
+                if (data.url === liveUrl) {
+                    return { success: true, data: data.content };
+                }
             }
-            const data = await response.text();
-            return { success: true, data };
-        } catch (error: any) {
-            logger.error(`[SC] getLiveList error`, { error: error.message });
-            return { success: false, data: null };
         }
+
+        // Fallback: If URL changed, maybe we just return the latest from ANY controller
+        // that matches the domain? No, that's dangerous.
+
+        // Better Approach: getLiveList is called by StreamDownloader.
+        // StreamDownloader obtained 'liveUrl' from 'parseMasterPlaylist'.
+        // We returned the intercepted URL there.
+        // So the first call will match. Subsequent calls might not if the browser updates the URL.
+        // But StreamDownloader keeps using the old URL unless we tell it to switch.
+
+        // FIX: We iterate all controllers. If any controller has a playlist, we return it
+        // IF the url requested matches what we have OR if we can infer it.
+        // Actually, StreamDownloader updates its local 'liveUrl' if we use the QualityMonitor,
+        // but we aren't using that here.
+
+        // Simple logic: Scan for exact match.
+        for (const controller of this.controllers.values()) {
+            const data = controller.getLatestPlaylist();
+            if (data && data.url === liveUrl) {
+                return { success: true, data: data.content };
+            }
+        }
+
+        // If exact match fails (maybe token rotated), we might check if the base path matches?
+        // For now, return false. StreamDownloader will retry.
+        // If the browser rotated the URL, StreamDownloader is out of sync.
+        // This architecture usually requires StreamDownloader to be aware of the new URL.
+        // BUT, since we just need the CONTENT, and the content contains the segments...
+
+        // HACK: Since we can't easily identify which channel 'liveUrl' belongs to if it doesn't match,
+        // we might fail here. However, SC tokens are usually sticky for the session.
+        return { success: false, data: null };
     }
 
     public async getTsSegment(url: string): Promise<Buffer | null> {
-        try {
-            const response = await fetch(url, { headers: this.DEFAULT_HEADERS });
-            if (response.ok) {
-                const arr = await response.arrayBuffer();
-                return Buffer.from(arr);
-            }
-            logger.warn(`[SC] Segment fetch failed: ${response.status} ${url}`);
-            return null;
-        } catch (error) { return null; }
+        // Check all controllers for this segment
+        for (const controller of this.controllers.values()) {
+            const buffer = controller.getSegment(url);
+            if (buffer) return buffer;
+        }
+        return null;
     }
 
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
@@ -157,13 +184,11 @@ export class ScClient implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<boolean> {
+        // If Playwright intercepted it, it's likely valid.
+        // We perform a basic check.
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return false;
-
-        // Relaxed validation: SC often has very short segments or weird headers
-        if (isNaN(info.bitRate) && info.duration > 0) return true;
-        if (info.bitRate > 0) return true;
-
+        if (info.duration > 0) return true;
         return false;
     }
 }
