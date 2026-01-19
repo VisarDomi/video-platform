@@ -5,7 +5,7 @@ export class Fc2Client implements IStreamProvider {
     private msgId = 0;
 
     constructor() {
-        logger.info("Fc2Client initialized.");
+        logger.info("[FC2] Client initialized.");
     }
 
     public async isOnline(channelId: string): Promise<boolean> {
@@ -28,7 +28,7 @@ export class Fc2Client implements IStreamProvider {
             });
 
             if (!response.ok) {
-                logger.warn(`FC2 memberApi returned ${response.status} for ${channelId}`);
+                logger.warn(`[FC2] memberApi returned ${response.status} for ${channelId}`);
                 return false;
             }
 
@@ -36,7 +36,7 @@ export class Fc2Client implements IStreamProvider {
             // channel_data.is_publish > 0 means online
             return json?.data?.channel_data?.is_publish > 0;
         } catch (error: any) {
-            logger.error(`Error checking isOnline for ${channelId}`, { error: error.message });
+            logger.error(`[FC2] Error checking isOnline for ${channelId}`, { error: error.message });
             return false;
         }
     }
@@ -63,7 +63,7 @@ export class Fc2Client implements IStreamProvider {
             });
 
             if (!ctrlRes.ok) {
-                logger.error(`Failed to get FC2 control server for ${channelId}`);
+                logger.error(`[FC2] Failed to get FC2 control server for ${channelId}`);
                 return null;
             }
 
@@ -72,7 +72,7 @@ export class Fc2Client implements IStreamProvider {
             const controlToken = ctrlData.control_token;
 
             if (!wsBaseUrl || !controlToken) {
-                logger.error(`Invalid control server response for ${channelId}`);
+                logger.error(`[FC2] Invalid control server response for ${channelId}`);
                 return null;
             }
 
@@ -81,7 +81,7 @@ export class Fc2Client implements IStreamProvider {
             return await this._performWsHandshake(wsUrl, channelId);
 
         } catch (error: any) {
-            logger.error(`Error fetching HLS URL for ${channelId}`, { error: error.message });
+            logger.error(`[FC2] Error fetching HLS URL for ${channelId}`, { error: error.message });
             return null;
         }
     }
@@ -102,7 +102,7 @@ export class Fc2Client implements IStreamProvider {
             // Timeout after 15 seconds
             const timeout = setTimeout(() => {
                 if (!isResolved) {
-                    logger.warn(`FC2 WebSocket handshake timed out for ${channelId}`);
+                    logger.warn(`[FC2] WebSocket handshake timed out for ${channelId}`);
                     safeResolve(null);
                 }
             }, 15000);
@@ -141,12 +141,12 @@ export class Fc2Client implements IStreamProvider {
                         safeResolve(playlistUrl);
                     }
                 } catch (err) {
-                    logger.error("Error parsing FC2 WS message", { err });
+                    logger.error("[FC2] Error parsing WS message", { err });
                 }
             };
 
             ws.onerror = (err) => {
-                logger.error(`FC2 WebSocket error for ${channelId}`, { err });
+                logger.error(`[FC2] WebSocket error for ${channelId}`, { err });
                 clearTimeout(timeout);
                 safeResolve(null);
             };
@@ -169,7 +169,7 @@ export class Fc2Client implements IStreamProvider {
             if (!response.ok) return null;
             return await response.text();
         } catch (error: any) {
-            logger.error(`FC2 getMasterList failed for ${masterListUrl}`, { error: error.message });
+            logger.error(`[FC2] getMasterList failed for ${masterListUrl}`, { error: error.message });
             return null;
         }
     }
@@ -181,7 +181,7 @@ export class Fc2Client implements IStreamProvider {
             const data = await response.text();
             return { success: true, data };
         } catch (error: any) {
-            logger.warn(`FC2 getLiveList failed: ${error.message}`);
+            logger.warn(`[FC2] getLiveList failed: ${error.message}`);
             return { success: false, data: null };
         }
     }
@@ -193,11 +193,11 @@ export class Fc2Client implements IStreamProvider {
                 const arr = await response.arrayBuffer();
                 return Buffer.from(arr);
             }
-            logger.warn(`FC2 getTsSegment status ${response.status}`);
+            logger.warn(`[FC2] getTsSegment status ${response.status}`);
             return null;
         } catch (error: any) {
             if (error?.message !== "terminated") {
-                logger.warn(`FC2 getTsSegment network error: ${error.message}`);
+                logger.warn(`[FC2] getTsSegment network error: ${error.message}`);
             }
             return null;
         }

@@ -15,7 +15,7 @@ export class Fc2DiscoveryService {
         this.targetManager = targetManager;
         this.fc2Client = fc2Client;
         this.downloadsManager = downloadsManager;
-        logger.info("Fc2DiscoveryService initialized.");
+        logger.info("[FC2] DiscoveryService initialized.");
     }
 
     public start(): void {
@@ -53,7 +53,7 @@ export class Fc2DiscoveryService {
                 if (masterUrl) {
                     // Check if we are already downloading this URL
                     if (!this.downloadsManager.has(masterUrl)) {
-                        logger.info(`FC2 Channel ${channelId} is LIVE. Starting download...`);
+                        logger.info(`[FC2] Channel ${channelId} is LIVE. Starting download...`);
 
                         const handle = this.downloadsManager.add(masterUrl, {
                             streamerId: channelId,
@@ -69,11 +69,11 @@ export class Fc2DiscoveryService {
                         // Already downloading, nothing to do
                     }
                 } else {
-                    logger.warn(`FC2 Channel ${channelId} is online but failed to retrieve HLS URL.`);
+                    logger.warn(`[FC2] Channel ${channelId} is online but failed to retrieve HLS URL.`);
                 }
             }
         } catch (error: any) {
-            logger.error(`Error checking status for FC2 channel ${channelId}`, { error: error.message });
+            logger.error(`[FC2] Error checking status for channel ${channelId}`, { error: error.message });
         }
     }
 }

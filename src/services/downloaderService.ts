@@ -39,7 +39,7 @@ export class DownloaderService {
         this.streamDiscoveryService = streamDiscoveryService;
         this.fc2DiscoveryService = fc2DiscoveryService;
         this.orphanStreamFinalizer = orphanStreamFinalizer;
-        logger.info("DownloaderService initialized as a composition root.");
+        logger.info("[General] DownloaderService initialized as a composition root.");
     }
 
     public static async create(): Promise<DownloaderService> {
@@ -71,7 +71,7 @@ export class DownloaderService {
     }
 
     public async start() {
-        logger.info("Starting all services...");
+        logger.info("[General] Starting all services...");
 
         this.orphanStreamFinalizer.start();
         DiskSpaceMonitor.run();

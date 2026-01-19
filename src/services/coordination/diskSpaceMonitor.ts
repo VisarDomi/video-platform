@@ -17,7 +17,7 @@ export class DiskSpaceMonitor {
     }
 
     private async start(): Promise<void> {
-        logger.info("DiskSpaceMonitor started.");
+        logger.info("[System] DiskSpaceMonitor started.");
 
         while (true) {
             try {
@@ -35,11 +35,11 @@ export class DiskSpaceMonitor {
                     // Create empty file
                     await fs.writeFile(markerPath, "");
 
-                    logger.error(`Disk space limit reached (<50GB). Marker created at ${markerPath}. Exiting immediately.`);
+                    logger.error(`[System] Disk space limit reached (<50GB). Marker created at ${markerPath}. Exiting immediately.`);
                     process.exit(1);
                 }
             } catch (error: any) {
-                logger.error("Error checking disk space:", { error: error.message });
+                logger.error("[System] Error checking disk space:", { error: error.message });
             }
 
             // Check every minute

@@ -16,7 +16,7 @@ export class TokenManager {
     private tokens: Tokens | null = null;
 
     private constructor() {
-        logger.info("TokenManager initialized.");
+        logger.info("[Tango] TokenManager initialized.");
     }
 
     public static async create(): Promise<TokenManager> {
@@ -44,7 +44,7 @@ export class TokenManager {
 
         if (!session) {
             if (this.tokens) {
-                logger.warn("Tokens became invalid: session.json not found or is invalid.");
+                logger.warn("[Tango] Tokens became invalid: session.json not found or is invalid.");
             }
             this.tokens = null;
             return false;
@@ -59,7 +59,7 @@ export class TokenManager {
             };
             return true;
         } else {
-            logger.warn("Token load failed: session.json is missing required tokens.");
+            logger.warn("[Tango] Token load failed: session.json is missing required tokens.");
             this.tokens = null;
             return false;
         }
@@ -67,7 +67,7 @@ export class TokenManager {
 
     public async getTokens(): Promise<Tokens> {
         while (!this.tokens) {
-            logger.warn("Tokens not available. Waiting for session.json to be populated...");
+            logger.warn("[Tango] Tokens not available. Waiting for session.json to be populated...");
             const loaded = await this._loadTokens();
             if (!loaded) {
                 await timersPromises.setTimeout(5000); // wait 5s before retrying

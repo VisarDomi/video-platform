@@ -9,28 +9,28 @@ export class AliasSyncService {
     constructor(apiClient: ApiClient, aliasManager: AliasManager) {
         this.apiClient = apiClient;
         this.aliasManager = aliasManager;
-        logger.info("AliasSyncService initialized.");
+        logger.info("[Tango] AliasSyncService initialized.");
     }
 
     public start(): void {
         const performSync = async () => {
-            logger.info("Performing hourly alias cache update...");
+            logger.info("[Tango] Performing hourly alias cache update...");
 
             const followingsResponse = await this.apiClient.getAllFollowing();
             if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
-                logger.warn("Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
+                logger.warn("[Tango] Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
                 return;
             }
             const followers = followingsResponse.followers;
-            logger.info(`Step 1/2 SUCCESS: Fetched ${followers.length} followed accounts from 'allfollow' endpoint.`);
+            logger.info(`[Tango] Step 1/2 SUCCESS: Fetched ${followers.length} followed accounts from 'allfollow' endpoint.`);
             const streamerIds = followers.map((f: any) => f.accountId);
 
             const batchResponse = await this.apiClient.getAliasesInBatch(streamerIds);
             if (!batchResponse) {
-                logger.error("Alias update failed: The POST request to the 'batch' endpoint returned no data.");
+                logger.error("[Tango] Alias update failed: The POST request to the 'batch' endpoint returned no data.");
                 return;
             }
-            logger.info(`Step 2/2 SUCCESS: Received response from 'batch' endpoint.`);
+            logger.info(`[Tango] Step 2/2 SUCCESS: Received response from 'batch' endpoint.`);
 
             const aliasMap: { [key: string]: string } = {};
             for (const streamerId in batchResponse) {
@@ -42,9 +42,9 @@ export class AliasSyncService {
 
             if (Object.keys(aliasMap).length > 0) {
                 this.aliasManager.batchSet(aliasMap);
-                logger.info(`Alias cache updated with ${Object.keys(aliasMap).length} entries (out of ${streamerIds.length} IDs sent).`);
+                logger.info(`[Tango] Alias cache updated with ${Object.keys(aliasMap).length} entries (out of ${streamerIds.length} IDs sent).`);
             } else {
-                logger.warn("Could not extract any valid aliases from the batch response. Cache not updated.");
+                logger.warn("[Tango] Could not extract any valid aliases from the batch response. Cache not updated.");
             }
         };
 

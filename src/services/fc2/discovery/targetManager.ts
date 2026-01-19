@@ -15,7 +15,7 @@ export class TargetManager {
     private constructor() {
         const projectRoot = utils.findProjectRoot(__dirname);
         this.targetsFilePath = path.join(projectRoot, "fc2.txt");
-        logger.info(`Fc2 TargetManager initialized. Watching: ${this.targetsFilePath}`);
+        logger.info(`[FC2] TargetManager initialized. Watching: ${this.targetsFilePath}`);
     }
 
     public static create(): TargetManager {
@@ -31,7 +31,7 @@ export class TargetManager {
 
     private loadTargets(): void {
         if (!fs.existsSync(this.targetsFilePath)) {
-            logger.warn(`fc2.txt not found at ${this.targetsFilePath}. Creating empty file.`);
+            logger.warn(`[FC2] fc2.txt not found at ${this.targetsFilePath}. Creating empty file.`);
             fs.writeFileSync(this.targetsFilePath, "# Add FC2 Channel IDs here, one per line\n");
             return;
         }
@@ -49,9 +49,9 @@ export class TargetManager {
             }
 
             this.targets = newTargets;
-            logger.info(`Loaded ${this.targets.size} FC2 targets.`);
+            logger.info(`[FC2] Loaded ${this.targets.size} targets.`);
         } catch (error: any) {
-            logger.error("Error reading fc2.txt", { error: error.message });
+            logger.error("[FC2] Error reading fc2.txt", { error: error.message });
         }
     }
 
@@ -60,7 +60,7 @@ export class TargetManager {
             if (eventType === "change") {
                 if (this.debounceTimer) clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(() => {
-                    logger.info("fc2.txt changed. Reloading targets...");
+                    logger.info("[FC2] fc2.txt changed. Reloading targets...");
                     this.loadTargets();
                     this.debounceTimer = null;
                 }, 500);

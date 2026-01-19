@@ -8,7 +8,7 @@ export class ApiClient implements IStreamProvider {
 
     public constructor(tokenManager: TokenManager) {
         this.tokenManager = tokenManager;
-        logger.info("ApiClient initialized.");
+        logger.info("[Tango] ApiClient initialized.");
     }
 
     private _getApiHeaders(tokens: Tokens): HeadersInit {
@@ -45,7 +45,7 @@ export class ApiClient implements IStreamProvider {
 
             const response = await fetch(url, options);
             if (!response.ok) {
-                logger.error(`API request to ${url} failed`, {
+                logger.error(`[Tango] API request to ${url} failed`, {
                     status: response.status,
                     statusText: response.statusText,
                 });
@@ -60,7 +60,7 @@ export class ApiClient implements IStreamProvider {
                     return (await response.arrayBuffer()) as T;
             }
         } catch (error) {
-            logger.error(`API request to ${url} failed with network/parsing error.`, { errorMessage: (error as Error).message });
+            logger.error(`[Tango] API request to ${url} failed with network/parsing error.`, { errorMessage: (error as Error).message });
             return null;
         }
     }
@@ -76,7 +76,7 @@ export class ApiClient implements IStreamProvider {
                 "json"
             );
         } catch (error) {
-            logger.error(`Unexpected error in getFollowingResponseBody`, { error: (error as Error).message });
+            logger.error(`[Tango] Unexpected error in getFollowingResponseBody`, { error: (error as Error).message });
             return null;
         }
     }
@@ -88,7 +88,7 @@ export class ApiClient implements IStreamProvider {
             const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
             return this._makeApiRequest<any>(url, "GET", headers, "json");
         } catch (error) {
-            logger.error(`Unexpected error in getAllFollowing`, { error: (error as Error).message });
+            logger.error(`[Tango] Unexpected error in getAllFollowing`, { error: (error as Error).message });
             return null;
         }
     }
@@ -100,7 +100,7 @@ export class ApiClient implements IStreamProvider {
             const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
             return this._makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
         } catch (error) {
-            logger.error(`Unexpected error in getAliasesInBatch`, { error: (error as Error).message });
+            logger.error(`[Tango] Unexpected error in getAliasesInBatch`, { error: (error as Error).message });
             return null;
         }
     }
@@ -116,7 +116,7 @@ export class ApiClient implements IStreamProvider {
             }
             return streamerId;
         } catch (error) {
-            logger.error(`Unexpected error in getStreamerAlias for ${streamerId}`, { error: (error as Error).message });
+            logger.error(`[Tango] Unexpected error in getStreamerAlias for ${streamerId}`, { error: (error as Error).message });
             return streamerId;
         }
     }
@@ -129,7 +129,7 @@ export class ApiClient implements IStreamProvider {
             const headers = this._getStreamHeaders(tokens);
             return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
         } catch (error) {
-            logger.error(`Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
+            logger.error(`[Tango] Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
             return null;
         }
     }
@@ -147,7 +147,7 @@ export class ApiClient implements IStreamProvider {
             const data = await response.text();
             return { success: true, data };
         } catch (error) {
-            logger.warn(`API request to ${liveUrl} failed with network/parsing error.`, { error: (error as Error).message });
+            logger.warn(`[Tango] API request to ${liveUrl} failed with network/parsing error.`, { error: (error as Error).message });
             return { success: false, data: null };
         }
     }
@@ -159,11 +159,11 @@ export class ApiClient implements IStreamProvider {
                 const tsBuffer = await tsResponse.arrayBuffer();
                 return Buffer.from(tsBuffer);
             } else {
-                logger.warn(`Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
+                logger.warn(`[Tango] Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
             }
         } catch (error: any) {
             if (error?.message !== "terminated") {
-                logger.warn(`Network error downloading TS segment: ${error.message}`, { tsUrl });
+                logger.warn(`[Tango] Network error downloading TS segment: ${error.message}`, { tsUrl });
             }
         }
         return null;

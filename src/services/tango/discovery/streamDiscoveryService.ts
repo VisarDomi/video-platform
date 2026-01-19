@@ -16,7 +16,7 @@ export class StreamDiscoveryService {
         this.apiClient = apiClient;
         this.aliasManager = aliasManager;
         this.downloadsManager = downloadsManager;
-        logger.info("StreamDiscoveryService initialized.");
+        logger.info("[Tango] StreamDiscoveryService initialized.");
     }
 
     public async start(): Promise<void> {
@@ -27,7 +27,7 @@ export class StreamDiscoveryService {
 
             const currentTotal = this.downloadsManager.size;
             if (currentTotal !== lastKnownTotal) {
-                logger.info(`Watching for streams... Total active/pending: ${currentTotal}`);
+                logger.info(`[Tango] Watching for streams... Total active/pending: ${currentTotal}`);
                 lastKnownTotal = currentTotal;
             }
 
@@ -40,11 +40,11 @@ export class StreamDiscoveryService {
 
                     if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
                         if (!this.downloadsManager.has(masterPlaylistUrl)) {
-                            logger.info(`Discovered new stream from ${streamerId}.`);
+                            logger.info(`[Tango] Discovered new stream from ${streamerId}.`);
 
                             let alias = this.aliasManager.get(streamerId);
                             if (!alias) {
-                                logger.info(`Alias for ${streamerId} not in cache. Fetching from API...`);
+                                logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
                                 alias = await this.apiClient.getStreamerAlias(streamerId);
                                 if (alias && alias !== streamerId) {
                                     this.aliasManager.set(streamerId, alias);
@@ -57,7 +57,7 @@ export class StreamDiscoveryService {
                             });
 
                             if (downloadHandle) {
-                                logger.info(`Initiating download for ${alias || streamerId}...`);
+                                logger.info(`[Tango] Initiating download for ${alias || streamerId}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
                                 void streamDownloader.start();
                             }
@@ -65,7 +65,7 @@ export class StreamDiscoveryService {
                     }
                 }
             } else {
-                logger.verbose("Poll complete: No new streams found or unable to fetch.");
+                logger.verbose("[Tango] Poll complete: No new streams found or unable to fetch.");
             }
             await timersPromises.setTimeout(config.getConfig().intervals.pollFollowing);
         }

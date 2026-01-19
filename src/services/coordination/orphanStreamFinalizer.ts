@@ -23,7 +23,7 @@ export class OrphanStreamFinalizer {
     }
 
     private async processOrphans(): Promise<void> {
-        logger.info("Starting orphan stream finalizer check...");
+        logger.info("[System] Starting orphan stream finalizer check...");
         const cfg = config.getConfig();
         const streamsLocation = path.join(cfg.storagePath, "tango", "downloader");
 
@@ -33,7 +33,7 @@ export class OrphanStreamFinalizer {
             try {
                 await fs.access(streamsLocation);
             } catch {
-                logger.info(`Stream location ${streamsLocation} does not exist. Skipping orphan stream check.`);
+                logger.info(`[System] Stream location ${streamsLocation} does not exist. Skipping orphan stream check.`);
                 return;
             }
 
@@ -70,7 +70,7 @@ export class OrphanStreamFinalizer {
 
                         // DELETE EMPTY FOLDERS
                         if (tsFiles.length === 0) {
-                            logger.info(`Orphan folder ${dirent.name} contains no segments. Deleting folder.`);
+                            logger.info(`[System] Orphan folder ${dirent.name} contains no segments. Deleting folder.`);
                             await fs.rm(streamPath, { recursive: true, force: true });
                             deletedEmptyFolders++;
                             continue;
@@ -118,7 +118,7 @@ export class OrphanStreamFinalizer {
                                             // File missing from disk, discard buffer
                                             hasChanges = true;
                                             metadataBuffer.length = 0;
-                                            logger.info(`Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
+                                            logger.info(`[System] Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
                                         }
                                     }
                                 }
@@ -137,15 +137,15 @@ export class OrphanStreamFinalizer {
                             }
                         }
                     } catch (err: any) {
-                        logger.error(`Error processing orphan ${dirent.name}`, { error: err.message });
+                        logger.error(`[System] Error processing orphan ${dirent.name}`, { error: err.message });
                     }
                 }
             }
             logger.info(
-                `Orphan stream finalizer check complete. Scanned ${processedCount} orphans. Deleted ${deletedEmptyFolders} empty folders. Fixed/Synced ${fixedPlaylists} playlists.`
+                `[System] Orphan stream finalizer check complete. Scanned ${processedCount} orphans. Deleted ${deletedEmptyFolders} empty folders. Fixed/Synced ${fixedPlaylists} playlists.`
             );
         } catch (error: any) {
-            logger.error("Error during orphan stream finalization check:", { errorMessage: error.message });
+            logger.error("[System] Error during orphan stream finalization check:", { errorMessage: error.message });
         }
     }
 }
