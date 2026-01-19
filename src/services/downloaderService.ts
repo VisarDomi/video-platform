@@ -12,11 +12,18 @@ export class DownloaderService {
     private tokenManager: TokenManager;
     private aliasSyncService: AliasSyncService;
     private streamDiscoveryService: StreamDiscoveryService;
+    private orphanStreamFinalizer: OrphanStreamFinalizer;
 
-    private constructor(tokenManager: TokenManager, aliasSyncService: AliasSyncService, streamDiscoveryService: StreamDiscoveryService) {
+    private constructor(
+        tokenManager: TokenManager,
+        aliasSyncService: AliasSyncService,
+        streamDiscoveryService: StreamDiscoveryService,
+        orphanStreamFinalizer: OrphanStreamFinalizer
+    ) {
         this.tokenManager = tokenManager;
         this.aliasSyncService = aliasSyncService;
         this.streamDiscoveryService = streamDiscoveryService;
+        this.orphanStreamFinalizer = orphanStreamFinalizer;
         logger.info("DownloaderService initialized as a composition root.");
     }
 
@@ -28,14 +35,15 @@ export class DownloaderService {
         const apiClient = new ApiClient(tokenManager);
         const aliasSyncService = new AliasSyncService(apiClient, aliasManager);
         const streamDiscoveryService = new StreamDiscoveryService(apiClient, aliasManager, downloadsManager);
+        const orphanStreamFinalizer = new OrphanStreamFinalizer(downloadsManager);
 
-        return new DownloaderService(tokenManager, aliasSyncService, streamDiscoveryService);
+        return new DownloaderService(tokenManager, aliasSyncService, streamDiscoveryService, orphanStreamFinalizer);
     }
 
     public async start() {
         logger.info("Starting all services...");
 
-        OrphanStreamFinalizer.run();
+        this.orphanStreamFinalizer.start();
         DiskSpaceMonitor.run();
 
         this.tokenManager.startTokenWatcher();

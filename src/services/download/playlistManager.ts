@@ -11,10 +11,15 @@ export interface SegmentInfo {
 export class PlaylistManager {
     private readonly segmentsDirPath: string;
     private readonly fullPlaylistPath: string;
+    private ignoredSegments: Set<string> = new Set();
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;
         this.fullPlaylistPath = path.join(this.segmentsDirPath, "playlist.m3u8");
+    }
+
+    public addIgnoredSegment(segmentName: string): void {
+        this.ignoredSegments.add(segmentName);
     }
 
     private async getExistingLocalSegments(): Promise<Set<string>> {
@@ -75,7 +80,7 @@ export class PlaylistManager {
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
-            if (!existingSegments.has(localName)) {
+            if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName)) {
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();

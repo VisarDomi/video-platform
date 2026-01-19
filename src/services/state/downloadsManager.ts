@@ -98,6 +98,16 @@ export class DownloadsManager {
         return this.downloads.size;
     }
 
+    public getActiveSegmentPaths(): Set<string> {
+        const paths = new Set<string>();
+        for (const download of this.downloads.values()) {
+            if (download.segmentsDirPath) {
+                paths.add(download.segmentsDirPath);
+            }
+        }
+        return paths;
+    }
+
     private _requestStatusFileUpdate(): void {
         if (this._updateFileDebounceTimer) {
             clearTimeout(this._updateFileDebounceTimer);

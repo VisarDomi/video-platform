@@ -91,6 +91,7 @@ export class StreamDownloader {
                             if (isBad) {
                                 logger.warn(`Downloaded segment is corrupt (0kb/s or bad duration). Deleting and skipping: ${segmentPath}`);
                                 await fs.unlink(segmentPath).catch(() => {});
+                                playlistManager.addIgnoredSegment(segment.localName);
                                 // Keep lastDownload fresh so we don't abort stream due to bad segments
                                 lastDownload = Date.now();
                             } else {
