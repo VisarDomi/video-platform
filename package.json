@@ -1,15 +1,15 @@
 {
-    "name": "video-segment-fetcher",
+    "name": "video-downloader",
     "type": "module",
     "version": "1.0.0",
     "description": "Download 1s .ts files for each of the streamers you follow",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name video-segment-fetcher",
-        "restart": "npm run build && pm2 restart video-segment-fetcher",
-        "stop": "pm2 stop video-segment-fetcher",
-        "logs": "pm2 logs video-segment-fetcher -f"
+        "start": "npm run build && pm2 start dist/main.js --name video-downloader",
+        "restart": "npm run build && pm2 restart video-downloader",
+        "stop": "pm2 stop video-downloader",
+        "logs": "pm2 logs video-downloader -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",

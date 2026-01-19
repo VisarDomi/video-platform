@@ -5,19 +5,19 @@ import * as fs from "fs/promises";
 import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
 import { DownloadPathManager } from "./tango/downloadPathManager.js";
-import { ApiClient } from "../api/apiClient.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { MediaValidator } from "../../common/mediaValidator.js";
+import { IStreamProvider } from "../core/interfaces.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
-    private apiClient: ApiClient;
+    private streamProvider: IStreamProvider;
 
-    constructor(downloadHandle: DownloadHandle, apiClient: ApiClient) {
+    constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
         this.downloadHandle = downloadHandle;
-        this.apiClient = apiClient;
+        this.streamProvider = streamProvider;
     }
 
     public async start() {
@@ -66,7 +66,7 @@ export class StreamDownloader {
         let lastDownload = Date.now();
 
         while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
-            const liveResponse = await this.apiClient.getLiveList(liveUrl);
+            const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
                 const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
@@ -74,7 +74,7 @@ export class StreamDownloader {
 
                 if (segmentsToProcess.length > 0) {
                     for (const segment of segmentsToProcess) {
-                        const tsBuffer = await this.apiClient.getTsSegment(segment.remoteUrl);
+                        const tsBuffer = await this.streamProvider.getTsSegment(segment.remoteUrl);
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
@@ -116,7 +116,7 @@ export class StreamDownloader {
     }
 
     private async _getLiveUrlFromMaster(): Promise<string | null> {
-        const masterListBody = await this.apiClient.getMasterList(this.downloadHandle.masterPlaylistUrl);
+        const masterListBody = await this.streamProvider.getMasterList(this.downloadHandle.masterPlaylistUrl);
         if (!masterListBody) {
             logger.warn(
                 `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
