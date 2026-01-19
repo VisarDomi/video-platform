@@ -43,24 +43,22 @@ export class Fc2DiscoveryService {
         const channelId = targets[this.queueIndex];
         this.queueIndex++;
 
-        // Changed to INFO to match reference code's "Waiting for stream" visibility
-        logger.info(`[FC2] Checking target: ${channelId}`);
+        // NOISE REDUCTION: Only info log if we actually try to start something
+        // logger.info(`[FC2] Checking target: ${channelId}`);
 
         try {
-            // Check if we are already downloading this Streamer ID
-            // Since FC2 URLs change on every request, we must check by ID, not URL.
             if (this.downloadsManager.hasStreamer(channelId)) {
-                logger.debug(`[FC2] Already downloading ${channelId}. Skipping check.`);
+                // NOISE REDUCTION: Removed debug log
                 return;
             }
 
+            // Only log checking at debug level now
+            logger.debug(`[FC2] Checking status for ${channelId}`);
             const isLive = await this.fc2Client.isOnline(channelId);
 
             if (isLive) {
-                // Double check race condition after async call
                 if (this.downloadsManager.hasStreamer(channelId)) return;
 
-                // Fetch the Master Playlist URL
                 const masterUrl = await this.fc2Client.getHlsUrl(channelId);
 
                 if (masterUrl) {
@@ -68,11 +66,10 @@ export class Fc2DiscoveryService {
 
                     const handle = this.downloadsManager.add(masterUrl, {
                         streamerId: channelId,
-                        alias: channelId // FC2 doesn't have aliases in this implementation yet
+                        alias: channelId
                     });
 
                     if (handle) {
-                        // Inject the Fc2Client as the IStreamProvider
                         const downloader = new StreamDownloader(handle, this.fc2Client);
                         void downloader.start();
                     }

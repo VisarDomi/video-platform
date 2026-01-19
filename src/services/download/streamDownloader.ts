@@ -29,7 +29,6 @@ export class StreamDownloader {
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 5000;
 
-        // 1. Resolve Live Playlist URL via Provider
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             const resolvedUrl = await this.streamProvider.parseMasterPlaylist(this.downloadHandle.masterPlaylistUrl);
             if (resolvedUrl) {
@@ -49,7 +48,6 @@ export class StreamDownloader {
         this.downloadHandle.update({ liveUrl });
 
         const startDate = new Date();
-        // 2. Setup Directory via Provider
         const segmentsDirPath = await this.streamProvider.setupDownloadDir(alias, startDate);
 
         if (!segmentsDirPath) {
@@ -64,16 +62,14 @@ export class StreamDownloader {
         const playlistManager = new PlaylistManager(segmentsDirPath);
         let lastDownload = Date.now();
 
-        // 3. Download Loop
         while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
 
-                // DEBUG: Log the raw playlist content (first 500 chars)
-                // logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
+                // UNCOMMENTED DEBUG LOG
+                logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
 
-                // Use the provider-specific URL resolver
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
                     (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
@@ -92,7 +88,6 @@ export class StreamDownloader {
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
 
                         if (writeSuccess) {
-                            // 4. Validate via Provider
                             const isValid = await this.streamProvider.validateSegment(segmentPath);
 
                             if (!isValid) {

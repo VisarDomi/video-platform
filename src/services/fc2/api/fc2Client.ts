@@ -45,11 +45,13 @@ export class Fc2Client implements IStreamProvider {
             }
 
             const json: any = await response.json();
-            logger.debug(`[FC2] memberApi response for ${channelId}:`, { data: json?.data?.channel_data });
+
+            // TRUNCATED LOG: Only show is_publish status to reduce bloat
+            logger.debug(`[FC2] memberApi response for ${channelId}: is_publish=${json?.data?.channel_data?.is_publish}`);
 
             const isPublish = json?.data?.channel_data?.is_publish > 0;
             if (!isPublish) {
-                logger.debug(`[FC2] Channel ${channelId} is offline (is_publish=${json?.data?.channel_data?.is_publish})`);
+                logger.debug(`[FC2] Channel ${channelId} is offline`);
             }
             return isPublish;
         } catch (error: any) {
@@ -57,6 +59,8 @@ export class Fc2Client implements IStreamProvider {
             return false;
         }
     }
+
+    // ... [Rest of the class remains unchanged: getHlsUrl, _performWsHandshake, etc] ...
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
         try {
@@ -184,24 +188,21 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        // Fetch the content to check if it is a Master Playlist
         const content = await this.getMasterList(masterUrl);
         if (!content) return null;
 
         if (content.includes("#EXT-X-STREAM-INF")) {
             logger.info(`[FC2] Detected Master Playlist. Parsing for best variant...`);
-            // Parse Master Playlist
             const lines = content.split("\n");
             let bestVariantUrl: string | null = null;
 
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].startsWith("#EXT-X-STREAM-INF")) {
-                    // The next line is the URL
                     if (i + 1 < lines.length) {
                         const variantLine = lines[i+1].trim();
                         if (variantLine && !variantLine.startsWith("#")) {
                             bestVariantUrl = this.getSegmentUrl(masterUrl, variantLine);
-                            break; // Just pick the first one (highest quality usually listed first in Adaptive)
+                            break;
                         }
                     }
                 }
@@ -214,8 +215,6 @@ export class Fc2Client implements IStreamProvider {
                 logger.warn(`[FC2] Failed to parse variant from Master Playlist. Using original URL.`);
             }
         }
-
-        // If not a master playlist, or failed to parse, assume it's a Media Playlist
         return masterUrl;
     }
 
