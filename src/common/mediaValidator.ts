@@ -2,17 +2,22 @@ import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+interface FFMPEGStream {
+    codec_type: string;
+    width: number;
+    height: number;
+}
 
 export class MediaValidator {
     /**
-     * Checks if a media segment is corrupted based on bitrate and duration.
-     * Identifying 0kb/s bitrate or improbable duration (> 1 hour) for short segments.
+     * Checks if a media segment is corrupted based on bitrate, duration, and specific dimensions.
+     * Identifying 0kb/s bitrate, improbable duration, or specific 360x640 resolution artifacts.
      */
     public static async isSegmentCorrupt(filePath: string): Promise<boolean> {
         try {
-            // Check bitrate and duration using JSON output for reliability
-            // -show_format gives us container level info (duration, bit_rate)
-            const cmd = `ffprobe -v error -show_format -of json "${filePath}"`;
+            // Check bitrate, duration, and streams using JSON output
+            // UPDATE: Added -show_streams to access video resolution info
+            const cmd = `ffprobe -v error -show_format -show_streams -of json "${filePath}"`;
             const { stdout } = await execAsync(cmd);
             const data = JSON.parse(stdout);
 
@@ -21,7 +26,6 @@ export class MediaValidator {
 
             // Condition 1: Bitrate is effectively 0 or N/A (NaN)
             // Valid TS files usually have > 100k bitrate.
-            // We use a safe threshold of 1000 bps (1 kbps) to catch empty/header-only files.
             if (isNaN(bitRate) || bitRate < 1000) {
                 return true;
             }
@@ -30,6 +34,22 @@ export class MediaValidator {
             // This catches timestamp wrap-around bugs common in some streams.
             if (!isNaN(duration) && duration > 3600) {
                 return true;
+            }
+
+            // Condition 3: Specific corrupt resolution (Width 360, Height 640)
+            // We check the streams array for the video track
+            if (data.streams && Array.isArray(data.streams)) {
+                const videoStream: FFMPEGStream = data.streams.find((stream: FFMPEGStream) => stream.codec_type === 'video');
+
+                if (videoStream) {
+                    const width = videoStream.width;
+                    const height = videoStream.height;
+
+                    // If the specific "corrupt" dimension is detected
+                    if (width === 360 && height === 640) {
+                        return true;
+                    }
+                }
             }
 
             return false;
