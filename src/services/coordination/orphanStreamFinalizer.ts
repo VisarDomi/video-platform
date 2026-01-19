@@ -40,6 +40,7 @@ export class OrphanStreamFinalizer {
             const streamDirs = await fs.readdir(streamsLocation, { withFileTypes: true });
             let processedCount = 0;
             let fixedPlaylists = 0;
+            let deletedEmptyFolders = 0;
 
             for (const dirent of streamDirs) {
                 if (dirent.isDirectory()) {
@@ -63,14 +64,25 @@ export class OrphanStreamFinalizer {
 
                     processedCount++;
 
-                    // Sync Playlist and Finalize
                     try {
+                        const allFiles = await fs.readdir(streamPath);
+                        const tsFiles = allFiles.filter((f) => f.endsWith(".ts"));
+
+                        // DELETE EMPTY FOLDERS
+                        if (tsFiles.length === 0) {
+                            logger.info(`Orphan folder ${dirent.name} contains no segments. Deleting folder.`);
+                            await fs.rm(streamPath, { recursive: true, force: true });
+                            deletedEmptyFolders++;
+                            continue;
+                        }
+
+                        // Sync Playlist and Finalize
                         const playlistPath = path.join(streamPath, "playlist.m3u8");
                         if (await FileSystemManager.pathExists(playlistPath)) {
                             const content = await FileSystemManager.readFile(playlistPath);
                             if (content) {
                                 // 1. Get list of actual files on disk
-                                const filesOnDisk = new Set(await fs.readdir(streamPath));
+                                const filesOnDisk = new Set(allFiles);
 
                                 // 2. Rebuild playlist based on file existence
                                 const lines = content.split("\n");
@@ -93,7 +105,7 @@ export class OrphanStreamFinalizer {
                                         ) {
                                             newLines.push(trimmed);
                                         } else {
-                                            // Buffer metadata (EXTINF, EXT-X-PROGRAM-DATE-TIME) until we confirm file exists
+                                            // Buffer metadata until we confirm file exists
                                             metadataBuffer.push(trimmed);
                                         }
                                     } else {
@@ -103,7 +115,7 @@ export class OrphanStreamFinalizer {
                                             newLines.push(trimmed);
                                             metadataBuffer.length = 0;
                                         } else {
-                                            // File missing from disk, discard buffer and skip this line
+                                            // File missing from disk, discard buffer
                                             hasChanges = true;
                                             metadataBuffer.length = 0;
                                             logger.info(`Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
@@ -125,11 +137,13 @@ export class OrphanStreamFinalizer {
                             }
                         }
                     } catch (err: any) {
-                        logger.error(`Error finalizing playlist for orphan ${dirent.name}`, { error: err.message });
+                        logger.error(`Error processing orphan ${dirent.name}`, { error: err.message });
                     }
                 }
             }
-            logger.info(`Orphan stream finalizer check complete. Scanned ${processedCount} orphans. Fixed/Synced ${fixedPlaylists} playlists.`);
+            logger.info(
+                `Orphan stream finalizer check complete. Scanned ${processedCount} orphans. Deleted ${deletedEmptyFolders} empty folders. Fixed/Synced ${fixedPlaylists} playlists.`
+            );
         } catch (error: any) {
             logger.error("Error during orphan stream finalization check:", { errorMessage: error.message });
         }
