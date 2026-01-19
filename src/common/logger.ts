@@ -20,7 +20,7 @@ const consoleFormat = winston.format.combine(
 const fileFormat = winston.format.combine(winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), winston.format.json());
 
 const logger = winston.createLogger({
-    level: "info",
+    level: "debug", // CHANGED: info -> debug to see FC2 payloads
     transports: [
         new winston.transports.Console({
             format: consoleFormat,

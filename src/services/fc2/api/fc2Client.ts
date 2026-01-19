@@ -8,28 +8,60 @@ import { MediaValidator } from "../../../common/mediaValidator.js";
 export class Fc2Client implements IStreamProvider {
     private msgId = 0;
 
+    // Mimic the reference implementation headers
+    private readonly HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://live.fc2.com/",
+        "Origin": "https://live.fc2.com",
+        "Connection": "keep-alive",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*"
+    };
+
     constructor() {
         logger.info("[FC2] Client initialized.");
     }
 
-    // ... [isOnline, getHlsUrl, _performWsHandshake logic same as before] ...
+    /**
+     * Helper to make requests with consistent headers
+     */
+    private async _request(url: string, options: RequestInit = {}): Promise<Response> {
+        const headers = { ...this.HEADERS, ...(options.headers || {}) };
+        return fetch(url, { ...options, headers });
+    }
 
     public async isOnline(channelId: string): Promise<boolean> {
         try {
             const url = "https://live.fc2.com/api/memberApi.php";
             const body = { channel: 1, profile: 1, user: 1, streamid: channelId };
-            const response = await fetch(url, {
+
+            logger.debug(`[FC2] Checking status for ${channelId}...`);
+
+            const response = await this._request(url, {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                },
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: new URLSearchParams(body as any),
             });
-            if (!response.ok) return false;
+
+            if (!response.ok) {
+                logger.warn(`[FC2] memberApi returned ${response.status} for ${channelId}`);
+                return false;
+            }
+
             const json: any = await response.json();
-            return json?.data?.channel_data?.is_publish > 0;
-        } catch (error) { return false; }
+
+            // Log the raw response if debug is enabled, similar to reference code's trace
+            logger.debug(`[FC2] memberApi response for ${channelId}:`, { data: json?.data?.channel_data });
+
+            const isPublish = json?.data?.channel_data?.is_publish > 0;
+            if (!isPublish) {
+                logger.debug(`[FC2] Channel ${channelId} is offline (is_publish=${json?.data?.channel_data?.is_publish})`);
+            }
+            return isPublish;
+        } catch (error: any) {
+            logger.error(`[FC2] Error checking isOnline for ${channelId}`, { error: error.message });
+            return false;
+        }
     }
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
@@ -39,21 +71,58 @@ export class Fc2Client implements IStreamProvider {
                 channel_id: channelId, mode: "play", client_version: "2.1.0\n+[1]",
                 client_type: "pc", client_app: "browser_hls", ipv6: "",
             });
-            const ctrlRes = await fetch(controlUrl, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params });
-            if (!ctrlRes.ok) return null;
+
+            const ctrlRes = await this._request(controlUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: params,
+            });
+
+            if (!ctrlRes.ok) {
+                logger.error(`[FC2] Failed to get FC2 control server for ${channelId} (Status: ${ctrlRes.status})`);
+                return null;
+            }
+
             const ctrlData: any = await ctrlRes.json();
-            if (!ctrlData.url || !ctrlData.control_token) return null;
+            if (!ctrlData.url || !ctrlData.control_token) {
+                logger.warn(`[FC2] Invalid control response for ${channelId}`, ctrlData);
+                return null;
+            }
+
             const wsUrl = `${ctrlData.url}?control_token=${ctrlData.control_token}`;
             return await this._performWsHandshake(wsUrl, channelId);
-        } catch (error) { return null; }
+        } catch (error: any) {
+            logger.error(`[FC2] Error fetching HLS URL for ${channelId}`, { error: error.message });
+            return null;
+        }
     }
 
     private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {
         return new Promise((resolve) => {
+            // Note: Node's global WebSocket doesn't easily support headers in constructor without agents,
+            // but the handshake token usually authenticates enough.
             const ws = new WebSocket(wsUrl);
             let isResolved = false;
-            const safeResolve = (val: string | null) => { if (!isResolved) { isResolved = true; resolve(val); ws.close(); } };
-            const timeout = setTimeout(() => { if (!isResolved) safeResolve(null); }, 15000);
+
+            const safeResolve = (val: string | null) => {
+                if (!isResolved) {
+                    isResolved = true;
+                    resolve(val);
+                    ws.close();
+                }
+            };
+
+            const timeout = setTimeout(() => {
+                if (!isResolved) {
+                    logger.warn(`[FC2] WebSocket handshake timed out for ${channelId}`);
+                    safeResolve(null);
+                }
+            }, 15000);
+
+            ws.onopen = () => {
+                logger.debug(`[FC2] WebSocket connected for ${channelId}`);
+            };
+
             ws.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data as string);
@@ -62,12 +131,26 @@ export class Fc2Client implements IStreamProvider {
                         ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
                     } else if (msg.name === "_response_" && msg.id === this.msgId) {
                         const lists = msg.arguments.playlists || msg.arguments.playlists_middle_latency || msg.arguments.playlists_high_latency;
-                        safeResolve(lists?.[0]?.url || null);
+                        const url = lists?.[0]?.url || null;
+
+                        if (url) {
+                            logger.info(`[FC2] Resolved HLS URL for ${channelId}`);
+                        } else {
+                            logger.warn(`[FC2] No playlists found in WS response for ${channelId}`);
+                        }
+
+                        safeResolve(url);
                         clearTimeout(timeout);
                     }
-                } catch (err) {}
+                } catch (err) {
+                    logger.error(`[FC2] WS Parse Error`, { err });
+                }
             };
-            ws.onerror = () => safeResolve(null);
+
+            ws.onerror = (e) => {
+                logger.error(`[FC2] WebSocket error for ${channelId}`, { error: (e as any).message });
+                safeResolve(null);
+            };
             ws.onclose = () => safeResolve(null);
         });
     }
@@ -76,7 +159,8 @@ export class Fc2Client implements IStreamProvider {
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
-            const response = await fetch(masterListUrl);
+            // Use _request to ensure headers
+            const response = await this._request(masterListUrl);
             if (!response.ok) return null;
             return await response.text();
         } catch (error: any) {
@@ -87,7 +171,7 @@ export class Fc2Client implements IStreamProvider {
 
     public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
         try {
-            const response = await fetch(liveUrl);
+            const response = await this._request(liveUrl);
             if (!response.ok) return { success: false, data: null };
             const data = await response.text();
             return { success: true, data };
@@ -98,17 +182,18 @@ export class Fc2Client implements IStreamProvider {
 
     public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
         try {
-            const response = await fetch(tsUrl);
+            // CRITICAL: Use _request to include User-Agent for the CDN
+            const response = await this._request(tsUrl);
             if (response.ok) {
                 const arr = await response.arrayBuffer();
                 return Buffer.from(arr);
             }
+            logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
             return null;
         } catch (error) { return null; }
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        // Pass-through for FC2 (we get the direct variant URL from the WS)
         return masterUrl;
     }
 
@@ -116,7 +201,6 @@ export class Fc2Client implements IStreamProvider {
         try {
             return new URL(segmentLine, baseUrl).href;
         } catch (e) {
-            // Fallback for weird lines, though URL constructor handles relative paths
             return segmentLine;
         }
     }
@@ -150,7 +234,6 @@ export class Fc2Client implements IStreamProvider {
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return false;
 
-        // Generic checks only for FC2
         if (isNaN(info.bitRate) || info.bitRate < 1000) return false;
         if (!isNaN(info.duration) && info.duration > 3600) return false;
 

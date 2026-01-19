@@ -43,6 +43,9 @@ export class Fc2DiscoveryService {
         const channelId = targets[this.queueIndex];
         this.queueIndex++;
 
+        // Changed to INFO to match reference code's "Waiting for stream" visibility
+        logger.info(`[FC2] Checking target: ${channelId}`);
+
         try {
             const isLive = await this.fc2Client.isOnline(channelId);
 
