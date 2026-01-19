@@ -1,7 +1,11 @@
+import * as path from "path";
+import * as config from "../../../common/config.js";
+import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import * as constants from "../../../common/constants.js";
 import { IStreamProvider } from "../../core/interfaces.js";
 import { TokenManager, Tokens } from "./tokenManager.js";
+import { MediaValidator } from "../../../common/mediaValidator.js";
 
 export class ApiClient implements IStreamProvider {
     private tokenManager: TokenManager;
@@ -167,5 +171,81 @@ export class ApiClient implements IStreamProvider {
             }
         }
         return null;
+    }
+
+    public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
+        const masterListBody = await this.getMasterList(masterUrl);
+        if (!masterListBody) return null;
+
+        const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
+        let relativeLiveUrl: string | undefined;
+
+        for (let i = 0; i < masterLines.length; i++) {
+            if (masterLines[i].includes("RESOLUTION=1280x720")) {
+                relativeLiveUrl = masterLines[i + 1];
+                break;
+            }
+        }
+
+        if (!relativeLiveUrl) {
+            logger.warn(`[Tango] Could not find HD stream in master playlist: ${masterUrl}`);
+            return null;
+        }
+
+        const cinemaApiUrl = masterUrl.split("/v2/")[0];
+        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
+        if (livePlaylistUrl.endsWith("&")) {
+            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
+        }
+        return livePlaylistUrl;
+    }
+
+    public getSegmentUrl(baseUrl: string, segmentLine: string): string {
+        if (segmentLine.startsWith("/")) {
+            const urlObj = new URL(baseUrl);
+            return `${urlObj.origin}${segmentLine}`;
+        }
+        return segmentLine;
+    }
+
+    public async setupDownloadDir(alias: string, date: Date): Promise<string | null> {
+        const generateDownloadBaseName = (alias: string, date: Date): string => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            const hours = String(date.getHours()).padStart(2, "0");
+            const minutes = String(date.getMinutes()).padStart(2, "0");
+            const seconds = String(date.getSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
+        };
+
+        const baseFilename = generateDownloadBaseName(alias, date);
+        const storageLocation = path.join(config.getConfig().storagePath, "tango", "downloader");
+
+        const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
+        if (!storageLocationExists) {
+            logger.error(`[Tango] Could not create or access storage folder at: ${storageLocation}`);
+            return null;
+        }
+
+        const segmentsDirPath = path.resolve(storageLocation, baseFilename);
+        const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
+        return segmentsDirExists ? segmentsDirPath : null;
+    }
+
+    public async validateSegment(filePath: string): Promise<boolean> {
+        const info = await MediaValidator.getMediaInfo(filePath);
+        if (!info) return false;
+
+        // Condition 1: Bitrate < 1000 or NaN
+        if (isNaN(info.bitRate) || info.bitRate < 1000) return false;
+
+        // Condition 2: Insane Duration (> 1 hour)
+        if (!isNaN(info.duration) && info.duration > 3600) return false;
+
+        // Condition 3: Specific Tango corrupt resolution
+        if (info.width === 360 && info.height === 640) return false;
+
+        return true;
     }
 }

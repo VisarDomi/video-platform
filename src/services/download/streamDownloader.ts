@@ -4,11 +4,9 @@ import * as fs from "fs/promises";
 
 import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
-import { DownloadPathManager } from "./tango/downloadPathManager.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
-import { MediaValidator } from "../../common/mediaValidator.js";
 import { IStreamProvider } from "../core/interfaces.js";
 
 export class StreamDownloader {
@@ -27,13 +25,13 @@ export class StreamDownloader {
         }
 
         const alias = this.downloadHandle.state.alias;
-
         let liveUrl: string | null = null;
         const MAX_RETRIES = 3;
         const RETRY_DELAY = 5000;
 
+        // 1. Resolve Live Playlist URL via Provider
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const resolvedUrl = await this._getLiveUrlFromMaster();
+            const resolvedUrl = await this.streamProvider.parseMasterPlaylist(this.downloadHandle.masterPlaylistUrl);
             if (resolvedUrl) {
                 liveUrl = resolvedUrl;
                 break;
@@ -51,7 +49,8 @@ export class StreamDownloader {
         this.downloadHandle.update({ liveUrl });
 
         const startDate = new Date();
-        const segmentsDirPath = await DownloadPathManager.createDownloadPaths(alias, startDate);
+        // 2. Setup Directory via Provider
+        const segmentsDirPath = await this.streamProvider.setupDownloadDir(alias, startDate);
 
         if (!segmentsDirPath) {
             logger.error(`Failed to create download paths for ${alias}. Aborting download.`);
@@ -65,12 +64,16 @@ export class StreamDownloader {
         const playlistManager = new PlaylistManager(segmentsDirPath);
         let lastDownload = Date.now();
 
+        // 3. Download Loop
         while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
-                const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-                const segmentsToProcess = await playlistManager.identifyNewSegments(liveResponse.data, cinemaApiUrl);
+                // Use the provider-specific URL resolver
+                const segmentsToProcess = await playlistManager.identifyNewSegments(
+                    liveResponse.data,
+                    (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
+                );
 
                 if (segmentsToProcess.length > 0) {
                     for (const segment of segmentsToProcess) {
@@ -85,14 +88,13 @@ export class StreamDownloader {
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
 
                         if (writeSuccess) {
-                            // Validate using shared MediaValidator
-                            const isBad = await MediaValidator.isSegmentCorrupt(segmentPath);
+                            // 4. Validate via Provider
+                            const isValid = await this.streamProvider.validateSegment(segmentPath);
 
-                            if (isBad) {
-                                logger.warn(`Downloaded segment is corrupt (0kb/s or bad duration). Deleting and skipping: ${segmentPath}`);
+                            if (!isValid) {
+                                logger.warn(`Downloaded segment is corrupt (validation failed). Deleting and skipping: ${segmentPath}`);
                                 await fs.unlink(segmentPath).catch(() => {});
                                 playlistManager.addIgnoredSegment(segment.localName);
-                                // Keep lastDownload fresh so we don't abort stream due to bad segments
                                 lastDownload = Date.now();
                             } else {
                                 await playlistManager.appendSegmentToPlaylist(segment);
@@ -113,37 +115,5 @@ export class StreamDownloader {
 
         logger.info(`Finished download process for: ${segmentsDirPath}`);
         this.downloadHandle.remove();
-    }
-
-    private async _getLiveUrlFromMaster(): Promise<string | null> {
-        const masterListBody = await this.streamProvider.getMasterList(this.downloadHandle.masterPlaylistUrl);
-        if (!masterListBody) {
-            logger.warn(
-                `Could not fetch master playlist body from: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
-            );
-            return null;
-        }
-
-        const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
-        let relativeLiveUrl;
-        for (let i = 0; i < masterLines.length; i++) {
-            if (masterLines[i].includes("RESOLUTION=1280x720")) {
-                relativeLiveUrl = masterLines[i + 1];
-                break;
-            }
-        }
-
-        if (!relativeLiveUrl) {
-            logger.warn(
-                `Could not find HD stream in master playlist: ${this.downloadHandle.masterPlaylistUrl} for ${this.downloadHandle.state?.segmentsDirPath}`
-            );
-            return null;
-        }
-        const cinemaApiUrl = this.downloadHandle.masterPlaylistUrl.split("/v2/")[0];
-        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
-        if (livePlaylistUrl.endsWith("&")) {
-            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
-        }
-        return livePlaylistUrl;
     }
 }

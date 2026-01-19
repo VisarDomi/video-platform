@@ -8,6 +8,9 @@ export interface SegmentInfo {
     metadata: string[];
 }
 
+// Define a type for the URL resolver
+export type SegmentUrlResolver = (segmentLine: string) => string;
+
 export class PlaylistManager {
     private readonly segmentsDirPath: string;
     private readonly fullPlaylistPath: string;
@@ -38,7 +41,7 @@ export class PlaylistManager {
         return segments;
     }
 
-    public async identifyNewSegments(livePlaylistContent: string, cinemaApiUrl: string): Promise<SegmentInfo[]> {
+    public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
         const newSegments: SegmentInfo[] = [];
 
@@ -76,7 +79,9 @@ export class PlaylistManager {
                 continue;
             }
 
-            const remoteTsUrl = line.startsWith("/") ? `${cinemaApiUrl}${line}` : line;
+            // USE THE RESOLVER CALLBACK
+            const remoteTsUrl = urlResolver(line);
+
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
