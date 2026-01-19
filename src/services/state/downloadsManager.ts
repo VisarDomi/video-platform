@@ -41,7 +41,7 @@ export class DownloadsManager {
     private constructor() {
         const cfg = config.getConfig();
         this.statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");
-        logger.info(`DownloadsManager initialized. Status file: ${this.statusFilePath}`);
+        logger.info(`[General] DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 
     public static async create(): Promise<DownloadsManager> {
@@ -52,7 +52,7 @@ export class DownloadsManager {
 
     public add(masterPlaylistUrl: string, initialData: Omit<Download, "liveUrl" | "segmentsDirPath">): DownloadHandle | null {
         if (this.downloads.has(masterPlaylistUrl)) {
-            logger.warn(`Attempted to add an already existing download: ${masterPlaylistUrl}`);
+            logger.warn(`[General] Attempted to add an already existing download: ${masterPlaylistUrl}`);
             return null;
         }
 
@@ -70,7 +70,7 @@ export class DownloadsManager {
     public update(masterPlaylistUrl: string, updates: Partial<Download>): Download | undefined {
         const existing = this.downloads.get(masterPlaylistUrl);
         if (!existing) {
-            logger.error(`Attempted to update non-existent download: ${masterPlaylistUrl}`);
+            logger.error(`[General] Attempted to update non-existent download: ${masterPlaylistUrl}`);
             return undefined;
         }
 
@@ -92,6 +92,19 @@ export class DownloadsManager {
 
     public has(masterPlaylistUrl: string): boolean {
         return this.downloads.has(masterPlaylistUrl);
+    }
+
+    /**
+     * Checks if a specific streamer ID is currently being downloaded.
+     * Useful when URLs change dynamically (e.g. FC2).
+     */
+    public hasStreamer(streamerId: string): boolean {
+        for (const download of this.downloads.values()) {
+            if (download.streamerId === streamerId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public get size(): number {
@@ -127,7 +140,7 @@ export class DownloadsManager {
     }
 
     private async _clearStatusFile(): Promise<void> {
-        logger.info("Clearing live-status.json for a fresh start...");
+        logger.info("[General] Clearing live-status.json for a fresh start...");
         if (this._updateFileDebounceTimer) {
             clearTimeout(this._updateFileDebounceTimer);
             this._updateFileDebounceTimer = null;
