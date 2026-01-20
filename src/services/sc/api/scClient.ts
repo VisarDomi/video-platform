@@ -86,7 +86,6 @@ export class ScClient implements IStreamProvider {
         }
 
         const segments = controller.getAvailableSegments();
-        // Since we record 2000ms chunks
         const duration = 2.0;
 
         let m3u8 = "#EXTM3U\n";
@@ -98,16 +97,21 @@ export class ScClient implements IStreamProvider {
 
         for (const seqId of segments) {
             m3u8 += `#EXTINF:${duration},\n`;
-            // Use .webm extension to indicate content type, though generic 'segment' logic handles it
-            m3u8 += `sc_seg_${channelId}_${seqId}.webm\n`;
+            // Change extension to .mp4. If the browser sends mp4, good.
+            // If it sends WebM, we name it .mp4 anyway to trick HLS players?
+            // No, that confuses demuxers.
+            // If we successfully get mp4 from browser, we name it .mp4.
+            // If we get WebM, we name it .webm and assume the user concatenates manually (since HLS player won't support it).
+            // Let's stick to .mp4 naming in the hope that `MediaRecorderInMP4` flag works.
+            m3u8 += `sc_seg_${channelId}_${seqId}.mp4\n`;
         }
 
         return { success: true, data: m3u8 };
     }
 
     public async getTsSegment(url: string): Promise<Buffer | null> {
-        // Updated regex for .webm
-        const match = url.match(/sc_seg_(.+)_(\d+)\.webm/);
+        // Regex matches .mp4 now
+        const match = url.match(/sc_seg_(.+)_(\d+)\.mp4/);
 
         if (match) {
             const channelId = match[1];
@@ -152,8 +156,6 @@ export class ScClient implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<boolean> {
-        // MediaValidator uses ffprobe. WebM/VP8 is standard, should pass if file size > 0.
-        // We relax validation to just check existence/size as duration on chunk 2+ might be weird for ffprobe without headers.
         try {
             const stat = await import("fs/promises").then(fs => fs.stat(filePath));
             return stat.size > 0;

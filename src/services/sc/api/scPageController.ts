@@ -26,19 +26,20 @@ export class ScPageController {
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--mute-audio",
-                    "--window-size=1280,720"
+                    "--window-size=1280,720",
+                    // Enable features for MP4 recording if available
+                    "--enable-features=MediaRecorderInMP4"
                 ],
             });
 
             const context = await this.browser.newContext({
                 viewport: { width: 1280, height: 720 },
                 userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                permissions: ['microphone', 'camera'] // sometimes needed for captureStream
+                permissions: ['microphone', 'camera']
             });
 
             this.page = await context.newPage();
 
-            // 1. Expose binding to receive chunks from browser context
             await this.page.exposeFunction("nodeOnChunk", (base64Data: string) => {
                 const buf = Buffer.from(base64Data, "base64");
                 this.segmentQueue.push(buf);
@@ -56,7 +57,6 @@ export class ScPageController {
 
             await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-            // 2. Handle Age Gate
             try {
                 const enterBtn = this.page.locator('.btn-visitors-agreement-accept').first();
                 if (await enterBtn.isVisible({ timeout: 5000 })) {
@@ -64,8 +64,6 @@ export class ScPageController {
                 }
             } catch (e) {}
 
-            // 3. Inject Recorder Script
-            // We wait a bit for the video element to populate
             await this.page.waitForTimeout(5000);
 
             await this.page.evaluate(() => {
@@ -73,42 +71,51 @@ export class ScPageController {
 
                 const startRecording = () => {
                     const video = document.querySelector('video');
-                    if (!video) {
-                        console.log("No video element found yet...");
-                        return false;
-                    }
+                    if (!video) return false;
 
-                    // Ensure it's playing
                     if (video.paused) {
-                        console.log("Video paused, forcing play...");
                         video.muted = true;
                         video.play().catch(e => console.error("Play failed", e));
                     }
 
-                    // Check if already captured
                     if ((window as any).__isRecording) return true;
 
                     try {
-                        console.log("Found video, capturing stream...");
                         const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream();
-                        if (!stream) {
-                            console.error("captureStream not supported");
+                        if (!stream) return false;
+
+                        // ATTEMPT TO FORCE MP4
+                        // Chrome typically supports 'video/webm;codecs=h264' or just 'video/webm'
+                        // Newer Chrome supports 'video/mp4'
+                        const mimeTypes = [
+                            'video/mp4;codecs=avc1,mp4a',
+                            'video/mp4',
+                            'video/webm;codecs=h264',
+                            'video/webm;codecs=vp9',
+                            'video/webm'
+                        ];
+
+                        let selectedMime = "";
+                        for (const type of mimeTypes) {
+                            if (MediaRecorder.isTypeSupported(type)) {
+                                selectedMime = type;
+                                console.log(`[Recorder] Supported MIME: ${type}`);
+                                break;
+                            }
+                        }
+
+                        if (!selectedMime) {
+                            console.error("[Recorder] No supported MIME types found.");
                             return false;
                         }
 
-                        // Use specific mimeType if supported, else default (usually video/webm; codecs=vp8/opus)
-                        let options = { mimeType: 'video/webm;codecs=vp8' };
-                        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                            options = { mimeType: 'video/webm' }; // Fallback
-                        }
-
+                        const options = { mimeType: selectedMime };
                         const mediaRecorder = new MediaRecorder(stream, options);
                         (window as any).__mediaRecorder = mediaRecorder;
                         (window as any).__isRecording = true;
 
                         mediaRecorder.ondataavailable = async (e) => {
                             if (e.data && e.data.size > 0) {
-                                // Convert Blob to Base64 to send to Node
                                 const reader = new FileReader();
                                 reader.onloadend = () => {
                                     const base64 = (reader.result as string).split(',')[1];
@@ -118,18 +125,16 @@ export class ScPageController {
                             }
                         };
 
-                        // Start recording with 2000ms timeslices
                         mediaRecorder.start(2000);
-                        console.log("MediaRecorder started!");
+                        console.log(`[Recorder] Started with ${selectedMime}`);
                         return true;
 
                     } catch (e) {
-                        console.error("Recorder error:", e);
+                        console.error("[Recorder] Error:", e);
                         return false;
                     }
                 };
 
-                // Polling loop to ensure we attach if video reloads/changes
                 setInterval(() => {
                     startRecording();
                 }, CHECK_INTERVAL);
