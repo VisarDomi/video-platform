@@ -2,6 +2,7 @@ import { Router } from "express";
 import { promises as fs } from "fs";
 import { FC2_FILE_PATH } from "../core/config.js";
 import logger from "../core/logger.js";
+import { cleanListContent } from "../core/content-processor.js";
 
 const router = Router();
 
@@ -98,6 +99,8 @@ router.get("/fc2", (_req, res) => {
                 if (res.ok) {
                     status.textContent = 'Saved successfully at ' + new Date().toLocaleTimeString();
                     status.style.color = '#34c759';
+                    // Reload to show the cleaned content
+                    loadContent();
                 } else {
                     throw new Error('Save failed');
                 }
@@ -145,12 +148,9 @@ router.post("/api/fc2", async (req, res) => {
     }
 
     try {
-        // Ensure directory exists if it's a completely new setup (unlikely given the path, but good practice)
-        // Note: fs.writeFile handles file creation, but not directory creation.
-        // We assume the video-downloader folder exists based on project structure.
-
-        await fs.writeFile(FC2_FILE_PATH, content, "utf-8");
-        logger.info("FC2 file updated via web editor");
+        const cleanedContent = cleanListContent(content);
+        await fs.writeFile(FC2_FILE_PATH, cleanedContent, "utf-8");
+        logger.info("FC2 file updated and cleaned via web editor");
         res.sendStatus(200);
     } catch (error) {
         logger.error("Error writing fc2 file", { error });

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { promises as fs } from "fs";
 import { SC_FILE_PATH } from "../core/config.js";
 import logger from "../core/logger.js";
+import { cleanListContent } from "../core/content-processor.js";
 
 const router = Router();
 
@@ -98,6 +99,7 @@ router.get("/sc", (_req, res) => {
                 if (res.ok) {
                     status.textContent = 'Saved successfully at ' + new Date().toLocaleTimeString();
                     status.style.color = '#34c759';
+                    loadContent();
                 } else {
                     throw new Error('Save failed');
                 }
@@ -145,8 +147,9 @@ router.post("/api/sc", async (req, res) => {
     }
 
     try {
-        await fs.writeFile(SC_FILE_PATH, content, "utf-8");
-        logger.info("SC file updated via web editor");
+        const cleanedContent = cleanListContent(content);
+        await fs.writeFile(SC_FILE_PATH, cleanedContent, "utf-8");
+        logger.info("SC file updated and cleaned via web editor");
         res.sendStatus(200);
     } catch (error) {
         logger.error("Error writing sc file", { error });
