@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as url from "url";
 import * as timersPromises from "timers/promises";
+import { exec } from "child_process";
 
 import logger from "../../common/logger.js";
 import * as config from "../../common/config.js";
@@ -27,16 +28,18 @@ export class DiskSpaceMonitor {
                 const limitBytes = 50 * 1024 * 1024 * 1024; // 50GB
 
                 if (availableBytes < limitBytes) {
-                    const dateStr = new Date().toISOString().split("T")[0];
-                    const fileName = `no-more-space-${dateStr}.txt`;
-                    const projectRoot = utils.findProjectRoot(__dirname);
-                    const markerPath = path.join(projectRoot, fileName);
+                    logger.error(`[System] Disk space limit reached (<50GB). Stopping PM2 process to prevent loop.`);
 
-                    // Create empty file
+                    // Create marker
+                    const dateStr = new Date().toISOString().split("T")[0];
+                    const markerPath = path.join(utils.findProjectRoot(__dirname), `no-more-space-${dateStr}.txt`);
                     await fs.writeFile(markerPath, "");
 
-                    logger.error(`[System] Disk space limit reached (<50GB). Marker created at ${markerPath}. Exiting immediately.`);
-                    process.exit(1);
+                    // Stop PM2 gracefully instead of crashing
+                    exec("pm2 stop video-downloader");
+
+                    // Wait forever so we don't loop before PM2 kills us
+                    await timersPromises.setTimeout(24 * 60 * 60 * 1000);
                 }
             } catch (error: any) {
                 logger.error("[System] Error checking disk space:", { error: error.message });
