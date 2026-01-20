@@ -21,7 +21,7 @@ interface IConfig {
     fc2FilePath: string;
 }
 
-const DEFAULT_PROVIDERS = ["tango", "fc2"];
+const DEFAULT_PROVIDERS = ["tango", "fc2", "sc"];
 
 function generateDefaultPaths(providerName: string): PathConfig {
     return {
