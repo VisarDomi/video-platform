@@ -35,21 +35,22 @@ export class ScQualityManager {
         try {
             if (this.page.isClosed()) return;
 
-            // 1. Simulate Hover to reveal UI
-            // The controls are hidden by CSS until mouse interaction
-            const videoEl = this.page.locator('video').first();
-            if (await videoEl.isVisible()) {
-                await videoEl.hover();
-                // Short wait for CSS fade-in
-                await this.page.waitForTimeout(500);
-            } else {
-                return;
-            }
+            // 1. Simulate Hover using JS Dispatch (Identical to Userscript logic)
+            // This avoids Playwright trying to scroll the page.
+            await this.page.evaluate(() => {
+                const videoContainer = document.querySelector('.player-container') || document.querySelector('video')?.parentElement;
+                if (videoContainer) {
+                    videoContainer.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 100, clientY: 100 }));
+                    videoContainer.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+                }
+            });
+
+            // Short wait for CSS fade-in
+            await this.page.waitForTimeout(500);
 
             // 2. Find Gear Button
             const gearBtn = this.page.locator('.player-resolution').first();
             if (!(await gearBtn.isVisible())) {
-                // UI didn't appear or selector is wrong
                 return;
             }
 
@@ -61,7 +62,6 @@ export class ScQualityManager {
             try {
                 await menu.waitFor({ state: "visible", timeout: 2000 });
             } catch {
-                // Menu failed to open. Try clicking gear again to toggle/reset state.
                 await gearBtn.click().catch(() => {});
                 return;
             }
@@ -103,16 +103,16 @@ export class ScQualityManager {
                     await targetOption.element.click();
                     this.currentQuality = targetOption.text;
                 } else {
-                    // Already on best. Close menu by clicking gear.
+                    // Already on best. Close menu.
                     await gearBtn.click();
                 }
             } else {
-                // No valid options? Close menu.
+                // No valid options. Close menu.
                 await gearBtn.click();
             }
 
         } catch (error: any) {
-            // Page context might be destroyed
+            // Squelch errors during shutdown/nav
         }
     }
 }
