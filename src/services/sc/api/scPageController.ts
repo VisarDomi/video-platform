@@ -20,7 +20,7 @@ export class ScPageController {
     }
 
     public async start(): Promise<void> {
-        logger.info(`[SC] [${this.channelName}] Launching browser + FFmpeg...`);
+        logger.info(`[SC] [${this.channelName}] Launching browser + FFmpeg (System Chromium)...`);
 
         // 1. Prepare Temp Dir
         try {
@@ -50,8 +50,9 @@ export class ScPageController {
             path.join(this.tempDir, "playlist.m3u8")
         ]);
 
+        // DEBUG: Log FFmpeg Output
         this.ffmpegProcess.stderr?.on("data", (data) => {
-            // logger.debug(`[FFmpeg] ${data.toString()}`);
+            logger.debug(`[FFmpeg] ${data.toString()}`);
         });
 
         this.ffmpegProcess.on("exit", (code) => {
@@ -61,10 +62,9 @@ export class ScPageController {
         });
 
         try {
-            // UPDATED: Use system Chromium
             this.browser = await chromium.launch({
-                executablePath: "/usr/bin/chromium", // <--- Force system browser
-                headless: true, // Try headless "new" logic if possible, or set false if needed
+                executablePath: "/usr/bin/chromium",
+                headless: false,
                 args: [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
@@ -82,14 +82,22 @@ export class ScPageController {
 
             this.page = await context.newPage();
 
-            await this.page.exposeFunction("nodeOnChunk", (base64Data: string) => {
+            // DEBUG: Capture Browser Console
+            this.page.on("console", msg => {
+                logger.debug(`[Browser Console] ${msg.text()}`);
+            });
+
+            await this.page.exposeFunction("nodeOnChunk", (base64Data: string, seqId: number) => {
                 if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
                     try {
                         const buf = Buffer.from(base64Data, "base64");
+                        logger.debug(`[Node] Writing chunk #${seqId} to FFmpeg (Received String Length: ${base64Data.length}, Buffer Size: ${buf.length} bytes)`);
                         this.ffmpegProcess.stdin.write(buf);
-                    } catch (e) {
-                        // Ignore write errors if FFmpeg died
+                    } catch (e: any) {
+                        logger.warn(`[SC] Failed to write chunk #${seqId} to FFmpeg stdin: ${e.message}`);
                     }
+                } else {
+                    logger.warn(`[Node] Dropping chunk #${seqId} because FFmpeg stdin is closed/destroyed.`);
                 }
             });
 
@@ -119,35 +127,83 @@ export class ScPageController {
 
                     try {
                         const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream();
-                        if (!stream) return false;
+                        if (!stream) {
+                            console.error("No stream found from captureStream()");
+                            return false;
+                        }
 
-                        // Strict H.264 Requirement
                         const mimeType = 'video/webm;codecs=h264';
                         if (!MediaRecorder.isTypeSupported(mimeType)) {
-                            console.error("[SC] Browser does not support H.264 recording!");
+                            console.error(`Browser DOES NOT support ${mimeType}`);
                             return false;
+                        } else {
+                            console.log(`Browser supports ${mimeType}`);
                         }
 
                         const mediaRecorder = new MediaRecorder(stream, { mimeType });
                         (window as any).__mediaRecorder = mediaRecorder;
                         (window as any).__isRecording = true;
 
-                        mediaRecorder.ondataavailable = async (e) => {
+                        // --- Queue System Start ---
+                        const queue: { blob: Blob, seq: number }[] = [];
+                        let isProcessing = false;
+                        let seqCounter = 0;
+
+                        const processQueue = async () => {
+                            if (isProcessing) return;
+                            isProcessing = true;
+
+                            while (queue.length > 0) {
+                                const item = queue.shift();
+                                if (!item) continue;
+
+                                console.log(`[Queue] Processing chunk #${item.seq} (Blob Size: ${item.blob.size})`);
+
+                                await new Promise<void>((resolve) => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = async () => {
+                                        if (typeof reader.result === 'string') {
+                                            const parts = reader.result.split(',');
+                                            if (parts.length < 2) {
+                                                console.error(`[Queue] Invalid Data URL format for chunk #${item.seq}. Result start: ${reader.result.substring(0, 50)}`);
+                                                resolve();
+                                                return;
+                                            }
+                                            const base64 = parts[1];
+                                            console.log(`[Queue] Sending chunk #${item.seq} to Node. Base64 Len: ${base64.length}, Preview: ${base64.substring(0, 30)}...`);
+
+                                            await (window as any).nodeOnChunk(base64, item.seq);
+                                        } else {
+                                            console.error(`[Queue] Reader result was not a string for chunk #${item.seq}`);
+                                        }
+                                        resolve();
+                                    };
+                                    reader.onerror = () => {
+                                        console.error(`[Queue] Reader error on chunk #${item.seq}`);
+                                        resolve();
+                                    };
+                                    reader.readAsDataURL(item.blob);
+                                });
+                            }
+                            isProcessing = false;
+                        };
+
+                        mediaRecorder.ondataavailable = (e) => {
                             if (e.data && e.data.size > 0) {
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                    const base64 = (reader.result as string).split(',')[1];
-                                    (window as any).nodeOnChunk(base64);
-                                };
-                                reader.readAsDataURL(e.data);
+                                seqCounter++;
+                                console.log(`[Recorder] Chunk received #${seqCounter} (Size: ${e.data.size}). Pushing to queue.`);
+                                queue.push({ blob: e.data, seq: seqCounter });
+                                processQueue();
                             }
                         };
+                        // --- Queue System End ---
 
                         mediaRecorder.start(1000);
                         console.log(`[Recorder] Started with ${mimeType}`);
                         return true;
 
-                    } catch (e) {
+                    } catch (e: any) {
+                        console.error("Recorder Error: " + e.message);
                         return false;
                     }
                 };
