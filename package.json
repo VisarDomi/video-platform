@@ -6,10 +6,10 @@
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start dist/main.js --name video-downloader-sc --update-env",
-        "restart": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 restart video-downloader-sc --update-env",
-        "stop": "pm2 stop video-downloader-sc",
-        "logs": "pm2 logs video-downloader-sc -f",
+        "start": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start dist/main.js --name video-downloader --update-env",
+        "restart": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 restart video-downloader --update-env",
+        "stop": "pm2 stop video-downloader",
+        "logs": "pm2 logs video-downloader -f",
         "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
     },
     "keywords": [],
