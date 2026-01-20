@@ -17,3 +17,5 @@ which gets consumed by both video-stream-builder and video-packager
 put links of streamers in:
 ladder.txt
 fmp4.txt
+
+sudo apt-get install xvfb
