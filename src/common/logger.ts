@@ -20,7 +20,7 @@ const consoleFormat = winston.format.combine(
 const fileFormat = winston.format.combine(winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }), winston.format.json());
 
 const logger = winston.createLogger({
-    level: "debug",
+    level: "info",
     transports: [
         new winston.transports.Console({
             format: consoleFormat,
