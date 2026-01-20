@@ -32,9 +32,6 @@ export class ScPageController {
         }
 
         // 2. Start FFmpeg (Hybrid: Copy Video, Transcode Audio -> HLS)
-        // -c:v copy: Pass-through H.264 (Low CPU)
-        // -c:a aac: Transcode Opus -> AAC (iOS Compatibility)
-        // -f hls: Standard MPEG-TS segments
         this.ffmpegProcess = spawn("ffmpeg", [
             "-hide_banner",
             "-y",
@@ -47,7 +44,7 @@ export class ScPageController {
 
             "-f", "hls",
             "-hls_time", "2",
-            "-hls_list_size", "10", // Keep last 10 segments in temp buffer
+            "-hls_list_size", "10",
             "-hls_flags", "delete_segments",
             "-hls_segment_filename", path.join(this.tempDir, "segment_%03d.ts"),
             path.join(this.tempDir, "playlist.m3u8")
@@ -64,14 +61,16 @@ export class ScPageController {
         });
 
         try {
+            // UPDATED: Use system Chromium
             this.browser = await chromium.launch({
-                headless: false, // Often needed for codec/GPU access
+                executablePath: "/usr/bin/chromium", // <--- Force system browser
+                headless: true, // Try headless "new" logic if possible, or set false if needed
                 args: [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--mute-audio",
                     "--window-size=1280,720",
-                    "--enable-features=MediaRecorderInMP4" // Experimental flag, sometimes helps
+                    "--enable-features=MediaRecorderInMP4"
                 ],
             });
 
@@ -85,8 +84,12 @@ export class ScPageController {
 
             await this.page.exposeFunction("nodeOnChunk", (base64Data: string) => {
                 if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
-                    const buf = Buffer.from(base64Data, "base64");
-                    this.ffmpegProcess.stdin.write(buf);
+                    try {
+                        const buf = Buffer.from(base64Data, "base64");
+                        this.ffmpegProcess.stdin.write(buf);
+                    } catch (e) {
+                        // Ignore write errors if FFmpeg died
+                    }
                 }
             });
 
