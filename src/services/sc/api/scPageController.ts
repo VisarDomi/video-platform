@@ -4,11 +4,13 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import logger from "../../../common/logger.js";
+import { ScQualityManager } from "./scQualityManager.js";
 
 export class ScPageController {
     private browser: Browser | null = null;
     private page: Page | null = null;
     public readonly channelName: string;
+    private qualityManager: ScQualityManager | null = null;
 
     // FFmpeg State
     private ffmpegProcess: ChildProcess | null = null;
@@ -112,6 +114,11 @@ export class ScPageController {
             } catch (e) {}
 
             await this.page.waitForTimeout(5000);
+
+            // --- START QUALITY MANAGER ---
+            this.qualityManager = new ScQualityManager(this.page);
+            this.qualityManager.start();
+            // -----------------------------
 
             await this.page.evaluate(() => {
                 const startRecording = () => {
@@ -221,6 +228,7 @@ export class ScPageController {
     }
 
     public async stop(): Promise<void> {
+        this.qualityManager?.stop(); // Stop the interval
         if (this.browser) {
             try { await this.browser.close(); } catch (e) {}
             this.browser = null;
