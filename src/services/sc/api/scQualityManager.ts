@@ -16,7 +16,7 @@ export class ScQualityManager {
         if (this.intervalId) return;
         logger.info("[SC] QualityManager started.");
 
-        // Initial check after a short delay to let stream settle
+        // Initial check
         setTimeout(() => this.checkAndSetQuality(), 5000);
 
         this.intervalId = setInterval(() => {
@@ -35,62 +35,84 @@ export class ScQualityManager {
         try {
             if (this.page.isClosed()) return;
 
-            // 1. Find and Click Gear
-            const gearBtn = this.page.locator('.player-resolution').first();
-            if (!(await gearBtn.isVisible())) {
+            // 1. Simulate Hover to reveal UI
+            // The controls are hidden by CSS until mouse interaction
+            const videoEl = this.page.locator('video').first();
+            if (await videoEl.isVisible()) {
+                await videoEl.hover();
+                // Short wait for CSS fade-in
+                await this.page.waitForTimeout(500);
+            } else {
                 return;
             }
+
+            // 2. Find Gear Button
+            const gearBtn = this.page.locator('.player-resolution').first();
+            if (!(await gearBtn.isVisible())) {
+                // UI didn't appear or selector is wrong
+                return;
+            }
+
+            // 3. Click Gear
             await gearBtn.click();
 
-            // 2. Wait for Menu
+            // 4. Wait for Menu
             const menu = this.page.locator('.player-resolution-tooltip__resolutions');
             try {
                 await menu.waitFor({ state: "visible", timeout: 2000 });
             } catch {
-                // Menu didn't open or timed out, maybe button wasn't clickable
+                // Menu failed to open. Try clicking gear again to toggle/reset state.
+                await gearBtn.click().catch(() => {});
                 return;
             }
 
-            // 3. Scan Options
-            const optionElements = await menu.locator('> *').all(); // Direct children
+            // 5. Scrape Options
+            const optionElements = await menu.locator('> *').all();
             const availableOptions: { text: string; element: any }[] = [];
 
             for (const el of optionElements) {
                 const text = (await el.innerText()).trim();
-                if (text) {
+                if (text && !text.toLowerCase().includes('auto')) {
                     availableOptions.push({ text, element: el });
                 }
             }
 
-            // 4. Determine Best Quality
+            // 6. Select Best
             let targetOption = null;
+
+            // A. Try explicit priority list first (exact matches)
             for (const priority of this.PRIORITIES) {
                 targetOption = availableOptions.find(opt => opt.text === priority);
                 if (targetOption) break;
             }
 
-            // 5. Act
+            // B. Fallback: Parse highest number
+            if (!targetOption && availableOptions.length > 0) {
+                const sorted = availableOptions.sort((a, b) => {
+                    const valA = parseInt(a.text) || 0;
+                    const valB = parseInt(b.text) || 0;
+                    return valB - valA;
+                });
+                targetOption = sorted[0];
+            }
+
+            // 7. Act
             if (targetOption) {
                 if (this.currentQuality !== targetOption.text) {
-                    logger.info(`[SC] QualityManager: Switching from ${this.currentQuality || 'Auto'} to ${targetOption.text}`);
+                    logger.info(`[SC] QualityManager: Switching to ${targetOption.text}`);
                     await targetOption.element.click();
                     this.currentQuality = targetOption.text;
-
-                    // Wait a bit for buffering/stream reset logic in browser
-                    // No need to close menu, clicking an option usually closes it
                 } else {
-                    // We are already on the best quality. Close the menu by clicking gear again.
-                    // logger.debug(`[SC] QualityManager: Keeping ${this.currentQuality}.`);
+                    // Already on best. Close menu by clicking gear.
                     await gearBtn.click();
                 }
             } else {
-                // No HD options found (e.g., only 480p/Auto). Close menu.
+                // No valid options? Close menu.
                 await gearBtn.click();
             }
 
         } catch (error: any) {
-            // Ignore errors (page closed, selector moved, etc) to prevent crashing the stream
-            // logger.debug(`[SC] QualityManager check failed: ${error.message}`);
+            // Page context might be destroyed
         }
     }
 }
