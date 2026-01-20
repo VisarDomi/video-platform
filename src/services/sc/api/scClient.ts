@@ -7,11 +7,40 @@ import { IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { ScPageController } from "./scPageController.js";
 
+interface ScSession {
+    controller: ScPageController;
+    lastAccess: number;
+}
+
 export class ScClient implements IStreamProvider {
-    private controllers: Map<string, ScPageController> = new Map();
+    private sessions: Map<string, ScSession> = new Map();
+    private cleanupInterval: NodeJS.Timeout;
 
     constructor() {
         logger.info("[SC] Client initialized (FFmpeg HLS Mode).");
+        // Check for stale sessions every 30 seconds
+        this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
+    }
+
+    private _cleanupStaleSessions() {
+        const now = Date.now();
+        // 60 seconds timeout - if Downloader stops polling, we kill the browser
+        const TIMEOUT_MS = 60000;
+
+        for (const [channelId, session] of this.sessions.entries()) {
+            if (now - session.lastAccess > TIMEOUT_MS) {
+                logger.info(`[SC] Session for ${channelId} timed out. Stopping controller.`);
+                this._closeSession(channelId);
+            }
+        }
+    }
+
+    private async _closeSession(channelId: string) {
+        const session = this.sessions.get(channelId);
+        if (session) {
+            await session.controller.stop();
+            this.sessions.delete(channelId);
+        }
     }
 
     public async isOnline(channelId: string): Promise<boolean> {
@@ -28,23 +57,37 @@ export class ScClient implements IStreamProvider {
         return `http://synthetic-sc/${channelId}/playlist.m3u8`;
     }
 
+    private _touchSession(channelId: string) {
+        const session = this.sessions.get(channelId);
+        if (session) {
+            session.lastAccess = Date.now();
+        }
+    }
+
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
         const match = masterUrl.match(/synthetic-sc\/([^\/]+)\//);
         const channelId = match ? match[1] : masterUrl;
 
-        let controller = this.controllers.get(channelId);
+        let session = this.sessions.get(channelId);
 
-        if (!controller || !controller.isActive()) {
-            controller = new ScPageController(channelId);
-            this.controllers.set(channelId, controller);
+        if (!session || !session.controller.isActive()) {
+            const controller = new ScPageController(channelId);
+            session = {
+                controller,
+                lastAccess: Date.now()
+            };
+            this.sessions.set(channelId, session);
             await controller.start();
         }
 
-        const playlistPath = path.join(controller.tempDir, "playlist.m3u8");
+        const playlistPath = path.join(session.controller.tempDir, "playlist.m3u8");
 
         // Wait for FFmpeg to produce the playlist
         for (let i = 0; i < 30; i++) {
             try {
+                // Keep session alive while waiting
+                this._touchSession(channelId);
+
                 const stat = await fs.stat(playlistPath);
                 if (stat.size > 0) {
                     logger.info(`[SC] [${channelId}] HLS Playlist ready.`);
@@ -55,8 +98,7 @@ export class ScClient implements IStreamProvider {
         }
 
         logger.warn(`[SC] [${channelId}] Timed out waiting for playlist.`);
-        await controller.stop();
-        this.controllers.delete(channelId);
+        await this._closeSession(channelId);
         return null;
     }
 
@@ -72,16 +114,17 @@ export class ScClient implements IStreamProvider {
         const match = liveUrl.match(/synthetic-sc\/([^\/]+)\//);
         const channelId = match ? match[1] : "";
 
-        const controller = this.controllers.get(channelId);
-        if (!controller || !controller.isActive()) return { success: false, data: null };
+        const session = this.sessions.get(channelId);
+        if (!session || !session.controller.isActive()) return { success: false, data: null };
+
+        this._touchSession(channelId);
 
         try {
-            const playlistPath = path.join(controller.tempDir, "playlist.m3u8");
+            const playlistPath = path.join(session.controller.tempDir, "playlist.m3u8");
             const data = await fs.readFile(playlistPath, "utf-8");
 
             // Rewrite the TS paths in the playlist to be resolvable by our synthetic system
-            // Local file: segment_000.ts -> Synthetic URL: sc_local_{channelId}_segment_000.ts
-            // We use a custom separator to strictly split channelId vs filename later
+            // Local file: segment_000.ts -> Synthetic URL: sc_local_STREAMER_{channelId}_FILE_{line}
             const rewritten = data.split('\n').map(line => {
                 if (line.endsWith('.ts') && !line.startsWith('http')) {
                     return `sc_local_STREAMER_${channelId}_FILE_${line}`;
@@ -105,9 +148,10 @@ export class ScClient implements IStreamProvider {
 
             const channelId = prefixPart.replace('sc_local_STREAMER_', '');
 
-            const controller = this.controllers.get(channelId);
-            if (controller) {
-                const filePath = path.join(controller.tempDir, filename);
+            const session = this.sessions.get(channelId);
+            if (session) {
+                this._touchSession(channelId);
+                const filePath = path.join(session.controller.tempDir, filename);
                 try {
                     const data = await fs.readFile(filePath);
                     return data;
@@ -116,7 +160,7 @@ export class ScClient implements IStreamProvider {
                     return null;
                 }
             } else {
-                logger.warn(`[SC] Controller not found for channel: ${channelId} (URL: ${url})`);
+                logger.warn(`[SC] Session not found for channel: ${channelId} (URL: ${url})`);
             }
         } else {
             logger.warn(`[SC] Malformed TS URL: ${url}`);
