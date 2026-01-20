@@ -31,22 +31,26 @@ export class ScPageController {
             return;
         }
 
-        // 2. Start FFmpeg
-        // Reads from stdin (pipe:0), segments into MKV files in temp dir
-        // -c copy: No transcoding (Low CPU)
-        // -f segment: Splits stream
-        // -segment_time 2: 2 second chunks
-        // -reset_timestamps 1: Makes each file playable independently
-        // -segment_format matroska: Robust container
+        // 2. Start FFmpeg (Hybrid: Copy Video, Transcode Audio -> HLS)
+        // -c:v copy: Pass-through H.264 (Low CPU)
+        // -c:a aac: Transcode Opus -> AAC (iOS Compatibility)
+        // -f hls: Standard MPEG-TS segments
         this.ffmpegProcess = spawn("ffmpeg", [
+            "-hide_banner",
             "-y",
+            "-f", "webm",
             "-i", "pipe:0",
-            "-c", "copy",
-            "-f", "segment",
-            "-segment_time", "2",
-            "-reset_timestamps", "1",
-            "-segment_format", "matroska",
-            path.join(this.tempDir, "seg_%05d.mkv")
+
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-b:a", "128k",
+
+            "-f", "hls",
+            "-hls_time", "2",
+            "-hls_list_size", "10", // Keep last 10 segments in temp buffer
+            "-hls_flags", "delete_segments",
+            "-hls_segment_filename", path.join(this.tempDir, "segment_%03d.ts"),
+            path.join(this.tempDir, "playlist.m3u8")
         ]);
 
         this.ffmpegProcess.stderr?.on("data", (data) => {
@@ -61,13 +65,13 @@ export class ScPageController {
 
         try {
             this.browser = await chromium.launch({
-                headless: false,
+                headless: false, // Often needed for codec/GPU access
                 args: [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--mute-audio",
                     "--window-size=1280,720",
-                    "--enable-features=MediaRecorderInMP4"
+                    "--enable-features=MediaRecorderInMP4" // Experimental flag, sometimes helps
                 ],
             });
 
@@ -114,18 +118,14 @@ export class ScPageController {
                         const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream();
                         if (!stream) return false;
 
-                        // Prefer MP4 if possible, else defaults.
-                        const mimeTypes = [
-                            'video/mp4;codecs=avc1,mp4a',
-                            'video/mp4',
-                            'video/webm;codecs=h264',
-                            'video/webm;codecs=vp9',
-                            'video/webm'
-                        ];
-                        let selectedMime = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || "";
+                        // Strict H.264 Requirement
+                        const mimeType = 'video/webm;codecs=h264';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {
+                            console.error("[SC] Browser does not support H.264 recording!");
+                            return false;
+                        }
 
-                        const options = selectedMime ? { mimeType: selectedMime } : undefined;
-                        const mediaRecorder = new MediaRecorder(stream, options);
+                        const mediaRecorder = new MediaRecorder(stream, { mimeType });
                         (window as any).__mediaRecorder = mediaRecorder;
                         (window as any).__isRecording = true;
 
@@ -141,7 +141,7 @@ export class ScPageController {
                         };
 
                         mediaRecorder.start(1000);
-                        console.log(`[Recorder] Started with ${selectedMime || 'default'}`);
+                        console.log(`[Recorder] Started with ${mimeType}`);
                         return true;
 
                     } catch (e) {
