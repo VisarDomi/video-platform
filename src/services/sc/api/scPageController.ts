@@ -64,7 +64,7 @@ export class ScPageController {
         try {
             this.browser = await chromium.launch({
                 executablePath: "/usr/bin/chromium",
-                headless: false,
+                headless: false, // Keep visible for debugging
                 args: [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
@@ -91,7 +91,7 @@ export class ScPageController {
                 if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
                     try {
                         const buf = Buffer.from(base64Data, "base64");
-                        logger.debug(`[Node] Writing chunk #${seqId} to FFmpeg (Received String Length: ${base64Data.length}, Buffer Size: ${buf.length} bytes)`);
+                        logger.debug(`[Node] Writing chunk #${seqId} to FFmpeg (Payload: ${base64Data.length} chars -> ${buf.length} bytes)`);
                         this.ffmpegProcess.stdin.write(buf);
                     } catch (e: any) {
                         logger.warn(`[SC] Failed to write chunk #${seqId} to FFmpeg stdin: ${e.message}`);
@@ -161,20 +161,25 @@ export class ScPageController {
 
                                 await new Promise<void>((resolve) => {
                                     const reader = new FileReader();
-                                    reader.onloadend = async () => {
-                                        if (typeof reader.result === 'string') {
-                                            const parts = reader.result.split(',');
-                                            if (parts.length < 2) {
-                                                console.error(`[Queue] Invalid Data URL format for chunk #${item.seq}. Result start: ${reader.result.substring(0, 50)}`);
-                                                resolve();
-                                                return;
-                                            }
-                                            const base64 = parts[1];
-                                            console.log(`[Queue] Sending chunk #${item.seq} to Node. Base64 Len: ${base64.length}, Preview: ${base64.substring(0, 30)}...`);
+                                    // Use ArrayBuffer to avoid MIME type comma parsing issues
+                                    reader.readAsArrayBuffer(item.blob);
 
+                                    reader.onloadend = async () => {
+                                        if (reader.result instanceof ArrayBuffer) {
+                                            const buffer = reader.result;
+                                            const bytes = new Uint8Array(buffer);
+                                            let binary = '';
+                                            const len = bytes.byteLength;
+                                            // Manual Base64 conversion to ensure integrity
+                                            for (let i = 0; i < len; i++) {
+                                                binary += String.fromCharCode(bytes[i]);
+                                            }
+                                            const base64 = window.btoa(binary);
+
+                                            console.log(`[Queue] Sending chunk #${item.seq} to Node. Base64 Len: ${base64.length}`);
                                             await (window as any).nodeOnChunk(base64, item.seq);
                                         } else {
-                                            console.error(`[Queue] Reader result was not a string for chunk #${item.seq}`);
+                                            console.error(`[Queue] Reader result was not ArrayBuffer for chunk #${item.seq}`);
                                         }
                                         resolve();
                                     };
@@ -182,7 +187,6 @@ export class ScPageController {
                                         console.error(`[Queue] Reader error on chunk #${item.seq}`);
                                         resolve();
                                     };
-                                    reader.readAsDataURL(item.blob);
                                 });
                             }
                             isProcessing = false;

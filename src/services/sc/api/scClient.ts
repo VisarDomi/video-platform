@@ -81,9 +81,10 @@ export class ScClient implements IStreamProvider {
 
             // Rewrite the TS paths in the playlist to be resolvable by our synthetic system
             // Local file: segment_000.ts -> Synthetic URL: sc_local_{channelId}_segment_000.ts
+            // We use a custom separator to strictly split channelId vs filename later
             const rewritten = data.split('\n').map(line => {
                 if (line.endsWith('.ts') && !line.startsWith('http')) {
-                    return `sc_local_${channelId}_${line}`;
+                    return `sc_local_STREAMER_${channelId}_FILE_${line}`;
                 }
                 return line;
             }).join('\n');
@@ -95,12 +96,14 @@ export class ScClient implements IStreamProvider {
     }
 
     public async getTsSegment(url: string): Promise<Buffer | null> {
-        // Match: sc_local_{channelId}_{filename}
-        const match = url.match(/sc_local_([^_]+)_(.+)/);
+        // Format: sc_local_STREAMER_{channelId}_FILE_{filename}
+        const parts = url.split('_FILE_');
 
-        if (match) {
-            const channelId = match[1];
-            const filename = match[2];
+        if (parts.length === 2) {
+            const prefixPart = parts[0];
+            const filename = parts[1];
+
+            const channelId = prefixPart.replace('sc_local_STREAMER_', '');
 
             const controller = this.controllers.get(channelId);
             if (controller) {
@@ -108,10 +111,15 @@ export class ScClient implements IStreamProvider {
                 try {
                     const data = await fs.readFile(filePath);
                     return data;
-                } catch {
+                } catch (e: any) {
+                    logger.warn(`[SC] Failed to read segment file: ${filePath}`, { error: e.message });
                     return null;
                 }
+            } else {
+                logger.warn(`[SC] Controller not found for channel: ${channelId} (URL: ${url})`);
             }
+        } else {
+            logger.warn(`[SC] Malformed TS URL: ${url}`);
         }
         return null;
     }
