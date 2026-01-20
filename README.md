@@ -1,4 +1,4 @@
-# video-segment-fetcher
+# video-downloader
 Download 1s .ts files for each of the streamers you follow.
 
 ## note
@@ -14,4 +14,6 @@ and produces:
 
 which gets consumed by both video-stream-builder and video-packager
 
-Note: The LadderClient.isOnline response does contain the streamer's name (profile_data.name), but we currently discard it and return a boolean. If you ever want human-readable folders for LADDER, that is where the change would happen.
+put links of streamers in:
+ladder.txt
+fmp4.txt
