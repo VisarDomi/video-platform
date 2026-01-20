@@ -7,6 +7,7 @@ import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/fc2.routes.js";
+import scRouter from "./api/sc.routes.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 declare module "express-serve-static-core" {
@@ -39,6 +40,7 @@ async function startServer() {
 
     // Register routes
     app.use("/", fc2Router); // fc2Router handles /fc2 and /api/fc2
+    app.use("/", scRouter); // scRouter handles /sc and /api/sc
     app.use("/api", videoApiRouter);
     app.use("/", hlsRouter);
 
