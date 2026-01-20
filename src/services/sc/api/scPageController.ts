@@ -12,7 +12,6 @@ export class ScPageController {
     public readonly channelName: string;
     private qualityManager: ScQualityManager | null = null;
 
-    // FFmpeg State
     private ffmpegProcess: ChildProcess | null = null;
     public readonly tempDir: string;
 
@@ -24,7 +23,6 @@ export class ScPageController {
     public async start(): Promise<void> {
         logger.info(`[SC] [${this.channelName}] Launching browser + FFmpeg (System Chromium)...`);
 
-        // 1. Prepare Temp Dir
         try {
             await fs.rm(this.tempDir, { recursive: true, force: true });
             await fs.mkdir(this.tempDir, { recursive: true });
@@ -33,7 +31,6 @@ export class ScPageController {
             return;
         }
 
-        // 2. Start FFmpeg (Hybrid: Copy Video, Transcode Audio -> HLS)
         this.ffmpegProcess = spawn("ffmpeg", [
             "-hide_banner",
             "-y",
@@ -52,7 +49,6 @@ export class ScPageController {
             path.join(this.tempDir, "playlist.m3u8")
         ]);
 
-        // DEBUG: Log FFmpeg Output
         this.ffmpegProcess.stderr?.on("data", (data) => {
             logger.debug(`[FFmpeg] ${data.toString()}`);
         });
@@ -66,25 +62,24 @@ export class ScPageController {
         try {
             this.browser = await chromium.launch({
                 executablePath: "/usr/bin/chromium",
-                headless: false, // Keep visible for debugging
+                headless: false,
                 args: [
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--mute-audio",
-                    "--window-size=1920,1080", // Increased size
+                    "--window-size=1920,1080",
                     "--enable-features=MediaRecorderInMP4"
                 ],
             });
 
             const context = await this.browser.newContext({
-                viewport: { width: 1920, height: 1080 }, // Increased size
+                viewport: { width: 1920, height: 1080 },
                 userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 permissions: ['microphone', 'camera']
             });
 
             this.page = await context.newPage();
 
-            // DEBUG: Capture Browser Console
             this.page.on("console", msg => {
                 logger.debug(`[Browser Console] ${msg.text()}`);
             });
@@ -105,6 +100,7 @@ export class ScPageController {
 
             const targetUrl = `https://stripchat.com/${this.channelName}`;
             await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+            await this.page.addStyleTag({ content: ".view-cam-watching-limit { display: none !important; }" });
 
             try {
                 const enterBtn = this.page.locator('.btn-visitors-agreement-accept').first();
@@ -115,10 +111,8 @@ export class ScPageController {
 
             await this.page.waitForTimeout(5000);
 
-            // --- START QUALITY MANAGER ---
             this.qualityManager = new ScQualityManager(this.page);
             this.qualityManager.start();
-            // -----------------------------
 
             await this.page.evaluate(() => {
                 const startRecording = () => {
@@ -151,7 +145,6 @@ export class ScPageController {
                         (window as any).__mediaRecorder = mediaRecorder;
                         (window as any).__isRecording = true;
 
-                        // --- Queue System Start ---
                         const queue: { blob: Blob, seq: number }[] = [];
                         let isProcessing = false;
                         let seqCounter = 0;
@@ -168,7 +161,6 @@ export class ScPageController {
 
                                 await new Promise<void>((resolve) => {
                                     const reader = new FileReader();
-                                    // Use ArrayBuffer to avoid MIME type comma parsing issues
                                     reader.readAsArrayBuffer(item.blob);
 
                                     reader.onloadend = async () => {
@@ -177,7 +169,6 @@ export class ScPageController {
                                             const bytes = new Uint8Array(buffer);
                                             let binary = '';
                                             const len = bytes.byteLength;
-                                            // Manual Base64 conversion to ensure integrity
                                             for (let i = 0; i < len; i++) {
                                                 binary += String.fromCharCode(bytes[i]);
                                             }
@@ -207,7 +198,6 @@ export class ScPageController {
                                 processQueue();
                             }
                         };
-                        // --- Queue System End ---
 
                         mediaRecorder.start(1000);
                         console.log(`[Recorder] Started with ${mimeType}`);
@@ -228,7 +218,7 @@ export class ScPageController {
     }
 
     public async stop(): Promise<void> {
-        this.qualityManager?.stop(); // Stop the interval
+        this.qualityManager?.stop();
         if (this.browser) {
             try { await this.browser.close(); } catch (e) {}
             this.browser = null;
