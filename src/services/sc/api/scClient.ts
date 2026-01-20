@@ -1,4 +1,5 @@
 import * as path from "path";
+import * as fs from "fs/promises";
 import * as config from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
@@ -10,31 +11,17 @@ export class ScClient implements IStreamProvider {
     private controllers: Map<string, ScPageController> = new Map();
 
     constructor() {
-        logger.info("[SC] Client initialized (Stream Recorder Mode).");
+        logger.info("[SC] Client initialized (FFmpeg Remux Mode).");
     }
 
     public async isOnline(channelId: string): Promise<boolean> {
         try {
             const url = `https://stripchat.com/api/front/v2/models/username/${channelId}/cam`;
-            const response = await fetch(url, {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"
-                }
-            });
+            const response = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
             if (!response.ok) return false;
-
             const data = await response.json();
-            const modelStatus = data.user?.user?.status;
-            const cam = data.cam;
-
-            if (modelStatus === "public" && cam?.isCamAvailable && cam?.isCamActive) {
-                return true;
-            }
-            return false;
-        } catch (error: any) {
-            logger.error(`[SC] Error checking online status for ${channelId}`, { error: error.message });
-            return false;
-        }
+            return (data.user?.user?.status === "public" && data.cam?.isCamAvailable && data.cam?.isCamActive);
+        } catch { return false; }
     }
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
@@ -53,16 +40,19 @@ export class ScClient implements IStreamProvider {
             await controller.start();
         }
 
-        // Wait for buffer
+        // Wait for FFmpeg to produce at least 2 segments (so 0 is safe)
         for (let i = 0; i < 30; i++) {
-            if (controller.getAvailableSegments().length > 0) {
-                logger.info(`[SC] [${channelId}] Recorder active. Buffer ready.`);
-                return masterUrl;
-            }
+            try {
+                const files = await fs.readdir(controller.tempDir);
+                if (files.filter(f => f.endsWith('.mkv')).length >= 2) {
+                    logger.info(`[SC] [${channelId}] FFmpeg producing files. Ready.`);
+                    return masterUrl;
+                }
+            } catch {}
             await new Promise(r => setTimeout(r, 1000));
         }
 
-        logger.warn(`[SC] [${channelId}] Timed out waiting for recorder.`);
+        logger.warn(`[SC] [${channelId}] Timed out waiting for FFmpeg.`);
         await controller.stop();
         this.controllers.delete(channelId);
         return null;
@@ -81,49 +71,60 @@ export class ScClient implements IStreamProvider {
         const channelId = match ? match[1] : "";
 
         const controller = this.controllers.get(channelId);
-        if (!controller || !controller.isActive()) {
+        if (!controller || !controller.isActive()) return { success: false, data: null };
+
+        try {
+            const files = await fs.readdir(controller.tempDir);
+            const segments = files
+                .filter(f => f.endsWith('.mkv'))
+                .sort(); // seg_00000.mkv, seg_00001.mkv...
+
+            // Exclude the last one as it might be currently being written by FFmpeg
+            if (segments.length > 0) {
+                segments.pop();
+            }
+
+            const duration = 2.0;
+
+            let m3u8 = "#EXTM3U\n";
+            m3u8 += "#EXT-X-VERSION:3\n";
+            m3u8 += `#EXT-X-TARGETDURATION:${Math.ceil(duration)}\n`;
+
+            // Extract seq number from filename seg_XXXXX.mkv
+            const firstFile = segments[0];
+            const firstSeq = firstFile ? parseInt(firstFile.match(/seg_(\d+)/)![1], 10) : 0;
+
+            m3u8 += `#EXT-X-MEDIA-SEQUENCE:${firstSeq}\n`;
+
+            for (const filename of segments) {
+                m3u8 += `#EXTINF:${duration},\n`;
+                // URL: sc_local_{channelId}_{filename}
+                m3u8 += `sc_local_${channelId}_${filename}\n`;
+            }
+
+            return { success: true, data: m3u8 };
+        } catch (e) {
             return { success: false, data: null };
         }
-
-        const segments = controller.getAvailableSegments();
-        const duration = 2.0;
-
-        let m3u8 = "#EXTM3U\n";
-        m3u8 += "#EXT-X-VERSION:3\n";
-        m3u8 += `#EXT-X-TARGETDURATION:${Math.ceil(duration)}\n`;
-
-        const firstSeq = segments.length > 0 ? segments[0] : 0;
-        m3u8 += `#EXT-X-MEDIA-SEQUENCE:${firstSeq}\n`;
-
-        for (const seqId of segments) {
-            m3u8 += `#EXTINF:${duration},\n`;
-            // Change extension to .mp4. If the browser sends mp4, good.
-            // If it sends WebM, we name it .mp4 anyway to trick HLS players?
-            // No, that confuses demuxers.
-            // If we successfully get mp4 from browser, we name it .mp4.
-            // If we get WebM, we name it .webm and assume the user concatenates manually (since HLS player won't support it).
-            // Let's stick to .mp4 naming in the hope that `MediaRecorderInMP4` flag works.
-            m3u8 += `sc_seg_${channelId}_${seqId}.mp4\n`;
-        }
-
-        return { success: true, data: m3u8 };
     }
 
     public async getTsSegment(url: string): Promise<Buffer | null> {
-        // Regex matches .mp4 now
-        const match = url.match(/sc_seg_(.+)_(\d+)\.mp4/);
+        // Match: sc_local_{channelId}_{filename}
+        const match = url.match(/sc_local_([^_]+)_(.+)/);
 
         if (match) {
             const channelId = match[1];
-            const seqId = parseInt(match[2], 10);
+            const filename = match[2];
 
             const controller = this.controllers.get(channelId);
             if (controller) {
-                let buf = controller.popSegment(seqId);
-                if (!buf) {
-                    buf = controller.popNext();
+                const filePath = path.join(controller.tempDir, filename);
+                try {
+                    const data = await fs.readFile(filePath);
+                    return data;
+                } catch {
+                    return null;
                 }
-                return buf;
             }
         }
         return null;
@@ -147,9 +148,7 @@ export class ScClient implements IStreamProvider {
         const baseFilename = generateDownloadBaseName(alias, date);
         const storageLocation = path.join(config.getConfig().storagePath, "sc", "downloader");
 
-        const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
-        if (!storageLocationExists) return null;
-
+        await FileSystemManager.ensureDirExists(storageLocation);
         const segmentsDirPath = path.resolve(storageLocation, baseFilename);
         const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
         return segmentsDirExists ? segmentsDirPath : null;
@@ -157,7 +156,8 @@ export class ScClient implements IStreamProvider {
 
     public async validateSegment(filePath: string): Promise<boolean> {
         try {
-            const stat = await import("fs/promises").then(fs => fs.stat(filePath));
+            // MKV segments generated by FFmpeg should be valid
+            const stat = await fs.stat(filePath);
             return stat.size > 0;
         } catch {
             return false;

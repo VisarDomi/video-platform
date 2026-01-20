@@ -1,4 +1,8 @@
 import { chromium, Browser, Page } from "playwright";
+import { spawn, ChildProcess } from "child_process";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
 import logger from "../../../common/logger.js";
 
 export class ScPageController {
@@ -6,18 +10,54 @@ export class ScPageController {
     private page: Page | null = null;
     public readonly channelName: string;
 
-    // State
-    public targetDuration: number = 2;
-    private segmentQueue: Buffer[] = [];
-    private producedSegmentCount: number = 0;
-    private headSequence: number = 0;
+    // FFmpeg State
+    private ffmpegProcess: ChildProcess | null = null;
+    public readonly tempDir: string;
 
     constructor(channelName: string) {
         this.channelName = channelName;
+        this.tempDir = path.join(os.tmpdir(), `sc_capture_${channelName}`);
     }
 
     public async start(): Promise<void> {
-        logger.info(`[SC] [${this.channelName}] Launching browser instance (Headful - Stream Recorder Mode)...`);
+        logger.info(`[SC] [${this.channelName}] Launching browser + FFmpeg...`);
+
+        // 1. Prepare Temp Dir
+        try {
+            await fs.rm(this.tempDir, { recursive: true, force: true });
+            await fs.mkdir(this.tempDir, { recursive: true });
+        } catch (e) {
+            logger.error(`[SC] Failed to create temp dir ${this.tempDir}`);
+            return;
+        }
+
+        // 2. Start FFmpeg
+        // Reads from stdin (pipe:0), segments into MKV files in temp dir
+        // -c copy: No transcoding (Low CPU)
+        // -f segment: Splits stream
+        // -segment_time 2: 2 second chunks
+        // -reset_timestamps 1: Makes each file playable independently
+        // -segment_format matroska: Robust container
+        this.ffmpegProcess = spawn("ffmpeg", [
+            "-y",
+            "-i", "pipe:0",
+            "-c", "copy",
+            "-f", "segment",
+            "-segment_time", "2",
+            "-reset_timestamps", "1",
+            "-segment_format", "matroska",
+            path.join(this.tempDir, "seg_%05d.mkv")
+        ]);
+
+        this.ffmpegProcess.stderr?.on("data", (data) => {
+            // logger.debug(`[FFmpeg] ${data.toString()}`);
+        });
+
+        this.ffmpegProcess.on("exit", (code) => {
+            if (code !== 0 && code !== null) {
+                logger.error(`[SC] FFmpeg exited with code ${code}`);
+            }
+        });
 
         try {
             this.browser = await chromium.launch({
@@ -27,7 +67,6 @@ export class ScPageController {
                     "--disable-setuid-sandbox",
                     "--mute-audio",
                     "--window-size=1280,720",
-                    // Enable features for MP4 recording if available
                     "--enable-features=MediaRecorderInMP4"
                 ],
             });
@@ -41,20 +80,13 @@ export class ScPageController {
             this.page = await context.newPage();
 
             await this.page.exposeFunction("nodeOnChunk", (base64Data: string) => {
-                const buf = Buffer.from(base64Data, "base64");
-                this.segmentQueue.push(buf);
-                this.producedSegmentCount++;
-                logger.debug(`[SC] [${this.channelName}] Received chunk #${this.producedSegmentCount} (${buf.length} bytes). Queue: ${this.segmentQueue.length}`);
-
-                if (this.segmentQueue.length > 50) {
-                    this.segmentQueue.shift();
-                    this.headSequence++;
+                if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
+                    const buf = Buffer.from(base64Data, "base64");
+                    this.ffmpegProcess.stdin.write(buf);
                 }
             });
 
             const targetUrl = `https://stripchat.com/${this.channelName}`;
-            logger.info(`[SC] [${this.channelName}] Navigating to ${targetUrl}`);
-
             await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
             try {
@@ -67,8 +99,6 @@ export class ScPageController {
             await this.page.waitForTimeout(5000);
 
             await this.page.evaluate(() => {
-                const CHECK_INTERVAL = 1000;
-
                 const startRecording = () => {
                     const video = document.querySelector('video');
                     if (!video) return false;
@@ -84,9 +114,7 @@ export class ScPageController {
                         const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream();
                         if (!stream) return false;
 
-                        // ATTEMPT TO FORCE MP4
-                        // Chrome typically supports 'video/webm;codecs=h264' or just 'video/webm'
-                        // Newer Chrome supports 'video/mp4'
+                        // Prefer MP4 if possible, else defaults.
                         const mimeTypes = [
                             'video/mp4;codecs=avc1,mp4a',
                             'video/mp4',
@@ -94,22 +122,9 @@ export class ScPageController {
                             'video/webm;codecs=vp9',
                             'video/webm'
                         ];
+                        let selectedMime = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || "";
 
-                        let selectedMime = "";
-                        for (const type of mimeTypes) {
-                            if (MediaRecorder.isTypeSupported(type)) {
-                                selectedMime = type;
-                                console.log(`[Recorder] Supported MIME: ${type}`);
-                                break;
-                            }
-                        }
-
-                        if (!selectedMime) {
-                            console.error("[Recorder] No supported MIME types found.");
-                            return false;
-                        }
-
-                        const options = { mimeType: selectedMime };
+                        const options = selectedMime ? { mimeType: selectedMime } : undefined;
                         const mediaRecorder = new MediaRecorder(stream, options);
                         (window as any).__mediaRecorder = mediaRecorder;
                         (window as any).__isRecording = true;
@@ -125,19 +140,15 @@ export class ScPageController {
                             }
                         };
 
-                        mediaRecorder.start(2000);
-                        console.log(`[Recorder] Started with ${selectedMime}`);
+                        mediaRecorder.start(1000);
+                        console.log(`[Recorder] Started with ${selectedMime || 'default'}`);
                         return true;
 
                     } catch (e) {
-                        console.error("[Recorder] Error:", e);
                         return false;
                     }
                 };
-
-                setInterval(() => {
-                    startRecording();
-                }, CHECK_INTERVAL);
+                setInterval(startRecording, 1000);
             });
 
         } catch (error: any) {
@@ -146,37 +157,16 @@ export class ScPageController {
         }
     }
 
-    public getAvailableSegments(): number[] {
-        const available: number[] = [];
-        for (let i = 0; i < this.segmentQueue.length; i++) {
-            available.push(this.headSequence + i);
-        }
-        return available;
-    }
-
-    public popSegment(sequenceId: number): Buffer | null {
-        if (sequenceId === this.headSequence) {
-            const buf = this.segmentQueue.shift();
-            if (buf) {
-                this.headSequence++;
-                return buf;
-            }
-        }
-        return null;
-    }
-
-    public popNext(): Buffer | null {
-        const buf = this.segmentQueue.shift();
-        if (buf) this.headSequence++;
-        return buf || null;
-    }
-
     public async stop(): Promise<void> {
         if (this.browser) {
             try { await this.browser.close(); } catch (e) {}
             this.browser = null;
             this.page = null;
-            this.segmentQueue = [];
+        }
+        if (this.ffmpegProcess) {
+            this.ffmpegProcess.stdin?.end();
+            this.ffmpegProcess.kill();
+            this.ffmpegProcess = null;
         }
     }
 
