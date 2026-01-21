@@ -30,7 +30,8 @@ const defaultConfig: IConfig = {
         shortTokenRefresh: 5000,
     },
     timeouts: {
-        staleStream: 15000,
+        // Increased to 60s to prevent premature SC disconnects during buffering/transcoding lags
+        staleStream: 60000,
     },
 };
 

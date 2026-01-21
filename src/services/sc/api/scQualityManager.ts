@@ -5,7 +5,12 @@ export class ScQualityManager {
     private page: Page;
     private intervalId: NodeJS.Timeout | null = null;
     private currentQuality: string | null = null;
-    // Slow down significantly to avoid 429/Rate Limiting
+    private lastVideoTime: number = -1;
+
+    // --- CONFIGURATION ---
+    private readonly ENABLE_LATENCY_TOGGLE = false; // Set to TRUE to enable latency switching
+    // ---------------------
+
     private readonly CHECK_INTERVAL = 60000;
     private readonly PRIORITIES = ['1080p60', '1080p', '720p60', '720p'];
 
@@ -17,12 +22,12 @@ export class ScQualityManager {
         if (this.intervalId) return;
         logger.info("[SC] QualityManager started.");
 
-        // Initial sequence: Wait 15s for page/player to settle before touching anything
         setTimeout(async () => {
             await this.ensurePlayerControlsVisible();
-            await this.ensureLatencySettings();
+            if (this.ENABLE_LATENCY_TOGGLE) {
+                await this.ensureLatencySettings();
+            }
 
-            // Wait 5 seconds between operations to be gentle
             await this.page.waitForTimeout(5000);
 
             await this.ensurePlayerControlsVisible();
@@ -31,6 +36,23 @@ export class ScQualityManager {
 
         this.intervalId = setInterval(async () => {
             await this.ensurePlayerControlsVisible();
+
+            // FREEZE DETECTION
+            const isFrozen = await this.checkIfFrozen();
+            if (isFrozen) {
+                logger.warn("[SC] Stream freeze detected.");
+                if (this.ENABLE_LATENCY_TOGGLE) {
+                    logger.info("[SC] Toggling latency to attempt fix...");
+                    await this.toggleLatency();
+                    return;
+                } else {
+                    logger.info("[SC] Latency toggle disabled. Skipping fix.");
+                }
+            }
+
+            if (this.ENABLE_LATENCY_TOGGLE) {
+                await this.ensureLatencySettings();
+            }
             await this.checkAndSetQuality();
         }, this.CHECK_INTERVAL);
     }
@@ -42,15 +64,29 @@ export class ScQualityManager {
         }
     }
 
+    private async checkIfFrozen(): Promise<boolean> {
+        try {
+            if (this.page.isClosed()) return false;
+            const currentTime = await this.page.evaluate(() => {
+                const v = document.querySelector('video');
+                return v ? v.currentTime : -1;
+            });
+
+            if (currentTime === -1) return false;
+
+            const frozen = (Math.abs(currentTime - this.lastVideoTime) < 0.1 && currentTime > 0.5);
+            this.lastVideoTime = currentTime;
+            return frozen;
+        } catch (e) {
+            return false;
+        }
+    }
+
     private async ensurePlayerControlsVisible(): Promise<void> {
         try {
             if (this.page.isClosed()) return;
-
-            // Optimization: Don't spam mouse events if controls are already there
             const gearBtn = this.page.locator('.player-resolution').first();
-            if (await gearBtn.isVisible()) {
-                return;
-            }
+            if (await gearBtn.isVisible()) return;
 
             await this.page.evaluate(() => {
                 const videoContainer = document.querySelector('.player-container') || document.querySelector('video')?.parentElement;
@@ -59,46 +95,62 @@ export class ScQualityManager {
                     videoContainer.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
                 }
             });
-            // Wait longer for fade-in
             await this.page.waitForTimeout(1000);
+        } catch (e) { /* ignore */ }
+    }
+
+    private async toggleLatency(): Promise<void> {
+        if (!this.ENABLE_LATENCY_TOGGLE) return;
+        try {
+            if (this.page.isClosed()) return;
+            const lightningBtn = this.page.locator('.player-low-latency-button').first();
+            if (!(await lightningBtn.isVisible())) return;
+
+            await lightningBtn.click({ force: true });
+            await this.page.waitForTimeout(2000);
+
+            const latencyRow = this.page.locator('.player-low-latency-dropdown__toggler').filter({ hasText: 'Ultra-low Latency' }).first();
+            if (await latencyRow.isVisible()) {
+                const input = latencyRow.locator('input');
+                if ((await input.count()) > 0) {
+                    await input.click({ force: true });
+                } else {
+                    await latencyRow.click({ force: true });
+                }
+                await this.page.waitForTimeout(2000);
+            } else {
+                await lightningBtn.click({ force: true }).catch(() => {});
+            }
         } catch (e) {
-            // Ignore errors if page is closing
+            logger.warn(`[SC] Error toggling latency: ${(e as Error).message}`);
         }
     }
 
     private async ensureLatencySettings(): Promise<void> {
+        if (!this.ENABLE_LATENCY_TOGGLE) return;
         try {
             if (this.page.isClosed()) return;
 
-            // 1. Find Lightning Button
             const lightningBtn = this.page.locator('.player-low-latency-button').first();
-            if (!(await lightningBtn.isVisible())) {
-                logger.debug("[SC] Latency button not visible.");
-                return;
-            }
+            if (!(await lightningBtn.isVisible())) return;
 
-            // 2. Open Menu
-            await lightningBtn.click();
-            await this.page.waitForTimeout(2000); // Slow down
+            await lightningBtn.click({ force: true });
+            await this.page.waitForTimeout(2000);
 
-            // 3. Find "Ultra-low Latency" Row
             const latencyRow = this.page.locator('.player-low-latency-dropdown__toggler').filter({ hasText: 'Ultra-low Latency' }).first();
 
             if (await latencyRow.isVisible()) {
                 let isOn = false;
-
-                // Check for <input> (Best check)
                 const input = latencyRow.locator('input');
+
                 if ((await input.count()) > 0) {
                     isOn = await input.isChecked();
                 } else {
-                    // Fallback: Check for switch/toggle element classes
                     const switchEl = latencyRow.locator('.switch, .toggle, [class*="switch"]').first();
                     if ((await switchEl.count()) > 0) {
                         const classes = await switchEl.getAttribute('class') || '';
                         isOn = classes.includes('active') || classes.includes('checked') || classes.includes('on');
                     } else {
-                        // Fallback: Check row classes
                         const rowClasses = await latencyRow.getAttribute('class') || '';
                         isOn = rowClasses.includes('active') || rowClasses.includes('checked');
                     }
@@ -107,25 +159,19 @@ export class ScQualityManager {
                 if (!isOn) {
                     logger.info("[SC] QualityManager: Enabling Ultra-low Latency");
                     if ((await input.count()) > 0) {
-                        await input.click();
+                        await input.click({ force: true });
                     } else {
-                        await latencyRow.click();
+                        await latencyRow.click({ force: true });
                     }
-                    // Wait after click to let it register/save
                     await this.page.waitForTimeout(2000);
                 } else {
-                    logger.debug("[SC] Ultra-low Latency is already ON.");
-                    // Close menu since we didn't toggle it
-                    await lightningBtn.click().catch(() => {});
+                    await lightningBtn.click({ force: true }).catch(() => {});
                     await this.page.waitForTimeout(1000);
                 }
             } else {
-                logger.warn("[SC] 'Ultra-low Latency' option not found in menu.");
-                // Close menu
-                await lightningBtn.click().catch(() => {});
+                await lightningBtn.click({ force: true }).catch(() => {});
                 await this.page.waitForTimeout(1000);
             }
-
         } catch (error: any) {
             logger.warn(`[SC] Error ensuring latency settings: ${error.message}`);
         }
@@ -135,25 +181,20 @@ export class ScQualityManager {
         try {
             if (this.page.isClosed()) return;
 
-            // 1. Find Gear Button
             const gearBtn = this.page.locator('.player-resolution').first();
             if (!(await gearBtn.isVisible())) return;
 
-            // 2. Click Gear
-            await gearBtn.click();
+            await gearBtn.click({ force: true });
 
-            // 3. Wait for Menu - Increased timeout for slowness
             const menu = this.page.locator('.player-resolution-tooltip__resolutions');
             try {
                 await menu.waitFor({ state: "visible", timeout: 3000 });
-                // Extra wait for list population
                 await this.page.waitForTimeout(1000);
             } catch {
-                await gearBtn.click().catch(() => {});
+                await gearBtn.click({ force: true }).catch(() => {});
                 return;
             }
 
-            // 4. Scrape Options
             const optionElements = await menu.locator('> *').all();
             const availableOptions: { text: string; element: any }[] = [];
 
@@ -164,16 +205,12 @@ export class ScQualityManager {
                 }
             }
 
-            // 5. Select Best
             let targetOption = null;
-
-            // A. Try explicit priority list first (exact matches)
             for (const priority of this.PRIORITIES) {
                 targetOption = availableOptions.find(opt => opt.text === priority);
                 if (targetOption) break;
             }
 
-            // B. Fallback: Parse highest number
             if (!targetOption && availableOptions.length > 0) {
                 const sorted = availableOptions.sort((a, b) => {
                     const valA = parseInt(a.text) || 0;
@@ -183,30 +220,25 @@ export class ScQualityManager {
                 targetOption = sorted[0];
             }
 
-            // 6. Act
             if (targetOption) {
                 const classAttr = await targetOption.element.getAttribute('class') || '';
                 const isActive = classAttr.includes('active') || classAttr.includes('selected');
 
                 if (!isActive && this.currentQuality !== targetOption.text) {
                     logger.info(`[SC] QualityManager: Switching to ${targetOption.text}`);
-                    await targetOption.element.click();
+                    await targetOption.element.click({ force: true });
                     this.currentQuality = targetOption.text;
-                    // Wait for switch to apply
                     await this.page.waitForTimeout(2000);
                 } else {
-                    // Already on best. Close menu.
-                    await gearBtn.click();
+                    await gearBtn.click({ force: true });
                     await this.page.waitForTimeout(1000);
                 }
             } else {
-                // No valid options. Close menu.
-                await gearBtn.click();
+                await gearBtn.click({ force: true });
                 await this.page.waitForTimeout(1000);
             }
-
         } catch (error: any) {
-            // Squelch errors during shutdown/nav
+            // Squelch
         }
     }
 }

@@ -11,6 +11,7 @@ export class ScPageController {
     private page: Page | null = null;
     public readonly channelName: string;
     private qualityManager: ScQualityManager | null = null;
+    private cookieInterval: NodeJS.Timeout | null = null;
 
     private ffmpegProcess: ChildProcess | null = null;
     public readonly tempDir: string;
@@ -31,9 +32,11 @@ export class ScPageController {
             return;
         }
 
+        // Added -thread_queue_size to help with stdin buffering
         this.ffmpegProcess = spawn("ffmpeg", [
-            "-hide_banner",
+            "-loglevel", "info",
             "-y",
+            "-thread_queue_size", "1024",
             "-f", "webm",
             "-i", "pipe:0",
 
@@ -50,13 +53,12 @@ export class ScPageController {
         ]);
 
         this.ffmpegProcess.stderr?.on("data", (data) => {
-            logger.debug(`[FFmpeg] ${data.toString()}`);
+            const msg = data.toString().trim();
+            if (msg) logger.debug(`[FFmpeg] ${msg}`);
         });
 
         this.ffmpegProcess.on("exit", (code) => {
-            if (code !== 0 && code !== null) {
-                logger.error(`[SC] FFmpeg exited with code ${code}`);
-            }
+            logger.info(`[SC] FFmpeg exited (code ${code})`);
         });
 
         try {
@@ -81,6 +83,7 @@ export class ScPageController {
             this.page = await context.newPage();
 
             this.page.on("console", msg => {
+                // Restore logs to debug recorder issues
                 logger.debug(`[Browser Console] ${msg.text()}`);
             });
 
@@ -88,19 +91,23 @@ export class ScPageController {
                 if (this.ffmpegProcess && this.ffmpegProcess.stdin && !this.ffmpegProcess.stdin.destroyed) {
                     try {
                         const buf = Buffer.from(base64Data, "base64");
-                        logger.debug(`[Node] Writing chunk #${seqId} to FFmpeg (Payload: ${base64Data.length} chars -> ${buf.length} bytes)`);
-                        this.ffmpegProcess.stdin.write(buf);
+                        const flushed = this.ffmpegProcess.stdin.write(buf);
+                        if (!flushed) {
+                            // logger.warn(`[Node] FFmpeg stdin buffer full at chunk #${seqId}. Backpressure!`);
+                            // We can try to listen for 'drain' but in this sync callback loop it's hard.
+                            // Just letting Node handle the buffer is usually okay unless it grows infinite.
+                        }
                     } catch (e: any) {
-                        logger.warn(`[SC] Failed to write chunk #${seqId} to FFmpeg stdin: ${e.message}`);
+                        logger.warn(`[SC] Failed to write chunk #${seqId}: ${e.message}`);
                     }
-                } else {
-                    logger.warn(`[Node] Dropping chunk #${seqId} because FFmpeg stdin is closed/destroyed.`);
                 }
             });
 
             const targetUrl = `https://stripchat.com/${this.channelName}`;
             await this.page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
             await this.page.addStyleTag({ content: ".view-cam-watching-limit { display: none !important; }" });
+
+            this.startCookieLooper();
 
             try {
                 const enterBtn = this.page.locator('.btn-visitors-agreement-accept').first();
@@ -137,8 +144,6 @@ export class ScPageController {
                         if (!MediaRecorder.isTypeSupported(mimeType)) {
                             console.error(`Browser DOES NOT support ${mimeType}`);
                             return false;
-                        } else {
-                            console.log(`Browser supports ${mimeType}`);
                         }
 
                         const mediaRecorder = new MediaRecorder(stream, { mimeType });
@@ -156,35 +161,27 @@ export class ScPageController {
                             while (queue.length > 0) {
                                 const item = queue.shift();
                                 if (!item) continue;
-
-                                console.log(`[Queue] Processing chunk #${item.seq} (Blob Size: ${item.blob.size})`);
-
                                 await new Promise<void>((resolve) => {
                                     const reader = new FileReader();
                                     reader.readAsArrayBuffer(item.blob);
-
                                     reader.onloadend = async () => {
                                         if (reader.result instanceof ArrayBuffer) {
                                             const buffer = reader.result;
                                             const bytes = new Uint8Array(buffer);
                                             let binary = '';
                                             const len = bytes.byteLength;
-                                            for (let i = 0; i < len; i++) {
-                                                binary += String.fromCharCode(bytes[i]);
+                                            // Chunking large strings to avoid stack overflow in some browsers
+                                            const CHUNK_SIZE = 8192;
+                                            for (let i = 0; i < len; i += CHUNK_SIZE) {
+                                                const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+                                                binary += String.fromCharCode.apply(null, Array.from(chunk));
                                             }
                                             const base64 = window.btoa(binary);
-
-                                            console.log(`[Queue] Sending chunk #${item.seq} to Node. Base64 Len: ${base64.length}`);
                                             await (window as any).nodeOnChunk(base64, item.seq);
-                                        } else {
-                                            console.error(`[Queue] Reader result was not ArrayBuffer for chunk #${item.seq}`);
                                         }
                                         resolve();
                                     };
-                                    reader.onerror = () => {
-                                        console.error(`[Queue] Reader error on chunk #${item.seq}`);
-                                        resolve();
-                                    };
+                                    reader.onerror = () => resolve();
                                 });
                             }
                             isProcessing = false;
@@ -193,7 +190,6 @@ export class ScPageController {
                         mediaRecorder.ondataavailable = (e) => {
                             if (e.data && e.data.size > 0) {
                                 seqCounter++;
-                                console.log(`[Recorder] Chunk received #${seqCounter} (Size: ${e.data.size}). Pushing to queue.`);
                                 queue.push({ blob: e.data, seq: seqCounter });
                                 processQueue();
                             }
@@ -217,7 +213,24 @@ export class ScPageController {
         }
     }
 
+    private startCookieLooper(): void {
+        if (this.cookieInterval) clearInterval(this.cookieInterval);
+        this.cookieInterval = setInterval(async () => {
+            if (!this.page || this.page.isClosed()) return;
+            try {
+                const cookieBtn = this.page.locator('.cookies-reminder__accept-all-button, .ds-btn-apply-2-ds').first();
+                if (await cookieBtn.isVisible()) {
+                    await cookieBtn.click({ force: true });
+                }
+            } catch (e) {}
+        }, 60000);
+    }
+
     public async stop(): Promise<void> {
+        if (this.cookieInterval) {
+            clearInterval(this.cookieInterval);
+            this.cookieInterval = null;
+        }
         this.qualityManager?.stop();
         if (this.browser) {
             try { await this.browser.close(); } catch (e) {}

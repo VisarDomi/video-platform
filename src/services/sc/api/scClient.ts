@@ -18,13 +18,12 @@ export class ScClient implements IStreamProvider {
 
     constructor() {
         logger.info("[SC] Client initialized (FFmpeg HLS Mode).");
-        // Check for stale sessions every 30 seconds
         this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
     }
 
     private _cleanupStaleSessions() {
         const now = Date.now();
-        // 60 seconds timeout - if Downloader stops polling, we kill the browser
+        // If a session hasn't been touched (polled) in 60s, kill it.
         const TIMEOUT_MS = 60000;
 
         for (const [channelId, session] of this.sessions.entries()) {
@@ -43,6 +42,12 @@ export class ScClient implements IStreamProvider {
         }
     }
 
+    // Force close specific session (useful if downloader detects stall)
+    public async forceCloseSession(channelId: string) {
+        logger.info(`[SC] Forcing close of session: ${channelId}`);
+        await this._closeSession(channelId);
+    }
+
     public async isOnline(channelId: string): Promise<boolean> {
         try {
             const url = `https://stripchat.com/api/front/v2/models/username/${channelId}/cam`;
@@ -54,6 +59,7 @@ export class ScClient implements IStreamProvider {
     }
 
     public async getHlsUrl(channelId: string): Promise<string | null> {
+        // We use a fake URL scheme to pass the channelId around
         return `http://synthetic-sc/${channelId}/playlist.m3u8`;
     }
 
@@ -68,9 +74,14 @@ export class ScClient implements IStreamProvider {
         const match = masterUrl.match(/synthetic-sc\/([^\/]+)\//);
         const channelId = match ? match[1] : masterUrl;
 
+        // If a session exists but might be stale/broken from a previous run that exited poorly,
+        // we might want to kill it to be safe. But for now, let's reuse if active.
         let session = this.sessions.get(channelId);
 
         if (!session || !session.controller.isActive()) {
+            // Ensure any old one is gone
+            await this._closeSession(channelId);
+
             const controller = new ScPageController(channelId);
             session = {
                 controller,
@@ -83,11 +94,9 @@ export class ScClient implements IStreamProvider {
         const playlistPath = path.join(session.controller.tempDir, "playlist.m3u8");
 
         // Wait for FFmpeg to produce the playlist
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 60; i++) {
             try {
-                // Keep session alive while waiting
                 this._touchSession(channelId);
-
                 const stat = await fs.stat(playlistPath);
                 if (stat.size > 0) {
                     logger.info(`[SC] [${channelId}] HLS Playlist ready.`);
@@ -123,8 +132,6 @@ export class ScClient implements IStreamProvider {
             const playlistPath = path.join(session.controller.tempDir, "playlist.m3u8");
             const data = await fs.readFile(playlistPath, "utf-8");
 
-            // Rewrite the TS paths in the playlist to be resolvable by our synthetic system
-            // Local file: segment_000.ts -> Synthetic URL: sc_local_STREAMER_{channelId}_FILE_{line}
             const rewritten = data.split('\n').map(line => {
                 if (line.endsWith('.ts') && !line.startsWith('http')) {
                     return `sc_local_STREAMER_${channelId}_FILE_${line}`;
@@ -139,13 +146,11 @@ export class ScClient implements IStreamProvider {
     }
 
     public async getTsSegment(url: string): Promise<Buffer | null> {
-        // Format: sc_local_STREAMER_{channelId}_FILE_{filename}
         const parts = url.split('_FILE_');
 
         if (parts.length === 2) {
             const prefixPart = parts[0];
             const filename = parts[1];
-
             const channelId = prefixPart.replace('sc_local_STREAMER_', '');
 
             const session = this.sessions.get(channelId);
@@ -156,14 +161,9 @@ export class ScClient implements IStreamProvider {
                     const data = await fs.readFile(filePath);
                     return data;
                 } catch (e: any) {
-                    logger.warn(`[SC] Failed to read segment file: ${filePath}`, { error: e.message });
                     return null;
                 }
-            } else {
-                logger.warn(`[SC] Session not found for channel: ${channelId} (URL: ${url})`);
             }
-        } else {
-            logger.warn(`[SC] Malformed TS URL: ${url}`);
         }
         return null;
     }

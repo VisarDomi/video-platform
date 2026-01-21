@@ -9,6 +9,8 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { IStreamProvider } from "../core/interfaces.js";
 import { StreamQualityMonitor } from "./streamQualityMonitor.js";
+// Needed for type checking/casting if we want to call ScClient methods
+import { ScClient } from "../sc/api/scClient.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -62,7 +64,6 @@ export class StreamDownloader {
 
         const playlistManager = new PlaylistManager(segmentsDirPath);
 
-        // Initialize Quality Monitor
         const qualityMonitor = new StreamQualityMonitor(
             this.streamProvider,
             this.downloadHandle.masterPlaylistUrl,
@@ -73,7 +74,7 @@ export class StreamDownloader {
                 liveUrl = newUrl;
                 this.downloadHandle.update({ liveUrl });
             },
-            10000 // Poll every 10 seconds
+            10000
         );
         qualityMonitor.start();
 
@@ -83,9 +84,6 @@ export class StreamDownloader {
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
-
-                // logger.debug(`[Downloader] Raw Playlist for ${alias}: \n${liveResponse.data.substring(0, 500)}...`);
-
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
                     (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
@@ -107,7 +105,6 @@ export class StreamDownloader {
                             const isValid = await this.streamProvider.validateSegment(segmentPath);
 
                             if (!isValid) {
-                                // logger.warn(`Downloaded segment is corrupt (validation failed). Deleting and skipping: ${segmentPath}`);
                                 await fs.unlink(segmentPath).catch(() => {});
                                 playlistManager.addIgnoredSegment(segment.localName);
                                 lastDownload = Date.now();
@@ -122,7 +119,6 @@ export class StreamDownloader {
                     }
                 }
             }
-
             await timersPromises.setTimeout(1000);
         }
 
@@ -130,6 +126,18 @@ export class StreamDownloader {
         await playlistManager.finalizePlaylist();
 
         logger.info(`Finished download process for: ${segmentsDirPath}`);
+
+        // --- CLEANUP SC SESSION ON DOWNLOAD END ---
+        if (this.streamProvider instanceof ScClient) {
+            const match = this.downloadHandle.masterPlaylistUrl.match(/synthetic-sc\/([^\/]+)\//);
+            const channelId = match ? match[1] : this.downloadHandle.state.streamerId;
+            if (channelId) {
+                logger.info(`[StreamDownloader] Closing SC session for ${channelId}`);
+                await (this.streamProvider as ScClient).forceCloseSession(channelId);
+            }
+        }
+        // ------------------------------------------
+
         this.downloadHandle.remove();
     }
 }
