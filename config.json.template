@@ -4,6 +4,6 @@
         "pollFollowing": 1000
     },
     "timeouts": {
-        "staleStream": 15000
+        "staleStream": 60000
     }
 }
