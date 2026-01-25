@@ -10,19 +10,8 @@ const router = Router();
 
 router.get("/videos", async (req, res) => {
     try {
-        const start = Date.now();
         const provider = (req.query.provider as string) || "tango";
-        const { videos, timings } = await retrieveService.getAllVideos(provider);
-        const end = Date.now();
-
-        res.set("X-Total-Server-Time-Ms", String(end - start));
-        res.set("X-Timing-Live-Folders-Ms", String(timings['live-folders']));
-        res.set("X-Timing-Readdir-Ms", String(timings['readdir']));
-        res.set("X-Timing-Duration-Calc-Ms", String(timings['duration-calc']));
-
-        res.set("X-Timing-Sorting-Ms", String(timings['sorting']));
-        res.set("X-Count-Videos", String(timings['count']));
-
+        const videos = await retrieveService.getAllVideos(provider);
         res.json(videos);
     } catch (error: any) {
         logger.error("Failed to retrieve videos", { error });
