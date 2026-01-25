@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Result holds the parsed duration for a file
@@ -17,6 +18,17 @@ type Result struct {
 	Path     string  `json:"path"`
 	Duration float64 `json:"duration"`
 }
+
+// CacheEntry holds the cached duration and last modification time
+type CacheEntry struct {
+	ModTime  time.Time
+	Duration float64
+}
+
+var (
+	cache      = make(map[string]CacheEntry)
+	cacheMutex sync.RWMutex
+)
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -85,7 +97,35 @@ func worker(jobs <-chan string, results chan<- Result, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for path := range jobs {
+		// 1. Get File Info (for cache check)
+		info, err := os.Stat(path)
+		if err != nil {
+			// File likely doesn't exist or permissions issue
+			results <- Result{Path: path, Duration: 0}
+			continue
+		}
+
+		// 2. Check Cache
+		cacheMutex.RLock()
+		entry, found := cache[path]
+		cacheMutex.RUnlock()
+
+		if found && entry.ModTime.Equal(info.ModTime()) {
+			results <- Result{Path: path, Duration: entry.Duration}
+			continue
+		}
+
+		// 3. Cache Miss - Parse File
 		dur := parsePlaylist(path)
+
+		// 4. Update Cache
+		cacheMutex.Lock()
+		cache[path] = CacheEntry{
+			ModTime:  info.ModTime(),
+			Duration: dur,
+		}
+		cacheMutex.Unlock()
+
 		results <- Result{Path: path, Duration: dur}
 	}
 }
