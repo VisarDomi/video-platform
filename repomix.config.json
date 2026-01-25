@@ -5,7 +5,7 @@
         "copyToClipboard": false
     },
     "include": [
-        "**/*.svelte",
+        "**/*.go",
         "**/*.ts",
         "**/*.html",
         "**/*.css",
