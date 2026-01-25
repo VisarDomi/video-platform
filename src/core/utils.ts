@@ -66,26 +66,3 @@ export async function getLiveFolders(): Promise<Set<string>> {
         return new Set();
     }
 }
-
-export async function getPlaylistDuration(videoPath: string): Promise<number> {
-    try {
-        const playlistPath = path.join(videoPath, constants.FILE_NAMES.HLS_PLAYLIST);
-        const content = await fsPromises.readFile(playlistPath, constants.MISC.ENCODING_UTF8);
-        let duration = 0;
-        const lines = content.split(constants.MISC.NEW_LINE);
-
-        for (const line of lines) {
-            if (line.startsWith(constants.HLS.INF_PREFIX)) {
-                // Format is #EXTINF:10.000,
-                const valueStr = line.substring(constants.HLS.INF_PREFIX.length).split(',')[0];
-                const value = parseFloat(valueStr);
-                if (!isNaN(value)) {
-                    duration += value;
-                }
-            }
-        }
-        return duration;
-    } catch {
-        return 0;
-    }
-}

@@ -12,7 +12,7 @@ function getDurationsFromGo(filePaths: string[]): Promise<Record<string, number>
     return new Promise((resolve) => {
         const projectRoot = utils.findProjectRoot();
         // Path to the compiled binary
-        const binaryPath = path.join(projectRoot, "core", "bin", "playlist-parser");
+        const binaryPath = path.join(projectRoot, "src", "core", "bin", "playlist-parser");
 
         const child = spawn(binaryPath);
 
