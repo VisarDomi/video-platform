@@ -5,16 +5,22 @@ import * as config from "../../core/config.js";
 import * as utils from "../../core/utils.js";
 import * as constants from "../../core/constants.js";
 
-export async function getAllVideos(provider: string = "tango"): Promise<types.VideoItem[]> {
-    const liveFolders = await utils.getLiveFolders();
-    const videos: types.VideoItem[] = [];
+export async function getAllVideos(provider: string = "tango"): Promise<{ videos: types.VideoItem[], timings: Record<string, number> }> {
+    const timings: Record<string, number> = {};
+    const tStart = Date.now();
 
+    const liveFolders = await utils.getLiveFolders();
+    timings['live-folders'] = Date.now() - tStart;
+
+    const videos: types.VideoItem[] = [];
     const paths = config.getProviderPaths(provider);
     const providerPaths = [
         { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
         { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
         { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
     ];
+
+    const tProcessStart = Date.now();
 
     // Process all video directories in parallel
     const dirPromises = providerPaths.map(async (dirConfig) => {
@@ -48,6 +54,11 @@ export async function getAllVideos(provider: string = "tango"): Promise<types.Vi
     });
 
     await Promise.all(dirPromises);
+    timings['processing-files'] = Date.now() - tProcessStart;
 
-    return videos.sort((a, b) => a.filename.localeCompare(b.filename));
+    const tSortStart = Date.now();
+    videos.sort((a, b) => a.filename.localeCompare(b.filename));
+    timings['sorting'] = Date.now() - tSortStart;
+
+    return { videos, timings };
 }
