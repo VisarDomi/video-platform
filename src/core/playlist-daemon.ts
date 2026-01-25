@@ -7,7 +7,8 @@ import logger from "./logger.js";
 
 let daemonProcess: ChildProcess | null = null;
 let currentResolve: ((value: Record<string, number>) => void) | null = null;
-const daemonLock = pLimit(1); // Serialize access to the daemon
+let currentPaths: string[] = []; // Store paths to map response back to filenames
+const daemonLock = pLimit(1);
 
 function getDaemon(): ChildProcess {
     if (daemonProcess && !daemonProcess.killed) {
@@ -19,21 +20,32 @@ function getDaemon(): ChildProcess {
 
     daemonProcess = spawn(binaryPath);
 
-    // Setup stdout listener
     const rl = createInterface({ input: daemonProcess.stdout! });
     rl.on('line', (line) => {
         if (currentResolve) {
             try {
-                const result = JSON.parse(line);
+                // Protocol: Semicolon separated values "10.5;0;20.1"
+                // Order matches currentPaths exactly
+                const durations = line.split(';');
+                const result: Record<string, number> = {};
+
+                // Map values back to paths
+                for (let i = 0; i < currentPaths.length; i++) {
+                    const duration = parseFloat(durations[i]);
+                    // Safety check for parsing errors
+                    result[currentPaths[i]] = isNaN(duration) ? 0 : duration;
+                }
+
                 const resolve = currentResolve;
                 currentResolve = null;
+                currentPaths = [];
                 resolve(result);
             } catch (err) {
-                logger.error("Failed to parse Go output line", { err, line });
-                // Don't leave the request hanging
+                logger.error("Failed to parse Go output line", { err });
                 if (currentResolve) {
                     currentResolve({});
                     currentResolve = null;
+                    currentPaths = [];
                 }
             }
         }
@@ -49,6 +61,7 @@ function getDaemon(): ChildProcess {
         if (currentResolve) {
             currentResolve({});
             currentResolve = null;
+            currentPaths = [];
         }
     });
 
@@ -56,15 +69,13 @@ function getDaemon(): ChildProcess {
 }
 
 export function getDurationsFromGo(filePaths: string[]): Promise<Record<string, number>> {
-    // We wrap this in daemonLock to ensure we only send one batch at a time
-    // and wait for its specific response.
     return daemonLock(() => {
         return new Promise<Record<string, number>>((resolve) => {
             try {
                 const process = getDaemon();
                 currentResolve = resolve;
+                currentPaths = filePaths;
 
-                // Write paths followed by the sentinel
                 if (filePaths.length === 0) {
                     resolve({});
                     return;

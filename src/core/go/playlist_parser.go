@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -13,10 +12,16 @@ import (
 	"time"
 )
 
-// Result holds the parsed duration for a file
+// Job holds the processing task info
+type Job struct {
+	Index int
+	Path  string
+}
+
+// Result holds the parsed duration and its original index
 type Result struct {
-	Path     string  `json:"path"`
-	Duration float64 `json:"duration"`
+	Index    int
+	Duration float64
 }
 
 // CacheEntry holds the cached duration and last modification time
@@ -32,15 +37,18 @@ var (
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
+	// Buffer size increased to handle large inputs if necessary
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
 	var currentBatch []string
 
-	// Infinite loop: read lines, build batch, process on sentinel
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
 		if line == "<<BATCH_END>>" {
 			processBatch(currentBatch)
-			currentBatch = nil // Reset for next batch
+			currentBatch = nil
 			continue
 		}
 
@@ -51,74 +59,81 @@ func main() {
 }
 
 func processBatch(paths []string) {
-	if len(paths) == 0 {
-		fmt.Println("{}")
+	count := len(paths)
+	if count == 0 {
+		fmt.Println("")
 		return
 	}
 
-	// 1. Worker Pool Setup
+	// Pre-allocate storage for ordered results
+	finalDurations := make([]float64, count)
+
 	numWorkers := runtime.NumCPU() * 2
-	jobs := make(chan string, len(paths))
-	results := make(chan Result, len(paths))
+
+	jobs := make(chan Job, count)
+	results := make(chan Result, count)
 	var wg sync.WaitGroup
 
-	// 2. Start Workers
 	for w := 0; w < numWorkers; w++ {
 		wg.Add(1)
 		go worker(jobs, results, &wg)
 	}
 
-	// 3. Send Jobs
-	for _, p := range paths {
-		jobs <- p
+	for i, p := range paths {
+		jobs <- Job{Index: i, Path: p}
 	}
 	close(jobs)
 
-	// 4. Wait for workers in a separate goroutine to close results channel
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	// 5. Collect Results into a Map
-	output := make(map[string]float64)
+	// Collect results and place them in the correct index
 	for res := range results {
-		output[res.Path] = res.Duration
+		finalDurations[res.Index] = res.Duration
 	}
 
-	// 6. Print JSON (NewEncoder appends a newline, which is crucial for the Node.js readline)
-	jsonEncoder := json.NewEncoder(os.Stdout)
-	if err := jsonEncoder.Encode(output); err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+	// Efficiently build the output string
+	var sb strings.Builder
+	// Pre-allocate approximation: 6 chars per float * count
+	sb.Grow(count * 6)
+
+	for i, dur := range finalDurations {
+		if i > 0 {
+			sb.WriteByte(';')
+		}
+		// Format float to suppress scientific notation, minimal decimals
+		sb.WriteString(strconv.FormatFloat(dur, 'f', -1, 64))
 	}
+
+	// Print single line to stdout
+	fmt.Println(sb.String())
 }
 
-func worker(jobs <-chan string, results chan<- Result, wg *sync.WaitGroup) {
+func worker(jobs <-chan Job, results chan<- Result, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	for path := range jobs {
-		// 1. Get File Info (for cache check)
+	for job := range jobs {
+		path := job.Path
+
 		info, err := os.Stat(path)
 		if err != nil {
-			// File likely doesn't exist or permissions issue
-			results <- Result{Path: path, Duration: 0}
+			results <- Result{Index: job.Index, Duration: 0}
 			continue
 		}
 
-		// 2. Check Cache
 		cacheMutex.RLock()
 		entry, found := cache[path]
 		cacheMutex.RUnlock()
 
 		if found && entry.ModTime.Equal(info.ModTime()) {
-			results <- Result{Path: path, Duration: entry.Duration}
+			results <- Result{Index: job.Index, Duration: entry.Duration}
 			continue
 		}
 
-		// 3. Cache Miss - Parse File
 		dur := parsePlaylist(path)
 
-		// 4. Update Cache
 		cacheMutex.Lock()
 		cache[path] = CacheEntry{
 			ModTime:  info.ModTime(),
@@ -126,7 +141,7 @@ func worker(jobs <-chan string, results chan<- Result, wg *sync.WaitGroup) {
 		}
 		cacheMutex.Unlock()
 
-		results <- Result{Path: path, Duration: dur}
+		results <- Result{Index: job.Index, Duration: dur}
 	}
 }
 
