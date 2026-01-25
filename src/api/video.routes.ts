@@ -17,8 +17,10 @@ router.get("/videos", async (req, res) => {
 
         res.set("X-Total-Server-Time-Ms", String(end - start));
         res.set("X-Timing-Live-Folders-Ms", String(timings['live-folders']));
-        res.set("X-Timing-Processing-Files-Ms", String(timings['processing-files']));
+        res.set("X-Timing-Readdir-Ms", String(timings['readdir']));
+        res.set("X-Timing-Duration-Calc-Ms", String(timings['duration-calc']));
         res.set("X-Timing-Sorting-Ms", String(timings['sorting']));
+        res.set("X-Count-Videos", String(timings['count']));
 
         res.json(videos);
     } catch (error: any) {

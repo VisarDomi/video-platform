@@ -12,7 +12,6 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
     const liveFolders = await utils.getLiveFolders();
     timings['live-folders'] = Date.now() - tStart;
 
-    const videos: types.VideoItem[] = [];
     const paths = config.getProviderPaths(provider);
     const providerPaths = [
         { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
@@ -20,45 +19,52 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
         { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
     ];
 
-    const tProcessStart = Date.now();
+    // Phase 1: Readdir (Listing all folders)
+    const tReaddirStart = Date.now();
+    const allEntries: { name: string; fullPath: string; type: types.VideoType }[] = [];
 
-    // Process all video directories in parallel
-    const dirPromises = providerPaths.map(async (dirConfig) => {
+    await Promise.all(providerPaths.map(async (dirConfig) => {
         try {
             const entries = await fsPromises.readdir(dirConfig.path, { withFileTypes: true });
-
-            // Map entries to VideoItems in parallel
-            const folderPromises = entries
-                .filter(entry => entry.isDirectory())
-                .map(async (entry) => {
-                    const fullPath = path.join(dirConfig.path, entry.name);
-                    const isLive = liveFolders.has(entry.name);
-
-                    // Only read duration if not live (live duration changes constantly)
-                    const duration = isLive ? 0 : await utils.getPlaylistDuration(fullPath);
-
-                    return {
-                        filename: entry.name,
-                        type: dirConfig.type,
-                        size: 0, // Calculation skipped for performance
-                        duration: duration,
-                        isLive: isLive
-                    };
-                });
-
-            const dirVideos = await Promise.all(folderPromises);
-            videos.push(...dirVideos);
+            entries.forEach(entry => {
+                if (entry.isDirectory()) {
+                    allEntries.push({
+                        name: entry.name,
+                        fullPath: path.join(dirConfig.path, entry.name),
+                        type: dirConfig.type
+                    });
+                }
+            });
         } catch (error) {
-            // Directory might not exist or be inaccessible, just skip it
+            // Directory might not exist or be inaccessible
         }
-    });
+    }));
+    timings['readdir'] = Date.now() - tReaddirStart;
 
-    await Promise.all(dirPromises);
-    timings['processing-files'] = Date.now() - tProcessStart;
+    // Phase 2: Processing (Reading durations)
+    const tProcessStart = Date.now();
+    const videos: types.VideoItem[] = await Promise.all(allEntries.map(async (entry) => {
+        const isLive = liveFolders.has(entry.name);
+        // Only read duration if not live
+        const duration = isLive ? 0 : await utils.getPlaylistDuration(entry.fullPath);
 
+        return {
+            filename: entry.name,
+            type: entry.type,
+            size: 0,
+            duration: duration,
+            isLive: isLive
+        };
+    }));
+    timings['duration-calc'] = Date.now() - tProcessStart;
+
+    // Phase 3: Sorting
     const tSortStart = Date.now();
     videos.sort((a, b) => a.filename.localeCompare(b.filename));
     timings['sorting'] = Date.now() - tSortStart;
+
+    // Stats
+    timings['count'] = videos.length;
 
     return { videos, timings };
 }
