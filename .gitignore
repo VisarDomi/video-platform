@@ -10,3 +10,4 @@ repomix/
 .idea/
 .vscode/
 *.log
+src/core/bin

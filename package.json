@@ -5,7 +5,8 @@
     "main": "dist/main.js",
     "type": "module",
     "scripts": {
-        "build": "rm -rf dist && tsc",
+        "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
+        "build": "npm run compile-go && rm -rf dist && tsc",
         "start": "npm run build && pm2 start dist/main.js --name video-editor-backend --update-env",
         "restart": "npm run build && pm2 restart video-editor-backend --update-env",
         "stop": "pm2 stop video-editor-backend",
