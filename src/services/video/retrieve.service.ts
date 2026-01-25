@@ -1,9 +1,57 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
+import { spawn } from "child_process";
 import * as types from "../../core/types.js";
 import * as config from "../../core/config.js";
 import * as utils from "../../core/utils.js";
 import * as constants from "../../core/constants.js";
+import logger from "../../core/logger.js";
+
+// Helper to run the Go binary
+function getDurationsFromGo(filePaths: string[]): Promise<Record<string, number>> {
+    return new Promise((resolve) => {
+        const projectRoot = utils.findProjectRoot();
+        // Path to the compiled binary
+        const binaryPath = path.join(projectRoot, "core", "bin", "playlist-parser");
+
+        const child = spawn(binaryPath);
+
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.on("data", (data) => {
+            stdout += data.toString();
+        });
+
+        child.stderr.on("data", (data) => {
+            stderr += data.toString();
+        });
+
+        child.on("close", (code) => {
+            if (code !== 0) {
+                logger.error("Go parser failed", { code, stderr });
+                resolve({});
+                return;
+            }
+            try {
+                const result = JSON.parse(stdout);
+                resolve(result);
+            } catch (err) {
+                logger.error("Failed to parse Go output", { err, stdout });
+                resolve({});
+            }
+        });
+
+        child.on("error", (err) => {
+            logger.error("Failed to spawn Go parser", { err });
+            resolve({});
+        });
+
+        // Write paths to stdin
+        child.stdin.write(filePaths.join("\n"));
+        child.stdin.end();
+    });
+}
 
 export async function getAllVideos(provider: string = "tango"): Promise<{ videos: types.VideoItem[], timings: Record<string, number> }> {
     const timings: Record<string, number> = {};
@@ -21,7 +69,7 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
 
     // Phase 1: Readdir
     const tReaddirStart = Date.now();
-    const allEntries: { name: string; fullPath: string; type: types.VideoType }[] = [];
+    const allEntries: { name: string; fullPath: string; type: types.VideoType; playlistPath?: string }[] = [];
 
     await Promise.all(providerPaths.map(async (dirConfig) => {
         try {
@@ -41,52 +89,35 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
     }));
     timings['readdir'] = Date.now() - tReaddirStart;
 
-    // Phase 2: Processing (Reading durations)
+    // Phase 2: Processing (Go Implementation)
     const tProcessStart = Date.now();
 
-    // Instrumentation accumulators
-    let totalIoTime = 0;
-    let totalSplitTime = 0;
-    let totalLoopTime = 0;
-    let totalLinesCount = 0;
+    // Prepare list for Go
+    const pathsToProcess: string[] = [];
+    // Map to quickly find entry by path to assign duration later
+    const entryMap = new Map<string, typeof allEntries[0]>();
 
-    const videos: types.VideoItem[] = await Promise.all(allEntries.map(async (entry) => {
+    allEntries.forEach(entry => {
+        const isLive = liveFolders.has(entry.name);
+        if (!isLive) {
+            const playlistPath = path.join(entry.fullPath, constants.FILE_NAMES.HLS_PLAYLIST);
+            entry.playlistPath = playlistPath;
+            pathsToProcess.push(playlistPath);
+            entryMap.set(playlistPath, entry);
+        }
+    });
+
+    // Call Go
+    const durationMap = await getDurationsFromGo(pathsToProcess);
+
+    const videos: types.VideoItem[] = allEntries.map(entry => {
         const isLive = liveFolders.has(entry.name);
         let duration = 0;
 
-        if (!isLive) {
-            try {
-                const playlistPath = path.join(entry.fullPath, constants.FILE_NAMES.HLS_PLAYLIST);
-
-                // Measure IO
-                const tIoStart = performance.now();
-                const content = await fsPromises.readFile(playlistPath, constants.MISC.ENCODING_UTF8);
-                totalIoTime += (performance.now() - tIoStart);
-
-                // Measure Split
-                const tSplitStart = performance.now();
-                const lines = content.split(constants.MISC.NEW_LINE);
-                totalSplitTime += (performance.now() - tSplitStart);
-
-                totalLinesCount += lines.length;
-
-                // Measure Loop logic
-                const tLoopStart = performance.now();
-                for (const line of lines) {
-                    if (line.startsWith(constants.HLS.INF_PREFIX)) {
-                        // Original Logic: line.substring(...).split(',')[0]
-                        const valueStr = line.substring(constants.HLS.INF_PREFIX.length).split(',')[0];
-                        const value = parseFloat(valueStr);
-                        if (!isNaN(value)) {
-                            duration += value;
-                        }
-                    }
-                }
-                totalLoopTime += (performance.now() - tLoopStart);
-
-            } catch {
-                duration = 0;
-            }
+        if (isLive) {
+            duration = 0;
+        } else if (entry.playlistPath && durationMap[entry.playlistPath] !== undefined) {
+            duration = durationMap[entry.playlistPath];
         }
 
         return {
@@ -96,13 +127,9 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
             duration: duration,
             isLive: isLive
         };
-    }));
+    });
 
     timings['duration-calc'] = Date.now() - tProcessStart;
-    timings['duration-io-sum'] = Math.round(totalIoTime);
-    timings['duration-split-sum'] = Math.round(totalSplitTime);
-    timings['duration-loop-sum'] = Math.round(totalLoopTime);
-    timings['lines-count'] = totalLinesCount;
 
     // Phase 3: Sorting
     const tSortStart = Date.now();
