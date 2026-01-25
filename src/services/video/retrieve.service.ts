@@ -46,14 +46,15 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
 
     // Instrumentation accumulators
     let totalIoTime = 0;
-    let totalParseTime = 0;
+    let totalSplitTime = 0;
+    let totalLoopTime = 0;
+    let totalLinesCount = 0;
 
     const videos: types.VideoItem[] = await Promise.all(allEntries.map(async (entry) => {
         const isLive = liveFolders.has(entry.name);
         let duration = 0;
 
         if (!isLive) {
-            // INLINED Logic from utils.getPlaylistDuration for profiling
             try {
                 const playlistPath = path.join(entry.fullPath, constants.FILE_NAMES.HLS_PLAYLIST);
 
@@ -62,11 +63,18 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
                 const content = await fsPromises.readFile(playlistPath, constants.MISC.ENCODING_UTF8);
                 totalIoTime += (performance.now() - tIoStart);
 
-                // Measure Parse
-                const tParseStart = performance.now();
+                // Measure Split
+                const tSplitStart = performance.now();
                 const lines = content.split(constants.MISC.NEW_LINE);
+                totalSplitTime += (performance.now() - tSplitStart);
+
+                totalLinesCount += lines.length;
+
+                // Measure Loop logic
+                const tLoopStart = performance.now();
                 for (const line of lines) {
                     if (line.startsWith(constants.HLS.INF_PREFIX)) {
+                        // Original Logic: line.substring(...).split(',')[0]
                         const valueStr = line.substring(constants.HLS.INF_PREFIX.length).split(',')[0];
                         const value = parseFloat(valueStr);
                         if (!isNaN(value)) {
@@ -74,7 +82,7 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
                         }
                     }
                 }
-                totalParseTime += (performance.now() - tParseStart);
+                totalLoopTime += (performance.now() - tLoopStart);
 
             } catch {
                 duration = 0;
@@ -92,7 +100,9 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
 
     timings['duration-calc'] = Date.now() - tProcessStart;
     timings['duration-io-sum'] = Math.round(totalIoTime);
-    timings['duration-parse-sum'] = Math.round(totalParseTime);
+    timings['duration-split-sum'] = Math.round(totalSplitTime);
+    timings['duration-loop-sum'] = Math.round(totalLoopTime);
+    timings['lines-count'] = totalLinesCount;
 
     // Phase 3: Sorting
     const tSortStart = Date.now();

@@ -20,9 +20,11 @@ router.get("/videos", async (req, res) => {
         res.set("X-Timing-Readdir-Ms", String(timings['readdir']));
         res.set("X-Timing-Duration-Calc-Ms", String(timings['duration-calc']));
 
-        // New detailed headers
+        // Granular Breakdown headers
         res.set("X-Timing-Duration-IO-Sum-Ms", String(timings['duration-io-sum']));
-        res.set("X-Timing-Duration-Parse-Sum-Ms", String(timings['duration-parse-sum']));
+        res.set("X-Timing-Duration-Split-Sum-Ms", String(timings['duration-split-sum']));
+        res.set("X-Timing-Duration-Loop-Sum-Ms", String(timings['duration-loop-sum']));
+        res.set("X-Count-Lines", String(timings['lines-count']));
 
         res.set("X-Timing-Sorting-Ms", String(timings['sorting']));
         res.set("X-Count-Videos", String(timings['count']));
