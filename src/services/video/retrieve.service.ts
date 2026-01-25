@@ -1,91 +1,10 @@
 import { promises as fsPromises } from "fs";
 import path from "path";
-import { spawn, ChildProcess } from "child_process";
-import { createInterface } from "readline";
-import pLimit from "p-limit";
 import * as types from "../../core/types.js";
 import * as config from "../../core/config.js";
 import * as utils from "../../core/utils.js";
 import * as constants from "../../core/constants.js";
-import logger from "../../core/logger.js";
-
-// --- Stateful Daemon Logic ---
-
-let daemonProcess: ChildProcess | null = null;
-let currentResolve: ((value: Record<string, number>) => void) | null = null;
-const daemonLock = pLimit(1); // Serialize access to the daemon
-
-function getDaemon(): ChildProcess {
-    if (daemonProcess && !daemonProcess.killed) {
-        return daemonProcess;
-    }
-
-    const projectRoot = utils.findProjectRoot();
-    const binaryPath = path.join(projectRoot, "src", "core", "bin", "playlist-parser");
-
-    daemonProcess = spawn(binaryPath);
-
-    // Setup stdout listener
-    const rl = createInterface({ input: daemonProcess.stdout! });
-    rl.on('line', (line) => {
-        if (currentResolve) {
-            try {
-                const result = JSON.parse(line);
-                const resolve = currentResolve;
-                currentResolve = null;
-                resolve(result);
-            } catch (err) {
-                logger.error("Failed to parse Go output line", { err, line });
-                // Don't leave the request hanging
-                if (currentResolve) {
-                    currentResolve({});
-                    currentResolve = null;
-                }
-            }
-        }
-    });
-
-    daemonProcess.stderr?.on('data', (data) => {
-        logger.error(`Go Parser Stderr: ${data}`);
-    });
-
-    daemonProcess.on('exit', (code) => {
-        logger.warn(`Go Parser exited with code ${code}`);
-        daemonProcess = null;
-        if (currentResolve) {
-            currentResolve({});
-            currentResolve = null;
-        }
-    });
-
-    return daemonProcess;
-}
-
-function getDurationsFromGo(filePaths: string[]): Promise<Record<string, number>> {
-    // We wrap this in daemonLock to ensure we only send one batch at a time
-    // and wait for its specific response.
-    return daemonLock(() => {
-        return new Promise<Record<string, number>>((resolve) => {
-            try {
-                const process = getDaemon();
-                currentResolve = resolve;
-
-                // Write paths followed by the sentinel
-                if (filePaths.length === 0) {
-                    resolve({});
-                    return;
-                }
-
-                process.stdin?.write(filePaths.join('\n') + '\n<<BATCH_END>>\n');
-            } catch (error) {
-                logger.error("Failed to communicate with Go daemon", { error });
-                resolve({});
-            }
-        });
-    });
-}
-
-// --- End Stateful Daemon Logic ---
+import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 
 export async function getAllVideos(provider: string = "tango"): Promise<{ videos: types.VideoItem[], timings: Record<string, number> }> {
     const timings: Record<string, number> = {};
@@ -128,6 +47,7 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
 
     // Prepare list for Go
     const pathsToProcess: string[] = [];
+    // Map to quickly find entry by path to assign duration later
     const entryMap = new Map<string, typeof allEntries[0]>();
 
     allEntries.forEach(entry => {
@@ -140,7 +60,7 @@ export async function getAllVideos(provider: string = "tango"): Promise<{ videos
         }
     });
 
-    // Call Go (Now using Stateful Daemon)
+    // Call Go
     const durationMap = await getDurationsFromGo(pathsToProcess);
 
     const videos: types.VideoItem[] = allEntries.map(entry => {
