@@ -8,6 +8,8 @@
 	import { filterVideos } from '$lib/utils/filter.js';
 	import ProviderSelector from '$lib/components/ProviderSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
+	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
+	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
 	const MIN_LIST_ITEMS = 100;
 
@@ -30,7 +32,6 @@
 		}
 		videoListStore.initialize(p);
 		playerStore.initialize(p);
-		document.title = `${p} - Video Editor`;
 		loadVideos(p);
 	});
 
@@ -39,10 +40,22 @@
 		videoListStore.setVideos(videos);
 	}
 
+	// Update title reactively
+	$effect(() => {
+		const cv = playerStore.currentVideo;
+		const p = videoListStore.selectedProvider;
+		if (playerStore.view === 'video' && cv) {
+			document.title = `${cv.filename} - ${p} - Video Editor`;
+		} else {
+			document.title = `${p} - Video Editor`;
+		}
+	});
+
 	function handleVideoClick(video: typeof videoListStore.videos[number]) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
 		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
 		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
+		void fetchAndParsePlaylist(video);
 	}
 
 	function handleScroll() {
@@ -114,6 +127,8 @@
 		{/each}
 	{/if}
 </div>
+
+<VideoPlayer />
 
 <style>
 	.search-container {
