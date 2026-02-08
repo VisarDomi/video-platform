@@ -1,0 +1,69 @@
+import { STORAGE_KEYS } from '../constants.js';
+import type { Video } from '../types.js';
+
+class PlayerStore {
+	view = $state<'list' | 'video'>('list');
+	currentVideo = $state<Video | null>(null);
+	currentVideoStartTime = $state(0);
+	lastPlayedVideo = $state<Video | null>(null);
+	segments = $state<number[]>([]);
+	lastActionedVideoFilename = $state<string | null>(null);
+	activePlayerIndex = $state(0);
+	isUiVisible = $state(false);
+
+	initialize(provider: string) {
+		const saved = localStorage.getItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`);
+		if (saved) {
+			this.lastPlayedVideo = JSON.parse(saved);
+		}
+	}
+
+	playVideo(video: Video, startTime: number, provider: string) {
+		this._startPlaying(video, startTime, provider);
+		this.activePlayerIndex = 0;
+	}
+
+	navigateVideo(video: Video, startTime: number, direction: 1 | -1, provider: string) {
+		const newIndex = (this.activePlayerIndex + direction + 3) % 3;
+		this._startPlaying(video, startTime, provider);
+		this.activePlayerIndex = newIndex;
+	}
+
+	setEditedVideo(video: Video, startTime: number, provider: string) {
+		const newIndex = (this.activePlayerIndex + 1 + 3) % 3;
+		this._startPlaying(video, startTime, provider);
+		this.activePlayerIndex = newIndex;
+	}
+
+	showList(lastActionedFilename: string | null = null) {
+		this.view = 'list';
+		this.lastActionedVideoFilename = lastActionedFilename;
+	}
+
+	addSegment(time: number) {
+		if (!this.currentVideo || this.currentVideo.type !== 'original') return;
+		this.segments = [...this.segments, time].sort((a, b) => a - b);
+	}
+
+	removeLastSegment() {
+		if (!this.currentVideo || this.currentVideo.type !== 'original' || this.segments.length === 0) return;
+		this.segments = this.segments.slice(0, -1);
+	}
+
+	toggleUi() {
+		this.isUiVisible = !this.isUiVisible;
+	}
+
+	private _startPlaying(video: Video, startTime: number, provider: string) {
+		localStorage.setItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`, JSON.stringify(video));
+		this.currentVideo = video;
+		this.currentVideoStartTime = startTime;
+		this.lastPlayedVideo = video;
+		this.segments = [];
+		this.view = 'video';
+		this.lastActionedVideoFilename = null;
+		this.isUiVisible = false;
+	}
+}
+
+export const playerStore = new PlayerStore();
