@@ -228,6 +228,7 @@
 
 	function clearStream(el: HTMLVideoElement) {
 		el.pause();
+		el.style.opacity = '';
 
 		// Destroy hls.js instance
 		const hls = hlsInstances.get(el);
@@ -477,6 +478,7 @@
 
 	.video-player :global(.background-player) {
 		z-index: 1;
+		opacity: 0;
 	}
 
 	.top-bar {
