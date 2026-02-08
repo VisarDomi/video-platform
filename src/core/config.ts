@@ -65,7 +65,7 @@ const config: IConfig = {
         acc[provider] = generateDefaultPaths(provider);
         return acc;
     }, {} as Record<string, PathConfig>),
-    frontendDistPath: path.join(projectRoot, "..", "video-editor-frontend", "dist"),
+    frontendDistPath: path.join(projectRoot, "..", "video-editor-svelte", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
     fc2FilePath: path.join(projectRoot, "..", "video-downloader", "fc2.txt"),
     scFilePath: path.join(projectRoot, "..", "video-downloader", "sc.txt"),
