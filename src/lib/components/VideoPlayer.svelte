@@ -421,7 +421,7 @@
 		top: 0;
 		left: 0;
 		width: 100%;
-		padding: 15px;
+		padding: calc(env(safe-area-inset-top, 0px) + 15px) 15px 15px 15px;
 		box-sizing: border-box;
 		background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
 		z-index: 20;
