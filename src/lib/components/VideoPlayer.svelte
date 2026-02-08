@@ -147,6 +147,7 @@
 	async function activatePlayer(el: HTMLVideoElement, v: Video, startTime: number) {
 		const effectiveStart = v.isLive ? 0 : startTime;
 
+		el.style.opacity = '0';
 		await loadStream(el, v, effectiveStart);
 
 		if (v.isLive) {
@@ -162,6 +163,7 @@
 		} catch (e) {
 			console.warn('Playback failed', e);
 		}
+		el.style.opacity = '1';
 	}
 
 	function loadStream(el: HTMLVideoElement, v: Video, startTime: number): Promise<void> {
