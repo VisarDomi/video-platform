@@ -27,6 +27,10 @@ export default defineConfig({
 	server: {
 		host: '0.0.0.0',
 		port: 43210,
-		https: getHttpsConfig()
+		https: getHttpsConfig(),
+		proxy: {
+			'/api': 'http://localhost:7973',
+			'/hls': 'http://localhost:7973'
+		}
 	}
 });
