@@ -80,6 +80,16 @@
 		}
 	}
 
+	// Hide search when entering video view, reset when returning to list
+	$effect(() => {
+		if (playerStore.view === 'video') {
+			searchHidden = true;
+		} else {
+			searchHidden = false;
+			lastScrollY = 0;
+		}
+	});
+
 	function isActiveVideo(video: typeof videoListStore.videos[number]): boolean {
 		const active = playerStore.currentVideo || playerStore.lastPlayedVideo;
 		if (!active) return false;
