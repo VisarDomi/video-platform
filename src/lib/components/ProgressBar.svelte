@@ -51,9 +51,13 @@
 	<span class="time-display">{timeText}</span>
 </div>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="progress-bar"
+	role="slider"
+	aria-valuenow={currentTime}
+	aria-valuemin={0}
+	aria-valuemax={effectiveDuration}
+	tabindex="-1"
 	bind:this={progressBar}
 	onpointerdown={onPointerDown}
 	ondblclick={(e) => e.preventDefault()}

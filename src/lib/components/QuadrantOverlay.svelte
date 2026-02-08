@@ -12,7 +12,7 @@
 	}
 </script>
 
-<div class="overlay" oncontextmenu={(e) => e.preventDefault()}>
+<div class="overlay" role="group" oncontextmenu={(e) => e.preventDefault()}>
 	<!-- Row 1: prev / seek-backward -->
 	<div
 		class="quadrant top-quadrant"

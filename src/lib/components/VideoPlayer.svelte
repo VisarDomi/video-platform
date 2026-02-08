@@ -320,10 +320,10 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="video-view"
 	class:visible={isVisible}
+	role="application"
 	ondblclick={(e) => e.preventDefault()}
 	ontouchmove={(e) => e.preventDefault()}
 >
