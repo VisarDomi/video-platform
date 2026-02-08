@@ -102,11 +102,13 @@
 		const videoChanged = currentFilename !== cv.filename;
 		currentFilename = cv.filename;
 
-		// Update CSS classes
+		// Update CSS classes and inline opacity
 		videoElements.forEach((el, i) => {
 			if (i === activeIdx) {
+				el.style.opacity = '0';
 				el.className = 'active-player';
 			} else {
+				el.style.opacity = '';
 				el.className = 'background-player';
 				el.muted = true;
 			}
@@ -147,7 +149,6 @@
 	async function activatePlayer(el: HTMLVideoElement, v: Video, startTime: number) {
 		const effectiveStart = v.isLive ? 0 : startTime;
 
-		el.style.opacity = '0';
 		await loadStream(el, v, effectiveStart);
 
 		if (v.isLive) {
