@@ -42,7 +42,11 @@ export function saveCurrentVideo() {
 	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
-	sendSaveRequest(video, provider).then(() => void reloadVideos());
+	sendSaveRequest(video, provider).catch(() => {
+		playerStore.markCurrentAsOriginal(provider);
+		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+		void reloadVideos();
+	});
 }
 
 export async function createEditedVideo() {
@@ -71,13 +75,18 @@ export async function createEditedVideo() {
 	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 
 	// Fire edit request in background
-	sendEditRequest(filename, segmentsToSave, provider).then(() => {
-		// If still watching the same video, reload from start
-		if (playerStore.currentVideo?.filename === filename) {
-			playerStore.reloadCurrentVideo();
-		}
-		void reloadVideos();
-	});
+	sendEditRequest(filename, segmentsToSave, provider)
+		.then(() => {
+			// If still watching the same video, reload from start
+			if (playerStore.currentVideo?.filename === filename) {
+				playerStore.reloadCurrentVideo();
+			}
+		})
+		.catch(() => {
+			playerStore.markCurrentAsOriginal(provider);
+			videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+			void reloadVideos();
+		});
 }
 
 export function returnToOriginals() {
@@ -90,5 +99,9 @@ export function returnToOriginals() {
 	playerStore.markCurrentAsOriginal(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
-	sendReturnRequest(video, provider).then(() => void reloadVideos());
+	sendReturnRequest(video, provider).catch(() => {
+		playerStore.markCurrentAsEdited(provider);
+		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+		void reloadVideos();
+	});
 }
