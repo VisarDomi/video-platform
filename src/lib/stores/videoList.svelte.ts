@@ -1,5 +1,5 @@
 import { DEFAULT_PROVIDER, STORAGE_KEYS } from '../constants.js';
-import type { Video } from '../types.js';
+import type { Video, VideoType } from '../types.js';
 
 class VideoListStore {
 	videos = $state<Video[]>([]);
@@ -28,6 +28,12 @@ class VideoListStore {
 
 	setLoading(loading: boolean) {
 		this.isLoading = loading;
+	}
+
+	updateVideoType(filename: string, oldType: VideoType, newType: VideoType) {
+		this.videos = this.videos.map((v) =>
+			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v
+		);
 	}
 }
 

@@ -1,4 +1,4 @@
-import { STORAGE_KEYS } from '../constants.js';
+import { STORAGE_KEYS, VIDEO_TYPE } from '../constants.js';
 import type { Video } from '../types.js';
 
 class PlayerStore {
@@ -43,12 +43,12 @@ class PlayerStore {
 	reloadToken = $state(0);
 
 	addSegment(time: number) {
-		if (!this.currentVideo || this.currentVideo.type !== 'original') return;
+		if (!this.currentVideo || this.currentVideo.type !== VIDEO_TYPE.ORIGINAL) return;
 		this.segments = [...this.segments, time].sort((a, b) => a - b);
 	}
 
 	removeLastSegment() {
-		if (!this.currentVideo || this.currentVideo.type !== 'original' || this.segments.length === 0) return;
+		if (!this.currentVideo || this.currentVideo.type !== VIDEO_TYPE.ORIGINAL || this.segments.length === 0) return;
 		this.segments = this.segments.slice(0, -1);
 	}
 
@@ -65,15 +65,35 @@ class PlayerStore {
 		this.lastActionedVideoFilename = filename;
 	}
 
+	markCurrentAsEdited(provider: string) {
+		if (this.currentVideo) {
+			const updated = { ...this.currentVideo, type: VIDEO_TYPE.EDITED };
+			this.currentVideo = updated;
+			this._persistVideo(updated, provider);
+		}
+	}
+
+	markCurrentAsOriginal(provider: string) {
+		if (this.currentVideo) {
+			const updated = { ...this.currentVideo, type: VIDEO_TYPE.ORIGINAL };
+			this.currentVideo = updated;
+			this._persistVideo(updated, provider);
+		}
+	}
+
 	toggleUi() {
 		this.isUiVisible = !this.isUiVisible;
 	}
 
-	private _startPlaying(video: Video, startTime: number, provider: string) {
+	private _persistVideo(video: Video, provider: string) {
 		localStorage.setItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`, JSON.stringify(video));
+		this.lastPlayedVideo = video;
+	}
+
+	private _startPlaying(video: Video, startTime: number, provider: string) {
+		this._persistVideo(video, provider);
 		this.currentVideo = video;
 		this.currentVideoStartTime = startTime;
-		this.lastPlayedVideo = video;
 		this.segments = [];
 		this.view = 'video';
 		this.lastActionedVideoFilename = null;

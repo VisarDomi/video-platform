@@ -36,9 +36,13 @@ export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.ORIGINAL || playerStore.segments.length > 0) return;
 
-	// Stay on video, fire request in background
+	const provider = videoListStore.selectedProvider;
+
+	// Update UI immediately: original → edited (player + list + localStorage)
+	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(video.filename);
-	sendSaveRequest(video, videoListStore.selectedProvider).then(() => void reloadVideos());
+	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+	sendSaveRequest(video, provider).then(() => void reloadVideos());
 }
 
 export async function createEditedVideo() {
@@ -58,12 +62,16 @@ export async function createEditedVideo() {
 	const segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments);
 	const filename = video.filename;
 
-	// Clear segments immediately so the UI reflects the action
+	const provider = videoListStore.selectedProvider;
+
+	// Update UI immediately: clear segments, mark as edited (player + list + localStorage)
 	playerStore.clearSegments();
+	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(filename);
+	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 
 	// Fire edit request in background
-	sendEditRequest(filename, segmentsToSave, videoListStore.selectedProvider).then(() => {
+	sendEditRequest(filename, segmentsToSave, provider).then(() => {
 		// If still watching the same video, reload from start
 		if (playerStore.currentVideo?.filename === filename) {
 			playerStore.reloadCurrentVideo();
@@ -76,15 +84,11 @@ export function returnToOriginals() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.EDITED) return;
 
-	const { nextVideo, prevVideo } = getAdjacentVideos(video);
-	navigateToNext(nextVideo, prevVideo);
+	const provider = videoListStore.selectedProvider;
 
-	// Optimistically remove from list
-	videoListStore.setVideos(
-		videoListStore.videos.filter(
-			(v) => v.filename !== video.filename || v.type !== video.type
-		)
-	);
-
-	sendReturnRequest(video, videoListStore.selectedProvider).then(() => void reloadVideos());
+	// Update UI immediately: edited → original (player + list + localStorage)
+	playerStore.markCurrentAsOriginal(provider);
+	playerStore.setLastActioned(video.filename);
+	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+	sendReturnRequest(video, provider).then(() => void reloadVideos());
 }
