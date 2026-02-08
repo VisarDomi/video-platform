@@ -1,4 +1,7 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
+import os from "os";
 import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
@@ -7,6 +10,21 @@ import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
 
 const router = Router();
+
+router.get("/cert", (_req, res) => {
+    try {
+        const certPath = path.join(os.homedir(), ".local/share/mkcert", "rootCA.pem");
+        const certFile = fs.readFileSync(certPath);
+        res.set({
+            "Content-Disposition": 'attachment; filename="rootCA.pem"',
+            "Content-Type": "application/x-x509-ca-cert",
+        });
+        res.send(certFile);
+    } catch (error: any) {
+        logger.error("Failed to read rootCA.pem", { message: error.message });
+        res.status(500).json({ error: "Certificate not found on server" });
+    }
+});
 
 router.get("/videos", async (req, res) => {
     try {

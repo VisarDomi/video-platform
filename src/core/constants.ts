@@ -97,7 +97,7 @@ export const LOGS = {
     },
     TIMESTAMP_FORMAT: "YYYY-MM-DD HH:mm:ss",
     MESSAGES: {
-        LAN_ACCESS: (address: string, port: number) => `LAN Access: http://${address}:${port}`,
+        LAN_ACCESS: (address: string, port: number) => `LAN Access: https://${address}:${port}`,
         MOVE_ERROR: "File is already at the destination.",
         DESTINATION_ERROR: "Destination can only be trash, original, or edited.",
     },

@@ -1,6 +1,8 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
+import https from "https";
 import * as os from "os";
 import logger from "./core/logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
@@ -52,9 +54,24 @@ async function startServer() {
         res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));
     });
 
-    app.listen(PORT, API.HOST, () => {
-        logServerInfo();
-    });
+    const mkcertPath = path.join(os.homedir(), ".local/share/mkcert/pwa");
+    const keyPath = path.join(mkcertPath, "key.pem");
+    const certPath = path.join(mkcertPath, "cert.pem");
+
+    if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
+        const sslOptions = {
+            key: fs.readFileSync(keyPath),
+            cert: fs.readFileSync(certPath),
+        };
+        https.createServer(sslOptions, app).listen(PORT, API.HOST, () => {
+            logServerInfo();
+        });
+    } else {
+        logger.warn("SSL certs not found at " + mkcertPath + ", falling back to HTTP");
+        app.listen(PORT, API.HOST, () => {
+            logServerInfo();
+        });
+    }
 }
 
 void startServer().catch((err: any) => {
