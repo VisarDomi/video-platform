@@ -31,7 +31,8 @@ export async function sendReturnRequest(video: Video, provider: string): Promise
 }
 
 export async function sendDeleteRequest(video: Video, provider: string): Promise<void> {
-	await fetch(`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`, {
+	const response = await fetch(`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`, {
 		method: 'POST'
 	});
+	if (!response.ok) throw new Error(`Delete failed: ${response.statusText}`);
 }

@@ -1,13 +1,8 @@
 import { videoListStore } from '../stores/videoList.svelte.js';
 import { playerStore } from '../stores/player.svelte.js';
 import { VIDEO_TYPE } from '../constants.js';
-import { fetchVideos, sendSaveRequest, sendEditRequest, sendReturnRequest } from './api.js';
+import { sendSaveRequest, sendEditRequest, sendReturnRequest } from './api.js';
 import { fetchAndParsePlaylist, calculateSegmentsToKeep } from './hls.js';
-
-async function reloadVideos() {
-	const videos = await fetchVideos(videoListStore.selectedProvider);
-	videoListStore.setVideos(videos);
-}
 
 export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
@@ -24,7 +19,6 @@ export function saveCurrentVideo() {
 			playerStore.markCurrentAsOriginal(provider);
 		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
-		void reloadVideos();
 	});
 }
 
@@ -66,7 +60,6 @@ export async function createEditedVideo() {
 				playerStore.markCurrentAsOriginal(provider);
 			}
 			videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
-			void reloadVideos();
 		});
 }
 
@@ -85,6 +78,5 @@ export function returnToOriginals() {
 			playerStore.markCurrentAsEdited(provider);
 		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
-		void reloadVideos();
 	});
 }
