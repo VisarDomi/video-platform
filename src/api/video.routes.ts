@@ -27,12 +27,12 @@ router.post("/edit", async (req, res) => {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED);
     }
 
-    const editPromise = editService.editVideo(filename, segments, targetProvider);
-    res.status(200);
     try {
-        await editPromise;
+        await editService.editVideo(filename, segments, targetProvider);
+        res.json({ success: true });
     } catch (error: any) {
         logger.error(`Error editing:`, { message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
@@ -43,12 +43,12 @@ router.post("/videos/:filename/:destination", async (req, res) => {
     if (!filename || !(destination === DESTINATIONS.TRASH || destination === DESTINATIONS.ORIGINAL || destination === DESTINATIONS.EDITED)) {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_DESTINATION);
     }
-    const movePromise = moveService.moveVideo(filename, destination, provider);
-    res.status(200);
     try {
-        await movePromise;
+        await moveService.moveVideo(filename, destination, provider);
+        res.json({ success: true });
     } catch (error: any) {
         logger.error(`Error moving:`, { message: error.message });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
