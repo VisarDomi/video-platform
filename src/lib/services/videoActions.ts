@@ -1,31 +1,8 @@
 import { videoListStore } from '../stores/videoList.svelte.js';
 import { playerStore } from '../stores/player.svelte.js';
-import { filterVideos } from '../utils/filter.js';
-import { STORAGE_KEYS, VIDEO_TYPE } from '../constants.js';
+import { VIDEO_TYPE } from '../constants.js';
 import { fetchVideos, sendSaveRequest, sendEditRequest, sendReturnRequest } from './api.js';
 import { fetchAndParsePlaylist, calculateSegmentsToKeep } from './hls.js';
-import type { Video } from '../types.js';
-
-function getAdjacentVideos(videoToAction: Video) {
-	const filteredList = filterVideos(videoListStore.videos, videoListStore.filter);
-	const idx = filteredList.findIndex(
-		(v) => v.filename === videoToAction.filename && v.type === videoToAction.type
-	);
-	const nextVideo = idx > -1 && idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
-	const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
-	return { nextVideo, prevVideo };
-}
-
-function navigateToNext(nextVideo: Video | null, prevVideo: Video | null) {
-	if (nextVideo) {
-		void fetchAndParsePlaylist(nextVideo);
-		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${nextVideo.filename}`);
-		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
-		playerStore.setEditedVideo(nextVideo, startTime, videoListStore.selectedProvider);
-	} else {
-		playerStore.showList(prevVideo?.filename || null);
-	}
-}
 
 async function reloadVideos() {
 	const videos = await fetchVideos(videoListStore.selectedProvider);
@@ -43,7 +20,9 @@ export function saveCurrentVideo() {
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 	sendSaveRequest(video, provider).catch(() => {
-		playerStore.markCurrentAsOriginal(provider);
+		if (playerStore.currentVideo?.filename === video.filename) {
+			playerStore.markCurrentAsOriginal(provider);
+		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 		void reloadVideos();
 	});
@@ -83,7 +62,9 @@ export async function createEditedVideo() {
 			}
 		})
 		.catch(() => {
-			playerStore.markCurrentAsOriginal(provider);
+			if (playerStore.currentVideo?.filename === filename) {
+				playerStore.markCurrentAsOriginal(provider);
+			}
 			videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 			void reloadVideos();
 		});
@@ -100,7 +81,9 @@ export function returnToOriginals() {
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 	sendReturnRequest(video, provider).catch(() => {
-		playerStore.markCurrentAsEdited(provider);
+		if (playerStore.currentVideo?.filename === video.filename) {
+			playerStore.markCurrentAsEdited(provider);
+		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 		void reloadVideos();
 	});
