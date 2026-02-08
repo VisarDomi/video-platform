@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { PROVIDERS, DEFAULT_PROVIDER, STORAGE_KEYS } from '$lib/constants.js';
@@ -14,6 +15,7 @@
 	const MIN_LIST_ITEMS = 100;
 
 	let searchInput = $state<HTMLInputElement | null>(null);
+	let listContainer = $state<HTMLElement | null>(null);
 	let lastScrollY = $state(0);
 	let searchHidden = $state(false);
 
@@ -38,6 +40,19 @@
 	async function loadVideos(p: string) {
 		const videos = await fetchVideos(p);
 		videoListStore.setVideos(videos);
+		await tick();
+		scrollToActiveVideo();
+	}
+
+	function scrollToActiveVideo() {
+		if (!listContainer) return;
+		if (document.activeElement === searchInput) return;
+		const target =
+			listContainer.querySelector('.last-actioned') ||
+			listContainer.querySelector('.current-video');
+		if (target) {
+			target.scrollIntoView({ block: 'center', behavior: 'auto' });
+		}
 	}
 
 	// Update title reactively
@@ -80,13 +95,14 @@
 		}
 	}
 
-	// Hide search when entering video view, reset when returning to list
+	// Hide search when entering video view, reset and scroll when returning to list
 	$effect(() => {
 		if (playerStore.view === 'video') {
 			searchHidden = true;
 		} else {
 			searchHidden = false;
 			lastScrollY = 0;
+			tick().then(scrollToActiveVideo);
 		}
 	});
 
@@ -115,7 +131,7 @@
 	</div>
 </div>
 
-<div class="list-container">
+<div class="list-container" bind:this={listContainer}>
 	{#if videoListStore.isLoading}
 		<p class="info-message">Loading...</p>
 	{:else if filteredVideos.length === 0}
