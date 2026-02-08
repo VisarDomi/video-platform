@@ -40,6 +40,8 @@ class PlayerStore {
 		this.lastActionedVideoFilename = lastActionedFilename;
 	}
 
+	reloadToken = $state(0);
+
 	addSegment(time: number) {
 		if (!this.currentVideo || this.currentVideo.type !== 'original') return;
 		this.segments = [...this.segments, time].sort((a, b) => a - b);
@@ -48,6 +50,19 @@ class PlayerStore {
 	removeLastSegment() {
 		if (!this.currentVideo || this.currentVideo.type !== 'original' || this.segments.length === 0) return;
 		this.segments = this.segments.slice(0, -1);
+	}
+
+	clearSegments() {
+		this.segments = [];
+	}
+
+	reloadCurrentVideo() {
+		this.currentVideoStartTime = 0;
+		this.reloadToken++;
+	}
+
+	setLastActioned(filename: string) {
+		this.lastActionedVideoFilename = filename;
 	}
 
 	toggleUi() {

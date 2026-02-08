@@ -36,7 +36,8 @@ export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.ORIGINAL || playerStore.segments.length > 0) return;
 
-	playerStore.showList(video.filename);
+	// Stay on video, fire request in background
+	playerStore.setLastActioned(video.filename);
 	sendSaveRequest(video, videoListStore.selectedProvider).then(() => void reloadVideos());
 }
 
@@ -55,11 +56,20 @@ export async function createEditedVideo() {
 	if (!playlistData) return;
 
 	const segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments);
+	const filename = video.filename;
 
-	playerStore.showList(video.filename);
-	sendEditRequest(video.filename, segmentsToSave, videoListStore.selectedProvider).then(
-		() => void reloadVideos()
-	);
+	// Clear segments immediately so the UI reflects the action
+	playerStore.clearSegments();
+	playerStore.setLastActioned(filename);
+
+	// Fire edit request in background
+	sendEditRequest(filename, segmentsToSave, videoListStore.selectedProvider).then(() => {
+		// If still watching the same video, reload from start
+		if (playerStore.currentVideo?.filename === filename) {
+			playerStore.reloadCurrentVideo();
+		}
+		void reloadVideos();
+	});
 }
 
 export function returnToOriginals() {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Hls from 'hls.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { QUADRANT_ACTIONS, STORAGE_KEYS, API } from '$lib/constants.js';
@@ -17,6 +18,8 @@
 	let isMuted = $state(true);
 	let currentFilename = $state<string | null>(null);
 	let wakeLock = $state<WakeLockSentinel | null>(null);
+
+	const hlsInstances = new Map<HTMLVideoElement, Hls>();
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
@@ -123,6 +126,20 @@
 		preloadAdjacent(cv, activeIdx, filteredList);
 	});
 
+	// Watch reloadToken to force-reload current video (after cut completes)
+	let lastReloadToken = 0;
+	$effect(() => {
+		const token = playerStore.reloadToken;
+		if (token > lastReloadToken && videoElements.length > 0) {
+			lastReloadToken = token;
+			const cv = playerStore.currentVideo;
+			if (cv) {
+				const activeEl = getActiveElement();
+				forceReloadStream(activeEl, cv);
+			}
+		}
+	});
+
 	function getActiveElement(): HTMLVideoElement {
 		return videoElements[playerStore.activePlayerIndex];
 	}
@@ -155,20 +172,68 @@
 				return;
 			}
 
-			const onReady = () => {
-				el.removeEventListener('loadedmetadata', onReady);
-				if (startTime > 0) el.currentTime = startTime;
-				resolve();
-			};
+			const url = API.HLS_PLAYLIST(v.filename);
 
-			el.addEventListener('loadedmetadata', onReady, { once: true });
-			el.src = API.HLS_PLAYLIST(v.filename);
+			if (Hls.isSupported()) {
+				// Destroy previous hls.js instance for this element
+				const oldHls = hlsInstances.get(el);
+				if (oldHls) {
+					oldHls.destroy();
+					hlsInstances.delete(el);
+				}
+
+				const hls = new Hls();
+				hlsInstances.set(el, hls);
+
+				hls.on(Hls.Events.MANIFEST_PARSED, () => {
+					if (startTime > 0) el.currentTime = startTime;
+					resolve();
+				});
+
+				hls.on(Hls.Events.ERROR, (_event, data) => {
+					if (data.fatal) {
+						console.warn('HLS fatal error', data.type, data.details);
+						if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+							hls.startLoad();
+						} else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+							hls.recoverMediaError();
+						}
+					}
+				});
+
+				hls.loadSource(url);
+				hls.attachMedia(el);
+			} else {
+				// Safari native HLS fallback
+				const onReady = () => {
+					el.removeEventListener('loadedmetadata', onReady);
+					if (startTime > 0) el.currentTime = startTime;
+					resolve();
+				};
+				el.addEventListener('loadedmetadata', onReady, { once: true });
+				el.src = url;
+			}
+
 			el.dataset.loadedFilename = v.filename;
 		});
 	}
 
+	function forceReloadStream(el: HTMLVideoElement, v: Video) {
+		// Clear the cached filename so loadStream doesn't skip
+		delete el.dataset.loadedFilename;
+		void activatePlayer(el, v, 0);
+	}
+
 	function clearStream(el: HTMLVideoElement) {
 		el.pause();
+
+		// Destroy hls.js instance
+		const hls = hlsInstances.get(el);
+		if (hls) {
+			hls.destroy();
+			hlsInstances.delete(el);
+		}
+
 		el.removeAttribute('src');
 		if (el.dataset.loadedFilename) {
 			el.load();
@@ -313,10 +378,6 @@
 			await wakeLock.release();
 			wakeLock = null;
 		}
-	}
-
-	function syncPosition() {
-		// noop in Svelte - we use fixed positioning instead
 	}
 </script>
 
