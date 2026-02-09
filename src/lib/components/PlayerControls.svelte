@@ -14,7 +14,8 @@
 
 	const video = $derived(playerStore.currentVideo);
 	const segments = $derived(playerStore.segments);
-	const isOriginal = $derived(video?.type === VIDEO_TYPE.ORIGINAL);
+	const isLive = $derived(video?.isLive === true);
+	const isOriginal = $derived(video?.type === VIDEO_TYPE.ORIGINAL && !isLive);
 	const isEdited = $derived(video?.type === VIDEO_TYPE.EDITED);
 	const hasSegments = $derived(isOriginal && segments.length > 0);
 
