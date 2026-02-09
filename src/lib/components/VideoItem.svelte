@@ -93,6 +93,7 @@
 		align-items: center;
 		margin-top: 2px;
 		line-height: 1.2;
+		gap: 8px;
 	}
 
 	.duration,
@@ -100,6 +101,7 @@
 		font-size: 13px;
 		color: #aaa;
 		font-family: 'Courier New', Courier, monospace;
+		flex-shrink: 0;
 	}
 
 	.size.bold {
