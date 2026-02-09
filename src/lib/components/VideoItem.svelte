@@ -12,9 +12,7 @@
 
 	const sizeBytes = $derived(video.duration * BPS_ESTIMATE);
 	const isLarge = $derived(sizeBytes > 350 * 1024 * 1024);
-	const displayName = $derived(
-		video.filename + (video.type === VIDEO_TYPE.EDITED ? ' (edited)' : '')
-	);
+	const isEdited = $derived(video.type === VIDEO_TYPE.EDITED);
 </script>
 
 <button
@@ -22,9 +20,10 @@
 	class:current-video={isActive}
 	class:last-actioned={isLastActioned}
 	class:live={video.isLive}
+	class:edited={isEdited}
 	{onclick}
 >
-	<span class="name">{displayName}</span>
+	<span class="name">{video.filename}</span>
 	<div class="meta">
 		<span class="duration">{formatDuration(video.duration)}</span>
 		<span class="size" class:bold={isLarge}>{formatSize(sizeBytes)}</span>
@@ -74,6 +73,10 @@
 	.list-item.live .name {
 		color: #ff6b6b;
 		font-weight: bold;
+	}
+
+	.list-item.edited .name {
+		color: #f0a050;
 	}
 
 	.name {
