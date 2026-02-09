@@ -29,7 +29,8 @@ router.get("/cert", (_req, res) => {
 router.get("/videos", async (req, res) => {
     try {
         const provider = (req.query.provider as string) || "tango";
-        const videos = await retrieveService.getAllVideos(provider);
+        const after = req.query.after as string | undefined;
+        const videos = await retrieveService.getAllVideos(provider, after);
         res.json(videos);
     } catch (error: any) {
         logger.error("Failed to retrieve videos", { error });

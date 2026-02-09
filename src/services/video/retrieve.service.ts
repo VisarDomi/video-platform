@@ -6,7 +6,7 @@ import * as utils from "../../core/utils.js";
 import * as constants from "../../core/constants.js";
 import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 
-export async function getAllVideos(provider: string = "tango"): Promise<types.VideoItem[]> {
+export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
     const liveFolders = await utils.getLiveFolders();
 
     const paths = config.getProviderPaths(provider);
@@ -35,12 +35,17 @@ export async function getAllVideos(provider: string = "tango"): Promise<types.Vi
         }
     }));
 
+    // Filter to only new entries when polling
+    const entriesToProcess = after
+        ? allEntries.filter(entry => entry.name > after)
+        : allEntries;
+
     // Prepare list for Go
     const pathsToProcess: string[] = [];
     // Map to quickly find entry by path to assign duration later
     const entryMap = new Map<string, typeof allEntries[0]>();
 
-    allEntries.forEach(entry => {
+    entriesToProcess.forEach(entry => {
         const isLive = liveFolders.has(entry.name);
         if (!isLive) {
             const playlistPath = path.join(entry.fullPath, constants.FILE_NAMES.HLS_PLAYLIST);
@@ -53,7 +58,7 @@ export async function getAllVideos(provider: string = "tango"): Promise<types.Vi
     // Call Go
     const durationMap = await getDurationsFromGo(pathsToProcess);
 
-    const videos: types.VideoItem[] = allEntries.map(entry => {
+    const videos: types.VideoItem[] = entriesToProcess.map(entry => {
         const isLive = liveFolders.has(entry.name);
         let duration = 0;
 
