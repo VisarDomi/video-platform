@@ -1,8 +1,20 @@
 import { API } from '../constants.js';
 import type { Video } from '../types.js';
 
+export class ApiError extends Error {
+	constructor(public status: number, message: string) {
+		super(message);
+	}
+}
+
 export async function fetchVideos(provider: string): Promise<Video[]> {
 	const url = `${API.VIDEOS}?provider=${encodeURIComponent(provider)}`;
+	const response = await fetch(url);
+	return await response.json();
+}
+
+export async function fetchNewVideos(provider: string, after: string): Promise<Video[]> {
+	const url = `${API.VIDEOS}?provider=${encodeURIComponent(provider)}&after=${encodeURIComponent(after)}`;
 	const response = await fetch(url);
 	return await response.json();
 }
@@ -11,7 +23,7 @@ export async function sendSaveRequest(video: Video, provider: string): Promise<v
 	const response = await fetch(`${API.EDITED(video.filename)}?provider=${encodeURIComponent(provider)}`, {
 		method: 'POST'
 	});
-	if (!response.ok) throw new Error(`Save failed: ${response.statusText}`);
+	if (!response.ok) throw new ApiError(response.status, `Save failed: ${response.statusText}`);
 }
 
 export async function sendEditRequest(filename: string, segments: string[], provider: string): Promise<void> {
@@ -20,19 +32,19 @@ export async function sendEditRequest(filename: string, segments: string[], prov
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ filename, segments, provider })
 	});
-	if (!response.ok) throw new Error(`Edit failed: ${response.statusText}`);
+	if (!response.ok) throw new ApiError(response.status, `Edit failed: ${response.statusText}`);
 }
 
 export async function sendReturnRequest(video: Video, provider: string): Promise<void> {
 	const response = await fetch(`${API.ORIGINAL(video.filename)}?provider=${encodeURIComponent(provider)}`, {
 		method: 'POST'
 	});
-	if (!response.ok) throw new Error(`Return failed: ${response.statusText}`);
+	if (!response.ok) throw new ApiError(response.status, `Return failed: ${response.statusText}`);
 }
 
 export async function sendDeleteRequest(video: Video, provider: string): Promise<void> {
 	const response = await fetch(`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`, {
 		method: 'POST'
 	});
-	if (!response.ok) throw new Error(`Delete failed: ${response.statusText}`);
+	if (!response.ok) throw new ApiError(response.status, `Delete failed: ${response.statusText}`);
 }

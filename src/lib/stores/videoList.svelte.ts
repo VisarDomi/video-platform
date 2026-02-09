@@ -46,6 +46,25 @@ class VideoListStore {
 		this.selectedAliases = new Set();
 	}
 
+	addVideos(newVideos: Video[]) {
+		if (newVideos.length === 0) return;
+		const existing = new Set(this.videos.map((v) => v.filename + v.type));
+		const toAdd = newVideos.filter((v) => !existing.has(v.filename + v.type));
+		if (toAdd.length === 0) return;
+		const merged = [...this.videos, ...toAdd];
+		merged.sort((a, b) => a.filename.localeCompare(b.filename));
+		this.videos = merged;
+	}
+
+	removeVideo(filename: string) {
+		this.videos = this.videos.filter((v) => v.filename !== filename);
+	}
+
+	getLatestFilename(): string | null {
+		if (this.videos.length === 0) return null;
+		return this.videos[this.videos.length - 1].filename;
+	}
+
 	updateVideoType(filename: string, oldType: VideoType, newType: VideoType) {
 		this.videos = this.videos.map((v) =>
 			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v

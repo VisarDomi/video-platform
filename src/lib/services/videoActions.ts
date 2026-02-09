@@ -1,7 +1,7 @@
 import { videoListStore } from '../stores/videoList.svelte.js';
 import { playerStore } from '../stores/player.svelte.js';
 import { VIDEO_TYPE } from '../constants.js';
-import { sendSaveRequest, sendEditRequest, sendReturnRequest } from './api.js';
+import { sendSaveRequest, sendEditRequest, sendReturnRequest, ApiError } from './api.js';
 import { fetchAndParsePlaylist, calculateSegmentsToKeep } from './hls.js';
 
 export function saveCurrentVideo() {
@@ -14,7 +14,12 @@ export function saveCurrentVideo() {
 	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
-	sendSaveRequest(video, provider).catch(() => {
+	sendSaveRequest(video, provider).catch((err) => {
+		if (err instanceof ApiError && err.status === 404) {
+			videoListStore.removeVideo(video.filename);
+			playerStore.showList();
+			return;
+		}
 		if (playerStore.currentVideo?.filename === video.filename) {
 			playerStore.markCurrentAsOriginal(provider);
 		}
@@ -55,7 +60,12 @@ export async function createEditedVideo() {
 				playerStore.reloadCurrentVideo();
 			}
 		})
-		.catch(() => {
+		.catch((err) => {
+			if (err instanceof ApiError && err.status === 404) {
+				videoListStore.removeVideo(filename);
+				playerStore.showList();
+				return;
+			}
 			if (playerStore.currentVideo?.filename === filename) {
 				playerStore.markCurrentAsOriginal(provider);
 			}
@@ -73,7 +83,12 @@ export function returnToOriginals() {
 	playerStore.markCurrentAsOriginal(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
-	sendReturnRequest(video, provider).catch(() => {
+	sendReturnRequest(video, provider).catch((err) => {
+		if (err instanceof ApiError && err.status === 404) {
+			videoListStore.removeVideo(video.filename);
+			playerStore.showList();
+			return;
+		}
 		if (playerStore.currentVideo?.filename === video.filename) {
 			playerStore.markCurrentAsEdited(provider);
 		}

@@ -204,6 +204,17 @@
 					if (data.fatal) {
 						console.warn('HLS fatal error', data.type, data.details);
 						if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+							if (data.response?.code === 404) {
+								videoListStore.removeVideo(v.filename);
+								const next = findAdjacentVideo(1);
+								if (next) {
+									const saved = getSavedTime(next);
+									playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
+								} else {
+									playerStore.showList();
+								}
+								return;
+							}
 							hls.startLoad();
 						} else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
 							hls.recoverMediaError();

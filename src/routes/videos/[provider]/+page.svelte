@@ -6,6 +6,7 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { fetchVideos } from '$lib/services/api.js';
+	import { startSync, stopSync } from '$lib/services/sync.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { extractUniqueAliases } from '$lib/utils/alias.js';
 	import ProviderSelector from '$lib/components/ProviderSelector.svelte';
@@ -35,6 +36,7 @@
 			goto(`/videos/${DEFAULT_PROVIDER}`, { replaceState: true });
 			return;
 		}
+		stopSync();
 		videoListStore.initialize(p);
 		videoListStore.clearAliases();
 		playerStore.initialize(p);
@@ -44,6 +46,7 @@
 	async function loadVideos(p: string) {
 		const videos = await fetchVideos(p);
 		videoListStore.setVideos(videos);
+		startSync(p);
 		await tick();
 		const saved = localStorage.getItem(STORAGE_KEYS.SCROLL_PREFIX + p);
 		window.scrollTo(0, saved ? parseFloat(saved) : 0);
