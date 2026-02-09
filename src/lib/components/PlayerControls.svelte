@@ -2,7 +2,15 @@
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 
-	let { isMuted, onback, ontoggleMute, onaddpoint, onsave, oncut, onreturn }: {
+	let {
+		isMuted,
+		onback,
+		ontoggleMute,
+		onaddpoint,
+		onsave,
+		oncut,
+		onreturn
+	}: {
 		isMuted: boolean;
 		onback: () => void;
 		ontoggleMute: () => void;
@@ -51,10 +59,7 @@
 
 			{#if isOriginal}
 				<button onclick={onaddpoint}>📍</button>
-				<button
-					onclick={handleOkOrCut}
-					disabled={hasSegments && segments.length % 2 !== 0}
-				>
+				<button onclick={handleOkOrCut} disabled={hasSegments && segments.length % 2 !== 0}>
 					{hasSegments ? '✂️' : '✅'}
 				</button>
 			{/if}

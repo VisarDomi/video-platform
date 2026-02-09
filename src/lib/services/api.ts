@@ -2,7 +2,10 @@ import { API } from '../constants.js';
 import type { Video } from '../types.js';
 
 export class ApiError extends Error {
-	constructor(public status: number, message: string) {
+	constructor(
+		public status: number,
+		message: string
+	) {
 		super(message);
 	}
 }
@@ -20,13 +23,20 @@ export async function fetchNewVideos(provider: string, after: string): Promise<V
 }
 
 export async function sendSaveRequest(video: Video, provider: string): Promise<void> {
-	const response = await fetch(`${API.EDITED(video.filename)}?provider=${encodeURIComponent(provider)}`, {
-		method: 'POST'
-	});
+	const response = await fetch(
+		`${API.EDITED(video.filename)}?provider=${encodeURIComponent(provider)}`,
+		{
+			method: 'POST'
+		}
+	);
 	if (!response.ok) throw new ApiError(response.status, `Save failed: ${response.statusText}`);
 }
 
-export async function sendEditRequest(filename: string, segments: string[], provider: string): Promise<void> {
+export async function sendEditRequest(
+	filename: string,
+	segments: string[],
+	provider: string
+): Promise<void> {
 	const response = await fetch(API.EDIT, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -36,15 +46,21 @@ export async function sendEditRequest(filename: string, segments: string[], prov
 }
 
 export async function sendReturnRequest(video: Video, provider: string): Promise<void> {
-	const response = await fetch(`${API.ORIGINAL(video.filename)}?provider=${encodeURIComponent(provider)}`, {
-		method: 'POST'
-	});
+	const response = await fetch(
+		`${API.ORIGINAL(video.filename)}?provider=${encodeURIComponent(provider)}`,
+		{
+			method: 'POST'
+		}
+	);
 	if (!response.ok) throw new ApiError(response.status, `Return failed: ${response.statusText}`);
 }
 
 export async function sendDeleteRequest(video: Video, provider: string): Promise<void> {
-	const response = await fetch(`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`, {
-		method: 'POST'
-	});
+	const response = await fetch(
+		`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`,
+		{
+			method: 'POST'
+		}
+	);
 	if (!response.ok) throw new ApiError(response.status, `Delete failed: ${response.statusText}`);
 }

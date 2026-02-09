@@ -73,7 +73,7 @@
 		}
 	});
 
-	function handleVideoClick(video: typeof videoListStore.videos[number]) {
+	function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
 		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
 		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
@@ -108,7 +108,7 @@
 		}
 	});
 
-	function isActiveVideo(video: typeof videoListStore.videos[number]): boolean {
+	function isActiveVideo(video: (typeof videoListStore.videos)[number]): boolean {
 		const active = playerStore.currentVideo || playerStore.lastPlayedVideo;
 		if (!active) return false;
 		return video.filename === active.filename && video.type === active.type;
@@ -170,7 +170,9 @@
 		backdrop-filter: blur(10px);
 		-webkit-backdrop-filter: blur(10px);
 		opacity: 1;
-		transition: opacity 0.3s ease, transform 0.3s ease;
+		transition:
+			opacity 0.3s ease,
+			transform 0.3s ease;
 	}
 
 	.search-container.hidden {

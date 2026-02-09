@@ -2,7 +2,11 @@
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { formatTimePrecise } from '$lib/utils/format.js';
 
-	let { currentTime, duration, onseek }: {
+	let {
+		currentTime,
+		duration,
+		onseek
+	}: {
 		currentTime: number;
 		duration: number;
 		onseek: (time: number) => void;
@@ -11,12 +15,8 @@
 	let progressBar = $state<HTMLElement | null>(null);
 	let isScrubbing = $state(false);
 
-	const effectiveDuration = $derived(
-		duration === Infinity ? 0 : (isNaN(duration) ? 0 : duration)
-	);
-	const percentage = $derived(
-		effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0
-	);
+	const effectiveDuration = $derived(duration === Infinity ? 0 : isNaN(duration) ? 0 : duration);
+	const percentage = $derived(effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0);
 	const timeText = $derived(
 		`${formatTimePrecise(currentTime)} / ${formatTimePrecise(effectiveDuration)}`
 	);

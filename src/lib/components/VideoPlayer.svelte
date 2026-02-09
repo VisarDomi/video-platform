@@ -4,8 +4,12 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { QUADRANT_ACTIONS, STORAGE_KEYS, API } from '$lib/constants.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
-	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
-	import { saveCurrentVideo, createEditedVideo, returnToOriginals } from '$lib/services/videoActions.js';
+	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
+	import {
+		saveCurrentVideo,
+		createEditedVideo,
+		returnToOriginals
+	} from '$lib/services/videoActions.js';
 	import QuadrantOverlay from './QuadrantOverlay.svelte';
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
@@ -163,8 +167,16 @@
 				const isLive = el.duration === Infinity;
 				if (isLive) {
 					playerStore.setCurrentVideoLive();
-				} else if (startTime > 0) {
-					el.currentTime = startTime;
+					videoListStore.updateVideoLive(v.filename, true);
+				} else {
+					if (v.isLive) {
+						playerStore.setCurrentVideoNotLive();
+						videoListStore.updateVideoLive(v.filename, false);
+						clearPlaylistCache(v.filename);
+					}
+					if (startTime > 0) {
+						el.currentTime = startTime;
+					}
 				}
 				resolve();
 				return;
@@ -187,16 +199,33 @@
 					resolve();
 				});
 
-				let liveDetected = false;
+				let initialLoadDone = false;
+				let wasLive = false;
 				hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
-					if (liveDetected) return;
-					liveDetected = true;
-					if (data.details.live) {
-						if (playerStore.currentVideo?.filename === v.filename) {
-							playerStore.setCurrentVideoLive();
+					const isLive = data.details.live;
+
+					if (!initialLoadDone) {
+						initialLoadDone = true;
+						if (isLive) {
+							wasLive = true;
+							if (playerStore.currentVideo?.filename === v.filename) {
+								playerStore.setCurrentVideoLive();
+								videoListStore.updateVideoLive(v.filename, true);
+							}
+						} else if (startTime > 0) {
+							el.currentTime = startTime;
 						}
-					} else if (startTime > 0) {
-						el.currentTime = startTime;
+						return;
+					}
+
+					// Detect live → ended transition
+					if (wasLive && !isLive) {
+						wasLive = false;
+						if (playerStore.currentVideo?.filename === v.filename) {
+							playerStore.setCurrentVideoNotLive();
+							videoListStore.updateVideoLive(v.filename, false);
+							clearPlaylistCache(v.filename);
+						}
 					}
 				});
 
@@ -226,16 +255,27 @@
 				hls.attachMedia(el);
 			} else {
 				// Safari native HLS fallback
+				let safariWasLive = false;
 				const onReady = () => {
-					el.removeEventListener('loadedmetadata', onReady);
 					if (el.duration === Infinity) {
+						safariWasLive = true;
 						playerStore.setCurrentVideoLive();
+						videoListStore.updateVideoLive(v.filename, true);
 					} else if (startTime > 0) {
 						el.currentTime = startTime;
 					}
 					resolve();
 				};
+				const onDurationChange = () => {
+					if (safariWasLive && el.duration !== Infinity) {
+						safariWasLive = false;
+						playerStore.setCurrentVideoNotLive();
+						videoListStore.updateVideoLive(v.filename, false);
+						clearPlaylistCache(v.filename);
+					}
+				};
 				el.addEventListener('loadedmetadata', onReady, { once: true });
+				el.addEventListener('durationchange', onDurationChange);
 				el.src = url;
 			}
 
@@ -273,9 +313,7 @@
 	}
 
 	function preloadAdjacent(cv: Video, activeIdx: number, filteredList: Video[]) {
-		const idx = filteredList.findIndex(
-			(v) => v.filename === cv.filename && v.type === cv.type
-		);
+		const idx = filteredList.findIndex((v) => v.filename === cv.filename && v.type === cv.type);
 		if (idx === -1) return;
 
 		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
@@ -314,9 +352,7 @@
 	}
 
 	function getSavedTime(v: Video): number {
-		return parseFloat(
-			localStorage.getItem(STORAGE_KEYS.PROGRESS_PREFIX + v.filename) || '0'
-		);
+		return parseFloat(localStorage.getItem(STORAGE_KEYS.PROGRESS_PREFIX + v.filename) || '0');
 	}
 
 	function findAdjacentVideo(direction: 1 | -1): Video | null {
@@ -324,9 +360,7 @@
 		if (!cv) return null;
 		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
 		if (filteredList.length < 2) return null;
-		const idx = filteredList.findIndex(
-			(v) => v.filename === cv.filename && v.type === cv.type
-		);
+		const idx = filteredList.findIndex((v) => v.filename === cv.filename && v.type === cv.type);
 		if (idx === -1) return null;
 		const newIdx = idx + direction;
 		if (newIdx < 0 || newIdx >= filteredList.length) return null;

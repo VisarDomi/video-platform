@@ -1,5 +1,7 @@
 <script lang="ts">
-	let { onaction }: {
+	let {
+		onaction
+	}: {
 		onaction: (action: string) => void;
 	} = $props();
 

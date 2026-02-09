@@ -13,6 +13,10 @@ export interface PlaylistData {
 
 const cache = new Map<string, PlaylistData>();
 
+export function clearPlaylistCache(filename: string) {
+	cache.delete(filename);
+}
+
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
 	if (cache.has(video.filename)) {
 		return cache.get(video.filename)!;

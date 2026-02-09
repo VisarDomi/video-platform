@@ -48,7 +48,12 @@ class PlayerStore {
 	}
 
 	removeLastSegment() {
-		if (!this.currentVideo || this.currentVideo.type !== VIDEO_TYPE.ORIGINAL || this.segments.length === 0) return;
+		if (
+			!this.currentVideo ||
+			this.currentVideo.type !== VIDEO_TYPE.ORIGINAL ||
+			this.segments.length === 0
+		)
+			return;
 		this.segments = this.segments.slice(0, -1);
 	}
 
@@ -84,6 +89,12 @@ class PlayerStore {
 	setCurrentVideoLive() {
 		if (this.currentVideo && !this.currentVideo.isLive) {
 			this.currentVideo = { ...this.currentVideo, isLive: true };
+		}
+	}
+
+	setCurrentVideoNotLive() {
+		if (this.currentVideo?.isLive) {
+			this.currentVideo = { ...this.currentVideo, isLive: false };
 		}
 	}
 

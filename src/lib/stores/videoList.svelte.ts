@@ -65,6 +65,10 @@ class VideoListStore {
 		return this.videos[this.videos.length - 1].filename;
 	}
 
+	updateVideoLive(filename: string, isLive: boolean) {
+		this.videos = this.videos.map((v) => (v.filename === filename ? { ...v, isLive } : v));
+	}
+
 	updateVideoType(filename: string, oldType: VideoType, newType: VideoType) {
 		this.videos = this.videos.map((v) =>
 			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v

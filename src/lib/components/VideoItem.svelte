@@ -3,7 +3,12 @@
 	import { VIDEO_TYPE, BPS_ESTIMATE } from '$lib/constants.js';
 	import { formatDuration, formatSize } from '$lib/utils/format.js';
 
-	let { video, isActive, isLastActioned, onclick }: {
+	let {
+		video,
+		isActive,
+		isLastActioned,
+		onclick
+	}: {
 		video: Video;
 		isActive: boolean;
 		isLastActioned: boolean;
