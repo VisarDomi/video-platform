@@ -81,6 +81,12 @@ class PlayerStore {
 		}
 	}
 
+	setCurrentVideoLive() {
+		if (this.currentVideo && !this.currentVideo.isLive) {
+			this.currentVideo = { ...this.currentVideo, isLive: true };
+		}
+	}
+
 	toggleUi() {
 		this.isUiVisible = !this.isUiVisible;
 	}

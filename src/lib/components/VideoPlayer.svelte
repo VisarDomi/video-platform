@@ -147,17 +147,7 @@
 	}
 
 	async function activatePlayer(el: HTMLVideoElement, v: Video, startTime: number) {
-		const effectiveStart = v.isLive ? 0 : startTime;
-
-		await loadStream(el, v, effectiveStart);
-
-		if (v.isLive) {
-			if (el.seekable.length > 0) {
-				el.currentTime = el.seekable.end(el.seekable.length - 1);
-			} else if (!isNaN(el.duration) && el.duration !== Infinity) {
-				el.currentTime = el.duration;
-			}
-		}
+		await loadStream(el, v, startTime);
 
 		try {
 			await el.play();
@@ -170,7 +160,12 @@
 	function loadStream(el: HTMLVideoElement, v: Video, startTime: number): Promise<void> {
 		return new Promise((resolve) => {
 			if (el.dataset.loadedFilename === v.filename) {
-				if (startTime > 0) el.currentTime = startTime;
+				const isLive = el.duration === Infinity;
+				if (isLive) {
+					playerStore.setCurrentVideoLive();
+				} else if (startTime > 0) {
+					el.currentTime = startTime;
+				}
 				resolve();
 				return;
 			}
@@ -189,8 +184,20 @@
 				hlsInstances.set(el, hls);
 
 				hls.on(Hls.Events.MANIFEST_PARSED, () => {
-					if (startTime > 0) el.currentTime = startTime;
 					resolve();
+				});
+
+				let liveDetected = false;
+				hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
+					if (liveDetected) return;
+					liveDetected = true;
+					if (data.details.live) {
+						if (playerStore.currentVideo?.filename === v.filename) {
+							playerStore.setCurrentVideoLive();
+						}
+					} else if (startTime > 0) {
+						el.currentTime = startTime;
+					}
 				});
 
 				hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -210,7 +217,11 @@
 				// Safari native HLS fallback
 				const onReady = () => {
 					el.removeEventListener('loadedmetadata', onReady);
-					if (startTime > 0) el.currentTime = startTime;
+					if (el.duration === Infinity) {
+						playerStore.setCurrentVideoLive();
+					} else if (startTime > 0) {
+						el.currentTime = startTime;
+					}
 					resolve();
 				};
 				el.addEventListener('loadedmetadata', onReady, { once: true });
