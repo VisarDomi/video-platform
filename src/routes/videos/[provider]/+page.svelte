@@ -45,7 +45,8 @@
 		const videos = await fetchVideos(p);
 		videoListStore.setVideos(videos);
 		await tick();
-		scrollToActiveVideo();
+		const saved = localStorage.getItem(STORAGE_KEYS.SCROLL_PREFIX + p);
+		window.scrollTo(0, saved ? parseFloat(saved) : 0);
 	}
 
 	function scrollToActiveVideo() {
@@ -86,6 +87,11 @@
 			searchHidden = false;
 		}
 		lastScrollY = currentScrollY < 0 ? 0 : currentScrollY;
+
+		const p = videoListStore.selectedProvider;
+		if (p && playerStore.view === 'list' && !videoListStore.isLoading) {
+			localStorage.setItem(STORAGE_KEYS.SCROLL_PREFIX + p, String(Math.round(currentScrollY)));
+		}
 	}
 
 	// Hide search when entering video view, reset and scroll when returning to list

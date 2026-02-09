@@ -4,6 +4,7 @@ export const DEFAULT_PROVIDER = PROVIDERS[0];
 export const STORAGE_KEYS = {
 	LAST_PLAYED_VIDEO: 'last-played-video',
 	PROGRESS_PREFIX: 'video-progress-',
+	SCROLL_PREFIX: 'scroll-',
 	SELECTED_PROVIDER: 'selected-provider'
 } as const;
 
