@@ -59,4 +59,3 @@ export const HLS = {
 } as const;
 
 export const BPS_ESTIMATE = (2300 * 1000) / 8;
-export const MIN_FILTER_CHARS = 3;

@@ -4,16 +4,12 @@ import type { Video, VideoType } from '../types.js';
 class VideoListStore {
 	videos = $state<Video[]>([]);
 	isLoading = $state(true);
-	filter = $state('');
 	selectedProvider = $state<string>(DEFAULT_PROVIDER);
+	selectedAliases = $state<Set<string>>(new Set());
 
 	initialize(provider: string) {
 		this.selectedProvider = provider;
 		this.isLoading = true;
-	}
-
-	setFilter(newFilter: string) {
-		this.filter = newFilter;
 	}
 
 	setProvider(newProvider: string) {
@@ -28,6 +24,26 @@ class VideoListStore {
 
 	setLoading(loading: boolean) {
 		this.isLoading = loading;
+	}
+
+	toggleAlias(alias: string) {
+		const next = new Set(this.selectedAliases);
+		if (next.has(alias)) {
+			next.delete(alias);
+		} else {
+			next.add(alias);
+		}
+		this.selectedAliases = next;
+	}
+
+	removeAlias(alias: string) {
+		const next = new Set(this.selectedAliases);
+		next.delete(alias);
+		this.selectedAliases = next;
+	}
+
+	clearAliases() {
+		this.selectedAliases = new Set();
 	}
 
 	updateVideoType(filename: string, oldType: VideoType, newType: VideoType) {

@@ -3,7 +3,7 @@
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { QUADRANT_ACTIONS, STORAGE_KEYS, API } from '$lib/constants.js';
-	import { filterVideos } from '$lib/utils/filter.js';
+	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 	import { saveCurrentVideo, createEditedVideo, returnToOriginals } from '$lib/services/videoActions.js';
 	import QuadrantOverlay from './QuadrantOverlay.svelte';
@@ -124,7 +124,7 @@
 		}
 
 		// Preload adjacent
-		const filteredList = filterVideos(videoListStore.videos, videoListStore.filter);
+		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
 		preloadAdjacent(cv, activeIdx, filteredList);
 	});
 
@@ -300,7 +300,7 @@
 	function findAdjacentVideo(direction: 1 | -1): Video | null {
 		const cv = playerStore.currentVideo;
 		if (!cv) return null;
-		const filteredList = filterVideos(videoListStore.videos, videoListStore.filter);
+		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
 		if (filteredList.length < 2) return null;
 		const idx = filteredList.findIndex(
 			(v) => v.filename === cv.filename && v.type === cv.type

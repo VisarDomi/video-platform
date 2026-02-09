@@ -6,23 +6,26 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { fetchVideos } from '$lib/services/api.js';
-	import { filterVideos } from '$lib/utils/filter.js';
+	import { filterByAliases } from '$lib/utils/filter.js';
+	import { extractUniqueAliases } from '$lib/utils/alias.js';
 	import ProviderSelector from '$lib/components/ProviderSelector.svelte';
+	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
 	const MIN_LIST_ITEMS = 100;
 
-	let searchInput = $state<HTMLInputElement | null>(null);
 	let listContainer = $state<HTMLElement | null>(null);
 	let lastScrollY = $state(0);
 	let searchHidden = $state(false);
 
 	const provider = $derived(page.params.provider);
 
+	const uniqueAliases = $derived(extractUniqueAliases(videoListStore.videos));
+
 	const filteredVideos = $derived(
-		filterVideos(videoListStore.videos, videoListStore.filter)
+		filterByAliases(videoListStore.videos, videoListStore.selectedAliases)
 	);
 
 	// Validate provider and load videos when it changes
@@ -33,6 +36,7 @@
 			return;
 		}
 		videoListStore.initialize(p);
+		videoListStore.clearAliases();
 		playerStore.initialize(p);
 		loadVideos(p);
 	});
@@ -46,7 +50,6 @@
 
 	function scrollToActiveVideo() {
 		if (!listContainer) return;
-		if (document.activeElement === searchInput) return;
 		const target =
 			listContainer.querySelector('.last-actioned') ||
 			listContainer.querySelector('.current-video');
@@ -74,8 +77,6 @@
 	}
 
 	function handleScroll() {
-		if (document.activeElement === searchInput) return;
-
 		const currentScrollY = window.scrollY;
 		if (Math.abs(currentScrollY - lastScrollY) < 10) return;
 
@@ -85,14 +86,6 @@
 			searchHidden = false;
 		}
 		lastScrollY = currentScrollY < 0 ? 0 : currentScrollY;
-	}
-
-	function clearFilter() {
-		videoListStore.setFilter('');
-		if (searchInput) {
-			searchInput.value = '';
-			searchInput.blur();
-		}
 	}
 
 	// Hide search when entering video view, reset and scroll when returning to list
@@ -117,18 +110,12 @@
 
 <div class="search-container" class:hidden={searchHidden}>
 	<ProviderSelector />
-	<div class="search-row">
-		<input
-			bind:this={searchInput}
-			type="text"
-			placeholder="Filter (regex)..."
-			value={videoListStore.filter}
-			oninput={(e) => videoListStore.setFilter(e.currentTarget.value)}
-		/>
-		{#if videoListStore.filter}
-			<button class="clear-btn" onclick={clearFilter}>&times;</button>
-		{/if}
-	</div>
+	<AliasSelector
+		aliases={uniqueAliases}
+		selectedAliases={videoListStore.selectedAliases}
+		ontoggle={(alias) => videoListStore.toggleAlias(alias)}
+		onremove={(alias) => videoListStore.removeAlias(alias)}
+	/>
 </div>
 
 <div class="list-container" bind:this={listContainer}>
@@ -181,32 +168,6 @@
 		opacity: 0;
 		transform: translateY(-1500%);
 		pointer-events: none;
-	}
-
-	.search-row {
-		display: flex;
-		width: 100%;
-		align-items: center;
-	}
-
-	input {
-		flex-grow: 1;
-		padding: 10px;
-		font-size: 16px;
-		background-color: transparent;
-		border: none;
-		color: white;
-		outline: none;
-	}
-
-	.clear-btn {
-		background: none;
-		border: none;
-		color: #aaa;
-		cursor: pointer;
-		font-size: 18px;
-		line-height: 1;
-		padding: 0 10px;
 	}
 
 	.list-container {
