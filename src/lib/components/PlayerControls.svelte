@@ -4,7 +4,6 @@
 
 	let {
 		isMuted,
-		onback,
 		ontoggleMute,
 		onaddpoint,
 		onsave,
@@ -12,7 +11,6 @@
 		onreturn
 	}: {
 		isMuted: boolean;
-		onback: () => void;
 		ontoggleMute: () => void;
 		onaddpoint: () => void;
 		onsave: () => void;
@@ -47,8 +45,6 @@
 {#if video}
 	<div class="controls">
 		<div class="buttons">
-			<button onclick={onback}>↩️</button>
-
 			<button onclick={handleMuteOrUndo}>
 				{#if hasSegments}
 					↪️

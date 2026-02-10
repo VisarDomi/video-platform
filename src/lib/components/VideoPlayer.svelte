@@ -400,6 +400,7 @@
 	}
 
 	function handleQuadrantAction(action: string) {
+		if (playerStore.isSwiping || playerStore.swipeAnimating) return;
 		if (action === QUADRANT_ACTIONS.TOGGLE_UI) {
 			playerStore.toggleUi();
 			return;
@@ -476,14 +477,85 @@
 			wakeLock = null;
 		}
 	}
+	// Swipe-to-go-back gesture
+	const EDGE_ZONE = 30;
+	const SWIPE_THRESHOLD = 0.3;
+	let swipeTracking = false;
+	let swipeStartX = 0;
+	let swipeStartY = 0;
+	let swipeLocked = false;
+	let swipeRejected = false;
+
+	function handleTouchStart(e: TouchEvent) {
+		if (playerStore.swipeAnimating) return;
+		const touch = e.touches[0];
+		if (touch.clientX <= EDGE_ZONE) {
+			swipeTracking = true;
+			swipeStartX = touch.clientX;
+			swipeStartY = touch.clientY;
+			swipeLocked = false;
+			swipeRejected = false;
+		}
+	}
+
+	function handleTouchMove(e: TouchEvent) {
+		e.preventDefault();
+		if (!swipeTracking || swipeRejected) return;
+		const touch = e.touches[0];
+		const dx = touch.clientX - swipeStartX;
+		const dy = touch.clientY - swipeStartY;
+		if (!swipeLocked) {
+			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+			if (Math.abs(dy) > Math.abs(dx)) {
+				swipeRejected = true;
+				return;
+			}
+			swipeLocked = true;
+			playerStore.isSwiping = true;
+		}
+		const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+		playerStore.swipeProgress = progress;
+	}
+
+	function handleTouchEnd() {
+		if (!swipeTracking || !swipeLocked) {
+			swipeTracking = false;
+			return;
+		}
+		swipeTracking = false;
+		const progress = playerStore.swipeProgress;
+		playerStore.swipeAnimating = true;
+		if (progress > SWIPE_THRESHOLD) {
+			playerStore.swipeProgress = 1;
+			setTimeout(() => {
+				playerStore.showList();
+				playerStore.isSwiping = false;
+				playerStore.swipeAnimating = false;
+				playerStore.swipeProgress = 0;
+			}, 250);
+		} else {
+			playerStore.swipeProgress = 0;
+			setTimeout(() => {
+				playerStore.isSwiping = false;
+				playerStore.swipeAnimating = false;
+			}, 250);
+		}
+	}
 </script>
 
 <div
 	class="video-view"
 	class:visible={isVisible}
+	class:swipe-active={playerStore.isSwiping}
+	class:swipe-animating={playerStore.swipeAnimating}
+	style={playerStore.isSwiping || playerStore.swipeAnimating
+		? `transform:translateX(${playerStore.swipeProgress * 100}%)`
+		: ''}
 	role="application"
 	ondblclick={(e) => e.preventDefault()}
-	ontouchmove={(e) => e.preventDefault()}
+	ontouchstart={handleTouchStart}
+	ontouchmove={handleTouchMove}
+	ontouchend={handleTouchEnd}
 >
 	<div class="video-container">
 		<div class="video-player" bind:this={videoContainer}></div>
@@ -500,7 +572,6 @@
 
 				<PlayerControls
 					{isMuted}
-					onback={() => playerStore.showList()}
 					ontoggleMute={toggleMute}
 					onaddpoint={handleAddPoint}
 					onsave={saveCurrentVideo}
@@ -600,5 +671,12 @@
 		text-shadow: 1px 1px 2px black;
 		margin-bottom: 10px;
 		word-break: break-all;
+	}
+	.video-view.swipe-active {
+		box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
+	}
+
+	.video-view.swipe-animating {
+		transition: transform 250ms ease-out;
 	}
 </style>

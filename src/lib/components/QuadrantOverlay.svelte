@@ -5,7 +5,10 @@
 		onaction: (action: string) => void;
 	} = $props();
 
-	function handlePointerDown(action: string) {
+	const EDGE_ZONE = 30;
+
+	function handlePointerDown(action: string, e: PointerEvent) {
+		if (e.clientX <= EDGE_ZONE) return;
 		onaction(action);
 	}
 
@@ -18,14 +21,14 @@
 	<!-- Row 1: prev / seek-backward -->
 	<div
 		class="quadrant top-quadrant"
-		onpointerdown={() => handlePointerDown('prev')}
+		onpointerdown={(e) => handlePointerDown('prev', e)}
 		ontouchend={preventTouchZoom}
 		role="button"
 		tabindex="-1"
 	></div>
 	<div
 		class="quadrant top-quadrant"
-		onpointerdown={() => handlePointerDown('seek-backward')}
+		onpointerdown={(e) => handlePointerDown('seek-backward', e)}
 		ontouchend={preventTouchZoom}
 		role="button"
 		tabindex="-1"
@@ -34,14 +37,14 @@
 	<!-- Row 2: next / seek-forward -->
 	<div
 		class="quadrant top-quadrant"
-		onpointerdown={() => handlePointerDown('next')}
+		onpointerdown={(e) => handlePointerDown('next', e)}
 		ontouchend={preventTouchZoom}
 		role="button"
 		tabindex="-1"
 	></div>
 	<div
 		class="quadrant top-quadrant"
-		onpointerdown={() => handlePointerDown('seek-forward')}
+		onpointerdown={(e) => handlePointerDown('seek-forward', e)}
 		ontouchend={preventTouchZoom}
 		role="button"
 		tabindex="-1"
@@ -50,7 +53,7 @@
 	<!-- Row 3: toggle-ui (full width) -->
 	<div
 		class="quadrant bottom-quadrant"
-		onpointerdown={() => handlePointerDown('toggle-ui')}
+		onpointerdown={(e) => handlePointerDown('toggle-ui', e)}
 		role="button"
 		tabindex="-1"
 	></div>

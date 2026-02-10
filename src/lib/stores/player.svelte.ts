@@ -10,6 +10,9 @@ class PlayerStore {
 	lastActionedVideoFilename = $state<string | null>(null);
 	activePlayerIndex = $state(0);
 	isUiVisible = $state(false);
+	swipeProgress = $state(0);
+	isSwiping = $state(false);
+	swipeAnimating = $state(false);
 
 	initialize(provider: string) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`);
