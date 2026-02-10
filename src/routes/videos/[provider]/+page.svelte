@@ -9,7 +9,6 @@
 	import { startSync, stopSync } from '$lib/services/sync.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { extractUniqueAliases } from '$lib/utils/alias.js';
-	import ProviderSelector from '$lib/components/ProviderSelector.svelte';
 	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
@@ -115,12 +114,45 @@
 		if (!active) return false;
 		return video.filename === active.filename && video.type === active.type;
 	}
+	// Swipe to switch provider
+	const SWIPE_THRESHOLD = 80;
+	let swipeStartX = 0;
+	let swipeStartY = 0;
+
+	function handleTouchStart(e: TouchEvent) {
+		if (playerStore.view !== 'list') return;
+		swipeStartX = e.touches[0].clientX;
+		swipeStartY = e.touches[0].clientY;
+	}
+
+	function handleTouchEnd(e: TouchEvent) {
+		if (playerStore.view !== 'list') return;
+		const touch = e.changedTouches[0];
+		const dx = touch.clientX - swipeStartX;
+		const dy = touch.clientY - swipeStartY;
+		if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 2) {
+			switchProvider(dx < 0 ? 1 : -1);
+		}
+	}
+
+	function switchProvider(direction: 1 | -1) {
+		const currentIdx = (PROVIDERS as readonly string[]).indexOf(videoListStore.selectedProvider);
+		const newIdx = currentIdx + direction;
+		if (newIdx < 0 || newIdx >= PROVIDERS.length) return;
+		const newProvider = PROVIDERS[newIdx];
+		videoListStore.setProvider(newProvider);
+		goto(`/videos/${newProvider}`, { replaceState: true });
+	}
 </script>
 
-<svelte:window onscroll={handleScroll} />
+<svelte:window
+	onscroll={handleScroll}
+	ontouchstart={handleTouchStart}
+	ontouchend={handleTouchEnd}
+/>
 
 <div class="search-container" class:hidden={searchHidden}>
-	<ProviderSelector />
+	<div class="provider-label">{videoListStore.selectedProvider.toUpperCase()}</div>
 	<AliasSelector
 		aliases={uniqueAliases}
 		selectedAliases={videoListStore.selectedAliases}
@@ -197,5 +229,15 @@
 	.empty-item {
 		height: 52px;
 		border-bottom: 1px solid #333;
+	}
+	.provider-label {
+		width: 100%;
+		text-align: center;
+		font-size: 14px;
+		font-weight: bold;
+		color: #fff;
+		padding: 6px 0;
+		border-bottom: 1px solid #444;
+		margin-bottom: 5px;
 	}
 </style>
