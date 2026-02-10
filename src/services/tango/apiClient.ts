@@ -5,6 +5,7 @@ const API_BASE = "https://gateway.tango.me/proxycador/api/public/v1";
 
 export interface TlStreamer {
     streamerId: string;
+    streamId: string;
     alias: string;
     firstName: string;
     masterListUrl: string;
@@ -81,7 +82,7 @@ export async function fetchStreamers(count: number = 50): Promise<{ following: T
         const recommended: TlStreamer[] = [];
 
         if (recommendations?.categoryInfoList) {
-            const allStreamers: Array<{ streamerId: string; masterListUrl: string; firstName: string; isFollowing: boolean }> = [];
+            const allStreamers: Array<{ streamerId: string; streamId: string; masterListUrl: string; firstName: string; isFollowing: boolean }> = [];
 
             for (const category of recommendations.categoryInfoList) {
                 if (category.streamInfoList?.streamDetails) {
@@ -91,6 +92,7 @@ export async function fetchStreamers(count: number = 50): Promise<{ following: T
                             if (!blockList.includes(streamerId)) {
                                 allStreamers.push({
                                     streamerId,
+                                    streamId: detail.stream.id || "",
                                     masterListUrl: detail.stream.masterListUrl,
                                     firstName: detail.anchor.firstName || "...",
                                     isFollowing: category.tag === "following",
@@ -108,6 +110,7 @@ export async function fetchStreamers(count: number = 50): Promise<{ following: T
                 const profileData = aliases?.[s.streamerId];
                 const streamer: TlStreamer = {
                     streamerId: s.streamerId,
+                    streamId: s.streamId,
                     alias: profileData?.alias || s.streamerId,
                     firstName: profileData?.firstName || s.firstName,
                     masterListUrl: s.masterListUrl,
@@ -159,6 +162,66 @@ export async function fetchAliasesInBatch(streamerIds: string[]): Promise<Record
     } catch (error) {
         logger.error("[TL] Failed to fetch aliases in batch", { error: (error as Error).message });
         return null;
+    }
+}
+
+export async function fetchMultiBroadcastStreamers(streamId: string): Promise<TlStreamer[]> {
+    try {
+        const headers = getApiHeaders();
+        headers["Content-Type"] = "text/plain";
+
+        const [watchResponse, blockList] = await Promise.all([
+            fetch(`${API_BASE}/live/stream/v2/watch?requestId=`, {
+                method: "POST",
+                headers,
+                body: streamId,
+            }),
+            fetchBlockList(),
+        ]);
+
+        if (!watchResponse.ok) {
+            logger.error(`[TL] Multi-broadcast request failed: ${watchResponse.status}`);
+            return [];
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = (await watchResponse.json()) as any;
+        const streams = data?.multiBroadcast?.streams;
+        if (!Array.isArray(streams) || streams.length === 0) return [];
+
+        const rawStreamers: Array<{ streamerId: string; streamId: string; masterListUrl: string }> = [];
+        for (const item of streams) {
+            const accountId = item.stream?.mbDescriptor?.accountId;
+            const mbStreamId = item.stream?.mbDescriptor?.streamId;
+            const streamURL = item.stream?.streamURL;
+            if (accountId && mbStreamId && streamURL && !blockList.includes(accountId)) {
+                rawStreamers.push({ streamerId: accountId, streamId: mbStreamId, masterListUrl: streamURL });
+            }
+        }
+
+        if (rawStreamers.length === 0) return [];
+
+        // Exclude the parent streamer from co-streamers
+        const filtered = rawStreamers.filter((s) => s.streamId !== streamId);
+
+        if (filtered.length === 0) return [];
+
+        const aliases = await fetchAliasesInBatch(filtered.map((s) => s.streamerId));
+
+        return filtered.map((s) => {
+            const profileData = aliases?.[s.streamerId];
+            return {
+                streamerId: s.streamerId,
+                streamId: s.streamId,
+                alias: profileData?.alias || s.streamerId,
+                firstName: profileData?.firstName || "...",
+                masterListUrl: s.masterListUrl,
+                isFollowing: false,
+            };
+        });
+    } catch (error) {
+        logger.error("[TL] Failed to fetch multi-broadcast streamers", { error: (error as Error).message });
+        return [];
     }
 }
 

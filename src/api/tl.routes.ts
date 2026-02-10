@@ -17,6 +17,19 @@ router.get("/tl/streams", async (_req, res) => {
     }
 });
 
+// --- Multi-broadcast (co-streamers) ---
+router.post("/tl/multi-broadcast", async (req, res) => {
+    const { streamId } = req.body;
+    if (!streamId) return res.status(400).json({ error: "streamId required" });
+    try {
+        const streamers = await tangoApi.fetchMultiBroadcastStreamers(streamId);
+        res.json(streamers);
+    } catch (error: any) {
+        logger.error("[TL] Failed to fetch multi-broadcast", { error: error.message });
+        res.status(500).json({ error: "Failed to fetch multi-broadcast" });
+    }
+});
+
 // --- Social actions ---
 router.post("/tl/follow", async (req, res) => {
     const { streamerId } = req.body;
