@@ -2,7 +2,7 @@
 	import Hls from 'hls.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { QUADRANT_ACTIONS, STORAGE_KEYS, API } from '$lib/constants.js';
+	import { QUADRANT_ACTIONS, STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
 	import {
@@ -24,6 +24,7 @@
 	let wakeLock = $state<WakeLockSentinel | null>(null);
 
 	const hlsInstances = new Map<HTMLVideoElement, Hls>();
+	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
@@ -187,7 +188,7 @@
 
 			const url = API.HLS_PLAYLIST(v.filename);
 
-			if (Hls.isSupported()) {
+			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				// Destroy previous hls.js instance for this element
 				const oldHls = hlsInstances.get(el);
 				if (oldHls) {
@@ -257,11 +258,17 @@
 				hls.loadSource(url);
 				hls.attachMedia(el);
 			} else {
-				// Safari native HLS fallback
-				let safariWasLive = false;
+				// Native HLS path (Safari, or forced via USE_NATIVE_HLS)
+				const oldController = nativeAbortControllers.get(el);
+				if (oldController) oldController.abort();
+				const controller = new AbortController();
+				nativeAbortControllers.set(el, controller);
+				const signal = controller.signal;
+
+				let nativeWasLive = false;
 				const onReady = () => {
 					if (el.duration === Infinity) {
-						safariWasLive = true;
+						nativeWasLive = true;
 						playerStore.setCurrentVideoLive();
 						videoListStore.updateVideoLive(v.filename, true);
 					} else if (startTime > 0) {
@@ -270,15 +277,30 @@
 					resolve();
 				};
 				const onDurationChange = () => {
-					if (safariWasLive && el.duration !== Infinity) {
-						safariWasLive = false;
+					if (nativeWasLive && el.duration !== Infinity) {
+						nativeWasLive = false;
 						playerStore.setCurrentVideoNotLive();
 						videoListStore.updateVideoLive(v.filename, false);
 						clearPlaylistCache(v.filename);
 					}
 				};
-				el.addEventListener('loadedmetadata', onReady, { once: true });
-				el.addEventListener('durationchange', onDurationChange);
+				const onError = () => {
+					const mediaError = el.error;
+					if (mediaError) {
+						console.warn('Native HLS error', mediaError.code, mediaError.message);
+						videoListStore.removeVideo(v.filename);
+						const next = findAdjacentVideo(1);
+						if (next) {
+							const saved = getSavedTime(next);
+							playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
+						} else {
+							playerStore.showList();
+						}
+					}
+				};
+				el.addEventListener('loadedmetadata', onReady, { once: true, signal });
+				el.addEventListener('durationchange', onDurationChange, { signal });
+				el.addEventListener('error', onError, { signal });
 				el.src = url;
 			}
 
@@ -301,6 +323,13 @@
 		if (hls) {
 			hls.destroy();
 			hlsInstances.delete(el);
+		}
+
+		// Abort native HLS event listeners
+		const controller = nativeAbortControllers.get(el);
+		if (controller) {
+			controller.abort();
+			nativeAbortControllers.delete(el);
 		}
 
 		el.removeAttribute('src');

@@ -60,3 +60,10 @@ export const HLS = {
 } as const;
 
 export const BPS_ESTIMATE = (2300 * 1000) / 8;
+
+export const IS_IOS =
+	typeof navigator !== 'undefined' &&
+	(/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+		(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+export const USE_NATIVE_HLS = IS_IOS;
