@@ -16,6 +16,8 @@
 		fetchStreams,
 		startDownload,
 		fetchMultiBroadcast,
+		trackTlAlias,
+		stopAllTlDownloads,
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
@@ -58,6 +60,7 @@
 			return;
 		}
 		stopSync();
+		stopAllTlDownloads();
 		videoListStore.initialize(p);
 		videoListStore.clearAliases();
 		playerStore.initialize(p);
@@ -266,6 +269,7 @@
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(video.filename);
 			if (streamer) {
+				trackTlAlias(video.filename);
 				await startDownload(streamer);
 			}
 		}

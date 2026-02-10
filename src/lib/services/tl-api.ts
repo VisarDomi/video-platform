@@ -41,6 +41,32 @@ export async function stopDownload(alias: string): Promise<void> {
 	});
 }
 
+const activeTlDownloads = new Set<string>();
+
+export function trackTlAlias(alias: string) {
+	activeTlDownloads.add(alias);
+}
+
+export function stopStaleTlDownloads(keep: string[]) {
+	const keepSet = new Set(keep);
+	for (const alias of activeTlDownloads) {
+		if (!keepSet.has(alias)) {
+			activeTlDownloads.delete(alias);
+			console.log('[TL:dl] stopping download for', alias);
+			void stopDownload(alias);
+		}
+	}
+}
+
+export function stopAllTlDownloads() {
+	if (activeTlDownloads.size === 0) return;
+	console.log('[TL:dl] stopping all downloads:', [...activeTlDownloads].join(', '));
+	for (const alias of activeTlDownloads) {
+		void stopDownload(alias);
+	}
+	activeTlDownloads.clear();
+}
+
 export async function followStreamer(streamerId: string): Promise<boolean> {
 	const response = await fetch(TL_API.FOLLOW, {
 		method: 'POST',

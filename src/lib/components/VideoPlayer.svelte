@@ -10,7 +10,13 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
-	import { startDownload, fetchMultiBroadcast } from '$lib/services/tl-api.js';
+	import {
+		startDownload,
+		fetchMultiBroadcast,
+		trackTlAlias,
+		stopStaleTlDownloads,
+		stopAllTlDownloads
+	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
@@ -93,6 +99,7 @@
 		if (playerStore.view !== 'list' || videoElements.length === 0) return;
 		playerStore.swipeAnimating = false;
 		getActiveElement()?.pause();
+		stopAllTlDownloads();
 	});
 
 	// Cleanup when video is cleared
@@ -395,6 +402,7 @@
 	}
 
 	function stopPlayback() {
+		stopAllTlDownloads();
 		currentFilename = null;
 		videoElements.forEach(clearStream);
 	}
@@ -405,6 +413,15 @@
 
 		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
 		const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
+
+		// Stop TL downloads no longer in the active window
+		if (videoListStore.selectedProvider === 'tl') {
+			const keep = [cv.filename];
+			if (nextVideo) keep.push(nextVideo.filename);
+			if (prevVideo) keep.push(prevVideo.filename);
+			trackTlAlias(cv.filename);
+			stopStaleTlDownloads(keep);
+		}
 
 		const nextPlayer = videoElements[(activeIdx + 1) % 3];
 		if (nextVideo) {
@@ -424,7 +441,10 @@
 	async function ensureTlDownload(v: Video) {
 		if (videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(v.filename);
-		if (streamer) await startDownload(streamer);
+		if (streamer) {
+			trackTlAlias(v.filename);
+			await startDownload(streamer);
+		}
 	}
 
 	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
@@ -455,6 +475,7 @@
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(target.filename);
 			if (streamer) {
+				trackTlAlias(target.filename);
 				await startDownload(streamer);
 			}
 			if (myNav !== navCounter) return;
