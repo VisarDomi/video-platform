@@ -90,6 +90,7 @@
 		if (videoElements.length === 0) return;
 
 		if (view === 'list') {
+			playerStore.swipeAnimating = false;
 			getActiveElement()?.pause();
 			updateWakeLock(false);
 			return;
@@ -125,12 +126,18 @@
 		isMuted = activeEl.muted;
 
 		if (videoChanged) {
+			resetZoom();
 			void activatePlayer(activeEl, cv, playerStore.currentVideoStartTime);
 		} else if (activeEl.paused) {
 			void activeEl.play();
 		}
+	});
 
-		// Preload adjacent
+	// Preload adjacent — separate effect to avoid reactive loops through videoListStore.videos
+	$effect(() => {
+		const cv = playerStore.currentVideo;
+		if (!cv || playerStore.view !== 'video' || videoElements.length === 0) return;
+		const activeIdx = playerStore.activePlayerIndex;
 		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
 		preloadAdjacent(cv, activeIdx, filteredList);
 	});
@@ -393,9 +400,10 @@
 		if (filteredList.length < 2) return null;
 		const idx = filteredList.findIndex((v) => v.filename === cv.filename && v.type === cv.type);
 		if (idx === -1) return null;
-		const newIdx = idx + direction;
-		if (newIdx < 0 || newIdx >= filteredList.length) return null;
-		return filteredList[newIdx];
+		for (let i = idx + direction; i >= 0 && i < filteredList.length; i += direction) {
+			if (filteredList[i].filename !== cv.filename) return filteredList[i];
+		}
+		return null;
 	}
 
 	function handleSeek(time: number) {
@@ -440,14 +448,86 @@
 	const FLICK_THRESHOLD = 80;
 	const UI_SWIPE_THRESHOLD = 80;
 	const SEEK_RATE = 60;
+	const MAX_ZOOM = 5;
+	const ZOOM_THRESHOLD = 1.01;
 	let swipeStartX = 0;
 	let swipeStartY = 0;
 	let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
+	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' | 'pinch' | 'pan' = 'none';
 	let seekBaseTime = 0;
+
+	// Pinch-to-zoom state
+	let zoomScale = $state(1);
+	let zoomX = $state(0);
+	let zoomY = $state(0);
+	let pinchStartDist = 0;
+	let pinchStartScale = 0;
+	let pinchContentAnchorX = 0;
+	let pinchContentAnchorY = 0;
+	let panStartTouchX = 0;
+	let panStartTouchY = 0;
+	let panStartZoomX = 0;
+	let panStartZoomY = 0;
+
+	function getPinchDist(e: TouchEvent): number {
+		const [a, b] = [e.touches[0], e.touches[1]];
+		return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+	}
+
+	function getPinchMid(e: TouchEvent): [number, number] {
+		const [a, b] = [e.touches[0], e.touches[1]];
+		return [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
+	}
+
+	function initPinch(e: TouchEvent) {
+		pinchStartDist = Math.max(1, getPinchDist(e));
+		pinchStartScale = zoomScale;
+		const [midX, midY] = getPinchMid(e);
+		const cx = window.innerWidth / 2;
+		const cy = window.innerHeight / 2;
+		pinchContentAnchorX = (midX - cx - zoomX) / zoomScale;
+		pinchContentAnchorY = (midY - cy - zoomY) / zoomScale;
+	}
+
+	function clampTranslate() {
+		if (zoomScale <= 1) {
+			zoomX = 0;
+			zoomY = 0;
+			return;
+		}
+		const maxX = ((zoomScale - 1) * window.innerWidth) / 2;
+		const maxY = ((zoomScale - 1) * window.innerHeight) / 2;
+		zoomX = Math.max(-maxX, Math.min(maxX, zoomX));
+		zoomY = Math.max(-maxY, Math.min(maxY, zoomY));
+	}
+
+	function resetZoom() {
+		zoomScale = 1;
+		zoomX = 0;
+		zoomY = 0;
+	}
+
+	function handleTouchCancel() {
+		if (zoomScale <= ZOOM_THRESHOLD) resetZoom();
+		swipeType = 'none';
+		swipeAxis = 'none';
+		if (playerStore.isSwiping) {
+			playerStore.isSwiping = false;
+			playerStore.swipeAnimating = false;
+			playerStore.swipeProgress = 0;
+		}
+	}
 
 	function handleTouchStart(e: TouchEvent) {
 		if (playerStore.swipeAnimating) return;
+
+		if (e.touches.length === 2) {
+			swipeType = 'pinch';
+			swipeAxis = 'none';
+			initPinch(e);
+			return;
+		}
+
 		const touch = e.touches[0];
 		swipeStartX = touch.clientX;
 		swipeStartY = touch.clientY;
@@ -458,10 +538,51 @@
 	function handleTouchMove(e: TouchEvent) {
 		e.preventDefault();
 		if (playerStore.swipeAnimating) return;
+
+		// Pinch zoom (2 fingers)
+		if (e.touches.length === 2) {
+			if (swipeType !== 'pinch') {
+				swipeType = 'pinch';
+				initPinch(e);
+				return;
+			}
+			const newDist = getPinchDist(e);
+			const newScale = Math.max(
+				1,
+				Math.min(MAX_ZOOM, pinchStartScale * (newDist / pinchStartDist))
+			);
+			const [midX, midY] = getPinchMid(e);
+			const cx = window.innerWidth / 2;
+			const cy = window.innerHeight / 2;
+			zoomX = midX - cx - newScale * pinchContentAnchorX;
+			zoomY = midY - cy - newScale * pinchContentAnchorY;
+			zoomScale = newScale;
+			return;
+		}
+
+		// Single finger
 		const touch = e.touches[0];
 		const dx = touch.clientX - swipeStartX;
 		const dy = touch.clientY - swipeStartY;
 
+		// When zoomed, pan instead of swipe
+		if (zoomScale > ZOOM_THRESHOLD && swipeType === 'none') {
+			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+			swipeType = 'pan';
+			panStartTouchX = swipeStartX;
+			panStartTouchY = swipeStartY;
+			panStartZoomX = zoomX;
+			panStartZoomY = zoomY;
+		}
+
+		if (swipeType === 'pan') {
+			zoomX = panStartZoomX + (touch.clientX - panStartTouchX);
+			zoomY = panStartZoomY + (touch.clientY - panStartTouchY);
+			clampTranslate();
+			return;
+		}
+
+		// Normal swipe gestures (only at 1x zoom)
 		if (swipeAxis === 'none') {
 			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
 			if (Math.abs(dx) >= Math.abs(dy)) {
@@ -469,7 +590,7 @@
 				if (swipeStartX <= EDGE_ZONE && dx > 0) {
 					swipeType = 'edge-back';
 					playerStore.isSwiping = true;
-				} else if (swipeStartY < window.innerHeight / 2) {
+				} else if (swipeStartY < window.innerHeight / 2 && !playerStore.currentVideo?.isLive) {
 					swipeType = 'seek';
 					seekBaseTime = getActiveElement().currentTime;
 				} else {
@@ -496,6 +617,25 @@
 	}
 
 	function handleTouchEnd(e: TouchEvent) {
+		if (swipeType === 'pinch') {
+			if (e.touches.length > 0) return;
+			if (zoomScale <= ZOOM_THRESHOLD) {
+				resetZoom();
+			} else {
+				clampTranslate();
+			}
+			swipeType = 'none';
+			swipeAxis = 'none';
+			return;
+		}
+
+		if (swipeType === 'pan') {
+			clampTranslate();
+			swipeType = 'none';
+			swipeAxis = 'none';
+			return;
+		}
+
 		const touch = e.changedTouches[0];
 		const dx = touch.clientX - swipeStartX;
 		const dy = touch.clientY - swipeStartY;
@@ -523,20 +663,17 @@
 			}
 			case 'nav': {
 				if (Math.abs(dx) > FLICK_THRESHOLD) {
-					if (dx < 0) {
-						const next = findAdjacentVideo(1);
-						if (next) {
-							const saved = getSavedTime(next);
-							playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-							void fetchAndParsePlaylist(next);
-						}
-					} else {
-						const prev = findAdjacentVideo(-1);
-						if (prev) {
-							const saved = getSavedTime(prev);
-							playerStore.navigateVideo(prev, saved, -1, videoListStore.selectedProvider);
-							void fetchAndParsePlaylist(prev);
-						}
+					const dir = dx < 0 ? 1 : -1;
+					const target = findAdjacentVideo(dir as 1 | -1);
+					if (target) {
+						const saved = getSavedTime(target);
+						playerStore.navigateVideo(
+							target,
+							saved,
+							dir as 1 | -1,
+							videoListStore.selectedProvider
+						);
+						void fetchAndParsePlaylist(target);
 					}
 				}
 				break;
@@ -565,9 +702,14 @@
 	ontouchstart={handleTouchStart}
 	ontouchmove={handleTouchMove}
 	ontouchend={handleTouchEnd}
+	ontouchcancel={handleTouchCancel}
 >
 	<div class="video-container">
-		<div class="video-player" bind:this={videoContainer}></div>
+		<div
+			class="video-player"
+			bind:this={videoContainer}
+			style={zoomScale > 1 ? `transform:translate(${zoomX}px,${zoomY}px) scale(${zoomScale})` : ''}
+		></div>
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
 			{#if video}
@@ -598,7 +740,7 @@
 		background-color: black;
 		-webkit-user-select: none;
 		user-select: none;
-		touch-action: pinch-zoom;
+		touch-action: none;
 		z-index: -1;
 		opacity: 0;
 		pointer-events: none;

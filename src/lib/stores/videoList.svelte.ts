@@ -66,6 +66,8 @@ class VideoListStore {
 	}
 
 	updateVideoLive(filename: string, isLive: boolean) {
+		const target = this.videos.find((v) => v.filename === filename);
+		if (!target || target.isLive === isLive) return;
 		this.videos = this.videos.map((v) => (v.filename === filename ? { ...v, isLive } : v));
 	}
 
