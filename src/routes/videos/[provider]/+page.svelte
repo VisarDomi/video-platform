@@ -81,6 +81,8 @@
 	}
 
 	function handleScroll() {
+		if (playerStore.view === 'video') return;
+
 		const currentScrollY = window.scrollY;
 		if (Math.abs(currentScrollY - lastScrollY) < 10) return;
 

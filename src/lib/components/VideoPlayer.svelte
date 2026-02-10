@@ -109,7 +109,10 @@
 		// Update CSS classes and inline opacity
 		videoElements.forEach((el, i) => {
 			if (i === activeIdx) {
-				el.style.opacity = '0';
+				// Only hide if we're about to load a new video
+				if (videoChanged) {
+					el.style.opacity = '0';
+				}
 				el.className = 'active-player';
 			} else {
 				el.style.opacity = '';
