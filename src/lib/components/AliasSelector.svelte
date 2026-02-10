@@ -1,23 +1,12 @@
 <script lang="ts">
-	interface Props {
-		aliases: string[];
-		selectedAliases: Set<string>;
-		ontoggle: (alias: string) => void;
-		onremove: (alias: string) => void;
-	}
+	import { videoListStore } from '$lib/stores/videoList.svelte.js';
+	import { extractUniqueAliases } from '$lib/utils/alias.js';
 
-	let { aliases, selectedAliases, ontoggle, onremove }: Props = $props();
+	const aliases = $derived(extractUniqueAliases(videoListStore.videos));
+	const selectedAliases = $derived(videoListStore.selectedAliases);
 
 	let open = $state(false);
 	let container = $state<HTMLElement | null>(null);
-
-	function handleToggle(alias: string) {
-		ontoggle(alias);
-	}
-
-	function handleRemove(alias: string) {
-		onremove(alias);
-	}
 
 	function handleOutsideClick(e: MouseEvent) {
 		if (container && !container.contains(e.target as Node)) {
@@ -44,7 +33,7 @@
 				<button
 					class="dropdown-item"
 					class:selected={selectedAliases.has(alias)}
-					onclick={() => handleToggle(alias)}
+					onclick={() => videoListStore.toggleAlias(alias)}
 				>
 					<span class="check">{selectedAliases.has(alias) ? '\u2713' : ''}</span>
 					{alias}
@@ -58,7 +47,9 @@
 			{#each [...selectedAliases].sort() as alias}
 				<span class="chip">
 					{alias}
-					<button class="chip-remove" onclick={() => handleRemove(alias)}>&times;</button>
+					<button class="chip-remove" onclick={() => videoListStore.removeAlias(alias)}
+						>&times;</button
+					>
 				</span>
 			{/each}
 		</div>

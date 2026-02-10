@@ -22,8 +22,6 @@
 
 	const provider = $derived(page.params.provider);
 
-	const uniqueAliases = $derived(extractUniqueAliases(videoListStore.videos));
-
 	const filteredVideos = $derived(
 		filterByAliases(videoListStore.videos, videoListStore.selectedAliases)
 	);
@@ -152,12 +150,7 @@
 />
 
 <div class="search-container" class:hidden={searchHidden}>
-	<AliasSelector
-		aliases={uniqueAliases}
-		selectedAliases={videoListStore.selectedAliases}
-		ontoggle={(alias) => videoListStore.toggleAlias(alias)}
-		onremove={(alias) => videoListStore.removeAlias(alias)}
-	/>
+	<AliasSelector />
 </div>
 
 <div class="list-container" bind:this={listContainer}>
