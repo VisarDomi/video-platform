@@ -10,6 +10,7 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
+	import { startDownload } from '$lib/services/tl-api.js';
 	import type { Video } from '$lib/types.js';
 
 	let videoElements = $state<HTMLVideoElement[]>([]);
@@ -380,7 +381,14 @@
 		}
 	}
 
+	async function ensureTlDownload(v: Video) {
+		if (videoListStore.selectedProvider !== 'tl') return;
+		const streamer = videoListStore.getStreamer(v.filename);
+		if (streamer) await startDownload(streamer);
+	}
+
 	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
+		await ensureTlDownload(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		el.muted = true;
@@ -392,6 +400,7 @@
 	}
 
 	async function preloadAndPause(el: HTMLVideoElement, v: Video) {
+		await ensureTlDownload(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		if (!el.paused) el.pause();
@@ -399,6 +408,18 @@
 
 	function getSavedTime(v: Video): number {
 		return parseFloat(localStorage.getItem(STORAGE_KEYS.PROGRESS_PREFIX + v.filename) || '0');
+	}
+
+	async function navigateToVideo(target: Video, dir: 1 | -1) {
+		if (videoListStore.selectedProvider === 'tl') {
+			const streamer = videoListStore.getStreamer(target.filename);
+			if (streamer) {
+				await startDownload(streamer);
+			}
+		}
+		const saved = getSavedTime(target);
+		playerStore.navigateVideo(target, saved, dir, videoListStore.selectedProvider);
+		void fetchAndParsePlaylist(target);
 	}
 
 	function findAdjacentVideo(direction: 1 | -1): Video | null {
@@ -669,14 +690,7 @@
 					const dir = dx < 0 ? 1 : -1;
 					const target = findAdjacentVideo(dir as 1 | -1);
 					if (target) {
-						const saved = getSavedTime(target);
-						playerStore.navigateVideo(
-							target,
-							saved,
-							dir as 1 | -1,
-							videoListStore.selectedProvider
-						);
-						void fetchAndParsePlaylist(target);
+						void navigateToVideo(target, dir as 1 | -1);
 					}
 				}
 				break;
