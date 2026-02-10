@@ -2,10 +2,12 @@ import { TL_API } from '../constants.js';
 
 export interface TlStreamer {
 	streamerId: string;
+	streamId: string;
 	alias: string;
 	firstName: string;
 	masterListUrl: string;
 	isFollowing: boolean;
+	parentAlias?: string;
 }
 
 export interface TlStreamsResponse {
@@ -67,4 +69,14 @@ export async function blockStreamer(streamerId: string): Promise<boolean> {
 	});
 	const data = await response.json();
 	return data.success;
+}
+
+export async function fetchMultiBroadcast(streamId: string): Promise<TlStreamer[]> {
+	const response = await fetch(TL_API.MULTI_BROADCAST, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ streamId })
+	});
+	if (!response.ok) return [];
+	return await response.json();
 }

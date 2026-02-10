@@ -89,6 +89,23 @@ class VideoListStore {
 		return this.streamerMap.get(alias);
 	}
 
+	insertVideosAfter(afterFilename: string, newVideos: Video[], newStreamers: TlStreamer[]) {
+		if (newVideos.length === 0) return;
+		const existing = new Set(this.videos.map((v) => v.filename));
+		const toAdd = newVideos.filter((v) => !existing.has(v.filename));
+		if (toAdd.length === 0) return;
+		const idx = this.videos.findIndex((v) => v.filename === afterFilename);
+		const insertAt = idx === -1 ? this.videos.length : idx + 1;
+		const updated = [...this.videos];
+		updated.splice(insertAt, 0, ...toAdd);
+		this.videos = updated;
+		const nextMap = new Map(this.streamerMap);
+		for (const s of newStreamers) {
+			nextMap.set(s.alias, s);
+		}
+		this.streamerMap = nextMap;
+	}
+
 	appendVideos(newVideos: Video[]) {
 		if (newVideos.length === 0) return;
 		const existing = new Set(this.videos.map((v) => v.filename));

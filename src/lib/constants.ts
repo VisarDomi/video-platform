@@ -52,7 +52,8 @@ export const TL_API = {
 	UNFOLLOW: '/api/tl/unfollow',
 	BLOCK: '/api/tl/block',
 	DOWNLOAD_START: '/api/tl/download/start',
-	DOWNLOAD_STOP: '/api/tl/download/stop'
+	DOWNLOAD_STOP: '/api/tl/download/stop',
+	MULTI_BROADCAST: '/api/tl/multi-broadcast'
 } as const;
 
 export const HLS = {

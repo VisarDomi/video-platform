@@ -10,7 +10,8 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
-	import { startDownload } from '$lib/services/tl-api.js';
+	import { startDownload, fetchMultiBroadcast } from '$lib/services/tl-api.js';
+	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
 	let videoElements = $state<HTMLVideoElement[]>([]);
@@ -24,6 +25,7 @@
 
 	const hlsInstances = new Map<HTMLVideoElement, Hls>();
 	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
+	const processedStreamIds = new Set<string>();
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
@@ -130,6 +132,27 @@
 		} else if (activeEl.paused) {
 			void activeEl.play();
 		}
+	});
+
+	// Fetch co-streamers when a tl video activates
+	$effect(() => {
+		const cv = playerStore.currentVideo;
+		if (!cv || playerStore.view !== 'video' || videoListStore.selectedProvider !== 'tl') return;
+		const streamer = videoListStore.getStreamer(cv.filename);
+		if (!streamer || !streamer.streamId || processedStreamIds.has(streamer.streamId)) return;
+		processedStreamIds.add(streamer.streamId);
+		fetchMultiBroadcast(streamer.streamId).then((coStreamers) => {
+			if (coStreamers.length === 0) return;
+			const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
+			const newVideos = withParent.map((s) => ({
+				filename: s.alias,
+				type: VIDEO_TYPE.ORIGINAL as const,
+				duration: 0,
+				size: 0,
+				isLive: true
+			}));
+			videoListStore.insertVideosAfter(cv.filename, newVideos, withParent);
+		});
 	});
 
 	// Preload adjacent — depends on video list and active index, not on currentVideo identity

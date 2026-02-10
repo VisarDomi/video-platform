@@ -223,6 +223,18 @@
 						isActive={isActiveVideo(video)}
 						isLastActioned={playerStore.lastActionedVideoFilename === video.filename}
 						onclick={() => handleVideoClick(video)}
+						streamerInfo={videoListStore.selectedProvider === 'tl'
+							? (() => {
+									const s = videoListStore.getStreamer(video.filename);
+									return s
+										? {
+												firstName: s.firstName,
+												isFollowing: s.isFollowing,
+												parentAlias: s.parentAlias
+											}
+										: undefined;
+								})()
+							: undefined}
 					/>
 				{/each}
 			</div>
