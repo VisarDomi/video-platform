@@ -2,7 +2,7 @@
 	import Hls from 'hls.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { QUADRANT_ACTIONS, STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
+	import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
 	import {
@@ -10,7 +10,6 @@
 		createEditedVideo,
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
-	import QuadrantOverlay from './QuadrantOverlay.svelte';
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import type { Video } from '$lib/types.js';
@@ -399,48 +398,6 @@
 		return filteredList[newIdx];
 	}
 
-	function handleQuadrantAction(action: string) {
-		if (playerStore.isSwiping || playerStore.swipeAnimating) return;
-		if (action === QUADRANT_ACTIONS.TOGGLE_UI) {
-			playerStore.toggleUi();
-			return;
-		}
-
-		// In opaque mode (UI visible), only toggle-ui works
-		if (playerStore.isUiVisible) return;
-
-		const activeEl = getActiveElement();
-		switch (action) {
-			case QUADRANT_ACTIONS.NEXT: {
-				const next = findAdjacentVideo(1);
-				if (next) {
-					const saved = getSavedTime(next);
-					playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-					void fetchAndParsePlaylist(next);
-				}
-				break;
-			}
-			case QUADRANT_ACTIONS.PREV: {
-				const prev = findAdjacentVideo(-1);
-				if (prev) {
-					const saved = getSavedTime(prev);
-					playerStore.navigateVideo(prev, saved, -1, videoListStore.selectedProvider);
-					void fetchAndParsePlaylist(prev);
-				}
-				break;
-			}
-			case QUADRANT_ACTIONS.SEEK_FORWARD:
-				if (!isNaN(activeEl.duration)) {
-					activeEl.currentTime = Math.min(activeEl.duration, activeEl.currentTime + 5);
-				}
-				break;
-			case QUADRANT_ACTIONS.SEEK_BACKWARD:
-				activeEl.currentTime = Math.max(0, activeEl.currentTime - 5);
-				void activeEl.play();
-				break;
-		}
-	}
-
 	function handleSeek(time: number) {
 		const activeEl = getActiveElement();
 		if (!isNaN(activeEl.duration)) {
@@ -477,69 +434,122 @@
 			wakeLock = null;
 		}
 	}
-	// Swipe-to-go-back gesture
+	// Gesture system
 	const EDGE_ZONE = 30;
-	const SWIPE_THRESHOLD = 0.3;
-	let swipeTracking = false;
+	const EDGE_BACK_THRESHOLD = 0.3;
+	const FLICK_THRESHOLD = 80;
+	const UI_SWIPE_THRESHOLD = 80;
+	const SEEK_RATE = 60;
 	let swipeStartX = 0;
 	let swipeStartY = 0;
-	let swipeLocked = false;
-	let swipeRejected = false;
+	let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
+	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
+	let seekBaseTime = 0;
 
 	function handleTouchStart(e: TouchEvent) {
 		if (playerStore.swipeAnimating) return;
 		const touch = e.touches[0];
-		if (touch.clientX <= EDGE_ZONE) {
-			swipeTracking = true;
-			swipeStartX = touch.clientX;
-			swipeStartY = touch.clientY;
-			swipeLocked = false;
-			swipeRejected = false;
-		}
+		swipeStartX = touch.clientX;
+		swipeStartY = touch.clientY;
+		swipeAxis = 'none';
+		swipeType = 'none';
 	}
 
 	function handleTouchMove(e: TouchEvent) {
 		e.preventDefault();
-		if (!swipeTracking || swipeRejected) return;
+		if (playerStore.swipeAnimating) return;
 		const touch = e.touches[0];
 		const dx = touch.clientX - swipeStartX;
 		const dy = touch.clientY - swipeStartY;
-		if (!swipeLocked) {
+
+		if (swipeAxis === 'none') {
 			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-			if (Math.abs(dy) > Math.abs(dx)) {
-				swipeRejected = true;
-				return;
+			if (Math.abs(dx) >= Math.abs(dy)) {
+				swipeAxis = 'horizontal';
+				if (swipeStartX <= EDGE_ZONE && dx > 0) {
+					swipeType = 'edge-back';
+					playerStore.isSwiping = true;
+				} else if (swipeStartY < window.innerHeight / 2) {
+					swipeType = 'seek';
+					seekBaseTime = getActiveElement().currentTime;
+				} else {
+					swipeType = 'nav';
+				}
+			} else {
+				swipeAxis = 'vertical';
+				swipeType = 'ui';
 			}
-			swipeLocked = true;
-			playerStore.isSwiping = true;
 		}
-		const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
-		playerStore.swipeProgress = progress;
+
+		if (swipeType === 'edge-back') {
+			const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+			playerStore.swipeProgress = progress;
+		} else if (swipeType === 'seek') {
+			const seekDelta = (dx / window.innerWidth) * SEEK_RATE;
+			const activeEl = getActiveElement();
+			if (!isNaN(activeEl.duration)) {
+				const newTime = Math.max(0, Math.min(activeEl.duration, seekBaseTime + seekDelta));
+				activeEl.currentTime = newTime;
+				currentTime = newTime;
+			}
+		}
 	}
 
-	function handleTouchEnd() {
-		if (!swipeTracking || !swipeLocked) {
-			swipeTracking = false;
-			return;
+	function handleTouchEnd(e: TouchEvent) {
+		const touch = e.changedTouches[0];
+		const dx = touch.clientX - swipeStartX;
+		const dy = touch.clientY - swipeStartY;
+
+		switch (swipeType) {
+			case 'edge-back': {
+				const progress = playerStore.swipeProgress;
+				playerStore.swipeAnimating = true;
+				if (progress > EDGE_BACK_THRESHOLD) {
+					playerStore.swipeProgress = 1;
+					setTimeout(() => {
+						playerStore.showList();
+						playerStore.isSwiping = false;
+						playerStore.swipeAnimating = false;
+						playerStore.swipeProgress = 0;
+					}, 250);
+				} else {
+					playerStore.swipeProgress = 0;
+					setTimeout(() => {
+						playerStore.isSwiping = false;
+						playerStore.swipeAnimating = false;
+					}, 250);
+				}
+				break;
+			}
+			case 'nav': {
+				if (Math.abs(dx) > FLICK_THRESHOLD) {
+					if (dx < 0) {
+						const next = findAdjacentVideo(1);
+						if (next) {
+							const saved = getSavedTime(next);
+							playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
+							void fetchAndParsePlaylist(next);
+						}
+					} else {
+						const prev = findAdjacentVideo(-1);
+						if (prev) {
+							const saved = getSavedTime(prev);
+							playerStore.navigateVideo(prev, saved, -1, videoListStore.selectedProvider);
+							void fetchAndParsePlaylist(prev);
+						}
+					}
+				}
+				break;
+			}
+			case 'ui': {
+				if (Math.abs(dy) > UI_SWIPE_THRESHOLD) {
+					playerStore.isUiVisible = dy < 0;
+				}
+				break;
+			}
 		}
-		swipeTracking = false;
-		const progress = playerStore.swipeProgress;
-		playerStore.swipeAnimating = true;
-		if (progress > SWIPE_THRESHOLD) {
-			playerStore.swipeProgress = 1;
-			setTimeout(() => {
-				playerStore.showList();
-				playerStore.isSwiping = false;
-				playerStore.swipeAnimating = false;
-				playerStore.swipeProgress = 0;
-			}, 250);
-		} else {
-			playerStore.swipeProgress = 0;
-			setTimeout(() => {
-				playerStore.isSwiping = false;
-				playerStore.swipeAnimating = false;
-			}, 250);
-		}
+		swipeAxis = 'none';
+		swipeType = 'none';
 	}
 </script>
 
@@ -552,17 +562,12 @@
 		? `transform:translateX(${playerStore.swipeProgress * 100}%)`
 		: ''}
 	role="application"
-	ondblclick={(e) => e.preventDefault()}
 	ontouchstart={handleTouchStart}
 	ontouchmove={handleTouchMove}
 	ontouchend={handleTouchEnd}
 >
 	<div class="video-container">
 		<div class="video-player" bind:this={videoContainer}></div>
-
-		{#if video}
-			<QuadrantOverlay onaction={handleQuadrantAction} />
-		{/if}
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
 			{#if video}

@@ -13,14 +13,6 @@ export const VIDEO_TYPE = {
 	EDITED: 'edited'
 } as const;
 
-export const QUADRANT_ACTIONS = {
-	NEXT: 'next',
-	PREV: 'prev',
-	SEEK_FORWARD: 'seek-forward',
-	SEEK_BACKWARD: 'seek-backward',
-	TOGGLE_UI: 'toggle-ui'
-} as const;
-
 export const API = {
 	VIDEOS: '/api/videos',
 	EDIT: '/api/edit',
