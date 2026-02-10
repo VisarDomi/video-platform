@@ -14,7 +14,7 @@
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
 	const ITEM_HEIGHT = 52;
-	const SCROLL_BUFFER = 40;
+	const SCROLL_BUFFER = 10;
 	const MIN_LIST_ITEMS = 100;
 
 	let lastScrollY = 0;
