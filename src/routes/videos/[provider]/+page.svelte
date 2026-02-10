@@ -8,7 +8,6 @@
 	import { fetchVideos } from '$lib/services/api.js';
 	import { startSync, stopSync } from '$lib/services/sync.js';
 	import { filterByAliases } from '$lib/utils/filter.js';
-	import { extractUniqueAliases } from '$lib/utils/alias.js';
 	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
@@ -17,7 +16,7 @@
 	const MIN_LIST_ITEMS = 100;
 
 	let listContainer = $state<HTMLElement | null>(null);
-	let lastScrollY = $state(0);
+	let lastScrollY = 0;
 	let searchHidden = $state(false);
 
 	const provider = $derived(page.params.provider);
