@@ -25,7 +25,6 @@
 
 	const hlsInstances = new Map<HTMLVideoElement, Hls>();
 	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
-	const processedStreamIds = new Set<string>();
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
@@ -134,15 +133,26 @@
 		}
 	});
 
-	// Fetch co-streamers when a tl video activates
+	// Fetch co-streamers on-demand when a tl video activates
 	$effect(() => {
 		const cv = playerStore.currentVideo;
 		if (!cv || playerStore.view !== 'video' || videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(cv.filename);
-		if (!streamer || !streamer.streamId || processedStreamIds.has(streamer.streamId)) return;
-		processedStreamIds.add(streamer.streamId);
+		if (!streamer?.streamId || !videoListStore.markStreamIdProcessed(streamer.streamId)) return;
+		console.log('[TL:co] on-demand fetch for', streamer.alias, streamer.streamId);
 		fetchMultiBroadcast(streamer.streamId).then((coStreamers) => {
-			if (coStreamers.length === 0) return;
+			if (coStreamers.length === 0) {
+				console.log('[TL:co] no co-streamers for', streamer.alias);
+				return;
+			}
+			console.log(
+				'[TL:co] found',
+				coStreamers.length,
+				'co-streamers for',
+				streamer.alias,
+				':',
+				coStreamers.map((s) => s.alias).join(', ')
+			);
 			const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
 			const newVideos = withParent.map((s) => ({
 				filename: s.alias,

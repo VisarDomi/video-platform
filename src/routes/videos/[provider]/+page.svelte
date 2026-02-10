@@ -12,7 +12,12 @@
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
-	import { fetchStreams, startDownload, type TlStreamer } from '$lib/services/tl-api.js';
+	import {
+		fetchStreams,
+		startDownload,
+		fetchMultiBroadcast,
+		type TlStreamer
+	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 
 	const ITEM_HEIGHT = 52;
@@ -73,6 +78,15 @@
 		try {
 			const { following, recommended } = await fetchStreams();
 			const allStreamers = [...following, ...recommended];
+			console.log(
+				'[TL] loaded',
+				following.length,
+				'following +',
+				recommended.length,
+				'recommended =',
+				allStreamers.length,
+				'total'
+			);
 			const map = new Map<string, TlStreamer>();
 			const videos = allStreamers.map((s) => {
 				map.set(s.alias, s);
@@ -86,11 +100,45 @@
 			});
 			videoListStore.setStreamerMap(map);
 			videoListStore.setVideos(videos);
-			// No sync polling for tl
+			fetchCoStreamersEagerly(allStreamers);
 		} catch (e) {
-			console.error('Failed to load tl streams', e);
+			console.error('[TL] Failed to load tl streams', e);
 			videoListStore.setVideos([]);
 		}
+	}
+
+	async function fetchCoStreamersEagerly(streamers: TlStreamer[]) {
+		console.log('[TL:co] starting eager co-streamer scan for', streamers.length, 'streamers');
+		let found = 0;
+		for (const streamer of streamers) {
+			if (!streamer.streamId) continue;
+			if (!videoListStore.markStreamIdProcessed(streamer.streamId)) continue;
+			try {
+				const coStreamers = await fetchMultiBroadcast(streamer.streamId);
+				if (coStreamers.length === 0) continue;
+				found += coStreamers.length;
+				console.log(
+					'[TL:co] eager:',
+					streamer.alias,
+					'->',
+					coStreamers.length,
+					'co-streamers:',
+					coStreamers.map((s) => s.alias).join(', ')
+				);
+				const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
+				const newVideos = withParent.map((s) => ({
+					filename: s.alias,
+					type: VIDEO_TYPE.ORIGINAL as const,
+					duration: 0,
+					size: 0,
+					isLive: true
+				}));
+				videoListStore.insertVideosAfter(streamer.alias, newVideos, withParent);
+			} catch (e) {
+				console.warn('[TL:co] eager fetch failed for', streamer.alias, e);
+			}
+		}
+		console.log('[TL:co] eager scan done. found', found, 'co-streamers total');
 	}
 
 	function scrollToActiveVideo() {

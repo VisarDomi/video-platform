@@ -10,6 +10,7 @@ class VideoListStore {
 
 	// TL-specific state
 	streamerMap = $state<Map<string, TlStreamer>>(new Map());
+	processedStreamIds = new Set<string>();
 
 	initialize(provider: string) {
 		this.selectedProvider = provider;
@@ -87,6 +88,12 @@ class VideoListStore {
 
 	getStreamer(alias: string): TlStreamer | undefined {
 		return this.streamerMap.get(alias);
+	}
+
+	markStreamIdProcessed(streamId: string): boolean {
+		if (this.processedStreamIds.has(streamId)) return false;
+		this.processedStreamIds.add(streamId);
+		return true;
 	}
 
 	insertVideosAfter(afterFilename: string, newVideos: Video[], newStreamers: TlStreamer[]) {
