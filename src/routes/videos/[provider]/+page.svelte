@@ -13,17 +13,32 @@
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
+	const ITEM_HEIGHT = 52;
+	const SCROLL_BUFFER = 40;
 	const MIN_LIST_ITEMS = 100;
 
-	let listContainer = $state<HTMLElement | null>(null);
 	let lastScrollY = 0;
 	let searchHidden = $state(false);
+	let scrollY = $state(0);
 
 	const provider = $derived(page.params.provider);
 
 	const filteredVideos = $derived(
 		filterByAliases(videoListStore.videos, videoListStore.selectedAliases)
 	);
+
+	const totalHeight = $derived(Math.max(MIN_LIST_ITEMS, filteredVideos.length) * ITEM_HEIGHT);
+	const startIdx = $derived(Math.max(0, Math.floor(scrollY / ITEM_HEIGHT) - SCROLL_BUFFER));
+	const endIdx = $derived(
+		Math.min(
+			filteredVideos.length,
+			Math.ceil(
+				(scrollY + (typeof window !== 'undefined' ? window.innerHeight : 800)) / ITEM_HEIGHT
+			) + SCROLL_BUFFER
+		)
+	);
+	const visibleVideos = $derived(filteredVideos.slice(startIdx, endIdx));
+	const offsetY = $derived(startIdx * ITEM_HEIGHT);
 
 	// Validate provider and load videos when it changes
 	$effect(() => {
@@ -49,13 +64,14 @@
 	}
 
 	function scrollToActiveVideo() {
-		if (!listContainer) return;
-		const target =
-			listContainer.querySelector('.last-actioned') ||
-			listContainer.querySelector('.current-video');
-		if (target) {
-			target.scrollIntoView({ block: 'center', behavior: 'auto' });
-		}
+		const active = playerStore.currentVideo || playerStore.lastPlayedVideo;
+		if (!active) return;
+		const idx = filteredVideos.findIndex(
+			(v) => v.filename === active.filename && v.type === active.type
+		);
+		if (idx === -1) return;
+		const targetY = idx * ITEM_HEIGHT - window.innerHeight / 2 + ITEM_HEIGHT / 2;
+		window.scrollTo(0, Math.max(0, targetY));
 	}
 
 	// Update title reactively
@@ -80,6 +96,8 @@
 		if (playerStore.view === 'video') return;
 
 		const currentScrollY = window.scrollY;
+		scrollY = currentScrollY;
+
 		if (Math.abs(currentScrollY - lastScrollY) < 10) return;
 
 		if (currentScrollY > lastScrollY && currentScrollY > 50) {
@@ -111,6 +129,7 @@
 		if (!active) return false;
 		return video.filename === active.filename && video.type === active.type;
 	}
+
 	// Swipe to switch provider
 	const SWIPE_THRESHOLD = 80;
 	let swipeStartX = 0;
@@ -152,26 +171,24 @@
 	<AliasSelector />
 </div>
 
-<div class="list-container" bind:this={listContainer}>
+<div class="list-container">
 	{#if videoListStore.isLoading}
 		<p class="info-message">Loading...</p>
 	{:else if filteredVideos.length === 0}
 		<p class="info-message">No videos found.</p>
-		{#each { length: MIN_LIST_ITEMS - 1 } as _}
-			<div class="empty-item"></div>
-		{/each}
 	{:else}
-		{#each filteredVideos as video (video.filename + video.type)}
-			<VideoItem
-				{video}
-				isActive={isActiveVideo(video)}
-				isLastActioned={playerStore.lastActionedVideoFilename === video.filename}
-				onclick={() => handleVideoClick(video)}
-			/>
-		{/each}
-		{#each { length: Math.max(0, MIN_LIST_ITEMS - filteredVideos.length) } as _}
-			<div class="empty-item"></div>
-		{/each}
+		<div class="virtual-spacer" style="height: {totalHeight}px;">
+			<div style="transform: translateY({offsetY}px);">
+				{#each visibleVideos as video (video.filename + video.type)}
+					<VideoItem
+						{video}
+						isActive={isActiveVideo(video)}
+						isLastActioned={playerStore.lastActionedVideoFilename === video.filename}
+						onclick={() => handleVideoClick(video)}
+					/>
+				{/each}
+			</div>
+		</div>
 	{/if}
 </div>
 
@@ -210,15 +227,14 @@
 		padding-top: 0;
 	}
 
+	.virtual-spacer {
+		position: relative;
+	}
+
 	.info-message {
 		text-align: center;
 		padding: 40px;
 		font-style: italic;
 		color: #888;
-	}
-
-	.empty-item {
-		height: 52px;
-		border-bottom: 1px solid #333;
 	}
 </style>
