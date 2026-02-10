@@ -20,6 +20,7 @@
 	let isMuted = $state(true);
 	let currentFilename: string | null = null;
 	let wakeLock: WakeLockSentinel | null = null;
+	let navCounter = 0;
 
 	const hlsInstances = new Map<HTMLVideoElement, Hls>();
 	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
@@ -249,6 +250,11 @@
 						console.warn('HLS fatal error', data.type, data.details);
 						if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
 							if (data.response?.code === 404) {
+								if (!isActivePlayer) {
+									hls.destroy();
+									hlsInstances.delete(el);
+									return;
+								}
 								videoListStore.removeVideo(v.filename);
 								const next = findAdjacentVideo(1);
 								if (next) {
@@ -303,6 +309,7 @@
 					const mediaError = el.error;
 					if (mediaError) {
 						console.warn('Native HLS error', mediaError.code, mediaError.message);
+						if (!isActivePlayer) return;
 						videoListStore.removeVideo(v.filename);
 						const next = findAdjacentVideo(1);
 						if (next) {
@@ -411,11 +418,13 @@
 	}
 
 	async function navigateToVideo(target: Video, dir: 1 | -1) {
+		const myNav = ++navCounter;
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(target.filename);
 			if (streamer) {
 				await startDownload(streamer);
 			}
+			if (myNav !== navCounter) return;
 		}
 		const saved = getSavedTime(target);
 		playerStore.navigateVideo(target, saved, dir, videoListStore.selectedProvider);
