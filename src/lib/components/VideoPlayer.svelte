@@ -414,7 +414,12 @@
 	function handleSeek(time: number) {
 		const activeEl = getActiveElement();
 		if (!isNaN(activeEl.duration)) {
+			const wasPlaying = !activeEl.paused;
+			if (wasPlaying) activeEl.pause();
 			activeEl.currentTime = time;
+			if (wasPlaying) {
+				activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
+			}
 		}
 	}
 
