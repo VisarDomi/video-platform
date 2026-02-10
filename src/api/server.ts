@@ -90,6 +90,42 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
 
     const activeDownloads = new Map<string, EphemeralDownload>();
 
+    // Server-side active set: client reports which aliases it needs (max 3).
+    // If no heartbeat arrives within STALE_TIMEOUT, stop everything.
+    let wantedAliases = new Set<string>();
+    let lastActiveTimestamp = 0;
+    const CLEANUP_INTERVAL = 10_000;
+    const STALE_TIMEOUT = 60_000;
+
+    async function cleanupDir(alias: string) {
+        const dirPath = path.join(TL_BASE_PATH, alias);
+        try {
+            await fs.rm(dirPath, { recursive: true, force: true });
+        } catch {
+            // Directory may not exist
+        }
+    }
+
+    setInterval(() => {
+        if (activeDownloads.size === 0) return;
+        const now = Date.now();
+        const isStale = lastActiveTimestamp > 0 && (now - lastActiveTimestamp > STALE_TIMEOUT);
+
+        for (const [alias, entry] of activeDownloads) {
+            if (isStale || !wantedAliases.has(alias)) {
+                logger.info(`[API] Cleanup: stopping ${alias} (${isStale ? "stale heartbeat" : "not in active set"})`);
+                entry.downloader.abort();
+                activeDownloads.delete(alias);
+                void cleanupDir(alias);
+            }
+        }
+
+        if (isStale && activeDownloads.size === 0) {
+            wantedAliases = new Set();
+            lastActiveTimestamp = 0;
+        }
+    }, CLEANUP_INTERVAL);
+
     app.post("/api/download/start", async (req, res) => {
         const { masterPlaylistUrl, alias, streamerId } = req.body;
         if (!masterPlaylistUrl || !alias || !streamerId) {
@@ -164,14 +200,20 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
         }
 
         // Clean up directory
-        const dirPath = path.join(TL_BASE_PATH, alias);
-        try {
-            await fs.rm(dirPath, { recursive: true, force: true });
-        } catch {
-            // Directory may not exist, ignore
-        }
+        await cleanupDir(alias);
 
         res.json({ success: true });
+    });
+
+    app.post("/api/download/active", (req, res) => {
+        const { aliases } = req.body;
+        if (!Array.isArray(aliases)) {
+            res.status(400).json({ success: false, error: "aliases must be an array" });
+            return;
+        }
+        wantedAliases = new Set(aliases);
+        lastActiveTimestamp = Date.now();
+        res.json({ success: true, active: Array.from(activeDownloads.keys()), wanted: aliases });
     });
 
     app.get("/api/download/status", (_req, res) => {
