@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { DEFAULT_PROVIDER } from '$lib/constants.js';
+	import { DEFAULT_PROVIDER, STORAGE_KEYS } from '$lib/constants.js';
 
-	goto(`/videos/${DEFAULT_PROVIDER}`, { replaceState: true });
+	const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_PROVIDER);
+	const provider = saved || DEFAULT_PROVIDER;
+	goto(`/videos/${provider}`, { replaceState: true });
 </script>
