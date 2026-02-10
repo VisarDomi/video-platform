@@ -41,8 +41,22 @@ export async function stopDownload(alias: string): Promise<void> {
 	});
 }
 
+let previousActiveSet = new Set<string>();
+
 export function sendActiveSet(aliases: string[]) {
 	console.log('[TL:dl] active set:', aliases.join(', ') || '(empty)');
+	const nextSet = new Set(aliases);
+
+	// Immediately stop downloads that just dropped out of the active window
+	for (const alias of previousActiveSet) {
+		if (!nextSet.has(alias)) {
+			console.log('[TL:dl] immediate stop:', alias);
+			void stopDownload(alias);
+		}
+	}
+	previousActiveSet = nextSet;
+
+	// Also update server-side active set (heartbeat + safety net)
 	void fetch(TL_API.DOWNLOAD_ACTIVE, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
