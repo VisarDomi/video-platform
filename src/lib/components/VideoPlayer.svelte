@@ -3,6 +3,7 @@
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
+	import { untrack } from 'svelte';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
 	import {
@@ -19,8 +20,8 @@
 	let currentTime = $state(0);
 	let duration = $state(0);
 	let isMuted = $state(true);
-	let currentFilename = $state<string | null>(null);
-	let wakeLock = $state<WakeLockSentinel | null>(null);
+	let currentFilename: string | null = null;
+	let wakeLock: WakeLockSentinel | null = null;
 
 	const hlsInstances = new Map<HTMLVideoElement, Hls>();
 	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
@@ -133,12 +134,14 @@
 		}
 	});
 
-	// Preload adjacent — separate effect to avoid reactive loops through videoListStore.videos
+	// Preload adjacent — depends on video list and active index, not on currentVideo identity
 	$effect(() => {
-		const cv = playerStore.currentVideo;
-		if (!cv || playerStore.view !== 'video' || videoElements.length === 0) return;
+		const view = playerStore.view;
+		if (view !== 'video' || videoElements.length === 0) return;
 		const activeIdx = playerStore.activePlayerIndex;
 		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
+		const cv = untrack(() => playerStore.currentVideo);
+		if (!cv) return;
 		preloadAdjacent(cv, activeIdx, filteredList);
 	});
 
@@ -161,7 +164,7 @@
 	}
 
 	async function activatePlayer(el: HTMLVideoElement, v: Video, startTime: number) {
-		await loadStream(el, v, startTime);
+		await loadStream(el, v, startTime, true);
 
 		try {
 			await el.play();
@@ -171,22 +174,27 @@
 		el.style.opacity = '1';
 	}
 
-	function loadStream(el: HTMLVideoElement, v: Video, startTime: number): Promise<void> {
+	function loadStream(
+		el: HTMLVideoElement,
+		v: Video,
+		startTime: number,
+		isActivePlayer = false
+	): Promise<void> {
 		return new Promise((resolve) => {
 			if (el.dataset.loadedFilename === v.filename) {
-				const isLive = el.duration === Infinity;
-				if (isLive) {
-					playerStore.setCurrentVideoLive();
-					videoListStore.updateVideoLive(v.filename, true);
-				} else {
-					if (v.isLive) {
+				if (isActivePlayer) {
+					const isLive = el.duration === Infinity;
+					if (isLive) {
+						playerStore.setCurrentVideoLive();
+						videoListStore.updateVideoLive(v.filename, true);
+					} else if (v.isLive) {
 						playerStore.setCurrentVideoNotLive();
 						videoListStore.updateVideoLive(v.filename, false);
 						clearPlaylistCache(v.filename);
 					}
-					if (startTime > 0) {
-						el.currentTime = startTime;
-					}
+				}
+				if (startTime > 0) {
+					el.currentTime = startTime;
 				}
 				resolve();
 				return;
@@ -218,7 +226,7 @@
 						initialLoadDone = true;
 						if (isLive) {
 							wasLive = true;
-							if (playerStore.currentVideo?.filename === v.filename) {
+							if (isActivePlayer) {
 								playerStore.setCurrentVideoLive();
 								videoListStore.updateVideoLive(v.filename, true);
 							}
@@ -231,7 +239,7 @@
 					// Detect live → ended transition
 					if (wasLive && !isLive) {
 						wasLive = false;
-						if (playerStore.currentVideo?.filename === v.filename) {
+						if (isActivePlayer) {
 							playerStore.setCurrentVideoNotLive();
 							videoListStore.updateVideoLive(v.filename, false);
 							clearPlaylistCache(v.filename);
@@ -275,8 +283,10 @@
 				const onReady = () => {
 					if (el.duration === Infinity) {
 						nativeWasLive = true;
-						playerStore.setCurrentVideoLive();
-						videoListStore.updateVideoLive(v.filename, true);
+						if (isActivePlayer) {
+							playerStore.setCurrentVideoLive();
+							videoListStore.updateVideoLive(v.filename, true);
+						}
 					} else if (startTime > 0) {
 						el.currentTime = startTime;
 					}
@@ -285,9 +295,11 @@
 				const onDurationChange = () => {
 					if (nativeWasLive && el.duration !== Infinity) {
 						nativeWasLive = false;
-						playerStore.setCurrentVideoNotLive();
-						videoListStore.updateVideoLive(v.filename, false);
-						clearPlaylistCache(v.filename);
+						if (isActivePlayer) {
+							playerStore.setCurrentVideoNotLive();
+							videoListStore.updateVideoLive(v.filename, false);
+							clearPlaylistCache(v.filename);
+						}
 					}
 				};
 				const onError = () => {
