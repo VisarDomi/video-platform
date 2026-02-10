@@ -41,30 +41,23 @@ export async function stopDownload(alias: string): Promise<void> {
 	});
 }
 
-const activeTlDownloads = new Set<string>();
-
-export function trackTlAlias(alias: string) {
-	activeTlDownloads.add(alias);
+export function sendActiveSet(aliases: string[]) {
+	console.log('[TL:dl] active set:', aliases.join(', ') || '(empty)');
+	void fetch(TL_API.DOWNLOAD_ACTIVE, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ aliases })
+	});
 }
 
-export function stopStaleTlDownloads(keep: string[]) {
-	const keepSet = new Set(keep);
-	for (const alias of activeTlDownloads) {
-		if (!keepSet.has(alias)) {
-			activeTlDownloads.delete(alias);
-			console.log('[TL:dl] stopping download for', alias);
-			void stopDownload(alias);
-		}
+export async function fetchLiveFilenames(): Promise<Record<string, string>> {
+	try {
+		const response = await fetch(TL_API.LIVE_FILENAMES);
+		if (!response.ok) return {};
+		return await response.json();
+	} catch {
+		return {};
 	}
-}
-
-export function stopAllTlDownloads() {
-	if (activeTlDownloads.size === 0) return;
-	console.log('[TL:dl] stopping all downloads:', [...activeTlDownloads].join(', '));
-	for (const alias of activeTlDownloads) {
-		void stopDownload(alias);
-	}
-	activeTlDownloads.clear();
 }
 
 export async function followStreamer(streamerId: string): Promise<boolean> {

@@ -53,6 +53,8 @@ export const TL_API = {
 	BLOCK: '/api/tl/block',
 	DOWNLOAD_START: '/api/tl/download/start',
 	DOWNLOAD_STOP: '/api/tl/download/stop',
+	DOWNLOAD_ACTIVE: '/api/tl/download/active',
+	LIVE_FILENAMES: '/api/tl/live-filenames',
 	MULTI_BROADCAST: '/api/tl/multi-broadcast'
 } as const;
 

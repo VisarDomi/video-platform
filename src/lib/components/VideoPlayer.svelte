@@ -10,13 +10,7 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
-	import {
-		startDownload,
-		fetchMultiBroadcast,
-		trackTlAlias,
-		stopStaleTlDownloads,
-		stopAllTlDownloads
-	} from '$lib/services/tl-api.js';
+	import { startDownload, fetchMultiBroadcast, sendActiveSet } from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
@@ -99,7 +93,7 @@
 		if (playerStore.view !== 'list' || videoElements.length === 0) return;
 		playerStore.swipeAnimating = false;
 		getActiveElement()?.pause();
-		stopAllTlDownloads();
+		if (videoListStore.selectedProvider === 'tl') sendActiveSet([]);
 	});
 
 	// Cleanup when video is cleared
@@ -238,7 +232,10 @@
 				return;
 			}
 
-			const url = API.HLS_PLAYLIST(v.filename);
+			const hlsFilename =
+				(videoListStore.selectedProvider === 'tl' && videoListStore.getLiveFilename(v.filename)) ||
+				v.filename;
+			const url = API.HLS_PLAYLIST(hlsFilename);
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				// Destroy previous hls.js instance for this element
@@ -293,6 +290,12 @@
 								if (!isActivePlayer) {
 									hls.destroy();
 									hlsInstances.delete(el);
+									return;
+								}
+								// TL streams may 404 briefly while download starts — retry
+								if (videoListStore.selectedProvider === 'tl') {
+									console.log('[TL:hls] 404 on active player, retrying:', v.filename);
+									hls.startLoad();
 									return;
 								}
 								videoListStore.removeVideo(v.filename);
@@ -350,6 +353,11 @@
 					if (mediaError) {
 						console.warn('Native HLS error', mediaError.code, mediaError.message);
 						if (!isActivePlayer) return;
+						// TL streams may error briefly while download starts — don't remove
+						if (videoListStore.selectedProvider === 'tl') {
+							console.log('[TL:native] error on active player, ignoring:', v.filename);
+							return;
+						}
 						videoListStore.removeVideo(v.filename);
 						const next = findAdjacentVideo(1);
 						if (next) {
@@ -402,7 +410,7 @@
 	}
 
 	function stopPlayback() {
-		stopAllTlDownloads();
+		if (videoListStore.selectedProvider === 'tl') sendActiveSet([]);
 		currentFilename = null;
 		videoElements.forEach(clearStream);
 	}
@@ -414,13 +422,16 @@
 		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
 		const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
 
-		// Stop TL downloads no longer in the active window
+		// Report active set to server for cleanup
 		if (videoListStore.selectedProvider === 'tl') {
-			const keep = [cv.filename];
-			if (nextVideo) keep.push(nextVideo.filename);
-			if (prevVideo) keep.push(prevVideo.filename);
-			trackTlAlias(cv.filename);
-			stopStaleTlDownloads(keep);
+			const active = [cv.filename];
+			if (nextVideo) active.push(nextVideo.filename);
+			if (prevVideo) active.push(prevVideo.filename);
+			// Only include aliases that have ephemeral downloads (not following with live filename)
+			const ephemeral = active.filter(
+				(a) => !videoListStore.getLiveFilename(a) || !videoListStore.getStreamer(a)?.isFollowing
+			);
+			sendActiveSet(ephemeral);
 		}
 
 		const nextPlayer = videoElements[(activeIdx + 1) % 3];
@@ -441,10 +452,9 @@
 	async function ensureTlDownload(v: Video) {
 		if (videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(v.filename);
-		if (streamer) {
-			trackTlAlias(v.filename);
-			await startDownload(streamer);
-		}
+		if (!streamer) return;
+		if (streamer.isFollowing && videoListStore.getLiveFilename(v.filename)) return;
+		await startDownload(streamer);
 	}
 
 	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
@@ -474,8 +484,7 @@
 		const myNav = ++navCounter;
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(target.filename);
-			if (streamer) {
-				trackTlAlias(target.filename);
+			if (streamer && !(streamer.isFollowing && videoListStore.getLiveFilename(target.filename))) {
 				await startDownload(streamer);
 			}
 			if (myNav !== navCounter) return;

@@ -16,8 +16,8 @@
 		fetchStreams,
 		startDownload,
 		fetchMultiBroadcast,
-		trackTlAlias,
-		stopAllTlDownloads,
+		fetchLiveFilenames,
+		sendActiveSet,
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
@@ -60,7 +60,7 @@
 			return;
 		}
 		stopSync();
-		stopAllTlDownloads();
+		sendActiveSet([]);
 		videoListStore.initialize(p);
 		videoListStore.clearAliases();
 		playerStore.initialize(p);
@@ -106,6 +106,10 @@
 			});
 			videoListStore.setStreamerMap(map);
 			videoListStore.setVideos(videos);
+			fetchLiveFilenames().then((filenames) => {
+				videoListStore.setLiveFilenames(filenames);
+				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
+			});
 			fetchCoStreamersEagerly(allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
@@ -225,8 +229,13 @@
 				}
 			}
 
-			// Apply removals
+			// Apply removals (skip currently playing video)
+			const currentlyPlaying = playerStore.currentVideo?.filename;
 			for (const alias of toRemove) {
+				if (alias === currentlyPlaying) {
+					console.log('[TL:refresh] skipping removal of currently playing:', alias);
+					continue;
+				}
 				videoListStore.removeVideo(alias);
 			}
 
@@ -269,8 +278,11 @@
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(video.filename);
 			if (streamer) {
-				trackTlAlias(video.filename);
-				await startDownload(streamer);
+				if (streamer.isFollowing && videoListStore.getLiveFilename(video.filename)) {
+					console.log('[TL:dl] skipping download for followed stream:', video.filename);
+				} else {
+					await startDownload(streamer);
+				}
 			}
 		}
 
