@@ -1,21 +1,20 @@
 <script lang="ts">
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
+	import {
+		saveCurrentVideo,
+		createEditedVideo,
+		returnToOriginals
+	} from '$lib/services/videoActions.js';
 
 	let {
 		isMuted,
-		ontoggleMute,
-		onaddpoint,
-		onsave,
-		oncut,
-		onreturn
+		currentTime,
+		ontoggleMute
 	}: {
 		isMuted: boolean;
+		currentTime: number;
 		ontoggleMute: () => void;
-		onaddpoint: () => void;
-		onsave: () => void;
-		oncut: () => void;
-		onreturn: () => void;
 	} = $props();
 
 	const video = $derived(playerStore.currentVideo);
@@ -35,9 +34,9 @@
 
 	function handleOkOrCut() {
 		if (hasSegments) {
-			oncut();
+			void createEditedVideo();
 		} else {
-			onsave();
+			saveCurrentVideo();
 		}
 	}
 </script>
@@ -54,14 +53,14 @@
 			</button>
 
 			{#if isOriginal}
-				<button onclick={onaddpoint}>📍</button>
+				<button onclick={() => playerStore.addSegment(currentTime)}>📍</button>
 				<button onclick={handleOkOrCut} disabled={hasSegments && segments.length % 2 !== 0}>
 					{hasSegments ? '✂️' : '✅'}
 				</button>
 			{/if}
 
 			{#if isEdited}
-				<button onclick={onreturn}>🔄</button>
+				<button onclick={returnToOriginals}>🔄</button>
 			{/if}
 		</div>
 	</div>

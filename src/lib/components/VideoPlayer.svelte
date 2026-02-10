@@ -6,11 +6,7 @@
 	import { untrack } from 'svelte';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
-	import {
-		saveCurrentVideo,
-		createEditedVideo,
-		returnToOriginals
-	} from '$lib/services/videoActions.js';
+
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import type { Video } from '$lib/types.js';
@@ -435,11 +431,6 @@
 		activeEl.muted = !activeEl.muted;
 	}
 
-	function handleAddPoint() {
-		const activeEl = getActiveElement();
-		playerStore.addSegment(activeEl.currentTime);
-	}
-
 	async function updateWakeLock(shouldBeActive: boolean) {
 		if (shouldBeActive && !wakeLock) {
 			if ('wakeLock' in navigator) {
@@ -729,14 +720,7 @@
 
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 
-				<PlayerControls
-					{isMuted}
-					ontoggleMute={toggleMute}
-					onaddpoint={handleAddPoint}
-					onsave={saveCurrentVideo}
-					oncut={() => void createEditedVideo()}
-					onreturn={returnToOriginals}
-				/>
+				<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
 			{/if}
 		</div>
 	</div>
