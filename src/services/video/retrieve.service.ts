@@ -7,6 +7,9 @@ import * as constants from "../../core/constants.js";
 import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 
 export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
+    // tl provider uses /api/tl/streams instead
+    if (provider === "tl") return [];
+
     const liveFolders = await utils.getLiveFolders();
 
     const paths = config.getProviderPaths(provider);

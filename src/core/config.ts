@@ -60,19 +60,30 @@ function generateDefaultPaths(providerName: string): PathConfig {
     };
 }
 
+// tl provider uses /tmp/ paths - ephemeral, created on demand
+const TL_PATHS: PathConfig = {
+    downloader: "/tmp/Videos/downloads/tl",
+    edited: "/tmp/Videos/downloads/tl",
+    trash: "/tmp/Videos/downloads/tl",
+    converted: "/tmp/Videos/downloads/tl",
+};
+
 const config: IConfig = {
-    providers: DEFAULT_PROVIDERS.reduce((acc, provider) => {
-        acc[provider] = generateDefaultPaths(provider);
-        return acc;
-    }, {} as Record<string, PathConfig>),
+    providers: {
+        ...DEFAULT_PROVIDERS.reduce((acc, provider) => {
+            acc[provider] = generateDefaultPaths(provider);
+            return acc;
+        }, {} as Record<string, PathConfig>),
+        tl: TL_PATHS,
+    },
     frontendDistPath: path.join(projectRoot, "..", "video-editor-svelte", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
     fc2FilePath: path.join(projectRoot, "..", "video-downloader", "fc2.txt"),
     scFilePath: path.join(projectRoot, "..", "video-downloader", "sc.txt"),
 };
 
-// Validate all paths for all providers
-Object.values(config.providers).forEach(paths => {
+// Validate all paths for all providers (skip tl - ephemeral /tmp dirs created on demand)
+Object.entries(config.providers).filter(([name]) => name !== "tl").map(([, paths]) => paths).forEach(paths => {
     [paths.downloader, paths.edited, paths.converted, paths.trash].forEach((dir) => {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });

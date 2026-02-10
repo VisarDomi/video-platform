@@ -10,6 +10,8 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/fc2.routes.js";
 import scRouter from "./api/sc.routes.js";
+import tlRouter from "./api/tl.routes.js";
+import { startTokenWatcher } from "./services/tango/tokenManager.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 declare module "express-serve-static-core" {
@@ -40,7 +42,11 @@ async function startServer() {
         process.exit(1);
     }
 
+    // Initialize tl token watcher
+    startTokenWatcher();
+
     // Register routes
+    app.use("/api", tlRouter);
     app.use("/", fc2Router); // fc2Router handles /fc2 and /api/fc2
     app.use("/", scRouter); // scRouter handles /sc and /api/sc
     app.use("/api", videoApiRouter);
