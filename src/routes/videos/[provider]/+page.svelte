@@ -18,12 +18,15 @@
 		fetchMultiBroadcast,
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
-	import { VIDEO_TYPE } from '$lib/constants.js';
+	import { VIDEO_TYPE, API } from '$lib/constants.js';
 
 	const ITEM_HEIGHT = 52;
 	const SCROLL_BUFFER = 10;
 	const MIN_LIST_ITEMS = 100;
+	const REFRESH_GATE_MS = 30_000;
 
+	let lastRefreshTime = 0;
+	let isRefreshing = false;
 	let lastScrollY = 0;
 	let searchHidden = $state(false);
 	let scrollY = $state(0);
@@ -162,6 +165,99 @@
 			document.title = `${p} - Video Editor`;
 		}
 	});
+
+	// TL refresh trigger: last element visible in list view
+	$effect(() => {
+		if (videoListStore.selectedProvider !== 'tl' || playerStore.view !== 'list') return;
+		if (filteredVideos.length === 0 || videoListStore.isLoading) return;
+		if (endIdx >= filteredVideos.length) {
+			refreshTlStreams();
+		}
+	});
+
+	// TL refresh trigger: next-up is the last video during playback
+	$effect(() => {
+		if (videoListStore.selectedProvider !== 'tl' || playerStore.view !== 'video') return;
+		const cv = playerStore.currentVideo;
+		if (!cv || filteredVideos.length === 0) return;
+		const idx = filteredVideos.findIndex((v) => v.filename === cv.filename);
+		if (idx !== -1 && idx >= filteredVideos.length - 2) {
+			refreshTlStreams();
+		}
+	});
+
+	async function refreshTlStreams() {
+		const now = Date.now();
+		if (isRefreshing || now - lastRefreshTime < REFRESH_GATE_MS) return;
+		lastRefreshTime = now;
+		isRefreshing = true;
+		console.log('[TL:refresh] starting...');
+
+		try {
+			const { following, recommended } = await fetchStreams();
+			const freshStreamers = [...following, ...recommended];
+			console.log('[TL:refresh] got', freshStreamers.length, 'streamers from API');
+
+			const toRemove: string[] = [];
+			const toAppend: TlStreamer[] = [];
+
+			for (const streamer of freshStreamers) {
+				const existing = videoListStore.getStreamer(streamer.alias);
+				if (!existing) {
+					toAppend.push(streamer);
+					continue;
+				}
+				// Duplicate — check if existing stream is 404
+				try {
+					const res = await fetch(API.HLS_PLAYLIST(streamer.alias), { method: 'HEAD' });
+					if (res.status === 404) {
+						console.log('[TL:refresh] 404:', streamer.alias, '-> remove + re-add');
+						toRemove.push(streamer.alias);
+						toAppend.push(streamer);
+					}
+				} catch {
+					// Network error → treat as 404
+					toRemove.push(streamer.alias);
+					toAppend.push(streamer);
+				}
+			}
+
+			// Apply removals
+			for (const alias of toRemove) {
+				videoListStore.removeVideo(alias);
+			}
+
+			// Apply additions
+			if (toAppend.length > 0) {
+				console.log(
+					'[TL:refresh] adding',
+					toAppend.length,
+					'streamers:',
+					toAppend.map((s) => s.alias).join(', ')
+				);
+				const nextMap = new Map(videoListStore.streamerMap);
+				const newVideos = toAppend.map((s) => {
+					nextMap.set(s.alias, s);
+					return {
+						filename: s.alias,
+						type: VIDEO_TYPE.ORIGINAL as const,
+						duration: 0,
+						size: 0,
+						isLive: true
+					};
+				});
+				videoListStore.setStreamerMap(nextMap);
+				videoListStore.appendVideos(newVideos);
+				fetchCoStreamersEagerly(toAppend);
+			} else {
+				console.log('[TL:refresh] no new streamers to add');
+			}
+		} catch (e) {
+			console.error('[TL:refresh] failed', e);
+		} finally {
+			isRefreshing = false;
+		}
+	}
 
 	async function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
