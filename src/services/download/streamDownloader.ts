@@ -15,10 +15,19 @@ import { ScClient } from "../sc/api/scClient.js";
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
     private streamProvider: IStreamProvider;
+    private aborted = false;
 
     constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
         this.downloadHandle = downloadHandle;
         this.streamProvider = streamProvider;
+    }
+
+    public abort(): void {
+        this.aborted = true;
+    }
+
+    public get isAborted(): boolean {
+        return this.aborted;
     }
 
     public async start() {
@@ -80,7 +89,7 @@ export class StreamDownloader {
 
         let lastDownload = Date.now();
 
-        while (Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
+        while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {

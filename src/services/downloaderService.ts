@@ -23,6 +23,7 @@ import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
 export class DownloaderService {
     // Tango Services
     private tokenManager: TokenManager;
+    private apiClient: ApiClient;
     private aliasSyncService: AliasSyncService;
     private streamDiscoveryService: StreamDiscoveryService;
 
@@ -37,6 +38,7 @@ export class DownloaderService {
 
     private constructor(
         tokenManager: TokenManager,
+        apiClient: ApiClient,
         aliasSyncService: AliasSyncService,
         streamDiscoveryService: StreamDiscoveryService,
         fc2DiscoveryService: Fc2DiscoveryService,
@@ -44,6 +46,7 @@ export class DownloaderService {
         orphanStreamFinalizer: OrphanStreamFinalizer
     ) {
         this.tokenManager = tokenManager;
+        this.apiClient = apiClient;
         this.aliasSyncService = aliasSyncService;
         this.streamDiscoveryService = streamDiscoveryService;
         this.fc2DiscoveryService = fc2DiscoveryService;
@@ -79,12 +82,17 @@ export class DownloaderService {
 
         return new DownloaderService(
             tokenManager,
+            apiClient,
             aliasSyncService,
             streamDiscoveryService,
             fc2DiscoveryService,
             scDiscoveryService,
             orphanStreamFinalizer
         );
+    }
+
+    public getTangoApiClient(): ApiClient {
+        return this.apiClient;
     }
 
     public async start() {
