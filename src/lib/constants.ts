@@ -1,4 +1,4 @@
-export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
+export const PROVIDERS = ['tl', 'tango', 'fc2', 'sc'] as const;
 export const DEFAULT_PROVIDER = PROVIDERS[0];
 
 export const STORAGE_KEYS = {
@@ -44,6 +44,15 @@ export const UI_TEXT = {
 		TIME_PRECISE_PLACEHOLDER: '00:00.000',
 		SIZE_UNIT: ' MiB'
 	}
+} as const;
+
+export const TL_API = {
+	STREAMS: '/api/tl/streams',
+	FOLLOW: '/api/tl/follow',
+	UNFOLLOW: '/api/tl/unfollow',
+	BLOCK: '/api/tl/block',
+	DOWNLOAD_START: '/api/tl/download/start',
+	DOWNLOAD_STOP: '/api/tl/download/stop'
 } as const;
 
 export const HLS = {

@@ -9,6 +9,7 @@
 
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
+	import TlControls from './TlControls.svelte';
 	import type { Video } from '$lib/types.js';
 
 	let videoElements = $state<HTMLVideoElement[]>([]);
@@ -24,6 +25,7 @@
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
+	const isTl = $derived(videoListStore.selectedProvider === 'tl');
 
 	// Initialize 3 video elements
 	$effect(() => {
@@ -718,7 +720,11 @@
 
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 
-				<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
+				{#if isTl}
+					<TlControls />
+				{:else}
+					<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
+				{/if}
 			{/if}
 		</div>
 	</div>

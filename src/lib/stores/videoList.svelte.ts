@@ -1,11 +1,15 @@
 import { DEFAULT_PROVIDER, STORAGE_KEYS } from '../constants.js';
 import type { Video, VideoType } from '../types.js';
+import type { TlStreamer } from '../services/tl-api.js';
 
 class VideoListStore {
 	videos = $state<Video[]>([]);
 	isLoading = $state(true);
 	selectedProvider = $state<string>(DEFAULT_PROVIDER);
 	selectedAliases = $state<Set<string>>(new Set());
+
+	// TL-specific state
+	streamerMap = $state<Map<string, TlStreamer>>(new Map());
 
 	initialize(provider: string) {
 		this.selectedProvider = provider;
@@ -75,6 +79,23 @@ class VideoListStore {
 		this.videos = this.videos.map((v) =>
 			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v
 		);
+	}
+	// TL-specific methods
+	setStreamerMap(map: Map<string, TlStreamer>) {
+		this.streamerMap = map;
+	}
+
+	getStreamer(alias: string): TlStreamer | undefined {
+		return this.streamerMap.get(alias);
+	}
+
+	appendVideos(newVideos: Video[]) {
+		if (newVideos.length === 0) return;
+		const existing = new Set(this.videos.map((v) => v.filename));
+		const toAdd = newVideos.filter((v) => !existing.has(v.filename));
+		if (toAdd.length === 0) return;
+		// Don't sort - keep following first, then recommended
+		this.videos = [...this.videos, ...toAdd];
 	}
 }
 

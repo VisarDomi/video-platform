@@ -12,6 +12,8 @@
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
+	import { fetchStreams, startDownload, type TlStreamer } from '$lib/services/tl-api.js';
+	import { VIDEO_TYPE } from '$lib/constants.js';
 
 	const ITEM_HEIGHT = 52;
 	const SCROLL_BUFFER = 10;
@@ -55,12 +57,40 @@
 	});
 
 	async function loadVideos(p: string) {
+		if (p === 'tl') {
+			await loadTlStreams();
+			return;
+		}
 		const videos = await fetchVideos(p);
 		videoListStore.setVideos(videos);
 		startSync(p);
 		await tick();
 		const saved = localStorage.getItem(STORAGE_KEYS.SCROLL_PREFIX + p);
 		window.scrollTo(0, saved ? parseFloat(saved) : 0);
+	}
+
+	async function loadTlStreams() {
+		try {
+			const { following, recommended } = await fetchStreams();
+			const allStreamers = [...following, ...recommended];
+			const map = new Map<string, TlStreamer>();
+			const videos = allStreamers.map((s) => {
+				map.set(s.alias, s);
+				return {
+					filename: s.alias,
+					type: VIDEO_TYPE.ORIGINAL as const,
+					duration: 0,
+					size: 0,
+					isLive: true
+				};
+			});
+			videoListStore.setStreamerMap(map);
+			videoListStore.setVideos(videos);
+			// No sync polling for tl
+		} catch (e) {
+			console.error('Failed to load tl streams', e);
+			videoListStore.setVideos([]);
+		}
 	}
 
 	function scrollToActiveVideo() {
@@ -85,9 +115,17 @@
 		}
 	});
 
-	function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
+	async function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
 		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
+
+		if (videoListStore.selectedProvider === 'tl') {
+			const streamer = videoListStore.getStreamer(video.filename);
+			if (streamer) {
+				await startDownload(streamer);
+			}
+		}
+
 		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
 		void fetchAndParsePlaylist(video);
 	}
