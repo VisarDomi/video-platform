@@ -152,7 +152,6 @@
 />
 
 <div class="search-container" class:hidden={searchHidden}>
-	<div class="provider-label">{videoListStore.selectedProvider.toUpperCase()}</div>
 	<AliasSelector
 		aliases={uniqueAliases}
 		selectedAliases={videoListStore.selectedAliases}
@@ -229,15 +228,5 @@
 	.empty-item {
 		height: 52px;
 		border-bottom: 1px solid #333;
-	}
-	.provider-label {
-		width: 100%;
-		text-align: center;
-		font-size: 14px;
-		font-weight: bold;
-		color: #fff;
-		padding: 6px 0;
-		border-bottom: 1px solid #444;
-		margin-bottom: 5px;
 	}
 </style>
