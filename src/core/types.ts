@@ -11,6 +11,7 @@ export type VideoItem = {
 };
 
 export interface LiveDownload {
+    alias?: string;
     segmentsDirPath: string;
 }
 

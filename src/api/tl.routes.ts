@@ -1,6 +1,7 @@
 import { Router } from "express";
 import logger from "../core/logger.js";
 import * as tangoApi from "../services/tango/apiClient.js";
+import * as utils from "../core/utils.js";
 
 const router = Router();
 
@@ -52,6 +53,17 @@ router.post("/tl/block", async (req, res) => {
     res.json({ success: ok });
 });
 
+// --- Live filename resolution ---
+router.get("/tl/live-filenames", async (_req, res) => {
+    try {
+        const filenames = await utils.getLiveFilenames();
+        res.json(filenames);
+    } catch (error: any) {
+        logger.error("[TL] Failed to get live filenames", { error: error.message });
+        res.status(500).json({});
+    }
+});
+
 // --- Download proxy ---
 router.post("/tl/download/start", async (req, res) => {
     const { masterPlaylistUrl, alias, streamerId } = req.body;
@@ -85,6 +97,23 @@ router.post("/tl/download/stop", async (req, res) => {
         res.json(data);
     } catch (error: any) {
         logger.error("[TL] Failed to proxy download/stop", { error: error.message });
+        res.status(502).json({ error: "Download service unavailable" });
+    }
+});
+
+router.post("/tl/download/active", async (req, res) => {
+    const { aliases } = req.body;
+    if (!Array.isArray(aliases)) return res.status(400).json({ error: "aliases must be an array" });
+    try {
+        const response = await fetch(`${DOWNLOADER_API}/api/download/active`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ aliases }),
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error: any) {
+        logger.error("[TL] Failed to proxy download/active", { error: error.message });
         res.status(502).json({ error: "Download service unavailable" });
     }
 });
