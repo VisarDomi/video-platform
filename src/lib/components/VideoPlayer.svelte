@@ -78,39 +78,37 @@
 		return () => cleanups.forEach((fn) => fn());
 	});
 
-	// Sync player state when video/view changes
+	// Wake lock: acquire when playing, release when not
+	$effect(() => {
+		updateWakeLock(playerStore.view === 'video' && !!playerStore.currentVideo);
+	});
+
+	// Cleanup when returning to list view
+	$effect(() => {
+		if (playerStore.view !== 'list' || videoElements.length === 0) return;
+		playerStore.swipeAnimating = false;
+		getActiveElement()?.pause();
+	});
+
+	// Cleanup when video is cleared
+	$effect(() => {
+		if (playerStore.view !== 'video' || playerStore.currentVideo || videoElements.length === 0)
+			return;
+		stopPlayback();
+	});
+
+	// Activate video when it changes
 	$effect(() => {
 		const cv = playerStore.currentVideo;
-		const view = playerStore.view;
+		if (!cv || playerStore.view !== 'video' || videoElements.length === 0) return;
 		const activeIdx = playerStore.activePlayerIndex;
-
-		if (videoElements.length === 0) return;
-
-		if (view === 'list') {
-			playerStore.swipeAnimating = false;
-			getActiveElement()?.pause();
-			updateWakeLock(false);
-			return;
-		}
-
-		if (!cv) {
-			stopPlayback();
-			updateWakeLock(false);
-			return;
-		}
-
-		updateWakeLock(true);
 
 		const videoChanged = currentFilename !== cv.filename;
 		currentFilename = cv.filename;
 
-		// Update CSS classes and inline opacity
 		videoElements.forEach((el, i) => {
 			if (i === activeIdx) {
-				// Only hide if we're about to load a new video
-				if (videoChanged) {
-					el.style.opacity = '0';
-				}
+				if (videoChanged) el.style.opacity = '0';
 				el.className = 'active-player';
 			} else {
 				el.style.opacity = '';
