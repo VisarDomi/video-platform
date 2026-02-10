@@ -7,6 +7,14 @@
 	const streamer = $derived(video ? videoListStore.getStreamer(video.filename) : undefined);
 	const isFollowing = $derived(streamer?.isFollowing ?? false);
 
+	let {
+		isMuted,
+		ontoggleMute
+	}: {
+		isMuted: boolean;
+		ontoggleMute: () => void;
+	} = $props();
+
 	let blockConfirm = $state(false);
 
 	function handleFollow() {
@@ -49,6 +57,9 @@
 
 {#if streamer}
 	<div class="tl-controls">
+		<button class="tl-btn" onclick={ontoggleMute}>
+			{isMuted ? '🔇' : '🔊'}
+		</button>
 		<button class="tl-btn" class:following={isFollowing} onclick={handleFollow}>
 			{isFollowing ? '➖' : '➕'}
 		</button>

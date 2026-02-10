@@ -798,7 +798,7 @@
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 
 				{#if isTl}
-					<TlControls />
+					<TlControls {isMuted} ontoggleMute={toggleMute} />
 				{:else}
 					<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
 				{/if}
