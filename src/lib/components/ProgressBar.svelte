@@ -60,7 +60,6 @@
 	tabindex="-1"
 	bind:this={progressBar}
 	onpointerdown={onPointerDown}
-	ondblclick={(e) => e.preventDefault()}
 >
 	<div class="progress-fill" style="width: {percentage}%"></div>
 

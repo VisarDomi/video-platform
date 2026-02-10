@@ -598,7 +598,7 @@
 		background-color: black;
 		-webkit-user-select: none;
 		user-select: none;
-		touch-action: none;
+		touch-action: pinch-zoom;
 		z-index: -1;
 		opacity: 0;
 		pointer-events: none;
