@@ -21,6 +21,7 @@
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
+	let videoViewEl = $state<HTMLElement | null>(null);
 	let videoElements = $state<HTMLVideoElement[]>([]);
 	let videoContainer = $state<HTMLElement | null>(null);
 	let currentTime = $state(0);
@@ -223,6 +224,7 @@
 	): Promise<void> {
 		return new Promise((resolve) => {
 			if (el.dataset.loadedFilename === v.filename) {
+				console.log('[stream]', v.filename, isActivePlayer ? 'active' : 'preload', 'cache-hit');
 				if (isActivePlayer) {
 					const isLive = el.duration === Infinity;
 					if (isLive) {
@@ -253,6 +255,8 @@
 			} else {
 				url = API.HLS_PLAYLIST(v.filename);
 			}
+
+			console.log('[stream]', v.filename, isActivePlayer ? 'active' : 'preload', 'url:', url);
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				// Destroy previous hls.js instance for this element
@@ -474,8 +478,8 @@
 		if (videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(v.filename);
 		if (!streamer) return;
-		// Start proxy for fast playback
-		void startProxy(streamer);
+		// Start proxy (await so URL is available for loadStream)
+		await startProxy(streamer);
 		// Also start download for archival (skip for followed streams with live filename)
 		if (!(streamer.isFollowing && videoListStore.getLiveFilename(v.filename))) {
 			void startDownload(streamer);
@@ -566,6 +570,14 @@
 			wakeLock = null;
 		}
 	}
+	// Attach touchmove with { passive: false } so preventDefault() works
+	$effect(() => {
+		if (!videoViewEl) return;
+		const el = videoViewEl;
+		el.addEventListener('touchmove', handleTouchMove, { passive: false });
+		return () => el.removeEventListener('touchmove', handleTouchMove);
+	});
+
 	// Gesture system
 	const EDGE_ZONE = 30;
 	const EDGE_BACK_THRESHOLD = 0.3;
@@ -816,8 +828,8 @@
 		? `transform:translateX(${playerStore.swipeProgress * 100}%)`
 		: ''}
 	role="application"
+	bind:this={videoViewEl}
 	ontouchstart={handleTouchStart}
-	ontouchmove={handleTouchMove}
 	ontouchend={handleTouchEnd}
 	ontouchcancel={handleTouchCancel}
 >
