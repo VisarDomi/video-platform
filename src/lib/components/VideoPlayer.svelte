@@ -10,7 +10,14 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
-	import { startDownload, fetchMultiBroadcast, sendActiveSet } from '$lib/services/tl-api.js';
+	import {
+		startDownload,
+		fetchMultiBroadcast,
+		sendActiveSet,
+		startProxy,
+		getProxyUrl,
+		syncProxySessions
+	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
@@ -140,8 +147,10 @@
 		if (!cv || playerStore.view !== 'video' || videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(cv.filename);
 		if (!streamer?.streamId || !videoListStore.markStreamIdProcessed(streamer.streamId)) return;
+		const epoch = videoListStore.epoch;
 		console.log('[TL:co] on-demand fetch for', streamer.alias, streamer.streamId);
 		fetchMultiBroadcast(streamer.streamId).then((coStreamers) => {
+			if (videoListStore.epoch !== epoch) return;
 			if (coStreamers.length === 0) {
 				console.log('[TL:co] no co-streamers for', streamer.alias);
 				return;
@@ -232,10 +241,18 @@
 				return;
 			}
 
-			const hlsFilename =
-				(videoListStore.selectedProvider === 'tl' && videoListStore.getLiveFilename(v.filename)) ||
-				v.filename;
-			const url = API.HLS_PLAYLIST(hlsFilename);
+			let url: string;
+			if (videoListStore.selectedProvider === 'tl') {
+				const proxyUrl = getProxyUrl(v.filename);
+				if (proxyUrl) {
+					url = proxyUrl;
+				} else {
+					const hlsFilename = videoListStore.getLiveFilename(v.filename) || v.filename;
+					url = API.HLS_PLAYLIST(hlsFilename);
+				}
+			} else {
+				url = API.HLS_PLAYLIST(v.filename);
+			}
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				// Destroy previous hls.js instance for this element
@@ -410,7 +427,10 @@
 	}
 
 	function stopPlayback() {
-		if (videoListStore.selectedProvider === 'tl') sendActiveSet([]);
+		if (videoListStore.selectedProvider === 'tl') {
+			sendActiveSet([]);
+			syncProxySessions([]);
+		}
 		currentFilename = null;
 		videoElements.forEach(clearStream);
 	}
@@ -432,6 +452,7 @@
 				(a) => !videoListStore.getLiveFilename(a) || !videoListStore.getStreamer(a)?.isFollowing
 			);
 			sendActiveSet(ephemeral);
+			syncProxySessions(active);
 		}
 
 		const nextPlayer = videoElements[(activeIdx + 1) % 3];
@@ -449,16 +470,20 @@
 		}
 	}
 
-	async function ensureTlDownload(v: Video) {
+	async function ensureTlStream(v: Video) {
 		if (videoListStore.selectedProvider !== 'tl') return;
 		const streamer = videoListStore.getStreamer(v.filename);
 		if (!streamer) return;
-		if (streamer.isFollowing && videoListStore.getLiveFilename(v.filename)) return;
-		await startDownload(streamer);
+		// Start proxy for fast playback
+		void startProxy(streamer);
+		// Also start download for archival (skip for followed streams with live filename)
+		if (!(streamer.isFollowing && videoListStore.getLiveFilename(v.filename))) {
+			void startDownload(streamer);
+		}
 	}
 
 	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
-		await ensureTlDownload(v);
+		await ensureTlStream(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		el.muted = true;
@@ -470,7 +495,7 @@
 	}
 
 	async function preloadAndPause(el: HTMLVideoElement, v: Video) {
-		await ensureTlDownload(v);
+		await ensureTlStream(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		if (!el.paused) el.pause();
@@ -484,8 +509,11 @@
 		const myNav = ++navCounter;
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(target.filename);
-			if (streamer && !(streamer.isFollowing && videoListStore.getLiveFilename(target.filename))) {
-				await startDownload(streamer);
+			if (streamer) {
+				await startProxy(streamer);
+				if (!(streamer.isFollowing && videoListStore.getLiveFilename(target.filename))) {
+					void startDownload(streamer);
+				}
 			}
 			if (myNav !== navCounter) return;
 		}

@@ -55,7 +55,9 @@ export const TL_API = {
 	DOWNLOAD_STOP: '/api/tl/download/stop',
 	DOWNLOAD_ACTIVE: '/api/tl/download/active',
 	LIVE_FILENAMES: '/api/tl/live-filenames',
-	MULTI_BROADCAST: '/api/tl/multi-broadcast'
+	MULTI_BROADCAST: '/api/tl/multi-broadcast',
+	PROXY_START: '/api/tl/proxy/start',
+	PROXY_STOP: '/api/tl/proxy/stop'
 } as const;
 
 export const HLS = {

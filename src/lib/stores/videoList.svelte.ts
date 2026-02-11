@@ -8,18 +8,27 @@ class VideoListStore {
 	selectedProvider = $state<string>(DEFAULT_PROVIDER);
 	selectedAliases = $state<Set<string>>(new Set());
 
+	// Bumped on every initialize() — async ops capture this and bail if stale
+	epoch = 0;
+
 	// TL-specific state
 	streamerMap = $state<Map<string, TlStreamer>>(new Map());
 	processedStreamIds = new Set<string>();
 	liveFilenameMap = $state<Map<string, string>>(new Map());
 
 	initialize(provider: string) {
+		this.epoch++;
 		this.selectedProvider = provider;
 		this.isLoading = true;
+		this.videos = [];
+		this.streamerMap = new Map();
+		this.processedStreamIds = new Set();
+		this.liveFilenameMap = new Map();
 	}
 
 	setProvider(newProvider: string) {
 		localStorage.setItem(STORAGE_KEYS.SELECTED_PROVIDER, newProvider);
+		this.epoch++;
 		this.selectedProvider = newProvider;
 	}
 
@@ -84,6 +93,7 @@ class VideoListStore {
 	}
 	// TL-specific methods
 	setStreamerMap(map: Map<string, TlStreamer>) {
+		if (this.selectedProvider !== 'tl') return;
 		this.streamerMap = map;
 	}
 
@@ -92,6 +102,7 @@ class VideoListStore {
 	}
 
 	setLiveFilenames(map: Record<string, string>) {
+		if (this.selectedProvider !== 'tl') return;
 		this.liveFilenameMap = new Map(Object.entries(map));
 	}
 
@@ -100,12 +111,14 @@ class VideoListStore {
 	}
 
 	markStreamIdProcessed(streamId: string): boolean {
+		if (this.selectedProvider !== 'tl') return false;
 		if (this.processedStreamIds.has(streamId)) return false;
 		this.processedStreamIds.add(streamId);
 		return true;
 	}
 
 	insertVideosAfter(afterFilename: string, newVideos: Video[], newStreamers: TlStreamer[]) {
+		if (this.selectedProvider !== 'tl') return;
 		if (newVideos.length === 0) return;
 		const existing = new Set(this.videos.map((v) => v.filename));
 		const toAdd = newVideos.filter((v) => !existing.has(v.filename));
@@ -123,6 +136,7 @@ class VideoListStore {
 	}
 
 	appendVideos(newVideos: Video[]) {
+		if (this.selectedProvider !== 'tl') return;
 		if (newVideos.length === 0) return;
 		const existing = new Set(this.videos.map((v) => v.filename));
 		const toAdd = newVideos.filter((v) => !existing.has(v.filename));

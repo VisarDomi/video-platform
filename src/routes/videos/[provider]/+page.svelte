@@ -15,6 +15,7 @@
 	import {
 		fetchStreams,
 		startDownload,
+		startProxy,
 		fetchMultiBroadcast,
 		fetchLiveFilenames,
 		sendActiveSet,
@@ -68,11 +69,13 @@
 	});
 
 	async function loadVideos(p: string) {
+		const epoch = videoListStore.epoch;
 		if (p === 'tl') {
-			await loadTlStreams();
+			await loadTlStreams(epoch);
 			return;
 		}
 		const videos = await fetchVideos(p);
+		if (videoListStore.epoch !== epoch) return;
 		videoListStore.setVideos(videos);
 		startSync(p);
 		await tick();
@@ -80,9 +83,10 @@
 		window.scrollTo(0, saved ? parseFloat(saved) : 0);
 	}
 
-	async function loadTlStreams() {
+	async function loadTlStreams(epoch: number) {
 		try {
 			const { following, recommended } = await fetchStreams();
+			if (videoListStore.epoch !== epoch) return;
 			const allStreamers = [...following, ...recommended];
 			console.log(
 				'[TL] loaded',
@@ -107,20 +111,23 @@
 			videoListStore.setStreamerMap(map);
 			videoListStore.setVideos(videos);
 			fetchLiveFilenames().then((filenames) => {
+				if (videoListStore.epoch !== epoch) return;
 				videoListStore.setLiveFilenames(filenames);
 				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
 			});
-			fetchCoStreamersEagerly(allStreamers);
+			fetchCoStreamersEagerly(epoch, allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
+			if (videoListStore.epoch !== epoch) return;
 			videoListStore.setVideos([]);
 		}
 	}
 
-	async function fetchCoStreamersEagerly(streamers: TlStreamer[]) {
+	async function fetchCoStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
 		console.log('[TL:co] starting eager co-streamer scan for', streamers.length, 'streamers');
 		let found = 0;
 		for (const streamer of streamers) {
+			if (videoListStore.epoch !== epoch) break;
 			if (!streamer.streamId) continue;
 			if (!videoListStore.markStreamIdProcessed(streamer.streamId)) continue;
 			try {
@@ -198,10 +205,12 @@
 		if (isRefreshing || now - lastRefreshTime < REFRESH_GATE_MS) return;
 		lastRefreshTime = now;
 		isRefreshing = true;
+		const epoch = videoListStore.epoch;
 		console.log('[TL:refresh] starting...');
 
 		try {
 			const { following, recommended } = await fetchStreams();
+			if (videoListStore.epoch !== epoch) return;
 			const freshStreamers = [...following, ...recommended];
 			console.log('[TL:refresh] got', freshStreamers.length, 'streamers from API');
 
@@ -209,6 +218,7 @@
 			const toAppend: TlStreamer[] = [];
 
 			for (const streamer of freshStreamers) {
+				if (videoListStore.epoch !== epoch) return;
 				const existing = videoListStore.getStreamer(streamer.alias);
 				if (!existing) {
 					toAppend.push(streamer);
@@ -260,7 +270,7 @@
 				});
 				videoListStore.setStreamerMap(nextMap);
 				videoListStore.appendVideos(newVideos);
-				fetchCoStreamersEagerly(toAppend);
+				fetchCoStreamersEagerly(epoch, toAppend);
 			} else {
 				console.log('[TL:refresh] no new streamers to add');
 			}
@@ -278,10 +288,11 @@
 		if (videoListStore.selectedProvider === 'tl') {
 			const streamer = videoListStore.getStreamer(video.filename);
 			if (streamer) {
+				await startProxy(streamer);
 				if (streamer.isFollowing && videoListStore.getLiveFilename(video.filename)) {
 					console.log('[TL:dl] skipping download for followed stream:', video.filename);
 				} else {
-					await startDownload(streamer);
+					void startDownload(streamer);
 				}
 			}
 		}

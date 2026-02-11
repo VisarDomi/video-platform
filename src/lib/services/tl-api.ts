@@ -113,3 +113,59 @@ export async function fetchMultiBroadcast(streamId: string): Promise<TlStreamer[
 	if (!response.ok) return [];
 	return await response.json();
 }
+
+// --- HLS Proxy ---
+
+const proxyUrls = new Map<string, string>();
+
+export async function startProxy(streamer: TlStreamer): Promise<string | undefined> {
+	const existing = proxyUrls.get(streamer.alias);
+	if (existing) return existing;
+
+	try {
+		const response = await fetch(TL_API.PROXY_START, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				masterPlaylistUrl: streamer.masterListUrl,
+				alias: streamer.alias
+			})
+		});
+		if (!response.ok) return undefined;
+		const data = await response.json();
+		const url = data.proxyPlaylistUrl as string;
+		proxyUrls.set(streamer.alias, url);
+		console.log('[TL:proxy] started:', streamer.alias, url);
+		return url;
+	} catch (e) {
+		console.warn('[TL:proxy] start failed:', streamer.alias, e);
+		return undefined;
+	}
+}
+
+export async function stopProxy(alias: string): Promise<void> {
+	proxyUrls.delete(alias);
+	try {
+		await fetch(TL_API.PROXY_STOP, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ alias })
+		});
+	} catch {
+		// ignore
+	}
+}
+
+export function getProxyUrl(alias: string): string | undefined {
+	return proxyUrls.get(alias);
+}
+
+export function syncProxySessions(activeAliases: string[]) {
+	const activeSet = new Set(activeAliases);
+	for (const alias of proxyUrls.keys()) {
+		if (!activeSet.has(alias)) {
+			console.log('[TL:proxy] stopping dropped session:', alias);
+			void stopProxy(alias);
+		}
+	}
+}
