@@ -224,7 +224,6 @@
 	): Promise<void> {
 		return new Promise((resolve) => {
 			if (el.dataset.loadedFilename === v.filename) {
-				console.log('[stream]', v.filename, isActivePlayer ? 'active' : 'preload', 'cache-hit');
 				if (isActivePlayer) {
 					const isLive = el.duration === Infinity;
 					if (isLive) {
@@ -255,8 +254,6 @@
 			} else {
 				url = API.HLS_PLAYLIST(v.filename);
 			}
-
-			console.log('[stream]', v.filename, isActivePlayer ? 'active' : 'preload', 'url:', url);
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				// Destroy previous hls.js instance for this element
