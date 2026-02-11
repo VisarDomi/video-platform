@@ -96,6 +96,17 @@
 		updateWakeLock(playerStore.view === 'video' && !!playerStore.currentVideo);
 	});
 
+	// Destroy all streams when provider changes (stops hls.js polling)
+	let lastProvider: string | null = null;
+	$effect(() => {
+		const provider = videoListStore.selectedProvider;
+		if (lastProvider !== null && lastProvider !== provider && videoElements.length > 0) {
+			videoElements.forEach(clearStream);
+			currentFilename = null;
+		}
+		lastProvider = provider;
+	});
+
 	// Cleanup when returning to list view
 	$effect(() => {
 		if (playerStore.view !== 'list' || videoElements.length === 0) return;

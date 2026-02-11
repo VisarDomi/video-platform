@@ -19,6 +19,7 @@
 		fetchMultiBroadcast,
 		fetchLiveFilenames,
 		sendActiveSet,
+		syncProxySessions,
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
@@ -62,6 +63,7 @@
 		}
 		stopSync();
 		sendActiveSet([]);
+		syncProxySessions([]);
 		videoListStore.initialize(p);
 		videoListStore.clearAliases();
 		playerStore.initialize(p);
