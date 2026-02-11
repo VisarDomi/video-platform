@@ -227,6 +227,178 @@
 		el.style.opacity = '1';
 	}
 
+	function resolveStreamUrl(filename: string): string {
+		if (videoListStore.selectedProvider === 'tl') {
+			const proxyUrl = getProxyUrl(filename);
+			if (proxyUrl) return proxyUrl;
+			const hlsFilename = videoListStore.getLiveFilename(filename) || filename;
+			return API.HLS_PLAYLIST(hlsFilename);
+		}
+		return API.HLS_PLAYLIST(filename);
+	}
+
+	function handleVideoGone(): void {
+		const next = findAdjacentVideo(1);
+		if (next) {
+			const saved = getSavedTime(next);
+			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
+		} else {
+			playerStore.showList();
+		}
+	}
+
+	function syncLiveStatus(el: HTMLVideoElement, v: Video, isActivePlayer: boolean): void {
+		if (!isActivePlayer) return;
+		const isLive = el.duration === Infinity;
+		if (isLive) {
+			playerStore.setCurrentVideoLive();
+			videoListStore.updateVideoLive(v.filename, true);
+		} else if (v.isLive) {
+			playerStore.setCurrentVideoNotLive();
+			videoListStore.updateVideoLive(v.filename, false);
+			clearPlaylistCache(v.filename);
+		}
+	}
+
+	function setupHlsJs(
+		el: HTMLVideoElement,
+		url: string,
+		v: Video,
+		startTime: number,
+		isActivePlayer: boolean,
+		resolve: () => void
+	): void {
+		const oldHls = hlsInstances.get(el);
+		if (oldHls) {
+			oldHls.destroy();
+			hlsInstances.delete(el);
+		}
+
+		const hls = new Hls();
+		hlsInstances.set(el, hls);
+
+		hls.on(Hls.Events.MANIFEST_PARSED, () => {
+			resolve();
+		});
+
+		let initialLoadDone = false;
+		let wasLive = false;
+		hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
+			const isLive = data.details.live;
+
+			if (!initialLoadDone) {
+				initialLoadDone = true;
+				if (isLive) {
+					wasLive = true;
+					if (isActivePlayer) {
+						playerStore.setCurrentVideoLive();
+						videoListStore.updateVideoLive(v.filename, true);
+					}
+				} else if (startTime > 0) {
+					el.currentTime = startTime;
+				}
+				return;
+			}
+
+			// Detect live → ended transition
+			if (wasLive && !isLive) {
+				wasLive = false;
+				if (isActivePlayer) {
+					playerStore.setCurrentVideoNotLive();
+					videoListStore.updateVideoLive(v.filename, false);
+					clearPlaylistCache(v.filename);
+				}
+			}
+		});
+
+		hls.on(Hls.Events.ERROR, (_event, data) => {
+			if (data.fatal) {
+				console.warn('HLS fatal error', data.type, data.details);
+				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+					if (data.response?.code === 404) {
+						if (!isActivePlayer) {
+							hls.destroy();
+							hlsInstances.delete(el);
+							return;
+						}
+						// TL streams may 404 briefly while download starts — retry
+						if (videoListStore.selectedProvider === 'tl') {
+							console.log('[TL:hls] 404 on active player, retrying:', v.filename);
+							hls.startLoad();
+							return;
+						}
+						videoListStore.removeVideo(v.filename);
+						handleVideoGone();
+						return;
+					}
+					hls.startLoad();
+				} else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+					hls.recoverMediaError();
+				}
+			}
+		});
+
+		hls.loadSource(url);
+		hls.attachMedia(el);
+	}
+
+	function setupNativeHls(
+		el: HTMLVideoElement,
+		url: string,
+		v: Video,
+		startTime: number,
+		isActivePlayer: boolean,
+		resolve: () => void
+	): void {
+		const oldController = nativeAbortControllers.get(el);
+		if (oldController) oldController.abort();
+		const controller = new AbortController();
+		nativeAbortControllers.set(el, controller);
+		const signal = controller.signal;
+
+		let nativeWasLive = false;
+		const onReady = () => {
+			if (el.duration === Infinity) {
+				nativeWasLive = true;
+				if (isActivePlayer) {
+					playerStore.setCurrentVideoLive();
+					videoListStore.updateVideoLive(v.filename, true);
+				}
+			} else if (startTime > 0) {
+				el.currentTime = startTime;
+			}
+			resolve();
+		};
+		const onDurationChange = () => {
+			if (nativeWasLive && el.duration !== Infinity) {
+				nativeWasLive = false;
+				if (isActivePlayer) {
+					playerStore.setCurrentVideoNotLive();
+					videoListStore.updateVideoLive(v.filename, false);
+					clearPlaylistCache(v.filename);
+				}
+			}
+		};
+		const onError = () => {
+			const mediaError = el.error;
+			if (mediaError) {
+				console.warn('Native HLS error', mediaError.code, mediaError.message);
+				if (!isActivePlayer) return;
+				// TL streams may error briefly while download starts — don't remove
+				if (videoListStore.selectedProvider === 'tl') {
+					console.log('[TL:native] error on active player, ignoring:', v.filename);
+					return;
+				}
+				videoListStore.removeVideo(v.filename);
+				handleVideoGone();
+			}
+		};
+		el.addEventListener('loadedmetadata', onReady, { once: true, signal });
+		el.addEventListener('durationchange', onDurationChange, { signal });
+		el.addEventListener('error', onError, { signal });
+		el.src = url;
+	}
+
 	function loadStream(
 		el: HTMLVideoElement,
 		v: Video,
@@ -235,172 +407,18 @@
 	): Promise<void> {
 		return new Promise((resolve) => {
 			if (el.dataset.loadedFilename === v.filename) {
-				if (isActivePlayer) {
-					const isLive = el.duration === Infinity;
-					if (isLive) {
-						playerStore.setCurrentVideoLive();
-						videoListStore.updateVideoLive(v.filename, true);
-					} else if (v.isLive) {
-						playerStore.setCurrentVideoNotLive();
-						videoListStore.updateVideoLive(v.filename, false);
-						clearPlaylistCache(v.filename);
-					}
-				}
-				if (startTime > 0) {
-					el.currentTime = startTime;
-				}
+				syncLiveStatus(el, v, isActivePlayer);
+				if (startTime > 0) el.currentTime = startTime;
 				resolve();
 				return;
 			}
 
-			let url: string;
-			if (videoListStore.selectedProvider === 'tl') {
-				const proxyUrl = getProxyUrl(v.filename);
-				if (proxyUrl) {
-					url = proxyUrl;
-				} else {
-					const hlsFilename = videoListStore.getLiveFilename(v.filename) || v.filename;
-					url = API.HLS_PLAYLIST(hlsFilename);
-				}
-			} else {
-				url = API.HLS_PLAYLIST(v.filename);
-			}
+			const url = resolveStreamUrl(v.filename);
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
-				// Destroy previous hls.js instance for this element
-				const oldHls = hlsInstances.get(el);
-				if (oldHls) {
-					oldHls.destroy();
-					hlsInstances.delete(el);
-				}
-
-				const hls = new Hls();
-				hlsInstances.set(el, hls);
-
-				hls.on(Hls.Events.MANIFEST_PARSED, () => {
-					resolve();
-				});
-
-				let initialLoadDone = false;
-				let wasLive = false;
-				hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
-					const isLive = data.details.live;
-
-					if (!initialLoadDone) {
-						initialLoadDone = true;
-						if (isLive) {
-							wasLive = true;
-							if (isActivePlayer) {
-								playerStore.setCurrentVideoLive();
-								videoListStore.updateVideoLive(v.filename, true);
-							}
-						} else if (startTime > 0) {
-							el.currentTime = startTime;
-						}
-						return;
-					}
-
-					// Detect live → ended transition
-					if (wasLive && !isLive) {
-						wasLive = false;
-						if (isActivePlayer) {
-							playerStore.setCurrentVideoNotLive();
-							videoListStore.updateVideoLive(v.filename, false);
-							clearPlaylistCache(v.filename);
-						}
-					}
-				});
-
-				hls.on(Hls.Events.ERROR, (_event, data) => {
-					if (data.fatal) {
-						console.warn('HLS fatal error', data.type, data.details);
-						if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-							if (data.response?.code === 404) {
-								if (!isActivePlayer) {
-									hls.destroy();
-									hlsInstances.delete(el);
-									return;
-								}
-								// TL streams may 404 briefly while download starts — retry
-								if (videoListStore.selectedProvider === 'tl') {
-									console.log('[TL:hls] 404 on active player, retrying:', v.filename);
-									hls.startLoad();
-									return;
-								}
-								videoListStore.removeVideo(v.filename);
-								const next = findAdjacentVideo(1);
-								if (next) {
-									const saved = getSavedTime(next);
-									playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-								} else {
-									playerStore.showList();
-								}
-								return;
-							}
-							hls.startLoad();
-						} else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-							hls.recoverMediaError();
-						}
-					}
-				});
-
-				hls.loadSource(url);
-				hls.attachMedia(el);
+				setupHlsJs(el, url, v, startTime, isActivePlayer, resolve);
 			} else {
-				// Native HLS path (Safari, or forced via USE_NATIVE_HLS)
-				const oldController = nativeAbortControllers.get(el);
-				if (oldController) oldController.abort();
-				const controller = new AbortController();
-				nativeAbortControllers.set(el, controller);
-				const signal = controller.signal;
-
-				let nativeWasLive = false;
-				const onReady = () => {
-					if (el.duration === Infinity) {
-						nativeWasLive = true;
-						if (isActivePlayer) {
-							playerStore.setCurrentVideoLive();
-							videoListStore.updateVideoLive(v.filename, true);
-						}
-					} else if (startTime > 0) {
-						el.currentTime = startTime;
-					}
-					resolve();
-				};
-				const onDurationChange = () => {
-					if (nativeWasLive && el.duration !== Infinity) {
-						nativeWasLive = false;
-						if (isActivePlayer) {
-							playerStore.setCurrentVideoNotLive();
-							videoListStore.updateVideoLive(v.filename, false);
-							clearPlaylistCache(v.filename);
-						}
-					}
-				};
-				const onError = () => {
-					const mediaError = el.error;
-					if (mediaError) {
-						console.warn('Native HLS error', mediaError.code, mediaError.message);
-						if (!isActivePlayer) return;
-						// TL streams may error briefly while download starts — don't remove
-						if (videoListStore.selectedProvider === 'tl') {
-							console.log('[TL:native] error on active player, ignoring:', v.filename);
-							return;
-						}
-						videoListStore.removeVideo(v.filename);
-						const next = findAdjacentVideo(1);
-						if (next) {
-							const saved = getSavedTime(next);
-							playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-						} else {
-							playerStore.showList();
-						}
-					}
-				};
-				el.addEventListener('loadedmetadata', onReady, { once: true, signal });
-				el.addEventListener('durationchange', onDurationChange, { signal });
-				el.addEventListener('error', onError, { signal });
-				el.src = url;
+				setupNativeHls(el, url, v, startTime, isActivePlayer, resolve);
 			}
 
 			el.dataset.loadedFilename = v.filename;
