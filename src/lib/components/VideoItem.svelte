@@ -43,14 +43,14 @@
 		>{video.filename}{#if streamerInfo}
 			{streamerInfo.firstName}{/if}</span
 	>
-	<div class="meta">
+	<span class="meta">
 		{#if tlLabel}
 			<span class="tl-label" class:following={streamerInfo?.isFollowing}>{tlLabel}</span>
 		{:else}
 			<span class="duration">{formatDuration(video.duration)}</span>
 			<span class="size" class:bold={isLarge}>{formatSize(sizeBytes)}</span>
 		{/if}
-	</div>
+	</span>
 </button>
 
 <style>

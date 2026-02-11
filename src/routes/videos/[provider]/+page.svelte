@@ -104,7 +104,7 @@
 				map.set(s.alias, s);
 				return {
 					filename: s.alias,
-					type: VIDEO_TYPE.ORIGINAL as const,
+					type: VIDEO_TYPE.ORIGINAL,
 					duration: 0,
 					size: 0,
 					isLive: true
@@ -117,7 +117,7 @@
 				videoListStore.setLiveFilenames(filenames);
 				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
 			});
-			fetchCoStreamersEagerly(epoch, allStreamers);
+			void fetchCoStreamersEagerly(epoch, allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
 			if (videoListStore.epoch !== epoch) return;
@@ -147,7 +147,7 @@
 				const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
 				const newVideos = withParent.map((s) => ({
 					filename: s.alias,
-					type: VIDEO_TYPE.ORIGINAL as const,
+					type: VIDEO_TYPE.ORIGINAL,
 					duration: 0,
 					size: 0,
 					isLive: true
@@ -264,7 +264,7 @@
 					nextMap.set(s.alias, s);
 					return {
 						filename: s.alias,
-						type: VIDEO_TYPE.ORIGINAL as const,
+						type: VIDEO_TYPE.ORIGINAL,
 						duration: 0,
 						size: 0,
 						isLive: true
@@ -272,7 +272,7 @@
 				});
 				videoListStore.setStreamerMap(nextMap);
 				videoListStore.appendVideos(newVideos);
-				fetchCoStreamersEagerly(epoch, toAppend);
+				void fetchCoStreamersEagerly(epoch, toAppend);
 			} else {
 				console.log('[TL:refresh] no new streamers to add');
 			}

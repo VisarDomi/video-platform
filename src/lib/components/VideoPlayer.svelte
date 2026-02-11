@@ -178,7 +178,7 @@
 			const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
 			const newVideos = withParent.map((s) => ({
 				filename: s.alias,
-				type: VIDEO_TYPE.ORIGINAL as const,
+				type: VIDEO_TYPE.ORIGINAL,
 				duration: 0,
 				size: 0,
 				isLive: true
@@ -578,12 +578,20 @@
 			wakeLock = null;
 		}
 	}
-	// Attach touchmove with { passive: false } so preventDefault() works
+	// Attach touch handlers imperatively (touchmove needs passive: false for preventDefault)
 	$effect(() => {
 		if (!videoViewEl) return;
 		const el = videoViewEl;
+		el.addEventListener('touchstart', handleTouchStart);
 		el.addEventListener('touchmove', handleTouchMove, { passive: false });
-		return () => el.removeEventListener('touchmove', handleTouchMove);
+		el.addEventListener('touchend', handleTouchEnd);
+		el.addEventListener('touchcancel', handleTouchCancel);
+		return () => {
+			el.removeEventListener('touchstart', handleTouchStart);
+			el.removeEventListener('touchmove', handleTouchMove);
+			el.removeEventListener('touchend', handleTouchEnd);
+			el.removeEventListener('touchcancel', handleTouchCancel);
+		};
 	});
 
 	// Gesture system
@@ -837,9 +845,6 @@
 		: ''}
 	role="application"
 	bind:this={videoViewEl}
-	ontouchstart={handleTouchStart}
-	ontouchend={handleTouchEnd}
-	ontouchcancel={handleTouchCancel}
 >
 	<div class="video-container">
 		<div
