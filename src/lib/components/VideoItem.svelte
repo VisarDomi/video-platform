@@ -40,7 +40,8 @@
 	{onclick}
 >
 	<span class="name"
-		>{video.filename}{#if streamerInfo} {streamerInfo.firstName}{/if}</span
+		>{video.filename}{#if streamerInfo}
+			{streamerInfo.firstName}{/if}</span
 	>
 	<span class="meta">
 		{#if tlLabel}
@@ -94,7 +95,6 @@
 
 	.list-item.live .name {
 		color: #ff6b6b;
-		font-weight: bold;
 	}
 
 	.list-item.edited .name {
