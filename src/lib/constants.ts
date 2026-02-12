@@ -60,6 +60,12 @@ export const TL_API = {
 	PROXY_STOP: '/api/tl/proxy/stop'
 } as const;
 
+export const TANGO_API = {
+	FOLLOWING: '/api/tango/following',
+	FOLLOW: '/api/tango/follow',
+	UNFOLLOW: '/api/tango/unfollow'
+} as const;
+
 export const SC_API = {
 	FOLLOWING: '/api/sc/following',
 	FOLLOW: '/api/sc/follow',

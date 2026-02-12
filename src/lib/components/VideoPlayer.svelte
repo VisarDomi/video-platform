@@ -40,7 +40,9 @@
 	const video = $derived(playerStore.currentVideo);
 	const isTl = $derived(videoListStore.selectedProvider === 'tl');
 	const isFollowProvider = $derived(
-		videoListStore.selectedProvider === 'sc' || videoListStore.selectedProvider === 'fc2'
+		videoListStore.selectedProvider === 'tango' ||
+		videoListStore.selectedProvider === 'sc' ||
+		videoListStore.selectedProvider === 'fc2'
 	);
 
 	// Initialize 3 video elements
@@ -890,7 +892,7 @@
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
 			{#if video}
-				<div class="streamer-name">{video.filename}</div>
+				<div class="streamer-name">{video.filename}{#if isTl}{@const s = videoListStore.getStreamer(video.filename)}{#if s} {s.firstName}{/if}{/if}</div>
 
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 
