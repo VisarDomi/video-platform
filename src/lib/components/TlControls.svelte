@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { followStreamer, unfollowStreamer, blockStreamer } from '$lib/services/tl-api.js';
+	import { playerStore } from '$lib/stores/player.svelte.js';
+	import { followStreamer, unfollowStreamer } from '$lib/services/tl-api.js';
 
 	const video = $derived(playerStore.currentVideo);
 	const streamer = $derived(video ? videoListStore.getStreamer(video.filename) : undefined);
@@ -9,10 +9,12 @@
 
 	let {
 		isMuted,
-		ontoggleMute
+		ontoggleMute,
+		onblock
 	}: {
 		isMuted: boolean;
 		ontoggleMute: () => void;
+		onblock: (alias: string, streamerId: string) => void;
 	} = $props();
 
 	let blockConfirm = $state(false);
@@ -44,14 +46,7 @@
 			return;
 		}
 		blockConfirm = false;
-		const id = streamer.streamerId;
-		const alias = streamer.alias;
-
-		blockStreamer(id).catch(() => {});
-		videoListStore.removeVideo(alias);
-
-		// Navigate to next
-		playerStore.showList();
+		onblock(streamer.alias, streamer.streamerId);
 	}
 </script>
 

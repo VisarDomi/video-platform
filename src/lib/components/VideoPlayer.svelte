@@ -10,13 +10,15 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
+	import FollowControls from './FollowControls.svelte';
 	import {
 		startDownload,
 		fetchMultiBroadcast,
 		sendActiveSet,
 		startProxy,
 		getProxyUrl,
-		syncProxySessions
+		syncProxySessions,
+		blockStreamer
 	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
@@ -37,6 +39,9 @@
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
 	const isTl = $derived(videoListStore.selectedProvider === 'tl');
+	const isFollowProvider = $derived(
+		videoListStore.selectedProvider === 'sc' || videoListStore.selectedProvider === 'fc2'
+	);
 
 	// Initialize 3 video elements
 	$effect(() => {
@@ -239,6 +244,18 @@
 
 	function handleVideoGone(): void {
 		const next = findAdjacentVideo(1);
+		if (next) {
+			const saved = getSavedTime(next);
+			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
+		} else {
+			playerStore.showList();
+		}
+	}
+
+	function handleBlock(alias: string, streamerId: string) {
+		blockStreamer(streamerId).catch(() => {});
+		const next = findAdjacentVideo(1) || findAdjacentVideo(-1);
+		videoListStore.removeVideo(alias);
 		if (next) {
 			const saved = getSavedTime(next);
 			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
@@ -764,11 +781,11 @@
 					swipeType = 'seek';
 					seekBaseTime = getActiveElement().currentTime;
 				} else {
-					swipeType = 'nav';
+					swipeType = 'ui';
 				}
 			} else {
 				swipeAxis = 'vertical';
-				swipeType = 'ui';
+				swipeType = 'nav';
 			}
 		}
 
@@ -832,8 +849,8 @@
 				break;
 			}
 			case 'nav': {
-				if (Math.abs(dx) > FLICK_THRESHOLD) {
-					const dir = dx < 0 ? 1 : -1;
+				if (Math.abs(dy) > FLICK_THRESHOLD) {
+					const dir = dy < 0 ? 1 : -1;
 					const target = findAdjacentVideo(dir as 1 | -1);
 					if (target) {
 						void navigateToVideo(target, dir as 1 | -1);
@@ -842,8 +859,8 @@
 				break;
 			}
 			case 'ui': {
-				if (Math.abs(dy) > UI_SWIPE_THRESHOLD) {
-					playerStore.isUiVisible = dy < 0;
+				if (Math.abs(dx) > UI_SWIPE_THRESHOLD) {
+					playerStore.isUiVisible = dx > 0;
 				}
 				break;
 			}
@@ -878,7 +895,9 @@
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 
 				{#if isTl}
-					<TlControls {isMuted} ontoggleMute={toggleMute} />
+					<TlControls {isMuted} ontoggleMute={toggleMute} onblock={handleBlock} />
+				{:else if isFollowProvider}
+					<FollowControls {isMuted} ontoggleMute={toggleMute} />
 				{:else}
 					<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
 				{/if}

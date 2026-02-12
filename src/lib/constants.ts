@@ -60,6 +60,18 @@ export const TL_API = {
 	PROXY_STOP: '/api/tl/proxy/stop'
 } as const;
 
+export const SC_API = {
+	FOLLOWING: '/api/sc/following',
+	FOLLOW: '/api/sc/follow',
+	UNFOLLOW: '/api/sc/unfollow'
+} as const;
+
+export const FC2_API = {
+	FOLLOWING: '/api/fc2/following',
+	FOLLOW: '/api/fc2/follow',
+	UNFOLLOW: '/api/fc2/unfollow'
+} as const;
+
 export const HLS = {
 	TS_EXTENSION: '.ts',
 	EXTINF_PREFIX: '#EXTINF:'

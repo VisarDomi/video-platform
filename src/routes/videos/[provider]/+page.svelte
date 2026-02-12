@@ -12,6 +12,7 @@
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
+	import { fetchFollowing, isFollowProvider } from '$lib/services/follow-api.js';
 	import {
 		fetchStreams,
 		startDownload,
@@ -79,6 +80,12 @@
 		const videos = await fetchVideos(p);
 		if (videoListStore.epoch !== epoch) return;
 		videoListStore.setVideos(videos);
+		if (isFollowProvider(p)) {
+			fetchFollowing(p).then((ids) => {
+				if (videoListStore.epoch !== epoch) return;
+				videoListStore.setFollowedIdentifiers(ids);
+			});
+		}
 		startSync(p);
 		await tick();
 		const saved = localStorage.getItem(STORAGE_KEYS.SCROLL_PREFIX + p);

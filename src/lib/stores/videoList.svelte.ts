@@ -11,6 +11,9 @@ class VideoListStore {
 	// Bumped on every initialize() — async ops capture this and bail if stale
 	epoch = 0;
 
+	// SC/FC2 follow state
+	followedIdentifiers = $state<Set<string>>(new Set());
+
 	// TL-specific state
 	streamerMap = $state<Map<string, TlStreamer>>(new Map());
 	processedStreamIds = new Set<string>();
@@ -21,6 +24,7 @@ class VideoListStore {
 		this.selectedProvider = provider;
 		this.isLoading = true;
 		this.videos = [];
+		this.followedIdentifiers = new Set();
 		this.streamerMap = new Map();
 		this.processedStreamIds = new Set();
 		this.liveFilenameMap = new Map();
@@ -91,6 +95,20 @@ class VideoListStore {
 			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v
 		);
 	}
+	setFollowedIdentifiers(identifiers: string[]) {
+		this.followedIdentifiers = new Set(identifiers);
+	}
+
+	addFollowedIdentifier(id: string) {
+		this.followedIdentifiers = new Set(this.followedIdentifiers).add(id);
+	}
+
+	removeFollowedIdentifier(id: string) {
+		const next = new Set(this.followedIdentifiers);
+		next.delete(id);
+		this.followedIdentifiers = next;
+	}
+
 	// TL-specific methods
 	setStreamerMap(map: Map<string, TlStreamer>) {
 		if (this.selectedProvider !== 'tl') return;
