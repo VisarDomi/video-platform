@@ -40,8 +40,7 @@
 	{onclick}
 >
 	<span class="name"
-		>{video.filename}{#if streamerInfo}
-			{streamerInfo.firstName}{/if}</span
+		>{video.filename}{#if streamerInfo} {streamerInfo.firstName}{/if}</span
 	>
 	<span class="meta">
 		{#if tlLabel}
