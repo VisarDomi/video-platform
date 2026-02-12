@@ -1,6 +1,7 @@
 import { Router } from "express";
 import logger from "../core/logger.js";
 import * as tangoApi from "../services/tango/apiClient.js";
+import * as followingCache from "../services/tango/followingCache.js";
 import * as utils from "../core/utils.js";
 
 const router = Router();
@@ -116,6 +117,31 @@ router.post("/tl/download/active", async (req, res) => {
         logger.error("[TL] Failed to proxy download/active", { error: error.message });
         res.status(502).json({ error: "Download service unavailable" });
     }
+});
+
+// --- Tango provider follow/unfollow (recorded videos) ---
+router.get("/tango/following", async (_req, res) => {
+    try {
+        const aliases = await followingCache.getFollowedAliases();
+        res.json([...aliases]);
+    } catch (error: any) {
+        logger.error("[Tango] Failed to get following list", { error: error.message });
+        res.json([]);
+    }
+});
+
+router.post("/tango/follow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier) return res.status(400).json({ error: "identifier required" });
+    const ok = await followingCache.resolveAndFollow(identifier);
+    res.json({ success: ok });
+});
+
+router.post("/tango/unfollow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier) return res.status(400).json({ error: "identifier required" });
+    const ok = await followingCache.resolveAndUnfollow(identifier);
+    res.json({ success: ok });
 });
 
 export default router;

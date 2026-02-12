@@ -225,6 +225,65 @@ export async function fetchMultiBroadcastStreamers(streamId: string): Promise<Tl
     }
 }
 
+const DISCOVERY_BASE = "https://gateway.tango.me/discovery/v3";
+
+export async function resolveAlias(alias: string): Promise<{ accountId: string; firstName: string } | null> {
+    try {
+        const headers = getApiHeaders();
+        headers["Content-Type"] = "application/json";
+        const url = `${API_BASE}/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
+        const response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify([alias]),
+        });
+        if (!response.ok) return null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const body = (await response.json()) as Record<string, any>;
+        const key = Object.keys(body)[0];
+        if (!key) return null;
+        return {
+            accountId: body[key].encryptedAccountId || key,
+            firstName: body[key].basicProfile?.firstName || "",
+        };
+    } catch (error) {
+        logger.error("[TL] Failed to resolve alias", { alias, error: (error as Error).message });
+        return null;
+    }
+}
+
+export async function fetchFollowingList(): Promise<{ accountId: string; firstName: string }[]> {
+    try {
+        const headers = getApiHeaders();
+        const all: { accountId: string; firstName: string }[] = [];
+        let cursor = "";
+        for (let page = 0; page < 20; page++) {
+            const url = cursor
+                ? `${DISCOVERY_BASE}/followings/me/list?size=50&cursor=${cursor}`
+                : `${DISCOVERY_BASE}/followings/me/list?size=50`;
+            const response = await fetch(url, { headers });
+            if (!response.ok) break;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data = (await response.json()) as any;
+            if (Array.isArray(data.followers)) {
+                for (const f of data.followers) {
+                    all.push({
+                        accountId: f.accountId,
+                        firstName: f.profileDetails?.firstName || "",
+                    });
+                }
+            }
+            if (!data.nextCursor) break;
+            cursor = data.nextCursor;
+        }
+        logger.info(`[TL] Fetched following list: ${all.length} accounts`);
+        return all;
+    } catch (error) {
+        logger.error("[TL] Failed to fetch following list", { error: (error as Error).message });
+        return [];
+    }
+}
+
 export async function follow(streamerId: string): Promise<boolean> {
     try {
         const headers = getApiHeaders();
