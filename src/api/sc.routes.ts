@@ -138,6 +138,61 @@ router.get("/api/sc", async (_req, res) => {
     }
 });
 
+// API: Get following identifiers
+router.get("/api/sc/following", async (_req, res) => {
+    try {
+        const content = await fs.readFile(SC_FILE_PATH, "utf-8");
+        const identifiers = content.split("\n")
+            .map(line => line.trim())
+            .filter(line => line.startsWith("https://stripchat.com/"))
+            .map(line => line.replace("https://stripchat.com/", "").replace(/\/$/, ""));
+        res.json(identifiers);
+    } catch {
+        res.json([]);
+    }
+});
+
+// API: Follow (add to sc.txt)
+router.post("/api/sc/follow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ error: "identifier required" });
+    }
+    try {
+        let content = "";
+        try { content = await fs.readFile(SC_FILE_PATH, "utf-8"); } catch {}
+        if (content.includes(identifier)) {
+            return res.json({ success: true });
+        }
+        const url = `https://stripchat.com/${identifier}`;
+        const newContent = cleanListContent(content + "\n" + url);
+        await fs.writeFile(SC_FILE_PATH, newContent, "utf-8");
+        logger.info(`SC follow: added ${identifier}`);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Error adding to sc file", { error });
+        res.status(500).json({ error: "Failed to update file" });
+    }
+});
+
+// API: Unfollow (remove from sc.txt)
+router.post("/api/sc/unfollow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ error: "identifier required" });
+    }
+    try {
+        const content = await fs.readFile(SC_FILE_PATH, "utf-8");
+        const lines = content.split("\n").filter(line => !line.includes(identifier));
+        await fs.writeFile(SC_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
+        logger.info(`SC unfollow: removed ${identifier}`);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Error removing from sc file", { error });
+        res.status(500).json({ error: "Failed to update file" });
+    }
+});
+
 // API: Save content
 router.post("/api/sc", async (req, res) => {
     const { content } = req.body;

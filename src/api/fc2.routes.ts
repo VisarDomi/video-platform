@@ -139,6 +139,61 @@ router.get("/api/fc2", async (_req, res) => {
     }
 });
 
+// API: Get following identifiers
+router.get("/api/fc2/following", async (_req, res) => {
+    try {
+        const content = await fs.readFile(FC2_FILE_PATH, "utf-8");
+        const identifiers = content.split("\n")
+            .map(line => line.trim())
+            .filter(line => line.startsWith("https://live.fc2.com/"))
+            .map(line => line.replace("https://live.fc2.com/", "").replace(/\/$/, ""));
+        res.json(identifiers);
+    } catch {
+        res.json([]);
+    }
+});
+
+// API: Follow (add to fc2.txt)
+router.post("/api/fc2/follow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ error: "identifier required" });
+    }
+    try {
+        let content = "";
+        try { content = await fs.readFile(FC2_FILE_PATH, "utf-8"); } catch {}
+        if (content.includes(identifier)) {
+            return res.json({ success: true });
+        }
+        const url = `https://live.fc2.com/${identifier}/`;
+        const newContent = cleanListContent(content + "\n" + url);
+        await fs.writeFile(FC2_FILE_PATH, newContent, "utf-8");
+        logger.info(`FC2 follow: added ${identifier}`);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Error adding to fc2 file", { error });
+        res.status(500).json({ error: "Failed to update file" });
+    }
+});
+
+// API: Unfollow (remove from fc2.txt)
+router.post("/api/fc2/unfollow", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ error: "identifier required" });
+    }
+    try {
+        const content = await fs.readFile(FC2_FILE_PATH, "utf-8");
+        const lines = content.split("\n").filter(line => !line.includes(identifier));
+        await fs.writeFile(FC2_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
+        logger.info(`FC2 unfollow: removed ${identifier}`);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Error removing from fc2 file", { error });
+        res.status(500).json({ error: "Failed to update file" });
+    }
+});
+
 // API: Save content
 router.post("/api/fc2", async (req, res) => {
     const { content } = req.body;

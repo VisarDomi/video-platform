@@ -87,7 +87,7 @@ export async function fetchStreamers(count: number = 50): Promise<{ following: T
             for (const category of recommendations.categoryInfoList) {
                 if (category.streamInfoList?.streamDetails) {
                     for (const detail of category.streamInfoList.streamDetails) {
-                        if (detail.anchor?.encryptedAccountId && detail.stream?.masterListUrl) {
+                        if (detail.anchor?.encryptedAccountId && detail.stream?.masterListUrl && detail.stream?.id) {
                             const streamerId = detail.anchor.encryptedAccountId;
                             if (!blockList.includes(streamerId)) {
                                 allStreamers.push({
