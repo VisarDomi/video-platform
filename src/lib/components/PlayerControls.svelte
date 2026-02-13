@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { playerStore } from '$lib/stores/player.svelte.js';
+	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import {
 		saveCurrentVideo,
 		createEditedVideo,
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
+	import { follow, unfollow, extractIdentifier, isFollowProvider } from '$lib/services/follow-api.js';
 
 	let {
 		isMuted,
@@ -24,6 +26,11 @@
 	const isEdited = $derived(video?.type === VIDEO_TYPE.EDITED);
 	const hasSegments = $derived(isOriginal && segments.length > 0);
 
+	const provider = $derived(videoListStore.selectedProvider);
+	const showFollow = $derived(isFollowProvider(provider));
+	const identifier = $derived(video ? extractIdentifier(video.filename) : '');
+	const isFollowing = $derived(videoListStore.followedIdentifiers.has(identifier));
+
 	function handleMuteOrUndo() {
 		if (hasSegments) {
 			playerStore.removeLastSegment();
@@ -37,6 +44,21 @@
 			void createEditedVideo();
 		} else {
 			saveCurrentVideo();
+		}
+	}
+
+	function handleFollow() {
+		if (!identifier || !showFollow) return;
+		if (isFollowing) {
+			videoListStore.removeFollowedIdentifier(identifier);
+			unfollow(provider, identifier).catch(() => {
+				videoListStore.addFollowedIdentifier(identifier);
+			});
+		} else {
+			videoListStore.addFollowedIdentifier(identifier);
+			follow(provider, identifier).catch(() => {
+				videoListStore.removeFollowedIdentifier(identifier);
+			});
 		}
 	}
 </script>
@@ -61,6 +83,12 @@
 
 			{#if isEdited}
 				<button onclick={returnToOriginals}>🔄</button>
+			{/if}
+
+			{#if showFollow}
+				<button class:following={isFollowing} onclick={handleFollow}>
+					{isFollowing ? '➖' : '➕'}
+				</button>
 			{/if}
 		</div>
 	</div>
@@ -108,5 +136,9 @@
 		background-color: rgba(0, 0, 0, 0.6);
 		border-color: #888;
 		color: #888;
+	}
+
+	button.following {
+		border-color: #ff5e3a;
 	}
 </style>

@@ -10,7 +10,6 @@
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
 	import TlControls from './TlControls.svelte';
-	import FollowControls from './FollowControls.svelte';
 	import {
 		startDownload,
 		fetchMultiBroadcast,
@@ -39,11 +38,7 @@
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
 	const isTl = $derived(videoListStore.selectedProvider === 'tl');
-	const isFollowProvider = $derived(
-		videoListStore.selectedProvider === 'tango' ||
-		videoListStore.selectedProvider === 'sc' ||
-		videoListStore.selectedProvider === 'fc2'
-	);
+
 
 	// Initialize 3 video elements
 	$effect(() => {
@@ -898,8 +893,6 @@
 
 				{#if isTl}
 					<TlControls {isMuted} ontoggleMute={toggleMute} onblock={handleBlock} />
-				{:else if isFollowProvider}
-					<FollowControls {isMuted} ontoggleMute={toggleMute} />
 				{:else}
 					<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
 				{/if}
