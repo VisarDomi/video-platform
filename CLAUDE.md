@@ -11,6 +11,11 @@ Svelte 5 SPA for video editing across multiple streaming providers (tl, tango, f
   3. Commit all changes (use the changelog entry as the commit message)
   4. Move on to the next task
 
+## Build & Restart Policy
+- Only build/restart what is necessary, when it is necessary
+- If the frontend is served by the backend, a frontend rebuild is sufficient — no backend restart needed
+- Avoid unnecessary restarts or full rebuilds when a targeted action suffices
+
 ## Changelog & Decisions
 - Maintain `CHANGELOG.md` at project root
 - Format: date, type (fix/feature/refactor), short description

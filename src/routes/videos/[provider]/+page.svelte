@@ -307,7 +307,9 @@
 		}
 
 		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
-		void fetchAndParsePlaylist(video);
+		if (videoListStore.selectedProvider !== 'mp4') {
+			void fetchAndParsePlaylist(video);
+		}
 	}
 
 	function handleScroll() {

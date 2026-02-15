@@ -2,7 +2,7 @@
 	import Hls from 'hls.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
+	import { STORAGE_KEYS, API, USE_NATIVE_HLS, MP4_API } from '$lib/constants.js';
 	import { untrack } from 'svelte';
 	import { filterByAliases } from '$lib/utils/filter.js';
 	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
@@ -38,6 +38,7 @@
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
 	const isTl = $derived(videoListStore.selectedProvider === 'tl');
+	const isMp4 = $derived(videoListStore.selectedProvider === 'mp4');
 
 
 	// Initialize 3 video elements
@@ -229,7 +230,11 @@
 		el.style.opacity = '1';
 	}
 
-	function resolveStreamUrl(filename: string): string {
+	function resolveStreamUrl(filename: string, video?: Video): string {
+		if (videoListStore.selectedProvider === 'mp4') {
+			const type = video?.type === 'edited' ? 'edited' : 'original';
+			return MP4_API.STREAM(type, filename);
+		}
 		if (videoListStore.selectedProvider === 'tl') {
 			const proxyUrl = getProxyUrl(filename);
 			if (proxyUrl) return proxyUrl;
@@ -413,6 +418,38 @@
 		el.src = url;
 	}
 
+	function setupDirectMp4(
+		el: HTMLVideoElement,
+		url: string,
+		v: Video,
+		startTime: number,
+		isActivePlayer: boolean,
+		resolve: () => void
+	): void {
+		const oldController = nativeAbortControllers.get(el);
+		if (oldController) oldController.abort();
+		const controller = new AbortController();
+		nativeAbortControllers.set(el, controller);
+		const signal = controller.signal;
+
+		const onReady = () => {
+			if (startTime > 0) el.currentTime = startTime;
+			resolve();
+		};
+		const onError = () => {
+			const mediaError = el.error;
+			if (mediaError) {
+				console.warn('MP4 playback error', mediaError.code, mediaError.message);
+				if (!isActivePlayer) return;
+				videoListStore.removeVideo(v.filename);
+				handleVideoGone();
+			}
+		};
+		el.addEventListener('loadedmetadata', onReady, { once: true, signal });
+		el.addEventListener('error', onError, { signal });
+		el.src = url;
+	}
+
 	function loadStream(
 		el: HTMLVideoElement,
 		v: Video,
@@ -427,9 +464,11 @@
 				return;
 			}
 
-			const url = resolveStreamUrl(v.filename);
+			const url = resolveStreamUrl(v.filename, v);
 
-			if (!USE_NATIVE_HLS && Hls.isSupported()) {
+			if (isMp4) {
+				setupDirectMp4(el, url, v, startTime, isActivePlayer, resolve);
+			} else if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				setupHlsJs(el, url, v, startTime, isActivePlayer, resolve);
 			} else {
 				setupNativeHls(el, url, v, startTime, isActivePlayer, resolve);

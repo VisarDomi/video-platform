@@ -1,4 +1,4 @@
-export const PROVIDERS = ['tl', 'tango', 'fc2', 'sc'] as const;
+export const PROVIDERS = ['tl', 'tango', 'fc2', 'sc', 'mp4'] as const;
 export const DEFAULT_PROVIDER = PROVIDERS[0];
 
 export const STORAGE_KEYS = {
@@ -76,6 +76,11 @@ export const FC2_API = {
 	FOLLOWING: '/api/fc2/following',
 	FOLLOW: '/api/fc2/follow',
 	UNFOLLOW: '/api/fc2/unfollow'
+} as const;
+
+export const MP4_API = {
+	STREAM: (type: string, filename: string) =>
+		`/mp4/${type}/${encodeURIComponent(filename)}`
 } as const;
 
 export const HLS = {

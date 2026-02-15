@@ -38,13 +38,22 @@ export async function createEditedVideo() {
 	)
 		return;
 
-	const playlistData = await fetchAndParsePlaylist(video);
-	if (!playlistData) return;
-
-	const segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments);
+	const provider = videoListStore.selectedProvider;
 	const filename = video.filename;
 
-	const provider = videoListStore.selectedProvider;
+	let segmentsToSave: string[];
+
+	if (provider === 'mp4') {
+		// MP4: convert segment pairs to "start:end" time range strings
+		segmentsToSave = [];
+		for (let i = 0; i < timeSegments.length; i += 2) {
+			segmentsToSave.push(`${timeSegments[i]}:${timeSegments[i + 1]}`);
+		}
+	} else {
+		const playlistData = await fetchAndParsePlaylist(video);
+		if (!playlistData) return;
+		segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments);
+	}
 
 	// Update UI immediately: clear segments, mark as edited (player + list + localStorage)
 	playerStore.clearSegments();
