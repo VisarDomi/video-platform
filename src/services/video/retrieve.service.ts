@@ -5,10 +5,14 @@ import * as config from "../../core/config.js";
 import * as utils from "../../core/utils.js";
 import * as constants from "../../core/constants.js";
 import { getDurationsFromGo } from "../../core/playlist-daemon.js";
+import { getAllMp4Videos } from "./mp4-retrieve.service.js";
 
 export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
     // tl provider uses /api/tl/streams instead
     if (provider === "tl") return [];
+
+    // mp4 provider uses flat files, not HLS directories
+    if (provider === "mp4") return getAllMp4Videos(provider, after);
 
     const liveFolders = await utils.getLiveFolders();
 

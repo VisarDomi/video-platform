@@ -22,7 +22,7 @@ interface IConfig {
     scFilePath: string;
 }
 
-const DEFAULT_PROVIDERS = ["tango", "fc2", "sc"];
+const DEFAULT_PROVIDERS = ["tango", "fc2", "sc", "mp4"];
 
 function generateDefaultPaths(providerName: string): PathConfig {
     return {

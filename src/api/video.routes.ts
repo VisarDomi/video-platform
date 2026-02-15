@@ -5,6 +5,7 @@ import os from "os";
 import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
+import * as mp4EditService from "../services/video/mp4-edit.service.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
@@ -47,6 +48,16 @@ router.post("/edit", async (req, res) => {
     }
 
     try {
+        if (targetProvider === "mp4") {
+            const timeSegments = segments.map((s: string) => {
+                const [start, end] = s.split(":").map(Number);
+                return { start, end };
+            });
+            mp4EditService.editMp4Video(filename, timeSegments, targetProvider);
+            res.json({ success: true });
+            return;
+        }
+
         await editService.editVideo(filename, segments, targetProvider);
         res.json({ success: true });
     } catch (error: any) {
