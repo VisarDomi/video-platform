@@ -7,7 +7,7 @@
 		createEditedVideo,
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
-	import { follow, unfollow, extractIdentifier, isFollowProvider } from '$lib/services/follow-api.js';
+	import { extractIdentifier } from '$lib/services/follow-api.js';
 	import { addToList, removeFromList, isListProvider } from '$lib/services/list-api.js';
 
 	let {
@@ -28,15 +28,9 @@
 	const hasSegments = $derived(isOriginal && segments.length > 0);
 
 	const provider = $derived(videoListStore.selectedProvider);
-	const isTxtFollow = $derived(isFollowProvider(provider));
-	const isTxtList = $derived(!isTxtFollow && isListProvider(provider));
-	const showListButton = $derived(isTxtFollow || isTxtList);
+	const showListButton = $derived(isListProvider(provider));
 	const identifier = $derived(video ? extractIdentifier(video.filename) : '');
-	const isInList = $derived(
-		isTxtFollow
-			? videoListStore.followedIdentifiers.has(identifier)
-			: videoListStore.listIdentifiers.has(identifier)
-	);
+	const isInList = $derived(videoListStore.listIdentifiers.has(identifier));
 
 	function handleMuteOrUndo() {
 		if (hasSegments) {
@@ -56,30 +50,16 @@
 
 	function handleListToggle() {
 		if (!identifier || !showListButton) return;
-		if (isTxtFollow) {
-			if (isInList) {
-				videoListStore.removeFollowedIdentifier(identifier);
-				unfollow(provider, identifier).catch(() => {
-					videoListStore.addFollowedIdentifier(identifier);
-				});
-			} else {
-				videoListStore.addFollowedIdentifier(identifier);
-				follow(provider, identifier).catch(() => {
-					videoListStore.removeFollowedIdentifier(identifier);
-				});
-			}
-		} else {
-			if (isInList) {
-				videoListStore.removeListIdentifier(identifier);
-				removeFromList(provider, identifier).catch(() => {
-					videoListStore.addListIdentifier(identifier);
-				});
-			} else {
+		if (isInList) {
+			videoListStore.removeListIdentifier(identifier);
+			removeFromList(provider, identifier).catch(() => {
 				videoListStore.addListIdentifier(identifier);
-				addToList(provider, identifier).catch(() => {
-					videoListStore.removeListIdentifier(identifier);
-				});
-			}
+			});
+		} else {
+			videoListStore.addListIdentifier(identifier);
+			addToList(provider, identifier).catch(() => {
+				videoListStore.removeListIdentifier(identifier);
+			});
 		}
 	}
 </script>
