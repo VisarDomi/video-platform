@@ -6,17 +6,30 @@ import { StreamDownloader } from "../../download/streamDownloader.js";
 import { AliasManager } from "../../state/aliasManager.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ApiClient } from "../api/apiClient.js";
+import type { TargetManager } from "../../common/targetManager.js";
 
 export class StreamDiscoveryService {
     private readonly apiClient: ApiClient;
     private aliasManager: AliasManager;
     private downloadsManager: DownloadsManager;
+    private targetManager: TargetManager | null = null;
 
     constructor(apiClient: ApiClient, aliasManager: AliasManager, downloadsManager: DownloadsManager) {
         this.apiClient = apiClient;
         this.aliasManager = aliasManager;
         this.downloadsManager = downloadsManager;
         logger.info("[Tango] StreamDiscoveryService initialized.");
+    }
+
+    public setTargetManager(targetManager: TargetManager): void {
+        this.targetManager = targetManager;
+    }
+
+    private shouldDownload(alias: string): boolean {
+        if (!this.targetManager || this.targetManager.size === 0) {
+            return true; // No tango.txt entries = download everything
+        }
+        return this.targetManager.hasTarget(alias);
     }
 
     public async start(): Promise<void> {
@@ -40,8 +53,6 @@ export class StreamDiscoveryService {
 
                     if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
                         if (!this.downloadsManager.has(masterPlaylistUrl)) {
-                            logger.info(`[Tango] Discovered new stream from ${streamerId}.`);
-
                             let alias = this.aliasManager.get(streamerId);
                             if (!alias) {
                                 logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
@@ -51,13 +62,22 @@ export class StreamDiscoveryService {
                                 }
                             }
 
+                            const resolvedAlias = alias || streamerId;
+
+                            if (!this.shouldDownload(resolvedAlias)) {
+                                logger.verbose(`[Tango] Skipping ${resolvedAlias} (not in tango.txt)`);
+                                continue;
+                            }
+
+                            logger.info(`[Tango] Discovered new stream from ${resolvedAlias}.`);
+
                             const downloadHandle = this.downloadsManager.add(masterPlaylistUrl, {
                                 streamerId: streamerId,
-                                alias: alias || streamerId,
+                                alias: resolvedAlias,
                             });
 
                             if (downloadHandle) {
-                                logger.info(`[Tango] Initiating download for ${alias || streamerId}...`);
+                                logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
                                 void streamDownloader.start();
                             }

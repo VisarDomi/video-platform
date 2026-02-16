@@ -11,14 +11,17 @@ import { AliasSyncService } from "./tango/discovery/aliasSyncService.js";
 import { StreamDiscoveryService } from "./tango/discovery/streamDiscoveryService.js";
 
 // FC2 Specific Imports
-import { TargetManager } from "./fc2/discovery/targetManager.js";
+import { createFc2TargetManager } from "./fc2/discovery/targetManager.js";
 import { Fc2Client } from "./fc2/api/fc2Client.js";
 import { Fc2DiscoveryService } from "./fc2/discovery/discoveryService.js";
 
 // SC Specific Imports
-import { ScTargetManager } from "./sc/discovery/targetManager.js";
+import { createScTargetManager } from "./sc/discovery/targetManager.js";
 import { ScClient } from "./sc/api/scClient.js";
 import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
+
+// Tango Target Manager
+import { createTangoTargetManager } from "./tango/discovery/targetManager.js";
 
 export class DownloaderService {
     // Tango Services
@@ -67,16 +70,21 @@ export class DownloaderService {
         // ----------------------------
 
         // --- FC2 Initialization ---
-        const targetManager = TargetManager.create();
+        const fc2TargetManager = createFc2TargetManager();
         const fc2Client = new Fc2Client();
-        const fc2DiscoveryService = new Fc2DiscoveryService(targetManager, fc2Client, downloadsManager);
+        const fc2DiscoveryService = new Fc2DiscoveryService(fc2TargetManager, fc2Client, downloadsManager);
         // --------------------------
 
         // --- SC Initialization ---
-        const scTargetManager = ScTargetManager.create();
+        const scTargetManager = createScTargetManager();
         const scClient = new ScClient();
         const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
         // -------------------------
+
+        // --- Tango Target Manager (for tango.txt filtering) ---
+        const tangoTargetManager = createTangoTargetManager();
+        streamDiscoveryService.setTargetManager(tangoTargetManager);
+        // ------------------------------------------------------
 
         const orphanStreamFinalizer = new OrphanStreamFinalizer(downloadsManager);
 

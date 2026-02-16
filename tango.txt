@@ -1,0 +1,4 @@
+
+# Add Tango aliases here, one per line
+# If this file has entries, only matching aliases will be downloaded.
+# If empty (no entries), ALL followed streams will be downloaded.

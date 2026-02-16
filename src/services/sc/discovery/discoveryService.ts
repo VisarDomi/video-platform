@@ -1,17 +1,17 @@
 import * as timersPromises from "timers/promises";
 import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
-import { ScTargetManager } from "./targetManager.js";
+import { TargetManager } from "../../common/targetManager.js";
 import { ScClient } from "../api/scClient.js";
 import { StreamDownloader } from "../../download/streamDownloader.js";
 
 export class ScDiscoveryService {
-    private targetManager: ScTargetManager;
+    private targetManager: TargetManager;
     private scClient: ScClient;
     private downloadsManager: DownloadsManager;
     private queueIndex: number = 0;
 
-    constructor(targetManager: ScTargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
+    constructor(targetManager: TargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
         this.targetManager = targetManager;
         this.scClient = scClient;
         this.downloadsManager = downloadsManager;

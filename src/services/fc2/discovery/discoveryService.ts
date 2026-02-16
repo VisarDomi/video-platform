@@ -1,7 +1,7 @@
 import * as timersPromises from "timers/promises";
 import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
-import { TargetManager } from "./targetManager.js";
+import { TargetManager } from "../../common/targetManager.js";
 import { Fc2Client } from "../api/fc2Client.js";
 import { StreamDownloader } from "../../download/streamDownloader.js";
 
