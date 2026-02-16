@@ -6,10 +6,10 @@
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start dist/main.js --name tslive-auth --update-env",
-        "restart": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 restart tslive-auth --update-env",
-        "stop": "pm2 stop tslive-auth",
-        "logs": "pm2 logs tslive-auth -f",
+        "start": "npm run build && systemctl --user start tslive-auth",
+        "restart": "npm run build && systemctl --user restart tslive-auth",
+        "stop": "systemctl --user stop tslive-auth",
+        "logs": "journalctl --user -u tslive-auth -f",
         "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
     },
     "keywords": [],
