@@ -27,7 +27,8 @@ export class OrphanStreamFinalizer {
         const cfg = config.getConfig();
         const activePaths = this.downloadsManager.getActiveSegmentPaths();
 
-        const services = ["tango", "fc2"];
+        // Providers that use .ts segment folders (not mp4 or other formats)
+        const services = ["tango", "fc2", "sc"];
 
         let totalProcessed = 0;
         let totalFixed = 0;

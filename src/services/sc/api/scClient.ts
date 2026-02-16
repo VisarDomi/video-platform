@@ -15,6 +15,7 @@ interface ScSession {
 export class ScClient implements IStreamProvider {
     private sessions: Map<string, ScSession> = new Map();
     private cleanupInterval: NodeJS.Timeout;
+    private _lastLogTime: Map<string, number> = new Map();
 
     constructor() {
         logger.debug("[SC] Client initialized.");
@@ -74,12 +75,10 @@ export class ScClient implements IStreamProvider {
         const match = masterUrl.match(/synthetic-sc\/([^\/]+)\//);
         const channelId = match ? match[1] : masterUrl;
 
-        // If a session exists but might be stale/broken from a previous run that exited poorly,
-        // we might want to kill it to be safe. But for now, let's reuse if active.
         let session = this.sessions.get(channelId);
 
         if (!session || !session.controller.isActive()) {
-            // Ensure any old one is gone
+            logger.info(`[SC-DEBUG] parseMasterPlaylist ${channelId} session=${!!session} active=${session?.controller.isActive()} → creating new session`);
             await this._closeSession(channelId);
 
             const controller = new ScPageController(channelId);
@@ -89,6 +88,8 @@ export class ScClient implements IStreamProvider {
             };
             this.sessions.set(channelId, session);
             await controller.start();
+        } else {
+            logger.info(`[SC-DEBUG] parseMasterPlaylist ${channelId} reusing existing session`);
         }
 
         const playlistPath = path.join(session.controller.tempDir, "playlist.m3u8");
@@ -124,7 +125,16 @@ export class ScClient implements IStreamProvider {
         const channelId = match ? match[1] : "";
 
         const session = this.sessions.get(channelId);
-        if (!session || !session.controller.isActive()) return { success: false, data: null };
+        if (!session || !session.controller.isActive()) {
+            // Debounce: only log once per 30s per channel
+            const now = Date.now();
+            const key = `getLiveList_fail_${channelId}`;
+            if (!this._lastLogTime.has(key) || now - this._lastLogTime.get(key)! > 30000) {
+                logger.info(`[SC-DEBUG] getLiveList FAIL ${channelId} session=${!!session} active=${session?.controller.isActive()}`);
+                this._lastLogTime.set(key, now);
+            }
+            return { success: false, data: null };
+        }
 
         this._touchSession(channelId);
 

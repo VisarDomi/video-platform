@@ -52,7 +52,7 @@ export class StreamDownloader {
         }
 
         if (!liveUrl) {
-            logger.error(`Could not resolve live playlist URL for ${alias} after ${MAX_RETRIES} attempts. Aborting download.`);
+            logger.info(`[SC-DEBUG] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
             this.downloadHandle.remove();
             return;
         }
@@ -63,13 +63,13 @@ export class StreamDownloader {
         const segmentsDirPath = await this.streamProvider.setupDownloadDir(alias, startDate);
 
         if (!segmentsDirPath) {
-            logger.error(`Failed to create download paths for ${alias}. Aborting download.`);
+            logger.info(`[SC-DEBUG] EARLY-EXIT ${alias} reason=setupDownloadDir-failed`);
             this.downloadHandle.remove();
             return;
         }
 
         this.downloadHandle.update({ segmentsDirPath });
-        logger.info(`${segmentsDirPath} started downloading segments.`);
+        logger.info(`[SC-DEBUG] START ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
 
         const playlistManager = new PlaylistManager(segmentsDirPath);
 
@@ -88,11 +88,26 @@ export class StreamDownloader {
         qualityMonitor.start();
 
         let lastDownload = Date.now();
+        let consecutiveFailures = 0;
+        let reconnectAttempts = 0;
+        let segmentCount = 0;
+        let lastHeartbeat = Date.now();
+        const MAX_CONSECUTIVE_FAILURES = 5;
+        const MAX_RECONNECT_ATTEMPTS = 3;
+        const HEARTBEAT_INTERVAL = 30000;
 
         while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
+            // Heartbeat
+            if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
+                const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
+                logger.info(`[SC-DEBUG] HEARTBEAT ${alias} segments=${segmentCount} staleSec=${staleSec} failures=${consecutiveFailures}`);
+                lastHeartbeat = Date.now();
+            }
+
             const liveResponse = await this.streamProvider.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
+                consecutiveFailures = 0;
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
                     (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
@@ -104,7 +119,7 @@ export class StreamDownloader {
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
-                            logger.debug(`Segment fetch returned null, pausing:`, { segmentPath });
+                            logger.info(`[SC-DEBUG] NULL-SEGMENT ${alias} segment=${segment.localName}`);
                             break;
                         }
 
@@ -120,6 +135,8 @@ export class StreamDownloader {
                             } else {
                                 await playlistManager.appendSegmentToPlaylist(segment);
                                 lastDownload = Date.now();
+                                segmentCount++;
+                                reconnectAttempts = 0; // Successful segment = fresh reconnect budget
                             }
                         } else {
                             logger.error(`Failed to write segment to disk, pausing processing:`, { segmentPath });
@@ -127,14 +144,44 @@ export class StreamDownloader {
                         }
                     }
                 }
+            } else {
+                consecutiveFailures++;
+
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
+                    && reconnectAttempts < MAX_RECONNECT_ATTEMPTS
+                    && this.streamProvider.reconnect) {
+                    const streamerId = this.downloadHandle.state?.streamerId;
+                    if (streamerId) {
+                        reconnectAttempts++;
+                        logger.info(`[StreamDownloader] Attempting reconnect for ${alias} (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                        const newUrl = await this.streamProvider.reconnect(streamerId);
+
+                        if (newUrl) {
+                            logger.info(`[StreamDownloader] Reconnected ${alias}. Resuming in same folder.`);
+                            await playlistManager.insertDiscontinuity();
+                            liveUrl = newUrl;
+                            this.downloadHandle.update({ liveUrl });
+                            qualityMonitor.updateCurrentUrl(newUrl);
+                            lastDownload = Date.now();
+                            consecutiveFailures = 0;
+                            continue;
+                        } else {
+                            logger.warn(`[StreamDownloader] Reconnect failed for ${alias}.`);
+                        }
+                    }
+                }
             }
             await timersPromises.setTimeout(1000);
         }
 
+        const exitReason = this.aborted ? "aborted" : "stale-timeout";
+        const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
+        logger.info(`[SC-DEBUG] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
+
         qualityMonitor.stop();
         await playlistManager.finalizePlaylist();
 
-        logger.info(`Finished download process for: ${segmentsDirPath}`);
+        logger.info(`[SC-DEBUG] FINALIZED ${alias} dir=${path.basename(segmentsDirPath)}`);
 
         // --- CLEANUP SC SESSION ON DOWNLOAD END ---
         if (this.streamProvider instanceof ScClient) {
@@ -147,6 +194,7 @@ export class StreamDownloader {
         }
         // ------------------------------------------
 
+        logger.info(`[SC-DEBUG] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
         this.downloadHandle.remove();
     }
 }

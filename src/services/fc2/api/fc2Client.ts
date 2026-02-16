@@ -414,6 +414,11 @@ export class Fc2Client implements IStreamProvider {
         return segmentsDirExists ? segmentsDirPath : null;
     }
 
+    public async reconnect(streamerId: string): Promise<string | null> {
+        logger.info(`[FC2] Reconnecting for ${streamerId}...`);
+        return this.getHlsUrl(streamerId);
+    }
+
     public async validateSegment(filePath: string): Promise<boolean> {
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return false;

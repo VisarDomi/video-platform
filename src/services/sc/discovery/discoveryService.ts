@@ -46,28 +46,31 @@ export class ScDiscoveryService {
                 return;
             }
 
+            logger.info(`[SC-DEBUG] DISCOVERY ${username} not-in-downloads, checking isOnline...`);
             const isLive = await this.scClient.isOnline(username);
 
             if (isLive) {
-                if (this.downloadsManager.hasStreamer(username)) return;
+                const stillFree = !this.downloadsManager.hasStreamer(username);
+                logger.info(`[SC-DEBUG] DISCOVERY ${username} isLive=true hasStreamer(recheck)=${!stillFree}`);
 
-                // getHlsUrl now triggers the browser sniffer
+                if (!stillFree) return;
+
                 const masterUrl = await this.scClient.getHlsUrl(username);
 
                 if (masterUrl) {
-                    logger.info(`[SC] Channel ${username} is LIVE. Starting download...`);
-
                     const handle = this.downloadsManager.add(masterUrl, {
                         streamerId: username,
                         alias: username
                     });
+
+                    logger.info(`[SC-DEBUG] DISCOVERY ${username} add-result=${handle ? "OK" : "DUPLICATE"} url=${masterUrl}`);
 
                     if (handle) {
                         const downloader = new StreamDownloader(handle, this.scClient);
                         void downloader.start();
                     }
                 } else {
-                    logger.warn(`[SC] Channel ${username} is online but failed to retrieve HLS URL.`);
+                    logger.info(`[SC-DEBUG] DISCOVERY ${username} isLive but getHlsUrl=null`);
                 }
             }
         } catch (error: any) {

@@ -38,4 +38,10 @@ export interface IStreamProvider {
      * @param filePath Path to the downloaded .ts file
      */
     validateSegment(filePath: string): Promise<boolean>;
+
+    /**
+     * Attempt to re-establish a connection for a streamer whose stream is still live
+     * but whose transport (e.g. WebSocket) has died. Returns a new live URL on success.
+     */
+    reconnect?(streamerId: string): Promise<string | null>;
 }

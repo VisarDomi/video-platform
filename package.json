@@ -7,7 +7,7 @@
     "scripts": {
         "build": "rm -rf dist && tsc",
         "start": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start \"xvfb-run -a -s '-screen 0 1920x1080x24' node dist/main.js\" --name video-downloader --update-env",
-        "restart": "npm run build && pm2 delete video-downloader && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start \"xvfb-run -a -s '-screen 0 1920x1080x24' node dist/main.js\" --name video-downloader --update-env",
+        "restart": "npm run build && pm2 delete video-downloader 2>/dev/null; pkill -f 'xvfb-run.*node dist/main.js' 2>/dev/null; pkill -f '^node dist/main.js$' 2>/dev/null; sleep 1 && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start \"xvfb-run -a -s '-screen 0 1920x1080x24' node dist/main.js\" --name video-downloader --update-env",
         "start3": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start dist/main.js --name video-downloader --update-env",
         "restart3": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 restart video-downloader --update-env",
         "stop": "pm2 stop video-downloader",
