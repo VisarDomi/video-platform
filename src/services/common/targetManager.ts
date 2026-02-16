@@ -75,7 +75,7 @@ export class TargetManager {
             }
 
             this.targets = newTargets;
-            logger.info(`[${this.label}] Loaded ${this.targets.size} targets.`);
+            logger.info(`[${this.label}] Loaded ${this.targets.size} targets: ${[...this.targets].join(", ")}`);
         } catch (error: any) {
             logger.error(`[${this.label}] Error reading ${path.basename(this.targetsFilePath)}`, { error: error.message });
         }
