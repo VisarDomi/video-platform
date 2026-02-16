@@ -637,7 +637,7 @@
 	let swipeStartX = 0;
 	let swipeStartY = 0;
 	let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' | 'pinch' | 'pan' = 'none';
+	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' | 'pinch' = 'none';
 	let seekBaseTime = 0;
 
 	// Pinch-to-zoom state
@@ -648,12 +648,9 @@
 	let pinchStartScale = 0;
 	let pinchContentAnchorX = 0;
 	let pinchContentAnchorY = 0;
-	let panStartTouchX = 0;
-	let panStartTouchY = 0;
-	let panStartZoomX = 0;
-	let panStartZoomY = 0;
 	let lastZoomEnd = 0;
-	const ZOOM_DEBOUNCE_MS = 300;
+	let wasMultiTouch = false;
+	const ZOOM_DEBOUNCE_MS = 200;
 
 	function getPinchDist(e: TouchEvent): number {
 		const [a, b] = [e.touches[0], e.touches[1]];
@@ -695,6 +692,7 @@
 
 	function handleTouchCancel() {
 		if (zoomScale <= ZOOM_THRESHOLD) resetZoom();
+		wasMultiTouch = false;
 		swipeType = 'none';
 		swipeAxis = 'none';
 		if (playerStore.isSwiping) {
@@ -708,14 +706,15 @@
 		if (playerStore.swipeAnimating) return;
 
 		if (e.touches.length === 2) {
+			wasMultiTouch = true;
 			swipeType = 'pinch';
 			swipeAxis = 'none';
 			initPinch(e);
 			return;
 		}
 
-		// Ignore single-finger touch right after zoom/pan ends to prevent accidental swipes
-		if (Date.now() - lastZoomEnd < ZOOM_DEBOUNCE_MS) return;
+		// Block all single-finger gestures during/after multi-touch
+		if (wasMultiTouch || Date.now() - lastZoomEnd < ZOOM_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
 		swipeStartX = touch.clientX;
@@ -754,24 +753,7 @@
 		const dx = touch.clientX - swipeStartX;
 		const dy = touch.clientY - swipeStartY;
 
-		// When zoomed, pan instead of swipe
-		if (zoomScale > ZOOM_THRESHOLD && swipeType === 'none') {
-			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-			swipeType = 'pan';
-			panStartTouchX = swipeStartX;
-			panStartTouchY = swipeStartY;
-			panStartZoomX = zoomX;
-			panStartZoomY = zoomY;
-		}
-
-		if (swipeType === 'pan') {
-			zoomX = panStartZoomX + (touch.clientX - panStartTouchX);
-			zoomY = panStartZoomY + (touch.clientY - panStartTouchY);
-			clampTranslate();
-			return;
-		}
-
-		// Normal swipe gestures (only at 1x zoom)
+		// Normal swipe gestures
 		if (swipeAxis === 'none') {
 			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
 			if (Math.abs(dx) >= Math.abs(dy)) {
@@ -814,14 +796,7 @@
 				clampTranslate();
 			}
 			lastZoomEnd = Date.now();
-			swipeType = 'none';
-			swipeAxis = 'none';
-			return;
-		}
-
-		if (swipeType === 'pan') {
-			clampTranslate();
-			lastZoomEnd = Date.now();
+			wasMultiTouch = false;
 			swipeType = 'none';
 			swipeAxis = 'none';
 			return;
