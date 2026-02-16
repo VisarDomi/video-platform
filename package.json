@@ -6,10 +6,10 @@
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 start dist/main.js --name tango-auth --update-env",
-        "restart": "npm run build && PLAYWRIGHT_BROWSERS_PATH=0 pm2 restart tango-auth --update-env",
-        "stop": "pm2 stop tango-auth",
-        "logs": "pm2 logs tango-auth -f",
+        "start": "npm run build && systemctl --user start tango-auth",
+        "restart": "npm run build && systemctl --user restart tango-auth",
+        "stop": "systemctl --user stop tango-auth",
+        "logs": "journalctl --user -u tango-auth -f",
         "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
     },
     "keywords": [],
