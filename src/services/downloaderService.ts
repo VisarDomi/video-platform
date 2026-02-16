@@ -55,7 +55,7 @@ export class DownloaderService {
         this.fc2DiscoveryService = fc2DiscoveryService;
         this.scDiscoveryService = scDiscoveryService;
         this.orphanStreamFinalizer = orphanStreamFinalizer;
-        logger.info("[General] DownloaderService initialized as a composition root.");
+        logger.debug("[General] DownloaderService initialized.");
     }
 
     public static async create(): Promise<DownloaderService> {

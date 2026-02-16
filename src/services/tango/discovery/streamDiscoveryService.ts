@@ -18,7 +18,7 @@ export class StreamDiscoveryService {
         this.apiClient = apiClient;
         this.aliasManager = aliasManager;
         this.downloadsManager = downloadsManager;
-        logger.info("[Tango] StreamDiscoveryService initialized.");
+        logger.debug("[Tango] StreamDiscoveryService initialized.");
     }
 
     public setTargetManager(targetManager: TargetManager): void {

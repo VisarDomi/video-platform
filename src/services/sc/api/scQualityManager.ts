@@ -20,7 +20,6 @@ export class ScQualityManager {
 
     public start(): void {
         if (this.intervalId) return;
-        logger.info("[SC] QualityManager started.");
 
         setTimeout(async () => {
             await this.ensurePlayerControlsVisible();

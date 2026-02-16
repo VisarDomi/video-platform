@@ -17,7 +17,7 @@ export class ScClient implements IStreamProvider {
     private cleanupInterval: NodeJS.Timeout;
 
     constructor() {
-        logger.info("[SC] Client initialized (FFmpeg HLS Mode).");
+        logger.debug("[SC] Client initialized.");
         this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
     }
 

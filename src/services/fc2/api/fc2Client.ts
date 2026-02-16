@@ -252,7 +252,7 @@ export class Fc2Client implements IStreamProvider {
             this._touchSession(liveUrl);
             const response = await this._request(liveUrl);
             if (!response.ok) {
-                logger.error(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`, { liveUrl });
+                logger.debug(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`);
                 return { success: false, data: null };
             }
             const data = await response.text();

@@ -15,7 +15,7 @@ export class ScDiscoveryService {
         this.targetManager = targetManager;
         this.scClient = scClient;
         this.downloadsManager = downloadsManager;
-        logger.info("[SC] DiscoveryService initialized.");
+        logger.debug("[SC] DiscoveryService initialized.");
     }
 
     public start(): void {

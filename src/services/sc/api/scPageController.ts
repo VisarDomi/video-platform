@@ -208,7 +208,7 @@ export class ScPageController {
             });
 
         } catch (error: any) {
-            logger.error(`[SC] [${this.channelName}] Browser startup failed`, { error: error.message });
+            logger.error(`[SC] [${this.channelName}] Browser startup failed: ${error.message}`);
             await this.stop();
         }
     }

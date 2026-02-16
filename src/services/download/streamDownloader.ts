@@ -104,7 +104,7 @@ export class StreamDownloader {
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
-                            logger.warn(`Pausing segment processing due to download failure:`, { segmentPath });
+                            logger.debug(`Segment fetch returned null, pausing:`, { segmentPath });
                             break;
                         }
 

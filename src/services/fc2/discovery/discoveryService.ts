@@ -15,7 +15,7 @@ export class Fc2DiscoveryService {
         this.targetManager = targetManager;
         this.fc2Client = fc2Client;
         this.downloadsManager = downloadsManager;
-        logger.info("[FC2] DiscoveryService initialized.");
+        logger.debug("[FC2] DiscoveryService initialized.");
     }
 
     public start(): void {
