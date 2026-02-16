@@ -28,15 +28,15 @@ export class DiskSpaceMonitor {
                 const limitBytes = 50 * 1024 * 1024 * 1024; // 50GB
 
                 if (availableBytes < limitBytes) {
-                    logger.error(`[System] Disk space limit reached (<50GB). Stopping PM2 process to prevent loop.`);
+                    logger.error(`[System] Disk space limit reached (<50GB). Stopping service to prevent loop.`);
 
                     // Create marker
                     const dateStr = new Date().toISOString().split("T")[0];
                     const markerPath = path.join(utils.findProjectRoot(__dirname), `no-more-space-${dateStr}.txt`);
                     await fs.writeFile(markerPath, "");
 
-                    // Stop PM2 gracefully instead of crashing
-                    exec("pm2 stop video-downloader");
+                    // Stop systemd service gracefully instead of crashing
+                    exec("systemctl --user stop video-downloader");
 
                     // Wait forever so we don't loop before PM2 kills us
                     await timersPromises.setTimeout(24 * 60 * 60 * 1000);
