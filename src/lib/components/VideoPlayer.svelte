@@ -894,7 +894,7 @@
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
 			{#if video}
-				<div class="streamer-name">{video.filename}{#if isTl}{@const s = videoListStore.getStreamer(video.filename)}{#if s} {s.firstName}{/if}{/if}</div>
+				<div class="streamer-name">{video.filename}{#if isTl}{@const s = videoListStore.getStreamer(video.filename)}{#if s}{` ${s.firstName}`}{/if}{/if}</div>
 
 				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
 

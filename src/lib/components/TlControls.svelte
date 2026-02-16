@@ -74,13 +74,13 @@
 			{isMuted ? '🔇' : '🔊'}
 		</button>
 		<button class="tl-btn" class:following={isFollowing} onclick={handleFollow}>
-			{isFollowing ? '➖' : '➕'}
+			{isFollowing ? '❤️' : '🤍'}
 		</button>
 		<button class="tl-btn block-btn" class:confirm={blockConfirm} onclick={handleBlock}>
 			{blockConfirm ? '❓' : '🚫'}
 		</button>
-		<button class="tl-btn" class:in-list={isInList} onclick={handleListToggle}>
-			{isInList ? '📋' : '📝'}
+		<button class="tl-btn" class:list-add={!isInList} class:list-remove={isInList} onclick={handleListToggle}>
+			{isInList ? '➖' : '➕'}
 		</button>
 	</div>
 {/if}
@@ -113,8 +113,12 @@
 		background-color: rgba(100, 100, 0, 0.6);
 	}
 
-	.tl-btn.in-list {
+	.tl-btn.list-add {
 		border-color: #34c759;
+	}
+
+	.tl-btn.list-remove {
+		border-color: #ff5e3a;
 	}
 
 	@media (hover: hover) and (pointer: fine) {

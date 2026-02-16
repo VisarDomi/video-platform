@@ -67,21 +67,21 @@ export const TANGO_API = {
 } as const;
 
 export const SC_API = {
-	FOLLOWING: '/api/sc/following',
-	FOLLOW: '/api/sc/follow',
-	UNFOLLOW: '/api/sc/unfollow'
+	LIST: '/api/sc/list',
+	ADD: '/api/sc/add',
+	REMOVE: '/api/sc/remove'
 } as const;
 
 export const FC2_API = {
-	FOLLOWING: '/api/fc2/following',
-	FOLLOW: '/api/fc2/follow',
-	UNFOLLOW: '/api/fc2/unfollow'
+	LIST: '/api/fc2/list',
+	ADD: '/api/fc2/add',
+	REMOVE: '/api/fc2/remove'
 } as const;
 
 export const TANGO_LIST_API = {
-	FOLLOWING: '/api/tango-list/following',
-	FOLLOW: '/api/tango-list/follow',
-	UNFOLLOW: '/api/tango-list/unfollow'
+	LIST: '/api/tango-list/list',
+	ADD: '/api/tango-list/add',
+	REMOVE: '/api/tango-list/remove'
 } as const;
 
 export const HLS = {

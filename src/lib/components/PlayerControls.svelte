@@ -8,6 +8,7 @@
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
 	import { follow, unfollow, extractIdentifier, isFollowProvider } from '$lib/services/follow-api.js';
+	import { addToList, removeFromList, isListProvider } from '$lib/services/list-api.js';
 
 	let {
 		isMuted,
@@ -27,9 +28,15 @@
 	const hasSegments = $derived(isOriginal && segments.length > 0);
 
 	const provider = $derived(videoListStore.selectedProvider);
-	const showFollow = $derived(isFollowProvider(provider));
+	const isTxtFollow = $derived(isFollowProvider(provider));
+	const isTxtList = $derived(!isTxtFollow && isListProvider(provider));
+	const showListButton = $derived(isTxtFollow || isTxtList);
 	const identifier = $derived(video ? extractIdentifier(video.filename) : '');
-	const isFollowing = $derived(videoListStore.followedIdentifiers.has(identifier));
+	const isInList = $derived(
+		isTxtFollow
+			? videoListStore.followedIdentifiers.has(identifier)
+			: videoListStore.listIdentifiers.has(identifier)
+	);
 
 	function handleMuteOrUndo() {
 		if (hasSegments) {
@@ -47,21 +54,34 @@
 		}
 	}
 
-	function handleFollow() {
-		if (!identifier || !showFollow) return;
-		if (isFollowing) {
-			videoListStore.removeFollowedIdentifier(identifier);
-			unfollow(provider, identifier).catch(() => {
-				videoListStore.addFollowedIdentifier(identifier);
-			});
-		} else {
-			videoListStore.addFollowedIdentifier(identifier);
-			follow(provider, identifier).catch(() => {
+	function handleListToggle() {
+		if (!identifier || !showListButton) return;
+		if (isTxtFollow) {
+			if (isInList) {
 				videoListStore.removeFollowedIdentifier(identifier);
-			});
+				unfollow(provider, identifier).catch(() => {
+					videoListStore.addFollowedIdentifier(identifier);
+				});
+			} else {
+				videoListStore.addFollowedIdentifier(identifier);
+				follow(provider, identifier).catch(() => {
+					videoListStore.removeFollowedIdentifier(identifier);
+				});
+			}
+		} else {
+			if (isInList) {
+				videoListStore.removeListIdentifier(identifier);
+				removeFromList(provider, identifier).catch(() => {
+					videoListStore.addListIdentifier(identifier);
+				});
+			} else {
+				videoListStore.addListIdentifier(identifier);
+				addToList(provider, identifier).catch(() => {
+					videoListStore.removeListIdentifier(identifier);
+				});
+			}
 		}
 	}
-
 </script>
 
 {#if video}
@@ -75,9 +95,9 @@
 				{/if}
 			</button>
 
-			{#if showFollow}
-				<button class:following={isFollowing} onclick={handleFollow}>
-					{isFollowing ? '➖' : '➕'}
+			{#if showListButton}
+				<button class:list-add={!isInList} class:list-remove={isInList} onclick={handleListToggle}>
+					{isInList ? '➖' : '➕'}
 				</button>
 			{/if}
 
@@ -107,9 +127,9 @@
 	}
 
 	button {
-		padding: 8px 12px;
-		font-size: 28px;
-		min-width: 54px;
+		padding: 12px 18px;
+		font-size: 36px;
+		min-width: 70px;
 		background-color: rgba(0, 0, 0, 0.6);
 		color: white;
 		border: 1px solid white;
@@ -139,7 +159,11 @@
 		color: #888;
 	}
 
-	button.following {
+	button.list-add {
+		border-color: #34c759;
+	}
+
+	button.list-remove {
 		border-color: #ff5e3a;
 	}
 </style>

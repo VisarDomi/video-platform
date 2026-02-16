@@ -1,8 +1,10 @@
-import { TANGO_LIST_API } from '../constants.js';
+import { TANGO_LIST_API, FC2_API, SC_API } from '../constants.js';
 
 const apiMap = {
 	tango: TANGO_LIST_API,
-	tl: TANGO_LIST_API
+	tl: TANGO_LIST_API,
+	fc2: FC2_API,
+	sc: SC_API
 } as const;
 
 type ListProvider = keyof typeof apiMap;
@@ -13,7 +15,7 @@ export function isListProvider(provider: string): provider is ListProvider {
 
 export async function fetchListIdentifiers(provider: ListProvider): Promise<string[]> {
 	try {
-		const response = await fetch(apiMap[provider].FOLLOWING);
+		const response = await fetch(apiMap[provider].LIST);
 		if (!response.ok) return [];
 		return await response.json();
 	} catch {
@@ -23,7 +25,7 @@ export async function fetchListIdentifiers(provider: ListProvider): Promise<stri
 
 export async function addToList(provider: ListProvider, identifier: string): Promise<boolean> {
 	try {
-		const response = await fetch(apiMap[provider].FOLLOW, {
+		const response = await fetch(apiMap[provider].ADD, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ identifier })
@@ -37,7 +39,7 @@ export async function addToList(provider: ListProvider, identifier: string): Pro
 
 export async function removeFromList(provider: ListProvider, identifier: string): Promise<boolean> {
 	try {
-		const response = await fetch(apiMap[provider].UNFOLLOW, {
+		const response = await fetch(apiMap[provider].REMOVE, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ identifier })

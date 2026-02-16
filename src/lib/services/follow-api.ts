@@ -1,9 +1,7 @@
-import { TANGO_API, SC_API, FC2_API } from '../constants.js';
+import { TANGO_API } from '../constants.js';
 
 const apiMap = {
-	tango: TANGO_API,
-	sc: SC_API,
-	fc2: FC2_API
+	tango: TANGO_API
 } as const;
 
 type FollowProvider = keyof typeof apiMap;
