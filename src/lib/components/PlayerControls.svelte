@@ -74,10 +74,9 @@
 				{/if}
 			</button>
 
-			{#if isOriginal}
-				<button onclick={() => playerStore.addSegment(currentTime)}>📍</button>
-				<button onclick={handleOkOrCut} disabled={hasSegments && segments.length % 2 !== 0}>
-					{hasSegments ? '✂️' : '✅'}
+			{#if showFollow}
+				<button class:following={isFollowing} onclick={handleFollow}>
+					{isFollowing ? '➖' : '➕'}
 				</button>
 			{/if}
 
@@ -85,10 +84,11 @@
 				<button onclick={returnToOriginals}>🔄</button>
 			{/if}
 
-			{#if showFollow}
-				<button class:following={isFollowing} onclick={handleFollow}>
-					{isFollowing ? '➖' : '➕'}
+			{#if isOriginal}
+				<button onclick={handleOkOrCut} disabled={hasSegments && segments.length % 2 !== 0}>
+					{hasSegments ? '✂️' : '✅'}
 				</button>
+				<button onclick={() => playerStore.addSegment(currentTime)}>📍</button>
 			{/if}
 		</div>
 	</div>
