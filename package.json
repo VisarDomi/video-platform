@@ -7,10 +7,10 @@
     "scripts": {
         "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
         "build": "npm run compile-go && rm -rf dist && tsc",
-        "start": "npm run build && pm2 start dist/main.js --name video-editor-backend --update-env",
-        "restart": "npm run build && pm2 restart video-editor-backend --update-env",
-        "stop": "pm2 stop video-editor-backend",
-        "logs": "pm2 logs video-editor-backend -f"
+        "start": "npm run build && systemctl --user start video-editor-backend",
+        "restart": "npm run build && systemctl --user restart video-editor-backend",
+        "stop": "systemctl --user stop video-editor-backend",
+        "logs": "journalctl --user -u video-editor-backend -f"
     },
     "author": "",
     "license": "MIT",
