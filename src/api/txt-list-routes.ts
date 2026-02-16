@@ -144,7 +144,7 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
     });
 
     // API: Get parsed identifiers
-    router.get(`/api/${provider}/following`, async (_req, res) => {
+    router.get(`/api/${provider}/list`, async (_req, res) => {
         try {
             const content = await fs.readFile(filePath, "utf-8");
             const identifiers = content.split("\n")
@@ -162,8 +162,8 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Follow (add to txt)
-    router.post(`/api/${provider}/follow`, async (req, res) => {
+    // API: Add to list
+    router.post(`/api/${provider}/add`, async (req, res) => {
         const { identifier } = req.body;
         if (!identifier || typeof identifier !== "string") {
             return res.status(400).json({ error: "identifier required" });
@@ -177,7 +177,7 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
             const entry = urlPrefix + identifier + urlSuffix;
             const newContent = cleanListContent(content + "\n" + entry);
             await fs.writeFile(filePath, newContent, "utf-8");
-            logger.info(`${provider} follow: added ${identifier}`);
+            logger.info(`${provider} add: ${identifier}`);
             res.json({ success: true });
         } catch (error) {
             logger.error(`Error adding to ${provider} file`, { error });
@@ -185,8 +185,8 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Unfollow (remove from txt)
-    router.post(`/api/${provider}/unfollow`, async (req, res) => {
+    // API: Remove from list
+    router.post(`/api/${provider}/remove`, async (req, res) => {
         const { identifier } = req.body;
         if (!identifier || typeof identifier !== "string") {
             return res.status(400).json({ error: "identifier required" });
@@ -195,7 +195,7 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
             const content = await fs.readFile(filePath, "utf-8");
             const lines = content.split("\n").filter(line => !line.includes(identifier));
             await fs.writeFile(filePath, cleanListContent(lines.join("\n")), "utf-8");
-            logger.info(`${provider} unfollow: removed ${identifier}`);
+            logger.info(`${provider} remove: ${identifier}`);
             res.json({ success: true });
         } catch (error) {
             logger.error(`Error removing from ${provider} file`, { error });
