@@ -1,7 +1,8 @@
 import { TANGO_LIST_API } from '../constants.js';
 
 const apiMap = {
-	tango: TANGO_LIST_API
+	tango: TANGO_LIST_API,
+	tl: TANGO_LIST_API
 } as const;
 
 type ListProvider = keyof typeof apiMap;

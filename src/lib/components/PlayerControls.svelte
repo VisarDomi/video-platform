@@ -8,7 +8,6 @@
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
 	import { follow, unfollow, extractIdentifier, isFollowProvider } from '$lib/services/follow-api.js';
-	import { addToList, removeFromList, isListProvider } from '$lib/services/list-api.js';
 
 	let {
 		isMuted,
@@ -31,9 +30,6 @@
 	const showFollow = $derived(isFollowProvider(provider));
 	const identifier = $derived(video ? extractIdentifier(video.filename) : '');
 	const isFollowing = $derived(videoListStore.followedIdentifiers.has(identifier));
-
-	const showList = $derived(isListProvider(provider));
-	const isInList = $derived(videoListStore.listIdentifiers.has(identifier));
 
 	function handleMuteOrUndo() {
 		if (hasSegments) {
@@ -66,20 +62,6 @@
 		}
 	}
 
-	function handleListToggle() {
-		if (!identifier || !showList) return;
-		if (isInList) {
-			videoListStore.removeListIdentifier(identifier);
-			removeFromList(provider, identifier).catch(() => {
-				videoListStore.addListIdentifier(identifier);
-			});
-		} else {
-			videoListStore.addListIdentifier(identifier);
-			addToList(provider, identifier).catch(() => {
-				videoListStore.removeListIdentifier(identifier);
-			});
-		}
-	}
 </script>
 
 {#if video}
@@ -96,12 +78,6 @@
 			{#if showFollow}
 				<button class:following={isFollowing} onclick={handleFollow}>
 					{isFollowing ? '➖' : '➕'}
-				</button>
-			{/if}
-
-			{#if showList}
-				<button class:in-list={isInList} onclick={handleListToggle}>
-					{isInList ? '📋' : '📝'}
 				</button>
 			{/if}
 
@@ -165,9 +141,5 @@
 
 	button.following {
 		border-color: #ff5e3a;
-	}
-
-	button.in-list {
-		border-color: #34c759;
 	}
 </style>

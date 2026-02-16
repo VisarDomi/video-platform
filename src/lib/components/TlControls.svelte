@@ -2,10 +2,13 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { followStreamer, unfollowStreamer } from '$lib/services/tl-api.js';
+	import { addToList, removeFromList } from '$lib/services/list-api.js';
 
 	const video = $derived(playerStore.currentVideo);
 	const streamer = $derived(video ? videoListStore.getStreamer(video.filename) : undefined);
 	const isFollowing = $derived(streamer?.isFollowing ?? false);
+	const identifier = $derived(video?.filename ?? '');
+	const isInList = $derived(videoListStore.listIdentifiers.has(identifier));
 
 	let {
 		isMuted,
@@ -48,6 +51,21 @@
 		blockConfirm = false;
 		onblock(streamer.alias, streamer.streamerId);
 	}
+
+	function handleListToggle() {
+		if (!identifier) return;
+		if (isInList) {
+			videoListStore.removeListIdentifier(identifier);
+			removeFromList('tl', identifier).catch(() => {
+				videoListStore.addListIdentifier(identifier);
+			});
+		} else {
+			videoListStore.addListIdentifier(identifier);
+			addToList('tl', identifier).catch(() => {
+				videoListStore.removeListIdentifier(identifier);
+			});
+		}
+	}
 </script>
 
 {#if streamer}
@@ -60,6 +78,9 @@
 		</button>
 		<button class="tl-btn block-btn" class:confirm={blockConfirm} onclick={handleBlock}>
 			{blockConfirm ? '❓' : '🚫'}
+		</button>
+		<button class="tl-btn" class:in-list={isInList} onclick={handleListToggle}>
+			{isInList ? '📋' : '📝'}
 		</button>
 	</div>
 {/if}
@@ -90,6 +111,10 @@
 	.tl-btn.confirm {
 		border-color: #ff0;
 		background-color: rgba(100, 100, 0, 0.6);
+	}
+
+	.tl-btn.in-list {
+		border-color: #34c759;
 	}
 
 	@media (hover: hover) and (pointer: fine) {

@@ -652,6 +652,8 @@
 	let panStartTouchY = 0;
 	let panStartZoomX = 0;
 	let panStartZoomY = 0;
+	let lastZoomEnd = 0;
+	const ZOOM_DEBOUNCE_MS = 300;
 
 	function getPinchDist(e: TouchEvent): number {
 		const [a, b] = [e.touches[0], e.touches[1]];
@@ -711,6 +713,9 @@
 			initPinch(e);
 			return;
 		}
+
+		// Ignore single-finger touch right after zoom/pan ends to prevent accidental swipes
+		if (Date.now() - lastZoomEnd < ZOOM_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
 		swipeStartX = touch.clientX;
@@ -808,6 +813,7 @@
 			} else {
 				clampTranslate();
 			}
+			lastZoomEnd = Date.now();
 			swipeType = 'none';
 			swipeAxis = 'none';
 			return;
@@ -815,6 +821,7 @@
 
 		if (swipeType === 'pan') {
 			clampTranslate();
+			lastZoomEnd = Date.now();
 			swipeType = 'none';
 			swipeAxis = 'none';
 			return;
