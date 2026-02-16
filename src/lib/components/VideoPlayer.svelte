@@ -879,9 +879,9 @@
 	class:visible={isVisible}
 	class:swipe-active={playerStore.isSwiping}
 	class:swipe-animating={playerStore.swipeAnimating}
-	style={playerStore.isSwiping || playerStore.swipeAnimating
-		? `transform:translateX(${playerStore.swipeProgress * 100}%)`
-		: ''}
+	style:transform={playerStore.isSwiping || playerStore.swipeAnimating
+		? `translateX(${playerStore.swipeProgress * 100}%)`
+		: null}
 	role="application"
 	bind:this={videoViewEl}
 >
@@ -889,7 +889,7 @@
 		<div
 			class="video-player"
 			bind:this={videoContainer}
-			style={zoomScale > 1 ? `transform:translate(${zoomX}px,${zoomY}px) scale(${zoomScale})` : ''}
+			style:transform={zoomScale > 1 ? `translate(${zoomX}px,${zoomY}px) scale(${zoomScale})` : null}
 		></div>
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>

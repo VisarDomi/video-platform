@@ -402,8 +402,8 @@
 	{:else if filteredVideos.length === 0}
 		<p class="info-message">No videos found.</p>
 	{:else}
-		<div class="virtual-spacer" style="height: {totalHeight}px;">
-			<div style="transform: translateY({offsetY}px);">
+		<div class="virtual-spacer" style:height="{totalHeight}px">
+			<div style:transform="translateY({offsetY}px)">
 				{#each visibleVideos as video (video.filename + video.type)}
 					<VideoItem
 						{video}

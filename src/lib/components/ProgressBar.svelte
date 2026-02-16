@@ -61,11 +61,11 @@
 	bind:this={progressBar}
 	onpointerdown={onPointerDown}
 >
-	<div class="progress-fill" style="width: {percentage}%"></div>
+	<div class="progress-fill" style:width="{percentage}%"></div>
 
 	{#if effectiveDuration > 0}
 		{#each playerStore.segments as point}
-			<div class="segment-marker" style="left: {(point / effectiveDuration) * 100}%"></div>
+			<div class="segment-marker" style:left="{(point / effectiveDuration) * 100}%"></div>
 		{/each}
 	{/if}
 
