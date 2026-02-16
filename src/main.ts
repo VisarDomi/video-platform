@@ -10,6 +10,7 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/fc2.routes.js";
 import scRouter from "./api/sc.routes.js";
+import tangoListRouter from "./api/tango-list.routes.js";
 import tlRouter from "./api/tl.routes.js";
 import tlProxyRouter from "./api/tl-proxy.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
@@ -52,6 +53,7 @@ async function startServer() {
   app.use("/api", tlRouter);
   app.use("/", fc2Router); // fc2Router handles /fc2 and /api/fc2
   app.use("/", scRouter); // scRouter handles /sc and /api/sc
+  app.use("/", tangoListRouter); // tangoListRouter handles /tango-list and /api/tango-list
   app.use("/api", videoApiRouter);
   app.use("/", mp4StreamingRouter);
   app.use("/", hlsRouter);
