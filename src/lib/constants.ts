@@ -78,6 +78,12 @@ export const FC2_API = {
 	UNFOLLOW: '/api/fc2/unfollow'
 } as const;
 
+export const TANGO_LIST_API = {
+	FOLLOWING: '/api/tango-list/following',
+	FOLLOW: '/api/tango-list/follow',
+	UNFOLLOW: '/api/tango-list/unfollow'
+} as const;
+
 export const HLS = {
 	TS_EXTENSION: '.ts',
 	EXTINF_PREFIX: '#EXTINF:'

@@ -14,6 +14,9 @@ class VideoListStore {
 	// SC/FC2 follow state
 	followedIdentifiers = $state<Set<string>>(new Set());
 
+	// Tango list state (tango.txt download whitelist)
+	listIdentifiers = $state<Set<string>>(new Set());
+
 	// TL-specific state
 	streamerMap = $state<Map<string, TlStreamer>>(new Map());
 	processedStreamIds = new Set<string>();
@@ -25,6 +28,7 @@ class VideoListStore {
 		this.isLoading = true;
 		this.videos = [];
 		this.followedIdentifiers = new Set();
+		this.listIdentifiers = new Set();
 		this.streamerMap = new Map();
 		this.processedStreamIds = new Set();
 		this.liveFilenameMap = new Map();
@@ -107,6 +111,20 @@ class VideoListStore {
 		const next = new Set(this.followedIdentifiers);
 		next.delete(id);
 		this.followedIdentifiers = next;
+	}
+
+	setListIdentifiers(identifiers: string[]) {
+		this.listIdentifiers = new Set(identifiers);
+	}
+
+	addListIdentifier(id: string) {
+		this.listIdentifiers = new Set(this.listIdentifiers).add(id);
+	}
+
+	removeListIdentifier(id: string) {
+		const next = new Set(this.listIdentifiers);
+		next.delete(id);
+		this.listIdentifiers = next;
 	}
 
 	// TL-specific methods

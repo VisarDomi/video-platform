@@ -13,6 +13,7 @@
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 	import { fetchFollowing, isFollowProvider } from '$lib/services/follow-api.js';
+	import { fetchListIdentifiers, isListProvider } from '$lib/services/list-api.js';
 	import {
 		fetchStreams,
 		startDownload,
@@ -84,6 +85,12 @@
 			fetchFollowing(p).then((ids) => {
 				if (videoListStore.epoch !== epoch) return;
 				videoListStore.setFollowedIdentifiers(ids);
+			});
+		}
+		if (isListProvider(p)) {
+			fetchListIdentifiers(p).then((ids) => {
+				if (videoListStore.epoch !== epoch) return;
+				videoListStore.setListIdentifiers(ids);
 			});
 		}
 		startSync(p);
