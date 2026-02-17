@@ -900,8 +900,6 @@
 		width: 100%;
 		height: 100dvh;
 		background-color: black;
-		-webkit-user-select: none;
-		user-select: none;
 		touch-action: none;
 		z-index: -1;
 		opacity: 0;

@@ -2,6 +2,11 @@
 
 ## 2026-02-17
 
+- **fix**: Make text selectable in video view
+  - **root cause**: `.video-view` had `user-select: none` and `-webkit-user-select: none`, blocking all text selection (e.g. streamer name). This was an old workaround — the gesture system already handles touches via `preventDefault()`.
+  - **decision**: Remove `user-select: none`. Keep `touch-action: none` (needed for swipe/pinch gesture system). No double-tap zoom guard was found.
+  - **files**: `VideoPlayer.svelte` (removed 2 lines from `.video-view` styles)
+
 - **fix**: Restore seeking for live videos on non-TL providers
   - **root cause**: Both swipe-seek and progress bar scrubbing were gated on `!isLive`. For non-TL providers (tango/fc2/sc), "live" means a recording in progress — seeking through already-available segments should work. Swipe-seek checked `!playerStore.currentVideo?.isLive`, progress bar derived `effectiveDuration` as 0 when `duration === Infinity`.
   - **decision**: Track `seekableEnd` from `el.seekable` TimeRanges on each `timeupdate`. For non-TL live videos, use `seekableEnd` as the display duration so the progress bar shows a real timeline. Allow swipe-seek when `!isTl` even if `isLive`. TL live streams remain unseekable (truly live content).
