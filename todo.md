@@ -6,5 +6,6 @@
 - [x] Debounce swipe after pinch-to-zoom (VERON-55)
 - [x] Fix: Restore seeking for live videos on non-TL providers
 - [x] Fix: Make text selectable in video view
+- [x] Feature: Add video count to filter aliases
 
 ## Backlog

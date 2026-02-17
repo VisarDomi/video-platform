@@ -2,6 +2,10 @@
 
 ## 2026-02-17
 
+- **feature**: Add video count to filter aliases
+  - **rationale**: When filtering by alias, there was no way to see how many videos each alias has. Adds a count in parentheses next to each alias in the dropdown list and selected chips.
+  - **files**: `AliasSelector.svelte` (added `aliasCounts` derived map from `extractAlias`, display count in dropdown items and chips, `.count` style)
+
 - **fix**: Make text selectable in video view
   - **root cause**: `.video-view` had `user-select: none` and `-webkit-user-select: none`, blocking all text selection (e.g. streamer name). This was an old workaround — the gesture system already handles touches via `preventDefault()`.
   - **decision**: Remove `user-select: none`. Keep `touch-action: none` (needed for swipe/pinch gesture system). No double-tap zoom guard was found.

@@ -1,8 +1,16 @@
 <script lang="ts">
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { extractUniqueAliases } from '$lib/utils/alias.js';
+	import { extractAlias, extractUniqueAliases } from '$lib/utils/alias.js';
 
 	const aliases = $derived(extractUniqueAliases(videoListStore.videos));
+	const aliasCounts = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const v of videoListStore.videos) {
+			const a = extractAlias(v.filename);
+			counts.set(a, (counts.get(a) || 0) + 1);
+		}
+		return counts;
+	});
 	const selectedAliases = $derived(videoListStore.selectedAliases);
 
 	let open = $state(false);
@@ -36,7 +44,7 @@
 					onclick={() => videoListStore.toggleAlias(alias)}
 				>
 					<span class="check">{selectedAliases.has(alias) ? '\u2713' : ''}</span>
-					{alias}
+					{alias} <span class="count">({aliasCounts.get(alias) || 0})</span>
 				</button>
 			{/each}
 		</div>
@@ -46,7 +54,7 @@
 		<div class="chips">
 			{#each [...selectedAliases].sort() as alias}
 				<span class="chip">
-					{alias}
+					{alias} <span class="count">({aliasCounts.get(alias) || 0})</span>
 					<button class="chip-remove" onclick={() => videoListStore.removeAlias(alias)}
 						>&times;</button
 					>
@@ -132,6 +140,11 @@
 		width: 14px;
 		font-size: 12px;
 		color: #6c6;
+	}
+
+	.count {
+		color: #888;
+		font-size: 0.9em;
 	}
 
 	.chips {
