@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-02-17
+
+- **fix**: Restore seeking for live videos on non-TL providers
+  - **root cause**: Both swipe-seek and progress bar scrubbing were gated on `!isLive`. For non-TL providers (tango/fc2/sc), "live" means a recording in progress — seeking through already-available segments should work. Swipe-seek checked `!playerStore.currentVideo?.isLive`, progress bar derived `effectiveDuration` as 0 when `duration === Infinity`.
+  - **decision**: Track `seekableEnd` from `el.seekable` TimeRanges on each `timeupdate`. For non-TL live videos, use `seekableEnd` as the display duration so the progress bar shows a real timeline. Allow swipe-seek when `!isTl` even if `isLive`. TL live streams remain unseekable (truly live content).
+  - **files**: `VideoPlayer.svelte` (added `seekableEnd` state, `displayDuration` derived, updated swipe-seek condition and clamp logic, pass `displayDuration` to ProgressBar)
+
 ## 2026-02-16
 
 - **refactor**: Rename .txt-based API endpoints for consistency

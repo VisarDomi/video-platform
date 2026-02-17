@@ -27,6 +27,7 @@
 	let videoContainer = $state<HTMLElement | null>(null);
 	let currentTime = $state(0);
 	let duration = $state(0);
+	let seekableEnd = $state(0);
 	let isMuted = $state(true);
 	let currentFilename: string | null = null;
 	let wakeLock: WakeLockSentinel | null = null;
@@ -38,6 +39,9 @@
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
 	const isTl = $derived(videoListStore.selectedProvider === 'tl');
+	const displayDuration = $derived(
+		duration === Infinity && !isTl && seekableEnd > 0 ? seekableEnd : duration
+	);
 
 
 	// Initialize 3 video elements
@@ -67,6 +71,10 @@
 				if (el === getActiveElement()) {
 					currentTime = el.currentTime;
 					duration = el.duration;
+					// Track seekable range for live non-TL videos
+					if (el.duration === Infinity && el.seekable.length > 0) {
+						seekableEnd = el.seekable.end(el.seekable.length - 1);
+					}
 					// Save progress
 					const cv = playerStore.currentVideo;
 					if (cv && !cv.isLive) {
@@ -761,7 +769,7 @@
 				if (swipeStartX <= EDGE_ZONE && dx > 0) {
 					swipeType = 'edge-back';
 					playerStore.isSwiping = true;
-				} else if (swipeStartY < window.innerHeight / 2 && !playerStore.currentVideo?.isLive) {
+				} else if (swipeStartY < window.innerHeight / 2 && (!playerStore.currentVideo?.isLive || !isTl)) {
 					swipeType = 'seek';
 					seekBaseTime = getActiveElement().currentTime;
 				} else {
@@ -779,8 +787,9 @@
 		} else if (swipeType === 'seek') {
 			const seekDelta = (dx / window.innerWidth) * SEEK_RATE;
 			const activeEl = getActiveElement();
-			if (!isNaN(activeEl.duration)) {
-				const newTime = Math.max(0, Math.min(activeEl.duration, seekBaseTime + seekDelta));
+			const maxTime = activeEl.duration === Infinity ? seekableEnd : activeEl.duration;
+			if (!isNaN(maxTime) && maxTime > 0) {
+				const newTime = Math.max(0, Math.min(maxTime, seekBaseTime + seekDelta));
 				activeEl.currentTime = newTime;
 				currentTime = newTime;
 			}
@@ -871,7 +880,7 @@
 			{#if video}
 				<div class="streamer-name">{video.filename}{#if isTl}{@const s = videoListStore.getStreamer(video.filename)}{#if s}{` ${s.firstName}`}{/if}{/if}</div>
 
-				<ProgressBar {currentTime} {duration} onseek={handleSeek} />
+				<ProgressBar {currentTime} duration={displayDuration} onseek={handleSeek} />
 
 				{#if isTl}
 					<TlControls {isMuted} ontoggleMute={toggleMute} onblock={handleBlock} />
