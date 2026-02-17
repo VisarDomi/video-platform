@@ -2,7 +2,6 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { extractAlias, extractUniqueAliases } from '$lib/utils/alias.js';
 
-	const aliases = $derived(extractUniqueAliases(videoListStore.videos));
 	const aliasCounts = $derived.by(() => {
 		const counts = new Map<string, number>();
 		for (const v of videoListStore.videos) {
@@ -11,6 +10,11 @@
 		}
 		return counts;
 	});
+	const aliases = $derived(
+		extractUniqueAliases(videoListStore.videos).sort(
+			(a, b) => (aliasCounts.get(b) || 0) - (aliasCounts.get(a) || 0)
+		)
+	);
 	const selectedAliases = $derived(videoListStore.selectedAliases);
 
 	let open = $state(false);
