@@ -2,6 +2,10 @@
 
 ## 2026-02-17
 
+- **refactor**: Rename tango API endpoints for consistency (VERON-82)
+  - **rationale**: `/api/tango-list/*` renamed to `/api/tango/*` to match fc2/sc pattern. Tango follow API moved from `/api/tango/*` to `/api/tango-follow/*` to avoid conflict.
+  - **files**: `constants.ts` (updated `TANGO_LIST_API` and `TANGO_API` paths)
+
 - **feature**: Add video count to filter aliases, sort by count descending
   - **rationale**: When filtering by alias, there was no way to see how many videos each alias has. Adds a count in parentheses next to each alias in the dropdown list and selected chips. Aliases sorted by count (most videos first) instead of alphabetically.
   - **files**: `AliasSelector.svelte` (added `aliasCounts` derived map from `extractAlias`, display count in dropdown items and chips, `.count` style, sort aliases by count descending)

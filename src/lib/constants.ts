@@ -61,9 +61,9 @@ export const TL_API = {
 } as const;
 
 export const TANGO_API = {
-	FOLLOWING: '/api/tango/following',
-	FOLLOW: '/api/tango/follow',
-	UNFOLLOW: '/api/tango/unfollow'
+	FOLLOWING: '/api/tango-follow/following',
+	FOLLOW: '/api/tango-follow/follow',
+	UNFOLLOW: '/api/tango-follow/unfollow'
 } as const;
 
 export const SC_API = {
@@ -79,9 +79,9 @@ export const FC2_API = {
 } as const;
 
 export const TANGO_LIST_API = {
-	LIST: '/api/tango-list/list',
-	ADD: '/api/tango-list/add',
-	REMOVE: '/api/tango-list/remove'
+	LIST: '/api/tango/list',
+	ADD: '/api/tango/add',
+	REMOVE: '/api/tango/remove'
 } as const;
 
 export const HLS = {
