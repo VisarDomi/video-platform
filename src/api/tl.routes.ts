@@ -120,7 +120,7 @@ router.post("/tl/download/active", async (req, res) => {
 });
 
 // --- Tango provider follow/unfollow (recorded videos) ---
-router.get("/tango/following", async (_req, res) => {
+router.get("/tango-follow/following", async (_req, res) => {
     try {
         const aliases = await followingCache.getFollowedAliases();
         res.json([...aliases]);
@@ -130,14 +130,14 @@ router.get("/tango/following", async (_req, res) => {
     }
 });
 
-router.post("/tango/follow", async (req, res) => {
+router.post("/tango-follow/follow", async (req, res) => {
     const { identifier } = req.body;
     if (!identifier) return res.status(400).json({ error: "identifier required" });
     const ok = await followingCache.resolveAndFollow(identifier);
     res.json({ success: ok });
 });
 
-router.post("/tango/unfollow", async (req, res) => {
+router.post("/tango-follow/unfollow", async (req, res) => {
     const { identifier } = req.body;
     if (!identifier) return res.status(400).json({ error: "identifier required" });
     const ok = await followingCache.resolveAndUnfollow(identifier);

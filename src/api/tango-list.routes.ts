@@ -7,7 +7,7 @@ import logger from "../core/logger.js";
 import { cleanListContent } from "../core/content-processor.js";
 
 const TANGO_URL_PREFIX = "https://tango.me/";
-const baseRouter = createTxtListRoutes({ provider: "tango-list", filePath: TANGO_FILE_PATH, urlPrefix: "" });
+const baseRouter = createTxtListRoutes({ provider: "tango", filePath: TANGO_FILE_PATH, urlPrefix: "" });
 
 const router = Router();
 
@@ -22,7 +22,7 @@ function parseLine(line: string): { accountId: string; alias: string } | null {
 }
 
 // Override list to return aliases from the new format
-router.get("/api/tango-list/list", async (_req, res) => {
+router.get("/api/tango/list", async (_req, res) => {
     try {
         const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
         const identifiers = content.split("\n")
@@ -36,7 +36,7 @@ router.get("/api/tango-list/list", async (_req, res) => {
 });
 
 // Override add with smart alias resolution
-router.post("/api/tango-list/add", async (req, res) => {
+router.post("/api/tango/add", async (req, res) => {
     const { identifier } = req.body;
     if (!identifier || typeof identifier !== "string") {
         return res.status(400).json({ error: "identifier required" });
@@ -65,13 +65,13 @@ router.post("/api/tango-list/add", async (req, res) => {
         if (existingIndex !== -1) {
             const existing = parseLine(lines[existingIndex]);
             if (existing?.alias === latestAlias) {
-                logger.info(`tango-list skip: ${accountId} ${latestAlias} (already exists)`);
+                logger.info(`tango skip: ${accountId} ${latestAlias} (already exists)`);
                 return res.json({ success: true });
             }
             // Update alias
             lines[existingIndex] = `${TANGO_URL_PREFIX}${accountId} ${latestAlias}`;
             await fs.writeFile(TANGO_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
-            logger.info(`tango-list update: ${accountId} ${existing?.alias} -> ${latestAlias}`);
+            logger.info(`tango update: ${accountId} ${existing?.alias} -> ${latestAlias}`);
             return res.json({ success: true });
         }
 
@@ -79,15 +79,59 @@ router.post("/api/tango-list/add", async (req, res) => {
         const entry = `${TANGO_URL_PREFIX}${accountId} ${latestAlias}`;
         const newContent = cleanListContent(content + "\n" + entry);
         await fs.writeFile(TANGO_FILE_PATH, newContent, "utf-8");
-        logger.info(`tango-list add: ${accountId} ${latestAlias}`);
+        logger.info(`tango add: ${accountId} ${latestAlias}`);
         res.json({ success: true });
     } catch (error) {
-        logger.error("Error adding to tango-list", { error });
+        logger.error("Error adding to tango", { error });
         res.status(500).json({ error: "Failed to update file" });
     }
 });
 
-// Use base router for everything else (HTML editor, raw content, remove, save)
+// Override save with smart alias resolution for bare aliases
+router.post("/api/tango", async (req, res) => {
+    const { content } = req.body;
+    if (typeof content !== "string") {
+        return res.status(400).send("Invalid content");
+    }
+    try {
+        const lines = content.split("\n");
+        const resolved: string[] = [];
+
+        for (const raw of lines) {
+            const trimmed = raw.trim();
+            if (!trimmed || trimmed.startsWith("#")) {
+                resolved.push(raw);
+                continue;
+            }
+            // Already in proper format
+            if (parseLine(trimmed)) {
+                resolved.push(raw);
+                continue;
+            }
+            // Bare alias — resolve to full line
+            const alias = trimmed;
+            const result = await resolveAlias(alias);
+            if (!result) {
+                logger.warn(`tango save: could not resolve "${alias}", skipping`);
+                continue;
+            }
+            const profiles = await fetchAliasesInBatch([result.accountId]);
+            const latestAlias = profiles?.[result.accountId]?.alias || alias;
+            const entry = `${TANGO_URL_PREFIX}${result.accountId} ${latestAlias}`;
+            resolved.push(entry);
+            logger.info(`tango save: resolved "${alias}" -> ${entry}`);
+        }
+
+        await fs.writeFile(TANGO_FILE_PATH, cleanListContent(resolved.join("\n")), "utf-8");
+        logger.info("tango file updated via web editor (smart save)");
+        res.sendStatus(200);
+    } catch (error) {
+        logger.error("Error saving tango file", { error });
+        res.status(500).send("Error saving file");
+    }
+});
+
+// Use base router for everything else (HTML editor, raw content, remove)
 router.use(baseRouter);
 
 export default router;
