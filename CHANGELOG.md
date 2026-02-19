@@ -2,6 +2,11 @@
 
 ## 2026-02-19
 
+- **refactor**: Remove custom pinch-to-zoom from video player
+  - **root cause**: Pinch-to-zoom had a critical bug where `wasMultiTouch` got permanently stuck `true` after lifting one finger mid-pinch, blocking all future single-finger gestures until app restart. Additional issues: stale `swipeStartX/Y` caused wrong swipe direction detection, and remaining finger after pinch triggered accidental swipes.
+  - **decision**: Removed all zoom code rather than fixing it. The complexity of managing multi-touch lifecycle in a `touch-action: none` PWA on iOS is not worth it. Swipe gestures (seek, nav, edge-back, ui) are the core UX. Touch handlers now guard with `e.touches.length !== 1` so multi-touch is simply ignored.
+  - **files**: `VideoPlayer.svelte` (removed ~100 lines: zoom state, pinch functions, pan logic, zoom transform; simplified touch handlers)
+
 - **fix**: TL provider addToList not tracking correctly against tango.txt
   - **root cause**: `loadTlStreams` early-returned before `fetchListIdentifiers('tl')` was ever called, so `listIdentifiers` stayed empty. The API mapping (`tl: TANGO_LIST_API`) was already correct — TL's +/- button adds/removes from tango.txt. The only missing piece was loading the tango list on TL init so the UI could show which streamers are already tracked.
   - **decision**: Added `fetchListIdentifiers('tl')` call inside `loadTlStreams` after videos are set.

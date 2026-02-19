@@ -1,6 +1,7 @@
 # Todo
 
 ## In Progress
+- [x] Remove custom pinch-to-zoom — was causing gesture system corruption (VERON-55)
 - [x] Fix: TL provider addToList not loading tango.txt on init (VERON-65)
 - [x] Fix: Restore ability to edit original videos for tango/fc2/sc providers
 - [x] Move add-to-list button from tango to TL provider (VERON-65)
