@@ -644,6 +644,8 @@
 	let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
 	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
 	let seekBaseTime = 0;
+	let lastMultiTouchTime = 0;
+	const MULTI_TOUCH_DEBOUNCE_MS = 100;
 
 	function handleTouchCancel() {
 		swipeType = 'none';
@@ -655,8 +657,14 @@
 		}
 	}
 
+	function isViewportZoomed() {
+		return window.visualViewport != null && window.visualViewport.scale > 1.01;
+	}
+
 	function handleTouchStart(e: TouchEvent) {
-		if (playerStore.swipeAnimating || e.touches.length !== 1) return;
+		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
+		if (playerStore.swipeAnimating || isViewportZoomed()) return;
+		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
 		swipeStartX = touch.clientX;
@@ -666,8 +674,10 @@
 	}
 
 	function handleTouchMove(e: TouchEvent) {
+		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
+		if (playerStore.swipeAnimating || isViewportZoomed()) return;
+		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
 		e.preventDefault();
-		if (playerStore.swipeAnimating || e.touches.length !== 1) return;
 
 		const touch = e.touches[0];
 		const dx = touch.clientX - swipeStartX;
@@ -797,7 +807,7 @@
 		width: 100%;
 		height: 100dvh;
 		background-color: black;
-		touch-action: none;
+		touch-action: pinch-zoom;
 		z-index: -1;
 		opacity: 0;
 		pointer-events: none;

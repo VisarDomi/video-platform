@@ -2,6 +2,10 @@
 
 ## 2026-02-19
 
+- **feature**: Enable native Safari zoom in video player
+  - **rationale**: After removing custom pinch-to-zoom, there was no zoom at all in video view. Changed `touch-action: none` to `touch-action: pinch-zoom` so Safari handles zoom natively. Added `visualViewport.scale` check to yield to native panning when zoomed — swipe gestures only active at 1x. Also moved `e.preventDefault()` below guards so native pan isn't blocked when zoomed. Added 300ms multi-touch debounce so pinch-out release doesn't trigger accidental swipes (remaining finger after first lifts).
+  - **files**: `VideoPlayer.svelte` (changed touch-action CSS, added `isViewportZoomed()` guard, `lastMultiTouchTime` debounce, reordered preventDefault)
+
 - **refactor**: Remove custom pinch-to-zoom from video player
   - **root cause**: Pinch-to-zoom had a critical bug where `wasMultiTouch` got permanently stuck `true` after lifting one finger mid-pinch, blocking all future single-finger gestures until app restart. Additional issues: stale `swipeStartX/Y` caused wrong swipe direction detection, and remaining finger after pinch triggered accidental swipes.
   - **decision**: Removed all zoom code rather than fixing it. The complexity of managing multi-touch lifecycle in a `touch-action: none` PWA on iOS is not worth it. Swipe gestures (seek, nav, edge-back, ui) are the core UX. Touch handlers now guard with `e.touches.length !== 1` so multi-touch is simply ignored.
