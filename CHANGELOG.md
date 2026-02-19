@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-02-19
+
+- **fix**: TL provider addToList not tracking correctly against tango.txt
+  - **root cause**: `loadTlStreams` early-returned before `fetchListIdentifiers('tl')` was ever called, so `listIdentifiers` stayed empty. The API mapping (`tl: TANGO_LIST_API`) was already correct — TL's +/- button adds/removes from tango.txt. The only missing piece was loading the tango list on TL init so the UI could show which streamers are already tracked.
+  - **decision**: Added `fetchListIdentifiers('tl')` call inside `loadTlStreams` after videos are set.
+  - **files**: `+page.svelte` (call `fetchListIdentifiers` in TL loading path)
+
 ## 2026-02-17
 
 - **refactor**: Rename tango API endpoints for consistency (VERON-82)

@@ -126,6 +126,10 @@
 			});
 			videoListStore.setStreamerMap(map);
 			videoListStore.setVideos(videos);
+			fetchListIdentifiers('tl').then((ids) => {
+				if (videoListStore.epoch !== epoch) return;
+				videoListStore.setListIdentifiers(ids);
+			});
 			fetchLiveFilenames().then((filenames) => {
 				if (videoListStore.epoch !== epoch) return;
 				videoListStore.setLiveFilenames(filenames);
