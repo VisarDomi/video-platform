@@ -94,7 +94,8 @@ router.post("/tl/resolve-live-url", async (req, res) => {
   }
 });
 
-// POST /tl/check-live-url — HEAD check to see if a liveUrl still serves segments
+// POST /tl/check-live-url — GET check to see if a liveUrl still serves segments
+// Uses GET (not HEAD) because tango.me HLS endpoints may reject HEAD requests
 router.post("/tl/check-live-url", async (req, res) => {
   const { liveUrl } = req.body;
   if (!liveUrl) {
@@ -107,11 +108,12 @@ router.post("/tl/check-live-url", async (req, res) => {
   }
 
   try {
-    const headRes = await fetch(liveUrl, {
-      method: "HEAD",
+    const checkRes = await fetch(liveUrl, {
       headers: { Cookie: cookie },
     });
-    res.json({ alive: headRes.ok });
+    // Consume body to avoid leaking the connection
+    await checkRes.text();
+    res.json({ alive: checkRes.ok });
   } catch {
     res.json({ alive: false });
   }
