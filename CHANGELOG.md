@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-02-21
+
+- **feature**: Change app icon to capital "V" on purple background
+  - **rationale**: Match comix-frontend icon style (capital letter on #5B5FC7 purple rounded rectangle). Replaces old scissors/film-strip icon with consistent branding across apps — "C" for comix, "V" for video.
+  - **files**: `static/favicon.ico`, `static/icon-192.png`, `static/icon-512.png`, `static/apple-touch-icon.png`, `static/apple-touch-icon-precomposed.png`, `static/apple-touch-icon-120x120.png`, `static/apple-touch-icon-120x120-precomposed.png`
+
 ## 2026-02-19
 
 - **feature**: Enable native Safari zoom in video player
