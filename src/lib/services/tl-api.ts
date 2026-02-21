@@ -132,6 +132,21 @@ export async function resolveLiveUrl(masterListUrl: string): Promise<string | nu
 	}
 }
 
+export async function checkLiveUrl(liveUrl: string): Promise<boolean> {
+	try {
+		const response = await fetch(TL_API.CHECK_LIVE_URL, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ liveUrl })
+		});
+		if (!response.ok) return false;
+		const data = await response.json();
+		return data.alive === true;
+	} catch {
+		return false;
+	}
+}
+
 // --- HLS Proxy ---
 
 const proxyUrls = new Map<string, string>();

@@ -58,7 +58,8 @@ export const TL_API = {
 	MULTI_BROADCAST: '/api/tl/multi-broadcast',
 	PROXY_START: '/api/tl/proxy/start',
 	PROXY_STOP: '/api/tl/proxy/stop',
-	RESOLVE_LIVE_URL: '/api/tl/resolve-live-url'
+	RESOLVE_LIVE_URL: '/api/tl/resolve-live-url',
+	CHECK_LIVE_URL: '/api/tl/check-live-url'
 } as const;
 
 export const TL_PAGE = {

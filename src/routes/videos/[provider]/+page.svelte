@@ -17,6 +17,7 @@
 	import {
 		fetchStreams,
 		resolveLiveUrl,
+		checkLiveUrl,
 		startDownload,
 		startProxy,
 		fetchMultiBroadcast,
@@ -175,14 +176,16 @@
 		}
 	}
 
-	// liveUrl cache principle: a masterListUrl can 404 while the resolved liveUrl
-	// still serves segments. Therefore liveUrl is NEVER overwritten with null —
-	// only a successful resolution updates it, and only stream removal (gone from
-	// API) deletes the IDB entry. See tl-cache.ts for the IDB-level guard.
+	// liveUrl is the source of truth. masterListUrl can 404 while liveUrl still
+	// serves — so a masterListUrl failure alone doesn't kill a stream. Only when
+	// the liveUrl itself 404s on tango.me is the stream dead and removed.
 	async function processStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
 		console.log('[TL:eager] processing', streamers.length, 'streamers (co-streamers + liveUrl)');
 		let coFound = 0;
 		let resolved = 0;
+		const currentlyPlaying = playerStore.currentVideo?.filename;
+		const deadAliases: string[] = [];
+		const deadStreamerIds: string[] = [];
 
 		for (const streamer of streamers) {
 			if (videoListStore.epoch !== epoch) break;
@@ -224,8 +227,15 @@
 								resolved++;
 								videoListStore.updateStreamerLiveUrl(co.alias, liveUrl);
 								await putCached(co.streamerId, co.masterListUrl, liveUrl);
+							} else {
+								// masterListUrl failed — check cached liveUrl against tango.me
+								const cached = await getCached(co.streamerId);
+								const cachedLive = cached?.liveUrl;
+								if (cachedLive && !(await checkLiveUrl(cachedLive)) && co.alias !== currentlyPlaying) {
+									deadAliases.push(co.alias);
+									deadStreamerIds.push(co.streamerId);
+								}
 							}
-							// null = masterListUrl 404, do NOT clear cached liveUrl
 							await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 						}
 					}
@@ -242,9 +252,28 @@
 				resolved++;
 				videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
 				await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+			} else {
+				// masterListUrl failed — check cached liveUrl against tango.me
+				const cached = await getCached(streamer.streamerId);
+				const cachedLive = cached?.liveUrl ?? videoListStore.getStreamer(streamer.alias)?.liveUrl;
+				if (cachedLive && !(await checkLiveUrl(cachedLive)) && streamer.alias !== currentlyPlaying) {
+					deadAliases.push(streamer.alias);
+					deadStreamerIds.push(streamer.streamerId);
+				}
+				// no cached liveUrl and masterList failed = nothing to show, also dead
+				if (!cachedLive && streamer.alias !== currentlyPlaying) {
+					deadAliases.push(streamer.alias);
+					deadStreamerIds.push(streamer.streamerId);
+				}
 			}
-			// null = masterListUrl 404, do NOT clear cached liveUrl
 			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+		}
+
+		// Remove streams whose liveUrl confirmed 404 on tango.me
+		if (deadAliases.length > 0 && videoListStore.epoch === epoch) {
+			console.log('[TL:eager] removing', deadAliases.length, '404 streams:', deadAliases.join(', '));
+			videoListStore.removeStreamers(deadAliases);
+			for (const id of deadStreamerIds) void removeCached(id, true);
 		}
 
 		console.log(
@@ -304,10 +333,17 @@
 					toProcess.push(streamer);
 					continue;
 				}
-				// Same alias + same masterListUrl — check IDB cache for liveUrl
+				// Same alias + same masterListUrl — verify cached liveUrl is still alive
 				const cached = await getCached(streamer.streamerId);
 				if (cached && cached.masterListUrl === streamer.masterListUrl && cached.liveUrl) {
-					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
+					const alive = await checkLiveUrl(cached.liveUrl);
+					if (alive) {
+						videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
+					} else if (streamer.alias !== currentlyPlaying) {
+						console.log('[TL:soft] cached liveUrl 404:', streamer.alias);
+						videoListStore.removeStreamers([streamer.alias]);
+						void removeCached(streamer.streamerId, true);
+					}
 				} else {
 					toProcess.push(streamer);
 				}

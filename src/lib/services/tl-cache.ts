@@ -3,13 +3,13 @@ import type { TlStreamer } from './tl-api.js';
 
 // --- IndexedDB: tl-cache / streamers ---
 //
-// IMPORTANT: liveUrl is the most valuable cached data. A masterListUrl can 404
-// while the cached liveUrl still serves segments. Therefore:
-//   - NEVER overwrite a cached liveUrl with null — only a successful resolution
-//     may update it.
-//   - removeCached / sweepOrphans only delete entries older than 24h — guards
-//     against aggressive removal of a liveUrl that's still serving segments
-//     even though the stream disappeared from the API momentarily.
+// liveUrl is the source of truth for stream liveness (checked via HEAD against
+// tango.me). masterListUrl can 404 while liveUrl still serves segments.
+//   - putCached: never overwrites a cached liveUrl with null.
+//   - removeCached(id, force): force=true bypasses the 24h guard (used when
+//     liveUrl confirmed 404 on tango.me). Default keeps the 24h guard for
+//     streams that merely disappeared from the API response.
+//   - sweepOrphans: same 24h guard for orphaned entries.
 
 interface CachedStreamer {
 	streamerId: string;
@@ -84,19 +84,21 @@ export async function putCached(
 	}
 }
 
-export async function removeCached(streamerId: string): Promise<void> {
+export async function removeCached(streamerId: string, force = false): Promise<void> {
 	try {
 		const db = await openDb();
-		// Only delete entries older than 24h — the liveUrl may still serve
-		// segments even if the stream disappeared from the API momentarily
-		const tx = db.transaction(STORE_NAME, 'readonly');
-		const existing = await new Promise<CachedStreamer | undefined>((resolve) => {
-			const req = tx.objectStore(STORE_NAME).get(streamerId);
-			req.onsuccess = () => resolve(req.result ?? undefined);
-			req.onerror = () => resolve(undefined);
-		});
-		if (!existing) return;
-		if (Date.now() - (existing.cachedAt ?? 0) < MAX_AGE_MS) return;
+		if (!force) {
+			// Only delete entries older than 24h — the liveUrl may still serve
+			// segments even if the stream disappeared from the API momentarily
+			const tx = db.transaction(STORE_NAME, 'readonly');
+			const existing = await new Promise<CachedStreamer | undefined>((resolve) => {
+				const req = tx.objectStore(STORE_NAME).get(streamerId);
+				req.onsuccess = () => resolve(req.result ?? undefined);
+				req.onerror = () => resolve(undefined);
+			});
+			if (!existing) return;
+			if (Date.now() - (existing.cachedAt ?? 0) < MAX_AGE_MS) return;
+		}
 		const deleteTx = db.transaction(STORE_NAME, 'readwrite');
 		deleteTx.objectStore(STORE_NAME).delete(streamerId);
 	} catch {

@@ -2,6 +2,11 @@
 
 ## 2026-02-21
 
+- **fix**: TL provider removes 404 streams instead of black screen
+  - **root cause**: When a stream died, the masterPlaylistUrl would 404 but the code preserved the stale cached liveUrl (assuming it might still serve). Nobody checked the **liveUrl** itself. The liveUrl is the source of truth — only its 404 confirms a dead stream.
+  - **decision**: (1) New backend `POST /tl/check-live-url` does a HEAD against the liveUrl on tango.me. (2) `processStreamersEagerly`: when masterListUrl fails, checks cached liveUrl — if liveUrl also 404s, removes stream. If liveUrl alive, keeps it. (3) `softRefreshTlStreams`: verifies cached liveUrls are still alive before restoring. (4) `removeCached` gains `force` param to bypass 24h guard for confirmed-dead liveUrls.
+  - **files**: `tl-proxy.routes.ts` (new check-live-url endpoint), `constants.ts` (TL_API.CHECK_LIVE_URL), `tl-api.ts` (checkLiveUrl fn), `tl-cache.ts` (removeCached force param), `+page.svelte` (liveUrl 404 checks in eager + soft refresh)
+
 - **feature**: TL provider soft refresh + IndexedDB liveUrl cache
   - **rationale**: Every navigation to TL wiped all state and did a full API reload, causing a flash of "Loading..." and losing scroll position, co-streamer positions, and resolved liveUrls. Now saves an in-memory snapshot when leaving TL and restores it instantly on return. Background soft refresh removes dead streams, adds new ones, and uses IndexedDB-cached liveUrls (keyed by streamerId) to avoid re-resolving unchanged streams. Initial load also resolves liveUrls eagerly to warm the cache.
   - **decisions**: (1) In-memory snapshot for instant restore — survives provider switches within session, not page reloads. (2) IndexedDB for liveUrl persistence — keyed by streamerId with masterListUrl for cache invalidation on stream restarts. (3) Co-streamer + liveUrl resolution merged into single sequential `processStreamersEagerly` pass: for each streamer, check co-streamers first, resolve liveUrl for main + any co-streamers, then next. 200ms delay between each resolution. (4) New lightweight `POST /tl/resolve-live-url` backend endpoint reuses existing `resolveLiveUrl()` without creating proxy sessions. (5) Hardcoded TL page constants extracted to `TL_PAGE` config in constants.ts.
