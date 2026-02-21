@@ -175,6 +175,10 @@
 		}
 	}
 
+	// liveUrl cache principle: a masterListUrl can 404 while the resolved liveUrl
+	// still serves segments. Therefore liveUrl is NEVER overwritten with null —
+	// only a successful resolution updates it, and only stream removal (gone from
+	// API) deletes the IDB entry. See tl-cache.ts for the IDB-level guard.
 	async function processStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
 		console.log('[TL:eager] processing', streamers.length, 'streamers (co-streamers + liveUrl)');
 		let coFound = 0;
@@ -214,17 +218,14 @@
 						// Resolve liveUrls for co-streamers
 						for (const co of withParent) {
 							if (videoListStore.epoch !== epoch) break;
-							try {
-								const liveUrl = await resolveLiveUrl(co.masterListUrl);
-								if (videoListStore.epoch !== epoch) break;
-								if (liveUrl) {
-									resolved++;
-									videoListStore.updateStreamerLiveUrl(co.alias, liveUrl);
-								}
+							const liveUrl = await resolveLiveUrl(co.masterListUrl);
+							if (videoListStore.epoch !== epoch) break;
+							if (liveUrl) {
+								resolved++;
+								videoListStore.updateStreamerLiveUrl(co.alias, liveUrl);
 								await putCached(co.streamerId, co.masterListUrl, liveUrl);
-							} catch {
-								// continue
 							}
+							// null = masterListUrl 404, do NOT clear cached liveUrl
 							await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 						}
 					}
@@ -235,17 +236,14 @@
 
 			// 2. Resolve liveUrl for main streamer
 			if (videoListStore.epoch !== epoch) break;
-			try {
-				const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
-				if (videoListStore.epoch !== epoch) break;
-				if (liveUrl) {
-					resolved++;
-					videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-				}
+			const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+			if (videoListStore.epoch !== epoch) break;
+			if (liveUrl) {
+				resolved++;
+				videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
 				await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
-			} catch {
-				// continue
 			}
+			// null = masterListUrl 404, do NOT clear cached liveUrl
 			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 		}
 

@@ -2,6 +2,13 @@ import type { Video } from '../types.js';
 import type { TlStreamer } from './tl-api.js';
 
 // --- IndexedDB: tl-cache / streamers ---
+//
+// IMPORTANT: liveUrl is the most valuable cached data. A masterListUrl can 404
+// while the cached liveUrl still serves segments. Therefore:
+//   - NEVER overwrite a cached liveUrl with null — only a successful resolution
+//     may update it, and only removal (stream gone from API) may delete the entry.
+//   - Only removeCached / sweepOrphans delete entries (triggered when stream
+//     disappears from the API response).
 
 interface CachedStreamer {
 	streamerId: string;
@@ -55,6 +62,17 @@ export async function putCached(
 ): Promise<void> {
 	try {
 		const db = await openDb();
+		// Never overwrite a cached liveUrl with null — masterListUrl can 404
+		// while the cached liveUrl still serves segments
+		if (!liveUrl) {
+			const tx = db.transaction(STORE_NAME, 'readonly');
+			const existing = await new Promise<CachedStreamer | undefined>((resolve) => {
+				const req = tx.objectStore(STORE_NAME).get(streamerId);
+				req.onsuccess = () => resolve(req.result ?? undefined);
+				req.onerror = () => resolve(undefined);
+			});
+			if (existing?.liveUrl) return; // keep existing liveUrl
+		}
 		const tx = db.transaction(STORE_NAME, 'readwrite');
 		tx.objectStore(STORE_NAME).put({ streamerId, masterListUrl, liveUrl });
 	} catch {
