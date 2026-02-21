@@ -51,9 +51,6 @@ class VideoListStore {
 		this.streamerMap = nextMap;
 	}
 
-	// Callback set by +page.svelte for liveUrl 404 removal
-	onLiveUrlDead: ((alias: string) => void) | null = null;
-
 	updateStreamerLiveUrl(alias: string, liveUrl: string) {
 		const streamer = this.streamerMap.get(alias);
 		if (!streamer) return;

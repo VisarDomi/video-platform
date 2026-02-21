@@ -32,37 +32,52 @@ From **m** we resolve:
    - For each unique co-streamer: add to list after parent, resolve its **l**
 4. Continue until last stream processed
 
-### 2. Video Playback (organic liveUrl check)
+### 2. Video Playback (HLS error handling)
 
 When a video is opened/navigated to:
 1. Proxy starts → backend fetches **l** from tango.me to serve the m3u8
 2. If tango.me returns **200** → segments are served, video plays
-3. If tango.me returns **404** → stream is dead:
-   - Backend proxy returns 404 status + `X-TL-LiveUrl-Dead: true` header
-   - Frontend detects this via HLS.js error handler
-   - Stream is removed from: video list, streamerMap (memory), IndexedDB cache
-4. Same logic applies when navigating between videos
+3. If tango.me returns **404** → HLS.js gets a fatal 404 error:
+   - For TL: HLS instance is destroyed. The processing queue handles removal.
+   - For non-TL providers: stream is immediately removed from the video list.
+4. VideoPlayer watches the video list reactively — when the queue removes a stream that is currently playing, the player automatically navigates to the next available video.
 
-### 3. 30-Second Refresh Loop
+### 3. Processing Queue (continuous loop, replaces 30s timer)
 
-While on TL provider, every 30 seconds:
+The queue runs continuously while on TL provider. Each cycle:
+
+**Phase 1 — Endpoint fetch + process new:**
 1. Hit endpoint → get fresh list of `(s, m)` pairs
 2. For each streamer in fresh list:
    - If **duplicate** (same `s` + same `m` already in streamerMap) → skip
-   - If **new** (different `s`, or same `s` + different `m`) → add to list, queue for processing
-3. Process all new/changed streamers through the same queue as first load (liveUrl + co-streamers)
+   - If **new** (different `s`, or same `s` + different `m`) → add to list, process
+3. Process all new/changed streamers: resolve liveUrl + discover co-streamers
+4. Fire-and-forget: refresh liveFilenames, listIdentifiers, sweep orphans
+
+**Phase 2 — Reprocess existing:**
+1. For each existing streamer NOT just processed in Phase 1:
+2. Check **cached liveUrl** against tango.me (`checkLiveUrl`):
+   - If alive → done, stream stays
+   - If dead → try resolving new liveUrl from **masterListUrl** (`resolveLiveUrl`)
+3. If new liveUrl obtained, check **it** against tango.me:
+   - If alive → update cache + store, stream stays
+   - If dead → **both confirmed 404** → remove from list, memory, IndexedDB
+4. If `resolveLiveUrl` fails (null) → can't confirm both dead → keep for 24h
+5. If no cached liveUrl exists → try to resolve from masterListUrl (not a removal candidate)
+
+**Timing:** minimum `REFRESH_GATE_MS` (30s) between endpoint fetches. Polite `LIVE_URL_RESOLVE_DELAY_MS` (200ms) between each item.
 
 ### 4. Return to TL (after provider switch)
 
 1. Restore in-memory snapshot (instant visual restore)
-2. 30s interval continues — next tick picks up any changes
+2. Queue starts — next cycle picks up any changes
 
 ## IndexedDB Cache Rules
 
 Simple:
 - **Store**: on successful liveUrl resolution → `putCached(streamerId, masterListUrl, liveUrl)`
 - **Never overwrite** a cached liveUrl with null (masterListUrl can 404 while liveUrl still serves)
-- **Remove on 404**: when liveUrl confirmed dead on tango.me → `removeCached(streamerId, force=true)`
+- **Remove on confirmed dead**: when BOTH cached liveUrl AND endpoint liveUrl are 404 on tango.me → `removeCached(streamerId, force=true)`
 - **Remove on 24h**: automatic sweep removes entries older than 24 hours
 - That's it.
 
@@ -71,4 +86,5 @@ Simple:
 - masterListUrl returning 404 (the cached liveUrl may still serve segments)
 - Stream disappearing from the API response momentarily
 - Any transient network error
-- Only a **true HTTP 404 from tango.me on the liveUrl** removes a stream
+- `resolveLiveUrl` returning null (can't confirm dead)
+- Only when **BOTH** cached liveUrl AND endpoint liveUrl are confirmed 404 on tango.me

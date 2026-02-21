@@ -12,5 +12,6 @@
 - [x] Rename tango endpoints: /api/tango for list, /api/tango-follow for follow (VERON-82)
 - [x] TL provider: Soft refresh + IndexedDB liveUrl cache
 - [x] Refactor: TL provider — liveUrl source of truth, 30s refresh, organic 404 removal
+- [x] Refactor: TL provider — replace 30s timer with continuous processing queue
 
 ## Backlog

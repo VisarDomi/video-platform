@@ -17,6 +17,7 @@
 	import {
 		fetchStreams,
 		resolveLiveUrl,
+		checkLiveUrl,
 		startDownload,
 		startProxy,
 		fetchMultiBroadcast,
@@ -37,8 +38,7 @@
 
 	const { ITEM_HEIGHT, SCROLL_BUFFER, MIN_LIST_ITEMS, REFRESH_GATE_MS, LIVE_URL_RESOLVE_DELAY_MS } = TL_PAGE;
 
-	let isRefreshing = false;
-	let tlRefreshInterval: ReturnType<typeof setInterval> | null = null;
+	let queueRunning = false;
 	let lastScrollY = 0;
 	let searchHidden = $state(false);
 	let scrollY = $state(0);
@@ -72,11 +72,10 @@
 			return;
 		}
 
-		// Save TL snapshot before leaving, stop 30s refresh, clear callback
+		// Save TL snapshot before leaving, stop queue
 		if (previousProvider === 'tl' && p !== 'tl') {
 			saveTlSnapshot(videoListStore);
-			stopTlRefreshInterval();
-			videoListStore.onLiveUrlDead = null;
+			queueRunning = false;
 		}
 
 		stopSync();
@@ -88,11 +87,10 @@
 			videoListStore.initializeSoft('tl');
 			videoListStore.clearAliases();
 			playerStore.initialize(p);
-			videoListStore.onLiveUrlDead = handleLiveUrlDead;
 			const restored = restoreTlSnapshot(videoListStore);
 			if (restored) {
-				console.log('[TL] restored snapshot, starting 30s refresh');
-				startTlRefreshInterval();
+				console.log('[TL] restored snapshot, starting queue');
+				void startTlQueue(videoListStore.epoch);
 			} else {
 				videoListStore.initialize(p);
 				loadVideos(p);
@@ -101,7 +99,6 @@
 			videoListStore.initialize(p);
 			videoListStore.clearAliases();
 			playerStore.initialize(p);
-			if (p === 'tl') videoListStore.onLiveUrlDead = handleLiveUrlDead;
 			loadVideos(p);
 		}
 
@@ -171,8 +168,7 @@
 				videoListStore.setLiveFilenames(filenames);
 				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
 			});
-			void processStreamersEagerly(epoch, allStreamers);
-			startTlRefreshInterval();
+			void startTlQueue(epoch, allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
 			if (videoListStore.epoch !== epoch) return;
@@ -180,146 +176,93 @@
 		}
 	}
 
-	// Resolve liveUrl for each streamer, then check co-streamers.
-	// On masterListUrl failure, fall back to IDB cached liveUrl.
-	// No removal here — only a 404 on the liveUrl during video playback removes.
-	async function processStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
-		console.log('[TL:eager] processing', streamers.length, 'streamers');
-		let coFound = 0;
-		let resolved = 0;
+	// --- TL Processing Queue ---
+	// Replaces the 30s refresh timer. Continuous loop:
+	// 1. Fetch endpoint → process new/changed streamers (liveUrl + co-streamers)
+	// 2. Reprocess existing streamers (check cached liveUrl against tango.me, remove dead)
+	// 3. Repeat with minimum REFRESH_GATE_MS between endpoint fetches
+	//
+	// Source of truth for removal: liveUrl checked against tango.me.
+	// Only remove when BOTH cached liveUrl AND endpoint liveUrl are confirmed 404.
 
-		for (const streamer of streamers) {
-			if (videoListStore.epoch !== epoch) break;
+	async function startTlQueue(epoch: number, initialStreamers?: TlStreamer[]) {
+		if (queueRunning) return;
+		queueRunning = true;
+		console.log('[TL:queue] started');
 
-			// 1. Resolve liveUrl from masterListUrl
-			const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
-			if (videoListStore.epoch !== epoch) break;
-			if (liveUrl) {
-				resolved++;
-				videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-				await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
-			} else {
-				// masterListUrl failed — fall back to IDB cached liveUrl
-				const cached = await getCached(streamer.streamerId);
-				if (cached?.liveUrl) {
-					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
-				}
-				// no cached liveUrl = stream stays in list without liveUrl (unplayable
-				// until next 30s refresh resolves it)
+		// Process initial streamers from first load (resolve liveUrl + co-streamers)
+		if (initialStreamers && initialStreamers.length > 0) {
+			for (const streamer of initialStreamers) {
+				if (!queueRunning || videoListStore.epoch !== epoch) break;
+				await processNewStreamer(epoch, streamer);
+				await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 			}
-
-			// 2. Co-streamer check
-			if (streamer.streamId && videoListStore.markStreamIdProcessed(streamer.streamId)) {
-				try {
-					const coStreamers = await fetchMultiBroadcast(streamer.streamId);
-					if (videoListStore.epoch !== epoch) break;
-					if (coStreamers.length > 0) {
-						coFound += coStreamers.length;
-						console.log(
-							'[TL:eager]',
-							streamer.alias,
-							'->',
-							coStreamers.length,
-							'co-streamers:',
-							coStreamers.map((s) => s.alias).join(', ')
-						);
-						const withParent = coStreamers.map((s) => ({
-							...s,
-							parentAlias: streamer.alias
-						}));
-						const newVideos = withParent.map((s) => ({
-							filename: s.alias,
-							type: VIDEO_TYPE.ORIGINAL,
-							duration: 0,
-							size: 0,
-							isLive: true
-						}));
-						videoListStore.insertVideosAfter(streamer.alias, newVideos, withParent);
-
-						// Resolve liveUrl for each co-streamer
-						for (const co of withParent) {
-							if (videoListStore.epoch !== epoch) break;
-							const coLiveUrl = await resolveLiveUrl(co.masterListUrl);
-							if (videoListStore.epoch !== epoch) break;
-							if (coLiveUrl) {
-								resolved++;
-								videoListStore.updateStreamerLiveUrl(co.alias, coLiveUrl);
-								await putCached(co.streamerId, co.masterListUrl, coLiveUrl);
-							} else {
-								const cached = await getCached(co.streamerId);
-								if (cached?.liveUrl) {
-									videoListStore.updateStreamerLiveUrl(co.alias, cached.liveUrl);
-								}
-							}
-							await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
-						}
-					}
-				} catch (e) {
-					console.warn('[TL:eager] co-streamer fetch failed for', streamer.alias, e);
-				}
-			}
-
-			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+			console.log('[TL:queue] initial processing done');
 		}
 
-		console.log('[TL:eager] done.', coFound, 'co-streamers,', resolved, 'liveUrls resolved');
-	}
+		// Queue loop
+		while (queueRunning && videoListStore.epoch === epoch) {
+			const cycleStart = Date.now();
 
-	// --- 30s refresh interval ---
-	// Duplicate = same streamerId + same masterListUrl → skip (stays in position).
-	// New = different streamerId, or same streamerId + different masterListUrl → process.
+			// Phase 1: Fetch endpoint + process new/changed
+			const processedAliases = await fetchAndProcessNew(epoch);
+			if (!queueRunning || videoListStore.epoch !== epoch) break;
 
-	function startTlRefreshInterval() {
-		stopTlRefreshInterval();
-		tlRefreshInterval = setInterval(() => void refreshTlStreams(), REFRESH_GATE_MS);
-	}
+			// Phase 2: Reprocess existing streamers not just processed
+			await reprocessExisting(epoch, processedAliases);
+			if (!queueRunning || videoListStore.epoch !== epoch) break;
 
-	function stopTlRefreshInterval() {
-		if (tlRefreshInterval) {
-			clearInterval(tlRefreshInterval);
-			tlRefreshInterval = null;
+			// Ensure minimum cycle time before next endpoint fetch
+			const elapsed = Date.now() - cycleStart;
+			if (elapsed < REFRESH_GATE_MS) {
+				await new Promise((r) => setTimeout(r, REFRESH_GATE_MS - elapsed));
+			}
 		}
+
+		queueRunning = false;
+		console.log('[TL:queue] stopped');
 	}
 
-	async function refreshTlStreams() {
-		if (isRefreshing) return;
-		isRefreshing = true;
-		const epoch = videoListStore.epoch;
-		console.log('[TL:30s] refreshing...');
+	async function fetchAndProcessNew(epoch: number): Promise<Set<string>> {
+		const processedAliases = new Set<string>();
 
 		try {
+			console.log('[TL:queue] fetching endpoint...');
 			const { following, recommended } = await fetchStreams();
-			if (videoListStore.epoch !== epoch) return;
+			if (!queueRunning || videoListStore.epoch !== epoch) return processedAliases;
 			const freshStreamers = [...following, ...recommended];
 
 			const toAppend: TlStreamer[] = [];
 			const toProcess: TlStreamer[] = [];
 
 			for (const streamer of freshStreamers) {
-				if (videoListStore.epoch !== epoch) return;
 				const existing = videoListStore.getStreamer(streamer.alias);
 
 				if (!existing) {
-					// Different streamerId — new stream
 					toAppend.push(streamer);
 					toProcess.push(streamer);
-					continue;
+				} else if (
+					existing.streamerId === streamer.streamerId &&
+					existing.masterListUrl === streamer.masterListUrl
+				) {
+					// Duplicate → skip, mark as processed
+					processedAliases.add(streamer.alias);
+				} else {
+					// Restarted stream → remove old, add new
+					console.log('[TL:queue] restarted stream:', streamer.alias);
+					videoListStore.removeStreamers([streamer.alias]);
+					toAppend.push(streamer);
+					toProcess.push(streamer);
 				}
-
-				if (existing.streamerId === streamer.streamerId && existing.masterListUrl === streamer.masterListUrl) {
-					// Duplicate: same s + same m → skip
-					continue;
-				}
-
-				// Same s + different m = restarted stream → process as new
-				console.log('[TL:30s] restarted stream:', streamer.alias);
-				videoListStore.removeStreamers([streamer.alias]);
-				toAppend.push(streamer);
-				toProcess.push(streamer);
 			}
 
 			if (toAppend.length > 0) {
-				console.log('[TL:30s] appending', toAppend.length, ':', toAppend.map((s) => s.alias).join(', '));
+				console.log(
+					'[TL:queue] appending',
+					toAppend.length,
+					':',
+					toAppend.map((s) => s.alias).join(', ')
+				);
 				const nextMap = new Map(videoListStore.streamerMap);
 				const newVideos = toAppend.map((s) => {
 					nextMap.set(s.alias, s);
@@ -335,17 +278,15 @@
 				videoListStore.appendVideos(newVideos);
 			}
 
-			if (toProcess.length > 0) {
-				void processStreamersEagerly(epoch, toProcess);
+			// Process new streamers (resolve liveUrl + co-streamers)
+			for (const streamer of toProcess) {
+				if (!queueRunning || videoListStore.epoch !== epoch) break;
+				await processNewStreamer(epoch, streamer);
+				processedAliases.add(streamer.alias);
+				await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 			}
 
-			// Sweep IDB entries older than 24h
-			const activeIds = new Set(
-				[...videoListStore.streamerMap.values()].map((s) => s.streamerId)
-			);
-			void sweepOrphans(activeIds);
-
-			// Fire-and-forget: refresh liveFilenames + listIdentifiers
+			// Fire-and-forget: refresh liveFilenames + listIdentifiers + sweep
 			fetchLiveFilenames().then((filenames) => {
 				if (videoListStore.epoch !== epoch) return;
 				videoListStore.setLiveFilenames(filenames);
@@ -354,20 +295,141 @@
 				if (videoListStore.epoch !== epoch) return;
 				videoListStore.setListIdentifiers(ids);
 			});
+			const activeIds = new Set(
+				[...videoListStore.streamerMap.values()].map((s) => s.streamerId)
+			);
+			void sweepOrphans(activeIds);
 		} catch (e) {
-			console.error('[TL:30s] refresh failed', e);
-		} finally {
-			isRefreshing = false;
+			console.error('[TL:queue] endpoint fetch failed', e);
+		}
+
+		return processedAliases;
+	}
+
+	async function reprocessExisting(epoch: number, skipAliases: Set<string>) {
+		const existing = [...videoListStore.streamerMap.keys()].filter(
+			(a) => !skipAliases.has(a)
+		);
+		if (existing.length === 0) return;
+		console.log('[TL:queue] reprocessing', existing.length, 'existing streamers');
+
+		for (const alias of existing) {
+			if (!queueRunning || videoListStore.epoch !== epoch) break;
+			const streamer = videoListStore.getStreamer(alias);
+			if (!streamer) continue;
+			await reprocessExistingStreamer(epoch, streamer);
+			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 		}
 	}
 
-	// --- liveUrl 404 on tango.me → remove stream ---
-	// Called by VideoPlayer when the proxy signals X-TL-LiveUrl-Dead: true
-	function handleLiveUrlDead(alias: string) {
-		const streamer = videoListStore.getStreamer(alias);
-		console.log('[TL] liveUrl dead on tango.me, removing:', alias);
-		videoListStore.removeStreamers([alias]);
-		if (streamer) void removeCached(streamer.streamerId, true);
+	// Process a new streamer: resolve liveUrl from masterListUrl, discover co-streamers
+	async function processNewStreamer(epoch: number, streamer: TlStreamer) {
+		// 1. Resolve liveUrl from masterListUrl
+		const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+		if (!queueRunning || videoListStore.epoch !== epoch) return;
+		if (liveUrl) {
+			videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+			await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+		} else {
+			// masterListUrl failed — fall back to IDB cached liveUrl
+			const cached = await getCached(streamer.streamerId);
+			if (cached?.liveUrl) {
+				videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
+			}
+		}
+
+		// 2. Co-streamer check
+		if (streamer.streamId && videoListStore.markStreamIdProcessed(streamer.streamId)) {
+			try {
+				const coStreamers = await fetchMultiBroadcast(streamer.streamId);
+				if (!queueRunning || videoListStore.epoch !== epoch) return;
+				if (coStreamers.length > 0) {
+					console.log(
+						'[TL:queue]',
+						streamer.alias,
+						'->',
+						coStreamers.length,
+						'co-streamers:',
+						coStreamers.map((s) => s.alias).join(', ')
+					);
+					const withParent = coStreamers.map((s) => ({
+						...s,
+						parentAlias: streamer.alias
+					}));
+					const newVideos = withParent.map((s) => ({
+						filename: s.alias,
+						type: VIDEO_TYPE.ORIGINAL,
+						duration: 0,
+						size: 0,
+						isLive: true
+					}));
+					videoListStore.insertVideosAfter(streamer.alias, newVideos, withParent);
+
+					// Resolve liveUrl for each co-streamer
+					for (const co of withParent) {
+						if (!queueRunning || videoListStore.epoch !== epoch) break;
+						const coLiveUrl = await resolveLiveUrl(co.masterListUrl);
+						if (!queueRunning || videoListStore.epoch !== epoch) break;
+						if (coLiveUrl) {
+							videoListStore.updateStreamerLiveUrl(co.alias, coLiveUrl);
+							await putCached(co.streamerId, co.masterListUrl, coLiveUrl);
+						} else {
+							const cached = await getCached(co.streamerId);
+							if (cached?.liveUrl) {
+								videoListStore.updateStreamerLiveUrl(co.alias, cached.liveUrl);
+							}
+						}
+						await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+					}
+				}
+			} catch (e) {
+				console.warn('[TL:queue] co-streamer fetch failed for', streamer.alias, e);
+			}
+		}
+	}
+
+	// Reprocess an existing streamer: check if liveUrl is still alive on tango.me
+	// Source of truth: cached liveUrl → endpoint liveUrl (from masterListUrl)
+	// Remove only when BOTH confirmed dead (404 on tango.me)
+	async function reprocessExistingStreamer(epoch: number, streamer: TlStreamer) {
+		const cachedLiveUrl = streamer.liveUrl;
+
+		if (cachedLiveUrl) {
+			// Step 1: Check cached liveUrl against tango.me
+			const alive = await checkLiveUrl(cachedLiveUrl);
+			if (!queueRunning || videoListStore.epoch !== epoch) return;
+			if (alive) return; // still good
+
+			// Cached liveUrl is dead — try resolving new from endpoint
+			console.log('[TL:queue] cached liveUrl dead for', streamer.alias, '— trying endpoint');
+			const newLiveUrl = await resolveLiveUrl(streamer.masterListUrl);
+			if (!queueRunning || videoListStore.epoch !== epoch) return;
+
+			if (newLiveUrl) {
+				const newAlive = await checkLiveUrl(newLiveUrl);
+				if (!queueRunning || videoListStore.epoch !== epoch) return;
+				if (newAlive) {
+					// New liveUrl is alive — update
+					videoListStore.updateStreamerLiveUrl(streamer.alias, newLiveUrl);
+					await putCached(streamer.streamerId, streamer.masterListUrl, newLiveUrl);
+					return;
+				}
+				// Both confirmed dead → remove
+				console.log('[TL:queue] both liveUrls dead, removing:', streamer.alias);
+				videoListStore.removeStreamers([streamer.alias]);
+				void removeCached(streamer.streamerId, true);
+			}
+			// resolveLiveUrl failed (null) — can't confirm both dead, keep for 24h
+		} else {
+			// No liveUrl yet — try to resolve
+			const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+			if (!queueRunning || videoListStore.epoch !== epoch) return;
+			if (liveUrl) {
+				videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+				await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+			}
+			// Still can't resolve — keep (not confirmed dead)
+		}
 	}
 
 	function scrollToActiveVideo() {

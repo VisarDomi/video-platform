@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-02-22
+
+- **refactor**: TL provider — replace 30s refresh timer with continuous processing queue
+  - **root cause**: After PWA returns from background, old streams show black because (1) no visibility change detection, (2) `loadStream` early-returns on same filename (stale HLS persists), (3) passive player 404s silently swallowed. The 30s timer only added new streams but never re-checked existing ones for liveness.
+  - **design**: (1) Continuous queue loop replaces 30s `setInterval`: fetch endpoint → process new → reprocess existing → repeat. (2) Reprocessing checks cached liveUrl against tango.me first (source of truth). If dead, tries resolving new liveUrl from masterListUrl + checks that. Only removes when BOTH confirmed 404. (3) VideoPlayer no longer handles TL removal — just destroys HLS on 404. Queue is the single authority. (4) New `$effect` in VideoPlayer watches if current video is removed from list → navigates to next. (5) `onLiveUrlDead` callback removed — no longer needed.
+  - **files**: `+page.svelte` (queue: `startTlQueue`, `fetchAndProcessNew`, `reprocessExisting`, `processNewStreamer`, `reprocessExistingStreamer`; removed: `processStreamersEagerly`, `refreshTlStreams`, `handleLiveUrlDead`, timer functions), `VideoPlayer.svelte` (simplified HLS error handler for TL — just destroy; removed `checkLiveUrl` import; added video-removed-from-list effect), `videoList.svelte.ts` (removed `onLiveUrlDead`), `TL_PROVIDER.md` (updated architecture docs)
+
 ## 2026-02-21
 
 - **refactor**: TL provider rewrite — liveUrl as source of truth, 30s refresh, organic 404 removal
