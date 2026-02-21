@@ -17,7 +17,8 @@
 		startProxy,
 		getProxyUrl,
 		syncProxySessions,
-		blockStreamer
+		blockStreamer,
+		checkLiveUrl
 	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
@@ -342,10 +343,22 @@
 							hlsInstances.delete(el);
 							return;
 						}
-						// TL streams may 404 briefly while download starts — retry
 						if (videoListStore.selectedProvider === 'tl') {
-							console.log('[TL:hls] 404 on active player, retrying:', v.filename);
-							hls.startLoad();
+							// Check the liveUrl against tango.me — true 404 = dead
+							const streamer = videoListStore.getStreamer(v.filename);
+							const liveUrl = streamer?.liveUrl;
+							if (liveUrl) {
+								checkLiveUrl(liveUrl).then((alive) => {
+									if (!alive && videoListStore.onLiveUrlDead) {
+										videoListStore.onLiveUrlDead(v.filename);
+										handleVideoGone();
+									} else {
+										hls.startLoad();
+									}
+								});
+							} else {
+								hls.startLoad();
+							}
 							return;
 						}
 						videoListStore.removeVideo(v.filename);
@@ -405,9 +418,18 @@
 			if (mediaError) {
 				console.warn('Native HLS error', mediaError.code, mediaError.message);
 				if (!isActivePlayer) return;
-				// TL streams may error briefly while download starts — don't remove
 				if (videoListStore.selectedProvider === 'tl') {
-					console.log('[TL:native] error on active player, ignoring:', v.filename);
+					// Check liveUrl against tango.me — true 404 = dead
+					const streamer = videoListStore.getStreamer(v.filename);
+					const liveUrl = streamer?.liveUrl;
+					if (liveUrl) {
+						checkLiveUrl(liveUrl).then((alive) => {
+							if (!alive && videoListStore.onLiveUrlDead) {
+								videoListStore.onLiveUrlDead(v.filename);
+								handleVideoGone();
+							}
+						});
+					}
 					return;
 				}
 				videoListStore.removeVideo(v.filename);

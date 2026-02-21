@@ -2,10 +2,10 @@
 
 ## 2026-02-21
 
-- **fix**: TL 404 streams — regression fix for position-loss on followed streams
-  - **root cause**: Previous fix checked liveUrl via HEAD during soft refresh, but tango.me HLS endpoints reject HEAD → every cached stream was falsely marked dead, removed from top of list, then re-added as "new" in the middle on next refresh.
-  - **decision**: (1) Backend uses GET (not HEAD) for liveUrl check — HLS endpoints don't support HEAD. (2) Soft refresh no longer checks liveUrls — just restores from cache; liveUrl validation only happens in `processStreamersEagerly` when masterListUrl also fails. (3) Dead streams are hidden (removed from video list) but kept in streamerMap via `hideStreamers()` — prevents yo-yo re-addition as "new" on next refresh.
-  - **files**: `tl-proxy.routes.ts` (GET not HEAD), `videoList.svelte.ts` (new hideStreamers method), `+page.svelte` (soft refresh reverted to trust cache, eager uses hideStreamers)
+- **refactor**: TL provider rewrite — liveUrl as source of truth, 30s refresh, organic 404 removal
+  - See `TL_PROVIDER.md` for the full architecture document.
+  - **design**: (1) liveUrl is source of truth — only a true 404 from tango.me removes a stream. (2) processStreamersEagerly resolves liveUrl from masterListUrl, falls back to IDB cache — no removal during processing. (3) 30s interval replaces scroll-triggered refresh; duplicate check (same s+m) skips, new/changed streams get queued. (4) Video playback: HLS.js 404 → checkLiveUrl against tango.me → if dead, remove from list + memory + IDB. (5) IDB simple: store on resolve, remove on 404 or 24h sweep.
+  - **files**: `+page.svelte` (processStreamersEagerly simplified, softRefresh removed, 30s interval, handleLiveUrlDead), `videoList.svelte.ts` (onLiveUrlDead callback, hideStreamers removed), `VideoPlayer.svelte` (TL 404 → checkLiveUrl against tango.me), `tl-proxy.routes.ts` (X-TL-LiveUrl-Dead header on 404), `tl-cache.ts` (simplified header), `TL_PROVIDER.md` (new architecture doc)
 
 - **fix**: TL provider removes 404 streams instead of black screen
   - **root cause**: When a stream died, the masterPlaylistUrl would 404 but the code preserved the stale cached liveUrl (assuming it might still serve). Nobody checked the **liveUrl** itself. The liveUrl is the source of truth — only its 404 confirms a dead stream.

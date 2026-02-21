@@ -11,6 +11,6 @@
 - [x] Feature: Add video count to filter aliases
 - [x] Rename tango endpoints: /api/tango for list, /api/tango-follow for follow (VERON-82)
 - [x] TL provider: Soft refresh + IndexedDB liveUrl cache
-- [x] Fix: TL provider remove 404 streams (check liveUrl on tango.me)
+- [x] Refactor: TL provider — liveUrl source of truth, 30s refresh, organic 404 removal
 
 ## Backlog

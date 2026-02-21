@@ -51,13 +51,8 @@ class VideoListStore {
 		this.streamerMap = nextMap;
 	}
 
-	// Remove from video list only — keeps streamerMap entry so the alias
-	// isn't re-added as "new" on next refresh cycle
-	hideStreamers(aliases: string[]) {
-		if (aliases.length === 0) return;
-		const removeSet = new Set(aliases);
-		this.videos = this.videos.filter((v) => !removeSet.has(v.filename));
-	}
+	// Callback set by +page.svelte for liveUrl 404 removal
+	onLiveUrlDead: ((alias: string) => void) | null = null;
 
 	updateStreamerLiveUrl(alias: string, liveUrl: string) {
 		const streamer = this.streamerMap.get(alias);

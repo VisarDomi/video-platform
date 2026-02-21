@@ -2,14 +2,12 @@ import type { Video } from '../types.js';
 import type { TlStreamer } from './tl-api.js';
 
 // --- IndexedDB: tl-cache / streamers ---
+// See TL_PROVIDER.md for the full architecture.
 //
-// liveUrl is the source of truth for stream liveness (checked via HEAD against
-// tango.me). masterListUrl can 404 while liveUrl still serves segments.
-//   - putCached: never overwrites a cached liveUrl with null.
-//   - removeCached(id, force): force=true bypasses the 24h guard (used when
-//     liveUrl confirmed 404 on tango.me). Default keeps the 24h guard for
-//     streams that merely disappeared from the API response.
-//   - sweepOrphans: same 24h guard for orphaned entries.
+// liveUrl is the source of truth. Removal rules:
+//   - 404 on tango.me liveUrl → removeCached(id, true) (immediate)
+//   - Entry older than 24h → swept by sweepOrphans()
+// putCached never overwrites a cached liveUrl with null.
 
 interface CachedStreamer {
 	streamerId: string;
