@@ -167,9 +167,7 @@
 				videoListStore.setLiveFilenames(filenames);
 				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
 			});
-			void fetchCoStreamersEagerly(epoch, allStreamers);
-			// Warm IndexedDB cache with liveUrl resolution in background
-			void resolveAllLiveUrls(epoch, allStreamers);
+			void processStreamersEagerly(epoch, allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
 			if (videoListStore.epoch !== epoch) return;
@@ -177,45 +175,65 @@
 		}
 	}
 
-	async function fetchCoStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
-		console.log('[TL:co] starting eager co-streamer scan for', streamers.length, 'streamers');
-		let found = 0;
+	async function processStreamersEagerly(epoch: number, streamers: TlStreamer[]) {
+		console.log('[TL:eager] processing', streamers.length, 'streamers (co-streamers + liveUrl)');
+		let coFound = 0;
+		let resolved = 0;
+
 		for (const streamer of streamers) {
 			if (videoListStore.epoch !== epoch) break;
-			if (!streamer.streamId) continue;
-			if (!videoListStore.markStreamIdProcessed(streamer.streamId)) continue;
-			try {
-				const coStreamers = await fetchMultiBroadcast(streamer.streamId);
-				if (coStreamers.length === 0) continue;
-				found += coStreamers.length;
-				console.log(
-					'[TL:co] eager:',
-					streamer.alias,
-					'->',
-					coStreamers.length,
-					'co-streamers:',
-					coStreamers.map((s) => s.alias).join(', ')
-				);
-				const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
-				const newVideos = withParent.map((s) => ({
-					filename: s.alias,
-					type: VIDEO_TYPE.ORIGINAL,
-					duration: 0,
-					size: 0,
-					isLive: true
-				}));
-				videoListStore.insertVideosAfter(streamer.alias, newVideos, withParent);
-			} catch (e) {
-				console.warn('[TL:co] eager fetch failed for', streamer.alias, e);
-			}
-		}
-		console.log('[TL:co] eager scan done. found', found, 'co-streamers total');
-	}
 
-	async function resolveAllLiveUrls(epoch: number, streamers: TlStreamer[]) {
-		console.log('[TL:resolve] starting liveUrl resolution for', streamers.length, 'streamers');
-		let resolved = 0;
-		for (const streamer of streamers) {
+			// 1. Co-streamer check
+			if (streamer.streamId && videoListStore.markStreamIdProcessed(streamer.streamId)) {
+				try {
+					const coStreamers = await fetchMultiBroadcast(streamer.streamId);
+					if (videoListStore.epoch !== epoch) break;
+					if (coStreamers.length > 0) {
+						coFound += coStreamers.length;
+						console.log(
+							'[TL:eager]',
+							streamer.alias,
+							'->',
+							coStreamers.length,
+							'co-streamers:',
+							coStreamers.map((s) => s.alias).join(', ')
+						);
+						const withParent = coStreamers.map((s) => ({
+							...s,
+							parentAlias: streamer.alias
+						}));
+						const newVideos = withParent.map((s) => ({
+							filename: s.alias,
+							type: VIDEO_TYPE.ORIGINAL,
+							duration: 0,
+							size: 0,
+							isLive: true
+						}));
+						videoListStore.insertVideosAfter(streamer.alias, newVideos, withParent);
+
+						// Resolve liveUrls for co-streamers
+						for (const co of withParent) {
+							if (videoListStore.epoch !== epoch) break;
+							try {
+								const liveUrl = await resolveLiveUrl(co.masterListUrl);
+								if (videoListStore.epoch !== epoch) break;
+								if (liveUrl) {
+									resolved++;
+									videoListStore.updateStreamerLiveUrl(co.alias, liveUrl);
+								}
+								await putCached(co.streamerId, co.masterListUrl, liveUrl);
+							} catch {
+								// continue
+							}
+							await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+						}
+					}
+				} catch (e) {
+					console.warn('[TL:eager] co-streamer fetch failed for', streamer.alias, e);
+				}
+			}
+
+			// 2. Resolve liveUrl for main streamer
 			if (videoListStore.epoch !== epoch) break;
 			try {
 				const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
@@ -223,16 +241,21 @@
 				if (liveUrl) {
 					resolved++;
 					videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-					await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
-				} else {
-					await putCached(streamer.streamerId, streamer.masterListUrl, null);
 				}
+				await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
 			} catch {
-				// continue resolving others
+				// continue
 			}
 			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 		}
-		console.log('[TL:resolve] done.', resolved, '/', streamers.length, 'resolved');
+
+		console.log(
+			'[TL:eager] done.',
+			coFound,
+			'co-streamers,',
+			resolved,
+			'liveUrls resolved'
+		);
 	}
 
 	async function softRefreshTlStreams(epoch: number) {
@@ -263,14 +286,14 @@
 
 			// CLASSIFY fresh streamers
 			const toAppend: TlStreamer[] = [];
-			const toResolve: TlStreamer[] = [];
+			const toProcess: TlStreamer[] = [];
 
 			for (const streamer of freshStreamers) {
 				if (videoListStore.epoch !== epoch) return;
 				const existing = videoListStore.getStreamer(streamer.alias);
 				if (!existing) {
 					toAppend.push(streamer);
-					toResolve.push(streamer);
+					toProcess.push(streamer);
 					continue;
 				}
 				// Existing — check IDB cache for liveUrl
@@ -278,7 +301,7 @@
 				if (cached && cached.masterListUrl === streamer.masterListUrl && cached.liveUrl) {
 					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
 				} else {
-					toResolve.push(streamer);
+					toProcess.push(streamer);
 				}
 			}
 
@@ -303,7 +326,6 @@
 				});
 				videoListStore.setStreamerMap(nextMap);
 				videoListStore.appendVideos(newVideos);
-				void fetchCoStreamersEagerly(epoch, toAppend);
 			}
 
 			// 404 HEAD check on existing+still-listed streamers
@@ -329,31 +351,15 @@
 								isLive: true
 							}
 						]);
-						if (!toResolve.includes(streamer)) toResolve.push(streamer);
+						if (!toProcess.includes(streamer)) toProcess.push(streamer);
 					}
 				} catch {
 					// Network error — skip
 				}
 			}
 
-			// RESOLVE liveUrls sequentially
-			if (toResolve.length > 0) {
-				console.log('[TL:soft] resolving liveUrls for', toResolve.length, 'streamers');
-				for (const streamer of toResolve) {
-					if (videoListStore.epoch !== epoch) break;
-					try {
-						const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
-						if (videoListStore.epoch !== epoch) break;
-						if (liveUrl) {
-							videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-						}
-						await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
-					} catch {
-						// continue
-					}
-					await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
-				}
-			}
+			// Process all needing work: co-streamers (markStreamIdProcessed dedupes) + liveUrl
+			void processStreamersEagerly(epoch, toProcess);
 
 			// SWEEP IndexedDB orphans
 			const activeIds = new Set(
@@ -489,7 +495,7 @@
 				});
 				videoListStore.setStreamerMap(nextMap);
 				videoListStore.appendVideos(newVideos);
-				void fetchCoStreamersEagerly(epoch, toAppend);
+				void processStreamersEagerly(epoch, toAppend);
 			} else {
 				console.log('[TL:refresh] no new streamers to add');
 			}
