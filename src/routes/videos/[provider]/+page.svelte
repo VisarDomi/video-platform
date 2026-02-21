@@ -447,9 +447,7 @@
 					toProcess.push(streamer);
 					continue;
 				}
-				// Same alias + same masterListUrl — API confirms live, keep in place
-				// Queue for eager walk (co-streamers + liveUrl cache update)
-				toProcess.push(streamer);
+				// Same alias + same masterListUrl — already live, liveUrl already cached, skip
 			}
 
 			// Append new + different-stream + dead-readded streamers
