@@ -447,26 +447,9 @@
 					toProcess.push(streamer);
 					continue;
 				}
-				// Same alias + same masterListUrl — check liveness via tango.me
-				const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
-				if (videoListStore.epoch !== epoch) return;
-				if (!liveUrl) {
-					// Dead on source — remove + re-add
-					console.log('[TL:refresh] dead on source:', streamer.alias);
-					if (streamer.alias !== currentlyPlaying) {
-						videoListStore.removeVideo(streamer.alias);
-						const nextMap = new Map(videoListStore.streamerMap);
-						nextMap.delete(streamer.alias);
-						videoListStore.setStreamerMap(nextMap);
-					}
-					toAppend.push(streamer);
-					toProcess.push(streamer);
-				} else {
-					// Still alive — update cached liveUrl, queue for co-streamer check
-					videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-					await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
-					toProcess.push(streamer);
-				}
+				// Same alias + same masterListUrl — API confirms live, keep in place
+				// Queue for eager walk (co-streamers + liveUrl cache update)
+				toProcess.push(streamer);
 			}
 
 			// Append new + different-stream + dead-readded streamers
