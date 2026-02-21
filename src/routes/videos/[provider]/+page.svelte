@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { PROVIDERS, DEFAULT_PROVIDER, STORAGE_KEYS } from '$lib/constants.js';
+	import { PROVIDERS, DEFAULT_PROVIDER, STORAGE_KEYS, TL_PAGE } from '$lib/constants.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { fetchVideos } from '$lib/services/api.js';
@@ -16,6 +16,7 @@
 	import { fetchListIdentifiers, isListProvider } from '$lib/services/list-api.js';
 	import {
 		fetchStreams,
+		resolveLiveUrl,
 		startDownload,
 		startProxy,
 		fetchMultiBroadcast,
@@ -24,12 +25,17 @@
 		syncProxySessions,
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
+	import {
+		getCached,
+		putCached,
+		removeCached,
+		sweepOrphans,
+		saveTlSnapshot,
+		restoreTlSnapshot
+	} from '$lib/services/tl-cache.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
 
-	const ITEM_HEIGHT = 52;
-	const SCROLL_BUFFER = 10;
-	const MIN_LIST_ITEMS = 100;
-	const REFRESH_GATE_MS = 30_000;
+	const { ITEM_HEIGHT, SCROLL_BUFFER, MIN_LIST_ITEMS, REFRESH_GATE_MS, LIVE_URL_RESOLVE_DELAY_MS } = TL_PAGE;
 
 	let lastRefreshTime = 0;
 	let isRefreshing = false;
@@ -56,6 +62,8 @@
 	const visibleVideos = $derived(filteredVideos.slice(startIdx, endIdx));
 	const offsetY = $derived(startIdx * ITEM_HEIGHT);
 
+	let previousProvider: string | null = null;
+
 	// Validate provider and load videos when it changes
 	$effect(() => {
 		const p = provider ?? DEFAULT_PROVIDER;
@@ -63,13 +71,37 @@
 			goto(`/videos/${DEFAULT_PROVIDER}`, { replaceState: true });
 			return;
 		}
+
+		// Save TL snapshot before leaving
+		if (previousProvider === 'tl' && p !== 'tl') {
+			saveTlSnapshot(videoListStore);
+		}
+
 		stopSync();
 		sendActiveSet([]);
 		syncProxySessions([]);
-		videoListStore.initialize(p);
-		videoListStore.clearAliases();
-		playerStore.initialize(p);
-		loadVideos(p);
+
+		// Soft restore for TL if snapshot exists
+		if (p === 'tl' && previousProvider !== null && previousProvider !== 'tl') {
+			videoListStore.initializeSoft('tl');
+			videoListStore.clearAliases();
+			playerStore.initialize(p);
+			const restored = restoreTlSnapshot(videoListStore);
+			if (restored) {
+				console.log('[TL:soft] restored snapshot, starting soft refresh');
+				softRefreshTlStreams(videoListStore.epoch);
+			} else {
+				videoListStore.initialize(p);
+				loadVideos(p);
+			}
+		} else {
+			videoListStore.initialize(p);
+			videoListStore.clearAliases();
+			playerStore.initialize(p);
+			loadVideos(p);
+		}
+
+		previousProvider = p;
 	});
 
 	async function loadVideos(p: string) {
@@ -136,6 +168,8 @@
 				console.log('[TL] live filenames:', Object.keys(filenames).join(', ') || '(none)');
 			});
 			void fetchCoStreamersEagerly(epoch, allStreamers);
+			// Warm IndexedDB cache with liveUrl resolution in background
+			void resolveAllLiveUrls(epoch, allStreamers);
 		} catch (e) {
 			console.error('[TL] Failed to load tl streams', e);
 			if (videoListStore.epoch !== epoch) return;
@@ -176,6 +210,171 @@
 			}
 		}
 		console.log('[TL:co] eager scan done. found', found, 'co-streamers total');
+	}
+
+	async function resolveAllLiveUrls(epoch: number, streamers: TlStreamer[]) {
+		console.log('[TL:resolve] starting liveUrl resolution for', streamers.length, 'streamers');
+		let resolved = 0;
+		for (const streamer of streamers) {
+			if (videoListStore.epoch !== epoch) break;
+			try {
+				const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+				if (videoListStore.epoch !== epoch) break;
+				if (liveUrl) {
+					resolved++;
+					videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+					await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+				} else {
+					await putCached(streamer.streamerId, streamer.masterListUrl, null);
+				}
+			} catch {
+				// continue resolving others
+			}
+			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+		}
+		console.log('[TL:resolve] done.', resolved, '/', streamers.length, 'resolved');
+	}
+
+	async function softRefreshTlStreams(epoch: number) {
+		console.log('[TL:soft] starting soft refresh');
+		try {
+			const { following, recommended } = await fetchStreams();
+			if (videoListStore.epoch !== epoch) return;
+			const freshStreamers = [...following, ...recommended];
+			const freshAliasSet = new Set(freshStreamers.map((s) => s.alias));
+
+			// REMOVE: aliases in store but NOT in fresh response
+			const currentlyPlaying = playerStore.currentVideo?.filename;
+			const toRemoveAliases: string[] = [];
+			for (const [alias] of videoListStore.streamerMap) {
+				if (!freshAliasSet.has(alias) && alias !== currentlyPlaying) {
+					toRemoveAliases.push(alias);
+				}
+			}
+			if (toRemoveAliases.length > 0) {
+				console.log('[TL:soft] removing', toRemoveAliases.length, 'dead streams');
+				// Collect streamerIds before removal (removeStreamers deletes from map)
+				const removeIds = toRemoveAliases
+					.map((a) => videoListStore.getStreamer(a)?.streamerId)
+					.filter(Boolean) as string[];
+				videoListStore.removeStreamers(toRemoveAliases);
+				for (const id of removeIds) void removeCached(id);
+			}
+
+			// CLASSIFY fresh streamers
+			const toAppend: TlStreamer[] = [];
+			const toResolve: TlStreamer[] = [];
+
+			for (const streamer of freshStreamers) {
+				if (videoListStore.epoch !== epoch) return;
+				const existing = videoListStore.getStreamer(streamer.alias);
+				if (!existing) {
+					toAppend.push(streamer);
+					toResolve.push(streamer);
+					continue;
+				}
+				// Existing — check IDB cache for liveUrl
+				const cached = await getCached(streamer.streamerId);
+				if (cached && cached.masterListUrl === streamer.masterListUrl && cached.liveUrl) {
+					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
+				} else {
+					toResolve.push(streamer);
+				}
+			}
+
+			// APPEND new streamers
+			if (toAppend.length > 0) {
+				console.log(
+					'[TL:soft] appending',
+					toAppend.length,
+					'new:',
+					toAppend.map((s) => s.alias).join(', ')
+				);
+				const nextMap = new Map(videoListStore.streamerMap);
+				const newVideos = toAppend.map((s) => {
+					nextMap.set(s.alias, s);
+					return {
+						filename: s.alias,
+						type: VIDEO_TYPE.ORIGINAL,
+						duration: 0,
+						size: 0,
+						isLive: true
+					};
+				});
+				videoListStore.setStreamerMap(nextMap);
+				videoListStore.appendVideos(newVideos);
+				void fetchCoStreamersEagerly(epoch, toAppend);
+			}
+
+			// 404 HEAD check on existing+still-listed streamers
+			for (const streamer of freshStreamers) {
+				if (videoListStore.epoch !== epoch) return;
+				if (toAppend.includes(streamer)) continue;
+				try {
+					const res = await fetch(API.HLS_PLAYLIST(streamer.alias), { method: 'HEAD' });
+					if (res.status === 404) {
+						console.log('[TL:soft] 404:', streamer.alias, '-> remove + re-add');
+						if (streamer.alias !== currentlyPlaying) {
+							videoListStore.removeStreamers([streamer.alias]);
+						}
+						const nextMap = new Map(videoListStore.streamerMap);
+						nextMap.set(streamer.alias, streamer);
+						videoListStore.setStreamerMap(nextMap);
+						videoListStore.appendVideos([
+							{
+								filename: streamer.alias,
+								type: VIDEO_TYPE.ORIGINAL,
+								duration: 0,
+								size: 0,
+								isLive: true
+							}
+						]);
+						if (!toResolve.includes(streamer)) toResolve.push(streamer);
+					}
+				} catch {
+					// Network error — skip
+				}
+			}
+
+			// RESOLVE liveUrls sequentially
+			if (toResolve.length > 0) {
+				console.log('[TL:soft] resolving liveUrls for', toResolve.length, 'streamers');
+				for (const streamer of toResolve) {
+					if (videoListStore.epoch !== epoch) break;
+					try {
+						const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+						if (videoListStore.epoch !== epoch) break;
+						if (liveUrl) {
+							videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+						}
+						await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+					} catch {
+						// continue
+					}
+					await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+				}
+			}
+
+			// SWEEP IndexedDB orphans
+			const activeIds = new Set(
+				[...videoListStore.streamerMap.values()].map((s) => s.streamerId)
+			);
+			void sweepOrphans(activeIds);
+
+			// Fire-and-forget: refresh liveFilenames + listIdentifiers
+			fetchLiveFilenames().then((filenames) => {
+				if (videoListStore.epoch !== epoch) return;
+				videoListStore.setLiveFilenames(filenames);
+			});
+			fetchListIdentifiers('tl').then((ids) => {
+				if (videoListStore.epoch !== epoch) return;
+				videoListStore.setListIdentifiers(ids);
+			});
+
+			console.log('[TL:soft] soft refresh complete');
+		} catch (e) {
+			console.error('[TL:soft] failed', e);
+		}
 	}
 
 	function scrollToActiveVideo() {

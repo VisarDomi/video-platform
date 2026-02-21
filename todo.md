@@ -10,5 +10,6 @@
 - [x] Fix: Make text selectable in video view
 - [x] Feature: Add video count to filter aliases
 - [x] Rename tango endpoints: /api/tango for list, /api/tango-follow for follow (VERON-82)
+- [x] TL provider: Soft refresh + IndexedDB liveUrl cache
 
 ## Backlog

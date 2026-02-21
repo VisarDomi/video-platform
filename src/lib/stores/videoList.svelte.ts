@@ -34,6 +34,31 @@ class VideoListStore {
 		this.liveFilenameMap = new Map();
 	}
 
+	initializeSoft(provider: string) {
+		this.epoch++;
+		this.selectedProvider = provider;
+		// Do NOT wipe data — snapshot restore fills it in
+	}
+
+	removeStreamers(aliases: string[]) {
+		if (aliases.length === 0) return;
+		const removeSet = new Set(aliases);
+		this.videos = this.videos.filter((v) => !removeSet.has(v.filename));
+		const nextMap = new Map(this.streamerMap);
+		for (const alias of aliases) {
+			nextMap.delete(alias);
+		}
+		this.streamerMap = nextMap;
+	}
+
+	updateStreamerLiveUrl(alias: string, liveUrl: string) {
+		const streamer = this.streamerMap.get(alias);
+		if (!streamer) return;
+		const nextMap = new Map(this.streamerMap);
+		nextMap.set(alias, { ...streamer, liveUrl });
+		this.streamerMap = nextMap;
+	}
+
 	setProvider(newProvider: string) {
 		localStorage.setItem(STORAGE_KEYS.SELECTED_PROVIDER, newProvider);
 		this.epoch++;

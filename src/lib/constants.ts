@@ -57,7 +57,16 @@ export const TL_API = {
 	LIVE_FILENAMES: '/api/tl/live-filenames',
 	MULTI_BROADCAST: '/api/tl/multi-broadcast',
 	PROXY_START: '/api/tl/proxy/start',
-	PROXY_STOP: '/api/tl/proxy/stop'
+	PROXY_STOP: '/api/tl/proxy/stop',
+	RESOLVE_LIVE_URL: '/api/tl/resolve-live-url'
+} as const;
+
+export const TL_PAGE = {
+	ITEM_HEIGHT: 52,
+	SCROLL_BUFFER: 10,
+	MIN_LIST_ITEMS: 100,
+	REFRESH_GATE_MS: 30_000,
+	LIVE_URL_RESOLVE_DELAY_MS: 200
 } as const;
 
 export const TANGO_API = {

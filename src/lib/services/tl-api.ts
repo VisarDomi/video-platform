@@ -8,6 +8,7 @@ export interface TlStreamer {
 	masterListUrl: string;
 	isFollowing: boolean;
 	parentAlias?: string;
+	liveUrl?: string;
 }
 
 export interface TlStreamsResponse {
@@ -112,6 +113,23 @@ export async function fetchMultiBroadcast(streamId: string): Promise<TlStreamer[
 	});
 	if (!response.ok) return [];
 	return await response.json();
+}
+
+// --- Live URL Resolution ---
+
+export async function resolveLiveUrl(masterListUrl: string): Promise<string | null> {
+	try {
+		const response = await fetch(TL_API.RESOLVE_LIVE_URL, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ masterPlaylistUrl: masterListUrl })
+		});
+		if (!response.ok) return null;
+		const data = await response.json();
+		return data.liveUrl ?? null;
+	} catch {
+		return null;
+	}
 }
 
 // --- HLS Proxy ---
