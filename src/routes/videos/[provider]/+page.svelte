@@ -296,7 +296,17 @@
 					toProcess.push(streamer);
 					continue;
 				}
-				// Existing — check IDB cache for liveUrl
+				if (existing.masterListUrl !== streamer.masterListUrl) {
+					// Stream restarted — update in place, queue for re-resolution
+					console.log('[TL:soft] stream restarted:', streamer.alias);
+					videoListStore.updateStreamerLiveUrl(streamer.alias, '');
+					const nextMap = new Map(videoListStore.streamerMap);
+					nextMap.set(streamer.alias, { ...streamer, parentAlias: existing.parentAlias });
+					videoListStore.setStreamerMap(nextMap);
+					toProcess.push(streamer);
+					continue;
+				}
+				// Same alias + same masterListUrl — check IDB cache for liveUrl
 				const cached = await getCached(streamer.streamerId);
 				if (cached && cached.masterListUrl === streamer.masterListUrl && cached.liveUrl) {
 					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
@@ -305,7 +315,7 @@
 				}
 			}
 
-			// APPEND new streamers
+			// APPEND genuinely new streamers
 			if (toAppend.length > 0) {
 				console.log(
 					'[TL:soft] appending',
@@ -328,38 +338,10 @@
 				videoListStore.appendVideos(newVideos);
 			}
 
-			// 404 HEAD check on existing+still-listed streamers
-			for (const streamer of freshStreamers) {
-				if (videoListStore.epoch !== epoch) return;
-				if (toAppend.includes(streamer)) continue;
-				try {
-					const res = await fetch(API.HLS_PLAYLIST(streamer.alias), { method: 'HEAD' });
-					if (res.status === 404) {
-						console.log('[TL:soft] 404:', streamer.alias, '-> remove + re-add');
-						if (streamer.alias !== currentlyPlaying) {
-							videoListStore.removeStreamers([streamer.alias]);
-						}
-						const nextMap = new Map(videoListStore.streamerMap);
-						nextMap.set(streamer.alias, streamer);
-						videoListStore.setStreamerMap(nextMap);
-						videoListStore.appendVideos([
-							{
-								filename: streamer.alias,
-								type: VIDEO_TYPE.ORIGINAL,
-								duration: 0,
-								size: 0,
-								isLive: true
-							}
-						]);
-						if (!toProcess.includes(streamer)) toProcess.push(streamer);
-					}
-				} catch {
-					// Network error — skip
-				}
+			// Process new + restarted + uncached (co-streamers + liveUrl)
+			if (toProcess.length > 0) {
+				void processStreamersEagerly(epoch, toProcess);
 			}
-
-			// Process all needing work: co-streamers (markStreamIdProcessed dedupes) + liveUrl
-			void processStreamersEagerly(epoch, toProcess);
 
 			// SWEEP IndexedDB orphans
 			const activeIds = new Set(
@@ -431,6 +413,7 @@
 		lastRefreshTime = now;
 		isRefreshing = true;
 		const epoch = videoListStore.epoch;
+		const currentlyPlaying = playerStore.currentVideo?.filename;
 		console.log('[TL:refresh] starting...');
 
 		try {
@@ -439,42 +422,50 @@
 			const freshStreamers = [...following, ...recommended];
 			console.log('[TL:refresh] got', freshStreamers.length, 'streamers from API');
 
-			const toRemove: string[] = [];
 			const toAppend: TlStreamer[] = [];
+			const toProcess: TlStreamer[] = [];
 
 			for (const streamer of freshStreamers) {
 				if (videoListStore.epoch !== epoch) return;
 				const existing = videoListStore.getStreamer(streamer.alias);
 				if (!existing) {
+					// Genuinely new streamer
 					toAppend.push(streamer);
+					toProcess.push(streamer);
 					continue;
 				}
-				// Duplicate — check if existing stream is 404
+				if (existing.masterListUrl !== streamer.masterListUrl) {
+					// Stream restarted (same alias, new masterListUrl) — update in place
+					console.log('[TL:refresh] stream restarted:', streamer.alias);
+					videoListStore.updateStreamerLiveUrl(streamer.alias, '');
+					const nextMap = new Map(videoListStore.streamerMap);
+					nextMap.set(streamer.alias, { ...streamer, parentAlias: existing.parentAlias });
+					videoListStore.setStreamerMap(nextMap);
+					toProcess.push(streamer);
+					continue;
+				}
+				// Same alias + same masterListUrl — check liveness via tango.me
 				try {
-					const res = await fetch(API.HLS_PLAYLIST(streamer.alias), { method: 'HEAD' });
-					if (res.status === 404) {
-						console.log('[TL:refresh] 404:', streamer.alias, '-> remove + re-add');
-						toRemove.push(streamer.alias);
+					const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+					if (videoListStore.epoch !== epoch) return;
+					if (!liveUrl) {
+						console.log('[TL:refresh] dead on source:', streamer.alias, '-> remove + re-add');
+						if (streamer.alias !== currentlyPlaying) {
+							videoListStore.removeVideo(streamer.alias);
+						}
 						toAppend.push(streamer);
+						toProcess.push(streamer);
+					} else {
+						// Still alive — update cached liveUrl
+						videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+						await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
 					}
 				} catch {
-					// Network error → treat as 404
-					toRemove.push(streamer.alias);
-					toAppend.push(streamer);
+					// Resolution failed — keep in place
 				}
 			}
 
-			// Apply removals (skip currently playing video)
-			const currentlyPlaying = playerStore.currentVideo?.filename;
-			for (const alias of toRemove) {
-				if (alias === currentlyPlaying) {
-					console.log('[TL:refresh] skipping removal of currently playing:', alias);
-					continue;
-				}
-				videoListStore.removeVideo(alias);
-			}
-
-			// Apply additions
+			// Append genuinely new + dead-and-readded streamers
 			if (toAppend.length > 0) {
 				console.log(
 					'[TL:refresh] adding',
@@ -495,9 +486,13 @@
 				});
 				videoListStore.setStreamerMap(nextMap);
 				videoListStore.appendVideos(newVideos);
-				void processStreamersEagerly(epoch, toAppend);
+			}
+
+			// Process new + restarted + dead-readded (co-streamers + liveUrl)
+			if (toProcess.length > 0) {
+				void processStreamersEagerly(epoch, toProcess);
 			} else {
-				console.log('[TL:refresh] no new streamers to add');
+				console.log('[TL:refresh] no new or changed streamers');
 			}
 		} catch (e) {
 			console.error('[TL:refresh] failed', e);
