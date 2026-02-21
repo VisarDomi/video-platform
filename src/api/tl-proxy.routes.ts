@@ -73,6 +73,27 @@ async function resolveLiveUrl(
   return liveUrl;
 }
 
+// POST /tl/resolve-live-url — lightweight resolution without creating a proxy session
+router.post("/tl/resolve-live-url", async (req, res) => {
+  const { masterPlaylistUrl } = req.body;
+  if (!masterPlaylistUrl) {
+    return res.status(400).json({ error: "masterPlaylistUrl required" });
+  }
+
+  try {
+    const liveUrl = await resolveLiveUrl(masterPlaylistUrl);
+    if (!liveUrl) {
+      return res.status(502).json({ error: "Failed to resolve live URL" });
+    }
+    res.json({ liveUrl });
+  } catch (error: any) {
+    logger.error("[TL:resolve] resolve-live-url failed", {
+      error: error.message,
+    });
+    res.status(502).json({ error: "Resolution failed" });
+  }
+});
+
 // POST /tl/proxy/start
 router.post("/tl/proxy/start", async (req, res) => {
   const { masterPlaylistUrl, alias } = req.body;
