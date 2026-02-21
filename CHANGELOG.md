@@ -2,6 +2,10 @@
 
 ## 2026-02-22
 
+- **feature**: TL provider — process IDB cache on startup, remove 30s artificial delay
+  - **design**: (1) On queue start (app launch or provider return), process all IndexedDB entries first — checkLiveUrl against tango.me, remove 404s. Cleans stale liveUrls from previous sessions where the app was killed by the OS. (2) Removed REFRESH_GATE_MS (30s) wait between queue cycles — the queue paces itself naturally via 200ms per-item delay. (3) Added `getAllCached()` to tl-cache.ts.
+  - **files**: `+page.svelte` (new `processIdbCache` phase, removed 30s wait), `tl-cache.ts` (`getAllCached`), `TL_PROVIDER.md` (updated Phase 0 docs)
+
 - **refactor**: TL provider — replace 30s refresh timer with continuous processing queue
   - **root cause**: After PWA returns from background, old streams show black because (1) no visibility change detection, (2) `loadStream` early-returns on same filename (stale HLS persists), (3) passive player 404s silently swallowed. The 30s timer only added new streams but never re-checked existing ones for liveness.
   - **design**: (1) Continuous queue loop replaces 30s `setInterval`: fetch endpoint → process new → reprocess existing → repeat. (2) Reprocessing checks cached liveUrl against tango.me first (source of truth). If dead, tries resolving new liveUrl from masterListUrl + checks that. Only removes when BOTH confirmed 404. (3) VideoPlayer no longer handles TL removal — just destroys HLS on 404. Queue is the single authority. (4) New `$effect` in VideoPlayer watches if current video is removed from list → navigates to next. (5) `onLiveUrlDead` callback removed — no longer needed.

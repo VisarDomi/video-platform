@@ -42,6 +42,21 @@ function openDb(): Promise<IDBDatabase> {
 	});
 }
 
+export async function getAllCached(): Promise<{ streamerId: string; liveUrl: string | null }[]> {
+	try {
+		const db = await openDb();
+		return new Promise((resolve) => {
+			const tx = db.transaction(STORE_NAME, 'readonly');
+			const store = tx.objectStore(STORE_NAME);
+			const req = store.getAll();
+			req.onsuccess = () => resolve(req.result ?? []);
+			req.onerror = () => resolve([]);
+		});
+	} catch {
+		return [];
+	}
+}
+
 export async function getCached(streamerId: string): Promise<CachedStreamer | undefined> {
 	try {
 		const db = await openDb();

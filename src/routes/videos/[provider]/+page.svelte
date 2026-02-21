@@ -27,6 +27,7 @@
 		type TlStreamer
 	} from '$lib/services/tl-api.js';
 	import {
+		getAllCached,
 		getCached,
 		putCached,
 		removeCached,
@@ -36,7 +37,7 @@
 	} from '$lib/services/tl-cache.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
 
-	const { ITEM_HEIGHT, SCROLL_BUFFER, MIN_LIST_ITEMS, REFRESH_GATE_MS, LIVE_URL_RESOLVE_DELAY_MS } = TL_PAGE;
+	const { ITEM_HEIGHT, SCROLL_BUFFER, MIN_LIST_ITEMS, LIVE_URL_RESOLVE_DELAY_MS } = TL_PAGE;
 
 	let queueRunning = false;
 	let lastScrollY = 0;
@@ -177,10 +178,11 @@
 	}
 
 	// --- TL Processing Queue ---
-	// Replaces the 30s refresh timer. Continuous loop:
+	// Continuous loop:
+	// 0. On start: process all IDB entries (clean stale liveUrls from previous session)
 	// 1. Fetch endpoint → process new/changed streamers (liveUrl + co-streamers)
 	// 2. Reprocess existing streamers (check cached liveUrl against tango.me, remove dead)
-	// 3. Repeat with minimum REFRESH_GATE_MS between endpoint fetches
+	// 3. Repeat — no artificial delay, queue paces itself via LIVE_URL_RESOLVE_DELAY_MS per item
 	//
 	// Source of truth for removal: liveUrl checked against tango.me.
 	// Only remove when BOTH cached liveUrl AND endpoint liveUrl are confirmed 404.
@@ -189,6 +191,13 @@
 		if (queueRunning) return;
 		queueRunning = true;
 		console.log('[TL:queue] started');
+
+		// Phase 0: Clean stale IDB entries (important on app restart after memory kill)
+		await processIdbCache(epoch);
+		if (!queueRunning || videoListStore.epoch !== epoch) {
+			queueRunning = false;
+			return;
+		}
 
 		// Process initial streamers from first load (resolve liveUrl + co-streamers)
 		if (initialStreamers && initialStreamers.length > 0) {
@@ -202,25 +211,36 @@
 
 		// Queue loop
 		while (queueRunning && videoListStore.epoch === epoch) {
-			const cycleStart = Date.now();
-
 			// Phase 1: Fetch endpoint + process new/changed
 			const processedAliases = await fetchAndProcessNew(epoch);
 			if (!queueRunning || videoListStore.epoch !== epoch) break;
 
 			// Phase 2: Reprocess existing streamers not just processed
 			await reprocessExisting(epoch, processedAliases);
-			if (!queueRunning || videoListStore.epoch !== epoch) break;
-
-			// Ensure minimum cycle time before next endpoint fetch
-			const elapsed = Date.now() - cycleStart;
-			if (elapsed < REFRESH_GATE_MS) {
-				await new Promise((r) => setTimeout(r, REFRESH_GATE_MS - elapsed));
-			}
 		}
 
 		queueRunning = false;
 		console.log('[TL:queue] stopped');
+	}
+
+	async function processIdbCache(epoch: number) {
+		const all = await getAllCached();
+		if (!queueRunning || videoListStore.epoch !== epoch) return;
+		const withLiveUrl = all.filter((e) => e.liveUrl);
+		if (withLiveUrl.length === 0) return;
+		console.log('[TL:queue] processing', withLiveUrl.length, 'IDB entries');
+
+		for (const entry of withLiveUrl) {
+			if (!queueRunning || videoListStore.epoch !== epoch) break;
+			const alive = await checkLiveUrl(entry.liveUrl!);
+			if (!queueRunning || videoListStore.epoch !== epoch) break;
+			if (!alive) {
+				console.log('[TL:queue] IDB entry dead, removing:', entry.streamerId);
+				void removeCached(entry.streamerId, true);
+			}
+			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
+		}
+		console.log('[TL:queue] IDB processing done');
 	}
 
 	async function fetchAndProcessNew(epoch: number): Promise<Set<string>> {

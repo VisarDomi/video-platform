@@ -20,17 +20,18 @@ From **m** we resolve:
 
 ## Flows
 
-### 1. First Load (no IndexedDB, no memory)
+### 1. First Load
 
-1. Hit endpoint → get list of `(s, m)` pairs (following + recommended)
-2. Add all streamers to the video list
-3. Start processing queue top-to-bottom:
+1. Start queue → **Phase 0**: process all IndexedDB entries. For each cached liveUrl, `checkLiveUrl` against tango.me. If 404 → remove from IDB. This cleans stale entries from a previous session (app killed by OS).
+2. Hit endpoint → get list of `(s, m)` pairs (following + recommended)
+3. Add all streamers to the video list
+4. Process queue top-to-bottom:
    - For each streamer: resolve **l** from **m** (backend parses master m3u8)
    - If resolved → cache **l** in IndexedDB, update store
    - If failed → check IndexedDB for cached **l**. If exists, use it. If not, stream stays without liveUrl (unplayable until next cycle resolves it)
    - Then: fetch co-streamers for this streamer
    - For each unique co-streamer: add to list after parent, resolve its **l**
-4. Continue until last stream processed
+5. Continue until last stream processed, then enter the queue loop
 
 ### 2. Video Playback (HLS error handling)
 
@@ -42,9 +43,14 @@ When a video is opened/navigated to:
    - For non-TL providers: stream is immediately removed from the video list.
 4. VideoPlayer watches the video list reactively — when the queue removes a stream that is currently playing, the player automatically navigates to the next available video.
 
-### 3. Processing Queue (continuous loop, replaces 30s timer)
+### 3. Processing Queue (continuous loop)
 
-The queue runs continuously while on TL provider. Each cycle:
+The queue runs continuously while on TL provider. No artificial delays between cycles — the queue paces itself via `LIVE_URL_RESOLVE_DELAY_MS` (200ms) between each item.
+
+**Phase 0 — IDB cleanup (on start only):**
+1. Read all IndexedDB entries with a liveUrl
+2. For each: `checkLiveUrl` against tango.me → if 404, remove from IDB
+3. Ensures clean slate after app restart (OS killed the app, stale cache remains)
 
 **Phase 1 — Endpoint fetch + process new:**
 1. Hit endpoint → get fresh list of `(s, m)` pairs
@@ -65,12 +71,12 @@ The queue runs continuously while on TL provider. Each cycle:
 4. If `resolveLiveUrl` fails (null) → can't confirm both dead → keep for 24h
 5. If no cached liveUrl exists → try to resolve from masterListUrl (not a removal candidate)
 
-**Timing:** minimum `REFRESH_GATE_MS` (30s) between endpoint fetches. Polite `LIVE_URL_RESOLVE_DELAY_MS` (200ms) between each item.
+**Then back to Phase 1.** No waiting — the natural processing time + 200ms per-item delay provides pacing.
 
 ### 4. Return to TL (after provider switch)
 
 1. Restore in-memory snapshot (instant visual restore)
-2. Queue starts — next cycle picks up any changes
+2. Queue starts with Phase 0 (IDB cleanup) then enters the loop
 
 ## IndexedDB Cache Rules
 
