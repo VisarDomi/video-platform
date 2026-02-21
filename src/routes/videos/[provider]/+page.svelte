@@ -297,12 +297,12 @@
 					continue;
 				}
 				if (existing.masterListUrl !== streamer.masterListUrl) {
-					// Stream restarted — update in place, queue for re-resolution
-					console.log('[TL:soft] stream restarted:', streamer.alias);
-					videoListStore.updateStreamerLiveUrl(streamer.alias, '');
-					const nextMap = new Map(videoListStore.streamerMap);
-					nextMap.set(streamer.alias, { ...streamer, parentAlias: existing.parentAlias });
-					videoListStore.setStreamerMap(nextMap);
+					// Different masterListUrl = different stream — remove old, append new
+					console.log('[TL:soft] different stream:', streamer.alias);
+					if (streamer.alias !== currentlyPlaying) {
+						videoListStore.removeStreamers([streamer.alias]);
+					}
+					toAppend.push(streamer);
 					toProcess.push(streamer);
 					continue;
 				}
@@ -429,48 +429,52 @@
 				if (videoListStore.epoch !== epoch) return;
 				const existing = videoListStore.getStreamer(streamer.alias);
 				if (!existing) {
-					// Genuinely new streamer
+					// New streamer
 					toAppend.push(streamer);
 					toProcess.push(streamer);
 					continue;
 				}
 				if (existing.masterListUrl !== streamer.masterListUrl) {
-					// Stream restarted (same alias, new masterListUrl) — update in place
-					console.log('[TL:refresh] stream restarted:', streamer.alias);
-					videoListStore.updateStreamerLiveUrl(streamer.alias, '');
-					const nextMap = new Map(videoListStore.streamerMap);
-					nextMap.set(streamer.alias, { ...streamer, parentAlias: existing.parentAlias });
-					videoListStore.setStreamerMap(nextMap);
+					// Different masterListUrl = different stream — remove old, append new
+					console.log('[TL:refresh] different stream:', streamer.alias);
+					if (streamer.alias !== currentlyPlaying) {
+						videoListStore.removeVideo(streamer.alias);
+						const nextMap = new Map(videoListStore.streamerMap);
+						nextMap.delete(streamer.alias);
+						videoListStore.setStreamerMap(nextMap);
+					}
+					toAppend.push(streamer);
 					toProcess.push(streamer);
 					continue;
 				}
 				// Same alias + same masterListUrl — check liveness via tango.me
-				try {
-					const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
-					if (videoListStore.epoch !== epoch) return;
-					if (!liveUrl) {
-						console.log('[TL:refresh] dead on source:', streamer.alias, '-> remove + re-add');
-						if (streamer.alias !== currentlyPlaying) {
-							videoListStore.removeVideo(streamer.alias);
-						}
-						toAppend.push(streamer);
-						toProcess.push(streamer);
-					} else {
-						// Still alive — update cached liveUrl
-						videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
-						await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+				const liveUrl = await resolveLiveUrl(streamer.masterListUrl);
+				if (videoListStore.epoch !== epoch) return;
+				if (!liveUrl) {
+					// Dead on source — remove + re-add
+					console.log('[TL:refresh] dead on source:', streamer.alias);
+					if (streamer.alias !== currentlyPlaying) {
+						videoListStore.removeVideo(streamer.alias);
+						const nextMap = new Map(videoListStore.streamerMap);
+						nextMap.delete(streamer.alias);
+						videoListStore.setStreamerMap(nextMap);
 					}
-				} catch {
-					// Resolution failed — keep in place
+					toAppend.push(streamer);
+					toProcess.push(streamer);
+				} else {
+					// Still alive — update cached liveUrl, queue for co-streamer check
+					videoListStore.updateStreamerLiveUrl(streamer.alias, liveUrl);
+					await putCached(streamer.streamerId, streamer.masterListUrl, liveUrl);
+					toProcess.push(streamer);
 				}
 			}
 
-			// Append genuinely new + dead-and-readded streamers
+			// Append new + different-stream + dead-readded streamers
 			if (toAppend.length > 0) {
 				console.log(
-					'[TL:refresh] adding',
+					'[TL:refresh] appending',
 					toAppend.length,
-					'streamers:',
+					':',
 					toAppend.map((s) => s.alias).join(', ')
 				);
 				const nextMap = new Map(videoListStore.streamerMap);
@@ -488,11 +492,11 @@
 				videoListStore.appendVideos(newVideos);
 			}
 
-			// Process new + restarted + dead-readded (co-streamers + liveUrl)
+			// Process all via eager walk (co-streamers + liveUrl)
 			if (toProcess.length > 0) {
 				void processStreamersEagerly(epoch, toProcess);
 			} else {
-				console.log('[TL:refresh] no new or changed streamers');
+				console.log('[TL:refresh] nothing to process');
 			}
 		} catch (e) {
 			console.error('[TL:refresh] failed', e);

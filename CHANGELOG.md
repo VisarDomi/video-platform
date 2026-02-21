@@ -9,7 +9,7 @@
 
 - **fix**: refreshTlStreams 404 check targets tango.me instead of local HLS
   - **root cause**: The 404 HEAD check hit `/hls/${alias}/playlist.m3u8` which only exists after the user clicks to play. All unplayed streamers returned 404, causing them to be removed from their position and re-added at the bottom of the list. Following streamers at the top would jump to the end on every scroll-triggered refresh.
-  - **decision**: Three-way classification: (1) new alias → append, (2) same alias but different masterListUrl → stream restarted, update in place, (3) same alias + same masterListUrl → liveness check via `resolveLiveUrl` (backend → tango.me with auth cookies). Dead on source → remove + re-add. Still alive → update cached liveUrl. Resolution failure → keep in place (transient error). Soft refresh path uses IDB cache + masterListUrl comparison instead.
+  - **decision**: Three-way classification: (1) new alias → append, (2) same alias but different masterListUrl → different stream, remove old + append new at bottom, (3) same alias + same masterListUrl → liveness check via `resolveLiveUrl` (backend → tango.me with auth cookies). Dead on source (null) → remove + re-add. Still alive → update cached liveUrl. All categories feed into `processStreamersEagerly` queue for co-streamer checks + liveUrl resolution. `resolveLiveUrl` never throws (catch returns null), so no dead catch block. Soft refresh uses same masterListUrl comparison + IDB cache.
   - **files**: `+page.svelte` (refreshTlStreams rewritten, softRefreshTlStreams 404 block removed)
 
 - **feature**: Change app icon to capital "V" on purple background
