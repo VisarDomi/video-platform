@@ -269,10 +269,11 @@
 			await new Promise((r) => setTimeout(r, LIVE_URL_RESOLVE_DELAY_MS));
 		}
 
-		// Remove streams whose liveUrl confirmed 404 on tango.me
+		// Hide streams whose liveUrl confirmed 404 on tango.me — keep them in
+		// streamerMap so they aren't re-added as "new" on next refresh
 		if (deadAliases.length > 0 && videoListStore.epoch === epoch) {
-			console.log('[TL:eager] removing', deadAliases.length, '404 streams:', deadAliases.join(', '));
-			videoListStore.removeStreamers(deadAliases);
+			console.log('[TL:eager] hiding', deadAliases.length, '404 streams:', deadAliases.join(', '));
+			videoListStore.hideStreamers(deadAliases);
 			for (const id of deadStreamerIds) void removeCached(id, true);
 		}
 
@@ -333,17 +334,11 @@
 					toProcess.push(streamer);
 					continue;
 				}
-				// Same alias + same masterListUrl — verify cached liveUrl is still alive
+				// Same alias + same masterListUrl — restore cached liveUrl, let eager
+				// processing verify it if masterListUrl also fails
 				const cached = await getCached(streamer.streamerId);
 				if (cached && cached.masterListUrl === streamer.masterListUrl && cached.liveUrl) {
-					const alive = await checkLiveUrl(cached.liveUrl);
-					if (alive) {
-						videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
-					} else if (streamer.alias !== currentlyPlaying) {
-						console.log('[TL:soft] cached liveUrl 404:', streamer.alias);
-						videoListStore.removeStreamers([streamer.alias]);
-						void removeCached(streamer.streamerId, true);
-					}
+					videoListStore.updateStreamerLiveUrl(streamer.alias, cached.liveUrl);
 				} else {
 					toProcess.push(streamer);
 				}

@@ -2,10 +2,15 @@
 
 ## 2026-02-21
 
+- **fix**: TL 404 streams — regression fix for position-loss on followed streams
+  - **root cause**: Previous fix checked liveUrl via HEAD during soft refresh, but tango.me HLS endpoints reject HEAD → every cached stream was falsely marked dead, removed from top of list, then re-added as "new" in the middle on next refresh.
+  - **decision**: (1) Backend uses GET (not HEAD) for liveUrl check — HLS endpoints don't support HEAD. (2) Soft refresh no longer checks liveUrls — just restores from cache; liveUrl validation only happens in `processStreamersEagerly` when masterListUrl also fails. (3) Dead streams are hidden (removed from video list) but kept in streamerMap via `hideStreamers()` — prevents yo-yo re-addition as "new" on next refresh.
+  - **files**: `tl-proxy.routes.ts` (GET not HEAD), `videoList.svelte.ts` (new hideStreamers method), `+page.svelte` (soft refresh reverted to trust cache, eager uses hideStreamers)
+
 - **fix**: TL provider removes 404 streams instead of black screen
   - **root cause**: When a stream died, the masterPlaylistUrl would 404 but the code preserved the stale cached liveUrl (assuming it might still serve). Nobody checked the **liveUrl** itself. The liveUrl is the source of truth — only its 404 confirms a dead stream.
-  - **decision**: (1) New backend `POST /tl/check-live-url` does a HEAD against the liveUrl on tango.me. (2) `processStreamersEagerly`: when masterListUrl fails, checks cached liveUrl — if liveUrl also 404s, removes stream. If liveUrl alive, keeps it. (3) `softRefreshTlStreams`: verifies cached liveUrls are still alive before restoring. (4) `removeCached` gains `force` param to bypass 24h guard for confirmed-dead liveUrls.
-  - **files**: `tl-proxy.routes.ts` (new check-live-url endpoint), `constants.ts` (TL_API.CHECK_LIVE_URL), `tl-api.ts` (checkLiveUrl fn), `tl-cache.ts` (removeCached force param), `+page.svelte` (liveUrl 404 checks in eager + soft refresh)
+  - **decision**: (1) New backend `POST /tl/check-live-url` does GET against the liveUrl on tango.me. (2) `processStreamersEagerly`: when masterListUrl fails, checks cached liveUrl — if liveUrl also 404s, hides stream. If liveUrl alive, keeps it. (3) `removeCached` gains `force` param to bypass 24h guard for confirmed-dead liveUrls.
+  - **files**: `tl-proxy.routes.ts` (new check-live-url endpoint), `constants.ts` (TL_API.CHECK_LIVE_URL), `tl-api.ts` (checkLiveUrl fn), `tl-cache.ts` (removeCached force param), `+page.svelte` (liveUrl 404 checks in eager processing)
 
 - **feature**: TL provider soft refresh + IndexedDB liveUrl cache
   - **rationale**: Every navigation to TL wiped all state and did a full API reload, causing a flash of "Loading..." and losing scroll position, co-streamer positions, and resolved liveUrls. Now saves an in-memory snapshot when leaving TL and restores it instantly on return. Background soft refresh removes dead streams, adds new ones, and uses IndexedDB-cached liveUrls (keyed by streamerId) to avoid re-resolving unchanged streams. Initial load also resolves liveUrls eagerly to warm the cache.

@@ -51,6 +51,14 @@ class VideoListStore {
 		this.streamerMap = nextMap;
 	}
 
+	// Remove from video list only — keeps streamerMap entry so the alias
+	// isn't re-added as "new" on next refresh cycle
+	hideStreamers(aliases: string[]) {
+		if (aliases.length === 0) return;
+		const removeSet = new Set(aliases);
+		this.videos = this.videos.filter((v) => !removeSet.has(v.filename));
+	}
+
 	updateStreamerLiveUrl(alias: string, liveUrl: string) {
 		const streamer = this.streamerMap.get(alias);
 		if (!streamer) return;
