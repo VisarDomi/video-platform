@@ -94,6 +94,29 @@ router.post("/tl/resolve-live-url", async (req, res) => {
   }
 });
 
+// POST /tl/check-live-url — HEAD check to see if a liveUrl still serves segments
+router.post("/tl/check-live-url", async (req, res) => {
+  const { liveUrl } = req.body;
+  if (!liveUrl) {
+    return res.status(400).json({ error: "liveUrl required" });
+  }
+
+  const cookie = getStreamCookie();
+  if (!cookie) {
+    return res.json({ alive: false });
+  }
+
+  try {
+    const headRes = await fetch(liveUrl, {
+      method: "HEAD",
+      headers: { Cookie: cookie },
+    });
+    res.json({ alive: headRes.ok });
+  } catch {
+    res.json({ alive: false });
+  }
+});
+
 // POST /tl/proxy/start
 router.post("/tl/proxy/start", async (req, res) => {
   const { masterPlaylistUrl, alias } = req.body;
