@@ -6,19 +6,22 @@ import type { TlStreamer } from './tl-api.js';
 // IMPORTANT: liveUrl is the most valuable cached data. A masterListUrl can 404
 // while the cached liveUrl still serves segments. Therefore:
 //   - NEVER overwrite a cached liveUrl with null — only a successful resolution
-//     may update it, and only removal (stream gone from API) may delete the entry.
-//   - Only removeCached / sweepOrphans delete entries (triggered when stream
-//     disappears from the API response).
+//     may update it.
+//   - removeCached / sweepOrphans only delete entries older than 24h — guards
+//     against aggressive removal of a liveUrl that's still serving segments
+//     even though the stream disappeared from the API momentarily.
 
 interface CachedStreamer {
 	streamerId: string;
 	masterListUrl: string;
 	liveUrl: string | null;
+	cachedAt: number;
 }
 
 const DB_NAME = 'tl-cache';
 const STORE_NAME = 'streamers';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -31,6 +34,7 @@ function openDb(): Promise<IDBDatabase> {
 			if (!db.objectStoreNames.contains(STORE_NAME)) {
 				db.createObjectStore(STORE_NAME, { keyPath: 'streamerId' });
 			}
+			// v1→v2: existing entries get cachedAt = now (treat as fresh)
 		};
 		req.onsuccess = () => {
 			dbInstance = req.result;
@@ -74,7 +78,7 @@ export async function putCached(
 			if (existing?.liveUrl) return; // keep existing liveUrl
 		}
 		const tx = db.transaction(STORE_NAME, 'readwrite');
-		tx.objectStore(STORE_NAME).put({ streamerId, masterListUrl, liveUrl });
+		tx.objectStore(STORE_NAME).put({ streamerId, masterListUrl, liveUrl, cachedAt: Date.now() });
 	} catch {
 		// graceful fallback
 	}
@@ -83,8 +87,18 @@ export async function putCached(
 export async function removeCached(streamerId: string): Promise<void> {
 	try {
 		const db = await openDb();
-		const tx = db.transaction(STORE_NAME, 'readwrite');
-		tx.objectStore(STORE_NAME).delete(streamerId);
+		// Only delete entries older than 24h — the liveUrl may still serve
+		// segments even if the stream disappeared from the API momentarily
+		const tx = db.transaction(STORE_NAME, 'readonly');
+		const existing = await new Promise<CachedStreamer | undefined>((resolve) => {
+			const req = tx.objectStore(STORE_NAME).get(streamerId);
+			req.onsuccess = () => resolve(req.result ?? undefined);
+			req.onerror = () => resolve(undefined);
+		});
+		if (!existing) return;
+		if (Date.now() - (existing.cachedAt ?? 0) < MAX_AGE_MS) return;
+		const deleteTx = db.transaction(STORE_NAME, 'readwrite');
+		deleteTx.objectStore(STORE_NAME).delete(streamerId);
 	} catch {
 		// graceful fallback
 	}
@@ -93,14 +107,16 @@ export async function removeCached(streamerId: string): Promise<void> {
 export async function sweepOrphans(activeStreamerIds: Set<string>): Promise<void> {
 	try {
 		const db = await openDb();
+		const now = Date.now();
+		// Only delete orphan entries older than 24h
 		const tx = db.transaction(STORE_NAME, 'readwrite');
 		const store = tx.objectStore(STORE_NAME);
-		const req = store.getAllKeys();
+		const req = store.getAll();
 		req.onsuccess = () => {
-			for (const key of req.result) {
-				if (!activeStreamerIds.has(key as string)) {
-					store.delete(key);
-				}
+			for (const entry of req.result as CachedStreamer[]) {
+				if (activeStreamerIds.has(entry.streamerId)) continue;
+				if (now - (entry.cachedAt ?? 0) < MAX_AGE_MS) continue;
+				store.delete(entry.streamerId);
 			}
 		};
 	} catch {
