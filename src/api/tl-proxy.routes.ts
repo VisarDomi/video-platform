@@ -185,6 +185,10 @@ router.get("/tl/proxy/:alias/live.m3u8", async (req, res) => {
     });
 
     if (!playlistRes.ok) {
+      if (playlistRes.status === 404) {
+        // liveUrl confirmed dead on tango.me — signal to frontend
+        res.set("X-TL-LiveUrl-Dead", "true");
+      }
       return res.status(playlistRes.status).end();
     }
 
