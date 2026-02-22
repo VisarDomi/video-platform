@@ -14,5 +14,6 @@
 - [x] Refactor: TL provider — liveUrl source of truth, 30s refresh, organic 404 removal
 - [x] Refactor: TL provider — replace 30s timer with continuous processing queue
 - [x] Feature: TL provider — process IDB cache on startup, remove 30s artificial delay
+- [x] Fix: Black screen on swipe navigation between streams
 
 ## Backlog

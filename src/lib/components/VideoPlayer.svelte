@@ -248,7 +248,6 @@
 		try {
 			await el.play();
 		} catch (e) {
-			console.warn('Playback failed', e);
 		}
 		el.style.opacity = '1';
 	}
@@ -351,13 +350,13 @@
 
 		hls.on(Hls.Events.ERROR, (_event, data) => {
 			if (data.fatal) {
-				console.warn('HLS fatal error', data.type, data.details);
 				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
 					if (data.response?.code === 404) {
 						if (videoListStore.selectedProvider === 'tl') {
 							// Queue handles all TL removal — just destroy HLS
 							hls.destroy();
 							hlsInstances.delete(el);
+							delete el.dataset.loadedFilename;
 							return;
 						}
 						videoListStore.removeVideo(v.filename);
@@ -438,11 +437,16 @@
 		isActivePlayer = false
 	): Promise<void> {
 		return new Promise((resolve) => {
-			if (el.dataset.loadedFilename === v.filename) {
+			const hasActiveStream = hlsInstances.has(el) || nativeAbortControllers.has(el);
+			const streamAlive = el.dataset.loadedFilename === v.filename && hasActiveStream && !!el.src;
+			if (streamAlive) {
 				syncLiveStatus(el, v, isActivePlayer);
 				if (startTime > 0) el.currentTime = startTime;
 				resolve();
 				return;
+			}
+			if (el.dataset.loadedFilename === v.filename) {
+				delete el.dataset.loadedFilename;
 			}
 
 			const url = resolveStreamUrl(v.filename);

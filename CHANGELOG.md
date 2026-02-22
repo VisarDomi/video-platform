@@ -2,6 +2,11 @@
 
 ## 2026-02-22
 
+- **fix**: Black screen on swipe navigation between streams
+  - **root cause**: `loadStream` had a skip optimization that checked `el.dataset.loadedFilename === v.filename` to avoid re-loading an already-loaded stream. But HLS instances can be destroyed (by component lifecycle recreating the `hlsInstances` Map, or by TL 404 error handlers) without clearing `dataset.loadedFilename`. Result: `loadStream` thinks the video is loaded but HLS is dead — black screen with no src.
+  - **decision**: (1) Changed skip check to triple validation: filename match AND active HLS/native stream (`hlsInstances.has(el)` or `nativeAbortControllers.has(el)`) AND `!!el.src`. If filename matches but stream is dead, clear `dataset.loadedFilename` and re-load. (2) In the TL 404 error handler, `delete el.dataset.loadedFilename` when destroying HLS so the stale marker is cleaned up at the source.
+  - **files**: `VideoPlayer.svelte` (`loadStream` stale stream detection, HLS error handler `loadedFilename` cleanup)
+
 - **refactor**: TL provider — unified loading with IDB-first resolution and leftover consumption
   - **root cause**: On first open, streams appeared progressively (liveUrl=null → resolved one-by-one). On second open with IDB cache, Phase 0 ran separately and `setVideos()` bulk-loaded cached liveUrls, breaking the progressive UX.
   - **design**: (1) Removed Phase 0 (`processIdbCache`). IDB is now checked inline per-streamer via `resolveStreamerLiveUrl` helper (IDB-first → masterListUrl fallback). (2) After endpoint list consumed, `consumeLeftoverIdb` processes IDB entries not in endpoint — only adds to list if alive, with same costreamer logic. (3) Expanded IDB schema (v3) to store full streamer fields (`streamId`, `alias`, `firstName`, `isFollowing`, `parentAlias`) so leftover entries can be reconstituted into `TlStreamer` objects. (4) `putCached` now accepts a streamer object instead of individual fields. (5) Same progressive UX on every app open — streams appear with null liveUrl, light up one-by-one.
