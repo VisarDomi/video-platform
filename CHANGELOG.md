@@ -2,6 +2,11 @@
 
 ## 2026-02-22
 
+- **refactor**: TL provider — unified loading with IDB-first resolution and leftover consumption
+  - **root cause**: On first open, streams appeared progressively (liveUrl=null → resolved one-by-one). On second open with IDB cache, Phase 0 ran separately and `setVideos()` bulk-loaded cached liveUrls, breaking the progressive UX.
+  - **design**: (1) Removed Phase 0 (`processIdbCache`). IDB is now checked inline per-streamer via `resolveStreamerLiveUrl` helper (IDB-first → masterListUrl fallback). (2) After endpoint list consumed, `consumeLeftoverIdb` processes IDB entries not in endpoint — only adds to list if alive, with same costreamer logic. (3) Expanded IDB schema (v3) to store full streamer fields (`streamId`, `alias`, `firstName`, `isFollowing`, `parentAlias`) so leftover entries can be reconstituted into `TlStreamer` objects. (4) `putCached` now accepts a streamer object instead of individual fields. (5) Same progressive UX on every app open — streams appear with null liveUrl, light up one-by-one.
+  - **files**: `tl-cache.ts` (expanded `CachedStreamer` interface, DB v3, `putCached` signature change, `getAllCached` returns full entries), `+page.svelte` (new `resolveStreamerLiveUrl` + `consumeLeftoverIdb`, removed `processIdbCache`, rewrote `processNewStreamer` + co-streamer resolution, updated `putCached` calls in `reprocessExistingStreamer`), `TL_PROVIDER.md` (updated architecture docs)
+
 - **feature**: TL provider — process IDB cache on startup, remove 30s artificial delay
   - **design**: (1) On queue start (app launch or provider return), process all IndexedDB entries first — checkLiveUrl against tango.me, remove 404s. Cleans stale liveUrls from previous sessions where the app was killed by the OS. (2) Removed REFRESH_GATE_MS (30s) wait between queue cycles — the queue paces itself naturally via 200ms per-item delay. (3) Added `getAllCached()` to tl-cache.ts.
   - **files**: `+page.svelte` (new `processIdbCache` phase, removed 30s wait), `tl-cache.ts` (`getAllCached`), `TL_PROVIDER.md` (updated Phase 0 docs)

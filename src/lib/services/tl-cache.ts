@@ -9,16 +9,21 @@ import type { TlStreamer } from './tl-api.js';
 //   - Entry older than 24h → swept by sweepOrphans()
 // putCached never overwrites a cached liveUrl with null.
 
-interface CachedStreamer {
+export interface CachedStreamer {
 	streamerId: string;
+	streamId: string;
+	alias: string;
+	firstName: string;
 	masterListUrl: string;
+	isFollowing: boolean;
+	parentAlias?: string;
 	liveUrl: string | null;
 	cachedAt: number;
 }
 
 const DB_NAME = 'tl-cache';
 const STORE_NAME = 'streamers';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 let dbInstance: IDBDatabase | null = null;
@@ -27,12 +32,17 @@ function openDb(): Promise<IDBDatabase> {
 	if (dbInstance) return Promise.resolve(dbInstance);
 	return new Promise((resolve, reject) => {
 		const req = indexedDB.open(DB_NAME, DB_VERSION);
-		req.onupgradeneeded = () => {
+		req.onupgradeneeded = (event) => {
 			const db = req.result;
 			if (!db.objectStoreNames.contains(STORE_NAME)) {
 				db.createObjectStore(STORE_NAME, { keyPath: 'streamerId' });
 			}
-			// v1→v2: existing entries get cachedAt = now (treat as fresh)
+			// v2→v3: schema expanded with streamId/alias/firstName/isFollowing/parentAlias
+			// Clear store — cache repopulates on first cycle
+			if ((event.oldVersion ?? 0) < 3 && db.objectStoreNames.contains(STORE_NAME)) {
+				const tx = (event.target as IDBOpenDBRequest).transaction!;
+				tx.objectStore(STORE_NAME).clear();
+			}
 		};
 		req.onsuccess = () => {
 			dbInstance = req.result;
@@ -42,7 +52,7 @@ function openDb(): Promise<IDBDatabase> {
 	});
 }
 
-export async function getAllCached(): Promise<{ streamerId: string; liveUrl: string | null }[]> {
+export async function getAllCached(): Promise<CachedStreamer[]> {
 	try {
 		const db = await openDb();
 		return new Promise((resolve) => {
@@ -73,8 +83,15 @@ export async function getCached(streamerId: string): Promise<CachedStreamer | un
 }
 
 export async function putCached(
-	streamerId: string,
-	masterListUrl: string,
+	streamer: {
+		streamerId: string;
+		streamId: string;
+		alias: string;
+		firstName: string;
+		masterListUrl: string;
+		isFollowing: boolean;
+		parentAlias?: string;
+	},
 	liveUrl: string | null
 ): Promise<void> {
 	try {
@@ -84,14 +101,24 @@ export async function putCached(
 		if (!liveUrl) {
 			const tx = db.transaction(STORE_NAME, 'readonly');
 			const existing = await new Promise<CachedStreamer | undefined>((resolve) => {
-				const req = tx.objectStore(STORE_NAME).get(streamerId);
+				const req = tx.objectStore(STORE_NAME).get(streamer.streamerId);
 				req.onsuccess = () => resolve(req.result ?? undefined);
 				req.onerror = () => resolve(undefined);
 			});
 			if (existing?.liveUrl) return; // keep existing liveUrl
 		}
 		const tx = db.transaction(STORE_NAME, 'readwrite');
-		tx.objectStore(STORE_NAME).put({ streamerId, masterListUrl, liveUrl, cachedAt: Date.now() });
+		tx.objectStore(STORE_NAME).put({
+			streamerId: streamer.streamerId,
+			streamId: streamer.streamId,
+			alias: streamer.alias,
+			firstName: streamer.firstName,
+			masterListUrl: streamer.masterListUrl,
+			isFollowing: streamer.isFollowing,
+			parentAlias: streamer.parentAlias,
+			liveUrl,
+			cachedAt: Date.now()
+		} satisfies CachedStreamer);
 	} catch {
 		// graceful fallback
 	}
