@@ -1,0 +1,47 @@
+import * as path from "path";
+import winston from "winston";
+
+import * as utils from "./utils.js";
+import * as constants from "./constants.js";
+
+const projectRoot = utils.findProjectRoot();
+
+const consoleFormat = winston.format.combine(
+    winston.format.colorize(),
+    winston.format.timestamp({ format: constants.LOGS.TIMESTAMP_FORMAT }),
+    winston.format.printf(({ timestamp, level, message, ...meta }) => {
+        const metaString = Object.keys(meta).length ? JSON.stringify(meta, null, constants.MISC.JSON_INDENT) : constants.MISC.EMPTY_STRING;
+        return `${timestamp} ${level}: ${message} ${metaString}`;
+    })
+);
+
+const fileFormat = winston.format.combine(winston.format.timestamp({ format: constants.LOGS.TIMESTAMP_FORMAT }), winston.format.json());
+
+const logger = winston.createLogger({
+    level: constants.LOGS.LEVELS.INFO,
+    transports: [
+        new winston.transports.Console({
+            format: consoleFormat,
+        }),
+        new winston.transports.File({
+            filename: path.join(projectRoot, constants.FILE_NAMES.ERROR_LOG),
+            level: constants.LOGS.LEVELS.ERROR,
+            format: fileFormat,
+        }),
+    ],
+});
+
+export const profilingLogger = winston.createLogger({
+    level: constants.LOGS.LEVELS.INFO,
+    format: winston.format.combine(
+        winston.format.timestamp({ format: constants.LOGS.TIMESTAMP_FORMAT }),
+        winston.format.printf(({ timestamp, message }) => `${timestamp} - ${message}`)
+    ),
+    transports: [
+        new winston.transports.File({
+            filename: path.join(projectRoot, constants.FILE_NAMES.PROFILING_LOG),
+        }),
+    ],
+});
+
+export default logger;
