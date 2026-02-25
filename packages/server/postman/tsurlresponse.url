@@ -1,0 +1,20 @@
+HTTP/2 200 
+content-type: application/octet-stream
+via: 1.1 varnish, 1.1 varnish
+cache-control: max-age=70, public
+accept-ranges: bytes
+age: 0
+date: Tue, 14 Oct 2025 12:35:12 GMT
+x-served-by: cache-fra-etou8220090-FRA, cache-mxp6957-MXP
+x-cache: HIT, MISS
+x-cache-hits: 1, 0
+x-tango-req-start: 1760445312621
+x-tango-req-end: 1760445312631
+access-control-expose-headers: x-tango-req-start, x-tango-req-end
+access-control-allow-credentials: true
+access-control-allow-origin: https://tango.me
+strict-transport-security: max-age=300
+content-length: 127652
+X-Firefox-Spdy: h2
+
+R0AAE...

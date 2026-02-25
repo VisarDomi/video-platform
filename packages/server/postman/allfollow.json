@@ -1,0 +1,225 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_1",
+        "pageTimings": {
+          "onContentLoad": 112,
+          "onLoad": 2111
+        },
+        "startedDateTime": "2025-10-10T21:13:22.336+02:00",
+        "title": "https://tango.me/my-following"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2025-10-10T21:13:22.336+02:00",
+        "request": {
+          "bodySize": 0,
+          "method": "GET",
+          "url": "https://gateway.tango.me/discovery/v3/followings/me/list?size=50",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json; charset=UTF-8"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "foreground-id",
+              "value": "4c2f187f-0a0e-4bf4-aa6f-abc4451891ae"
+            },
+            {
+              "name": "interaction-id",
+              "value": "bf9c0db8-6089-46de-993a-9fbcba8fb8c6"
+            },
+            {
+              "name": "username",
+              "value": "2ea714b592eb495d97f4989d49c688ce"
+            },
+            {
+              "name": "x-app-client-session-id",
+              "value": "230d6759-73b5-49ad-869d-d53a5fc88dbe"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-GPC",
+              "value": "1"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Cookie",
+              "value": "Tango-DeviceId=cdc075d2190840bc8440a74f417b0c18; intercom-id-ahnp8yy2=bfc916e1-d4c7-4869-a42f-2bbc6a5154a9; intercom-session-ahnp8yy2=dS95TkhjNnRKbnJzdTAxNE9qL1E5SGswWnpoN090RlE4Qjd1UGxCamtqbTBxTlRJWXhSTDJMOUt5d3IwQ3dIMlRjVE1MTlJOM2hEdnpvLzlyQWVTdjZUaU1jYkFMM0pTcXNOVG4xK1Z5R3c9LS1MVGtHUXB5N1RraWV4bysvQWhXY0ZRPT0=--37bdf0a9c87ec33adc65f3ea0d03c7a0a2ca1882; intercom-device-id-ahnp8yy2=7e47fe4d-6fa8-4e89-b7ad-971a253f357a; Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg; Tango-WST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg; Tango-SD=eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOiJVVWhlNUsyTGZnbVRxSDVyT0pxTXBRIiwic2Vzc2lvblRva2VuVmFsaWRVbnRpbFNlYyI6MTc2MDEwMTM5NSwicmVmcmVzaFRva2VuVmFsaWRVbnRpbFNlYyI6MTc2Nzg3Mzc5NSwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSJ9; __ssid=3e8024b3ca9995018607d959ab61948; Tango-SD=eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NjAxMjU4OTYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Njc4OTgyOTYsImFjY291bnRJZCI6bnVsbH0="
+            },
+            {
+              "name": "Priority",
+              "value": "u=4"
+            },
+            {
+              "name": "TE",
+              "value": "trailers"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-DeviceId",
+              "value": "cdc075d2190840bc8440a74f417b0c18"
+            },
+            {
+              "name": "intercom-id-ahnp8yy2",
+              "value": "bfc916e1-d4c7-4869-a42f-2bbc6a5154a9"
+            },
+            {
+              "name": "intercom-session-ahnp8yy2",
+              "value": "dS95TkhjNnRKbnJzdTAxNE9qL1E5SGswWnpoN090RlE4Qjd1UGxCamtqbTBxTlRJWXhSTDJMOUt5d3IwQ3dIMlRjVE1MTlJOM2hEdnpvLzlyQWVTdjZUaU1jYkFMM0pTcXNOVG4xK1Z5R3c9LS1MVGtHUXB5N1RraWV4bysvQWhXY0ZRPT0=--37bdf0a9c87ec33adc65f3ea0d03c7a0a2ca1882"
+            },
+            {
+              "name": "intercom-device-id-ahnp8yy2",
+              "value": "7e47fe4d-6fa8-4e89-b7ad-971a253f357a"
+            },
+            {
+              "name": "Tango-ST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg"
+            },
+            {
+              "name": "Tango-WST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhdWQiOiJnYXRld2F5IiwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSIsImFuYWx5dGljc0tleSI6IlVVaGU1SzJMZmdtVHFINXJPSnFNcFEiLCJhcHBJZCI6InRhbmdvIiwiaXNzIjoidG9rZW4tc2VydmljZSIsImd1ZXN0IjpmYWxzZSwic2Vzc2lvbklkIjoiMmVhNzE0YjU5MmViNDk1ZDk3ZjQ5ODlkNDljNjg4Y2UiLCJleHAiOjE3NjAxMjU4OTcsImlhdCI6MTc2MDEyMjI5NywianRpIjoiYjlhMjk1MjktOGI4NS00N2U1LWI3YWYtNWY0Y2Q1NmRjYjI2IiwidXNlcm5hbWUiOiIyZWE3MTRiNTkyZWI0OTVkOTdmNDk4OWQ0OWM2ODhjZSJ9.mG0heQO9SgwVWBjC49cwF8OGwKeqXWMsBkCFF3h6KqihPIVbKirFuFSX3BJ4ih04H406nW92ReVKfXBah7AVBg"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOiJVVWhlNUsyTGZnbVRxSDVyT0pxTXBRIiwic2Vzc2lvblRva2VuVmFsaWRVbnRpbFNlYyI6MTc2MDEwMTM5NSwicmVmcmVzaFRva2VuVmFsaWRVbnRpbFNlYyI6MTc2Nzg3Mzc5NSwiYWNjb3VudElkIjoiVVVoZTVLMkxmZ21UcUg1ck9KcU1wUSJ9"
+            },
+            {
+              "name": "__ssid",
+              "value": "3e8024b3ca9995018607d959ab61948"
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NjAxMjU4OTYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Njc4OTgyOTYsImFjY291bnRJZCI6bnVsbH0="
+            }
+          ],
+          "queryString": [
+            {
+              "name": "size",
+              "value": "50"
+            }
+          ],
+          "headersSize": 2865
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "vary",
+              "value": "Origin,Access-Control-Request-Method,Access-Control-Request-Headers"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "x-b3-traceid",
+              "value": "199cf8ac611f701db0232bc9ea5"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json;charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "Fri, 10 Oct 2025 19:13:22 GMT"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "mimeType": "application/json; charset=UTF-8",
+            "size": 20386,
+            "text": "{\n  \"errorCode\": 0,\n  \"followers\": [{\n    \"accountId\": \"kCbUWnbG3kDFk1mPjccV8A\",\n    \"followDate\": \"1760025665000\",\n    \"profileDetails\": {\n      \"firstName\": \"guiltyXS\",\n      \"lastName\": \"\",\n      \"gender\": \"FEMALE\",\n      \"thumbnailUrl\": \"https://cget.tango.me/contentserver/download/AAFoKz2cAABP3FWmzjRt28XiAAAAAJ8i6No/1AilGp8O/thumbnail\",\n      \"vipLevel\": 0,\n      \"guest\": false,\n      \"vipConfigId\": \"0\"\n    },\n    \"mutual\": false\n  }, {\n    \"accountId\": \"A0X2eyW_FIBderJW6Z...tual\": false\n  }],\n  \"nextCursor\": \"1756809018000\"\n}"
+          },
+          "redirectURL": "",
+          "headersSize": 377,
+          "bodySize": 20763
+        },
+        "cache": {},
+        "timings": {
+          "blocked": 0,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 274,
+          "receive": 49
+        },
+        "time": 323,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_1"
+      }
+    ]
+  }
+}

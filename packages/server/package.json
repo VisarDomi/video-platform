@@ -1,0 +1,29 @@
+{
+    "name": "video-editor-backend",
+    "version": "1.0.0",
+    "description": "Backend server for viewing and editing videos.",
+    "main": "dist/main.js",
+    "type": "module",
+    "scripts": {
+        "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
+        "build": "npm run compile-go && rm -rf dist && tsc",
+        "start": "npm run build && systemctl --user start video-editor-backend",
+        "restart": "npm run build && systemctl --user restart video-editor-backend",
+        "stop": "systemctl --user stop video-editor-backend",
+        "logs": "journalctl --user -u video-editor-backend -f"
+    },
+    "author": "",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^5.0.3",
+        "@types/node": "^20.12.7",
+        "typescript": "^5.4.5"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "express": "^5.1.0",
+        "p-limit": "^7.1.1",
+        "winston": "^3.13.0"
+    }
+}
