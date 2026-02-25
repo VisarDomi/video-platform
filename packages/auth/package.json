@@ -1,5 +1,5 @@
 {
-    "name": "video-auth",
+    "name": "auth",
     "type": "module",
     "version": "1.0.0",
     "description": "Get and update auth tokens used by video microservices",

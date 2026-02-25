@@ -77,11 +77,11 @@ const config: IConfig = {
         }, {} as Record<string, PathConfig>),
         tl: TL_PATHS,
     },
-    frontendDistPath: path.join(projectRoot, "..", "video-editor-svelte", "build"),
+    frontendDistPath: path.join(projectRoot, "..", "app", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
-    fc2FilePath: path.join(projectRoot, "..", "video-downloader", "fc2.txt"),
-    scFilePath: path.join(projectRoot, "..", "video-downloader", "sc.txt"),
-    tangoFilePath: path.join(projectRoot, "..", "video-downloader", "tango.txt"),
+    fc2FilePath: path.join(projectRoot, "..", "downloader", "fc2.txt"),
+    scFilePath: path.join(projectRoot, "..", "downloader", "sc.txt"),
+    tangoFilePath: path.join(projectRoot, "..", "downloader", "tango.txt"),
 };
 
 // Validate all paths for all providers (skip tl - ephemeral /tmp dirs created on demand)
