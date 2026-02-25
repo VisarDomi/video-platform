@@ -1,0 +1,11 @@
+{
+    "name": "video-platform",
+    "version": "1.0.0",
+    "private": true,
+    "workspaces": [
+        "packages/auth",
+        "packages/downloader",
+        "packages/server",
+        "packages/app"
+    ]
+}
