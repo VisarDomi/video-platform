@@ -1,0 +1,29 @@
+{
+    "name": "video-auth",
+    "type": "module",
+    "version": "1.0.0",
+    "description": "Get and update auth tokens used by video microservices",
+    "main": "main.ts",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "start": "npm run build && systemctl --user start video-auth",
+        "restart": "npm run build && systemctl --user restart video-auth",
+        "stop": "systemctl --user stop video-auth",
+        "logs": "journalctl --user -u video-auth -f",
+        "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
+    },
+    "keywords": [],
+    "author": "visardomi4@gmail.com",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "20.8.10",
+
+        "ts-node": "^10.9.2",
+        "typescript": "5.2.2"
+    },
+    "dependencies": {
+        "dotenv": "^17.2.2",
+        "playwright": "^1.56.0",
+        "winston": "^3.17.0"
+    }
+}
