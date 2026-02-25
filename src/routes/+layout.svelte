@@ -1,12 +1,27 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 
 	let { children } = $props();
+
+	function preventZoom(e: Event) {
+		e.preventDefault();
+	}
 
 	onMount(() => {
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/sw.js');
 		}
+
+		// Prevent Safari pinch-zoom gestures
+		document.addEventListener('gesturestart', preventZoom, { passive: false });
+		document.addEventListener('gesturechange', preventZoom, { passive: false });
+		document.addEventListener('gestureend', preventZoom, { passive: false });
+	});
+
+	onDestroy(() => {
+		document.removeEventListener('gesturestart', preventZoom);
+		document.removeEventListener('gesturechange', preventZoom);
+		document.removeEventListener('gestureend', preventZoom);
 	});
 </script>
 

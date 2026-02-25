@@ -555,13 +555,9 @@
 		}
 	}
 
-	function isViewportZoomed() {
-		return window.visualViewport != null && window.visualViewport.scale > 1.01;
-	}
-
 	function handleTouchStart(e: TouchEvent) {
 		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
-		if (playerStore.swipeAnimating || isViewportZoomed()) return;
+		if (playerStore.swipeAnimating) return;
 		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -573,7 +569,7 @@
 
 	function handleTouchMove(e: TouchEvent) {
 		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
-		if (playerStore.swipeAnimating || isViewportZoomed()) return;
+		if (playerStore.swipeAnimating) return;
 		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
 		e.preventDefault();
 
@@ -701,7 +697,7 @@
 		width: 100%;
 		height: 100dvh;
 		background-color: black;
-		touch-action: pinch-zoom;
+		touch-action: none;
 		z-index: -1;
 		opacity: 0;
 		pointer-events: none;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-02-25
+
+- **fix**: Disable zoom — was causing zoom on rotation for fc2/sc videos
+  - **root cause**: `touch-action: pinch-zoom` on the video view allowed native Safari zoom. On fc2/sc streams, rotating the phone triggered unintended zoom that persisted. The `isViewportZoomed()` guard only suppressed swipe gestures during zoom but didn't prevent the zoom itself.
+  - **decision**: Disable zoom entirely, matching trader-svelte's approach: (1) Added `maximum-scale=1, user-scalable=no` to viewport meta tag. (2) Added Safari `gesturestart/change/end` event prevention in layout. (3) Changed `touch-action` back to `none` on `.video-view`. (4) Removed `isViewportZoomed()` function and its guards since zoom is no longer possible. Reverts the 2026-02-19 "Enable native Safari zoom" change.
+  - **files**: `app.html` (viewport meta), `+layout.svelte` (gesture prevention), `VideoPlayer.svelte` (touch-action: none, removed isViewportZoomed)
+
 ## 2026-02-22
 
 - **fix**: Black screen on swipe navigation between streams
