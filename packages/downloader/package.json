@@ -1,5 +1,5 @@
 {
-    "name": "video-downloader",
+    "name": "downloader",
     "type": "module",
     "version": "1.0.0",
     "description": "Download 1s .ts files for each of the streamers you follow",
