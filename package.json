@@ -1,15 +1,15 @@
 {
-    "name": "tslive-auth",
+    "name": "video-auth",
     "type": "module",
     "version": "1.0.0",
-    "description": "Get and update tokens used by other tslive microservices",
+    "description": "Get and update auth tokens used by video microservices",
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "start": "npm run build && systemctl --user start tslive-auth",
-        "restart": "npm run build && systemctl --user restart tslive-auth",
-        "stop": "systemctl --user stop tslive-auth",
-        "logs": "journalctl --user -u tslive-auth -f",
+        "start": "npm run build && systemctl --user start video-auth",
+        "restart": "npm run build && systemctl --user restart video-auth",
+        "stop": "systemctl --user stop video-auth",
+        "logs": "journalctl --user -u video-auth -f",
         "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
     },
     "keywords": [],

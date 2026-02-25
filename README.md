@@ -1,5 +1,5 @@
-# tslive-auth
-Get and update tokens used by other tslive microservices.
+# video-auth
+Get and update auth tokens used by video microservices.
 
 ## usage
 
@@ -7,11 +7,13 @@ Get and update tokens used by other tslive microservices.
     "accounts": [
         {
             "email": "email-here@gmail.com",
-            "password": "password-here"
+            "password": "password-here",
+            "provider": "tslive"
         },
         {
             "email": "email-here-2@gmail.com",
-            "password": "password-here-2"
+            "password": "password-here-2",
+            "provider": "tslive"
         }
     ]
 }`
