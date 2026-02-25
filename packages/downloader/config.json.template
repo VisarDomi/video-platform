@@ -1,0 +1,9 @@
+{
+    "storagePath": "/home/visar/Videos/downloads",
+    "intervals": {
+        "pollFollowing": 1000
+    },
+    "timeouts": {
+        "staleStream": 60000
+    }
+}

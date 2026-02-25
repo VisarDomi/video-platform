@@ -1,0 +1,93 @@
+import * as timersPromises from "timers/promises";
+
+import * as config from "../../../common/config.js";
+import logger from "../../../common/logger.js";
+import { StreamDownloader } from "../../download/streamDownloader.js";
+import { AliasManager } from "../../state/aliasManager.js";
+import { DownloadsManager } from "../../state/downloadsManager.js";
+import { ApiClient } from "../api/apiClient.js";
+import type { TargetManager } from "../../common/targetManager.js";
+
+export class StreamDiscoveryService {
+    private readonly apiClient: ApiClient;
+    private aliasManager: AliasManager;
+    private downloadsManager: DownloadsManager;
+    private targetManager: TargetManager | null = null;
+
+    constructor(apiClient: ApiClient, aliasManager: AliasManager, downloadsManager: DownloadsManager) {
+        this.apiClient = apiClient;
+        this.aliasManager = aliasManager;
+        this.downloadsManager = downloadsManager;
+        logger.debug("[Tango] StreamDiscoveryService initialized.");
+    }
+
+    public setTargetManager(targetManager: TargetManager): void {
+        this.targetManager = targetManager;
+    }
+
+    private shouldDownload(alias: string): boolean {
+        if (!this.targetManager || this.targetManager.size === 0) {
+            return true; // No tango.txt entries = download everything
+        }
+        return this.targetManager.hasTarget(alias);
+    }
+
+    public async start(): Promise<void> {
+        let lastKnownTotal = -1;
+
+        while (true) {
+            const streamIdsResponseBody = await this.apiClient.getFollowingResponseBody();
+
+            const currentTotal = this.downloadsManager.size;
+            if (currentTotal !== lastKnownTotal) {
+                logger.info(`[Tango] Watching for streams... Total active/pending: ${currentTotal}`);
+                lastKnownTotal = currentTotal;
+            }
+
+            if (streamIdsResponseBody?.entities?.stream) {
+                const streamIds: string[] = Object.keys(streamIdsResponseBody.entities.stream);
+                for (const streamId of streamIds) {
+                    const stream = streamIdsResponseBody.entities.stream[streamId];
+                    const masterPlaylistUrl = stream.playlistUrl;
+                    const streamerId = stream.broadcasterId;
+
+                    if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
+                        if (!this.downloadsManager.has(masterPlaylistUrl)) {
+                            let alias = this.aliasManager.get(streamerId);
+                            if (!alias) {
+                                logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
+                                alias = await this.apiClient.getStreamerAlias(streamerId);
+                                if (alias && alias !== streamerId) {
+                                    this.aliasManager.set(streamerId, alias);
+                                }
+                            }
+
+                            const resolvedAlias = alias || streamerId;
+
+                            if (!this.shouldDownload(resolvedAlias)) {
+                                logger.verbose(`[Tango] Skipping ${resolvedAlias} (not in tango.txt)`);
+                                continue;
+                            }
+
+                            logger.info(`[Tango] Discovered new stream from ${resolvedAlias}.`);
+
+                            const downloadHandle = this.downloadsManager.add(masterPlaylistUrl, {
+                                streamerId: streamerId,
+                                alias: resolvedAlias,
+                            });
+
+                            if (downloadHandle) {
+                                logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
+                                const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
+                                void streamDownloader.start();
+                            }
+                        }
+                    }
+                }
+            } else {
+                logger.verbose("[Tango] Poll complete: No new streams found or unable to fetch.");
+            }
+            await timersPromises.setTimeout(config.getConfig().intervals.pollFollowing);
+        }
+    }
+}

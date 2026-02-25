@@ -1,0 +1,16 @@
+/node_modules
+/dist
+.env
+error.log
+temp.txt
+temp.md
+*.har
+repomix-output.xml
+config.json
+.idea/
+.vscode/
+repomix/
+fc2.txt
+sc.txt
+/oneofthem.json
+/themp4file.json

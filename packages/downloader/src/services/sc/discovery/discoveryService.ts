@@ -1,0 +1,80 @@
+import * as timersPromises from "timers/promises";
+import logger from "../../../common/logger.js";
+import { DownloadsManager } from "../../state/downloadsManager.js";
+import { TargetManager } from "../../common/targetManager.js";
+import { ScClient } from "../api/scClient.js";
+import { StreamDownloader } from "../../download/streamDownloader.js";
+
+export class ScDiscoveryService {
+    private targetManager: TargetManager;
+    private scClient: ScClient;
+    private downloadsManager: DownloadsManager;
+    private queueIndex: number = 0;
+
+    constructor(targetManager: TargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
+        this.targetManager = targetManager;
+        this.scClient = scClient;
+        this.downloadsManager = downloadsManager;
+        logger.debug("[SC] DiscoveryService initialized.");
+    }
+
+    public start(): void {
+        const runLoop = async () => {
+            while (true) {
+                await this.processNextTarget();
+                await timersPromises.setTimeout(1000);
+            }
+        };
+        void runLoop();
+    }
+
+    private async processNextTarget(): Promise<void> {
+        const targets = this.targetManager.getTargets();
+
+        if (targets.length === 0) {
+            return;
+        }
+
+        if (this.queueIndex >= targets.length) {
+            this.queueIndex = 0;
+        }
+        const username = targets[this.queueIndex];
+        this.queueIndex++;
+
+        try {
+            if (this.downloadsManager.hasStreamer(username)) {
+                return;
+            }
+
+            logger.info(`[SC-DEBUG] DISCOVERY ${username} not-in-downloads, checking isOnline...`);
+            const isLive = await this.scClient.isOnline(username);
+
+            if (isLive) {
+                const stillFree = !this.downloadsManager.hasStreamer(username);
+                logger.info(`[SC-DEBUG] DISCOVERY ${username} isLive=true hasStreamer(recheck)=${!stillFree}`);
+
+                if (!stillFree) return;
+
+                const masterUrl = await this.scClient.getHlsUrl(username);
+
+                if (masterUrl) {
+                    const handle = this.downloadsManager.add(masterUrl, {
+                        streamerId: username,
+                        alias: username
+                    });
+
+                    logger.info(`[SC-DEBUG] DISCOVERY ${username} add-result=${handle ? "OK" : "DUPLICATE"} url=${masterUrl}`);
+
+                    if (handle) {
+                        const downloader = new StreamDownloader(handle, this.scClient);
+                        void downloader.start();
+                    }
+                } else {
+                    logger.info(`[SC-DEBUG] DISCOVERY ${username} isLive but getHlsUrl=null`);
+                }
+            }
+        } catch (error: any) {
+            logger.error(`[SC] Error checking status for channel ${username}`, { error: error.message });
+        }
+    }
+}
