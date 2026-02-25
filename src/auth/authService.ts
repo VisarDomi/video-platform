@@ -1,29 +1,29 @@
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
-import * as types from "../common/types.js";
+import { Account, IAuthProvider } from "../providers/interfaces.js";
 import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
-import * as authClient from "./authClient.js";
-import * as authUtils from "./authUtils.js";
 
 const AUTH_RETRY_INTERVAL_MS = 30 * 1000;
 const BACKGROUND_JOB_FAILURE_RETRY_MS = 15 * 1000;
 
 export class AuthService {
-    private readonly account: types.Account;
+    private readonly account: Account;
+    private readonly provider: IAuthProvider;
     private readonly authContext: AuthContext;
 
-    constructor(account: types.Account) {
+    constructor(account: Account, provider: IAuthProvider) {
         this.account = account;
-        this.authContext = new AuthContext(account.email);
+        this.provider = provider;
+        this.authContext = new AuthContext(account.email, provider);
     }
 
     public async initiateAuth() {
         const loadedFromFile = await this.authContext.loadTokenFromFile();
 
         if (loadedFromFile) {
-            logger.info(`Tango-RT for ${this.account.email} loaded from file. Attempting to establish session...`);
+            logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             while (true) {
                 try {
                     await this.ensureValidTokens();
@@ -63,7 +63,7 @@ export class AuthService {
 
     private async performFreshLogin() {
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
-        const tokens = await loginQueue.add(this.account);
+        const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
@@ -76,43 +76,37 @@ export class AuthService {
     }
 
     private async refreshSession() {
-        logger.info(`Attempting to refresh session for ${this.account.email} using Tango-RT...`);
-        const tangoRT = this.authContext.getTangoRT();
-        if (!tangoRT) {
-            throw new Error(`Tango-RT not found for ${this.account.email}.`);
-        }
-        const payload = authUtils.parseJwtPayload(tangoRT);
-        const username = payload?.username || payload?.sessionId;
-        if (!username) {
-            throw new Error(`Could not extract username from Tango-RT for ${this.account.email}.`);
+        logger.info(`Attempting to refresh session for ${this.account.email} using refresh token...`);
+        const tokenBag = this.authContext.getTokenBag();
+        if (!tokenBag) {
+            throw new Error(`Refresh token not found for ${this.account.email}.`);
         }
 
-        const result = await authClient.refreshSession(username, tangoRT);
+        const result = await this.provider.refreshSession(tokenBag);
         const receivedNewRT = this.authContext.updateFromRefresh(result);
 
         if (receivedNewRT) {
-            logger.info(`Successfully refreshed ST and RT for ${this.account.email}.`);
+            logger.info(`Successfully refreshed session token and refresh token for ${this.account.email}.`);
         } else {
-            logger.warn(`Refreshed ST, but no new RT was provided for ${this.account.email}.`);
+            logger.warn(`Refreshed session token, but no new refresh token was provided for ${this.account.email}.`);
         }
     }
 
     private async setTokenData() {
-        const tangoST = this.authContext.getTangoST();
-        if (!tangoST) {
-            throw new Error(`Cannot fetch token data for ${this.account.email} without Tango-ST.`);
+        const tokenBag = this.authContext.getTokenBag();
+        if (!tokenBag?.sessionToken) {
+            throw new Error(`Cannot fetch token data for ${this.account.email} without session token.`);
         }
-        const result = await authClient.fetchTokenData(tangoST);
+        const result = await this.provider.fetchShortTokens(tokenBag);
         this.authContext.updateFromTokenData(result);
     }
 
     private async refreshShortLivedTokens() {
         while (true) {
             try {
-                const refreshInterval = 5000;
                 await this.setTokenData();
                 await this.authContext.saveTokenToFile();
-                await timersPromises.setTimeout(refreshInterval);
+                await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             } catch (error) {
                 logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. Retrying after delay.`, { error: (error as Error).message });
                 await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
@@ -122,8 +116,7 @@ export class AuthService {
 
     private async manageTokenLifecycle() {
         while (true) {
-            const refreshInterval = 30 * 60 * 1000;
-            await timersPromises.setTimeout(refreshInterval);
+            await timersPromises.setTimeout(this.provider.intervals.sessionRefresh);
             await this.maintainSession();
         }
     }

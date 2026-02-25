@@ -3,55 +3,47 @@ import * as path from "path";
 
 import logger from "../common/logger.js";
 import * as config from "../common/config.js";
-import * as types from "../common/types.js";
-
-import { RefreshResult, TokenDataResult } from "./authClient.js";
-
-interface SessionData {
-    tangoRT: string | null;
-    tangoST: string | null;
-    tt: string | null;
-    ttu: string | null;
-    tte: string | null;
-}
+import { IAuthProvider, TokenBag, RefreshResult, ShortTokenResult } from "../providers/interfaces.js";
 
 export class AuthContext {
     private readonly email: string;
-    private tangoRT: string | null = null;
-    private tangoST: string | null = null;
-    private tt: string | null = null;
-    private ttu: string | null = null;
-    private tte: string | null = null;
+    private readonly provider: IAuthProvider;
+    private tokenBag: TokenBag | null = null;
 
-    constructor(email: string) {
+    constructor(email: string, provider: IAuthProvider) {
         this.email = email;
+        this.provider = provider;
     }
 
-    public getTangoRT(): string | null {
-        return this.tangoRT;
+    public getRefreshToken(): string | null {
+        return this.tokenBag?.refreshToken ?? null;
     }
-    public getTangoST(): string | null {
-        return this.tangoST;
+
+    public getSessionToken(): string | null {
+        return this.tokenBag?.sessionToken ?? null;
+    }
+
+    public getTokenBag(): TokenBag | null {
+        return this.tokenBag;
     }
 
     public updateFromRefresh(result: RefreshResult): boolean {
-        this.tangoST = result.newTangoST;
-        if (result.newTangoRT) {
-            this.tangoRT = result.newTangoRT;
+        if (!this.tokenBag) return false;
+        this.tokenBag.sessionToken = result.newSessionToken;
+        if (result.newRefreshToken) {
+            this.tokenBag.refreshToken = result.newRefreshToken;
             return true;
         }
         return false;
     }
 
-    public updateFromTokenData(result: TokenDataResult): void {
-        this.tt = result.tt;
-        this.ttu = result.ttu;
-        this.tte = result.tte;
+    public updateFromTokenData(result: ShortTokenResult): void {
+        if (!this.tokenBag) return;
+        this.tokenBag.extras = { ...this.tokenBag.extras, ...result.extras };
     }
 
-    public updateFromLogin(result: types.LoginResult): void {
-        this.tangoRT = result.tangoRT;
-        this.tangoST = result.tangoST;
+    public updateFromLogin(bag: TokenBag): void {
+        this.tokenBag = bag;
     }
 
     private getSessionFilePath(): string {
@@ -63,14 +55,11 @@ export class AuthContext {
         const filePath = this.getSessionFilePath();
         try {
             const data = await fsPromises.readFile(filePath, "utf-8");
-            const session: Partial<SessionData> = JSON.parse(data);
+            const parsed = JSON.parse(data);
+            const bag = this.provider.deserializeTokens(parsed);
 
-            if (session.tangoRT) {
-                this.tangoRT = session.tangoRT;
-                this.tangoST = session.tangoST ?? null;
-                this.tt = session.tt ?? null;
-                this.ttu = session.ttu ?? null;
-                this.tte = session.tte ?? null;
+            if (bag) {
+                this.tokenBag = bag;
                 return true;
             }
         } catch (error: any) {
@@ -84,15 +73,9 @@ export class AuthContext {
     public async saveTokenToFile(): Promise<void> {
         const filePath = this.getSessionFilePath();
         try {
-            if (this.tangoRT) {
-                const sessionData: SessionData = {
-                    tangoRT: this.tangoRT,
-                    tangoST: this.tangoST,
-                    tt: this.tt,
-                    ttu: this.ttu,
-                    tte: this.tte,
-                };
-                await fsPromises.writeFile(filePath, JSON.stringify(sessionData, null, 2));
+            if (this.tokenBag) {
+                const serialized = this.provider.serializeTokens(this.tokenBag);
+                await fsPromises.writeFile(filePath, JSON.stringify(serialized, null, 2));
                 logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {

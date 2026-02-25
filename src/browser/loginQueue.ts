@@ -1,10 +1,10 @@
 import logger from "../common/logger.js";
-import * as types from "../common/types.js";
-import { extractTokens } from "./playwrightLogin.js";
+import { Account, IAuthProvider, TokenBag } from "../providers/interfaces.js";
 
 interface QueuedLogin {
-    account: types.Account;
-    resolve: (value: types.LoginResult) => void;
+    account: Account;
+    provider: IAuthProvider;
+    resolve: (value: TokenBag) => void;
     reject: (reason?: any) => void;
 }
 
@@ -12,9 +12,9 @@ class LoginQueue {
     private queue: QueuedLogin[] = [];
     private isProcessing = false;
 
-    public add(account: types.Account): Promise<types.LoginResult> {
-        return new Promise<types.LoginResult>((resolve, reject) => {
-            this.queue.push({ account, resolve, reject });
+    public add(account: Account, provider: IAuthProvider): Promise<TokenBag> {
+        return new Promise<TokenBag>((resolve, reject) => {
+            this.queue.push({ account, provider, resolve, reject });
             logger.info(`Browser login for ${account.email} added to the queue. Queue size: ${this.queue.length}`);
             if (!this.isProcessing) {
                 void this.processQueue();
@@ -40,12 +40,8 @@ class LoginQueue {
         logger.info(`Processing browser login for ${request.account.email}. Remaining in queue: ${this.queue.length}`);
 
         try {
-            const result = await extractTokens(request.account);
-            if (result) {
-                request.resolve(result);
-            } else {
-                request.reject("yeah, no, i ate the error");
-            }
+            const result = await request.provider.login(request.account);
+            request.resolve(result);
         } catch (error) {
             request.reject(error);
         } finally {
