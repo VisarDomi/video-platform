@@ -1,0 +1,29 @@
+{
+    "name": "video-downloader",
+    "type": "module",
+    "version": "1.0.0",
+    "description": "Download 1s .ts files for each of the streamers you follow",
+    "main": "main.ts",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "start": "npm run build && systemctl --user start video-downloader",
+        "restart": "npm run build && systemctl --user restart video-downloader",
+        "stop": "systemctl --user stop video-downloader",
+        "logs": "journalctl --user -u video-downloader -f",
+        "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
+    },
+    "keywords": [],
+    "author": "visardomi4@gmail.com",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/express": "^5.0.6",
+        "@types/node": "20.8.10",
+
+        "typescript": "5.2.2"
+    },
+    "dependencies": {
+        "express": "^5.2.1",
+        "playwright": "^1.57.0",
+        "winston": "^3.17.0"
+    }
+}
