@@ -1,4 +1,4 @@
-export const PROVIDERS = ['tl', 'tango', 'fc2', 'sc'] as const;
+export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
 export const DEFAULT_PROVIDER = PROVIDERS[0];
 
 export const STORAGE_KEYS = {
@@ -44,30 +44,6 @@ export const UI_TEXT = {
 		TIME_PRECISE_PLACEHOLDER: '00:00.000',
 		SIZE_UNIT: ' MiB'
 	}
-} as const;
-
-export const TL_API = {
-	STREAMS: '/api/tl/streams',
-	FOLLOW: '/api/tl/follow',
-	UNFOLLOW: '/api/tl/unfollow',
-	BLOCK: '/api/tl/block',
-	DOWNLOAD_START: '/api/tl/download/start',
-	DOWNLOAD_STOP: '/api/tl/download/stop',
-	DOWNLOAD_ACTIVE: '/api/tl/download/active',
-	LIVE_FILENAMES: '/api/tl/live-filenames',
-	MULTI_BROADCAST: '/api/tl/multi-broadcast',
-	PROXY_START: '/api/tl/proxy/start',
-	PROXY_STOP: '/api/tl/proxy/stop',
-	RESOLVE_LIVE_URL: '/api/tl/resolve-live-url',
-	CHECK_LIVE_URL: '/api/tl/check-live-url'
-} as const;
-
-export const TL_PAGE = {
-	ITEM_HEIGHT: 52,
-	SCROLL_BUFFER: 10,
-	MIN_LIST_ITEMS: 100,
-	REFRESH_GATE_MS: 30_000,
-	LIVE_URL_RESOLVE_DELAY_MS: 200
 } as const;
 
 export const TANGO_API = {

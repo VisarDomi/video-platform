@@ -2,7 +2,6 @@ import { TANGO_LIST_API, FC2_API, SC_API } from '../constants.js';
 
 const apiMap = {
 	tango: TANGO_LIST_API,
-	tl: TANGO_LIST_API,
 	fc2: FC2_API,
 	sc: SC_API
 } as const;

@@ -9,16 +9,6 @@
 
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
-	import TlControls from './TlControls.svelte';
-	import {
-		startDownload,
-		fetchMultiBroadcast,
-		sendActiveSet,
-		startProxy,
-		getProxyUrl,
-		syncProxySessions,
-		blockStreamer
-	} from '$lib/services/tl-api.js';
 	import { VIDEO_TYPE } from '$lib/constants.js';
 	import type { Video } from '$lib/types.js';
 
@@ -38,9 +28,8 @@
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
-	const isTl = $derived(videoListStore.selectedProvider === 'tl');
 	const displayDuration = $derived(
-		duration === Infinity && !isTl && seekableEnd > 0 ? seekableEnd : duration
+		duration === Infinity && seekableEnd > 0 ? seekableEnd : duration
 	);
 
 
@@ -71,7 +60,7 @@
 				if (el === getActiveElement()) {
 					currentTime = el.currentTime;
 					duration = el.duration;
-					// Track seekable range for live non-TL videos
+					// Track seekable range for live videos
 					if (el.duration === Infinity && el.seekable.length > 0) {
 						seekableEnd = el.seekable.end(el.seekable.length - 1);
 					}
@@ -122,7 +111,6 @@
 		if (playerStore.view !== 'list' || videoElements.length === 0) return;
 		playerStore.swipeAnimating = false;
 		getActiveElement()?.pause();
-		if (videoListStore.selectedProvider === 'tl') sendActiveSet([]);
 	});
 
 	// Cleanup when video is cleared
@@ -132,7 +120,7 @@
 		stopPlayback();
 	});
 
-	// React to current video being removed from list (e.g., by the processing queue)
+	// React to current video being removed from list
 	$effect(() => {
 		const cv = playerStore.currentVideo;
 		if (!cv || playerStore.view !== 'video') return;
@@ -179,40 +167,6 @@
 		}
 	});
 
-	// Fetch co-streamers on-demand when a tl video activates
-	$effect(() => {
-		const cv = playerStore.currentVideo;
-		if (!cv || playerStore.view !== 'video' || videoListStore.selectedProvider !== 'tl') return;
-		const streamer = videoListStore.getStreamer(cv.filename);
-		if (!streamer?.streamId || !videoListStore.markStreamIdProcessed(streamer.streamId)) return;
-		const epoch = videoListStore.epoch;
-		console.log('[TL:co] on-demand fetch for', streamer.alias, streamer.streamId);
-		fetchMultiBroadcast(streamer.streamId).then((coStreamers) => {
-			if (videoListStore.epoch !== epoch) return;
-			if (coStreamers.length === 0) {
-				console.log('[TL:co] no co-streamers for', streamer.alias);
-				return;
-			}
-			console.log(
-				'[TL:co] found',
-				coStreamers.length,
-				'co-streamers for',
-				streamer.alias,
-				':',
-				coStreamers.map((s) => s.alias).join(', ')
-			);
-			const withParent = coStreamers.map((s) => ({ ...s, parentAlias: streamer.alias }));
-			const newVideos = withParent.map((s) => ({
-				filename: s.alias,
-				type: VIDEO_TYPE.ORIGINAL,
-				duration: 0,
-				size: 0,
-				isLive: true
-			}));
-			videoListStore.insertVideosAfter(cv.filename, newVideos, withParent);
-		});
-	});
-
 	// Preload adjacent — depends on video list and active index, not on currentVideo identity
 	$effect(() => {
 		const view = playerStore.view;
@@ -253,29 +207,11 @@
 	}
 
 	function resolveStreamUrl(filename: string): string {
-		if (videoListStore.selectedProvider === 'tl') {
-			const proxyUrl = getProxyUrl(filename);
-			if (proxyUrl) return proxyUrl;
-			const hlsFilename = videoListStore.getLiveFilename(filename) || filename;
-			return API.HLS_PLAYLIST(hlsFilename);
-		}
 		return API.HLS_PLAYLIST(filename);
 	}
 
 	function handleVideoGone(): void {
 		const next = findAdjacentVideo(1);
-		if (next) {
-			const saved = getSavedTime(next);
-			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-		} else {
-			playerStore.showList();
-		}
-	}
-
-	function handleBlock(alias: string, streamerId: string) {
-		blockStreamer(streamerId).catch(() => {});
-		const next = findAdjacentVideo(1) || findAdjacentVideo(-1);
-		videoListStore.removeVideo(alias);
 		if (next) {
 			const saved = getSavedTime(next);
 			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
@@ -352,13 +288,6 @@
 			if (data.fatal) {
 				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
 					if (data.response?.code === 404) {
-						if (videoListStore.selectedProvider === 'tl') {
-							// Queue handles all TL removal — just destroy HLS
-							hls.destroy();
-							hlsInstances.delete(el);
-							delete el.dataset.loadedFilename;
-							return;
-						}
 						videoListStore.removeVideo(v.filename);
 						handleVideoGone();
 						return;
@@ -415,10 +344,6 @@
 			const mediaError = el.error;
 			if (mediaError) {
 				console.warn('Native HLS error', mediaError.code, mediaError.message);
-				if (videoListStore.selectedProvider === 'tl') {
-					// Queue handles all TL removal
-					return;
-				}
 				if (!isActivePlayer) return;
 				videoListStore.removeVideo(v.filename);
 				handleVideoGone();
@@ -493,10 +418,6 @@
 	}
 
 	function stopPlayback() {
-		if (videoListStore.selectedProvider === 'tl') {
-			sendActiveSet([]);
-			syncProxySessions([]);
-		}
 		currentFilename = null;
 		videoElements.forEach(clearStream);
 	}
@@ -507,19 +428,6 @@
 
 		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
 		const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
-
-		// Report active set to server for cleanup
-		if (videoListStore.selectedProvider === 'tl') {
-			const active = [cv.filename];
-			if (nextVideo) active.push(nextVideo.filename);
-			if (prevVideo) active.push(prevVideo.filename);
-			// Only include aliases that have ephemeral downloads (not following with live filename)
-			const ephemeral = active.filter(
-				(a) => !videoListStore.getLiveFilename(a) || !videoListStore.getStreamer(a)?.isFollowing
-			);
-			sendActiveSet(ephemeral);
-			syncProxySessions(active);
-		}
 
 		const nextPlayer = videoElements[(activeIdx + 1) % 3];
 		if (nextVideo) {
@@ -536,20 +444,7 @@
 		}
 	}
 
-	async function ensureTlStream(v: Video) {
-		if (videoListStore.selectedProvider !== 'tl') return;
-		const streamer = videoListStore.getStreamer(v.filename);
-		if (!streamer) return;
-		// Start proxy (await so URL is available for loadStream)
-		await startProxy(streamer);
-		// Also start download for archival (skip for followed streams with live filename)
-		if (!(streamer.isFollowing && videoListStore.getLiveFilename(v.filename))) {
-			void startDownload(streamer);
-		}
-	}
-
 	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
-		await ensureTlStream(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		el.muted = true;
@@ -561,7 +456,6 @@
 	}
 
 	async function preloadAndPause(el: HTMLVideoElement, v: Video) {
-		await ensureTlStream(v);
 		const startTime = getSavedTime(v);
 		await loadStream(el, v, startTime);
 		if (!el.paused) el.pause();
@@ -572,17 +466,6 @@
 	}
 
 	async function navigateToVideo(target: Video, dir: 1 | -1) {
-		const myNav = ++navCounter;
-		if (videoListStore.selectedProvider === 'tl') {
-			const streamer = videoListStore.getStreamer(target.filename);
-			if (streamer) {
-				await startProxy(streamer);
-				if (!(streamer.isFollowing && videoListStore.getLiveFilename(target.filename))) {
-					void startDownload(streamer);
-				}
-			}
-			if (myNav !== navCounter) return;
-		}
 		const saved = getSavedTime(target);
 		playerStore.navigateVideo(target, saved, dir, videoListStore.selectedProvider);
 		void fetchAndParsePlaylist(target);
@@ -706,7 +589,7 @@
 				if (swipeStartX <= EDGE_ZONE && dx > 0) {
 					swipeType = 'edge-back';
 					playerStore.isSwiping = true;
-				} else if (swipeStartY < window.innerHeight / 2 && (!playerStore.currentVideo?.isLive || !isTl)) {
+				} else if (swipeStartY < window.innerHeight / 2 && !playerStore.currentVideo?.isLive) {
 					swipeType = 'seek';
 					seekBaseTime = getActiveElement().currentTime;
 				} else {
@@ -800,15 +683,11 @@
 
 		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
 			{#if video}
-				<div class="streamer-name">{video.filename}{#if isTl}{@const s = videoListStore.getStreamer(video.filename)}{#if s}{` ${s.firstName}`}{/if}{/if}</div>
+				<div class="streamer-name">{video.filename}</div>
 
 				<ProgressBar {currentTime} duration={displayDuration} onseek={handleSeek} />
 
-				{#if isTl}
-					<TlControls {isMuted} ontoggleMute={toggleMute} onblock={handleBlock} />
-				{:else}
-					<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
-				{/if}
+				<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
 			{/if}
 		</div>
 	</div>

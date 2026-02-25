@@ -1,11 +1,7 @@
 # Video Editor Frontend
 
 ## Project
-Svelte 5 SPA for video editing across multiple streaming providers (tl, tango, fc2, sc).
-
-## Required Reading
-- **TL Provider**: Read `TL_PROVIDER.md` before any TL provider work (architecture, source of truth hierarchy, removal rules)
-- **HLS Proxy**: Read `docs/tl-hls-proxy.md` for proxy architecture and past debugging lessons
+Svelte 5 SPA for video editing across multiple streaming providers (tango, fc2, sc).
 
 ## Workflow
 - Time to add changelogs on bug fixes/feature requests

@@ -7,28 +7,17 @@
 		video,
 		isActive,
 		isLastActioned,
-		onclick,
-		streamerInfo
+		onclick
 	}: {
 		video: Video;
 		isActive: boolean;
 		isLastActioned: boolean;
 		onclick: () => void;
-		streamerInfo?: { firstName: string; isFollowing: boolean; parentAlias?: string };
 	} = $props();
 
 	const sizeBytes = $derived(video.duration * BPS_ESTIMATE);
 	const isLarge = $derived(sizeBytes > 350 * 1024 * 1024);
 	const isEdited = $derived(video.type === VIDEO_TYPE.EDITED);
-	const tlLabel = $derived(
-		streamerInfo
-			? streamerInfo.parentAlias
-				? `Co-streamer of ${streamerInfo.parentAlias}`
-				: streamerInfo.isFollowing
-					? 'Following'
-					: 'Recommended'
-			: null
-	);
 </script>
 
 <button
@@ -39,16 +28,10 @@
 	class:edited={isEdited}
 	{onclick}
 >
-	<span class="name"
-		>{video.filename}{#if streamerInfo}{` ${streamerInfo.firstName}`}{/if}</span
-	>
+	<span class="name">{video.filename}</span>
 	<span class="meta">
-		{#if tlLabel}
-			<span class="tl-label" class:following={streamerInfo?.isFollowing}>{tlLabel}</span>
-		{:else}
-			<span class="duration">{formatDuration(video.duration)}</span>
-			<span class="size" class:bold={isLarge}>{formatSize(sizeBytes)}</span>
-		{/if}
+		<span class="duration">{formatDuration(video.duration)}</span>
+		<span class="size" class:bold={isLarge}>{formatSize(sizeBytes)}</span>
 	</span>
 </button>
 
@@ -128,14 +111,5 @@
 	.size.bold {
 		font-weight: bold;
 		color: #e0e0e0;
-	}
-
-	.tl-label {
-		font-size: 13px;
-		color: #aaa;
-	}
-
-	.tl-label.following {
-		color: #4cd137;
 	}
 </style>
