@@ -1,5 +1,5 @@
 {
-    "name": "video-editor-backend",
+    "name": "server",
     "version": "1.0.0",
     "description": "Backend server for viewing and editing videos.",
     "main": "dist/main.js",
@@ -7,10 +7,10 @@
     "scripts": {
         "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
         "build": "npm run compile-go && rm -rf dist && tsc",
-        "start": "npm run build && systemctl --user start video-editor-backend",
-        "restart": "npm run build && systemctl --user restart video-editor-backend",
-        "stop": "systemctl --user stop video-editor-backend",
-        "logs": "journalctl --user -u video-editor-backend -f"
+        "start": "npm run build && systemctl --user start video-server",
+        "restart": "npm run build && systemctl --user restart video-server",
+        "stop": "systemctl --user stop video-server",
+        "logs": "journalctl --user -u video-server -f"
     },
     "author": "",
     "license": "MIT",

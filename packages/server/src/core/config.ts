@@ -77,11 +77,11 @@ const config: IConfig = {
         }, {} as Record<string, PathConfig>),
         tl: TL_PATHS,
     },
-    frontendDistPath: path.join(projectRoot, "..", "video-editor-svelte", "build"),
+    frontendDistPath: path.join(projectRoot, "..", "app", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
-    ladderFilePath: path.join(projectRoot, "..", "video-downloader", "ladder.txt"),
-    scFilePath: path.join(projectRoot, "..", "video-downloader", "fmp4.txt"),
-    tsliveFilePath: path.join(projectRoot, "..", "video-downloader", "tslive.txt"),
+    ladderFilePath: path.join(projectRoot, "..", "downloader", "ladder.txt"),
+    scFilePath: path.join(projectRoot, "..", "downloader", "fmp4.txt"),
+    tsliveFilePath: path.join(projectRoot, "..", "downloader", "tslive.txt"),
 };
 
 // Validate all paths for all providers (skip tl - ephemeral /tmp dirs created on demand)
