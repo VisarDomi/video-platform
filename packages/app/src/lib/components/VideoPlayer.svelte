@@ -585,7 +585,7 @@
 				if (swipeStartX <= EDGE_ZONE && dx > 0) {
 					swipeType = 'edge-back';
 					playerStore.isSwiping = true;
-				} else if (swipeStartY < window.innerHeight / 2 && !playerStore.currentVideo?.isLive) {
+				} else if (swipeStartY < window.innerHeight / 2) {
 					swipeType = 'seek';
 					seekBaseTime = getActiveElement().currentTime;
 				} else {
