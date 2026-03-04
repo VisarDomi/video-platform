@@ -9,7 +9,7 @@ class PlayerStore {
 	segments = $state<number[]>([]);
 	lastActionedVideoFilename = $state<string | null>(null);
 	activePlayerIndex = $state(0);
-	isUiVisible = $state(false);
+	isUiVisible = $state(true);
 	swipeProgress = $state(0);
 	isSwiping = $state(false);
 	swipeAnimating = $state(false);
@@ -117,7 +117,7 @@ class PlayerStore {
 		this.segments = [];
 		this.view = 'video';
 		this.lastActionedVideoFilename = null;
-		this.isUiVisible = false;
+		this.isUiVisible = true;
 	}
 }
 
