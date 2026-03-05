@@ -1,6 +1,7 @@
 # Todo
 
 ## In Progress
+- [x] Refactor: Extract VideoEngine — split reactive shell from imperative media engine
 - [x] Enable native Safari zoom in video player via touch-action: pinch-zoom (VERON-55)
 - [x] Fix: TL provider addToList not loading tango.txt on init (VERON-65)
 - [x] Fix: Restore ability to edit original videos for tango/fc2/sc providers
@@ -16,5 +17,6 @@
 - [x] Feature: TL provider — process IDB cache on startup, remove 30s artificial delay
 - [x] Fix: Black screen on swipe navigation between streams
 - [x] Fix: Disable zoom — was causing zoom on rotation for fc2/sc
+- [x] Refactor: Fix bad $effect usage in VideoPlayer — 11→3 effects, shared derived, callbacks
 
 ## Backlog

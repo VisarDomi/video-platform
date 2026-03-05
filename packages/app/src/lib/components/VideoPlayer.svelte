@@ -1,30 +1,19 @@
 <script lang="ts">
-	import Hls from 'hls.js';
+	import { onMount } from 'svelte';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
-	import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '$lib/constants.js';
 	import { untrack } from 'svelte';
-	import { filterByAliases } from '$lib/utils/filter.js';
-	import { fetchAndParsePlaylist, clearPlaylistCache } from '$lib/services/hls.js';
+	import { VideoEngine } from '$lib/engine/VideoEngine.js';
 
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
-	import { VIDEO_TYPE } from '$lib/constants.js';
-	import type { Video } from '$lib/types.js';
 
 	let videoViewEl = $state<HTMLElement | null>(null);
-	let videoElements = $state<HTMLVideoElement[]>([]);
 	let videoContainer = $state<HTMLElement | null>(null);
 	let currentTime = $state(0);
 	let duration = $state(0);
 	let seekableEnd = $state(0);
 	let isMuted = $state(true);
-	let currentFilename: string | null = null;
-	let wakeLock: WakeLockSentinel | null = null;
-	let navCounter = 0;
-
-	const hlsInstances = new Map<HTMLVideoElement, Hls>();
-	const nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
 
 	const isVisible = $derived(playerStore.view === 'video');
 	const video = $derived(playerStore.currentVideo);
@@ -32,632 +21,57 @@
 		duration === Infinity && seekableEnd > 0 ? seekableEnd : duration
 	);
 
-
-	// Initialize 3 video elements
-	$effect(() => {
-		if (!videoContainer || videoElements.length > 0) return;
-		const els: HTMLVideoElement[] = [];
-		for (let i = 0; i < 3; i++) {
-			const el = document.createElement('video');
-			el.playsInline = true;
-			el.preload = 'auto';
-			el.muted = true;
-			el.className = 'background-player';
-			videoContainer.appendChild(el);
-			els.push(el);
-		}
-		videoElements = els;
+	const engine = new VideoEngine({
+		onTimeUpdate(ct, dur, se) {
+			currentTime = ct;
+			duration = dur;
+			seekableEnd = se;
+		},
+		onMuteChange(muted) {
+			isMuted = muted;
+		},
+		getPlayerStore: () => playerStore,
+		getVideoListStore: () => videoListStore
 	});
 
-	// Attach event listeners to video elements
-	$effect(() => {
-		if (videoElements.length === 0) return;
-
-		const cleanups: (() => void)[] = [];
-
-		videoElements.forEach((el) => {
-			const onTimeUpdate = () => {
-				if (el === getActiveElement()) {
-					currentTime = el.currentTime;
-					duration = el.duration;
-					// Track seekable range for live videos
-					if (el.duration === Infinity && el.seekable.length > 0) {
-						seekableEnd = el.seekable.end(el.seekable.length - 1);
-					}
-					// Save progress
-					const cv = playerStore.currentVideo;
-					if (cv && !cv.isLive) {
-						localStorage.setItem(
-							STORAGE_KEYS.PROGRESS_PREFIX + cv.filename,
-							String(Math.round(el.currentTime))
-						);
-					}
-				}
-			};
-			const onVolumeChange = () => {
-				if (el === getActiveElement()) {
-					isMuted = el.muted;
-				}
-			};
-			el.addEventListener('timeupdate', onTimeUpdate);
-			el.addEventListener('volumechange', onVolumeChange);
-			cleanups.push(() => {
-				el.removeEventListener('timeupdate', onTimeUpdate);
-				el.removeEventListener('volumechange', onVolumeChange);
-			});
-		});
-
-		return () => cleanups.forEach((fn) => fn());
+	onMount(() => {
+		const cleanup = engine.init(videoViewEl!, videoContainer!);
+		return cleanup;
 	});
 
-	// Wake lock: acquire when playing, release when not
+	// Wake lock
 	$effect(() => {
-		updateWakeLock(playerStore.view === 'video' && !!playerStore.currentVideo);
+		engine.updateWakeLock(playerStore.view === 'video' && !!playerStore.currentVideo);
 	});
 
-	// Destroy all streams when provider changes (stops hls.js polling)
-	let lastProvider: string | null = null;
+	// Video removed from list
 	$effect(() => {
-		const provider = videoListStore.selectedProvider;
-		if (lastProvider !== null && lastProvider !== provider && videoElements.length > 0) {
-			videoElements.forEach(clearStream);
-			currentFilename = null;
-		}
-		lastProvider = provider;
-	});
-
-	// Cleanup when returning to list view
-	$effect(() => {
-		if (playerStore.view !== 'list' || videoElements.length === 0) return;
-		playerStore.swipeAnimating = false;
-		getActiveElement()?.pause();
-	});
-
-	// Cleanup when video is cleared
-	$effect(() => {
-		if (playerStore.view !== 'video' || playerStore.currentVideo || videoElements.length === 0)
-			return;
-		stopPlayback();
-	});
-
-	// React to current video being removed from list
-	$effect(() => {
-		const cv = playerStore.currentVideo;
-		if (!cv || playerStore.view !== 'video') return;
-		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
-		const exists = filteredList.some((v) => v.filename === cv.filename);
-		if (!exists) {
-			if (filteredList.length > 0) {
-				const next = filteredList[0];
-				const saved = getSavedTime(next);
-				playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-			} else {
-				playerStore.showList();
+		const filteredList = videoListStore.filteredVideos;
+		untrack(() => {
+			const cv = playerStore.currentVideo;
+			if (!cv || playerStore.view !== 'video') return;
+			if (!filteredList.some((v) => v.filename === cv.filename)) {
+				engine.handleVideoGone();
 			}
-		}
+		});
 	});
 
 	// Activate video when it changes
 	$effect(() => {
 		const cv = playerStore.currentVideo;
-		if (!cv || playerStore.view !== 'video' || videoElements.length === 0) return;
-		const activeIdx = playerStore.activePlayerIndex;
-
-		const videoChanged = currentFilename !== cv.filename;
-		currentFilename = cv.filename;
-
-		videoElements.forEach((el, i) => {
-			if (i === activeIdx) {
-				if (videoChanged) el.style.opacity = '0';
-				el.className = 'active-player';
-			} else {
-				el.style.opacity = '';
-				el.className = 'background-player';
-				el.muted = true;
-			}
-		});
-
-		const activeEl = videoElements[activeIdx];
-		isMuted = activeEl.muted;
-
-		if (videoChanged) {
-			void activatePlayer(activeEl, cv, playerStore.currentVideoStartTime);
-		} else if (activeEl.paused) {
-			void activeEl.play();
-		}
+		if (!cv || playerStore.view !== 'video') return;
+		engine.activateIfChanged(cv, playerStore.activePlayerIndex, playerStore.currentVideoStartTime);
 	});
 
-	// Preload adjacent — depends on video list and active index, not on currentVideo identity
+	// Preload adjacent
 	$effect(() => {
-		const view = playerStore.view;
-		if (view !== 'video' || videoElements.length === 0) return;
+		if (playerStore.view !== 'video') return;
 		const activeIdx = playerStore.activePlayerIndex;
-		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
+		const filteredList = videoListStore.filteredVideos;
 		const cv = untrack(() => playerStore.currentVideo);
 		if (!cv) return;
-		preloadAdjacent(cv, activeIdx, filteredList);
+		engine.preloadForVideo(cv, activeIdx, filteredList);
 	});
-
-	// Watch reloadToken to force-reload current video (after cut completes)
-	let lastReloadToken = 0;
-	$effect(() => {
-		const token = playerStore.reloadToken;
-		if (token > lastReloadToken && videoElements.length > 0) {
-			lastReloadToken = token;
-			const cv = playerStore.currentVideo;
-			if (cv) {
-				const activeEl = getActiveElement();
-				forceReloadStream(activeEl, cv);
-			}
-		}
-	});
-
-	function getActiveElement(): HTMLVideoElement {
-		return videoElements[playerStore.activePlayerIndex];
-	}
-
-	async function activatePlayer(el: HTMLVideoElement, v: Video, startTime: number) {
-		await loadStream(el, v, startTime, true);
-
-		try {
-			await el.play();
-		} catch (e) {
-		}
-		el.style.opacity = '1';
-	}
-
-	function resolveStreamUrl(filename: string): string {
-		return API.HLS_PLAYLIST(filename);
-	}
-
-	function handleVideoGone(): void {
-		const next = findAdjacentVideo(1);
-		if (next) {
-			const saved = getSavedTime(next);
-			playerStore.navigateVideo(next, saved, 1, videoListStore.selectedProvider);
-		} else {
-			playerStore.showList();
-		}
-	}
-
-	function syncLiveStatus(el: HTMLVideoElement, v: Video, isActivePlayer: boolean): void {
-		if (!isActivePlayer) return;
-		const isLive = el.duration === Infinity;
-		if (isLive) {
-			playerStore.setCurrentVideoLive();
-			videoListStore.updateVideoLive(v.filename, true);
-		} else if (v.isLive) {
-			playerStore.setCurrentVideoNotLive();
-			videoListStore.updateVideoLive(v.filename, false);
-			clearPlaylistCache(v.filename);
-		}
-	}
-
-	function setupHlsJs(
-		el: HTMLVideoElement,
-		url: string,
-		v: Video,
-		startTime: number,
-		isActivePlayer: boolean,
-		resolve: () => void
-	): void {
-		const oldHls = hlsInstances.get(el);
-		if (oldHls) {
-			oldHls.destroy();
-			hlsInstances.delete(el);
-		}
-
-		const hls = new Hls();
-		hlsInstances.set(el, hls);
-
-		hls.on(Hls.Events.MANIFEST_PARSED, () => {
-			resolve();
-		});
-
-		let initialLoadDone = false;
-		let wasLive = false;
-		hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
-			const isLive = data.details.live;
-
-			if (!initialLoadDone) {
-				initialLoadDone = true;
-				if (isLive) {
-					wasLive = true;
-					if (isActivePlayer) {
-						playerStore.setCurrentVideoLive();
-						videoListStore.updateVideoLive(v.filename, true);
-					}
-				} else if (startTime > 0) {
-					el.currentTime = startTime;
-				}
-				return;
-			}
-
-			// Detect live → ended transition
-			if (wasLive && !isLive) {
-				wasLive = false;
-				if (isActivePlayer) {
-					playerStore.setCurrentVideoNotLive();
-					videoListStore.updateVideoLive(v.filename, false);
-					clearPlaylistCache(v.filename);
-				}
-			}
-		});
-
-		hls.on(Hls.Events.ERROR, (_event, data) => {
-			if (data.fatal) {
-				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-					if (data.response?.code === 404) {
-						videoListStore.removeVideo(v.filename);
-						handleVideoGone();
-						return;
-					}
-					hls.startLoad();
-				} else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-					hls.recoverMediaError();
-				}
-			}
-		});
-
-		hls.loadSource(url);
-		hls.attachMedia(el);
-	}
-
-	function setupNativeHls(
-		el: HTMLVideoElement,
-		url: string,
-		v: Video,
-		startTime: number,
-		isActivePlayer: boolean,
-		resolve: () => void
-	): void {
-		const oldController = nativeAbortControllers.get(el);
-		if (oldController) oldController.abort();
-		const controller = new AbortController();
-		nativeAbortControllers.set(el, controller);
-		const signal = controller.signal;
-
-		let nativeWasLive = false;
-		const onReady = () => {
-			if (el.duration === Infinity) {
-				nativeWasLive = true;
-				if (isActivePlayer) {
-					playerStore.setCurrentVideoLive();
-					videoListStore.updateVideoLive(v.filename, true);
-				}
-			} else if (startTime > 0) {
-				el.currentTime = startTime;
-			}
-			resolve();
-		};
-		const onDurationChange = () => {
-			if (nativeWasLive && el.duration !== Infinity) {
-				nativeWasLive = false;
-				if (isActivePlayer) {
-					playerStore.setCurrentVideoNotLive();
-					videoListStore.updateVideoLive(v.filename, false);
-					clearPlaylistCache(v.filename);
-				}
-			}
-		};
-		const onError = () => {
-			const mediaError = el.error;
-			if (mediaError) {
-				console.warn('Native HLS error', mediaError.code, mediaError.message);
-				if (!isActivePlayer) return;
-				videoListStore.removeVideo(v.filename);
-				handleVideoGone();
-			}
-		};
-		el.addEventListener('loadedmetadata', onReady, { once: true, signal });
-		el.addEventListener('durationchange', onDurationChange, { signal });
-		el.addEventListener('error', onError, { signal });
-		el.src = url;
-	}
-
-	function loadStream(
-		el: HTMLVideoElement,
-		v: Video,
-		startTime: number,
-		isActivePlayer = false
-	): Promise<void> {
-		return new Promise((resolve) => {
-			const hasActiveStream = hlsInstances.has(el) || nativeAbortControllers.has(el);
-			const streamAlive = el.dataset.loadedFilename === v.filename && hasActiveStream && !!el.src;
-			if (streamAlive) {
-				syncLiveStatus(el, v, isActivePlayer);
-				if (startTime > 0) el.currentTime = startTime;
-				resolve();
-				return;
-			}
-			if (el.dataset.loadedFilename === v.filename) {
-				delete el.dataset.loadedFilename;
-			}
-
-			const url = resolveStreamUrl(v.filename);
-
-			if (!USE_NATIVE_HLS && Hls.isSupported()) {
-				setupHlsJs(el, url, v, startTime, isActivePlayer, resolve);
-			} else {
-				setupNativeHls(el, url, v, startTime, isActivePlayer, resolve);
-			}
-
-			el.dataset.loadedFilename = v.filename;
-		});
-	}
-
-	function forceReloadStream(el: HTMLVideoElement, v: Video) {
-		// Clear the cached filename so loadStream doesn't skip
-		delete el.dataset.loadedFilename;
-		void activatePlayer(el, v, 0);
-	}
-
-	function clearStream(el: HTMLVideoElement) {
-		el.pause();
-		el.style.opacity = '';
-
-		// Destroy hls.js instance
-		const hls = hlsInstances.get(el);
-		if (hls) {
-			hls.destroy();
-			hlsInstances.delete(el);
-		}
-
-		// Abort native HLS event listeners
-		const controller = nativeAbortControllers.get(el);
-		if (controller) {
-			controller.abort();
-			nativeAbortControllers.delete(el);
-		}
-
-		el.removeAttribute('src');
-		if (el.dataset.loadedFilename) {
-			el.load();
-		}
-		delete el.dataset.loadedFilename;
-	}
-
-	function stopPlayback() {
-		currentFilename = null;
-		videoElements.forEach(clearStream);
-	}
-
-	function preloadAdjacent(cv: Video, activeIdx: number, filteredList: Video[]) {
-		const idx = filteredList.findIndex((v) => v.filename === cv.filename && v.type === cv.type);
-		if (idx === -1) return;
-
-		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
-		const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
-
-		const nextPlayer = videoElements[(activeIdx + 1) % 3];
-		if (nextVideo) {
-			void preloadAndPlay(nextPlayer, nextVideo);
-		} else {
-			clearStream(nextPlayer);
-		}
-
-		const prevPlayer = videoElements[(activeIdx + 2) % 3];
-		if (prevVideo) {
-			void preloadAndPause(prevPlayer, prevVideo);
-		} else {
-			clearStream(prevPlayer);
-		}
-	}
-
-	async function preloadAndPlay(el: HTMLVideoElement, v: Video) {
-		const startTime = getSavedTime(v);
-		await loadStream(el, v, startTime);
-		el.muted = true;
-		try {
-			if (el.paused) await el.play();
-		} catch (e) {
-			console.warn('Autoplay muted failed', e);
-		}
-	}
-
-	async function preloadAndPause(el: HTMLVideoElement, v: Video) {
-		const startTime = getSavedTime(v);
-		await loadStream(el, v, startTime);
-		if (!el.paused) el.pause();
-	}
-
-	function getSavedTime(v: Video): number {
-		return parseFloat(localStorage.getItem(STORAGE_KEYS.PROGRESS_PREFIX + v.filename) || '0');
-	}
-
-	async function navigateToVideo(target: Video, dir: 1 | -1) {
-		const saved = getSavedTime(target);
-		playerStore.navigateVideo(target, saved, dir, videoListStore.selectedProvider);
-		void fetchAndParsePlaylist(target);
-	}
-
-	function findAdjacentVideo(direction: 1 | -1): Video | null {
-		const cv = playerStore.currentVideo;
-		if (!cv) return null;
-		const filteredList = filterByAliases(videoListStore.videos, videoListStore.selectedAliases);
-		if (filteredList.length < 2) return null;
-		const idx = filteredList.findIndex((v) => v.filename === cv.filename && v.type === cv.type);
-		if (idx === -1) return null;
-		for (let i = idx + direction; i >= 0 && i < filteredList.length; i += direction) {
-			if (filteredList[i].filename !== cv.filename) return filteredList[i];
-		}
-		return null;
-	}
-
-	function handleSeek(time: number) {
-		const activeEl = getActiveElement();
-		if (!isNaN(activeEl.duration)) {
-			const wasPlaying = !activeEl.paused;
-			if (wasPlaying) activeEl.pause();
-			activeEl.currentTime = time;
-			if (wasPlaying) {
-				activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
-			}
-		}
-	}
-
-	function toggleMute() {
-		const activeEl = getActiveElement();
-		activeEl.muted = !activeEl.muted;
-	}
-
-	async function updateWakeLock(shouldBeActive: boolean) {
-		if (shouldBeActive && !wakeLock) {
-			if ('wakeLock' in navigator) {
-				try {
-					wakeLock = await navigator.wakeLock.request('screen');
-				} catch (e) {
-					console.warn('Wake lock failed', e);
-				}
-			}
-		} else if (!shouldBeActive && wakeLock) {
-			await wakeLock.release();
-			wakeLock = null;
-		}
-	}
-	// Attach touch handlers imperatively (touchmove needs passive: false for preventDefault)
-	$effect(() => {
-		if (!videoViewEl) return;
-		const el = videoViewEl;
-		el.addEventListener('touchstart', handleTouchStart);
-		el.addEventListener('touchmove', handleTouchMove, { passive: false });
-		el.addEventListener('touchend', handleTouchEnd);
-		el.addEventListener('touchcancel', handleTouchCancel);
-		return () => {
-			el.removeEventListener('touchstart', handleTouchStart);
-			el.removeEventListener('touchmove', handleTouchMove);
-			el.removeEventListener('touchend', handleTouchEnd);
-			el.removeEventListener('touchcancel', handleTouchCancel);
-		};
-	});
-
-	// Gesture system
-	const EDGE_ZONE = 30;
-	const EDGE_BACK_THRESHOLD = 0.3;
-	const FLICK_THRESHOLD = 80;
-	const UI_SWIPE_THRESHOLD = 80;
-	const SEEK_RATE = 60;
-	let swipeStartX = 0;
-	let swipeStartY = 0;
-	let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-	let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
-	let seekBaseTime = 0;
-	let lastMultiTouchTime = 0;
-	const MULTI_TOUCH_DEBOUNCE_MS = 100;
-
-	function handleTouchCancel() {
-		swipeType = 'none';
-		swipeAxis = 'none';
-		if (playerStore.isSwiping) {
-			playerStore.isSwiping = false;
-			playerStore.swipeAnimating = false;
-			playerStore.swipeProgress = 0;
-		}
-	}
-
-	function handleTouchStart(e: TouchEvent) {
-		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
-		if (playerStore.swipeAnimating) return;
-		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
-
-		const touch = e.touches[0];
-		swipeStartX = touch.clientX;
-		swipeStartY = touch.clientY;
-		swipeAxis = 'none';
-		swipeType = 'none';
-	}
-
-	function handleTouchMove(e: TouchEvent) {
-		if (e.touches.length > 1) { lastMultiTouchTime = Date.now(); return; }
-		if (playerStore.swipeAnimating) return;
-		if (Date.now() - lastMultiTouchTime < MULTI_TOUCH_DEBOUNCE_MS) return;
-		e.preventDefault();
-
-		const touch = e.touches[0];
-		const dx = touch.clientX - swipeStartX;
-		const dy = touch.clientY - swipeStartY;
-
-		// Swipe gestures
-		if (swipeAxis === 'none') {
-			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-			if (Math.abs(dx) >= Math.abs(dy)) {
-				swipeAxis = 'horizontal';
-				if (swipeStartX <= EDGE_ZONE && dx > 0) {
-					swipeType = 'edge-back';
-					playerStore.isSwiping = true;
-				} else if (swipeStartY < window.innerHeight / 2) {
-					swipeType = 'seek';
-					seekBaseTime = getActiveElement().currentTime;
-				} else {
-					swipeType = 'ui';
-				}
-			} else {
-				swipeAxis = 'vertical';
-				swipeType = 'nav';
-			}
-		}
-
-		if (swipeType === 'edge-back') {
-			const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
-			playerStore.swipeProgress = progress;
-		} else if (swipeType === 'seek') {
-			const seekDelta = (dx / window.innerWidth) * SEEK_RATE;
-			const activeEl = getActiveElement();
-			const maxTime = activeEl.duration === Infinity ? seekableEnd : activeEl.duration;
-			if (!isNaN(maxTime) && maxTime > 0) {
-				const newTime = Math.max(0, Math.min(maxTime, seekBaseTime + seekDelta));
-				activeEl.currentTime = newTime;
-				currentTime = newTime;
-			}
-		}
-	}
-
-	function handleTouchEnd(e: TouchEvent) {
-		const touch = e.changedTouches[0];
-		const dx = touch.clientX - swipeStartX;
-		const dy = touch.clientY - swipeStartY;
-
-		switch (swipeType) {
-			case 'edge-back': {
-				const progress = playerStore.swipeProgress;
-				playerStore.swipeAnimating = true;
-				if (progress > EDGE_BACK_THRESHOLD) {
-					playerStore.swipeProgress = 1;
-					setTimeout(() => {
-						playerStore.showList();
-						playerStore.isSwiping = false;
-						playerStore.swipeAnimating = false;
-						playerStore.swipeProgress = 0;
-					}, 250);
-				} else {
-					playerStore.swipeProgress = 0;
-					setTimeout(() => {
-						playerStore.isSwiping = false;
-						playerStore.swipeAnimating = false;
-					}, 250);
-				}
-				break;
-			}
-			case 'nav': {
-				if (Math.abs(dy) > FLICK_THRESHOLD) {
-					const dir = dy < 0 ? 1 : -1;
-					const target = findAdjacentVideo(dir as 1 | -1);
-					if (target) {
-						void navigateToVideo(target, dir as 1 | -1);
-					}
-				}
-				break;
-			}
-			case 'ui': {
-				if (Math.abs(dx) > UI_SWIPE_THRESHOLD) {
-					playerStore.isUiVisible = dx > 0;
-				}
-				break;
-			}
-		}
-		swipeAxis = 'none';
-		swipeType = 'none';
-	}
 </script>
 
 <div
@@ -681,9 +95,9 @@
 			{#if video}
 				<div class="streamer-name">{video.filename}</div>
 
-				<ProgressBar {currentTime} duration={displayDuration} onseek={handleSeek} />
+				<ProgressBar {currentTime} duration={displayDuration} onseek={(t) => engine.handleSeek(t)} />
 
-				<PlayerControls {isMuted} {currentTime} ontoggleMute={toggleMute} />
+				<PlayerControls {isMuted} {currentTime} ontoggleMute={() => engine.toggleMute()} />
 			{/if}
 		</div>
 	</div>

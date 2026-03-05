@@ -7,7 +7,6 @@
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { fetchVideos } from '$lib/services/api.js';
 	import { startSync, stopSync } from '$lib/services/sync.js';
-	import { filterByAliases } from '$lib/utils/filter.js';
 	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
@@ -26,9 +25,7 @@
 
 	const provider = $derived(page.params.provider);
 
-	const filteredVideos = $derived(
-		filterByAliases(videoListStore.videos, videoListStore.selectedAliases)
-	);
+	const filteredVideos = $derived(videoListStore.filteredVideos);
 
 	const totalHeight = $derived(Math.max(MIN_LIST_ITEMS, filteredVideos.length) * ITEM_HEIGHT);
 	const startIdx = $derived(Math.max(0, Math.floor(scrollY / ITEM_HEIGHT) - SCROLL_BUFFER));
@@ -54,6 +51,7 @@
 		}
 
 		stopSync();
+		playerStore.triggerProviderChange();
 
 		videoListStore.initialize(p);
 		videoListStore.clearAliases();
@@ -112,6 +110,7 @@
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
 		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
 
+		searchHidden = true;
 		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
 		void fetchAndParsePlaylist(video);
 	}

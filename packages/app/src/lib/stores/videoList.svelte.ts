@@ -1,4 +1,5 @@
 import { DEFAULT_PROVIDER, STORAGE_KEYS } from '../constants.js';
+import { filterByAliases } from '../utils/filter.js';
 import type { Video, VideoType } from '../types.js';
 
 class VideoListStore {
@@ -6,6 +7,7 @@ class VideoListStore {
 	isLoading = $state(true);
 	selectedProvider = $state<string>(DEFAULT_PROVIDER);
 	selectedAliases = $state<Set<string>>(new Set());
+	filteredVideos = $derived(filterByAliases(this.videos, this.selectedAliases));
 
 	// Bumped on every initialize() — async ops capture this and bail if stale
 	epoch = 0;

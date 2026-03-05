@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-03-05
+
+- **refactor**: Extract VideoEngine — split reactive shell from imperative media engine
+  - **root cause**: VideoPlayer.svelte used `$state` for values written at high frequency by media events (`timeupdate` 12x/sec) and touch events (60x/sec). Each `$state` write triggered the full Svelte 5 reactive pipeline. The companion userscript doing identical 3-video carousel work with plain class fields + direct DOM writes stayed cool on mobile.
+  - **design**: (1) Created `VideoEngine.ts` — plain TypeScript class with zero Svelte imports. All HLS management, gesture handling, navigation, and media logic moved here. (2) Throttled timeupdate sync to 4Hz (250ms) — human eyes can't distinguish progress bar updates faster. Internal `_currentTime`/`_duration`/`_seekableEnd` fields update at native 12Hz but only sync to `$state` via `onTimeUpdate` callback at throttled rate. (3) Debounced localStorage progress saves to 3s intervals (was 12x/sec = 720 writes/min → now 20/min), with `forceProgressSave()` on video switch/leave. (4) Direct DOM writes for edge-back swipe drag (`videoViewEl.style.transform`) — zero `$state` writes during 60fps drag. On touchend, single `swipeProgress` write hands off to Svelte's CSS transition. (5) `forceTimeSync()` called during seek gestures and ProgressBar scrub so UI stays responsive during interaction. (6) VideoPlayer.svelte reduced to ~80 lines: 4 `$state` vars (synced at 4Hz), 3 `$derived`, 4 `$effect` (all reading store state at user-action frequency), `onMount` for engine init.
+  - **result**: timeupdate: 12→4 reactive cascades/sec + localStorage 12→0.3/sec. Swipe drag: 60→0 `$state` writes/sec. Seek drag: 60→0 `$state` writes (direct DOM + force sync on release). VideoPlayer.svelte: 626→168 lines.
+  - **files**: `VideoEngine.ts` (new, ~430 lines), `VideoPlayer.svelte` (rewritten as thin shell)
+
+- **refactor**: Fix bad $effect usage in VideoPlayer — reduce effect count and reactive overhead
+  - **root cause**: VideoPlayer had 11 `$effect` blocks, many misusing effects for one-time init (`onMount` pattern), using effects as event handlers, or creating cascading reactive chains. On rapid next/next/next navigation, 6 state mutations triggered ~8 effect re-evaluations each, with duplicated O(n) `filterByAliases()` calls.
+  - **design**: (1) Merged effects #1 (init elements), #2 (attach listeners), #11 (touch handlers) into a single `onMount` with cleanup. (2) Replaced effects #4 (provider cleanup), #5 (pause on list), #10 (reload token) with imperative callbacks registered via `playerStore.onProviderChange/onShowList/onReload`. (3) Deleted effect #6 (dead code — "video cleared" state never reachable). (4) Effect #7 (video removed) now uses `untrack` around `currentVideo`/`view` so only `filteredVideos` changes trigger it. (5) Effect #8 (activate player) gets nav counter guard to cancel stale async activations. (6) Created shared `filteredVideos` derived on `videoListStore`, replacing 3 independent `filterByAliases()` calls with 1 cached `$derived`. (7) Removed `reloadToken` $state from player store. (8) Sync paused during video view (`stopSync` on play, `startSync` on showList) to prevent polling from mutating `videos` while watching.
+  - **result**: 11 VP effects → 3 VP effects (wake lock, video-removed, activate+preload), ~3 re-evaluations per navigation instead of ~8, 0 duplicate filterByAliases calls.
+  - **files**: `VideoPlayer.svelte` (effects consolidated/removed), `player.svelte.ts` (callback system, sync pause, removed reloadToken), `videoList.svelte.ts` (shared filteredVideos derived), `+page.svelte` (use shared derived, trigger provider change)
+
 ## 2026-02-25
 
 - **fix**: Disable zoom — was causing zoom on rotation for fc2/sc videos

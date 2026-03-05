@@ -1,4 +1,5 @@
 import { STORAGE_KEYS, VIDEO_TYPE } from '../constants.js';
+import { startSync, stopSync } from '../services/sync.js';
 import type { Video } from '../types.js';
 
 class PlayerStore {
@@ -38,12 +39,35 @@ class PlayerStore {
 		this.activePlayerIndex = newIndex;
 	}
 
+	private _onShowListCallback: (() => void) | null = null;
+	private _onReloadCallback: (() => void) | null = null;
+	private _onProviderChangeCallback: (() => void) | null = null;
+
+	onShowList(cb: () => void) {
+		this._onShowListCallback = cb;
+	}
+
+	onReload(cb: () => void) {
+		this._onReloadCallback = cb;
+	}
+
+	onProviderChange(cb: () => void) {
+		this._onProviderChangeCallback = cb;
+	}
+
+	triggerProviderChange() {
+		this._onProviderChangeCallback?.();
+	}
+
+	private _lastProvider: string | null = null;
+
 	showList(lastActionedFilename: string | null = null) {
 		this.view = 'list';
 		this.lastActionedVideoFilename = lastActionedFilename;
+		this.swipeAnimating = false;
+		this._onShowListCallback?.();
+		if (this._lastProvider) startSync(this._lastProvider);
 	}
-
-	reloadToken = $state(0);
 
 	addSegment(time: number) {
 		if (!this.currentVideo || this.currentVideo.type !== VIDEO_TYPE.ORIGINAL) return;
@@ -66,7 +90,7 @@ class PlayerStore {
 
 	reloadCurrentVideo() {
 		this.currentVideoStartTime = 0;
-		this.reloadToken++;
+		this._onReloadCallback?.();
 	}
 
 	setLastActioned(filename: string) {
@@ -111,6 +135,8 @@ class PlayerStore {
 	}
 
 	private _startPlaying(video: Video, startTime: number, provider: string) {
+		stopSync();
+		this._lastProvider = provider;
 		this._persistVideo(video, provider);
 		this.currentVideo = video;
 		this.currentVideoStartTime = startTime;
