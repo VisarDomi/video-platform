@@ -51,9 +51,9 @@ async function startServer() {
   // Register routes
   app.use("/api", tlProxyRouter);
   app.use("/api", tlRouter);
-  app.use("/", ladderRouter); // ladderRouter handles /ladder and /api/ladder
-  app.use("/", scRouter); // scRouter handles /fmp4 and /api/fmp4
-  app.use("/", tsliveListRouter); // tsliveListRouter handles /tslive and /api/tslive
+  app.use("/", ladderRouter);
+  app.use("/", scRouter);
+  app.use("/", tsliveListRouter);
   app.use("/api", videoApiRouter);
   app.use("/", mp4StreamingRouter);
   app.use("/", hlsRouter);
