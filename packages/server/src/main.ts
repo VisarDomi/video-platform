@@ -51,9 +51,9 @@ async function startServer() {
   // Register routes
   app.use("/api", tlProxyRouter);
   app.use("/api", tlRouter);
-  app.use("/", fc2Router); // fc2Router handles /fc2 and /api/fc2
-  app.use("/", scRouter); // scRouter handles /sc and /api/sc
-  app.use("/", tangoListRouter); // tangoListRouter handles /tango and /api/tango
+  app.use("/", fc2Router);
+  app.use("/", scRouter);
+  app.use("/", tangoListRouter);
   app.use("/api", videoApiRouter);
   app.use("/", mp4StreamingRouter);
   app.use("/", hlsRouter);
