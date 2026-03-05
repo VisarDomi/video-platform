@@ -5,6 +5,7 @@ import { promisify } from "util";
 import pLimit from "p-limit";
 import logger from "./logger.js";
 import { FILE_EXTENSIONS, FILE_NAMES, FFMPEG, HLS, MISC } from "./constants.js";
+import { fixTargetDuration } from "shared";
 
 const execFileAsync = promisify(execFile);
 const limit = pLimit(5); // Process 5 segments at a time
@@ -87,11 +88,26 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
     logger.info(`Playlist generated for ${videoPath}`);
 }
 
+const validatedPlaylists = new Set<string>();
+
 export async function ensurePlaylist(videoPath: string): Promise<void> {
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
+
     try {
         await fsPromises.access(playlistPath);
     } catch {
         await generatePlaylist(videoPath);
+        validatedPlaylists.add(playlistPath);
+        return;
     }
+
+    if (validatedPlaylists.has(playlistPath)) return;
+
+    const content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
+    const { content: fixed, wasFixed } = fixTargetDuration(content);
+    if (wasFixed) {
+        await fsPromises.writeFile(playlistPath, fixed, MISC.ENCODING_UTF8);
+        logger.info(`Fixed TARGETDURATION in ${playlistPath}`);
+    }
+    validatedPlaylists.add(playlistPath);
 }

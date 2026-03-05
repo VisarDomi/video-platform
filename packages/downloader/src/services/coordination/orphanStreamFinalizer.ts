@@ -3,6 +3,7 @@ import * as path from "path";
 import * as config from "../../common/config.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
+import { fixTargetDuration } from "shared";
 import { DownloadsManager } from "../state/downloadsManager.js";
 
 export class OrphanStreamFinalizer {
@@ -149,8 +150,15 @@ export class OrphanStreamFinalizer {
                                     hasChanges = true;
                                 }
 
+                                let finalContent = newLines.join("\n") + "\n";
+                                const { content: fixedContent, wasFixed } = fixTargetDuration(finalContent);
+                                if (wasFixed) {
+                                    finalContent = fixedContent;
+                                    hasChanges = true;
+                                }
+
                                 if (hasChanges) {
-                                    await FileSystemManager.writeFile(playlistPath, newLines.join("\n") + "\n");
+                                    await FileSystemManager.writeFile(playlistPath, finalContent);
                                     stats.fixed++;
                                 }
                             }
