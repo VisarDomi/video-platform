@@ -5,3 +5,4 @@ repomix-output.xml
 repomix/
 .idea/
 .vscode/
+packages/downloader/tango.txt
