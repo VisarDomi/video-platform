@@ -1,6 +1,7 @@
 import * as path from "path";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
+import { fixTargetDuration } from "shared";
 
 export interface SegmentInfo {
     remoteUrl: string;
@@ -126,5 +127,14 @@ export class PlaylistManager {
         logger.info(`Finalizing playlist: ${this.fullPlaylistPath}`);
         const endTag = "#EXT-X-ENDLIST\n";
         await FileSystemManager.appendFile(this.fullPlaylistPath, endTag);
+
+        const content = await FileSystemManager.readFile(this.fullPlaylistPath);
+        if (content) {
+            const { content: fixed, wasFixed } = fixTargetDuration(content);
+            if (wasFixed) {
+                await FileSystemManager.writeFile(this.fullPlaylistPath, fixed);
+                logger.info(`[PlaylistManager] Fixed TARGETDURATION in ${this.fullPlaylistPath}`);
+            }
+        }
     }
 }
