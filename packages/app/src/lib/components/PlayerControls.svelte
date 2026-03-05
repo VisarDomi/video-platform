@@ -12,11 +12,11 @@
 
 	let {
 		isMuted,
-		currentTime,
+		getCurrentTime,
 		ontoggleMute
 	}: {
 		isMuted: boolean;
-		currentTime: number;
+		getCurrentTime: () => number;
 		ontoggleMute: () => void;
 	} = $props();
 
@@ -89,7 +89,7 @@
 				<button onclick={handleOkOrCut} disabled={hasSegments && segments.length % 2 !== 0}>
 					{hasSegments ? '✂️' : '✅'}
 				</button>
-				<button onclick={() => playerStore.addSegment(currentTime)}>📍</button>
+				<button onclick={() => playerStore.addSegment(getCurrentTime())}>📍</button>
 			{/if}
 		</div>
 	</div>

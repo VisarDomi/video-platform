@@ -5,11 +5,13 @@
 	let {
 		currentTime,
 		duration,
-		onseek
+		onseek,
+		onseekdirect
 	}: {
 		currentTime: number;
 		duration: number;
 		onseek: (time: number) => void;
+		onseekdirect: (time: number) => void;
 	} = $props();
 
 	let progressBar = $state<HTMLElement | null>(null);
@@ -21,27 +23,55 @@
 		`${formatTimePrecise(currentTime)} / ${formatTimePrecise(effectiveDuration)}`
 	);
 
-	function handleScrub(e: PointerEvent) {
-		if (!progressBar || effectiveDuration <= 0) return;
-		const rect = progressBar.getBoundingClientRect();
-		const position = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-		const newTime = effectiveDuration * (position / rect.width);
-		onseek(newTime);
+	// Cached rect — set once on pointerdown, avoids layout thrash on every move
+	let cachedRect: DOMRect | null = null;
+	let lastScrubTime = 0;
+	let rafId = 0;
+	let pendingScrubX = 0;
+
+	function calcTimeFromX(clientX: number): number {
+		if (!cachedRect || effectiveDuration <= 0) return 0;
+		const position = Math.max(0, Math.min(clientX - cachedRect.left, cachedRect.width));
+		return effectiveDuration * (position / cachedRect.width);
 	}
 
 	function onPointerDown(e: PointerEvent) {
 		isScrubbing = true;
-		handleScrub(e);
+		cachedRect = progressBar!.getBoundingClientRect();
+		const time = calcTimeFromX(e.clientX);
+		onseek(time);
 		window.addEventListener('pointermove', onPointerMove);
 		window.addEventListener('pointerup', onPointerUp);
 	}
 
 	function onPointerMove(e: PointerEvent) {
-		if (isScrubbing) handleScrub(e);
+		if (!isScrubbing) return;
+		pendingScrubX = e.clientX;
+		if (!rafId) {
+			rafId = requestAnimationFrame(flushScrub);
+		}
+	}
+
+	function flushScrub() {
+		rafId = 0;
+		if (!isScrubbing) return;
+		const time = calcTimeFromX(pendingScrubX);
+		onseekdirect(time);
+		lastScrubTime = time;
 	}
 
 	function onPointerUp() {
+		if (rafId) {
+			cancelAnimationFrame(rafId);
+			rafId = 0;
+		}
+		if (isScrubbing && lastScrubTime > 0) {
+			// Final sync on release
+			onseek(lastScrubTime);
+		}
 		isScrubbing = false;
+		lastScrubTime = 0;
+		cachedRect = null;
 		window.removeEventListener('pointermove', onPointerMove);
 		window.removeEventListener('pointerup', onPointerUp);
 	}

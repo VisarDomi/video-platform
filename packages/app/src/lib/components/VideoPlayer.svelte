@@ -95,9 +95,9 @@
 			{#if video}
 				<div class="streamer-name">{video.filename}</div>
 
-				<ProgressBar {currentTime} duration={displayDuration} onseek={(t) => engine.handleSeek(t)} />
+				<ProgressBar {currentTime} duration={displayDuration} onseek={(t) => engine.handleSeek(t)} onseekdirect={(t) => engine.seekDirect(t)} />
 
-				<PlayerControls {isMuted} {currentTime} ontoggleMute={() => engine.toggleMute()} />
+				<PlayerControls {isMuted} getCurrentTime={() => engine.getCurrentTime()} ontoggleMute={() => engine.toggleMute()} />
 			{/if}
 		</div>
 	</div>

@@ -567,11 +567,25 @@ export class VideoEngine {
 			if (wasPlaying) activeEl.pause();
 			activeEl.currentTime = time;
 			this._currentTime = time;
+			// Sync immediately — called on pointer up or single click, not during drag
 			this.forceTimeSync();
 			if (wasPlaying) {
 				activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
 			}
 		}
+	}
+
+	/** Set currentTime without syncing to Svelte — for use during continuous drag */
+	seekDirect(time: number): void {
+		const activeEl = this.getActiveElement();
+		if (!isNaN(activeEl.duration)) {
+			activeEl.currentTime = time;
+			this._currentTime = time;
+		}
+	}
+
+	getCurrentTime(): number {
+		return this._currentTime;
 	}
 
 	toggleMute(): void {
@@ -656,7 +670,12 @@ export class VideoEngine {
 				const newTime = Math.max(0, Math.min(maxTime, this.seekBaseTime + seekDelta));
 				activeEl.currentTime = newTime;
 				this._currentTime = newTime;
-				this.forceTimeSync();
+				// Throttled sync during drag — 4Hz is enough for visual feedback
+				const now = performance.now();
+				if (now - this._lastTimeSync >= this.TIME_SYNC_MS) {
+					this._lastTimeSync = now;
+					this.callbacks.onTimeUpdate(this._currentTime, this._duration, this._seekableEnd);
+				}
 			}
 		}
 	};
@@ -688,6 +707,11 @@ export class VideoEngine {
 				}
 				// Clear direct DOM transform — Svelte's style binding takes over
 				this.videoViewEl.style.transform = '';
+				break;
+			}
+			case 'seek': {
+				// Final sync on release so ProgressBar snaps to exact position
+				this.forceTimeSync();
 				break;
 			}
 			case 'nav': {
