@@ -50,10 +50,8 @@ export class ListManager {
     private onStateChanged = (state: IApplicationState) => {
         this.render(state);
 
-        const viewModeChanged = state.viewMode !== this.previousViewMode;
-
-        if (state.viewMode === 'video' || viewModeChanged) {
-            this.scrollToActiveItem();
+        if (state.viewMode === 'video') {
+            this.scrollToTarget();
         }
 
         this.previousViewMode = state.viewMode;
@@ -67,6 +65,8 @@ export class ListManager {
         const target = e.target as HTMLElement;
         const item = target.closest(".list-item") as HTMLElement;
         if (item && item.dataset.streamerId) {
+            const rect = item.getBoundingClientRect();
+            this.appState.captureScrollAnchor(rect.top);
             this.emitter.emit(Events.UI.PLAY_STREAMER, item.dataset.streamerId);
         }
     }
@@ -115,11 +115,15 @@ export class ListManager {
         }
     }
 
-    private scrollToActiveItem() {
-        const activeItem = this.dom.videoItemsWrapper.querySelector(".current-streamer");
-        if (activeItem) {
-            activeItem.scrollIntoView({ block: "center", behavior: "auto" });
-        }
+    private scrollToTarget() {
+        const target = this.appState.scrollTarget;
+        if (!target) return;
+        const el = this.dom.videoItemsWrapper.querySelector(
+            `.list-item[data-streamer-id="${target.streamerId}"]`
+        ) as HTMLElement | null;
+        if (!el) return;
+        const targetY = Math.max(0, el.offsetTop - target.anchorY);
+        window.scrollTo(0, targetY);
     }
 
     private getDisplayName(streamer: Streamer): string {

@@ -7,15 +7,12 @@ export const UI_TEMPLATE = `
     </div>
 </div>
 
-<div id="videoView" class="hidden-view">
-    <div id="videoContainer">
-        <!-- StreamUnits injected here -->
-    </div>
+<div id="videoView">
+    <div id="videoContainer"></div>
 </div>
 `;
 
 export const UI_STYLES = `
-    /* Base Resets */
     body, html {
         margin: 0;
         padding: 0;
@@ -23,33 +20,23 @@ export const UI_STYLES = `
         background-color: #000000;
         color: #ffffff;
         -webkit-touch-callout: none;
-        
-        /* Native Document Scrolling Setup */
         width: 100%;
-        min-height: 100vh; /* Ensure body covers the screen to provide black background for over-scroll */
-        overflow-x: hidden; /* Prevent horizontal drift */
-        /* overflow-y is implicitly visible, allowing native scroll */
+        min-height: 100vh;
+        overflow-x: hidden;
     }
 
     .hidden {
         display: none !important;
     }
 
-    /* List View */
     #listView {
         position: relative;
         width: 100%;
         z-index: 1;
-        background-color: transparent; /* Transparent so body background shows through */
-        transition: opacity 0.3s ease;
-    }
-
-    #listView.hidden-view {
-        display: none; 
+        background-color: transparent;
     }
 
     #listContainer {
-        /* Padding for Safe Areas (Notch & Home Indicator) */
         padding-top: env(safe-area-inset-top);
         padding-bottom: calc(50px + env(safe-area-inset-bottom));
     }
@@ -105,7 +92,6 @@ export const UI_STYLES = `
         color: #888;
     }
 
-    /* Video View */
     #videoView {
         position: fixed;
         top: 0;
@@ -114,22 +100,24 @@ export const UI_STYLES = `
         bottom: 0;
         background-color: black;
         touch-action: none;
-        z-index: 10;
+        z-index: -1;
+        opacity: 0;
+        pointer-events: none;
         transition: opacity 0.3s ease;
     }
-    
+
+    #videoView.visible {
+        z-index: 10;
+        opacity: 1;
+        pointer-events: auto;
+    }
+
     #videoView.swipe-active {
         box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
     }
 
     #videoView.swipe-animating {
         transition: transform 250ms ease-out;
-    }
-
-    #videoView.hidden-view {
-        /* Crucial for iOS: completely remove fixed element from render tree 
-           to allow transparent bars in list view */
-        display: none; 
     }
 
     #videoContainer {

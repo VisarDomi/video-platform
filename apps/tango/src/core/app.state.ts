@@ -7,6 +7,8 @@ export class AppState {
     private _streamers: Streamer[];
     private _currentIndex: number = 0;
     private _viewMode: ViewMode = 'list';
+    private _scrollAnchorY: number = 0;
+    private _scrollTarget: { streamerId: string; anchorY: number } | null = null;
     private emitter: Emitter<EventPayloads>;
 
     constructor(initialStreamers: Streamer[], emitter: Emitter<EventPayloads>) {
@@ -115,7 +117,21 @@ export class AppState {
         }
     }
 
+    public get scrollTarget() { return this._scrollTarget; }
+
+    public captureScrollAnchor(anchorY: number) {
+        this._scrollAnchorY = anchorY;
+    }
+
+    public updateScrollTarget(streamerId: string) {
+        this._scrollTarget = { streamerId, anchorY: this._scrollAnchorY };
+    }
+
     public setViewMode(mode: ViewMode): void {
+        if (mode === 'list') {
+            this._scrollTarget = null;
+            this._scrollAnchorY = 0;
+        }
         this._viewMode = mode;
         this.emitStateChange();
     }

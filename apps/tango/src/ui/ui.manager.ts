@@ -51,12 +51,10 @@ export class UIManager {
     }
 
     private updateViewMode(viewMode: 'list' | 'video') {
-        if (viewMode === 'list') {
-            this.listView.classList.remove('hidden-view');
-            this.videoView.classList.add('hidden-view');
+        if (viewMode === 'video') {
+            this.videoView.classList.add('visible');
         } else {
-            this.listView.classList.add('hidden-view');
-            this.videoView.classList.remove('hidden-view');
+            this.videoView.classList.remove('visible');
         }
     }
 }

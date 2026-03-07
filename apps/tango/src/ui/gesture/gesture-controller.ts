@@ -63,7 +63,6 @@ export class GestureController {
                     if (this.swipeStartX <= GestureController.EDGE_ZONE && dx > 0) {
                         this.swipeType = 'edge-back';
                         this.elements.videoView.classList.add('swipe-active');
-                        this.elements.listView.classList.remove('hidden-view');
                     } else {
                         this.swipeType = 'ui';
                     }
@@ -108,7 +107,6 @@ export class GestureController {
                         videoView.style.transform = '';
                         videoView.addEventListener('transitionend', () => {
                             videoView.classList.remove('swipe-active', 'swipe-animating');
-                            this.elements.listView.classList.add('hidden-view');
                             this.swipeAnimating = false;
                         }, { once: true });
                     }
@@ -140,7 +138,6 @@ export class GestureController {
                 const videoView = this.elements.videoView;
                 videoView.style.transform = '';
                 videoView.classList.remove('swipe-active', 'swipe-animating');
-                this.elements.listView.classList.add('hidden-view');
             }
             this.swipeType = 'none';
             this.swipeAxis = 'none';

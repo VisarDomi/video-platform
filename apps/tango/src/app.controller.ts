@@ -103,10 +103,14 @@ export class AppController {
 
     private next = () => {
         this.store.next();
+        const current = this.store.getCurrentStreamer();
+        if (current) this.store.updateScrollTarget(current.streamerId);
     };
 
     private previous = () => {
         this.store.previous();
+        const current = this.store.getCurrentStreamer();
+        if (current) this.store.updateScrollTarget(current.streamerId);
     };
 
     private showList = () => {
