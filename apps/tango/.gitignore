@@ -1,0 +1,12 @@
+/node_modules
+/dist
+.env
+error.log
+temp.txt
+*.har
+repomix-output.xml
+session.json
+live-status.json
+temp.*
+repomix/
+.idea/

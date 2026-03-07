@@ -1,0 +1,16 @@
+{
+  "name": "tango",
+  "version": "145",
+  "description": "A lightweight userscript that makes exploring Tango streams easy",
+  "type": "module",
+  "scripts": {
+    "build": "node increase.js && vite build"
+  },
+  "devDependencies": {
+    "@types/tampermonkey": "^5.0.4",
+    "nodemon": "^3.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9",
+    "vite-plugin-monkey": "^7.1.4"
+  }
+}

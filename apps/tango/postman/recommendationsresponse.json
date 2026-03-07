@@ -1,0 +1,190 @@
+{
+    "code": "OK",
+    "categoryInfoList": [
+        {
+            "type": "CATEGORY",
+            "tag": "following",
+            "title": "following",
+            "canBePinned": false,
+            "streamInfoList": {
+                "sessionId": "",
+                "streamDetails": [
+                    {
+                        "stream": {
+                            "id": "Og2FnSS2VvjH_VHuwbuVXg",
+                            "encryptedAccountId": "EB5KY0bv2eQz6BmZbi7LwQ",
+                            "duration": 3705719,
+                            "thumbnail": "https://cget.tango.me/contentserver/download/AAFo58xNAACBh5H9nk1RHlYEAAAAALcGg2U/E5lfTQyq/thumbnail",
+                            "thumbnailWidth": 0,
+                            "thumbnailHeight": 0,
+                            "status": "LIVING",
+                            "streamKind": "PUBLIC",
+                            "liveListUrl": "https://cinema-de11.tango.me/v2/dda3b5ba31e15cebbc23c4c068723abf/master.m3u8",
+                            "completeListUrl": "https://cinema-de11.tango.me/v2/dda3b5ba31e15cebbc23c4c068723abf/master.m3u8",
+                            "previewListUrl": "https://cinema-de11.tango.me/v2/0ac934b5ac174d90c3f161b4f9988094/preview.m3u8",
+                            "masterListUrl": "https://cinema-de11.tango.me/v2/dda3b5ba31e15cebbc23c4c068723abf/master.m3u8",
+                            "streamProtocol": "SRT",
+                            "landscape": false
+                        },
+                        "anchor": {
+                            "encryptedAccountId": "EB5KY0bv2eQz6BmZbi7LwQ",
+                            "firstName": "\\ud83d\\udda4himka ᴸᴱ\\ud83d\\udda4",
+                            "profilePictureUrl": "https://cget.tango.me/contentserver/download/AAFpaQS_AAAs65mRwOLtSy9iAAAAALcGg2U/qXQWksI4",
+                            "gender": "FEMALE",
+                            "profileThumbnailUrl": "https://cget.tango.me/contentserver/download/AAFpaQS_AAAs65mRwOLtSy9iAAAAALcGg2U/qXQWksI4/thumbnail"
+                        },
+                        "anchorPoints": 5836962,
+                        "viewerCount": 8,
+                        "isPublic": true,
+                        "source": "feed",
+                        "totalPointsInStream": 8707,
+                        "uniqueViewerCount": 1532,
+                        "tags": [
+                            "dating"
+                        ],
+                        "settings": {
+                            "videoEnabled": true,
+                            "audioEnabled": true,
+                            "incognitoEnabled": false,
+                            "muteGiftSound": false,
+                            "liveChatForFollowersOnly": false,
+                            "audioRoom": false
+                        },
+                        "viewInfo": {
+                            "streamId": ""
+                        },
+                        "approved": false,
+                        "moderationLevel": 5,
+                        "rating": 1073785438,
+                        "historyId": 2219975,
+                        "moderationScore": 0.7160179241739139,
+                        "nsfw": false
+                    }
+                ]
+            },
+            "requestId": "11ce71f7-c418-4032-8360-264b2d4a22d1"
+        },
+        {
+            "type": "CATEGORY",
+            "tag": "following_recommendations",
+            "title": "following_recommendations",
+            "canBePinned": false,
+            "streamInfoList": {
+                "sessionId": "",
+                "streamDetails": [
+                    {
+                        "stream": {
+                            "id": "eTegupu0xTo7_3KSOkT9MQ",
+                            "encryptedAccountId": "Gl4Xf3guLYb0azD8tfUV0g",
+                            "duration": 108074,
+                            "thumbnail": "https://cget.tango.me/contentserver/download/AAFpO_ARAAA1iS1PRahBI4f8AAAAAP0UsX8/nAYwUsX8",
+                            "thumbnailWidth": 0,
+                            "thumbnailHeight": 0,
+                            "status": "LIVING",
+                            "streamKind": "PUBLIC",
+                            "liveListUrl": "https://cinema-de41.tango.me/v2/01f2e1d6bea53961b1edc67a2a5ca6d8/master.m3u8",
+                            "completeListUrl": "https://cinema-de41.tango.me/v2/01f2e1d6bea53961b1edc67a2a5ca6d8/master.m3u8",
+                            "previewListUrl": "https://cinema-de41.tango.me/v2/a8b61e1350fb8d65aec2f0d5b764ca0a/preview.m3u8",
+                            "masterListUrl": "https://cinema-de41.tango.me/v2/01f2e1d6bea53961b1edc67a2a5ca6d8/master.m3u8",
+                            "streamProtocol": "SRT",
+                            "landscape": false
+                        },
+                        "anchor": {
+                            "encryptedAccountId": "Gl4Xf3guLYb0azD8tfUV0g",
+                            "firstName": "Twin Queens 2",
+                            "profilePictureUrl": "https://cget.tango.me/contentserver/download/AAFm6yanAABQmUlK2wLpnvyrAAAAAP0UsX8/RTLusr0d",
+                            "gender": "FEMALE",
+                            "profileThumbnailUrl": "https://cget.tango.me/contentserver/download/AAFm6yanAABQmUlK2wLpnvyrAAAAAP0UsX8/RTLusr0d/thumbnail"
+                        },
+                        "anchorPoints": 13268812,
+                        "viewerCount": 37,
+                        "isPublic": true,
+                        "source": "feed",
+                        "totalPointsInStream": 1,
+                        "uniqueViewerCount": 133,
+                        "tags": [
+                            "dating"
+                        ],
+                        "settings": {
+                            "videoEnabled": true,
+                            "audioEnabled": true,
+                            "incognitoEnabled": false,
+                            "muteGiftSound": false,
+                            "liveChatForFollowersOnly": false,
+                            "audioRoom": false
+                        },
+                        "viewInfo": {
+                            "streamId": ""
+                        },
+                        "approved": false,
+                        "moderationLevel": 5,
+                        "rating": 1073742198,
+                        "historyId": 2264353,
+                        "moderationScore": 0.5403922088820525,
+                        "nsfw": false
+                    },
+                    {
+                        "stream": {
+                            "id": "z6c70AdA2J8YY2LiBip64Q",
+                            "encryptedAccountId": "v-CEDzgQaO6JKUJtdZPOaA",
+                            "duration": 104908,
+                            "title": "Смотрите мою прямую трансляцию!",
+                            "thumbnail": "https://cget.tango.me/contentserver/download/AAFpGjivAADWt7tkXm9jsbOuAAAAANOklD8/leB7Ljjs",
+                            "thumbnailWidth": 0,
+                            "thumbnailHeight": 0,
+                            "status": "LIVING",
+                            "streamKind": "PUBLIC",
+                            "liveListUrl": "https://cinema-de41.tango.me/v2/5301d060b47a01777f41728a257e8800/master.m3u8",
+                            "completeListUrl": "https://cinema-de41.tango.me/v2/5301d060b47a01777f41728a257e8800/master.m3u8",
+                            "previewListUrl": "https://cinema-de41.tango.me/v2/7c047dfba4c37801607612957de9da7f/preview.m3u8",
+                            "masterListUrl": "https://cinema-de41.tango.me/v2/5301d060b47a01777f41728a257e8800/master.m3u8",
+                            "streamProtocol": "SRT",
+                            "landscape": false
+                        },
+                        "anchor": {
+                            "encryptedAccountId": "v-CEDzgQaO6JKUJtdZPOaA",
+                            "firstName": "Kriss❤️",
+                            "profilePictureUrl": "https://cget.tango.me/contentserver/download/AAFpGjivAADWt7tkXm9jsbOuAAAAANOklD8/leB7Ljjs",
+                            "gender": "FEMALE",
+                            "profileThumbnailUrl": "https://cget.tango.me/contentserver/download/AAFpGjivAADWt7tkXm9jsbOuAAAAANOklD8/leB7Ljjs/thumbnail"
+                        },
+                        "anchorPoints": 5052232,
+                        "viewerCount": 26,
+                        "isPublic": true,
+                        "source": "feed",
+                        "totalPointsInStream": 0,
+                        "uniqueViewerCount": 78,
+                        "tags": [
+                            "battle",
+                            "dating",
+                            "multibroadcast"
+                        ],
+                        "relatedStreams": [
+                            {
+                                "thumbnail": "https://cget.tango.me/contentserver/download/AAFpYjVwAADU8Ifs7d6bbUreAAAAAN5gzaU/N4QlfcEs"
+                            }
+                        ],
+                        "settings": {
+                            "videoEnabled": true,
+                            "audioEnabled": true,
+                            "incognitoEnabled": false,
+                            "muteGiftSound": false,
+                            "liveChatForFollowersOnly": true,
+                            "audioRoom": false
+                        },
+                        "viewInfo": {
+                            "streamId": ""
+                        },
+                        "approved": false,
+                        "moderationLevel": 5,
+                        "rating": 1073742083,
+                        "historyId": 2264419,
+                        "moderationScore": 0.6567162384438996,
+                        "nsfw": true
+                    }
+                ]
+            }
+        }
+    ]
+}
+          

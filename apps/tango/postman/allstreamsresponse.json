@@ -1,0 +1,150 @@
+{
+    "code": "OK",
+    "details": {
+        "stream": {
+            "id": "nXL0YiV5NrY2lQ-2ab6DKw",
+            "encryptedAccountId": "Id-SgI_vdwWDF6_7w7aEWw",
+            "duration": 3149916,
+            "thumbnail": "https://cget.tango.me/contentserver/download/AAFo6XigAACnO09qI2p00npbAAAAALb44vs/HnDBFWFZ",
+            "thumbnailWidth": 0,
+            "thumbnailHeight": 0,
+            "status": "LIVING",
+            "streamKind": "PUBLIC",
+            "liveListUrl": "https://cinema-de41.tango.me/v2/3925307768e19f3be612e94f839dc50a/master.m3u8",
+            "completeListUrl": "https://cinema-de41.tango.me/v2/3925307768e19f3be612e94f839dc50a/master.m3u8",
+            "previewListUrl": "https://cinema-de41.tango.me/v2/ffdabb45b0485eb6faff48898a848b80/preview.m3u8",
+            "masterListUrl": "https://cinema-de41.tango.me/v2/3925307768e19f3be612e94f839dc50a/master.m3u8",
+            "streamProtocol": "SRT",
+            "egressUrl": "",
+            "landscape": false
+        },
+        "anchor": { "encryptedAccountId": "Id-SgI_vdwWDF6_7w7aEWw", "profilePictureUrl": "", "profileThumbnailUrl": "" },
+        "anchorPoints": 4497621,
+        "viewerCount": 40,
+        "isPublic": true,
+        "source": "feed",
+        "totalPointsInStream": 136,
+        "uniqueViewerCount": 2959,
+        "tags": ["battle", "dating", "multibroadcast"],
+        "relatedStreams": [
+            { "thumbnail": "https://cget.tango.me/contentserver/download/AAFooWKVAAD2VCu_njpdIafEAAAAAQGrL9s/Y8fXVtx5" },
+            { "thumbnail": "https://cget.tango.me/contentserver/download/AAFo7ETHAADkvlFlyJ2wFZZSAAAAAPfrfUM/piZNFI62" },
+            { "thumbnail": "https://cget.tango.me/contentserver/download/AAFo5ZOrAABR_8drao5VOaljAAAAAJvK-XA/5DqXZ6tm" }
+        ],
+        "settings": {
+            "videoEnabled": true,
+            "audioEnabled": true,
+            "incognitoEnabled": false,
+            "muteGiftSound": false,
+            "liveChatForFollowersOnly": false,
+            "audioRoom": false
+        },
+        "viewInfo": { "streamId": "nXL0YiV5NrY2lQ-2ab6DKw" },
+        "approved": false,
+        "moderationLevel": 5,
+        "moderationScore": 0.9465960191957878,
+        "nsfw": true
+    },
+    "giftDrawerVersion": 6600,
+    "bonusLevel": 0,
+    "bonusPercentage": 0,
+    "minGiftPriceForBonus": 0,
+    "isAdmin": false,
+    "multiBroadcast": {
+        "timestamp": 1760563282929,
+        "streams": [
+            {
+                "stream": {
+                    "mbDescriptor": { "streamId": "MabA10TTwm2R9rGOZ32lmw", "accountId": "xjBpLDSlNt2PekSZeAJ0ug" },
+                    "streamURL": "https://cinema-de41.tango.me/v2/5e1d0aedb03cb74fc01ab84fd3b5f7ce/master.m3u8",
+                    "thumbnailURL": "https://cget.tango.me/contentserver/download/AAFooWKVAAD2VCu_njpdIafEAAAAAQGrL9s/Y8fXVtx5",
+                    "multiBroadcastUrl": "",
+                    "settings": { "multiBattleSupport": true },
+                    "9": [1],
+                    "10": [0],
+                    "11": ["battle", "dating", "multibroadcast"]
+                },
+                "status": "ACTIVE",
+                "type": "LIVE_PARTY"
+            },
+            {
+                "stream": {
+                    "mbDescriptor": { "streamId": "nXL0YiV5NrY2lQ-2ab6DKw", "accountId": "Id-SgI_vdwWDF6_7w7aEWw" },
+                    "streamURL": "https://cinema-de41.tango.me/v2/3925307768e19f3be612e94f839dc50a/master.m3u8",
+                    "thumbnailURL": "https://cget.tango.me/contentserver/download/AAFo6XigAACnO09qI2p00npbAAAAALb44vs/HnDBFWFZ",
+                    "multiBroadcastUrl": "",
+                    "settings": { "multiBattleSupport": true },
+                    "9": [1],
+                    "10": [0],
+                    "11": ["battle", "dating", "multibroadcast"]
+                },
+                "status": "ACTIVE",
+                "type": "LIVE_PARTY"
+            },
+            {
+                "stream": {
+                    "mbDescriptor": { "streamId": "gf79Rw-mOv_XOExfa8Bofw", "accountId": "z4TcHOC2-5dbmeTqtZZVNA" },
+                    "streamURL": "https://cinema-de41.tango.me/v2/ca301f14927ae771311c235b3025fe3a/master.m3u8",
+                    "thumbnailURL": "https://cget.tango.me/contentserver/download/AAFo7ETHAADkvlFlyJ2wFZZSAAAAAPfrfUM/piZNFI62",
+                    "multiBroadcastUrl": "",
+                    "settings": { "multiBattleSupport": true },
+                    "9": [0],
+                    "10": [0],
+                    "11": ["tango-only", "battle", "dating", "multibroadcast"]
+                },
+                "status": "ACTIVE",
+                "type": "LIVE_PARTY"
+            },
+            {
+                "stream": {
+                    "mbDescriptor": { "streamId": "DYdv1MsUPatzEgCYJeeOZQ", "accountId": "vLkLwsaTGN-w_Fbq9eWqGQ" },
+                    "streamURL": "https://cinema-de41.tango.me/v2/ee4d701aaadef1c435f6f26ba13af865/master.m3u8",
+                    "thumbnailURL": "http://cget.tango.me/contentserver/download/Yks60gAAMgs9kh8pTaO-CQ/gkEbZcbw",
+                    "multiBroadcastUrl": "",
+                    "settings": { "multiBattleSupport": true },
+                    "9": [1],
+                    "10": [0],
+                    "11": ["battle", "dating", "multibroadcast"]
+                },
+                "status": "ACTIVE",
+                "type": "LIVE_PARTY"
+            }
+        ],
+        "invites": [
+            {
+                "guestAccountId": "mFNoEk8h7AtPlnApnjJdCQ",
+                "host": { "streamId": "gf79Rw-mOv_XOExfa8Bofw", "accountId": "z4TcHOC2-5dbmeTqtZZVNA" },
+                "status": "SENT"
+            }
+        ],
+        "mbId": "cef17b28-7652-464d-a386-275fdadb2d2f"
+    },
+    "userAccountId": "UUhe5K2LfgmTqH5rOJqMpQ",
+    "stickers": [
+        {
+            "id": "3069764347::GOAL",
+            "deprecatedType": "DEPRECATED_GOAL",
+            "payload": "DfBJAgAVv1sAAA==",
+            "posX": 0.0,
+            "posY": 0.21290323,
+            "rotation": 0.0,
+            "text": "\\ud83e\\ude75\\ud83c\\uddfa\\ud83c\\udde6UKRAINE \\ud83d\\udc9b\\ud83c\\uddfa\\ud83c\\udde6",
+            "status": "ACTIVE",
+            "scale": 0.9,
+            "type": "GOAL"
+        },
+        {
+            "id": "3069764347::GIFT",
+            "deprecatedType": "DEPRECATED_GIFT",
+            "payload": "ChZadk9VQVRBWTgyRDNIdUtmaUlfWnJnHRAAAAAlDAAAAA==",
+            "posX": 0.0,
+            "posY": 0.0,
+            "rotation": 0.0,
+            "text": "collection please \\ud83c\\udf39\\ud83c\\udf39",
+            "status": "ACTIVE",
+            "scale": 0.9,
+            "type": "GIFT"
+        }
+    ],
+    "gameId": 260930212
+}

@@ -1,0 +1,32 @@
+{
+    "encryptedAccountId": "YKVsI0MYBSeM43ZYKptHPg",
+    "basicProfile": {
+        "firstName": "Zarazaᴸᴱ",
+        "profilePictureUrl": "https://cget.tango.me/contentserver/download/AAFpNx-GAAAFJtfVA_mey0O5AAAAALaLChk/BKAJYDJ8",
+        "profileThumbnailUrl": "https://cget.tango.me/contentserver/download/AAFpNx-GAAAFJtfVA_mey0O5AAAAALaLChk/BKAJYDJ8/thumbnail",
+        "gender": "FEMALE",
+        "verified": true,
+        "aliases": [
+            {
+                "alias": "zaraza2",
+                "created": 1672830242033,
+                "creator": "USER"
+            }
+        ]
+    },
+    "profileDetails": {
+        "backgroundUrl": "https://surprises.tango.me/ts/pb0010.jpg",
+        "status": "Time you enjoy wasting, was not wasted☺️",
+        "birthday": "1993-06-03",
+        "phoneCountryCode": "7",
+        "iso2CountryCode": "RU"
+    },
+    "liveStats": {
+        "points": 24593126,
+        "vipStatus": 0
+    },
+    "followStats": {
+        "followingCount": 77,
+        "followersCount": 124989
+    }
+}

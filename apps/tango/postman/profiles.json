@@ -1,0 +1,246 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_2",
+        "pageTimings": {
+          "onContentLoad": 488,
+          "onLoad": 1006
+        },
+        "startedDateTime": "2026-02-04T16:57:50.142+01:00",
+        "title": "https://tango.me/live/recommended"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2026-02-04T16:57:50.142+01:00",
+        "request": {
+          "bodySize": 1251,
+          "method": "POST",
+          "url": "https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "*/*"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "1251"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Alt-Used",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "Cookie",
+              "value": "Tango-DeviceId=oLNP0w0IqHoHuGQgN7U3; intercom-id-ahnp8yy2=51bc3db3-f9f0-4c19-8d69-c2f6aa302ec9; intercom-session-ahnp8yy2=Z01CSExsMmtmL0pjdkdyNXNyWDlTdUszVURqeCtTbXJaTWdDbHpHeFhIUzhpb21UMW9yWWNYWmdBZ2pselFLRjZhU1h3anVsMThDRGZxSk9EbUFYYVFST2FTU2ZPQXllVExUS1dKekthSzA9LS01Mk82OU9lUElpZVN0dkpQM0NWTnhRPT0=--3da51c2624f6231e8d0447e17e7bfd42adb19d94; intercom-device-id-ahnp8yy2=0bdd906e-50e4-443b-9537-8e3f3f6b7fba; _iidt=jStIBoWNtouPIvAci515MvNxww0NS4fie3KIEwQCKuoZF8GIs4mtgU+urWyPjWgsH4j12I6JSjNBag==; _vid_t=IzLdFyCBrMP5LYpfJYBL//EcigLObIB8zAnsKZmBAiA1JZJ0MdA9lOyh5KAiW/v8AXA0yLT2Eah45g==; Tango-SD=eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzAyMjM3MTYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Nzc5OTYxMTYsImFjY291bnRJZCI6bnVsbH0=; __ssid=17f04625e23b5a317f9390eb83d0f56; Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMzcxNywiaWF0IjoxNzcwMjIwMTE3LCJqdGkiOiI3MTZiM2EwNy00Y2QzLTQ1ODEtYjU2Ni02YmQyN2MxNTFkNjUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.tkWBhzOy9YNj2wZumb1E0cNZfhOzoGrThSDUWtsnUAKKZ45Lc-aeS8OtTH78dMagRsnvFjAuzVIclTNthlM4Bg; Tango-WST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMzcxNywiaWF0IjoxNzcwMjIwMTE3LCJqdGkiOiI3MTZiM2EwNy00Y2QzLTQ1ODEtYjU2Ni02YmQyN2MxNTFkNjUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.tkWBhzOy9YNj2wZumb1E0cNZfhOzoGrThSDUWtsnUAKKZ45Lc-aeS8OtTH78dMagRsnvFjAuzVIclTNthlM4Bg; tt=YmQ0ZjA4ZDI0MTEwNmFhMzI1OWNjNWE3YTMzNzVjZWNmODVhMTA3M2VkZmY5MzUzMTg4ZmQ2OTBiNmYzZjdkNQ; ttu=01ce98f210c849a6887606fa63257aa2; tte=1770220677"
+            },
+            {
+              "name": "Priority",
+              "value": "u=4"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "TE",
+              "value": "trailers"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-DeviceId",
+              "value": "oLNP0w0IqHoHuGQgN7U3"
+            },
+            {
+              "name": "intercom-id-ahnp8yy2",
+              "value": "51bc3db3-f9f0-4c19-8d69-c2f6aa302ec9"
+            },
+            {
+              "name": "intercom-session-ahnp8yy2",
+              "value": "Z01CSExsMmtmL0pjdkdyNXNyWDlTdUszVURqeCtTbXJaTWdDbHpHeFhIUzhpb21UMW9yWWNYWmdBZ2pselFLRjZhU1h3anVsMThDRGZxSk9EbUFYYVFST2FTU2ZPQXllVExUS1dKekthSzA9LS01Mk82OU9lUElpZVN0dkpQM0NWTnhRPT0=--3da51c2624f6231e8d0447e17e7bfd42adb19d94"
+            },
+            {
+              "name": "intercom-device-id-ahnp8yy2",
+              "value": "0bdd906e-50e4-443b-9537-8e3f3f6b7fba"
+            },
+            {
+              "name": "_iidt",
+              "value": "jStIBoWNtouPIvAci515MvNxww0NS4fie3KIEwQCKuoZF8GIs4mtgU+urWyPjWgsH4j12I6JSjNBag=="
+            },
+            {
+              "name": "_vid_t",
+              "value": "IzLdFyCBrMP5LYpfJYBL//EcigLObIB8zAnsKZmBAiA1JZJ0MdA9lOyh5KAiW/v8AXA0yLT2Eah45g=="
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzAyMjM3MTYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Nzc5OTYxMTYsImFjY291bnRJZCI6bnVsbH0="
+            },
+            {
+              "name": "__ssid",
+              "value": "17f04625e23b5a317f9390eb83d0f56"
+            },
+            {
+              "name": "Tango-ST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMzcxNywiaWF0IjoxNzcwMjIwMTE3LCJqdGkiOiI3MTZiM2EwNy00Y2QzLTQ1ODEtYjU2Ni02YmQyN2MxNTFkNjUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.tkWBhzOy9YNj2wZumb1E0cNZfhOzoGrThSDUWtsnUAKKZ45Lc-aeS8OtTH78dMagRsnvFjAuzVIclTNthlM4Bg"
+            },
+            {
+              "name": "Tango-WST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMzcxNywiaWF0IjoxNzcwMjIwMTE3LCJqdGkiOiI3MTZiM2EwNy00Y2QzLTQ1ODEtYjU2Ni02YmQyN2MxNTFkNjUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.tkWBhzOy9YNj2wZumb1E0cNZfhOzoGrThSDUWtsnUAKKZ45Lc-aeS8OtTH78dMagRsnvFjAuzVIclTNthlM4Bg"
+            },
+            {
+              "name": "tt",
+              "value": "YmQ0ZjA4ZDI0MTEwNmFhMzI1OWNjNWE3YTMzNzVjZWNmODVhMTA3M2VkZmY5MzUzMTg4ZmQ2OTBiNmYzZjdkNQ"
+            },
+            {
+              "name": "ttu",
+              "value": "01ce98f210c849a6887606fa63257aa2"
+            },
+            {
+              "name": "tte",
+              "value": "1770220677"
+            }
+          ],
+          "queryString": [
+            {
+              "name": "basicProfile",
+              "value": "true"
+            },
+            {
+              "name": "liveStats",
+              "value": "false"
+            },
+            {
+              "name": "followStats",
+              "value": "false"
+            }
+          ],
+          "headersSize": 3017,
+          "postData": {
+            "mimeType": "application/json",
+            "params": [],
+            "text": "[\"hnPuGt0NmKVlTiyMCIwNkg\",\"1F9yw5bF43myebzikeKJOA\",\"1P5j1Y8pXat0Z_3GuILuTQ\",\"eIBwk-oCpV1NzSRxHUfZ2w\",\"x5lzZuitOvQ1rTzeJEKM6g\",\"DavZY8yVuhVobz5xChZPMw\",\"pqzI-Z17AhyGJGeug0zNwg\",\"v-CEDzgQaO6JKUJtdZPOaA\",\"iCAAPFw0Zwq7cm9k1TKCfQ\",\"-foY3LDeUavGvcF8CGQF8g\",\"YKVsI0MYBSeM43ZYKptHPg\",\"1-gX6EnagHufUnsDNnrEkg\",\"kiMWpVilZtcSvTpnatUIrQ\",\"2VxHBlayyAUpQqLUUXJomw\",\"05leKdBEJby1rfF5FEwjNQ\",\"P3q2ZIjeX3zofHl8tU_sHA\",\"MLRxKZleoTUYp43DIk85Ug\",\"hh9mx_4D3BAtSHw_fOZPXw\",\"tpRPiQS_nFTe7Oq61bZCEg\",\"7xSZa2eKIqvS5o3vvEnr2A\",\"bwn4REg3OZS8B9yt2_nn0w\",\"bfwqXaRkgosIBntxf-KrIw\",\"qro-QaZeApQ6c-sSt-9ldA\",\"5nsGrZ3-QzychXMCLD5_0g\",\"rV-2sTpmQRG5Bj0SvuYDrA\",\"gJt6iwRkTh_7-BE2ypRnVg\",\"hwdDyQOKvPAkUDELbZXdTg\",\"tsKPcnD0eakSAF0E_EEXrA\",\"ys5IF2AOFpUh8t3BukvB1A\",\"6QVST42-4mA6KYPcRfbqyQ\",\"KxpThSC12FEIYdJGGqXSOg\",\"Y6_3k7DgDqF7yagnIVCHDg\",\"4ijDZKI1Hq0974e6MPi9JA\",\"lmMWskbRFt0NdcyjWPjUnw\",\"23kVcQPB53t27PK5LM0ecg\",\"IEwQVN8Y2e40ttICiiau2A\",\"g5Vrjf1UQlu1Uz4GsHY2Rw\",\"o_Gw1CnSopyrRH_EfZE5wA\",\"VPYg7zIVTfjxm3v7RkAw2A\",\"jEo_nyQMskm9Sl5rlt9k3Q\",\"ZPIZ8FZZh-G6HV60F4WkJg\",\"BkeHhGrnH1-XUB-vzwkgIg\",\"XTfSPRfRn9UlLDE6DKGBcw\",\"4-zCrK15tSYrFMmAEUr5KQ\",\"EPriF4lvSrBlNzD1ccdRWw\",\"vxgLl6zW-tmBDIVuRvNbGw\",\"C9NpJoNdunb0TnH8VAfwOQ\",\"7VD0zzSjTOg4sMn6xmcazg\",\"nDpqCWcOuqjgpJf0VtCNMQ\",\"M8hzozQ7KyT74fD-bp4j7w\"]"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "x-b3-traceid",
+              "value": "19c295fce15829500ebd36d21a2"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json;charset=UTF-8"
+            },
+            {
+              "name": "date",
+              "value": "Wed, 04 Feb 2026 15:57:50 GMT"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "mimeType": "application/json; charset=UTF-8",
+            "size": 34666,
+            "text": "..."
+          },
+          "redirectURL": "",
+          "headersSize": 302,
+          "bodySize": 34968
+        },
+        "cache": {},
+        "timings": {
+          "blocked": 0,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 203,
+          "receive": 32
+        },
+        "time": 235,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_2"
+      }
+    ]
+  }
+}

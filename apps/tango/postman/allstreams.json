@@ -1,0 +1,188 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_1",
+        "pageTimings": {
+          "onContentLoad": 367,
+          "onLoad": 2545
+        },
+        "startedDateTime": "2025-10-15T23:21:22.386+02:00",
+        "title": "https://tango.me/stream/nXL0YiV5NrY2lQ-2ab6DKw"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2025-10-15T23:21:22.386+02:00",
+        "request": {
+          "bodySize": 22,
+          "method": "POST",
+          "url": "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v2/watch?requestId=",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "*/*"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain;charset=UTF-8"
+            },
+            {
+              "name": "Content-Length",
+              "value": "22"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "foreground-id",
+              "value": "4337c627-0ab1-4f51-ab70-85a490bb52b4"
+            },
+            {
+              "name": "interaction-id",
+              "value": "4337e59c-eac3-424f-8b2a-9c72b9f9e9d2"
+            },
+            {
+              "name": "username",
+              "value": "fb9132699cfb4309b0f1a509614c7318"
+            },
+            {
+              "name": "x-app-client-session-id",
+              "value": "3b314f34-cc05-4575-8d00-f3296b3e20b9"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-GPC",
+              "value": "1"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Cookie",
+              "value": "the usual..."
+            },
+            {
+              "name": "Priority",
+              "value": "u=4"
+            }
+          ],
+          "queryString": [
+            {
+              "name": "requestId",
+              "value": ""
+            }
+          ],
+          "headersSize": 2873,
+          "postData": {
+            "mimeType": "text/plain;charset=UTF-8",
+            "params": [],
+            "text": "nXL0YiV5NrY2lQ-2ab6DKw"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "x-b3-traceid",
+              "value": "199e9bfc3bee1e514273fe9c697"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "date",
+              "value": "Wed, 15 Oct 2025 21:21:22 GMT"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "mimeType": "application/json",
+            "size": 4601,
+            "text": "in it's own file..."
+          },
+          "redirectURL": "",
+          "headersSize": 288,
+          "bodySize": 4889
+        },
+        "cache": {},
+        "timings": {
+          "blocked": 0,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 264,
+          "receive": 0
+        },
+        "time": 264,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_1"
+      }
+    ]
+  }
+}

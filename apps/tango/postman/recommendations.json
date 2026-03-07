@@ -1,0 +1,238 @@
+{
+  "log": {
+    "version": "1.2",
+    "creator": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "browser": {
+      "name": "Firefox",
+      "version": "142.0"
+    },
+    "pages": [
+      {
+        "id": "page_1",
+        "pageTimings": {
+          "onContentLoad": 679,
+          "onLoad": 1090
+        },
+        "startedDateTime": "2026-02-04T16:47:36.466+01:00",
+        "title": "https://tango.me/live/recommended"
+      }
+    ],
+    "entries": [
+      {
+        "startedDateTime": "2026-02-04T16:47:36.466+01:00",
+        "request": {
+          "bodySize": 166,
+          "method": "POST",
+          "url": "https://gateway.tango.me/proxycador/api/public/v1/recommendations/following?tags=",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "Host",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0"
+            },
+            {
+              "name": "Accept",
+              "value": "*/*"
+            },
+            {
+              "name": "Accept-Language",
+              "value": "en-US,en;q=0.5"
+            },
+            {
+              "name": "Accept-Encoding",
+              "value": "gzip, deflate, br, zstd"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "166"
+            },
+            {
+              "name": "Referer",
+              "value": "https://tango.me/"
+            },
+            {
+              "name": "Origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "Sec-Fetch-Dest",
+              "value": "empty"
+            },
+            {
+              "name": "Sec-Fetch-Mode",
+              "value": "cors"
+            },
+            {
+              "name": "Sec-Fetch-Site",
+              "value": "same-site"
+            },
+            {
+              "name": "Connection",
+              "value": "keep-alive"
+            },
+            {
+              "name": "Alt-Used",
+              "value": "gateway.tango.me"
+            },
+            {
+              "name": "Cookie",
+              "value": "Tango-DeviceId=oLNP0w0IqHoHuGQgN7U3; intercom-id-ahnp8yy2=51bc3db3-f9f0-4c19-8d69-c2f6aa302ec9; intercom-session-ahnp8yy2=Z01CSExsMmtmL0pjdkdyNXNyWDlTdUszVURqeCtTbXJaTWdDbHpHeFhIUzhpb21UMW9yWWNYWmdBZ2pselFLRjZhU1h3anVsMThDRGZxSk9EbUFYYVFST2FTU2ZPQXllVExUS1dKekthSzA9LS01Mk82OU9lUElpZVN0dkpQM0NWTnhRPT0=--3da51c2624f6231e8d0447e17e7bfd42adb19d94; intercom-device-id-ahnp8yy2=0bdd906e-50e4-443b-9537-8e3f3f6b7fba; _iidt=jStIBoWNtouPIvAci515MvNxww0NS4fie3KIEwQCKuoZF8GIs4mtgU+urWyPjWgsH4j12I6JSjNBag==; _vid_t=IzLdFyCBrMP5LYpfJYBL//EcigLObIB8zAnsKZmBAiA1JZJ0MdA9lOyh5KAiW/v8AXA0yLT2Eah45g==; Tango-SD=eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzAyMjAxMzYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Nzc5OTI1MzYsImFjY291bnRJZCI6bnVsbH0=; __ssid=17f04625e23b5a317f9390eb83d0f56; Tango-ST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMDEzNywiaWF0IjoxNzcwMjE2NTM3LCJqdGkiOiJkN2M1ODg5MC1hNGQ0LTRmYmYtYmM1Mi0zNDIzMjc4MTExMzUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.1BgxT0406QIcnBlx150lC5Be2kjmC4QaMhILRDtGg1lfDH-N5ZtfEGzYANUWWKZTnYek0LPcrBtCwBrfgkqLAg; Tango-WST=eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMDEzNywiaWF0IjoxNzcwMjE2NTM3LCJqdGkiOiJkN2M1ODg5MC1hNGQ0LTRmYmYtYmM1Mi0zNDIzMjc4MTExMzUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.1BgxT0406QIcnBlx150lC5Be2kjmC4QaMhILRDtGg1lfDH-N5ZtfEGzYANUWWKZTnYek0LPcrBtCwBrfgkqLAg; tt=OGYwZTk2OTVkNDg1NTU2NDExN2VmOTJjYWFjNjc2MDY4YzE0NTkwNDRjNGZhMmJmOTY0ZWM2MjI0YWQwMDA5Zg; ttu=01ce98f210c849a6887606fa63257aa2; tte=1770220063"
+            },
+            {
+              "name": "Priority",
+              "value": "u=4"
+            },
+            {
+              "name": "Pragma",
+              "value": "no-cache"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "TE",
+              "value": "trailers"
+            }
+          ],
+          "cookies": [
+            {
+              "name": "Tango-DeviceId",
+              "value": "oLNP0w0IqHoHuGQgN7U3"
+            },
+            {
+              "name": "intercom-id-ahnp8yy2",
+              "value": "51bc3db3-f9f0-4c19-8d69-c2f6aa302ec9"
+            },
+            {
+              "name": "intercom-session-ahnp8yy2",
+              "value": "Z01CSExsMmtmL0pjdkdyNXNyWDlTdUszVURqeCtTbXJaTWdDbHpHeFhIUzhpb21UMW9yWWNYWmdBZ2pselFLRjZhU1h3anVsMThDRGZxSk9EbUFYYVFST2FTU2ZPQXllVExUS1dKekthSzA9LS01Mk82OU9lUElpZVN0dkpQM0NWTnhRPT0=--3da51c2624f6231e8d0447e17e7bfd42adb19d94"
+            },
+            {
+              "name": "intercom-device-id-ahnp8yy2",
+              "value": "0bdd906e-50e4-443b-9537-8e3f3f6b7fba"
+            },
+            {
+              "name": "_iidt",
+              "value": "jStIBoWNtouPIvAci515MvNxww0NS4fie3KIEwQCKuoZF8GIs4mtgU+urWyPjWgsH4j12I6JSjNBag=="
+            },
+            {
+              "name": "_vid_t",
+              "value": "IzLdFyCBrMP5LYpfJYBL//EcigLObIB8zAnsKZmBAiA1JZJ0MdA9lOyh5KAiW/v8AXA0yLT2Eah45g=="
+            },
+            {
+              "name": "Tango-SD",
+              "value": "eyJzZXNzaW9uVHlwZSI6IkRFRkFVTFQiLCJhbmFseXRpY3NLZXkiOm51bGwsInNlc3Npb25Ub2tlblZhbGlkVW50aWxTZWMiOjE3NzAyMjAxMzYsInJlZnJlc2hUb2tlblZhbGlkVW50aWxTZWMiOjE3Nzc5OTI1MzYsImFjY291bnRJZCI6bnVsbH0="
+            },
+            {
+              "name": "__ssid",
+              "value": "17f04625e23b5a317f9390eb83d0f56"
+            },
+            {
+              "name": "Tango-ST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMDEzNywiaWF0IjoxNzcwMjE2NTM3LCJqdGkiOiJkN2M1ODg5MC1hNGQ0LTRmYmYtYmM1Mi0zNDIzMjc4MTExMzUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.1BgxT0406QIcnBlx150lC5Be2kjmC4QaMhILRDtGg1lfDH-N5ZtfEGzYANUWWKZTnYek0LPcrBtCwBrfgkqLAg"
+            },
+            {
+              "name": "Tango-WST",
+              "value": "eyJraWQiOiIyNDIxNjQ2My0wNWNlLTQzZDMtOTkxMS1hNmY0YTZmYjVhNzUiLCJ0eXAiOiJKV1QiLCJhbGciOiJFZERTQSJ9.eyJhbmFseXRpY3NLZXkiOiIxb1F2VFlwdmhnQkhMMy1OMFB0dm5BIiwiY2hhdHRlciI6ZmFsc2UsImlzcyI6InRva2VuLXNlcnZpY2UiLCJzZXNzaW9uSWQiOiIwMWNlOThmMjEwYzg0OWE2ODg3NjA2ZmE2MzI1N2FhMiIsInBsYXRmb3JtIjoid2ViIiwic3VzcGVuZGVkIjpmYWxzZSwiYXVkIjoiZ2F0ZXdheSIsImFjY291bnRJZCI6IjFvUXZUWXB2aGdCSEwzLU4wUHR2bkEiLCJhcHBJZCI6InRhbmdvIiwiYXV0aHpTY29wZSI6ImRlZmF1bHQiLCJndWVzdCI6ZmFsc2UsImV4cCI6MTc3MDIyMDEzNywiaWF0IjoxNzcwMjE2NTM3LCJqdGkiOiJkN2M1ODg5MC1hNGQ0LTRmYmYtYmM1Mi0zNDIzMjc4MTExMzUiLCJ1c2VybmFtZSI6IjAxY2U5OGYyMTBjODQ5YTY4ODc2MDZmYTYzMjU3YWEyIn0.1BgxT0406QIcnBlx150lC5Be2kjmC4QaMhILRDtGg1lfDH-N5ZtfEGzYANUWWKZTnYek0LPcrBtCwBrfgkqLAg"
+            },
+            {
+              "name": "tt",
+              "value": "OGYwZTk2OTVkNDg1NTU2NDExN2VmOTJjYWFjNjc2MDY4YzE0NTkwNDRjNGZhMmJmOTY0ZWM2MjI0YWQwMDA5Zg"
+            },
+            {
+              "name": "ttu",
+              "value": "01ce98f210c849a6887606fa63257aa2"
+            },
+            {
+              "name": "tte",
+              "value": "1770220063"
+            }
+          ],
+          "queryString": [
+            {
+              "name": "tags",
+              "value": ""
+            }
+          ],
+          "headersSize": 2978,
+          "postData": {
+            "mimeType": "application/json",
+            "params": [],
+            "text": "{\"sessionId\":\"\",\"locale\":\"en_US\",\"region\":\"AL\",\"categoryPageSize\":50,\"streamPageSize\":50,\"page\":0,\"moderationLevel\":5,\"nsfwModerationLevel\":5,\"accessToPremium\":false}"
+          }
+        },
+        "response": {
+          "status": 200,
+          "statusText": "",
+          "httpVersion": "HTTP/3",
+          "headers": [
+            {
+              "name": "x-b3-traceid",
+              "value": "19c2956714489cf445e887e8c89"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "date",
+              "value": "Wed, 04 Feb 2026 15:47:37 GMT"
+            },
+            {
+              "name": "access-control-allow-origin",
+              "value": "https://tango.me"
+            },
+            {
+              "name": "access-control-allow-credentials",
+              "value": "true"
+            },
+            {
+              "name": "via",
+              "value": "1.1 google"
+            },
+            {
+              "name": "alt-svc",
+              "value": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+            }
+          ],
+          "cookies": [],
+          "content": {
+            "mimeType": "application/json",
+            "size": 84463,
+            "text": "..."
+          },
+          "redirectURL": "",
+          "headersSize": 288,
+          "bodySize": 84751
+        },
+        "cache": {},
+        "timings": {
+          "blocked": 0,
+          "dns": 0,
+          "connect": 0,
+          "ssl": 0,
+          "send": 0,
+          "wait": 302,
+          "receive": 166
+        },
+        "time": 468,
+        "_securityState": "secure",
+        "serverIPAddress": "35.201.91.142",
+        "connection": "443",
+        "pageref": "page_1"
+      }
+    ]
+  }
+}
