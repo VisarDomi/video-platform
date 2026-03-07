@@ -8,3 +8,4 @@ repomix/
 packages/downloader/tango.txt
 packages/downloader/fc2.txt
 packages/downloader/sc.txt
+dist/
