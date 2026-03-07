@@ -1,0 +1,17 @@
+export const ServiceKeys = {
+    EMITTER: "emitter",
+    LIVE_URL_CACHE: "liveUrlCache",
+    ALIAS_CACHE: "aliasCache",
+    APP_STATE: "appState",
+    AUTH_SERVICE: "authService",
+    STREAMER_SERVICE: "streamerService",
+    ACTION_SERVICE: "actionService",
+    LIVE_URL_SERVICE: "liveUrlService",
+    ALIAS_SERVICE: "aliasService",
+    UI_MANAGER: "uiManager",
+    LIST_MANAGER: "listManager",
+    VIDEO_MANAGER: "videoManager",
+    APP_CONTROLLER: "appController",
+    DEBUG_MANAGER: "debugManager",
+    STREAM_LOADER_SERVICE: "streamLoaderService",
+} as const;

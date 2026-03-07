@@ -5,12 +5,13 @@ import { VideoManager } from "../video/video.manager";
 import { AppController } from "../app.controller";
 import { LiveUrlService } from "../video/live-url.service";
 import { AliasService } from "../services/alias.service";
-import { EventPayloads, ICacheManager, Streamer } from "../types";
+import { EventPayloads, Streamer } from "../types";
 import { AuthService } from "../services/api/auth.service";
 import { StreamerService } from "../services/api/streamer.service";
 import { ActionService } from "../services/api/action.service";
 import { AppState } from "./app.state";
-import { createCacheManager } from "./cache";
+import { createLiveUrlCache, ILiveUrlCache } from "../video/live-url-cache";
+import { createAliasCache, IAliasCache } from "../services/alias-cache";
 import { ServiceKeys } from "./service.keys";
 import { DebugManager } from "../ui/debug/debug.manager";
 import { StreamLoaderService } from "../services/stream-loader.service";
@@ -49,7 +50,8 @@ export class ServiceContainer {
         const container = new ServiceContainer();
 
         container.register(ServiceKeys.EMITTER, () => new Emitter<EventPayloads>());
-        container.register(ServiceKeys.CACHE_MANAGER, () => createCacheManager(deps.originalSetTimeout));
+        container.register(ServiceKeys.LIVE_URL_CACHE, () => createLiveUrlCache(deps.originalSetTimeout));
+        container.register(ServiceKeys.ALIAS_CACHE, () => createAliasCache(deps.originalSetTimeout));
         container.register(ServiceKeys.APP_STATE, (c) => new AppState(deps.streamers, c.resolve(ServiceKeys.EMITTER)));
 
         container.register(ServiceKeys.AUTH_SERVICE, () => new AuthService(deps.defaultInit));
@@ -58,10 +60,10 @@ export class ServiceContainer {
 
         container.register(ServiceKeys.LIVE_URL_SERVICE, (c) => new LiveUrlService(
             deps.defaultInit,
-            c.resolve(ServiceKeys.CACHE_MANAGER),
+            c.resolve(ServiceKeys.LIVE_URL_CACHE),
             c.resolve(ServiceKeys.EMITTER)
         ));
-        container.register(ServiceKeys.ALIAS_SERVICE, (c) => new AliasService(c.resolve(ServiceKeys.STREAMER_SERVICE), c.resolve(ServiceKeys.CACHE_MANAGER)));
+        container.register(ServiceKeys.ALIAS_SERVICE, (c) => new AliasService(c.resolve(ServiceKeys.STREAMER_SERVICE), c.resolve(ServiceKeys.ALIAS_CACHE)));
 
         // Updated registration to inject Emitter
         container.register(ServiceKeys.STREAM_LOADER_SERVICE, (c) => new StreamLoaderService(
@@ -114,8 +116,39 @@ export class ServiceContainer {
                 })
         );
 
-        container.resolve<ICacheManager>(ServiceKeys.CACHE_MANAGER).clear();
+        // Migrate old unified cache to new split caches
+        migrateOldCache();
+
+        // Clear caches on startup
+        container.resolve<ILiveUrlCache>(ServiceKeys.LIVE_URL_CACHE).clear();
+        container.resolve<IAliasCache>(ServiceKeys.ALIAS_CACHE).clear();
 
         return container;
+    }
+}
+
+function migrateOldCache() {
+    const OLD_KEY = "tango_script_cache";
+    try {
+        const stored = localStorage.getItem(OLD_KEY);
+        if (!stored) return;
+
+        const parsed = JSON.parse(stored);
+
+        if (parsed.liveUrls && Object.keys(parsed.liveUrls).length > 0) {
+            localStorage.setItem("tango_liveurl_cache", JSON.stringify(parsed.liveUrls));
+        }
+
+        if ((parsed.aliases && Object.keys(parsed.aliases).length > 0) || (parsed.names && Object.keys(parsed.names).length > 0)) {
+            localStorage.setItem("tango_alias_cache", JSON.stringify({
+                aliases: parsed.aliases || {},
+                names: parsed.names || {},
+            }));
+        }
+
+        localStorage.removeItem(OLD_KEY);
+    } catch (e) {
+        console.error("Cache migration failed", e);
+        localStorage.removeItem(OLD_KEY);
     }
 }

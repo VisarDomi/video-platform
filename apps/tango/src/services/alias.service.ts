@@ -1,13 +1,13 @@
-import { ICacheManager } from "../types";
+import { IAliasCache } from "./alias-cache";
 import { StreamerService } from "./api/streamer.service";
 
 export class AliasService {
     private streamerService: StreamerService;
-    private cache: ICacheManager;
+    private cache: IAliasCache;
 
-    constructor(streamerService: StreamerService, cacheManager: ICacheManager) {
+    constructor(streamerService: StreamerService, cache: IAliasCache) {
         this.streamerService = streamerService;
-        this.cache = cacheManager;
+        this.cache = cache;
     }
 
     public getCachedAlias(streamerId: string): string | undefined {
