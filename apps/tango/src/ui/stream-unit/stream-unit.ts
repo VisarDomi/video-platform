@@ -1,0 +1,227 @@
+import { Emitter } from "../../core/emitter";
+import { Events } from "../../core/events";
+import { AliasService } from "../../services/alias.service";
+import { LiveUrlService } from "../../video/live-url.service";
+import { HlsPlayer } from "../../video/player/hls.player";
+import { EventPayloads, IPlayerStrategy, Streamer } from "../../types";
+import { STREAM_UNIT_TEMPLATE } from "./stream-unit.dom";
+import { GestureController, GestureElements } from "../gesture/gesture-controller";
+
+export class StreamUnit {
+    public element: HTMLElement;
+    public videoElement: HTMLVideoElement;
+
+    private player: IPlayerStrategy | null = null;
+    private currentStreamer: Streamer | null = null;
+
+    private emitter: Emitter<EventPayloads>;
+    private aliasService: AliasService;
+    private liveUrlService: LiveUrlService;
+
+    // UI Elements
+    private nameEl!: HTMLElement;
+    private topBarEl!: HTMLElement;
+    private muteBtn!: HTMLButtonElement;
+    private followBtn!: HTMLButtonElement;
+    private blockBtn!: HTMLButtonElement;
+
+    private blockConfirmState: boolean = false;
+    private audioOnly: boolean = false;
+
+    constructor(
+        emitter: Emitter<EventPayloads>,
+        aliasService: AliasService,
+        liveUrlService: LiveUrlService,
+        gestureElements: GestureElements,
+        originalAddEventListener: typeof EventTarget.prototype.addEventListener
+    ) {
+        this.emitter = emitter;
+        this.aliasService = aliasService;
+        this.liveUrlService = liveUrlService;
+        this.element = this._createDOM();
+        this.videoElement = this.element.querySelector('video') as HTMLVideoElement;
+        this._bindElements();
+        this._attachListeners();
+        this._initGestures(gestureElements, originalAddEventListener);
+    }
+
+    public get isMuted(): boolean {
+        return this.videoElement.muted;
+    }
+
+    public async update(streamer: Streamer | undefined) {
+        if (streamer && this.currentStreamer?.streamerId === streamer.streamerId) {
+            this.currentStreamer = streamer;
+            this._updateNameText(streamer);
+            this.updateFollowButton(streamer.isFollowing);
+            return;
+        }
+
+        if (this.player) {
+            this.player.destroy();
+            this.player = null;
+        }
+        this.videoElement.src = "";
+        this.currentStreamer = streamer || null;
+        this.blockConfirmState = false;
+        this.audioOnly = false;
+        this.blockBtn.textContent = "🚫";
+
+        if (!streamer) {
+            this.nameEl.textContent = "";
+            return;
+        }
+
+        const targetStreamerId = streamer.streamerId;
+
+        // Immediate UI Update (Uses whatever is currently in memory/cache)
+        this._updateNameText(streamer);
+        this.updateFollowButton(streamer.isFollowing);
+
+        // Async: Fetch Alias & Name.
+        // We use .then() to trigger a re-render of the text without blocking video loading.
+        this.aliasService.getAliasFor(streamer.streamerId).then(() => {
+            if (this.currentStreamer?.streamerId === targetStreamerId) {
+                this._updateNameText(streamer);
+            }
+        });
+
+        // Async: Video
+        try {
+            const cachedAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
+            const liveUrl = await this.liveUrlService.fetchAndParseLiveUrl(streamer, cachedAlias);
+
+            if (this.currentStreamer?.streamerId !== targetStreamerId) return;
+
+            if (liveUrl) {
+                // Fetch alias again for debug logs (might have updated in the split second)
+                const finalAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
+                this.player = new HlsPlayer(this.videoElement, this.emitter, finalAlias, streamer.streamerId);
+                this.player.loadSource(liveUrl);
+                this._detectAudioOnly(targetStreamerId);
+            } else {
+                this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
+            }
+
+        } catch (e) {
+            console.error("StreamUnit update failed", e);
+        }
+    }
+
+    private _detectAudioOnly(targetStreamerId: string) {
+        const onPlaying = () => {
+            this.videoElement.removeEventListener('playing', onPlaying);
+            if (this.currentStreamer?.streamerId !== targetStreamerId) return;
+            if (this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
+                this.audioOnly = true;
+                if (this.currentStreamer) this._updateNameText(this.currentStreamer);
+            }
+        };
+        this.videoElement.addEventListener('playing', onPlaying);
+    }
+
+    private _updateNameText(streamer: Streamer) {
+        // 1. Get cached alias or fallback to ID
+        const cachedAlias = this.aliasService.getCachedAlias(streamer.streamerId);
+        const displayAlias = cachedAlias || streamer.streamerId;
+
+        // 2. Get name. Prioritize cached name (in case streamer object is stale), then streamer.firstName
+        const cachedName = this.aliasService.getCachedName(streamer.streamerId);
+        const displayName = cachedName || streamer.firstName;
+
+        const audioTag = this.audioOnly ? ' 🔊' : '';
+        this.nameEl.textContent = `${displayAlias} ${displayName}${audioTag}`;
+    }
+
+    private onGlobalUiUpdate = () => {
+        if (this.currentStreamer) {
+            this._updateNameText(this.currentStreamer);
+            this.updateFollowButton(this.currentStreamer.isFollowing);
+        }
+    }
+
+    public setHidden(hidden: boolean) {
+        this.element.hidden = hidden;
+    }
+
+    public setMuted(muted: boolean) {
+        this.videoElement.muted = muted;
+        this.muteBtn.textContent = muted ? "🔇" : "🔊";
+    }
+
+    public play() {
+        this.videoElement.play().catch(e => console.error("Autoplay failed", e));
+    }
+
+    private _createDOM(): HTMLElement {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = STREAM_UNIT_TEMPLATE;
+        return wrapper.firstElementChild as HTMLElement;
+    }
+
+    private _bindElements() {
+        this.nameEl = this.element.querySelector('.streamer-name') as HTMLElement;
+        this.topBarEl = this.element.querySelector('.top-bar') as HTMLElement;
+        this.muteBtn = this.element.querySelector('.mute-btn') as HTMLButtonElement;
+        this.followBtn = this.element.querySelector('.follow-btn') as HTMLButtonElement;
+        this.blockBtn = this.element.querySelector('.block-btn') as HTMLButtonElement;
+    }
+
+    private _initGestures(gestureElements: GestureElements, originalAddEventListener: typeof EventTarget.prototype.addEventListener) {
+        const container = this.element.querySelector('.video-container') as HTMLElement;
+        new GestureController(container, {
+            onNext: () => this.emitter.emit(Events.UI.NEXT),
+            onPrevious: () => this.emitter.emit(Events.UI.PREVIOUS),
+            onShowList: () => this.emitter.emit(Events.UI.SHOW_LIST),
+            onSetUiVisible: (visible) => this.emitter.emit(Events.UI.SET_UI_VISIBLE, visible),
+        }, gestureElements, originalAddEventListener);
+    }
+
+    private _attachListeners() {
+        this.emitter.on(Events.APP.UPDATE_UI, this.onGlobalUiUpdate);
+
+        this.muteBtn.addEventListener("click", () => {
+            this.emitter.emit(Events.UI.TOGGLE_MUTE);
+        });
+
+        this.followBtn.addEventListener("click", () => {
+            const isFollowing = this.followBtn.dataset.following === "true";
+            if (isFollowing) {
+                this.emitter.emit(Events.UI.UNFOLLOW);
+            } else {
+                this.emitter.emit(Events.UI.FOLLOW);
+            }
+        });
+
+        this.blockBtn.addEventListener("click", () => {
+            if (!this.blockConfirmState) {
+                this.blockConfirmState = true;
+                this.blockBtn.textContent = "❓";
+            } else {
+                this.emitter.emit(Events.UI.BLOCK);
+                this.blockConfirmState = false;
+                this.blockBtn.textContent = "🚫";
+            }
+        });
+    }
+
+    public setUiVisible(visible: boolean) {
+        if (visible) {
+            this.topBarEl.classList.add("visible");
+        } else {
+            this.topBarEl.classList.remove("visible");
+        }
+    }
+
+    private updateFollowButton(isFollowing: boolean) {
+        this.followBtn.dataset.following = String(isFollowing);
+        this.followBtn.textContent = isFollowing ? "❤️" : "🤍";
+        this.followBtn.classList.remove("btn-follow", "btn-unfollow");
+
+        if (isFollowing) {
+            this.followBtn.classList.add("btn-unfollow");
+        } else {
+            this.followBtn.classList.add("btn-follow");
+        }
+    }
+}

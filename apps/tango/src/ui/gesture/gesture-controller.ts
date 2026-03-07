@@ -1,0 +1,150 @@
+export interface GestureCallbacks {
+    onNext(): void;
+    onPrevious(): void;
+    onShowList(): void;
+    onSetUiVisible(visible: boolean): void;
+}
+
+export interface GestureElements {
+    videoView: HTMLElement;
+    listView: HTMLElement;
+}
+
+export class GestureController {
+    private swipeStartX = 0;
+    private swipeStartY = 0;
+    private swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
+    private swipeType: 'none' | 'nav' | 'ui' | 'edge-back' = 'none';
+    private swipeAnimating = false;
+
+    private static readonly FLICK_THRESHOLD = 80;
+    private static readonly UI_SWIPE_THRESHOLD = 80;
+    private static readonly EDGE_ZONE = 30;
+    private static readonly EDGE_BACK_THRESHOLD = 0.3;
+
+    private callbacks: GestureCallbacks;
+    private elements: GestureElements;
+
+    constructor(
+        container: HTMLElement,
+        callbacks: GestureCallbacks,
+        elements: GestureElements,
+        originalAddEventListener: typeof EventTarget.prototype.addEventListener
+    ) {
+        this.callbacks = callbacks;
+        this.elements = elements;
+        this._attachListeners(container, originalAddEventListener);
+    }
+
+    private _attachListeners(container: HTMLElement, listen: typeof EventTarget.prototype.addEventListener) {
+        listen.call(container, 'touchstart', (e: TouchEvent) => {
+            if (e.touches.length > 1) return;
+            if (this.swipeAnimating) return;
+
+            const touch = e.touches[0];
+            this.swipeStartX = touch.clientX;
+            this.swipeStartY = touch.clientY;
+            this.swipeAxis = 'none';
+            this.swipeType = 'none';
+        });
+
+        listen.call(container, 'touchmove', (e: TouchEvent) => {
+            if (e.touches.length > 1) return;
+            if (this.swipeAnimating) return;
+
+            const touch = e.touches[0];
+            const dx = touch.clientX - this.swipeStartX;
+            const dy = touch.clientY - this.swipeStartY;
+
+            if (this.swipeAxis === 'none') {
+                if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                if (Math.abs(dx) >= Math.abs(dy)) {
+                    this.swipeAxis = 'horizontal';
+                    if (this.swipeStartX <= GestureController.EDGE_ZONE && dx > 0) {
+                        this.swipeType = 'edge-back';
+                        this.elements.videoView.classList.add('swipe-active');
+                        this.elements.listView.classList.remove('hidden-view');
+                    } else {
+                        this.swipeType = 'ui';
+                    }
+                } else {
+                    this.swipeAxis = 'vertical';
+                    this.swipeType = 'nav';
+                }
+            }
+
+            // Only prevent default after axis is determined and it's a gesture we own
+            if (this.swipeType !== 'none') {
+                e.preventDefault();
+            }
+
+            if (this.swipeType === 'edge-back') {
+                const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+                this.elements.videoView.style.transform = `translateX(${progress * 100}%)`;
+            }
+        }, { passive: false });
+
+        listen.call(container, 'touchend', (e: TouchEvent) => {
+            const touch = e.changedTouches[0];
+            const dx = touch.clientX - this.swipeStartX;
+            const dy = touch.clientY - this.swipeStartY;
+
+            switch (this.swipeType) {
+                case 'edge-back': {
+                    const videoView = this.elements.videoView;
+                    const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+                    this.swipeAnimating = true;
+                    videoView.classList.add('swipe-animating');
+
+                    if (progress > GestureController.EDGE_BACK_THRESHOLD) {
+                        videoView.style.transform = 'translateX(100%)';
+                        videoView.addEventListener('transitionend', () => {
+                            videoView.style.transform = '';
+                            videoView.classList.remove('swipe-active', 'swipe-animating');
+                            this.swipeAnimating = false;
+                            this.callbacks.onShowList();
+                        }, { once: true });
+                    } else {
+                        videoView.style.transform = '';
+                        videoView.addEventListener('transitionend', () => {
+                            videoView.classList.remove('swipe-active', 'swipe-animating');
+                            this.elements.listView.classList.add('hidden-view');
+                            this.swipeAnimating = false;
+                        }, { once: true });
+                    }
+                    break;
+                }
+                case 'nav': {
+                    if (Math.abs(dy) > GestureController.FLICK_THRESHOLD) {
+                        if (dy < 0) {
+                            this.callbacks.onNext();
+                        } else {
+                            this.callbacks.onPrevious();
+                        }
+                    }
+                    break;
+                }
+                case 'ui': {
+                    if (Math.abs(dx) > GestureController.UI_SWIPE_THRESHOLD) {
+                        this.callbacks.onSetUiVisible(dx > 0);
+                    }
+                    break;
+                }
+            }
+            this.swipeAxis = 'none';
+            this.swipeType = 'none';
+        });
+
+        listen.call(container, 'touchcancel', () => {
+            if (this.swipeType === 'edge-back') {
+                const videoView = this.elements.videoView;
+                videoView.style.transform = '';
+                videoView.classList.remove('swipe-active', 'swipe-animating');
+                this.elements.listView.classList.add('hidden-view');
+            }
+            this.swipeType = 'none';
+            this.swipeAxis = 'none';
+            this.swipeAnimating = false;
+        });
+    }
+}
