@@ -49,7 +49,7 @@
 	}
 
 	function handleListToggle() {
-		if (!identifier || !showListButton) return;
+		if (!identifier || !isListProvider(provider)) return;
 		if (isInList) {
 			videoListStore.removeListIdentifier(identifier);
 			removeFromList(provider, identifier).catch(() => {
