@@ -238,19 +238,19 @@ export class ApiClient implements IStreamProvider {
         return segmentsDirExists ? segmentsDirPath : null;
     }
 
-    public async validateSegment(filePath: string): Promise<boolean> {
+    public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
         const info = await MediaValidator.getMediaInfo(filePath);
-        if (!info) return false;
+        if (!info) return { valid: false };
 
         // Condition 1: Bitrate < 1000 or NaN
-        if (isNaN(info.bitRate) || info.bitRate < 1000) return false;
+        if (isNaN(info.bitRate) || info.bitRate < 1000) return { valid: false };
 
         // Condition 2: Insane Duration (> 1 hour)
-        if (!isNaN(info.duration) && info.duration > 3600) return false;
+        if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
 
         // Condition 3: Specific Tango corrupt resolution
-        if (info.width === 360 && info.height === 640) return false;
+        if (info.width === 360 && info.height === 640) return { valid: false };
 
-        return true;
+        return { valid: true, duration: info.duration };
     }
 }

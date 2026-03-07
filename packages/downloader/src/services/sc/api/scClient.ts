@@ -202,12 +202,12 @@ export class ScClient implements IStreamProvider {
         return segmentsDirExists ? segmentsDirPath : null;
     }
 
-    public async validateSegment(filePath: string): Promise<boolean> {
+    public async validateSegment(filePath: string): Promise<{ valid: boolean }> {
         try {
             const stat = await fs.stat(filePath);
-            return stat.size > 0;
+            return { valid: stat.size > 0 };
         } catch {
-            return false;
+            return { valid: false };
         }
     }
 }

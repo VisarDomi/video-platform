@@ -7,6 +7,7 @@ export interface SegmentInfo {
     remoteUrl: string;
     localName: string;
     metadata: string[];
+    accurateDuration?: number;
 }
 
 // Define a type for the URL resolver
@@ -16,6 +17,7 @@ export class PlaylistManager {
     private readonly segmentsDirPath: string;
     private readonly fullPlaylistPath: string;
     private ignoredSegments: Set<string> = new Set();
+    private lastSegmentNumber: number = -1;
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;
@@ -57,18 +59,7 @@ export class PlaylistManager {
                     line.startsWith("#EXT-X-MEDIA-SEQUENCE")
             );
 
-            // BUMP TARGET DURATION: Intercept and increase by 1s
-            const safeHeaderLines = headerLines.map((line) => {
-                if (line.startsWith("#EXT-X-TARGETDURATION:")) {
-                    const originalDuration = parseInt(line.split(":")[1], 10);
-                    if (!isNaN(originalDuration)) {
-                        return `#EXT-X-TARGETDURATION:${originalDuration + 1}`;
-                    }
-                }
-                return line.trim();
-            });
-
-            const header = safeHeaderLines.join("\n") + "\n";
+            const header = headerLines.map(l => l.trim()).join("\n") + "\n";
             await FileSystemManager.writeFile(this.fullPlaylistPath, header);
         }
 
@@ -113,6 +104,23 @@ export class PlaylistManager {
     }
 
     public async appendSegmentToPlaylist(segment: SegmentInfo): Promise<void> {
+        const currentNumber = parseInt(segment.localName.replace(/\.ts$/, ""), 10);
+
+        if (this.lastSegmentNumber !== -1 && !isNaN(currentNumber) && currentNumber !== this.lastSegmentNumber + 1) {
+            await this.insertDiscontinuity();
+        }
+
+        if (!isNaN(currentNumber)) {
+            this.lastSegmentNumber = currentNumber;
+        }
+
+        if (segment.accurateDuration !== undefined && segment.accurateDuration > 0) {
+            const idx = segment.metadata.findIndex(l => l.startsWith("#EXTINF:"));
+            if (idx !== -1) {
+                segment.metadata[idx] = `#EXTINF:${segment.accurateDuration.toFixed(3)},`;
+            }
+        }
+
         const entry = [...segment.metadata, segment.localName].join("\n") + "\n";
         await FileSystemManager.appendFile(this.fullPlaylistPath, entry);
     }

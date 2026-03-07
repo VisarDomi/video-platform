@@ -10,6 +10,11 @@ import { fixTargetDuration } from "shared";
 const execFileAsync = promisify(execFile);
 const limit = pLimit(5); // Process 5 segments at a time
 
+function extractSegmentNumber(filename: string): number | null {
+    const match = filename.match(/(\d+)\.ts$/);
+    return match ? parseInt(match[1], 10) : null;
+}
+
 export async function getSegmentDuration(tsFilePath: string): Promise<number> {
     try {
         const { stdout } = await execFileAsync(FFMPEG.COMMAND, [
@@ -34,9 +39,12 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
     const tsFiles = files
         .filter((f) => f.endsWith(FILE_EXTENSIONS.TS))
         .sort((a, b) => {
-            const numA = parseInt(a.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL);
-            const numB = parseInt(b.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL);
-            return numA - numB;
+            const numA = extractSegmentNumber(a);
+            const numB = extractSegmentNumber(b);
+            if (numA !== null && numB !== null) return numA - numB;
+            if (numA !== null) return -1;
+            if (numB !== null) return 1;
+            return a.localeCompare(b);
         });
 
     if (tsFiles.length === 0) return;
@@ -60,18 +68,20 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
         `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`
     ];
 
-    let lastSequence = -1;
+    let lastSequence: number | null = null;
 
     tsFiles.forEach((file, index) => {
         const duration = durations[index];
         if (duration <= 0) return;
 
         // Check for discontinuity based on numeric sequence
-        const currentSequence = parseInt(file.replace(FILE_EXTENSIONS.TS, MISC.EMPTY_STRING), MISC.RADIX_DECIMAL);
-        if (lastSequence !== -1 && currentSequence !== lastSequence + 1) {
+        const currentSequence = extractSegmentNumber(file);
+        if (lastSequence !== null && currentSequence !== null && currentSequence !== lastSequence + 1) {
             lines.push(HLS.DISCONTINUITY);
         }
-        lastSequence = currentSequence;
+        if (currentSequence !== null) {
+            lastSequence = currentSequence;
+        }
 
         lines.push(`${HLS.INF_PREFIX}${duration.toFixed(HLS.DURATION_DECIMAL_PRECISION)},`);
         lines.push(file);

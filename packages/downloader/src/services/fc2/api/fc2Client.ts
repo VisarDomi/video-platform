@@ -419,13 +419,13 @@ export class Fc2Client implements IStreamProvider {
         return this.getHlsUrl(streamerId);
     }
 
-    public async validateSegment(filePath: string): Promise<boolean> {
+    public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
         const info = await MediaValidator.getMediaInfo(filePath);
-        if (!info) return false;
+        if (!info) return { valid: false };
 
-        if (isNaN(info.bitRate) || info.bitRate < 1000) return false;
-        if (!isNaN(info.duration) && info.duration > 3600) return false;
+        if (isNaN(info.bitRate) || info.bitRate < 1000) return { valid: false };
+        if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
 
-        return true;
+        return { valid: true, duration: info.duration };
     }
 }
