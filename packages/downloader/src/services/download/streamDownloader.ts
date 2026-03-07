@@ -126,13 +126,16 @@ export class StreamDownloader {
                         const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
 
                         if (writeSuccess) {
-                            const isValid = await this.streamProvider.validateSegment(segmentPath);
+                            const result = await this.streamProvider.validateSegment(segmentPath);
 
-                            if (!isValid) {
+                            if (!result.valid) {
                                 await fs.unlink(segmentPath).catch(() => {});
                                 playlistManager.addIgnoredSegment(segment.localName);
                                 lastDownload = Date.now();
                             } else {
+                                if (result.duration !== undefined) {
+                                    segment.accurateDuration = result.duration;
+                                }
                                 await playlistManager.appendSegmentToPlaylist(segment);
                                 lastDownload = Date.now();
                                 segmentCount++;
