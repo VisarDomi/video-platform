@@ -79,6 +79,7 @@
 			if (target) {
 				engine.forceProgressSave();
 				playerStore.navigateVideo(target, getSavedTime(target), dir, videoListStore.selectedProvider);
+				playerStore.updateScrollTarget(target);
 				void fetchAndParsePlaylist(target);
 			}
 		}

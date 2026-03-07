@@ -1,6 +1,6 @@
 import { STORAGE_KEYS, VIDEO_TYPE } from '../constants.js';
 import { startSync, stopSync } from '../services/sync.js';
-import type { Video } from '../types.js';
+import type { Video, VideoType } from '../types.js';
 
 class PlayerStore {
 	view = $state<'list' | 'video'>('list');
@@ -14,6 +14,16 @@ class PlayerStore {
 	swipeProgress = $state(0);
 	isSwiping = $state(false);
 	swipeAnimating = $state(false);
+	scrollAnchorRatio = $state(0);
+	scrollTarget = $state<{ filename: string; type: VideoType; ratio: number } | null>(null);
+
+	captureScrollAnchor(ratio: number) {
+		this.scrollAnchorRatio = ratio;
+	}
+
+	updateScrollTarget(video: Video) {
+		this.scrollTarget = { filename: video.filename, type: video.type, ratio: this.scrollAnchorRatio };
+	}
 
 	initialize(provider: string) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`);
@@ -65,6 +75,8 @@ class PlayerStore {
 		this.view = 'list';
 		this.lastActionedVideoFilename = lastActionedFilename;
 		this.swipeAnimating = false;
+		this.scrollTarget = null;
+		this.scrollAnchorRatio = 0;
 		this._onShowListCallback?.();
 		if (this._lastProvider) startSync(this._lastProvider);
 	}

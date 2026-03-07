@@ -84,17 +84,6 @@
 		window.scrollTo(0, saved ? parseFloat(saved) : 0);
 	}
 
-	function scrollToActiveVideo() {
-		const active = playerStore.currentVideo || playerStore.lastPlayedVideo;
-		if (!active) return;
-		const idx = filteredVideos.findIndex(
-			(v) => v.filename === active.filename && v.type === active.type
-		);
-		if (idx === -1) return;
-		const targetY = idx * ITEM_HEIGHT - window.innerHeight / 2 + ITEM_HEIGHT / 2;
-		window.scrollTo(0, Math.max(0, targetY));
-	}
-
 	// Update title reactively
 	$effect(() => {
 		const cv = playerStore.currentVideo;
@@ -107,6 +96,12 @@
 	});
 
 	async function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
+		const idx = filteredVideos.findIndex(v => v.filename === video.filename && v.type === video.type);
+		if (idx !== -1) {
+			const itemTop = idx * ITEM_HEIGHT - window.scrollY;
+			playerStore.captureScrollAnchor(itemTop / window.innerHeight);
+		}
+
 		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
 		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
 
@@ -136,14 +131,27 @@
 		}
 	}
 
-	// Hide search when entering video view, reset and scroll when returning to list
+	// Scroll document while video overlay covers it
+	$effect(() => {
+		const target = playerStore.scrollTarget;
+		if (!target) return;
+		const idx = filteredVideos.findIndex(
+			(v) => v.filename === target.filename && v.type === target.type
+		);
+		if (idx === -1) return;
+		const targetY = Math.max(0, idx * ITEM_HEIGHT - target.ratio * window.innerHeight);
+		window.scrollTo(0, targetY);
+		scrollY = targetY;
+	});
+
+	// Hide search when entering video view, reset when returning to list
 	$effect(() => {
 		if (playerStore.view === 'video') {
 			searchHidden = true;
 		} else {
 			searchHidden = false;
 			lastScrollY = 0;
-			tick().then(scrollToActiveVideo);
+			scrollY = window.scrollY;
 		}
 	});
 

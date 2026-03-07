@@ -1,6 +1,7 @@
 # Todo
 
 ## In Progress
+- [x] Feature: Ownership-based scroll sync — no snap/jump on swipe-back from player
 - [x] Refactor: Ownership-focused refactor — extract GestureController, navigation utils, slim engine
 - [x] Refactor: Extract VideoEngine — split reactive shell from imperative media engine
 - [x] Enable native Safari zoom in video player via touch-action: pinch-zoom (VERON-55)
