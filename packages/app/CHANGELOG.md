@@ -2,6 +2,11 @@
 
 ## 2026-03-07
 
+- **fix**: Filter bar flashing visible on swipe-back to list
+  - **root cause**: View-transition `$effect` unconditionally set `searchHidden = false` and `lastScrollY = 0` on return to list. If scrolled down (e.g. scrollY=2000), filter appeared briefly, then the next scroll event compared 2000 > 0 and re-hid it — causing a flash.
+  - **design**: Set `searchHidden` based on current scroll position (`scrollY > 50`) instead of unconditionally showing it. Set `lastScrollY = scrollY` so subsequent scroll deltas are measured from the correct baseline.
+  - **files**: `routes/videos/[provider]/+page.svelte`
+
 - **feature**: Ownership-based scroll sync — eliminate snap/jump when swiping back from player to list
   - **root cause**: `showList()` triggered `tick().then(scrollToActiveVideo)` which scrolled after the transition completed — user saw the old scroll position, then a visible jump to the active video.
   - **design**: Borrowed ownership pattern from manga-reader. PlayerStore owns `scrollAnchorRatio` (captured on video tap — where the item was on screen) and `scrollTarget` (updated on each navigate). A `$effect` executor in +page.svelte reads `scrollTarget` and scrolls the document while the fixed player overlay covers it — invisible to the user. On swipe-back, position is already correct. `showList()` clears both values. Edge cases: no navigate = no scrollTarget = position unchanged; video not in filtered list = effect exits early; `handleScroll` early return when `view === 'video'` prevents localStorage saves during background scroll.
