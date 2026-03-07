@@ -237,7 +237,7 @@ export class VideoManager {
         const streamersCopy = [...streamers];
 
         for (const streamer of streamersCopy) {
-            const displayName = await this.aliasService.getAliasFor(streamer);
+            const displayName = await this.aliasService.getAliasFor(streamer.streamerId);
             await this.liveUrlService.fetchAndParseLiveUrl(streamer, displayName);
             await new Promise<void>((resolve) => this.originalSetTimeout(resolve, 500));
         }
