@@ -1,50 +1,27 @@
 import Hls from 'hls.js';
 import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '../constants.js';
-import { fetchAndParsePlaylist, clearPlaylistCache } from '../services/hls.js';
+import { clearPlaylistCache } from '../services/hls.js';
+import { getSavedTime } from '../utils/navigation.js';
 import type { Video } from '../types.js';
-
-interface PlayerStore {
-	view: 'list' | 'video';
-	currentVideo: Video | null;
-	currentVideoStartTime: number;
-	activePlayerIndex: number;
-	isUiVisible: boolean;
-	swipeProgress: number;
-	isSwiping: boolean;
-	swipeAnimating: boolean;
-	selectedProvider?: string;
-	navigateVideo(video: Video, startTime: number, direction: 1 | -1, provider: string): void;
-	showList(): void;
-	setCurrentVideoLive(): void;
-	setCurrentVideoNotLive(): void;
-	onShowList(cb: () => void): void;
-	onReload(cb: () => void): void;
-	onProviderChange(cb: () => void): void;
-}
-
-interface VideoListStore {
-	filteredVideos: Video[];
-	selectedProvider: string;
-	updateVideoLive(filename: string, isLive: boolean): void;
-	removeVideo(filename: string): void;
-}
 
 export interface VideoEngineCallbacks {
 	onTimeUpdate(currentTime: number, duration: number, seekableEnd: number): void;
 	onMuteChange(isMuted: boolean): void;
-	getPlayerStore(): PlayerStore;
-	getVideoListStore(): VideoListStore;
+	onLiveStatusChanged(filename: string, isLive: boolean): void;
+	onVideoRemoved(filename: string): void;
 }
 
 export class VideoEngine {
 	private elements: HTMLVideoElement[] = [];
-	private videoViewEl!: HTMLElement;
 	private videoContainer!: HTMLElement;
 	private hlsInstances = new Map<HTMLVideoElement, Hls>();
 	private nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
 	private currentFilename: string | null = null;
 	private wakeLock: WakeLockSentinel | null = null;
 	private navCounter = 0;
+
+	private activePlayerIndex = 0;
+	private currentIsLive = false;
 
 	// Internal time tracking — updated 12x/sec, synced to Svelte at 4Hz
 	private _currentTime = 0;
@@ -57,26 +34,9 @@ export class VideoEngine {
 	private _lastProgressSave = 0;
 	private readonly PROGRESS_SAVE_MS = 3000;
 
-	// Gesture state
-	private swipeStartX = 0;
-	private swipeStartY = 0;
-	private swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-	private swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
-	private seekBaseTime = 0;
-	private lastMultiTouchTime = 0;
-	private _swipeProgress = 0;
-
-	private readonly EDGE_ZONE = 30;
-	private readonly EDGE_BACK_THRESHOLD = 0.3;
-	private readonly FLICK_THRESHOLD = 80;
-	private readonly UI_SWIPE_THRESHOLD = 80;
-	private readonly SEEK_RATE = 60;
-	private readonly MULTI_TOUCH_DEBOUNCE_MS = 100;
-
 	constructor(private callbacks: VideoEngineCallbacks) {}
 
-	init(videoViewEl: HTMLElement, videoContainer: HTMLElement): () => void {
-		this.videoViewEl = videoViewEl;
+	init(videoContainer: HTMLElement): () => void {
 		this.videoContainer = videoContainer;
 
 		// Create 3 video elements
@@ -100,39 +60,11 @@ export class VideoEngine {
 			el.addEventListener('volumechange', volHandlers[i]);
 		});
 
-		// Attach touch handlers
-		const touchEl = videoViewEl;
-		touchEl.addEventListener('touchstart', this.handleTouchStart);
-		touchEl.addEventListener('touchmove', this.handleTouchMove, { passive: false });
-		touchEl.addEventListener('touchend', this.handleTouchEnd);
-		touchEl.addEventListener('touchcancel', this.handleTouchCancel);
-
-		// Register store callbacks
-		const store = this.callbacks.getPlayerStore();
-		store.onShowList(() => {
-			this.forceProgressSave();
-			this.getActiveElement()?.pause();
-		});
-
-		store.onProviderChange(() => {
-			this.elements.forEach((el) => this.clearStream(el));
-			this.currentFilename = null;
-		});
-
-		store.onReload(() => {
-			const cv = store.currentVideo;
-			if (cv) this.forceReloadStream(this.getActiveElement(), cv);
-		});
-
 		return () => {
 			els.forEach((el, i) => {
 				el.removeEventListener('timeupdate', timeHandlers[i]);
 				el.removeEventListener('volumechange', volHandlers[i]);
 			});
-			touchEl.removeEventListener('touchstart', this.handleTouchStart);
-			touchEl.removeEventListener('touchmove', this.handleTouchMove);
-			touchEl.removeEventListener('touchend', this.handleTouchEnd);
-			touchEl.removeEventListener('touchcancel', this.handleTouchCancel);
 		};
 	}
 
@@ -148,11 +80,14 @@ export class VideoEngine {
 			const now = performance.now();
 
 			// Debounced localStorage save
-			const cv = this.callbacks.getPlayerStore().currentVideo;
-			if (cv && !cv.isLive && now - this._lastProgressSave >= this.PROGRESS_SAVE_MS) {
+			if (
+				this.currentFilename &&
+				!this.currentIsLive &&
+				now - this._lastProgressSave >= this.PROGRESS_SAVE_MS
+			) {
 				this._lastProgressSave = now;
 				localStorage.setItem(
-					STORAGE_KEYS.PROGRESS_PREFIX + cv.filename,
+					STORAGE_KEYS.PROGRESS_PREFIX + this.currentFilename,
 					String(Math.round(el.currentTime))
 				);
 			}
@@ -178,19 +113,36 @@ export class VideoEngine {
 	}
 
 	forceProgressSave(): void {
-		const cv = this.callbacks.getPlayerStore().currentVideo;
-		if (!cv || cv.isLive) return;
+		if (!this.currentFilename || this.currentIsLive) return;
 		const el = this.getActiveElement();
 		if (!el || isNaN(el.currentTime)) return;
 		localStorage.setItem(
-			STORAGE_KEYS.PROGRESS_PREFIX + cv.filename,
+			STORAGE_KEYS.PROGRESS_PREFIX + this.currentFilename,
 			String(Math.round(el.currentTime))
 		);
 		this._lastProgressSave = performance.now();
 	}
 
 	private getActiveElement(): HTMLVideoElement {
-		return this.elements[this.callbacks.getPlayerStore().activePlayerIndex];
+		return this.elements[this.activePlayerIndex];
+	}
+
+	// --- Lifecycle methods (called by component) ---
+
+	onViewHidden(): void {
+		this.forceProgressSave();
+		this.getActiveElement()?.pause();
+	}
+
+	onProviderChange(): void {
+		this.elements.forEach((el) => this.clearStream(el));
+		this.currentFilename = null;
+	}
+
+	forceReloadStream(video: Video): void {
+		const el = this.getActiveElement();
+		delete el.dataset.loadedFilename;
+		void this.activatePlayer(el, video, 0);
 	}
 
 	// --- HLS Management ---
@@ -218,15 +170,13 @@ export class VideoEngine {
 
 	private syncLiveStatus(el: HTMLVideoElement, v: Video, isActivePlayer: boolean): void {
 		if (!isActivePlayer) return;
-		const store = this.callbacks.getPlayerStore();
-		const listStore = this.callbacks.getVideoListStore();
 		const isLive = el.duration === Infinity;
 		if (isLive) {
-			store.setCurrentVideoLive();
-			listStore.updateVideoLive(v.filename, true);
+			this.currentIsLive = true;
+			this.callbacks.onLiveStatusChanged(v.filename, true);
 		} else if (v.isLive) {
-			store.setCurrentVideoNotLive();
-			listStore.updateVideoLive(v.filename, false);
+			this.currentIsLive = false;
+			this.callbacks.onLiveStatusChanged(v.filename, false);
 			clearPlaylistCache(v.filename);
 		}
 	}
@@ -254,8 +204,6 @@ export class VideoEngine {
 
 		let initialLoadDone = false;
 		let wasLive = false;
-		const store = this.callbacks.getPlayerStore();
-		const listStore = this.callbacks.getVideoListStore();
 
 		hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
 			const isLive = data.details.live;
@@ -265,8 +213,8 @@ export class VideoEngine {
 				if (isLive) {
 					wasLive = true;
 					if (isActivePlayer) {
-						store.setCurrentVideoLive();
-						listStore.updateVideoLive(v.filename, true);
+						this.currentIsLive = true;
+						this.callbacks.onLiveStatusChanged(v.filename, true);
 					}
 				} else if (startTime > 0) {
 					el.currentTime = startTime;
@@ -277,8 +225,8 @@ export class VideoEngine {
 			if (wasLive && !isLive) {
 				wasLive = false;
 				if (isActivePlayer) {
-					store.setCurrentVideoNotLive();
-					listStore.updateVideoLive(v.filename, false);
+					this.currentIsLive = false;
+					this.callbacks.onLiveStatusChanged(v.filename, false);
 					clearPlaylistCache(v.filename);
 				}
 			}
@@ -288,8 +236,7 @@ export class VideoEngine {
 			if (data.fatal) {
 				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
 					if (data.response?.code === 404) {
-						listStore.removeVideo(v.filename);
-						this.handleVideoGone();
+						this.callbacks.onVideoRemoved(v.filename);
 						return;
 					}
 					hls.startLoad();
@@ -317,16 +264,13 @@ export class VideoEngine {
 		this.nativeAbortControllers.set(el, controller);
 		const signal = controller.signal;
 
-		const store = this.callbacks.getPlayerStore();
-		const listStore = this.callbacks.getVideoListStore();
-
 		let nativeWasLive = false;
 		const onReady = () => {
 			if (el.duration === Infinity) {
 				nativeWasLive = true;
 				if (isActivePlayer) {
-					store.setCurrentVideoLive();
-					listStore.updateVideoLive(v.filename, true);
+					this.currentIsLive = true;
+					this.callbacks.onLiveStatusChanged(v.filename, true);
 				}
 			} else if (startTime > 0) {
 				el.currentTime = startTime;
@@ -337,8 +281,8 @@ export class VideoEngine {
 			if (nativeWasLive && el.duration !== Infinity) {
 				nativeWasLive = false;
 				if (isActivePlayer) {
-					store.setCurrentVideoNotLive();
-					listStore.updateVideoLive(v.filename, false);
+					this.currentIsLive = false;
+					this.callbacks.onLiveStatusChanged(v.filename, false);
 					clearPlaylistCache(v.filename);
 				}
 			}
@@ -348,8 +292,7 @@ export class VideoEngine {
 			if (mediaError) {
 				console.warn('Native HLS error', mediaError.code, mediaError.message);
 				if (!isActivePlayer) return;
-				listStore.removeVideo(v.filename);
-				this.handleVideoGone();
+				this.callbacks.onVideoRemoved(v.filename);
 			}
 		};
 		el.addEventListener('loadedmetadata', onReady, { once: true, signal });
@@ -390,11 +333,6 @@ export class VideoEngine {
 		});
 	}
 
-	private forceReloadStream(el: HTMLVideoElement, v: Video): void {
-		delete el.dataset.loadedFilename;
-		void this.activatePlayer(el, v, 0);
-	}
-
 	private clearStream(el: HTMLVideoElement): void {
 		el.pause();
 		el.style.opacity = '';
@@ -418,56 +356,6 @@ export class VideoEngine {
 		delete el.dataset.loadedFilename;
 	}
 
-	// --- Navigation ---
-
-	handleVideoGone(): void {
-		const listStore = this.callbacks.getVideoListStore();
-		const filteredList = listStore.filteredVideos;
-		const next = this.findAdjacentVideo(1);
-		if (next) {
-			const saved = this.getSavedTime(next);
-			this.callbacks
-				.getPlayerStore()
-				.navigateVideo(next, saved, 1, listStore.selectedProvider);
-		} else if (filteredList.length > 0) {
-			const first = filteredList[0];
-			const saved = this.getSavedTime(first);
-			this.callbacks
-				.getPlayerStore()
-				.navigateVideo(first, saved, 1, listStore.selectedProvider);
-		} else {
-			this.callbacks.getPlayerStore().showList();
-		}
-	}
-
-	private findAdjacentVideo(direction: 1 | -1): Video | null {
-		const store = this.callbacks.getPlayerStore();
-		const cv = store.currentVideo;
-		if (!cv) return null;
-		const filteredList = this.callbacks.getVideoListStore().filteredVideos;
-		if (filteredList.length < 2) return null;
-		const idx = filteredList.findIndex(
-			(v) => v.filename === cv.filename && v.type === cv.type
-		);
-		if (idx === -1) return null;
-		for (let i = idx + direction; i >= 0 && i < filteredList.length; i += direction) {
-			if (filteredList[i].filename !== cv.filename) return filteredList[i];
-		}
-		return null;
-	}
-
-	private navigateToVideo(target: Video, dir: 1 | -1): void {
-		const saved = this.getSavedTime(target);
-		const listStore = this.callbacks.getVideoListStore();
-		this.forceProgressSave();
-		this.callbacks.getPlayerStore().navigateVideo(target, saved, dir, listStore.selectedProvider);
-		void fetchAndParsePlaylist(target);
-	}
-
-	private getSavedTime(v: Video): number {
-		return parseFloat(localStorage.getItem(STORAGE_KEYS.PROGRESS_PREFIX + v.filename) || '0');
-	}
-
 	// --- Public methods for $effects ---
 
 	activateIfChanged(cv: Video, activeIdx: number, startTime: number): void {
@@ -475,6 +363,8 @@ export class VideoEngine {
 
 		const videoChanged = this.currentFilename !== cv.filename;
 		this.currentFilename = cv.filename;
+		this.activePlayerIndex = activeIdx;
+		this.currentIsLive = cv.isLive ?? false;
 
 		this.elements.forEach((el, i) => {
 			if (i === activeIdx) {
@@ -525,7 +415,7 @@ export class VideoEngine {
 	}
 
 	private async preloadAndPlay(el: HTMLVideoElement, v: Video): Promise<void> {
-		const startTime = this.getSavedTime(v);
+		const startTime = getSavedTime(v);
 		await this.loadStream(el, v, startTime);
 		el.muted = true;
 		try {
@@ -536,7 +426,7 @@ export class VideoEngine {
 	}
 
 	private async preloadAndPause(el: HTMLVideoElement, v: Video): Promise<void> {
-		const startTime = this.getSavedTime(v);
+		const startTime = getSavedTime(v);
 		await this.loadStream(el, v, startTime);
 		if (!el.paused) el.pause();
 	}
@@ -567,7 +457,6 @@ export class VideoEngine {
 			if (wasPlaying) activeEl.pause();
 			activeEl.currentTime = time;
 			this._currentTime = time;
-			// Sync immediately — called on pointer up or single click, not during drag
 			this.forceTimeSync();
 			if (wasPlaying) {
 				activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
@@ -575,7 +464,6 @@ export class VideoEngine {
 		}
 	}
 
-	/** Set currentTime without syncing to Svelte — for use during continuous drag */
 	seekDirect(time: number): void {
 		const activeEl = this.getActiveElement();
 		if (!isNaN(activeEl.duration)) {
@@ -588,150 +476,16 @@ export class VideoEngine {
 		return this._currentTime;
 	}
 
+	getDuration(): number {
+		return this._duration;
+	}
+
+	getSeekableEnd(): number {
+		return this._seekableEnd;
+	}
+
 	toggleMute(): void {
 		const activeEl = this.getActiveElement();
 		activeEl.muted = !activeEl.muted;
 	}
-
-	// --- Gesture Handlers ---
-
-	private handleTouchCancel = (): void => {
-		this.swipeType = 'none';
-		this.swipeAxis = 'none';
-		const store = this.callbacks.getPlayerStore();
-		if (store.isSwiping) {
-			store.isSwiping = false;
-			store.swipeAnimating = false;
-			store.swipeProgress = 0;
-			this.videoViewEl.style.transform = '';
-		}
-	};
-
-	private handleTouchStart = (e: TouchEvent): void => {
-		if (e.touches.length > 1) {
-			this.lastMultiTouchTime = Date.now();
-			return;
-		}
-		const store = this.callbacks.getPlayerStore();
-		if (store.swipeAnimating) return;
-		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
-
-		const touch = e.touches[0];
-		this.swipeStartX = touch.clientX;
-		this.swipeStartY = touch.clientY;
-		this.swipeAxis = 'none';
-		this.swipeType = 'none';
-	};
-
-	private handleTouchMove = (e: TouchEvent): void => {
-		if (e.touches.length > 1) {
-			this.lastMultiTouchTime = Date.now();
-			return;
-		}
-		const store = this.callbacks.getPlayerStore();
-		if (store.swipeAnimating) return;
-		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
-		e.preventDefault();
-
-		const touch = e.touches[0];
-		const dx = touch.clientX - this.swipeStartX;
-		const dy = touch.clientY - this.swipeStartY;
-
-		if (this.swipeAxis === 'none') {
-			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-			if (Math.abs(dx) >= Math.abs(dy)) {
-				this.swipeAxis = 'horizontal';
-				if (this.swipeStartX <= this.EDGE_ZONE && dx > 0) {
-					this.swipeType = 'edge-back';
-					store.isSwiping = true;
-				} else if (this.swipeStartY < window.innerHeight / 2) {
-					this.swipeType = 'seek';
-					this.seekBaseTime = this.getActiveElement().currentTime;
-				} else {
-					this.swipeType = 'ui';
-				}
-			} else {
-				this.swipeAxis = 'vertical';
-				this.swipeType = 'nav';
-			}
-		}
-
-		if (this.swipeType === 'edge-back') {
-			const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
-			this._swipeProgress = progress;
-			// Direct DOM — no $state write during drag
-			this.videoViewEl.style.transform = `translateX(${progress * 100}%)`;
-		} else if (this.swipeType === 'seek') {
-			const seekDelta = (dx / window.innerWidth) * this.SEEK_RATE;
-			const activeEl = this.getActiveElement();
-			const maxTime =
-				activeEl.duration === Infinity ? this._seekableEnd : activeEl.duration;
-			if (!isNaN(maxTime) && maxTime > 0) {
-				const newTime = Math.max(0, Math.min(maxTime, this.seekBaseTime + seekDelta));
-				activeEl.currentTime = newTime;
-				this._currentTime = newTime;
-				// Throttled sync during drag — 4Hz is enough for visual feedback
-				const now = performance.now();
-				if (now - this._lastTimeSync >= this.TIME_SYNC_MS) {
-					this._lastTimeSync = now;
-					this.callbacks.onTimeUpdate(this._currentTime, this._duration, this._seekableEnd);
-				}
-			}
-		}
-	};
-
-	private handleTouchEnd = (e: TouchEvent): void => {
-		const touch = e.changedTouches[0];
-		const dx = touch.clientX - this.swipeStartX;
-		const dy = touch.clientY - this.swipeStartY;
-		const store = this.callbacks.getPlayerStore();
-
-		switch (this.swipeType) {
-			case 'edge-back': {
-				store.swipeAnimating = true;
-				// Hand off to Svelte for CSS transition
-				if (this._swipeProgress > this.EDGE_BACK_THRESHOLD) {
-					store.swipeProgress = 1;
-					setTimeout(() => {
-						store.showList();
-						store.isSwiping = false;
-						store.swipeAnimating = false;
-						store.swipeProgress = 0;
-					}, 250);
-				} else {
-					store.swipeProgress = 0;
-					setTimeout(() => {
-						store.isSwiping = false;
-						store.swipeAnimating = false;
-					}, 250);
-				}
-				// Clear direct DOM transform — Svelte's style binding takes over
-				this.videoViewEl.style.transform = '';
-				break;
-			}
-			case 'seek': {
-				// Final sync on release so ProgressBar snaps to exact position
-				this.forceTimeSync();
-				break;
-			}
-			case 'nav': {
-				if (Math.abs(dy) > this.FLICK_THRESHOLD) {
-					const dir = dy < 0 ? 1 : -1;
-					const target = this.findAdjacentVideo(dir as 1 | -1);
-					if (target) {
-						this.navigateToVideo(target, dir as 1 | -1);
-					}
-				}
-				break;
-			}
-			case 'ui': {
-				if (Math.abs(dx) > this.UI_SWIPE_THRESHOLD) {
-					store.isUiVisible = dx > 0;
-				}
-				break;
-			}
-		}
-		this.swipeAxis = 'none';
-		this.swipeType = 'none';
-	};
 }

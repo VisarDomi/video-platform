@@ -4,6 +4,9 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { untrack } from 'svelte';
 	import { VideoEngine } from '$lib/engine/VideoEngine.js';
+	import { GestureController } from '$lib/engine/GestureController.js';
+	import { findAdjacentVideo, getSavedTime } from '$lib/utils/navigation.js';
+	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
@@ -30,13 +33,69 @@
 		onMuteChange(muted) {
 			isMuted = muted;
 		},
-		getPlayerStore: () => playerStore,
-		getVideoListStore: () => videoListStore
+		onLiveStatusChanged(filename, isLive) {
+			if (isLive) {
+				playerStore.setCurrentVideoLive();
+				videoListStore.updateVideoLive(filename, true);
+			} else {
+				playerStore.setCurrentVideoNotLive();
+				videoListStore.updateVideoLive(filename, false);
+			}
+		},
+		onVideoRemoved(filename) {
+			videoListStore.removeVideo(filename);
+			const cv = playerStore.currentVideo;
+			if (!cv) return;
+			const filteredList = videoListStore.filteredVideos;
+			const next = findAdjacentVideo(cv, filteredList, 1);
+			if (next) {
+				engine.forceProgressSave();
+				playerStore.navigateVideo(next, getSavedTime(next), 1, videoListStore.selectedProvider);
+				void fetchAndParsePlaylist(next);
+			} else if (filteredList.length > 0) {
+				const first = filteredList[0];
+				engine.forceProgressSave();
+				playerStore.navigateVideo(first, getSavedTime(first), 1, videoListStore.selectedProvider);
+				void fetchAndParsePlaylist(first);
+			} else {
+				playerStore.showList();
+			}
+		}
+	});
+
+	const gesture = new GestureController(playerStore, {
+		getSeekBase: () => engine.getCurrentTime(),
+		getSeekMaxTime: () => {
+			const dur = engine.getDuration();
+			const se = engine.getSeekableEnd();
+			return dur === Infinity && se > 0 ? se : dur;
+		},
+		seekDirect: (t) => engine.seekDirect(t),
+		seekFinish: () => engine.forceTimeSync(),
+		navigate: (dir) => {
+			const cv = playerStore.currentVideo;
+			if (!cv) return;
+			const target = findAdjacentVideo(cv, videoListStore.filteredVideos, dir);
+			if (target) {
+				engine.forceProgressSave();
+				playerStore.navigateVideo(target, getSavedTime(target), dir, videoListStore.selectedProvider);
+				void fetchAndParsePlaylist(target);
+			}
+		}
 	});
 
 	onMount(() => {
-		const cleanup = engine.init(videoViewEl!, videoContainer!);
-		return cleanup;
+		const engineCleanup = engine.init(videoContainer!);
+		const gestureCleanup = gesture.init(videoViewEl!);
+
+		playerStore.onShowList(() => engine.onViewHidden());
+		playerStore.onProviderChange(() => engine.onProviderChange());
+		playerStore.onReload(() => engine.forceReloadStream(playerStore.currentVideo!));
+
+		return () => {
+			engineCleanup();
+			gestureCleanup();
+		};
 	});
 
 	// Wake lock
@@ -51,7 +110,19 @@
 			const cv = playerStore.currentVideo;
 			if (!cv || playerStore.view !== 'video') return;
 			if (!filteredList.some((v) => v.filename === cv.filename)) {
-				engine.handleVideoGone();
+				const next = findAdjacentVideo(cv, filteredList, 1);
+				if (next) {
+					engine.forceProgressSave();
+					playerStore.navigateVideo(next, getSavedTime(next), 1, videoListStore.selectedProvider);
+					void fetchAndParsePlaylist(next);
+				} else if (filteredList.length > 0) {
+					const first = filteredList[0];
+					engine.forceProgressSave();
+					playerStore.navigateVideo(first, getSavedTime(first), 1, videoListStore.selectedProvider);
+					void fetchAndParsePlaylist(first);
+				} else {
+					playerStore.showList();
+				}
 			}
 		});
 	});

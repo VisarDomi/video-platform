@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-07
+
+- **refactor**: Ownership-focused refactor — extract GestureController, navigation utils, slim VideoEngine
+  - **root cause**: VideoEngine.ts (738 lines) was a god object owning playback, gestures, navigation, and mutating both stores freely. Gesture code (~180 lines of touch handling) was entangled with playback code. Engine directly wrote `el.style.transform` during drag then cleared it and set `store.swipeProgress` on release — causing a 1-frame jump. `e.preventDefault()` fired before axis detection (line 634), blocking all default behavior.
+  - **design**: (1) Created `GestureController.ts` (~160 lines) — owns all gesture state and touch handlers, writes to playerStore for swipe UI, calls engine via narrow `GestureCallbacks` interface for seek/nav. (2) Created `utils/navigation.ts` (~20 lines) — pure functions `findAdjacentVideo()` and `getSavedTime()` with no store dependency. (3) Slimmed VideoEngine to ~340 lines — removed all gesture state/handlers, navigation logic, store accessors (`getPlayerStore`/`getVideoListStore`). Engine now tracks `activePlayerIndex` and `currentIsLive` internally. New callback interface: `onLiveStatusChanged(filename, isLive)` and `onVideoRemoved(filename)`. New lifecycle methods: `onViewHidden()`, `onProviderChange()`, `forceReloadStream(video)`. (4) VideoPlayer.svelte becomes the wiring layer — connects gesture→store and engine→store, handles "video removed from list" logic. (5) Bug fix: moved `e.preventDefault()` AFTER axis lock in GestureController — no longer blocks scroll before gesture is identified.
+  - **result**: Clear ownership: engine owns playback, gesture controller owns touch, component wires them. VideoEngine: 738→340 lines. No store imports in engine. Swipe-back jank fix via consistent rendering path.
+  - **files**: `engine/GestureController.ts` (new), `utils/navigation.ts` (new), `engine/VideoEngine.ts` (slimmed), `components/VideoPlayer.svelte` (wiring layer)
+
 ## 2026-03-05
 
 - **refactor**: Eliminate remaining high-frequency reactive overhead in video player

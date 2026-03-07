@@ -1,6 +1,7 @@
 # Todo
 
 ## In Progress
+- [x] Refactor: Ownership-focused refactor — extract GestureController, navigation utils, slim engine
 - [x] Refactor: Extract VideoEngine — split reactive shell from imperative media engine
 - [x] Enable native Safari zoom in video player via touch-action: pinch-zoom (VERON-55)
 - [x] Fix: TL provider addToList not loading tango.txt on init (VERON-65)
