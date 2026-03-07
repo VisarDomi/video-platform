@@ -19,6 +19,8 @@ export class AppState {
             streamers: this._streamers,
             currentIndex: this._currentIndex,
             currentStreamer: this.getCurrentStreamer(),
+            previousStreamer: this.getPreviousStreamer(),
+            nextStreamer: this.getNextStreamer(),
             viewMode: this._viewMode,
         };
     }

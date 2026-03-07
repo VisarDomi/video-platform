@@ -90,7 +90,7 @@ export class ServiceContainer {
             ServiceKeys.VIDEO_MANAGER,
             (c) =>
                 new VideoManager({
-                    appState: c.resolve(ServiceKeys.APP_STATE),
+                    initialState: c.resolve<AppState>(ServiceKeys.APP_STATE).getState(),
                     videosContainer: c.resolve<UIManager>(ServiceKeys.UI_MANAGER).videosContainer,
                     gestureElements: {
                         videoView: c.resolve<UIManager>(ServiceKeys.UI_MANAGER).videoViewElement,

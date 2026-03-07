@@ -20,6 +20,8 @@ export interface IApplicationState {
     streamers: Streamer[];
     currentIndex: number;
     currentStreamer: Streamer;
+    previousStreamer: Streamer | undefined;
+    nextStreamer: Streamer | undefined;
     viewMode: ViewMode;
 }
 
@@ -51,6 +53,7 @@ export type EventPayloads = {
     [Events.APP.STATE_CHANGED]: IApplicationState;
     [Events.APP.LOAD_MORE_STREAMERS]: void;
     [Events.APP.REMOVE_STREAMER]: string; // streamerId
+    [Events.APP.INSERT_STREAMERS_AFTER_CURRENT]: Streamer[];
 
     [Events.DEBUG.LOG]: DebugLogPayload;
 };

@@ -2,7 +2,7 @@ import { Emitter } from "./core/emitter";
 import { Events } from "./core/events";
 import { ActionService } from "./services/api/action.service";
 import { AppState } from "./core/app.state";
-import { EventPayloads } from "./types";
+import { EventPayloads, Streamer } from "./types";
 import { StreamLoaderService } from "./services/stream-loader.service";
 
 interface AppControllerDependencies {
@@ -35,6 +35,7 @@ export class AppController {
         this.emitter.on(Events.UI.PREVIOUS, this.previous);
         this.emitter.on(Events.UI.SHOW_LIST, this.showList);
         this.emitter.on(Events.UI.PLAY_STREAMER, this.playStreamer);
+        this.emitter.on(Events.APP.INSERT_STREAMERS_AFTER_CURRENT, this.insertStreamersAfterCurrent);
     }
 
     public initialPrefetch() {
@@ -114,5 +115,9 @@ export class AppController {
 
     private playStreamer = (streamerId: string) => {
         this.store.playStreamer(streamerId);
+    };
+
+    private insertStreamersAfterCurrent = (streamers: Streamer[]) => {
+        this.store.insertStreamersAfterCurrent(streamers);
     };
 }

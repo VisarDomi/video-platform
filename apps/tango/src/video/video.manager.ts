@@ -3,13 +3,12 @@ import { Events } from "../core/events";
 import { EventPayloads, IApplicationState, Streamer } from "../types";
 import { LiveUrlService } from "./live-url.service";
 import { StreamerService } from "../services/api/streamer.service";
-import { AppState } from "../core/app.state";
 import { AliasService } from "../services/alias.service";
 import { StreamUnit } from "../ui/stream-unit/stream-unit";
 import { GestureElements } from "../ui/gesture/gesture-controller";
 
 interface VideoManagerDependencies {
-    appState: AppState;
+    initialState: IApplicationState;
     videosContainer: HTMLDivElement;
     gestureElements: GestureElements;
     emitter: Emitter<EventPayloads>;
@@ -21,25 +20,25 @@ interface VideoManagerDependencies {
 }
 
 export class VideoManager {
-    private store: AppState;
     private videosContainer: HTMLDivElement;
     private emitter: Emitter<EventPayloads>;
     private liveUrlService: LiveUrlService;
     private streamerService: StreamerService;
     private aliasService: AliasService;
-    private originalSetTimeout: typeof window.setTimeout;
     private gestureElements: GestureElements;
+    private originalSetTimeout: typeof window.setTimeout;
     private originalAddEventListener: typeof EventTarget.prototype.addEventListener;
     private previousIndex: number;
     private processedForMulti: Set<string> = new Set();
     private lastStreamerId: string | null = null;
+    private initialState: IApplicationState;
 
     private units: StreamUnit[] = [];
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
 
     constructor(dependencies: VideoManagerDependencies) {
-        this.store = dependencies.appState;
+        this.initialState = dependencies.initialState;
         this.videosContainer = dependencies.videosContainer;
         this.gestureElements = dependencies.gestureElements;
         this.emitter = dependencies.emitter;
@@ -48,7 +47,7 @@ export class VideoManager {
         this.aliasService = dependencies.aliasService;
         this.originalSetTimeout = dependencies.originalSetTimeout;
         this.originalAddEventListener = dependencies.originalAddEventListener;
-        this.previousIndex = this.store.getState().currentIndex;
+        this.previousIndex = this.initialState.currentIndex;
     }
 
     public registerListeners() {
@@ -62,13 +61,13 @@ export class VideoManager {
         this.units = [prev, curr, next];
         this.videosContainer.append(prev.element, curr.element, next.element);
 
-        const currentStreamer = this.store.getCurrentStreamer();
-        this.lastStreamerId = currentStreamer?.streamerId || null;
+        const state = this.initialState;
+        this.lastStreamerId = state.currentStreamer?.streamerId || null;
 
         await Promise.all([
-            prev.update(this.store.getPreviousStreamer()),
-            curr.update(currentStreamer),
-            next.update(this.store.getNextStreamer()),
+            prev.update(state.previousStreamer),
+            curr.update(state.currentStreamer),
+            next.update(state.nextStreamer),
         ]);
 
         curr.setHidden(false);
@@ -79,11 +78,11 @@ export class VideoManager {
             unit.setUiVisible(this.uiVisible);
         }
 
-        this.emitter.emit(Events.APP.STATE_CHANGED, this.store.getState());
+        this.emitter.emit(Events.APP.STATE_CHANGED, state);
 
-        await this._checkForMultiBroadcast(this.store.getCurrentStreamer());
+        await this._checkForMultiBroadcast(state.currentStreamer);
 
-        this._primeLiveUrlCache();
+        this._primeLiveUrlCache(state.streamers);
     }
 
     private onToggleMute = () => {
@@ -106,9 +105,9 @@ export class VideoManager {
         if (currentId && this.lastStreamerId === currentId) {
             this.previousIndex = state.currentIndex;
             await Promise.all([
-                this.units[0].update(this.store.getPreviousStreamer()),
+                this.units[0].update(state.previousStreamer),
                 this.units[1].update(currentStreamer),
-                this.units[2].update(this.store.getNextStreamer())
+                this.units[2].update(state.nextStreamer)
             ]);
             return;
         }
@@ -124,8 +123,8 @@ export class VideoManager {
             if (state.viewMode === 'video') {
                 this.activeUnit?.update(state.currentStreamer);
                 await Promise.all([
-                    this.units[0].update(this.store.getPreviousStreamer()),
-                    this.units[2].update(this.store.getNextStreamer())
+                    this.units[0].update(state.previousStreamer),
+                    this.units[2].update(state.nextStreamer)
                 ]);
                 await this._checkForMultiBroadcast(state.currentStreamer);
             }
@@ -136,11 +135,11 @@ export class VideoManager {
         const isPrev = newIndex === oldIndex - 1;
 
         if (isNext) {
-            await this._handleNextNavigation();
+            await this._handleNextNavigation(state);
         } else if (isPrev) {
-            await this._handlePreviousNavigation();
+            await this._handlePreviousNavigation(state);
         } else {
-            await this._handleJumpNavigation();
+            await this._handleJumpNavigation(state);
         }
 
         this.previousIndex = newIndex;
@@ -172,22 +171,20 @@ export class VideoManager {
                 }));
 
             if (otherStreamers.length > 0) {
-                this.store.insertStreamersAfterCurrent(otherStreamers);
+                this.emitter.emit(Events.APP.INSERT_STREAMERS_AFTER_CURRENT, otherStreamers);
                 streamsAdded = true;
             }
         }
 
         if (streamsAdded) {
-            const nextUnit = this.units[2];
-            await nextUnit.update(this.store.getNextStreamer());
-        }
-
-        if (this.store.getNextStreamer()) {
+            // The state change from insert will trigger onStateChanged which updates neighbors
+            this.emitter.emit(Events.VIDEO.MULTI_BROADCAST_FETCH_END);
+        } else {
             this.emitter.emit(Events.VIDEO.MULTI_BROADCAST_FETCH_END);
         }
     }
 
-    private async _handleNextNavigation() {
+    private async _handleNextNavigation(state: IApplicationState) {
         const [curr, nextUnit, reused] = this._rotateUnitsForward();
         curr.setHidden(true);
         nextUnit.setHidden(false);
@@ -197,10 +194,10 @@ export class VideoManager {
         curr.setMuted(true);
         nextUnit.setMuted(true);
 
-        await reused.update(this.store.getNextStreamer());
+        await reused.update(state.nextStreamer);
     }
 
-    private async _handlePreviousNavigation() {
+    private async _handlePreviousNavigation(state: IApplicationState) {
         const [reused, prevUnit, curr] = this._rotateUnitsBackward();
         curr.setHidden(true);
         prevUnit.setHidden(false);
@@ -210,10 +207,10 @@ export class VideoManager {
         curr.setMuted(true);
         prevUnit.setMuted(true);
 
-        await reused.update(this.store.getPreviousStreamer());
+        await reused.update(state.previousStreamer);
     }
 
-    private async _handleJumpNavigation() {
+    private async _handleJumpNavigation(state: IApplicationState) {
         const [prev, curr, next] = this.units;
 
         prev.setHidden(true);
@@ -221,9 +218,9 @@ export class VideoManager {
         next.setHidden(true);
 
         await Promise.all([
-            prev.update(this.store.getPreviousStreamer()),
-            curr.update(this.store.getCurrentStreamer()),
-            next.update(this.store.getNextStreamer()),
+            prev.update(state.previousStreamer),
+            curr.update(state.currentStreamer),
+            next.update(state.nextStreamer),
         ]);
 
         curr.setHidden(false);
@@ -231,9 +228,8 @@ export class VideoManager {
         this.activeUnit.setMuted(true);
     }
 
-    private async _primeLiveUrlCache() {
+    private async _primeLiveUrlCache(streamers: Streamer[]) {
         console.log("Starting background cache priming...");
-        const { streamers } = this.store.getState();
         const streamersCopy = [...streamers];
 
         for (const streamer of streamersCopy) {
