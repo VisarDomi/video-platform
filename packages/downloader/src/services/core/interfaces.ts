@@ -37,7 +37,7 @@ export interface IStreamProvider {
      * Check if a downloaded segment is valid according to provider-specific rules.
      * @param filePath Path to the downloaded .ts file
      */
-    validateSegment(filePath: string): Promise<boolean>;
+    validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }>;
 
     /**
      * Attempt to re-establish a connection for a streamer whose stream is still live
