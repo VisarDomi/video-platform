@@ -48,7 +48,7 @@ A `div.virtual-spacer` with `height: totalItems × 52px` gives the browser the r
 
 ```typescript
 const ITEM_HEIGHT = 52;
-const SCROLL_BUFFER = 40;
+const SCROLL_BUFFER = 10;
 
 let scrollY = $state(0);
 
@@ -69,17 +69,7 @@ The visible items are wrapped in a div with `transform: translateY({offsetY}px)`
 
 **5. Scroll position restore**
 
-On provider switch or returning from video view, we calculate the target scroll position mathematically:
-
-```typescript
-function scrollToActiveVideo() {
-    const idx = filteredVideos.findIndex(v => v.filename === active.filename);
-    const targetY = idx * ITEM_HEIGHT - window.innerHeight / 2 + ITEM_HEIGHT / 2;
-    window.scrollTo(0, Math.max(0, targetY));
-}
-```
-
-No DOM queries needed — the item doesn't even need to be rendered yet. `window.scrollTo` triggers the scroll handler, which updates `scrollY`, which renders the correct items.
+On provider switch or returning from video view, scroll position is restored via a reactive `$effect` that watches `playerStore.scrollTarget`. The target scroll offset is calculated mathematically from the item index — no DOM queries needed, and the item doesn't even need to be rendered yet. `window.scrollTo` triggers the scroll handler, which updates `scrollY`, which renders the correct items. Scroll position is also persisted to `localStorage` per-provider.
 
 ## Why this works on iOS
 
@@ -94,16 +84,16 @@ The only `position: fixed` element is the search/filter bar, which floats above 
 
 | Metric | Before (no virtualization) | After (virtual scroll) |
 |--------|---------------------------|----------------------|
-| DOM nodes for 5600 items | ~5600 buttons | ~100 buttons |
+| DOM nodes for 5600 items | ~5600 buttons | ~37 buttons |
 | Initial render | Hundreds of ms | < 10ms |
 | Scroll handler cost | None (but initial mount slow) | `$state` assignment + integer math |
-| Memory | All 5600 components alive | ~100 components alive |
+| Memory | All 5600 components alive | ~37 components alive |
 
 The scroll handler fires on every scroll event but only does one `$state` assignment (`scrollY = currentScrollY`). The `$derived` chain does integer division and comparison — negligible cost. Svelte only touches the DOM when items enter or leave the visible range.
 
 ## Buffer size
 
-`SCROLL_BUFFER = 40` means we render 40 extra items above and below the viewport. This prevents blank flashes during fast scrolling. For 52px items on a ~900px viewport, the visible count is ~17 items, plus 80 buffer items = ~97 items in the DOM at any time. Even with fast fling-scrolling, the buffer ensures items are rendered before they scroll into view.
+`SCROLL_BUFFER = 10` means we render 10 extra items above and below the viewport. This prevents blank flashes during fast scrolling. For 52px items on a ~900px viewport, the visible count is ~17 items, plus 20 buffer items = ~37 items in the DOM at any time. Even with fast fling-scrolling, the buffer ensures items are rendered before they scroll into view.
 
 ## What we avoided
 

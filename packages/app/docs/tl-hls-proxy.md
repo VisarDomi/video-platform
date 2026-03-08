@@ -38,20 +38,13 @@ hls.js -> GET /api/tl/proxy/{alias}/seg.ts    -> backend fetches CDN (no auth)  
 
 **Cleanup**: 30s interval removes sessions idle for >120s (safety net if the frontend doesn't call stop).
 
-### Frontend integration
-
-- `startProxy(streamer)` — POST to proxy start, caches the proxy URL in a `Map<alias, url>`
-- `getProxyUrl(alias)` — returns the cached proxy URL
-- `loadStream()` — checks `getProxyUrl()` first; falls back to the download-based `/hls/` path if no proxy URL exists
-- `syncProxySessions(activeAliases)` — stops proxy sessions that dropped out of the active window (mirrors the existing `sendActiveSet` pattern for downloads)
-
 ## Bugs encountered
 
 ### Bug 1: Cross-provider state pollution (TL streamers appearing in tango list)
 
 **Symptoms**: Switch from TL to tango provider, some TL streamers appear in the tango video list. Happens more with rapid switching.
 
-**Root cause**: `videoListStore.initialize()` only set `selectedProvider` and `isLoading` — it never cleared `videos`, `streamerMap`, `processedStreamIds`, or `liveFilenameMap`. Async TL operations (`fetchCoStreamersEagerly`, `fetchLiveFilenames`, `refreshTlStreams`) that were in-flight when the user switched providers would complete and inject TL data into what was now the tango video list.
+**Root cause**: `videoListStore.initialize()` only set `selectedProvider` and `isLoading` — it never cleared `videos` or other TL-specific state. Async TL operations that were in-flight when the user switched providers would complete and inject TL data into what was now the tango video list.
 
 **Why the first fix didn't work**: We added `if (selectedProvider !== 'tl') return` guards after every `await`. But this is racy — the guard checks the provider at one instant, and the mutation happens at the next. In JavaScript's microtask model, a stale `.then()` callback queued before the Svelte effect fires can run before `initialize()` clears state.
 
@@ -71,19 +64,11 @@ async function loadTlStreams(epoch: number) {
 
 The key insight: `setProvider()` is called synchronously from the swipe handler, before any microtasks drain. So bumping epoch there closes the window that the effect-only approach left open.
 
-2. **Store-level guards** — TL-specific mutation methods (`insertVideosAfter`, `appendVideos`, `setStreamerMap`, `setLiveFilenames`, `markStreamIdProcessed`) check `this.selectedProvider !== 'tl'` before proceeding. Belt-and-suspenders: even if an epoch check is missed, the store itself rejects stale mutations.
+2. **Store-level guards** — mutation methods check the selected provider before proceeding. Belt-and-suspenders: even if an epoch check is missed, the store itself rejects stale mutations.
 
-3. **Clear all state in `initialize()`** — `videos = []`, `streamerMap = new Map()`, `processedStreamIds = new Set()`, `liveFilenameMap = new Map()`.
+3. **Clear all state in `initialize()`** — reset `videos` and all provider-specific state to empty defaults.
 
-### Bug 2: Proxy URL not available when loadStream runs (black screens after first few videos)
-
-**Symptoms**: First video plays fine, adjacent videos show black screen. Logs show proxy starting *after* the 404 on the download path.
-
-**Root cause**: `ensureTlStream()` called `void startProxy(streamer)` (fire-and-forget), then `loadStream()` ran immediately. `getProxyUrl()` returned `undefined` because the proxy POST hadn't resolved yet. Fell back to the download path, which 404'd because the downloader wasn't running.
-
-**The fix**: Change `void startProxy(streamer)` to `await startProxy(streamer)` in `ensureTlStream`. The proxy start is fast (~200ms — one HTTP round-trip to resolve the master playlist), so the delay is acceptable for preloading.
-
-### Bug 3: `preventDefault()` ignored on touchmove (Firefox warning)
+### Bug 2: `preventDefault()` ignored on touchmove (Firefox warning)
 
 **Symptoms**: `Ignoring 'preventDefault()' call on event of type 'touchmove' from a listener registered as 'passive'`
 
@@ -108,7 +93,7 @@ We debugged the proxy integration through a slow cycle: make a change, build, de
 
 ### What we should have done
 
-1. **Add structured debug logging from the start.** Before deploying the first version, add `console.log` at every decision point in the critical path: `loadStream` URL selection, `startProxy` timing, `ensureTlStream` sequence. Label them with a prefix like `[stream]` so they're easy to filter. Remove them after the feature stabilizes. We added these too late — only after multiple black-screen round-trips.
+1. **Add structured debug logging from the start.** Before deploying the first version, add `console.log` at every decision point in the critical path. Label them with a prefix like `[stream]` so they're easy to filter. Remove them after the feature stabilizes.
 
 2. **Think about the async timing on paper first.** The state pollution bug was fundamentally about microtask ordering. Drawing a timeline of "user swipes -> setProvider -> goto -> effect schedules -> microtask queue drains -> effect runs" would have revealed the race window immediately, instead of trying three different fixes.
 

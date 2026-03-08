@@ -4,7 +4,7 @@ How we built a full touch gesture system that makes a SvelteKit PWA feel like a 
 
 ## The challenge
 
-PWAs on iOS have a fundamental problem: the browser owns touch gestures. Swipe-from-edge navigates browser history, pinch zooms the page, pull-down refreshes. To build a video player with custom swipe navigation, seek-by-drag, edge-back, and pinch-to-zoom, we need to take full control of touch input.
+PWAs on iOS have a fundamental problem: the browser owns touch gestures. Swipe-from-edge navigates browser history, pinch zooms the page, pull-down refreshes. To build a video player with custom swipe navigation, seek-by-drag, and edge-back, we need to take full control of touch input.
 
 ## The key CSS: `touch-action: none`
 
@@ -36,7 +36,7 @@ Two state variables drive classification:
 
 ```typescript
 let swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' | 'pinch' | 'pan' = 'none';
+let swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
 ```
 
 Once classified, a gesture is locked in for the entire touch sequence. This prevents accidental mode switches mid-gesture.
@@ -46,13 +46,11 @@ Once classified, a gesture is locked in for the entire touch sequence. This prev
 On the first `touchmove` that exceeds the 10px dead zone:
 
 ```
-if (2 fingers)           → pinch
-if (zoomed in)           → pan
 if (horizontal):
     if (started at left edge, moving right) → edge-back
     if (top half of screen, non-live video) → seek
-    else                                    → nav
-if (vertical)            → ui (show/hide controls)
+    else                                    → ui (show/hide controls)
+if (vertical)            → nav (change videos)
 ```
 
 ### Gesture implementations
@@ -64,10 +62,10 @@ if (vertical)            → ui (show/hide controls)
 - Uses a 250ms CSS transition during the snap animation
 - A `swipeAnimating` flag blocks all touch handlers during the transition to prevent conflicts
 
-**Navigation** (horizontal swipe to change videos):
+**Navigation** (vertical swipe to change videos):
 - Only fires on touch end, not during the swipe (no visual feedback during drag)
 - Requires a minimum flick threshold of 80px
-- Left swipe = next video, right swipe = previous video
+- Swipe up = next video, swipe down = previous video
 - Uses a 3-player carousel: active player + preloaded next + preloaded previous
 
 **Seek** (horizontal swipe on top half to scrub timeline):
@@ -76,32 +74,15 @@ if (vertical)            → ui (show/hide controls)
 - Updates `currentTime` in real-time during the drag
 - Disabled for live videos (infinite duration)
 
-**UI toggle** (vertical swipe to show/hide controls):
-- Swipe up → show UI, swipe down → hide UI
+**UI toggle** (horizontal swipe on bottom half to show/hide controls):
+- Triggers on swipe end
 - 80px threshold to trigger
-
-**Pinch-to-zoom** (two-finger zoom):
-- Calculates scale from the ratio of current finger distance to initial finger distance
-- Anchors zoom to the midpoint between fingers (not the center of the screen)
-- Applies `transform: translate(x, y) scale(s)` to the video container
-- Clamps scale between 1x and 5x
-- On release, snaps back to 1x if scale is below 1.01 (threshold prevents floating-point lock)
-
-**Pan** (single finger while zoomed):
-- When `zoomScale > 1.01`, single-finger touches enter pan mode instead of swipe mode
-- Clamps translation so the video edge can't move past the viewport center
 
 ### Critical guards
 
-1. **Pinch distance floor**: `Math.max(1, getPinchDist(e))` prevents division by zero if two fingers land at the same pixel, which would produce `Infinity` zoom and permanently lock the app into pan mode.
+1. **`touchcancel` handler**: The browser fires `touchcancel` when it takes over a gesture (notification shade, system gesture). Without handling it, `swipeType` state gets stuck permanently. The handler resets all gesture state.
 
-2. **Zoom threshold**: Using `> 1.01` instead of `> 1` for the "is zoomed" check. Floating-point arithmetic from pinch calculations can produce `1.0000000001`, which would permanently enter pan mode with invisible zoom.
-
-3. **Snap on release**: When pinch ends with scale below 1.01, force-reset to exactly `1.0` with `zoomX = 0, zoomY = 0`.
-
-4. **`touchcancel` handler**: The browser fires `touchcancel` when it takes over a gesture (notification shade, system gesture). Without handling it, `swipeType` and zoom state get stuck permanently. The handler resets all gesture state.
-
-5. **Animation lock**: `swipeAnimating` prevents all touch handlers from firing during the 250ms edge-back transition. Without this, a touch during the animation could start a new gesture while the view is mid-slide.
+2. **Animation lock**: `swipeAnimating` prevents all touch handlers from firing during the 250ms edge-back transition. Without this, a touch during the animation could start a new gesture while the view is mid-slide.
 
 ## The 3-player carousel
 
@@ -141,7 +122,7 @@ We do NOT call `preventDefault()` in `touchstart` — doing so would prevent foc
 Live HLS streams have `duration === Infinity`. This requires special handling:
 
 - Seek gesture is disabled for live videos (can't scrub a live stream)
-- Horizontal swipes on live videos in the top half classify as `nav` instead of `seek`
+- Horizontal swipes on live videos in the top half classify as `ui` instead of `seek`
 - Progress saving is skipped (no meaningful position to save)
 
 ## PWA manifest considerations

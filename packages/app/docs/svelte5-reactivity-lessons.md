@@ -16,7 +16,7 @@ A live video would become "stuck" — swipe gestures were detected and processed
 
 ### Root cause: reactive loop through store writes
 
-The main `$effect` read `videoListStore.videos` (indirectly, via `preloadAdjacent` → `filterByAliases`). Deep inside `preloadAdjacent` → `loadStream`, when a preloaded video turned out to be a live HLS stream, it called `videoListStore.updateVideoLive()`. That method did:
+The main `$effect` read `videoListStore.videos` (indirectly, via `preloadForVideo` → `filterByAliases`). Deep inside `preloadForVideo` → `loadStream`, when a preloaded video turned out to be a live HLS stream, it called `videoListStore.updateVideoLive()`. That method did:
 
 ```typescript
 updateVideoLive(filename: string, isLive: boolean) {
@@ -26,7 +26,7 @@ updateVideoLive(filename: string, isLive: boolean) {
 }
 ```
 
-This creates a **new array reference every time**, even when nothing actually changed (video was already marked as live). Since the effect depended on `videoListStore.videos`, the new array triggered a re-run, which called `preloadAdjacent` again, which called `loadStream` again, which called `updateVideoLive` again — infinite loop.
+This creates a **new array reference every time**, even when nothing actually changed (video was already marked as live). Since the effect depended on `videoListStore.videos`, the new array triggered a re-run, which called `preloadForVideo` again, which called `loadStream` again, which called `updateVideoLive` again — infinite loop.
 
 ### Why it only affected live videos
 
@@ -46,7 +46,7 @@ updateVideoLive(filename: string, isLive: boolean) {
 ```
 
 **2. Separate the effects:**
-Move `preloadAdjacent` into its own `$effect`, isolated from the main video-change effect. This way, even if `videoListStore.videos` changes, it only re-triggers preloading — not the entire video switching logic.
+Move `preloadForVideo` into its own `$effect`, isolated from the main video-change effect. This way, even if `videoListStore.videos` changes, it only re-triggers preloading — not the entire video switching logic.
 
 **3. Scope store writes with `isActivePlayer`:**
 `loadStream` was calling `playerStore.setCurrentVideoLive()` even when preloading adjacent videos. This mutated `playerStore.currentVideo`, which re-triggered effects that depended on it. Added an `isActivePlayer` parameter so store mutations only happen for the video the user is actually watching.
@@ -93,11 +93,11 @@ $effect(() => {
 ```typescript
 $effect(() => {
     const videos = videoListStore.videos; // READS
-    preloadAdjacent(videos);              // transitively WRITES via updateVideoLive
+    preloadForVideo(videos);              // transitively WRITES via updateVideoLive
 });
 ```
 
-**Why it's bad:** The dependency isn't obvious — the write is buried 3 function calls deep. The effect depends on `videos`, and `preloadAdjacent` → `loadStream` → `updateVideoLive` creates a new `videos` array, re-triggering the effect.
+**Why it's bad:** The dependency isn't obvious — the write is buried 3 function calls deep. The effect depends on `videos`, and `preloadForVideo` → `loadStream` → `updateVideoLive` creates a new `videos` array, re-triggering the effect.
 
 **Good:** Either:
 - Guard mutations to bail when value hasn't changed
