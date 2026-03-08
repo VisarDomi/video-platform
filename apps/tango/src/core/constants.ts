@@ -33,6 +33,9 @@ VIDEO: {
     APP: {
         FETCH_BATCH_SIZE: 50,
     },
+    VIDEO_PLATFORM: {
+        BASE_URL: "https://192.168.1.197:7973",
+    },
     DEBUG: {
         ENABLED: false,
     },

@@ -16,6 +16,7 @@ export const STREAM_UNIT_TEMPLATE = `
                     <button class="control-btn mute-btn">🔇</button>
                     <button class="control-btn follow-btn" title="Follow/Unfollow">🤍</button>
                     <button class="control-btn block-btn" title="Block">🚫</button>
+                    <button class="control-btn download-list-btn" title="Download List">📥</button>
                 </div>
             </div>
         </div>

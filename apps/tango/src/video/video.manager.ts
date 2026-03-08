@@ -4,6 +4,7 @@ import { EventPayloads, IApplicationState, Streamer } from "../types";
 import { LiveUrlService } from "./live-url.service";
 import { StreamerService } from "../services/api/streamer.service";
 import { AliasService } from "../services/alias.service";
+import { DownloadListService } from "../services/api/download-list.service";
 import { StreamUnit } from "../ui/stream-unit/stream-unit";
 import { GestureElements } from "../ui/gesture/gesture-controller";
 
@@ -15,6 +16,7 @@ interface VideoManagerDependencies {
     liveUrlService: LiveUrlService;
     streamerService: StreamerService;
     aliasService: AliasService;
+    downloadListService: DownloadListService;
     originalSetTimeout: typeof window.setTimeout;
     originalAddEventListener: typeof EventTarget.prototype.addEventListener;
 }
@@ -25,6 +27,7 @@ export class VideoManager {
     private liveUrlService: LiveUrlService;
     private streamerService: StreamerService;
     private aliasService: AliasService;
+    private downloadListService: DownloadListService;
     private gestureElements: GestureElements;
     private originalSetTimeout: typeof window.setTimeout;
     private originalAddEventListener: typeof EventTarget.prototype.addEventListener;
@@ -45,6 +48,7 @@ export class VideoManager {
         this.liveUrlService = dependencies.liveUrlService;
         this.streamerService = dependencies.streamerService;
         this.aliasService = dependencies.aliasService;
+        this.downloadListService = dependencies.downloadListService;
         this.originalSetTimeout = dependencies.originalSetTimeout;
         this.originalAddEventListener = dependencies.originalAddEventListener;
         this.previousIndex = this.initialState.currentIndex;
@@ -241,7 +245,7 @@ export class VideoManager {
     }
 
     private _createUnit(): StreamUnit {
-        const unit = new StreamUnit(this.emitter, this.aliasService, this.liveUrlService, this.gestureElements, this.originalAddEventListener);
+        const unit = new StreamUnit(this.emitter, this.aliasService, this.liveUrlService, this.downloadListService, this.gestureElements, this.originalAddEventListener);
         unit.setHidden(true);
         return unit;
     }

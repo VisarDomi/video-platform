@@ -15,6 +15,7 @@ import { createAliasCache, IAliasCache } from "../services/alias-cache";
 import { ServiceKeys } from "./service.keys";
 import { DebugManager } from "../ui/debug/debug.manager";
 import { StreamLoaderService } from "../services/stream-loader.service";
+import { DownloadListService } from "../services/api/download-list.service";
 
 interface AppDependencies {
     originalSetTimeout: typeof window.setTimeout;
@@ -58,6 +59,8 @@ export class ServiceContainer {
         container.register(ServiceKeys.STREAMER_SERVICE, () => new StreamerService(deps.defaultInit));
         container.register(ServiceKeys.ACTION_SERVICE, () => new ActionService(deps.defaultInit));
 
+        container.register(ServiceKeys.DOWNLOAD_LIST_SERVICE, () => new DownloadListService());
+
         container.register(ServiceKeys.LIVE_URL_SERVICE, (c) => new LiveUrlService(
             deps.defaultInit,
             c.resolve(ServiceKeys.LIVE_URL_CACHE),
@@ -100,6 +103,7 @@ export class ServiceContainer {
                     liveUrlService: c.resolve(ServiceKeys.LIVE_URL_SERVICE),
                     streamerService: c.resolve(ServiceKeys.STREAMER_SERVICE),
                     aliasService: c.resolve(ServiceKeys.ALIAS_SERVICE),
+                    downloadListService: c.resolve(ServiceKeys.DOWNLOAD_LIST_SERVICE),
                     originalSetTimeout: deps.originalSetTimeout,
                     originalAddEventListener: deps.originalAddEventListener,
                 })
@@ -110,7 +114,9 @@ export class ServiceContainer {
             (c) =>
                 new AppController({
                     actionService: c.resolve(ServiceKeys.ACTION_SERVICE),
+                    downloadListService: c.resolve(ServiceKeys.DOWNLOAD_LIST_SERVICE),
                     streamLoaderService: c.resolve(ServiceKeys.STREAM_LOADER_SERVICE),
+                    aliasService: c.resolve(ServiceKeys.ALIAS_SERVICE),
                     emitter: c.resolve(ServiceKeys.EMITTER),
                     appState: c.resolve(ServiceKeys.APP_STATE),
                 })

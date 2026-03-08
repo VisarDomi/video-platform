@@ -39,6 +39,8 @@ export type EventPayloads = {
     [Events.UI.FOLLOW]: void;
     [Events.UI.UNFOLLOW]: void;
     [Events.UI.BLOCK]: void;
+    [Events.UI.ADD_TO_DOWNLOAD_LIST]: void;
+    [Events.UI.REMOVE_FROM_DOWNLOAD_LIST]: void;
     [Events.UI.NEXT]: void;
     [Events.UI.PREVIOUS]: void;
     [Events.UI.TOGGLE_MUTE]: void;

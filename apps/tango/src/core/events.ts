@@ -3,6 +3,8 @@ export const Events = {
         FOLLOW: "ui:follow",
         UNFOLLOW: "ui:unfollow",
         BLOCK: "ui:block",
+        ADD_TO_DOWNLOAD_LIST: "ui:addToDownloadList",
+        REMOVE_FROM_DOWNLOAD_LIST: "ui:removeFromDownloadList",
         NEXT: "ui:next",
         PREVIOUS: "ui:previous",
         TOGGLE_MUTE: "ui:toggleMute",

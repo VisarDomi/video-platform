@@ -14,4 +14,5 @@ export const ServiceKeys = {
     APP_CONTROLLER: "appController",
     DEBUG_MANAGER: "debugManager",
     STREAM_LOADER_SERVICE: "streamLoaderService",
+    DOWNLOAD_LIST_SERVICE: "downloadListService",
 } as const;

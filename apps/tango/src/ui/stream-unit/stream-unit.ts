@@ -1,6 +1,7 @@
 import { Emitter } from "../../core/emitter";
 import { Events } from "../../core/events";
 import { AliasService } from "../../services/alias.service";
+import { DownloadListService } from "../../services/api/download-list.service";
 import { LiveUrlService } from "../../video/live-url.service";
 import { HlsPlayer } from "../../video/player/hls.player";
 import { EventPayloads, IPlayerStrategy, Streamer } from "../../types";
@@ -17,6 +18,7 @@ export class StreamUnit {
     private emitter: Emitter<EventPayloads>;
     private aliasService: AliasService;
     private liveUrlService: LiveUrlService;
+    private downloadListService: DownloadListService;
 
     // UI Elements
     private nameEl!: HTMLElement;
@@ -24,6 +26,7 @@ export class StreamUnit {
     private muteBtn!: HTMLButtonElement;
     private followBtn!: HTMLButtonElement;
     private blockBtn!: HTMLButtonElement;
+    private downloadListBtn!: HTMLButtonElement;
 
     private blockConfirmState: boolean = false;
     private audioOnly: boolean = false;
@@ -32,12 +35,14 @@ export class StreamUnit {
         emitter: Emitter<EventPayloads>,
         aliasService: AliasService,
         liveUrlService: LiveUrlService,
+        downloadListService: DownloadListService,
         gestureElements: GestureElements,
         originalAddEventListener: typeof EventTarget.prototype.addEventListener
     ) {
         this.emitter = emitter;
         this.aliasService = aliasService;
         this.liveUrlService = liveUrlService;
+        this.downloadListService = downloadListService;
         this.element = this._createDOM();
         this.videoElement = this.element.querySelector('video') as HTMLVideoElement;
         this._bindElements();
@@ -54,6 +59,7 @@ export class StreamUnit {
             this.currentStreamer = streamer;
             this._updateNameText(streamer);
             this.updateFollowButton(streamer.isFollowing);
+            this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
             return;
         }
 
@@ -77,12 +83,14 @@ export class StreamUnit {
         // Immediate UI Update (Uses whatever is currently in memory/cache)
         this._updateNameText(streamer);
         this.updateFollowButton(streamer.isFollowing);
+        this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
 
         // Async: Fetch Alias & Name.
         // We use .then() to trigger a re-render of the text without blocking video loading.
         this.aliasService.getAliasFor(streamer.streamerId).then(() => {
             if (this.currentStreamer?.streamerId === targetStreamerId) {
                 this._updateNameText(streamer);
+                this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
             }
         });
 
@@ -137,6 +145,7 @@ export class StreamUnit {
         if (this.currentStreamer) {
             this._updateNameText(this.currentStreamer);
             this.updateFollowButton(this.currentStreamer.isFollowing);
+            this.updateDownloadListButton(this.aliasService.getCachedAlias(this.currentStreamer.streamerId));
         }
     }
 
@@ -165,6 +174,7 @@ export class StreamUnit {
         this.muteBtn = this.element.querySelector('.mute-btn') as HTMLButtonElement;
         this.followBtn = this.element.querySelector('.follow-btn') as HTMLButtonElement;
         this.blockBtn = this.element.querySelector('.block-btn') as HTMLButtonElement;
+        this.downloadListBtn = this.element.querySelector('.download-list-btn') as HTMLButtonElement;
     }
 
     private _initGestures(gestureElements: GestureElements, originalAddEventListener: typeof EventTarget.prototype.addEventListener) {
@@ -203,6 +213,15 @@ export class StreamUnit {
                 this.blockBtn.textContent = "🚫";
             }
         });
+
+        this.downloadListBtn.addEventListener("click", () => {
+            const isInList = this.downloadListBtn.dataset.inList === "true";
+            if (isInList) {
+                this.emitter.emit(Events.UI.REMOVE_FROM_DOWNLOAD_LIST);
+            } else {
+                this.emitter.emit(Events.UI.ADD_TO_DOWNLOAD_LIST);
+            }
+        });
     }
 
     public setUiVisible(visible: boolean) {
@@ -211,6 +230,19 @@ export class StreamUnit {
         } else {
             this.topBarEl.classList.remove("visible");
         }
+    }
+
+    private updateDownloadListButton(alias: string | undefined) {
+        if (!alias) {
+            this.downloadListBtn.dataset.inList = "false";
+            this.downloadListBtn.textContent = "📥";
+            this.downloadListBtn.classList.remove("btn-unfollow");
+            return;
+        }
+        const inList = this.downloadListService.isInList(alias);
+        this.downloadListBtn.dataset.inList = String(inList);
+        this.downloadListBtn.textContent = inList ? "✅" : "📥";
+        this.downloadListBtn.classList.toggle("btn-unfollow", inList);
     }
 
     private updateFollowButton(isFollowing: boolean) {
