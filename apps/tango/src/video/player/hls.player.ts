@@ -9,6 +9,8 @@ declare class Hls {
         ERROR: string;
     };
     loadSource(url: string): void;
+    startLoad(): void;
+    recoverMediaError(): void;
     attachMedia(video: HTMLVideoElement): void;
     on(event: string, callback: (...args: any[]) => void): void;
     destroy(): void;
@@ -53,10 +55,18 @@ export class HlsPlayer implements IPlayerStrategy {
                 });
 
                 if (data.type === 'networkError') {
-                    this.emitter.emit(Events.APP.REMOVE_STREAMER, this.streamerId);
+                    // Attempt recovery before removing
+                    this.hls.startLoad();
+                } else if (data.type === 'mediaError') {
+                    this.hls.recoverMediaError();
                 }
             }
         });
+    }
+
+    public resume(): void {
+        this.hls.startLoad();
+        this.videoElement.play().catch(() => {});
     }
 
     public destroy(): void {

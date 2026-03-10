@@ -102,6 +102,7 @@ export class ServiceContainer {
                     emitter: c.resolve(ServiceKeys.EMITTER),
                     liveUrlService: c.resolve(ServiceKeys.LIVE_URL_SERVICE),
                     streamerService: c.resolve(ServiceKeys.STREAMER_SERVICE),
+                    authService: c.resolve(ServiceKeys.AUTH_SERVICE),
                     aliasService: c.resolve(ServiceKeys.ALIAS_SERVICE),
                     downloadListService: c.resolve(ServiceKeys.DOWNLOAD_LIST_SERVICE),
                     originalSetTimeout: deps.originalSetTimeout,

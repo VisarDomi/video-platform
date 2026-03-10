@@ -162,6 +162,12 @@ export class StreamUnit {
         this.videoElement.play().catch(e => console.error("Autoplay failed", e));
     }
 
+    public resume() {
+        if (this.player) {
+            this.player.resume();
+        }
+    }
+
     private _createDOM(): HTMLElement {
         const wrapper = document.createElement('div');
         wrapper.innerHTML = STREAM_UNIT_TEMPLATE;

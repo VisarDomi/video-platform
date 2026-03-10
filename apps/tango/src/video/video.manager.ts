@@ -3,6 +3,7 @@ import { Events } from "../core/events";
 import { EventPayloads, IApplicationState, Streamer } from "../types";
 import { LiveUrlService } from "./live-url.service";
 import { StreamerService } from "../services/api/streamer.service";
+import { AuthService } from "../services/api/auth.service";
 import { AliasService } from "../services/alias.service";
 import { DownloadListService } from "../services/api/download-list.service";
 import { StreamUnit } from "../ui/stream-unit/stream-unit";
@@ -17,6 +18,7 @@ interface VideoManagerDependencies {
     streamerService: StreamerService;
     aliasService: AliasService;
     downloadListService: DownloadListService;
+    authService: AuthService;
     originalSetTimeout: typeof window.setTimeout;
     originalAddEventListener: typeof EventTarget.prototype.addEventListener;
 }
@@ -26,6 +28,7 @@ export class VideoManager {
     private emitter: Emitter<EventPayloads>;
     private liveUrlService: LiveUrlService;
     private streamerService: StreamerService;
+    private authService: AuthService;
     private aliasService: AliasService;
     private downloadListService: DownloadListService;
     private gestureElements: GestureElements;
@@ -40,6 +43,11 @@ export class VideoManager {
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
 
+    // Reconnection / freeze recovery
+    private readonly RESUME_THRESHOLD_MS = 3000;
+    private backgroundedAt = 0;
+    private isVisible = true;
+
     constructor(dependencies: VideoManagerDependencies) {
         this.initialState = dependencies.initialState;
         this.videosContainer = dependencies.videosContainer;
@@ -47,6 +55,7 @@ export class VideoManager {
         this.emitter = dependencies.emitter;
         this.liveUrlService = dependencies.liveUrlService;
         this.streamerService = dependencies.streamerService;
+        this.authService = dependencies.authService;
         this.aliasService = dependencies.aliasService;
         this.downloadListService = dependencies.downloadListService;
         this.originalSetTimeout = dependencies.originalSetTimeout;
@@ -58,6 +67,59 @@ export class VideoManager {
         this.emitter.on(Events.APP.STATE_CHANGED, this.onStateChanged);
         this.emitter.on(Events.UI.TOGGLE_MUTE, this.onToggleMute);
         this.emitter.on(Events.UI.SET_UI_VISIBLE, this.onSetUiVisible);
+        this._setupConnectionMonitor();
+    }
+
+    // --- Reconnection / freeze recovery ---
+
+    private _setupConnectionMonitor() {
+        const listen = this.originalAddEventListener;
+
+        listen.call(window, 'online', () => {
+            console.log('[VideoManager] Back online → resuming');
+            this._resumeActiveUnit();
+        });
+
+        listen.call(document, 'visibilitychange', () => {
+            const visible = document.visibilityState === 'visible';
+            this.isVisible = visible;
+            this._handleVisibilityChange(visible);
+        });
+
+        // iOS PWA fallbacks
+        listen.call(window, 'pageshow', () => {
+            if (document.visibilityState === 'visible' && !this.isVisible) {
+                this.isVisible = true;
+                this._handleVisibilityChange(true);
+            }
+        });
+
+        listen.call(window, 'focus', () => {
+            if (!this.isVisible) {
+                this.isVisible = true;
+                this._handleVisibilityChange(true);
+            }
+        });
+    }
+
+    private _handleVisibilityChange(visible: boolean) {
+        if (!visible) {
+            this.backgroundedAt = Date.now();
+        } else {
+            const elapsed = this.backgroundedAt > 0 ? Date.now() - this.backgroundedAt : 0;
+            this.backgroundedAt = 0;
+            if (elapsed > this.RESUME_THRESHOLD_MS) {
+                console.log(`[VideoManager] Resuming after ${Math.round(elapsed / 1000)}s`);
+                this._resumeActiveUnit();
+            }
+        }
+    }
+
+    private async _resumeActiveUnit() {
+        await this.authService.ensureTokens();
+        if (this.activeUnit) {
+            this.activeUnit.resume();
+        }
     }
 
     public async initialize() {

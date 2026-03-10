@@ -27,6 +27,7 @@ export interface IApplicationState {
 
 export interface IPlayerStrategy {
     loadSource(url: string): void;
+    resume(): void;
     destroy(): void;
 }
 

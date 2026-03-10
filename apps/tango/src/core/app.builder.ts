@@ -1,5 +1,6 @@
 import { ServiceContainer } from "./container";
 import { preparePageEnvironment, startDOMSanitizer } from "./environment";
+import { AuthService } from "../services/api/auth.service";
 import { StreamerService } from "../services/api/streamer.service";
 import { Streamer } from "../types";
 import { AppController } from "../app.controller";
@@ -43,6 +44,10 @@ export class ApplicationBuilder {
         if (!this.defaultInit) {
             throw new Error("API config must be set before fetching initial data.");
         }
+        // Ensure tokens are fresh before any API calls
+        const authService = new AuthService(this.defaultInit);
+        await authService.ensureTokens();
+
         const streamerService = new StreamerService(this.defaultInit);
         this.streamers = await streamerService.fetchStreamers(CONSTANTS.APP.FETCH_BATCH_SIZE);
         return this;
