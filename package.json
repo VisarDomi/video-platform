@@ -7,6 +7,7 @@
         "packages/auth",
         "packages/downloader",
         "packages/server",
-        "packages/app"
+        "packages/app",
+        "packages/dashboard"
     ]
 }
