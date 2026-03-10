@@ -53,7 +53,6 @@ export type EventPayloads = {
 
     [Events.APP.UPDATE_UI]: UIUpdateState;
     [Events.APP.STATE_CHANGED]: IApplicationState;
-    [Events.APP.LOAD_MORE_STREAMERS]: void;
     [Events.APP.REMOVE_STREAMER]: string; // streamerId
     [Events.APP.INSERT_STREAMERS_AFTER_CURRENT]: Streamer[];
 

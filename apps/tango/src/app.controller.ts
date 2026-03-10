@@ -34,7 +34,6 @@ export class AppController {
     }
 
     public registerListeners() {
-        this.emitter.on(Events.APP.LOAD_MORE_STREAMERS, this.loadMoreStreamers);
         this.emitter.on(Events.APP.REMOVE_STREAMER, this.removeStreamer);
         this.emitter.on(Events.UI.FOLLOW, this.follow);
         this.emitter.on(Events.UI.UNFOLLOW, this.unfollow);
@@ -54,10 +53,6 @@ export class AppController {
         // refreshing the cache even if data exists.
         this.streamLoaderService.prefetchAliases(this.store.getState().streamers, true);
     }
-
-    private loadMoreStreamers = async () => {
-        await this.streamLoaderService.loadMoreStreamers();
-    };
 
     private removeStreamer = (streamerId: string) => {
         this.store.removeStreamer(streamerId);

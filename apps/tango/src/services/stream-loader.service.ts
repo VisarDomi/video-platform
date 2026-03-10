@@ -13,8 +13,6 @@ export class StreamLoaderService {
     private emitter: Emitter<EventPayloads>;
     private prefetching: Set<string> = new Set();
     private isFetching: boolean = false;
-    private lastFetchTime: number = 0;
-    private static readonly FETCH_COOLDOWN_MS = 10_000;
 
     constructor(
         streamerService: StreamerService,
@@ -28,9 +26,12 @@ export class StreamLoaderService {
         this.emitter = emitter;
     }
 
+    public startAutoLoading(setInterval: typeof window.setInterval): void {
+        setInterval(() => this.loadMoreStreamers(), 10_000);
+    }
+
     public async loadMoreStreamers(): Promise<void> {
         if (this.isFetching) return;
-        if (Date.now() - this.lastFetchTime < StreamLoaderService.FETCH_COOLDOWN_MS) return;
 
         this.isFetching = true;
         try {
@@ -42,7 +43,6 @@ export class StreamLoaderService {
                 this._prefetchAliasesFor(newStreamers, false);
             }
         } finally {
-            this.lastFetchTime = Date.now();
             this.isFetching = false;
         }
     }

@@ -12,6 +12,7 @@ import { CONSTANTS } from "./constants";
 import { UI_STYLES } from "../ui/ui.resources";
 import { DebugManager } from "../ui/debug/debug.manager";
 import { DownloadListService } from "../services/api/download-list.service";
+import { StreamLoaderService } from "../services/stream-loader.service";
 
 interface BuiltApplication {
     run: () => Promise<void>;
@@ -78,6 +79,7 @@ export class ApplicationBuilder {
 
         const authService = container.resolve<AuthService>(ServiceKeys.AUTH_SERVICE);
         const appController = container.resolve<AppController>(ServiceKeys.APP_CONTROLLER);
+        const streamLoaderService = container.resolve<StreamLoaderService>(ServiceKeys.STREAM_LOADER_SERVICE);
         const downloadListService = container.resolve<DownloadListService>(ServiceKeys.DOWNLOAD_LIST_SERVICE);
         const videoManager = container.resolve<VideoManager>(ServiceKeys.VIDEO_MANAGER);
         const uiManager = container.resolve<UIManager>(ServiceKeys.UI_MANAGER);
@@ -101,6 +103,7 @@ export class ApplicationBuilder {
             listManager.initialize();
 
             appController.initialPrefetch();
+            streamLoaderService.startAutoLoading(this.originalSetInterval);
 
             await videoManager.initialize();
         };

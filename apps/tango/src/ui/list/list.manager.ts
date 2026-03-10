@@ -14,7 +14,6 @@ export class ListManager {
     private appState: AppState;
     private aliasService: AliasService;
     private lastRenderedState: string | null = null;
-    private intersectionObserver: IntersectionObserver;
     private previousViewMode: ViewMode = 'list';
 
     constructor(appState: AppState, emitter: Emitter<EventPayloads>, aliasService: AliasService) {
@@ -27,11 +26,6 @@ export class ListManager {
             videoItemsWrapper: document.getElementById(CONSTANTS.DOM.VIDEO_ITEMS_WRAPPER) as HTMLElement,
         };
 
-        this.intersectionObserver = new IntersectionObserver((entries) => {
-            if (entries.some(entry => entry.isIntersecting)) {
-                this.emitter.emit(Events.APP.LOAD_MORE_STREAMERS);
-            }
-        }, { threshold: 0.1 });
     }
 
     public registerListeners() {
@@ -91,8 +85,6 @@ export class ListManager {
 
         this.lastRenderedState = currentStateSignature;
 
-        this.intersectionObserver.disconnect();
-
         if (streamers.length === 0) {
             this.dom.videoItemsWrapper.innerHTML = `<div class="info-message">No streamers found.</div>`;
             return;
@@ -108,11 +100,6 @@ export class ListManager {
 
         this.dom.videoItemsWrapper.innerHTML = "";
         this.dom.videoItemsWrapper.appendChild(fragment);
-
-        const lastItem = this.dom.videoItemsWrapper.lastElementChild;
-        if (lastItem) {
-            this.intersectionObserver.observe(lastItem);
-        }
     }
 
     private scrollToTarget() {

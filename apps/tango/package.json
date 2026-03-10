@@ -1,6 +1,6 @@
 {
   "name": "tango",
-  "version": "147",
+  "version": "148",
   "description": "A lightweight userscript that makes exploring Tango streams easy",
   "type": "module",
   "scripts": {

@@ -19,7 +19,6 @@ export const Events = {
     APP: {
         UPDATE_UI: "app:updateUI",
         STATE_CHANGED: "app:stateChanged",
-        LOAD_MORE_STREAMERS: "app:loadMoreStreamers",
         REMOVE_STREAMER: "app:removeStreamer",
         INSERT_STREAMERS_AFTER_CURRENT: "app:insertStreamersAfterCurrent",
     },

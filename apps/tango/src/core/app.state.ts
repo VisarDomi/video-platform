@@ -95,10 +95,6 @@ export class AppState {
         if (this._currentIndex < this._streamers.length - 1) {
             this._currentIndex++;
             this.emitStateChange();
-
-            if (this._currentIndex >= this._streamers.length - 2) {
-                this.emitter.emit(Events.APP.LOAD_MORE_STREAMERS);
-            }
         }
     }
 
