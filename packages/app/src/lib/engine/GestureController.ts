@@ -1,3 +1,5 @@
+import { appDimensions } from '$lib/state/appDimensions';
+
 interface PlayerStore {
 	isUiVisible: boolean;
 	swipeProgress: number;
@@ -28,8 +30,10 @@ export class GestureController {
 	private lastMultiTouchTime = 0;
 	private _swipeProgress = 0;
 	private navAnimating = false;
+	private lockDx = 0;
 
-	private readonly EDGE_ZONE = 30;
+	private readonly EDGE_ZONE_RATIO = 0.077;
+	private readonly DEADZONE_RATIO = 0.026;
 	private readonly EDGE_BACK_THRESHOLD = 0.3;
 	private readonly UI_SWIPE_THRESHOLD = 80;
 	private readonly SEEK_RATE = 60;
@@ -98,11 +102,13 @@ export class GestureController {
 		const dy = touch.clientY - this.swipeStartY;
 
 		if (this.swipeAxis === 'none') {
-			if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+			const deadzone = appDimensions.width * this.DEADZONE_RATIO;
+			if (Math.abs(dx) < deadzone && Math.abs(dy) < deadzone) return;
 			if (Math.abs(dx) >= Math.abs(dy)) {
 				this.swipeAxis = 'horizontal';
-				if (this.swipeStartX <= this.EDGE_ZONE && dx > 0) {
+				if (this.swipeStartX <= appDimensions.width * this.EDGE_ZONE_RATIO && dx > 0) {
 					this.swipeType = 'edge-back';
+					this.lockDx = dx;
 					this.store.isSwiping = true;
 				} else if (this.swipeStartY < window.innerHeight / 2) {
 					this.swipeType = 'seek';
@@ -120,13 +126,14 @@ export class GestureController {
 		e.preventDefault();
 
 		if (this.swipeType === 'edge-back') {
-			const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+			const appWidth = appDimensions.width;
+			const progress = Math.max(0, Math.min(1, (dx - this.lockDx) / (appWidth - this.lockDx)));
 			this._swipeProgress = progress;
 			this.videoViewEl.style.transform = `translateX(${progress * 100}%)`;
 		} else if (this.swipeType === 'nav') {
 			this.callbacks.navPeekUpdate(dy);
 		} else if (this.swipeType === 'seek') {
-			const seekDelta = (dx / window.innerWidth) * this.SEEK_RATE;
+			const seekDelta = (dx / appDimensions.width) * this.SEEK_RATE;
 			const maxTime = this.callbacks.getSeekMaxTime();
 			if (!isNaN(maxTime) && maxTime > 0) {
 				const newTime = Math.max(0, Math.min(maxTime, this.seekBaseTime + seekDelta));

@@ -150,7 +150,6 @@ class PlayerStore {
 		this.segments = [];
 		this.view = 'video';
 		this.lastActionedVideoFilename = null;
-		this.isUiVisible = true;
 	}
 }
 
