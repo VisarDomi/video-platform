@@ -12,6 +12,9 @@ export interface GestureCallbacks {
 	seekDirect(time: number): void;
 	seekFinish(): void;
 	navigate(direction: 1 | -1): void;
+	navPeekUpdate(dy: number): void;
+	navPeekRelease(dy: number, onDone: () => void): void;
+	navPeekCancel(): void;
 }
 
 export class GestureController {
@@ -24,10 +27,10 @@ export class GestureController {
 	private seekBaseTime = 0;
 	private lastMultiTouchTime = 0;
 	private _swipeProgress = 0;
+	private navAnimating = false;
 
 	private readonly EDGE_ZONE = 30;
 	private readonly EDGE_BACK_THRESHOLD = 0.3;
-	private readonly FLICK_THRESHOLD = 80;
 	private readonly UI_SWIPE_THRESHOLD = 80;
 	private readonly SEEK_RATE = 60;
 	private readonly MULTI_TOUCH_DEBOUNCE_MS = 100;
@@ -54,6 +57,9 @@ export class GestureController {
 	}
 
 	private handleTouchCancel = (): void => {
+		if (this.swipeType === 'nav') {
+			this.callbacks.navPeekCancel();
+		}
 		this.swipeType = 'none';
 		this.swipeAxis = 'none';
 		if (this.store.isSwiping) {
@@ -69,7 +75,7 @@ export class GestureController {
 			this.lastMultiTouchTime = Date.now();
 			return;
 		}
-		if (this.store.swipeAnimating) return;
+		if (this.store.swipeAnimating || this.navAnimating) return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -84,7 +90,7 @@ export class GestureController {
 			this.lastMultiTouchTime = Date.now();
 			return;
 		}
-		if (this.store.swipeAnimating) return;
+		if (this.store.swipeAnimating || this.navAnimating) return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -117,6 +123,8 @@ export class GestureController {
 			const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
 			this._swipeProgress = progress;
 			this.videoViewEl.style.transform = `translateX(${progress * 100}%)`;
+		} else if (this.swipeType === 'nav') {
+			this.callbacks.navPeekUpdate(dy);
 		} else if (this.swipeType === 'seek') {
 			const seekDelta = (dx / window.innerWidth) * this.SEEK_RATE;
 			const maxTime = this.callbacks.getSeekMaxTime();
@@ -158,10 +166,10 @@ export class GestureController {
 				break;
 			}
 			case 'nav': {
-				if (Math.abs(dy) > this.FLICK_THRESHOLD) {
-					const dir: 1 | -1 = dy < 0 ? 1 : -1;
-					this.callbacks.navigate(dir);
-				}
+				this.navAnimating = true;
+				this.callbacks.navPeekRelease(dy, () => {
+					this.navAnimating = false;
+				});
 				break;
 			}
 			case 'ui': {

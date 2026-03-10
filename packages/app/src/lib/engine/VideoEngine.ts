@@ -367,8 +367,11 @@ export class VideoEngine {
 		this.currentIsLive = cv.isLive ?? false;
 
 		this.elements.forEach((el, i) => {
+			el.style.transform = '';
+			el.style.transition = '';
 			if (i === activeIdx) {
-				if (videoChanged) el.style.opacity = '0';
+				const needsLoad = videoChanged && el.dataset.loadedFilename !== cv.filename;
+				if (needsLoad) el.style.opacity = '0';
 				el.className = 'active-player';
 			} else {
 				el.style.opacity = '';
@@ -412,6 +415,109 @@ export class VideoEngine {
 		} else {
 			this.clearStream(prevPlayer);
 		}
+	}
+
+	// --- Nav peek (TikTok-style vertical swipe) ---
+
+	private readonly NAV_COMMIT_THRESHOLD = 0.2; // 20% of viewport height
+	private readonly NAV_ANIM_MS = 250;
+
+	navPeekUpdate(dy: number): void {
+		if (this.elements.length === 0) return;
+		const vh = window.innerHeight;
+		const activeEl = this.getActiveElement();
+
+		activeEl.style.transform = `translateY(${dy}px)`;
+		activeEl.style.transition = 'none';
+
+		const nextIdx = (this.activePlayerIndex + 1) % 3;
+		const prevIdx = (this.activePlayerIndex + 2) % 3;
+		const nextEl = this.elements[nextIdx];
+		const prevEl = this.elements[prevIdx];
+
+		if (dy < 0) {
+			// Swiping up → peek next below
+			if (nextEl.dataset.loadedFilename) {
+				nextEl.style.opacity = '1';
+				nextEl.style.transform = `translateY(${dy + vh}px)`;
+				nextEl.style.transition = 'none';
+			}
+			prevEl.style.opacity = '0';
+			prevEl.style.transform = '';
+		} else if (dy > 0) {
+			// Swiping down → peek prev above
+			if (prevEl.dataset.loadedFilename) {
+				prevEl.style.opacity = '1';
+				prevEl.style.transform = `translateY(${dy - vh}px)`;
+				prevEl.style.transition = 'none';
+			}
+			nextEl.style.opacity = '0';
+			nextEl.style.transform = '';
+		}
+	}
+
+	navPeekRelease(dy: number, onNavigate: (dir: 1 | -1) => void, onDone: () => void): void {
+		if (this.elements.length === 0) { onDone(); return; }
+
+		const vh = window.innerHeight;
+		const threshold = vh * this.NAV_COMMIT_THRESHOLD;
+		const dir: 1 | -1 = dy < 0 ? 1 : -1;
+		const peekIdx = dir === 1
+			? (this.activePlayerIndex + 1) % 3
+			: (this.activePlayerIndex + 2) % 3;
+		const peekEl = this.elements[peekIdx];
+		const hasPeek = !!peekEl.dataset.loadedFilename;
+		const activeEl = this.getActiveElement();
+
+		if (Math.abs(dy) > threshold && hasPeek) {
+			// Commit — animate to final positions
+			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
+			activeEl.style.transition = transition;
+			activeEl.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
+
+			peekEl.style.transition = transition;
+			peekEl.style.transform = 'translateY(0)';
+
+			setTimeout(() => {
+				// Hide old active, keep new visible — then navigate resets everything
+				activeEl.style.opacity = '0';
+				onNavigate(dir);
+				onDone();
+			}, this.NAV_ANIM_MS);
+		} else {
+			// Cancel — snap back
+			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
+			activeEl.style.transition = transition;
+			activeEl.style.transform = 'translateY(0)';
+
+			if (hasPeek && Math.abs(dy) > 0) {
+				peekEl.style.transition = `transform ${this.NAV_ANIM_MS}ms ease-out, opacity ${this.NAV_ANIM_MS}ms ease-out`;
+				peekEl.style.transform = `translateY(${dir === 1 ? vh : -vh}px)`;
+				peekEl.style.opacity = '0';
+			}
+
+			setTimeout(() => {
+				this.clearPeekStyles();
+				onDone();
+			}, this.NAV_ANIM_MS);
+		}
+	}
+
+	navPeekCancel(): void {
+		this.clearPeekStyles();
+	}
+
+	private clearPeekStyles(): void {
+		for (const el of this.elements) {
+			el.style.transform = '';
+			el.style.transition = '';
+		}
+		// Restore correct opacity: active visible, background hidden
+		this.elements.forEach((el, i) => {
+			if (i !== this.activePlayerIndex) {
+				el.style.opacity = '';
+			}
+		});
 	}
 
 	private async preloadAndPlay(el: HTMLVideoElement, v: Video): Promise<void> {
@@ -487,5 +593,37 @@ export class VideoEngine {
 	toggleMute(): void {
 		const activeEl = this.getActiveElement();
 		activeEl.muted = !activeEl.muted;
+	}
+
+	/**
+	 * Resume playback after iOS freeze / app switch / internet reconnect.
+	 * HLS.js: re-triggers manifest fetch via startLoad().
+	 * Native HLS (iOS Safari): reloads the source to force reconnection.
+	 */
+	resume(): void {
+		const el = this.getActiveElement();
+		if (!el || !this.currentFilename) return;
+
+		const hls = this.hlsInstances.get(el);
+		if (hls) {
+			// HLS.js: restart loading from current position
+			hls.startLoad();
+		} else if (el.src) {
+			// Native HLS (iOS Safari): reload the source
+			const currentTime = el.currentTime;
+			const wasLive = this.currentIsLive;
+			el.load();
+			el.addEventListener(
+				'loadedmetadata',
+				() => {
+					if (!wasLive && currentTime > 0) {
+						el.currentTime = currentTime;
+					}
+				},
+				{ once: true }
+			);
+		}
+
+		void el.play().catch(() => {});
 	}
 }

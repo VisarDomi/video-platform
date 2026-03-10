@@ -5,6 +5,8 @@
 	import { untrack } from 'svelte';
 	import { VideoEngine } from '$lib/engine/VideoEngine.js';
 	import { GestureController } from '$lib/engine/GestureController.js';
+	import { ConnectionMonitor } from '$lib/services/ConnectionMonitor.svelte.js';
+	import { WatchdogService } from '$lib/services/WatchdogService.js';
 	import { findAdjacentVideo, getSavedTime } from '$lib/utils/navigation.js';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
@@ -63,6 +65,18 @@
 		}
 	});
 
+	const doNavigate = (dir: 1 | -1) => {
+		const cv = playerStore.currentVideo;
+		if (!cv) return;
+		const target = findAdjacentVideo(cv, videoListStore.filteredVideos, dir);
+		if (target) {
+			engine.forceProgressSave();
+			playerStore.navigateVideo(target, getSavedTime(target), dir, videoListStore.selectedProvider);
+			playerStore.updateScrollTarget(target);
+			void fetchAndParsePlaylist(target);
+		}
+	};
+
 	const gesture = new GestureController(playerStore, {
 		getSeekBase: () => engine.getCurrentTime(),
 		getSeekMaxTime: () => {
@@ -72,22 +86,74 @@
 		},
 		seekDirect: (t) => engine.seekDirect(t),
 		seekFinish: () => engine.forceTimeSync(),
-		navigate: (dir) => {
-			const cv = playerStore.currentVideo;
-			if (!cv) return;
-			const target = findAdjacentVideo(cv, videoListStore.filteredVideos, dir);
-			if (target) {
-				engine.forceProgressSave();
-				playerStore.navigateVideo(target, getSavedTime(target), dir, videoListStore.selectedProvider);
-				playerStore.updateScrollTarget(target);
-				void fetchAndParsePlaylist(target);
-			}
+		navigate: doNavigate,
+		navPeekUpdate: (dy) => engine.navPeekUpdate(dy),
+		navPeekRelease: (dy, onDone) => engine.navPeekRelease(dy, doNavigate, onDone),
+		navPeekCancel: () => engine.navPeekCancel()
+	});
+
+	// --- Reconnection / freeze recovery ---
+	const RESUME_THRESHOLD_MS = 3000;
+	let backgroundedAt = 0;
+	let sentinelId: ReturnType<typeof setInterval> | null = null;
+
+	const watchdog = new WatchdogService();
+	watchdog.setOnFreeze(() => {
+		if (playerStore.view === 'video' && playerStore.currentVideo) {
+			console.log('[VideoPlayer] Watchdog freeze → resuming');
+			engine.resume();
 		}
 	});
+
+	function handleVisibilityChange(visible: boolean) {
+		if (!visible) {
+			backgroundedAt = Date.now();
+			engine.forceProgressSave();
+			watchdog.stop();
+			// Start sentinel: fallback for iOS missing visibilitychange on return
+			if (sentinelId) clearInterval(sentinelId);
+			let sentinelLast = Date.now();
+			sentinelId = setInterval(() => {
+				const now = Date.now();
+				const delta = now - sentinelLast;
+				sentinelLast = now;
+				if (delta > 3000 && document.visibilityState === 'visible') {
+					console.log(`[VideoPlayer] Sentinel: visibilitychange missed, forcing resume (frozen ${Math.round(delta / 1000)}s)`);
+					executeResume();
+				}
+			}, 1000);
+		} else {
+			executeResume();
+		}
+	}
+
+	function executeResume() {
+		if (sentinelId) {
+			clearInterval(sentinelId);
+			sentinelId = null;
+		}
+		watchdog.start();
+		const elapsed = backgroundedAt > 0 ? Date.now() - backgroundedAt : 0;
+		backgroundedAt = 0;
+		if (elapsed > RESUME_THRESHOLD_MS && playerStore.view === 'video' && playerStore.currentVideo) {
+			console.log(`[VideoPlayer] Resuming after ${Math.round(elapsed / 1000)}s`);
+			engine.resume();
+		}
+	}
+
+	function handleConnectivityChange(online: boolean) {
+		if (online && playerStore.view === 'video' && playerStore.currentVideo) {
+			console.log('[VideoPlayer] Back online → resuming');
+			engine.resume();
+		}
+	}
+
+	const connectionMonitor = new ConnectionMonitor(handleConnectivityChange, handleVisibilityChange);
 
 	onMount(() => {
 		const engineCleanup = engine.init(videoContainer!);
 		const gestureCleanup = gesture.init(videoViewEl!);
+		watchdog.start();
 
 		playerStore.onShowList(() => engine.onViewHidden());
 		playerStore.onProviderChange(() => engine.onProviderChange());
@@ -96,6 +162,9 @@
 		return () => {
 			engineCleanup();
 			gestureCleanup();
+			connectionMonitor.destroy();
+			watchdog.stop();
+			if (sentinelId) clearInterval(sentinelId);
 		};
 	});
 
