@@ -1,3 +1,5 @@
+import { appDimensions } from './app-dimensions';
+
 export interface GestureCallbacks {
     onNext(): void;
     onPrevious(): void;
@@ -22,10 +24,12 @@ export class GestureController {
     private swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
     private swipeType: 'none' | 'nav' | 'ui' | 'edge-back' = 'none';
     private swipeAnimating = false;
+    private lockDx = 0;
 
     private static readonly FLICK_THRESHOLD = 80;
     private static readonly UI_SWIPE_THRESHOLD = 80;
-    private static readonly EDGE_ZONE = 30;
+    private static readonly EDGE_ZONE_RATIO = 0.077;
+    private static readonly DEADZONE_RATIO = 0.026;
     private static readonly EDGE_BACK_THRESHOLD = 0.3;
 
     private callbacks: GestureCallbacks;
@@ -66,11 +70,14 @@ export class GestureController {
             const dy = touch.clientY - this.swipeStartY;
 
             if (this.swipeAxis === 'none') {
-                if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                const deadzone = appDimensions.width * GestureController.DEADZONE_RATIO;
+                if (Math.abs(dx) < deadzone && Math.abs(dy) < deadzone) return;
                 if (Math.abs(dx) >= Math.abs(dy)) {
                     this.swipeAxis = 'horizontal';
-                    if (this.swipeStartX <= GestureController.EDGE_ZONE && dx > 0) {
+                    const edgeZone = appDimensions.width * GestureController.EDGE_ZONE_RATIO;
+                    if (this.swipeStartX <= edgeZone && dx > 0) {
                         this.swipeType = 'edge-back';
+                        this.lockDx = dx;
                         this.elements.videoView.classList.add('swipe-active');
                     } else {
                         this.swipeType = 'ui';
@@ -87,7 +94,7 @@ export class GestureController {
             }
 
             if (this.swipeType === 'edge-back') {
-                const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+                const progress = Math.max(0, Math.min(1, (dx - this.lockDx) / (appDimensions.width - this.lockDx)));
                 this.elements.videoView.style.transform = `translateX(${progress * 100}%)`;
             }
 
@@ -104,7 +111,7 @@ export class GestureController {
             switch (this.swipeType) {
                 case 'edge-back': {
                     const videoView = this.elements.videoView;
-                    const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
+                    const progress = Math.max(0, Math.min(1, (dx - this.lockDx) / (appDimensions.width - this.lockDx)));
                     this.swipeAnimating = true;
                     videoView.classList.add('swipe-animating');
 
