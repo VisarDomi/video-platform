@@ -127,6 +127,7 @@ export const UI_STYLES = `
         display: flex;
         justify-content: center;
         align-items: center;
+        overflow: hidden;
     }
 
     ${STREAM_UNIT_STYLES}

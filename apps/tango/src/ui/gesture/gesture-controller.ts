@@ -5,6 +5,12 @@ export interface GestureCallbacks {
     onSetUiVisible(visible: boolean): void;
 }
 
+export interface PeekCallbacks {
+    navPeekUpdate(dy: number): void;
+    navPeekRelease(dy: number, onDone: () => void): void;
+    navPeekCancel(): void;
+}
+
 export interface GestureElements {
     videoView: HTMLElement;
     listView: HTMLElement;
@@ -24,15 +30,18 @@ export class GestureController {
 
     private callbacks: GestureCallbacks;
     private elements: GestureElements;
+    private peekCallbacks?: PeekCallbacks;
 
     constructor(
         container: HTMLElement,
         callbacks: GestureCallbacks,
         elements: GestureElements,
-        originalAddEventListener: typeof EventTarget.prototype.addEventListener
+        originalAddEventListener: typeof EventTarget.prototype.addEventListener,
+        peekCallbacks?: PeekCallbacks
     ) {
         this.callbacks = callbacks;
         this.elements = elements;
+        this.peekCallbacks = peekCallbacks;
         this._attachListeners(container, originalAddEventListener);
     }
 
@@ -81,6 +90,10 @@ export class GestureController {
                 const progress = Math.max(0, Math.min(1, dx / window.innerWidth));
                 this.elements.videoView.style.transform = `translateX(${progress * 100}%)`;
             }
+
+            if (this.swipeType === 'nav' && this.peekCallbacks) {
+                this.peekCallbacks.navPeekUpdate(dy);
+            }
         }, { passive: false });
 
         listen.call(container, 'touchend', (e: TouchEvent) => {
@@ -113,7 +126,12 @@ export class GestureController {
                     break;
                 }
                 case 'nav': {
-                    if (Math.abs(dy) > GestureController.FLICK_THRESHOLD) {
+                    if (this.peekCallbacks) {
+                        this.swipeAnimating = true;
+                        this.peekCallbacks.navPeekRelease(dy, () => {
+                            this.swipeAnimating = false;
+                        });
+                    } else if (Math.abs(dy) > GestureController.FLICK_THRESHOLD) {
                         if (dy < 0) {
                             this.callbacks.onNext();
                         } else {
@@ -138,6 +156,9 @@ export class GestureController {
                 const videoView = this.elements.videoView;
                 videoView.style.transform = '';
                 videoView.classList.remove('swipe-active', 'swipe-animating');
+            }
+            if (this.swipeType === 'nav' && this.peekCallbacks) {
+                this.peekCallbacks.navPeekCancel();
             }
             this.swipeType = 'none';
             this.swipeAxis = 'none';

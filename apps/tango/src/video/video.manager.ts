@@ -7,7 +7,7 @@ import { AuthService } from "../services/api/auth.service";
 import { AliasService } from "../services/alias.service";
 import { DownloadListService } from "../services/api/download-list.service";
 import { StreamUnit } from "../ui/stream-unit/stream-unit";
-import { GestureElements } from "../ui/gesture/gesture-controller";
+import { GestureElements, PeekCallbacks } from "../ui/gesture/gesture-controller";
 
 interface VideoManagerDependencies {
     initialState: IApplicationState;
@@ -42,6 +42,10 @@ export class VideoManager {
     private units: StreamUnit[] = [];
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
+
+    // Peek swipe
+    private readonly NAV_COMMIT_THRESHOLD = 0.2;
+    private readonly NAV_ANIM_MS = 250;
 
     // Reconnection / freeze recovery
     private readonly RESUME_THRESHOLD_MS = 3000;
@@ -306,8 +310,94 @@ export class VideoManager {
         console.log("Background cache priming finished.");
     }
 
+    // --- Peek swipe ---
+
+    public navPeekUpdate(dy: number): void {
+        const vh = window.innerHeight;
+        const active = this.units[1];
+        const peekUnit = dy < 0 ? this.units[2] : this.units[0];
+        const hideUnit = dy < 0 ? this.units[0] : this.units[2];
+
+        hideUnit.element.hidden = true;
+        peekUnit.element.hidden = false;
+
+        active.element.style.transition = 'none';
+        peekUnit.element.style.transition = 'none';
+
+        active.element.style.transform = `translateY(${dy}px)`;
+        if (dy < 0) {
+            peekUnit.element.style.transform = `translateY(${dy + vh}px)`;
+        } else {
+            peekUnit.element.style.transform = `translateY(${dy - vh}px)`;
+        }
+    }
+
+    public navPeekRelease(dy: number, onDone: () => void): void {
+        const vh = window.innerHeight;
+        const active = this.units[1];
+        const peekUnit = dy < 0 ? this.units[2] : this.units[0];
+        const commit = Math.abs(dy) > vh * this.NAV_COMMIT_THRESHOLD && peekUnit.hasContent;
+
+        const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
+        active.element.style.transition = transition;
+        peekUnit.element.style.transition = transition;
+
+        if (commit) {
+            // Animate active off-screen, peek to center
+            active.element.style.transform = dy < 0 ? `translateY(${-vh}px)` : `translateY(${vh}px)`;
+            peekUnit.element.style.transform = 'translateY(0)';
+
+            const onEnd = () => {
+                active.element.removeEventListener('transitionend', onEnd);
+                this._clearPeekStyles();
+                if (dy < 0) {
+                    this.emitter.emit(Events.UI.NEXT);
+                } else {
+                    this.emitter.emit(Events.UI.PREVIOUS);
+                }
+                onDone();
+            };
+            active.element.addEventListener('transitionend', onEnd, { once: true });
+        } else {
+            // Cancel: animate back
+            active.element.style.transform = 'translateY(0)';
+            if (dy < 0) {
+                peekUnit.element.style.transform = `translateY(${vh}px)`;
+            } else {
+                peekUnit.element.style.transform = `translateY(${-vh}px)`;
+            }
+
+            const onEnd = () => {
+                active.element.removeEventListener('transitionend', onEnd);
+                this._clearPeekStyles();
+                onDone();
+            };
+            active.element.addEventListener('transitionend', onEnd, { once: true });
+        }
+    }
+
+    public navPeekCancel(): void {
+        this._clearPeekStyles();
+    }
+
+    private _clearPeekStyles(): void {
+        for (let i = 0; i < this.units.length; i++) {
+            const el = this.units[i].element;
+            el.style.transform = '';
+            el.style.transition = '';
+            if (i !== 1) {
+                el.hidden = true;
+            }
+        }
+    }
+
     private _createUnit(): StreamUnit {
-        const unit = new StreamUnit(this.emitter, this.aliasService, this.liveUrlService, this.downloadListService, this.gestureElements, this.originalAddEventListener);
+        const peekCallbacks: PeekCallbacks = {
+            navPeekUpdate: (dy) => this.navPeekUpdate(dy),
+            navPeekRelease: (dy, onDone) => this.navPeekRelease(dy, onDone),
+            navPeekCancel: () => this.navPeekCancel(),
+        };
+        const unit = new StreamUnit(this.emitter, this.aliasService, this.liveUrlService, this.downloadListService, this.gestureElements, this.originalAddEventListener, peekCallbacks);
         unit.setHidden(true);
         return unit;
     }

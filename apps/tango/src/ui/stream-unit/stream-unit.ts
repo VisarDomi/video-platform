@@ -6,7 +6,7 @@ import { LiveUrlService } from "../../video/live-url.service";
 import { HlsPlayer } from "../../video/player/hls.player";
 import { EventPayloads, IPlayerStrategy, Streamer } from "../../types";
 import { STREAM_UNIT_TEMPLATE } from "./stream-unit.dom";
-import { GestureController, GestureElements } from "../gesture/gesture-controller";
+import { GestureController, GestureElements, PeekCallbacks } from "../gesture/gesture-controller";
 
 export class StreamUnit {
     public element: HTMLElement;
@@ -30,6 +30,7 @@ export class StreamUnit {
 
     private blockConfirmState: boolean = false;
     private audioOnly: boolean = false;
+    private peekCallbacks?: PeekCallbacks;
 
     constructor(
         emitter: Emitter<EventPayloads>,
@@ -37,12 +38,14 @@ export class StreamUnit {
         liveUrlService: LiveUrlService,
         downloadListService: DownloadListService,
         gestureElements: GestureElements,
-        originalAddEventListener: typeof EventTarget.prototype.addEventListener
+        originalAddEventListener: typeof EventTarget.prototype.addEventListener,
+        peekCallbacks?: PeekCallbacks
     ) {
         this.emitter = emitter;
         this.aliasService = aliasService;
         this.liveUrlService = liveUrlService;
         this.downloadListService = downloadListService;
+        this.peekCallbacks = peekCallbacks;
         this.element = this._createDOM();
         this.videoElement = this.element.querySelector('video') as HTMLVideoElement;
         this._bindElements();
@@ -52,6 +55,10 @@ export class StreamUnit {
 
     public get isMuted(): boolean {
         return this.videoElement.muted;
+    }
+
+    public get hasContent(): boolean {
+        return this.currentStreamer !== null;
     }
 
     public async update(streamer: Streamer | undefined) {
@@ -190,7 +197,7 @@ export class StreamUnit {
             onPrevious: () => this.emitter.emit(Events.UI.PREVIOUS),
             onShowList: () => this.emitter.emit(Events.UI.SHOW_LIST),
             onSetUiVisible: (visible) => this.emitter.emit(Events.UI.SET_UI_VISIBLE, visible),
-        }, gestureElements, originalAddEventListener);
+        }, gestureElements, originalAddEventListener, this.peekCallbacks);
     }
 
     private _attachListeners() {
