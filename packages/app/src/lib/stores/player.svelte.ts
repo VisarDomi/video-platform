@@ -5,7 +5,7 @@ import type { Video, VideoType } from '../types.js';
 class PlayerStore {
 	view = $state<'list' | 'video'>('list');
 	currentVideo = $state<Video | null>(null);
-	currentVideoStartTime = $state(0);
+	startTimeOverride = $state<number | null>(null);
 	lastPlayedVideo = $state<Video | null>(null);
 	segments = $state<number[]>([]);
 	lastActionedVideoFilename = $state<string | null>(null);
@@ -32,20 +32,16 @@ class PlayerStore {
 		}
 	}
 
-	playVideo(video: Video, startTime: number, provider: string) {
-		this._startPlaying(video, startTime, provider);
+	playVideo(video: Video, provider: string) {
+		this.startTimeOverride = null;
+		this._startPlaying(video, provider);
 		this.activePlayerIndex = 0;
 	}
 
-	navigateVideo(video: Video, startTime: number, direction: 1 | -1, provider: string) {
+	navigateVideo(video: Video, direction: 1 | -1, provider: string) {
 		const newIndex = (this.activePlayerIndex + direction + 3) % 3;
-		this._startPlaying(video, startTime, provider);
-		this.activePlayerIndex = newIndex;
-	}
-
-	setEditedVideo(video: Video, startTime: number, provider: string) {
-		const newIndex = (this.activePlayerIndex + 1 + 3) % 3;
-		this._startPlaying(video, startTime, provider);
+		this.startTimeOverride = null;
+		this._startPlaying(video, provider);
 		this.activePlayerIndex = newIndex;
 	}
 
@@ -101,7 +97,7 @@ class PlayerStore {
 	}
 
 	reloadCurrentVideo() {
-		this.currentVideoStartTime = 0;
+		this.startTimeOverride = 0;
 		this._onReloadCallback?.();
 	}
 
@@ -146,12 +142,11 @@ class PlayerStore {
 		this.lastPlayedVideo = video;
 	}
 
-	private _startPlaying(video: Video, startTime: number, provider: string) {
+	private _startPlaying(video: Video, provider: string) {
 		stopSync();
 		this._lastProvider = provider;
 		this._persistVideo(video, provider);
 		this.currentVideo = video;
-		this.currentVideoStartTime = startTime;
 		this.segments = [];
 		this.view = 'video';
 		this.lastActionedVideoFilename = null;

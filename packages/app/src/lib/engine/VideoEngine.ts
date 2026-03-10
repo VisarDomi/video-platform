@@ -358,7 +358,7 @@ export class VideoEngine {
 
 	// --- Public methods for $effects ---
 
-	activateIfChanged(cv: Video, activeIdx: number, startTime: number): void {
+	activateIfChanged(cv: Video, activeIdx: number, startTimeOverride: number | null): void {
 		if (this.elements.length === 0) return;
 
 		const videoChanged = this.currentFilename !== cv.filename;
@@ -384,11 +384,18 @@ export class VideoEngine {
 		this.callbacks.onMuteChange(activeEl.muted);
 
 		if (videoChanged) {
+			const startTime = this.resolveStartTime(activeEl, cv, startTimeOverride);
 			const thisNav = ++this.navCounter;
 			void this.activatePlayer(activeEl, cv, startTime, thisNav);
 		} else if (activeEl.paused) {
 			void activeEl.play();
 		}
+	}
+
+	private resolveStartTime(el: HTMLVideoElement, cv: Video, override: number | null): number {
+		if (override !== null) return override;
+		if (el.dataset.loadedFilename === cv.filename) return -1;
+		return getSavedTime(cv);
 	}
 
 	preloadForVideo(cv: Video, activeIdx: number, filteredList: Video[]): void {

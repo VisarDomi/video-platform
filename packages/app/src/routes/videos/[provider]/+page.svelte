@@ -102,11 +102,8 @@
 			playerStore.captureScrollAnchor(itemTop / window.innerHeight);
 		}
 
-		const saved = localStorage.getItem(`${STORAGE_KEYS.PROGRESS_PREFIX}${video.filename}`);
-		const startTime = saved && parseFloat(saved) > 0 ? Math.round(parseFloat(saved)) : 0;
-
 		searchHidden = true;
-		playerStore.playVideo(video, startTime, videoListStore.selectedProvider);
+		playerStore.playVideo(video, videoListStore.selectedProvider);
 		void fetchAndParsePlaylist(video);
 	}
 

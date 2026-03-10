@@ -7,7 +7,7 @@
 	import { GestureController } from '$lib/engine/GestureController.js';
 	import { ConnectionMonitor } from '$lib/services/ConnectionMonitor.svelte.js';
 	import { WatchdogService } from '$lib/services/WatchdogService.js';
-	import { findAdjacentVideo, getSavedTime } from '$lib/utils/navigation.js';
+	import { findAdjacentVideo } from '$lib/utils/navigation.js';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 
 	import ProgressBar from './ProgressBar.svelte';
@@ -52,12 +52,12 @@
 			const next = findAdjacentVideo(cv, filteredList, 1);
 			if (next) {
 				engine.forceProgressSave();
-				playerStore.navigateVideo(next, getSavedTime(next), 1, videoListStore.selectedProvider);
+				playerStore.navigateVideo(next, 1, videoListStore.selectedProvider);
 				void fetchAndParsePlaylist(next);
 			} else if (filteredList.length > 0) {
 				const first = filteredList[0];
 				engine.forceProgressSave();
-				playerStore.navigateVideo(first, getSavedTime(first), 1, videoListStore.selectedProvider);
+				playerStore.navigateVideo(first, 1, videoListStore.selectedProvider);
 				void fetchAndParsePlaylist(first);
 			} else {
 				playerStore.showList();
@@ -71,7 +71,7 @@
 		const target = findAdjacentVideo(cv, videoListStore.filteredVideos, dir);
 		if (target) {
 			engine.forceProgressSave();
-			playerStore.navigateVideo(target, getSavedTime(target), dir, videoListStore.selectedProvider);
+			playerStore.navigateVideo(target, dir, videoListStore.selectedProvider);
 			playerStore.updateScrollTarget(target);
 			void fetchAndParsePlaylist(target);
 		}
@@ -183,12 +183,12 @@
 				const next = findAdjacentVideo(cv, filteredList, 1);
 				if (next) {
 					engine.forceProgressSave();
-					playerStore.navigateVideo(next, getSavedTime(next), 1, videoListStore.selectedProvider);
+					playerStore.navigateVideo(next, 1, videoListStore.selectedProvider);
 					void fetchAndParsePlaylist(next);
 				} else if (filteredList.length > 0) {
 					const first = filteredList[0];
 					engine.forceProgressSave();
-					playerStore.navigateVideo(first, getSavedTime(first), 1, videoListStore.selectedProvider);
+					playerStore.navigateVideo(first, 1, videoListStore.selectedProvider);
 					void fetchAndParsePlaylist(first);
 				} else {
 					playerStore.showList();
@@ -201,7 +201,7 @@
 	$effect(() => {
 		const cv = playerStore.currentVideo;
 		if (!cv || playerStore.view !== 'video') return;
-		engine.activateIfChanged(cv, playerStore.activePlayerIndex, playerStore.currentVideoStartTime);
+		engine.activateIfChanged(cv, playerStore.activePlayerIndex, playerStore.startTimeOverride);
 	});
 
 	// Preload adjacent
