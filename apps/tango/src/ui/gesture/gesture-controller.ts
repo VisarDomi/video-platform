@@ -29,8 +29,8 @@ export class GestureController {
     private static readonly FLICK_THRESHOLD = 80;
     private static readonly UI_SWIPE_THRESHOLD = 80;
     private static readonly EDGE_ZONE_RATIO = 0.077;
-    private static readonly DEADZONE_RATIO = 0.026;
-    private static readonly EDGE_BACK_THRESHOLD = 0.3;
+    private static readonly DEADZONE_RATIO = 0.013;
+    private static readonly EDGE_BACK_THRESHOLD = 0.15;
 
     private callbacks: GestureCallbacks;
     private elements: GestureElements;
