@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { MonthReport, AliasReport } from '$lib/types';
+	import { PROVIDER_IDS, PROVIDER_META, type ProviderId, type MonthReport, type AliasReport } from '$lib/types';
 
+	let activeProvider: ProviderId = $state('tango');
 	let months: string[] = $state([]);
 	let selectedMonth = $state('');
 	let report: MonthReport | null = $state(null);
@@ -9,6 +10,8 @@
 	let sortKey: keyof AliasReport = $state('downloadedGB');
 	let sortAsc = $state(false);
 	let snapshotMsg = $state('');
+
+	const accent = $derived(PROVIDER_META[activeProvider].accent);
 
 	const sortedAliases = $derived(
 		report
@@ -29,8 +32,17 @@
 		report ? Math.max(...report.aliases.map((a) => a.downloadedGB), 1) : 1
 	);
 
+	async function switchProvider(id: ProviderId) {
+		report = null;
+		months = [];
+		selectedMonth = '';
+		snapshotMsg = '';
+		activeProvider = id;
+		await loadMonths();
+	}
+
 	async function loadMonths() {
-		const res = await fetch('/api/months');
+		const res = await fetch(`/api/${activeProvider}/months`);
 		months = await res.json();
 		if (months.length > 0 && !selectedMonth) {
 			selectedMonth = months[0];
@@ -41,7 +53,7 @@
 	async function loadReport() {
 		if (!selectedMonth) return;
 		loading = true;
-		const res = await fetch(`/api/report/${selectedMonth}`);
+		const res = await fetch(`/api/${activeProvider}/report/${selectedMonth}`);
 		report = await res.json();
 		loading = false;
 	}
@@ -49,14 +61,14 @@
 	async function loadLive() {
 		if (!selectedMonth) return;
 		loading = true;
-		const res = await fetch(`/api/report/${selectedMonth}/live`);
+		const res = await fetch(`/api/${activeProvider}/report/${selectedMonth}/live`);
 		report = await res.json();
 		loading = false;
 	}
 
 	async function saveSnapshot() {
 		if (!selectedMonth) return;
-		const res = await fetch(`/api/snapshot/${selectedMonth}`, { method: 'POST' });
+		const res = await fetch(`/api/${activeProvider}/snapshot/${selectedMonth}`, { method: 'POST' });
 		const data = await res.json();
 		if (data.saved) {
 			snapshotMsg = `Snapshot saved for ${selectedMonth}`;
@@ -87,7 +99,18 @@
 
 <div class="dashboard">
 	<header>
-		<h1>Tango Dashboard</h1>
+		<nav class="provider-tabs">
+			{#each PROVIDER_IDS as id}
+				<button
+					class="tab"
+					class:active={activeProvider === id}
+					style={activeProvider === id ? `border-color: ${PROVIDER_META[id].accent}; color: ${PROVIDER_META[id].accent}` : ''}
+					onclick={() => switchProvider(id)}
+				>
+					{PROVIDER_META[id].label}
+				</button>
+			{/each}
+		</nav>
 		<div class="controls">
 			<select bind:value={selectedMonth} onchange={loadReport}>
 				{#each months as m}
@@ -180,7 +203,7 @@
 								></div>
 								<div
 									class="bar bar-edit"
-									style="width: {(alias.editedGB / maxDownloaded) * 100}%"
+									style="width: {(alias.editedGB / maxDownloaded) * 100}%; background: {accent}"
 								></div>
 							</div>
 						</td>
@@ -217,10 +240,30 @@
 		margin-bottom: 1.5rem;
 	}
 
-	h1 {
-		margin: 0 0 1rem;
-		font-size: 1.5rem;
-		color: #fff;
+	.provider-tabs {
+		display: flex;
+		gap: 0.25rem;
+	}
+
+	.tab {
+		padding: 0.4rem 1rem;
+		background: #1e1e1e;
+		color: #888;
+		border: 2px solid transparent;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.tab:hover {
+		background: #2a2a2a;
+		color: #ccc;
+	}
+
+	.tab.active {
+		background: #1a1a1a;
+		font-weight: 600;
 	}
 
 	.controls {
@@ -231,7 +274,7 @@
 	}
 
 	select,
-	button {
+	button:not(.tab) {
 		padding: 0.4rem 0.8rem;
 		background: #1e1e1e;
 		color: #e0e0e0;
@@ -242,7 +285,7 @@
 	}
 
 	select:hover,
-	button:hover {
+	button:not(.tab):hover {
 		background: #2a2a2a;
 	}
 
@@ -376,10 +419,6 @@
 
 	.bar-dl {
 		background: #334155;
-	}
-
-	.bar-edit {
-		background: #4ade80;
 	}
 
 	.high-edit {
