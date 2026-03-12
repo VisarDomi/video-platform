@@ -15,6 +15,7 @@
 
 	let videoViewEl = $state<HTMLElement | null>(null);
 	let videoContainer = $state<HTMLElement | null>(null);
+	let topBarEl = $state<HTMLElement | null>(null);
 	let currentTime = $state(0);
 	let duration = $state(0);
 	let seekableEnd = $state(0);
@@ -152,6 +153,7 @@
 
 	onMount(() => {
 		const engineCleanup = engine.init(videoContainer!);
+		engine.setOverlay(topBarEl);
 		const gestureCleanup = gesture.init(videoViewEl!);
 		watchdog.start();
 
@@ -232,7 +234,7 @@
 			bind:this={videoContainer}
 		></div>
 
-		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video}>
+		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video} bind:this={topBarEl}>
 			{#if video}
 				<div class="streamer-name">{video.filename}</div>
 

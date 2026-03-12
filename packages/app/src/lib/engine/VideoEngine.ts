@@ -22,6 +22,7 @@ export class VideoEngine {
 
 	private activePlayerIndex = 0;
 	private currentIsLive = false;
+	private overlayEl: HTMLElement | null = null;
 
 	// Internal time tracking — updated 12x/sec, synced to Svelte at 4Hz
 	private _currentTime = 0;
@@ -35,6 +36,10 @@ export class VideoEngine {
 	private readonly PROGRESS_SAVE_MS = 3000;
 
 	constructor(private callbacks: VideoEngineCallbacks) {}
+
+	setOverlay(el: HTMLElement | null): void {
+		this.overlayEl = el;
+	}
 
 	init(videoContainer: HTMLElement): () => void {
 		this.videoContainer = videoContainer;
@@ -437,6 +442,11 @@ export class VideoEngine {
 		activeEl.style.transform = `translateY(${dy}px)`;
 		activeEl.style.transition = 'none';
 
+		if (this.overlayEl) {
+			this.overlayEl.style.transform = `translateY(${dy}px)`;
+			this.overlayEl.style.transition = 'none';
+		}
+
 		const nextIdx = (this.activePlayerIndex + 1) % 3;
 		const prevIdx = (this.activePlayerIndex + 2) % 3;
 		const nextEl = this.elements[nextIdx];
@@ -485,9 +495,18 @@ export class VideoEngine {
 			peekEl.style.transition = transition;
 			peekEl.style.transform = 'translateY(0)';
 
+			if (this.overlayEl) {
+				this.overlayEl.style.transition = transition;
+				this.overlayEl.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
+			}
+
 			setTimeout(() => {
 				// Hide old active, keep new visible — then navigate resets everything
 				activeEl.style.opacity = '0';
+				if (this.overlayEl) {
+					this.overlayEl.style.transition = '';
+					this.overlayEl.style.transform = '';
+				}
 				onNavigate(dir);
 				onDone();
 			}, this.NAV_ANIM_MS);
@@ -496,6 +515,11 @@ export class VideoEngine {
 			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
 			activeEl.style.transition = transition;
 			activeEl.style.transform = 'translateY(0)';
+
+			if (this.overlayEl) {
+				this.overlayEl.style.transition = transition;
+				this.overlayEl.style.transform = 'translateY(0)';
+			}
 
 			if (hasPeek && Math.abs(dy) > 0) {
 				peekEl.style.transition = `transform ${this.NAV_ANIM_MS}ms ease-out, opacity ${this.NAV_ANIM_MS}ms ease-out`;
@@ -525,6 +549,10 @@ export class VideoEngine {
 				el.style.opacity = '';
 			}
 		});
+		if (this.overlayEl) {
+			this.overlayEl.style.transform = '';
+			this.overlayEl.style.transition = '';
+		}
 	}
 
 	private async preloadAndPlay(el: HTMLVideoElement, v: Video): Promise<void> {
