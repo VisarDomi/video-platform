@@ -2,9 +2,6 @@ import { appDimensions } from '$lib/state/appDimensions';
 
 interface PlayerStore {
 	isUiVisible: boolean;
-	swipeProgress: number;
-	isSwiping: boolean;
-	swipeAnimating: boolean;
 	showList(): void;
 }
 
@@ -31,6 +28,10 @@ export class GestureController {
 	private _swipeProgress = 0;
 	private navAnimating = false;
 	private lockDx = 0;
+
+	swipeProgress = $state(0);
+	isSwiping = $state(false);
+	swipeAnimating = $state(false);
 
 	private readonly EDGE_ZONE_RATIO = 0.077;
 	private readonly DEADZONE_RATIO = 0.026;
@@ -66,10 +67,10 @@ export class GestureController {
 		}
 		this.swipeType = 'none';
 		this.swipeAxis = 'none';
-		if (this.store.isSwiping) {
-			this.store.isSwiping = false;
-			this.store.swipeAnimating = false;
-			this.store.swipeProgress = 0;
+		if (this.isSwiping) {
+			this.isSwiping = false;
+			this.swipeAnimating = false;
+			this.swipeProgress = 0;
 			this.videoViewEl.style.transform = '';
 		}
 	};
@@ -79,7 +80,7 @@ export class GestureController {
 			this.lastMultiTouchTime = Date.now();
 			return;
 		}
-		if (this.store.swipeAnimating || this.navAnimating) return;
+		if (this.swipeAnimating || this.navAnimating) return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -94,7 +95,7 @@ export class GestureController {
 			this.lastMultiTouchTime = Date.now();
 			return;
 		}
-		if (this.store.swipeAnimating || this.navAnimating) return;
+		if (this.swipeAnimating || this.navAnimating) return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -109,7 +110,7 @@ export class GestureController {
 				if (this.swipeStartX <= appDimensions.width * this.EDGE_ZONE_RATIO && dx > 0) {
 					this.swipeType = 'edge-back';
 					this.lockDx = dx;
-					this.store.isSwiping = true;
+					this.isSwiping = true;
 				} else if (this.swipeStartY < window.innerHeight / 2) {
 					this.swipeType = 'seek';
 					this.seekBaseTime = this.callbacks.getSeekBase();
@@ -149,20 +150,20 @@ export class GestureController {
 
 		switch (this.swipeType) {
 			case 'edge-back': {
-				this.store.swipeAnimating = true;
+				this.swipeAnimating = true;
 				if (this._swipeProgress > this.EDGE_BACK_THRESHOLD) {
-					this.store.swipeProgress = 1;
+					this.swipeProgress = 1;
 					setTimeout(() => {
 						this.store.showList();
-						this.store.isSwiping = false;
-						this.store.swipeAnimating = false;
-						this.store.swipeProgress = 0;
+						this.isSwiping = false;
+						this.swipeAnimating = false;
+						this.swipeProgress = 0;
 					}, 250);
 				} else {
-					this.store.swipeProgress = 0;
+					this.swipeProgress = 0;
 					setTimeout(() => {
-						this.store.isSwiping = false;
-						this.store.swipeAnimating = false;
+						this.isSwiping = false;
+						this.swipeAnimating = false;
 					}, 250);
 				}
 				this.videoViewEl.style.transform = '';

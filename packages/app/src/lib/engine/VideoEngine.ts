@@ -594,14 +594,11 @@ export class VideoEngine {
 	handleSeek(time: number): void {
 		const activeEl = this.getActiveElement();
 		if (!isNaN(activeEl.duration)) {
-			const wasPlaying = !activeEl.paused;
-			if (wasPlaying) activeEl.pause();
+			activeEl.pause();
 			activeEl.currentTime = time;
 			this._currentTime = time;
 			this.forceTimeSync();
-			if (wasPlaying) {
-				activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
-			}
+			activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
 		}
 	}
 

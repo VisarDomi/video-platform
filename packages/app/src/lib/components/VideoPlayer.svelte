@@ -4,7 +4,7 @@
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { untrack } from 'svelte';
 	import { VideoEngine } from '$lib/engine/VideoEngine.js';
-	import { GestureController } from '$lib/engine/GestureController.js';
+	import { GestureController } from '$lib/engine/GestureController.svelte.js';
 	import { ConnectionMonitor } from '$lib/services/ConnectionMonitor.svelte.js';
 	import { WatchdogService } from '$lib/services/WatchdogService.js';
 	import { findAdjacentVideo } from '$lib/utils/navigation.js';
@@ -220,10 +220,10 @@
 <div
 	class="video-view"
 	class:visible={isVisible}
-	class:swipe-active={playerStore.isSwiping}
-	class:swipe-animating={playerStore.swipeAnimating}
-	style:transform={playerStore.isSwiping || playerStore.swipeAnimating
-		? `translateX(${playerStore.swipeProgress * 100}%)`
+	class:swipe-active={gesture.isSwiping}
+	class:swipe-animating={gesture.swipeAnimating}
+	style:transform={gesture.isSwiping || gesture.swipeAnimating
+		? `translateX(${gesture.swipeProgress * 100}%)`
 		: null}
 	role="application"
 	bind:this={videoViewEl}

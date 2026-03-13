@@ -1,5 +1,8 @@
+import pLimit from "p-limit";
 import logger from "../../core/logger.js";
 import * as tangoApi from "./apiClient.js";
+
+const cacheLock = pLimit(1);
 
 // alias → accountId
 let aliasToAccount = new Map<string, string>();
@@ -7,9 +10,11 @@ let aliasToAccount = new Map<string, string>();
 let followedAliases = new Set<string>();
 let initialized = false;
 
-export async function getFollowedAliases(): Promise<Set<string>> {
-    if (!initialized) await refresh();
-    return followedAliases;
+export function getFollowedAliases(): Promise<Set<string>> {
+    return cacheLock(async () => {
+        if (!initialized) await refresh();
+        return followedAliases;
+    });
 }
 
 export async function refresh(): Promise<void> {
@@ -44,29 +49,32 @@ export async function refresh(): Promise<void> {
     }
 }
 
-export async function resolveAndFollow(alias: string): Promise<boolean> {
-    // Try cache first, then resolve via API
-    let accountId = aliasToAccount.get(alias);
-    if (!accountId) {
-        const resolved = await tangoApi.resolveAlias(alias);
-        if (!resolved) return false;
-        accountId = resolved.accountId;
-        aliasToAccount.set(alias, accountId);
-    }
-    const ok = await tangoApi.follow(accountId);
-    if (ok) followedAliases.add(alias);
-    return ok;
+export function resolveAndFollow(alias: string): Promise<boolean> {
+    return cacheLock(async () => {
+        let accountId = aliasToAccount.get(alias);
+        if (!accountId) {
+            const resolved = await tangoApi.resolveAlias(alias);
+            if (!resolved) return false;
+            accountId = resolved.accountId;
+            aliasToAccount.set(alias, accountId);
+        }
+        const ok = await tangoApi.follow(accountId);
+        if (ok) followedAliases.add(alias);
+        return ok;
+    });
 }
 
-export async function resolveAndUnfollow(alias: string): Promise<boolean> {
-    let accountId = aliasToAccount.get(alias);
-    if (!accountId) {
-        const resolved = await tangoApi.resolveAlias(alias);
-        if (!resolved) return false;
-        accountId = resolved.accountId;
-        aliasToAccount.set(alias, accountId);
-    }
-    const ok = await tangoApi.unfollow(accountId);
-    if (ok) followedAliases.delete(alias);
-    return ok;
+export function resolveAndUnfollow(alias: string): Promise<boolean> {
+    return cacheLock(async () => {
+        let accountId = aliasToAccount.get(alias);
+        if (!accountId) {
+            const resolved = await tangoApi.resolveAlias(alias);
+            if (!resolved) return false;
+            accountId = resolved.accountId;
+            aliasToAccount.set(alias, accountId);
+        }
+        const ok = await tangoApi.unfollow(accountId);
+        if (ok) followedAliases.delete(alias);
+        return ok;
+    });
 }

@@ -11,9 +11,6 @@ class PlayerStore {
 	lastActionedVideoFilename = $state<string | null>(null);
 	activePlayerIndex = $state(0);
 	isUiVisible = $state(true);
-	swipeProgress = $state(0);
-	isSwiping = $state(false);
-	swipeAnimating = $state(false);
 	scrollAnchorRatio = $state(0);
 	scrollTarget = $state<{ filename: string; type: VideoType; ratio: number } | null>(null);
 
@@ -70,7 +67,6 @@ class PlayerStore {
 	showList(lastActionedFilename: string | null = null) {
 		this.view = 'list';
 		this.lastActionedVideoFilename = lastActionedFilename;
-		this.swipeAnimating = false;
 		this.scrollTarget = null;
 		this.scrollAnchorRatio = 0;
 		this._onShowListCallback?.();

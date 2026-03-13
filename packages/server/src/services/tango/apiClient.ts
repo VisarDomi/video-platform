@@ -28,15 +28,15 @@ function getApiHeaders(): Record<string, string> {
     };
 }
 
-let blockListCache: string[] | null = null;
+let blockListCache: readonly string[] | null = null;
 
-async function fetchBlockList(): Promise<string[]> {
+async function fetchBlockList(): Promise<readonly string[]> {
     if (blockListCache !== null) return blockListCache;
     try {
         const headers = getApiHeaders();
         const response = await fetch(`${API_BASE}/blockList`, { headers });
         if (response.ok) {
-            blockListCache = (await response.json()) as string[];
+            blockListCache = Object.freeze((await response.json()) as string[]);
             return blockListCache;
         }
     } catch (error) {

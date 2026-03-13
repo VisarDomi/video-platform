@@ -98,26 +98,30 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
     logger.info(`Playlist generated for ${videoPath}`);
 }
 
-const validatedPlaylists = new Set<string>();
+const playlistPromises = new Map<string, Promise<void>>();
 
-export async function ensurePlaylist(videoPath: string): Promise<void> {
+export function ensurePlaylist(videoPath: string): Promise<void> {
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
 
-    try {
-        await fsPromises.access(playlistPath);
-    } catch {
-        await generatePlaylist(videoPath);
-        validatedPlaylists.add(playlistPath);
-        return;
-    }
+    const existing = playlistPromises.get(playlistPath);
+    if (existing) return existing;
 
-    if (validatedPlaylists.has(playlistPath)) return;
+    const promise = (async () => {
+        try {
+            await fsPromises.access(playlistPath);
+        } catch {
+            await generatePlaylist(videoPath);
+            return;
+        }
 
-    const content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
-    const { content: fixed, wasFixed } = fixTargetDuration(content);
-    if (wasFixed) {
-        await fsPromises.writeFile(playlistPath, fixed, MISC.ENCODING_UTF8);
-        logger.info(`Fixed TARGETDURATION in ${playlistPath}`);
-    }
-    validatedPlaylists.add(playlistPath);
+        const content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
+        const { content: fixed, wasFixed } = fixTargetDuration(content);
+        if (wasFixed) {
+            await fsPromises.writeFile(playlistPath, fixed, MISC.ENCODING_UTF8);
+            logger.info(`Fixed TARGETDURATION in ${playlistPath}`);
+        }
+    })();
+
+    playlistPromises.set(playlistPath, promise);
+    return promise;
 }
