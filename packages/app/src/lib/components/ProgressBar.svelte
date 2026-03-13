@@ -100,7 +100,7 @@
 	{/if}
 
 	<div class="segment-text-container">
-		{#each { length: Math.floor(playerStore.segments.length / 2) } as _, i}
+		{#each { length: Math.ceil(playerStore.segments.length / 2) } as _, i}
 			<div class="segment-row">
 				<span>start: {formatTimePrecise(playerStore.segments[i * 2])}</span>
 				{#if playerStore.segments[i * 2 + 1] !== undefined}

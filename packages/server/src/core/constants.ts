@@ -113,7 +113,6 @@ export const ERROR_NAMES = {
 export const MISC = {
     ENCODING_UTF8: "utf-8",
     NETWORK_INTERFACE_IPV4: "IPv4",
-    EDITED_VIDEO_PART_SUFFIX: (index: number) => ` part${index}`,
     ERROR_CODE: {
         ENOENT: "ENOENT",
         ECONNABORTED: "ECONNABORTED",
@@ -124,7 +123,6 @@ export const MISC = {
     EMPTY_STRING: "",
     RADIX_DECIMAL: 10,
     JSON_INDENT: 2,
-    MAX_EDIT_CHUNK_DURATION_SECONDS: 30 * 60,
     NEW_LINE: "\n",
     HASH_SYMBOL: "#",
 } as const;
