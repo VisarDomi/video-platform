@@ -8,8 +8,7 @@ self.addEventListener('activate', (event) => {
 	event.waitUntil(clients.claim());
 });
 
-self.addEventListener('fetch', (event) => {
-	// Pass through all requests to the network
-	// This minimal fetch handler is required for iOS 18 PWA installability
-	event.respondWith(fetch(event.request));
+self.addEventListener('fetch', () => {
+	// No-op: listener must exist for iOS 18 PWA installability,
+	// but not calling respondWith() lets the browser handle requests natively
 });
