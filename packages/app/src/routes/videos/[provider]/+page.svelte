@@ -147,9 +147,10 @@
 		if (playerStore.view === 'video') {
 			searchHidden = true;
 		} else {
-			scrollY = window.scrollY;
-			lastScrollY = scrollY;
-			searchHidden = scrollY > 50;
+			const currentY = window.scrollY;
+			scrollY = currentY;
+			lastScrollY = currentY;
+			searchHidden = currentY > 50;
 		}
 	});
 
