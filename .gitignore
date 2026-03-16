@@ -9,3 +9,7 @@ packages/downloader/tslive.txt
 packages/downloader/ladder.txt
 packages/downloader/fmp4.txt
 dist/
+dist-server/
+build/
+.svelte-kit/
+test.md
