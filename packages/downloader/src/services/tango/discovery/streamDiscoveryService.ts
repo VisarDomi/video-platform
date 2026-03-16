@@ -25,11 +25,11 @@ export class StreamDiscoveryService {
         this.targetManager = targetManager;
     }
 
-    private shouldDownload(alias: string): boolean {
+    private shouldDownload(streamerId: string): boolean {
         if (!this.targetManager || this.targetManager.size === 0) {
             return true; // No tango.txt entries = download everything
         }
-        return this.targetManager.hasTarget(alias);
+        return this.targetManager.hasTarget(streamerId);
     }
 
     public async start(): Promise<void> {
@@ -53,6 +53,12 @@ export class StreamDiscoveryService {
 
                     if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
                         if (!this.downloadsManager.has(masterPlaylistUrl)) {
+                            // Filter by streamerId first — no point resolving alias for skipped streamers
+                            if (!this.shouldDownload(streamerId)) {
+                                logger.verbose(`[Tango] Skipping ${streamerId} (not in tango.txt)`);
+                                continue;
+                            }
+
                             let alias = this.aliasManager.get(streamerId);
                             if (!alias) {
                                 logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
@@ -63,11 +69,6 @@ export class StreamDiscoveryService {
                             }
 
                             const resolvedAlias = alias || streamerId;
-
-                            if (!this.shouldDownload(resolvedAlias)) {
-                                logger.verbose(`[Tango] Skipping ${resolvedAlias} (not in tango.txt)`);
-                                continue;
-                            }
 
                             logger.info(`[Tango] Discovered new stream from ${resolvedAlias}.`);
 
