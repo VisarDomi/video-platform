@@ -7,8 +7,7 @@
 		createEditedVideo,
 		returnToOriginals
 	} from '$lib/services/videoActions.js';
-	import { extractIdentifier } from '$lib/services/follow-api.js';
-	import { addToList, removeFromList, isListProvider } from '$lib/services/list-api.js';
+	import { addToList, removeFromList, isListProvider, extractIdentifier } from '$lib/services/list-api.js';
 
 	let {
 		isMuted,

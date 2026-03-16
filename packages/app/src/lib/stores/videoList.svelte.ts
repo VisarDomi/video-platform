@@ -12,10 +12,7 @@ class VideoListStore {
 	// Bumped on every initialize() — async ops capture this and bail if stale
 	epoch = 0;
 
-	// SC/FC2 follow state
-	followedIdentifiers = $state<Set<string>>(new Set());
-
-	// Tango list state (tango.txt download whitelist)
+	// tango.txt / fc2.txt / sc.txt download whitelist
 	listIdentifiers = $state<Set<string>>(new Set());
 
 	initialize(provider: string) {
@@ -23,7 +20,6 @@ class VideoListStore {
 		this.selectedProvider = provider;
 		this.isLoading = true;
 		this.videos = [];
-		this.followedIdentifiers = new Set();
 		this.listIdentifiers = new Set();
 	}
 
@@ -92,20 +88,6 @@ class VideoListStore {
 			v.filename === filename && v.type === oldType ? { ...v, type: newType } : v
 		);
 	}
-	setFollowedIdentifiers(identifiers: string[]) {
-		this.followedIdentifiers = new Set(identifiers);
-	}
-
-	addFollowedIdentifier(id: string) {
-		this.followedIdentifiers = new Set(this.followedIdentifiers).add(id);
-	}
-
-	removeFollowedIdentifier(id: string) {
-		const next = new Set(this.followedIdentifiers);
-		next.delete(id);
-		this.followedIdentifiers = next;
-	}
-
 	setListIdentifiers(identifiers: string[]) {
 		this.listIdentifiers = new Set(identifiers);
 	}

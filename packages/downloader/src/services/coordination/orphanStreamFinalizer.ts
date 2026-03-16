@@ -15,12 +15,18 @@ export class OrphanStreamFinalizer {
     }
 
     public start(): void {
-        const runLoop = async () => {
-            await this.processOrphans();
-            setTimeout(runLoop, this.checkInterval);
-        };
         // Run immediately to clean up from potential previous crashes
-        void runLoop();
+        void this.processOrphans();
+        // Second pass after 5 minutes catches folders that were too fresh on boot
+        setTimeout(() => void this.processOrphans(), 5 * 60 * 1000);
+        // Then run every 24 hours
+        setTimeout(() => {
+            const runLoop = async () => {
+                await this.processOrphans();
+                setTimeout(runLoop, this.checkInterval);
+            };
+            void runLoop();
+        }, this.checkInterval);
     }
 
     private async processOrphans(): Promise<void> {

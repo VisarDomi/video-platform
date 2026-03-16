@@ -46,12 +46,6 @@ export const UI_TEXT = {
 	}
 } as const;
 
-export const TANGO_API = {
-	FOLLOWING: '/api/tango-follow/following',
-	FOLLOW: '/api/tango-follow/follow',
-	UNFOLLOW: '/api/tango-follow/unfollow'
-} as const;
-
 export const SC_API = {
 	LIST: '/api/sc/list',
 	ADD: '/api/sc/add',
