@@ -4,11 +4,8 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev",
 		"build": "vite build",
-		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"server:dev": "tsx server/index.ts",
 		"server:build": "rm -rf dist-server && tsc -p tsconfig.server.json",
 		"start": "npm run server:build && systemctl --user start video-dashboard",
 		"restart": "npm run server:build && systemctl --user restart video-dashboard",
