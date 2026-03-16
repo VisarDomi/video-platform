@@ -1,6 +1,4 @@
-import { Emitter } from "../../core/emitter";
-import { Events } from "../../core/events";
-import { EventPayloads, IPlayerStrategy } from "../../types";
+import { IPlayerStrategy } from "../../types";
 
 declare class Hls {
     constructor(config?: any);
@@ -16,18 +14,19 @@ declare class Hls {
     destroy(): void;
 }
 
+export interface HlsCallbacks {
+    onReady: () => void;
+    onFatalError: (type: 'network' | 'media') => void;
+}
+
 export class HlsPlayer implements IPlayerStrategy {
     private hls: Hls;
     private videoElement: HTMLVideoElement;
-    private emitter: Emitter<EventPayloads>;
-    private streamerName: string;
-    private streamerId: string;
+    private callbacks: HlsCallbacks;
 
-    constructor(videoElement: HTMLVideoElement, emitter: Emitter<EventPayloads>, streamerName: string, streamerId: string) {
+    constructor(videoElement: HTMLVideoElement, callbacks: HlsCallbacks) {
         this.videoElement = videoElement;
-        this.emitter = emitter;
-        this.streamerName = streamerName;
-        this.streamerId = streamerId;
+        this.callbacks = callbacks;
         this.hls = new Hls({
             xhrSetup: (xhr: XMLHttpRequest) => {
                 xhr.withCredentials = true;
@@ -40,25 +39,18 @@ export class HlsPlayer implements IPlayerStrategy {
         this.hls.loadSource(url);
 
         this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            this.emitter.emit(Events.DEBUG.LOG, {
-                message: `${this.streamerName} -> Live: OK`,
-                type: 'success'
-            });
             this.videoElement.play().catch((e) => console.error("Autoplay failed", e));
+            this.callbacks.onReady();
         });
 
         this.hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
             if (data.fatal) {
-                this.emitter.emit(Events.DEBUG.LOG, {
-                    message: `${this.streamerName} -> Live: ERROR (${data.type})`,
-                    type: 'error'
-                });
-
                 if (data.type === 'networkError') {
-                    // Attempt recovery before removing
                     this.hls.startLoad();
+                    this.callbacks.onFatalError('network');
                 } else if (data.type === 'mediaError') {
                     this.hls.recoverMediaError();
+                    this.callbacks.onFatalError('media');
                 }
             }
         });

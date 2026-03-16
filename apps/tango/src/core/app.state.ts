@@ -18,29 +18,30 @@ export class AppState {
 
     public getState(): IApplicationState {
         return {
-            streamers: this._streamers,
+            streamers: this._streamers.map(s => ({ ...s })),
             currentIndex: this._currentIndex,
             currentStreamer: this.getCurrentStreamer(),
             previousStreamer: this.getPreviousStreamer(),
             nextStreamer: this.getNextStreamer(),
             viewMode: this._viewMode,
+            scrollTarget: this._scrollTarget,
         };
     }
 
     public getCurrentStreamer(): Streamer {
-        return this._streamers[this._currentIndex];
+        return { ...this._streamers[this._currentIndex] };
     }
 
     public getNextStreamer(): Streamer | undefined {
         if (this._currentIndex + 1 < this._streamers.length) {
-            return this._streamers[this._currentIndex + 1];
+            return { ...this._streamers[this._currentIndex + 1] };
         }
         return undefined;
     }
 
     public getPreviousStreamer(): Streamer | undefined {
         if (this._currentIndex - 1 >= 0) {
-            return this._streamers[this._currentIndex - 1];
+            return { ...this._streamers[this._currentIndex - 1] };
         }
         return undefined;
     }
@@ -106,14 +107,12 @@ export class AppState {
     }
 
     public updateFollowingStatus(streamerId: string, isFollowing: boolean): void {
-        const streamer = this._streamers.find((s) => s.streamerId === streamerId);
-        if (streamer) {
-            streamer.isFollowing = isFollowing;
+        const index = this._streamers.findIndex((s) => s.streamerId === streamerId);
+        if (index !== -1) {
+            this._streamers[index] = { ...this._streamers[index], isFollowing };
             this.emitStateChange();
         }
     }
-
-    public get scrollTarget() { return this._scrollTarget; }
 
     public captureScrollAnchor(anchorY: number) {
         this._scrollAnchorY = anchorY;

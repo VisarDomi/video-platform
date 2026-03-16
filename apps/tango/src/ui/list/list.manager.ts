@@ -2,8 +2,7 @@ import { CONSTANTS } from "../../core/constants";
 import { Emitter } from "../../core/emitter";
 import { Events } from "../../core/events";
 import { AliasService } from "../../services/alias.service";
-import { AppState } from "../../core/app.state";
-import { EventPayloads, IApplicationState, Streamer, ViewMode } from "../../types";
+import { EventPayloads, IApplicationState, Streamer } from "../../types";
 
 export class ListManager {
     private dom: {
@@ -11,13 +10,11 @@ export class ListManager {
         videoItemsWrapper: HTMLElement;
     };
     private emitter: Emitter<EventPayloads>;
-    private appState: AppState;
     private aliasService: AliasService;
     private lastRenderedState: string | null = null;
-    private previousViewMode: ViewMode = 'list';
+    private lastState: IApplicationState | null = null;
 
-    constructor(appState: AppState, emitter: Emitter<EventPayloads>, aliasService: AliasService) {
-        this.appState = appState;
+    constructor(emitter: Emitter<EventPayloads>, aliasService: AliasService) {
         this.emitter = emitter;
         this.aliasService = aliasService;
 
@@ -35,24 +32,27 @@ export class ListManager {
         this.dom.videoItemsWrapper.addEventListener("click", this.handleItemClick);
     }
 
-    public initialize() {
-        const state = this.appState.getState();
+    public initialize(state: IApplicationState) {
+        this.lastState = state;
         this.render(state);
-        this.previousViewMode = state.viewMode;
+
     }
 
     private onStateChanged = (state: IApplicationState) => {
+        this.lastState = state;
         this.render(state);
 
         if (state.viewMode === 'video') {
-            this.scrollToTarget();
+            this.scrollToTarget(state);
         }
 
-        this.previousViewMode = state.viewMode;
+
     }
 
     private onUiUpdate = () => {
-        this.render(this.appState.getState());
+        if (this.lastState) {
+            this.render(this.lastState);
+        }
     }
 
     private handleItemClick = (e: Event) => {
@@ -60,7 +60,7 @@ export class ListManager {
         const item = target.closest(".list-item") as HTMLElement;
         if (item && item.dataset.streamerId) {
             const rect = item.getBoundingClientRect();
-            this.appState.captureScrollAnchor(rect.top);
+            this.emitter.emit(Events.UI.CAPTURE_SCROLL_ANCHOR, rect.top);
             this.emitter.emit(Events.UI.PLAY_STREAMER, item.dataset.streamerId);
         }
     }
@@ -102,8 +102,8 @@ export class ListManager {
         this.dom.videoItemsWrapper.appendChild(fragment);
     }
 
-    private scrollToTarget() {
-        const target = this.appState.scrollTarget;
+    private scrollToTarget(state: IApplicationState) {
+        const target = state.scrollTarget;
         if (!target) return;
         const el = this.dom.videoItemsWrapper.querySelector(
             `.list-item[data-streamer-id="${target.streamerId}"]`

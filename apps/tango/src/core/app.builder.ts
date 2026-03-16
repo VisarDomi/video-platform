@@ -7,7 +7,7 @@ import { AppController } from "../app.controller";
 import { VideoManager } from "../video/video.manager";
 import { UIManager } from "../ui/ui.manager";
 import { ListManager } from "../ui/list/list.manager";
-import { AuthService } from "../services/api/auth.service";
+import { AppState } from "./app.state";
 import { ServiceKeys } from "./service.keys";
 import { CONSTANTS } from "./constants";
 import { UI_STYLES } from "../ui/ui.resources";
@@ -105,12 +105,13 @@ export class ApplicationBuilder {
             }
 
             // Initialize List View content
-            listManager.initialize();
+            const appState = container.resolve<AppState>(ServiceKeys.APP_STATE);
+            listManager.initialize(appState.getState());
 
             appController.initialPrefetch();
             streamLoaderService.startAutoLoading(this.originalSetInterval);
 
-            await videoManager.initialize();
+            await videoManager.initialize(appState.getState());
         };
 
         return { run };

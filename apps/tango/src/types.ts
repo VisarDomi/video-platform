@@ -11,7 +11,6 @@ export interface Streamer {
 
 export interface UIUpdateState {
     alias: string;
-    isFollowing: boolean;
 }
 
 export type ViewMode = 'list' | 'video';
@@ -23,6 +22,7 @@ export interface IApplicationState {
     previousStreamer: Streamer | undefined;
     nextStreamer: Streamer | undefined;
     viewMode: ViewMode;
+    scrollTarget: { streamerId: string; anchorY: number } | null;
 }
 
 export interface IPlayerStrategy {
@@ -48,6 +48,7 @@ export type EventPayloads = {
     [Events.UI.SHOW_LIST]: void;
     [Events.UI.PLAY_STREAMER]: string; // streamerId
     [Events.UI.SET_UI_VISIBLE]: boolean;
+    [Events.UI.CAPTURE_SCROLL_ANCHOR]: number;
 
     [Events.VIDEO.MULTI_BROADCAST_FETCH_START]: void;
     [Events.VIDEO.MULTI_BROADCAST_FETCH_END]: void;

@@ -45,6 +45,7 @@ export class AppController {
         this.emitter.on(Events.APP.INSERT_STREAMERS_AFTER_CURRENT, this.insertStreamersAfterCurrent);
         this.emitter.on(Events.UI.ADD_TO_DOWNLOAD_LIST, this.addToDownloadList);
         this.emitter.on(Events.UI.REMOVE_FROM_DOWNLOAD_LIST, this.removeFromDownloadList);
+        this.emitter.on(Events.UI.CAPTURE_SCROLL_ANCHOR, this.captureScrollAnchor);
     }
 
     public initialPrefetch() {
@@ -61,45 +62,45 @@ export class AppController {
     private follow = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const originalStatus = streamer.isFollowing;
+        const { streamerId, isFollowing: originalStatus } = streamer;
 
-        this.store.updateFollowingStatus(streamer.streamerId, true);
+        this.store.updateFollowingStatus(streamerId, true);
 
         try {
-            await this.actionService.follow(streamer.streamerId);
+            await this.actionService.follow(streamerId);
         } catch (error) {
             console.error("Failed to follow streamer:", error);
-            this.store.updateFollowingStatus(streamer.streamerId, originalStatus);
+            this.store.updateFollowingStatus(streamerId, originalStatus);
         }
     };
 
     private unfollow = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const originalStatus = streamer.isFollowing;
+        const { streamerId, isFollowing: originalStatus } = streamer;
 
-        this.store.updateFollowingStatus(streamer.streamerId, false);
+        this.store.updateFollowingStatus(streamerId, false);
 
         try {
-            await this.actionService.unfollow(streamer.streamerId);
+            await this.actionService.unfollow(streamerId);
         } catch (error) {
             console.error("Failed to unfollow streamer:", error);
-            this.store.updateFollowingStatus(streamer.streamerId, originalStatus);
+            this.store.updateFollowingStatus(streamerId, originalStatus);
         }
     };
 
     private block = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-
-        if (streamer.isFollowing) {
-            await this.unfollow();
-        }
+        const { streamerId, isFollowing } = streamer;
 
         try {
-            const response = await this.actionService.block(streamer.streamerId);
+            if (isFollowing) {
+                await this.actionService.unfollow(streamerId);
+            }
+            const response = await this.actionService.block(streamerId);
             if (response.ok) {
-                this.removeStreamer(streamer.streamerId);
+                this.store.removeStreamer(streamerId);
             }
         } catch (error) {
             console.error("Failed to block streamer:", error);
@@ -126,6 +127,10 @@ export class AppController {
         this.store.playStreamer(streamerId);
     };
 
+    private captureScrollAnchor = (anchorY: number) => {
+        this.store.captureScrollAnchor(anchorY);
+    };
+
     private insertStreamersAfterCurrent = (streamers: Streamer[]) => {
         this.store.insertStreamersAfterCurrent(streamers);
     };
@@ -136,7 +141,7 @@ export class AppController {
         const alias = this.aliasService.getCachedAlias(streamer.streamerId);
         if (!alias) return;
         await this.downloadListService.add(alias);
-        this.emitter.emit(Events.APP.UPDATE_UI, { alias, isFollowing: streamer.isFollowing });
+        this.emitter.emit(Events.APP.UPDATE_UI, { alias });
     };
 
     private removeFromDownloadList = async () => {
@@ -145,6 +150,6 @@ export class AppController {
         const alias = this.aliasService.getCachedAlias(streamer.streamerId);
         if (!alias) return;
         await this.downloadListService.remove(alias);
-        this.emitter.emit(Events.APP.UPDATE_UI, { alias, isFollowing: streamer.isFollowing });
+        this.emitter.emit(Events.APP.UPDATE_UI, { alias });
     };
 }

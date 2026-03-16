@@ -11,6 +11,7 @@ export const Events = {
         SHOW_LIST: "ui:showList",
         PLAY_STREAMER: "ui:playStreamer",
         SET_UI_VISIBLE: "ui:setUiVisible",
+        CAPTURE_SCROLL_ANCHOR: "ui:captureScrollAnchor",
     },
     VIDEO: {
         MULTI_BROADCAST_FETCH_START: "video:multiBroadcastFetchStart",

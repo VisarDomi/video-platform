@@ -4,7 +4,7 @@ import { AliasService } from "../../services/alias.service";
 import { DownloadListService } from "../../services/api/download-list.service";
 import { LiveUrlService } from "../../video/live-url.service";
 import { HlsPlayer } from "../../video/player/hls.player";
-import { EventPayloads, IPlayerStrategy, Streamer } from "../../types";
+import { EventPayloads, IPlayerStrategy, Streamer, UIUpdateState } from "../../types";
 import { STREAM_UNIT_TEMPLATE } from "./stream-unit.dom";
 import { GestureController, GestureElements, PeekCallbacks } from "../gesture/gesture-controller";
 
@@ -31,6 +31,10 @@ export class StreamUnit {
     private blockConfirmState: boolean = false;
     private audioOnly: boolean = false;
     private peekCallbacks?: PeekCallbacks;
+
+    // Ownership token: each update() call increments this.
+    // Async continuations only mutate if they still own the current generation.
+    private updateGeneration: number = 0;
 
     constructor(
         emitter: Emitter<EventPayloads>,
@@ -62,6 +66,11 @@ export class StreamUnit {
     }
 
     public async update(streamer: Streamer | undefined) {
+        // Acquire ownership: increment generation and capture token.
+        // All async continuations must check owns() — stale generations are no-ops.
+        const gen = ++this.updateGeneration;
+        const owns = () => this.updateGeneration === gen;
+
         if (streamer && this.currentStreamer?.streamerId === streamer.streamerId) {
             this.currentStreamer = streamer;
             this._updateNameText(streamer);
@@ -95,10 +104,9 @@ export class StreamUnit {
         // Async: Fetch Alias & Name.
         // We use .then() to trigger a re-render of the text without blocking video loading.
         this.aliasService.getAliasFor(streamer.streamerId).then(() => {
-            if (this.currentStreamer?.streamerId === targetStreamerId) {
-                this._updateNameText(streamer);
-                this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
-            }
+            if (!owns()) return;
+            this._updateNameText(this.currentStreamer!);
+            this.updateDownloadListButton(this.aliasService.getCachedAlias(targetStreamerId));
         });
 
         // Async: Video
@@ -106,14 +114,30 @@ export class StreamUnit {
             const cachedAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
             const liveUrl = await this.liveUrlService.fetchAndParseLiveUrl(streamer, cachedAlias);
 
-            if (this.currentStreamer?.streamerId !== targetStreamerId) return;
+            if (!owns()) return;
 
             if (liveUrl) {
-                // Fetch alias again for debug logs (might have updated in the split second)
                 const finalAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
-                this.player = new HlsPlayer(this.videoElement, this.emitter, finalAlias, streamer.streamerId);
+                this.player = new HlsPlayer(this.videoElement, {
+                    onReady: () => {
+                        this.emitter.emit(Events.DEBUG.LOG, {
+                            message: `${finalAlias} -> Live: OK`,
+                            type: 'success'
+                        });
+                    },
+                    onFatalError: (type) => {
+                        if (!owns()) return;
+                        this.emitter.emit(Events.DEBUG.LOG, {
+                            message: `${finalAlias} -> Live: ERROR (${type})`,
+                            type: 'error'
+                        });
+                        if (type === 'network') {
+                            this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
+                        }
+                    },
+                });
                 this.player.loadSource(liveUrl);
-                this._detectAudioOnly(targetStreamerId);
+                this._detectAudioOnly(gen);
             } else {
                 this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
             }
@@ -123,10 +147,10 @@ export class StreamUnit {
         }
     }
 
-    private _detectAudioOnly(targetStreamerId: string) {
+    private _detectAudioOnly(ownerGen: number) {
         const onPlaying = () => {
             this.videoElement.removeEventListener('playing', onPlaying);
-            if (this.currentStreamer?.streamerId !== targetStreamerId) return;
+            if (this.updateGeneration !== ownerGen) return;
             if (this.videoElement.videoWidth === 0 || this.videoElement.videoHeight === 0) {
                 this.audioOnly = true;
                 if (this.currentStreamer) this._updateNameText(this.currentStreamer);
@@ -148,7 +172,7 @@ export class StreamUnit {
         this.nameEl.textContent = `${displayAlias} ${displayName}${audioTag}`;
     }
 
-    private onGlobalUiUpdate = () => {
+    private onGlobalUiUpdate = (_payload: UIUpdateState) => {
         if (this.currentStreamer) {
             this._updateNameText(this.currentStreamer);
             this.updateFollowButton(this.currentStreamer.isFollowing);

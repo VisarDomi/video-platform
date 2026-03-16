@@ -83,7 +83,6 @@ export class ServiceContainer {
         container.register(
             ServiceKeys.LIST_MANAGER,
             (c) => new ListManager(
-                c.resolve(ServiceKeys.APP_STATE),
                 c.resolve(ServiceKeys.EMITTER),
                 c.resolve(ServiceKeys.ALIAS_SERVICE)
             )
@@ -93,7 +92,6 @@ export class ServiceContainer {
             ServiceKeys.VIDEO_MANAGER,
             (c) =>
                 new VideoManager({
-                    initialState: c.resolve<AppState>(ServiceKeys.APP_STATE).getState(),
                     videosContainer: c.resolve<UIManager>(ServiceKeys.UI_MANAGER).videosContainer,
                     gestureElements: {
                         videoView: c.resolve<UIManager>(ServiceKeys.UI_MANAGER).videoViewElement,

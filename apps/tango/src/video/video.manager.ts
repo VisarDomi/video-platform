@@ -10,7 +10,6 @@ import { StreamUnit } from "../ui/stream-unit/stream-unit";
 import { GestureElements, PeekCallbacks } from "../ui/gesture/gesture-controller";
 
 interface VideoManagerDependencies {
-    initialState: IApplicationState;
     videosContainer: HTMLDivElement;
     gestureElements: GestureElements;
     emitter: Emitter<EventPayloads>;
@@ -34,14 +33,17 @@ export class VideoManager {
     private gestureElements: GestureElements;
     private originalSetTimeout: typeof window.setTimeout;
     private originalAddEventListener: typeof EventTarget.prototype.addEventListener;
-    private previousIndex: number;
+    private previousIndex: number = 0;
     private processedForMulti: Set<string> = new Set();
     private lastStreamerId: string | null = null;
-    private initialState: IApplicationState;
 
     private units: StreamUnit[] = [];
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
+
+    // Ownership token: only the current generation owns the right to mutate state.
+    // Each onStateChanged call increments this; stale generations become no-ops.
+    private stateGeneration: number = 0;
 
     // Peek swipe
     private readonly NAV_COMMIT_THRESHOLD = 0.2;
@@ -53,7 +55,6 @@ export class VideoManager {
     private isVisible = true;
 
     constructor(dependencies: VideoManagerDependencies) {
-        this.initialState = dependencies.initialState;
         this.videosContainer = dependencies.videosContainer;
         this.gestureElements = dependencies.gestureElements;
         this.emitter = dependencies.emitter;
@@ -64,7 +65,6 @@ export class VideoManager {
         this.downloadListService = dependencies.downloadListService;
         this.originalSetTimeout = dependencies.originalSetTimeout;
         this.originalAddEventListener = dependencies.originalAddEventListener;
-        this.previousIndex = this.initialState.currentIndex;
     }
 
     public registerListeners() {
@@ -126,12 +126,12 @@ export class VideoManager {
         }
     }
 
-    public async initialize() {
+    public async initialize(state: IApplicationState) {
         const [prev, curr, next] = [this._createUnit(), this._createUnit(), this._createUnit()];
         this.units = [prev, curr, next];
         this.videosContainer.append(prev.element, curr.element, next.element);
 
-        const state = this.initialState;
+        this.previousIndex = state.currentIndex;
         this.lastStreamerId = state.currentStreamer?.streamerId || null;
 
         await Promise.all([
@@ -169,6 +169,11 @@ export class VideoManager {
     };
 
     private onStateChanged = async (state: IApplicationState) => {
+        // Acquire ownership: increment generation and capture token.
+        // Any async continuation must check owns() before mutating.
+        const gen = ++this.stateGeneration;
+        const owns = () => this.stateGeneration === gen;
+
         const currentStreamer = state.currentStreamer;
         const currentId = currentStreamer?.streamerId;
 
@@ -186,16 +191,16 @@ export class VideoManager {
 
         const newIndex = state.currentIndex;
         const oldIndex = this.previousIndex;
+        this.previousIndex = newIndex;
 
         if (newIndex === oldIndex) {
-            // Identity changed, but index is same (e.g. Remove Streamer)
-            // Need to update active unit AND neighbors because the array shifted
             if (state.viewMode === 'video') {
                 this.activeUnit?.update(state.currentStreamer);
                 await Promise.all([
                     this.units[0].update(state.previousStreamer),
                     this.units[2].update(state.nextStreamer)
                 ]);
+                if (!owns()) return;
                 await this._checkForMultiBroadcast(state.currentStreamer);
             }
             return;
@@ -212,7 +217,7 @@ export class VideoManager {
             await this._handleJumpNavigation(state);
         }
 
-        this.previousIndex = newIndex;
+        if (!owns()) return;
 
         if (this.activeUnit && state.viewMode === 'video') {
             this.activeUnit.play();
@@ -300,7 +305,7 @@ export class VideoManager {
 
     private async _primeLiveUrlCache(streamers: Streamer[]) {
         console.log("Starting background cache priming...");
-        const streamersCopy = [...streamers];
+        const streamersCopy = streamers.map(s => ({ ...s }));
 
         for (const streamer of streamersCopy) {
             const displayName = await this.aliasService.getAliasFor(streamer.streamerId);
