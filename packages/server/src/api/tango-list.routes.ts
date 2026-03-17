@@ -28,7 +28,7 @@ router.get("/api/tango/list", async (_req, res) => {
         const identifiers = content.split("\n")
             .map(line => parseLine(line))
             .filter((p): p is NonNullable<typeof p> => p !== null)
-            .map(p => p.alias);
+            .map(p => p.accountId);
         res.json(identifiers);
     } catch {
         res.json([]);
