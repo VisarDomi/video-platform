@@ -5,13 +5,10 @@ import { DownloadListService } from "./services/api/download-list.service";
 import { AppState } from "./core/app.state";
 import { EventPayloads, Streamer } from "./types";
 import { StreamLoaderService } from "./services/stream-loader.service";
-import { AliasService } from "./services/alias.service";
-
 interface AppControllerDependencies {
     actionService: ActionService;
     downloadListService: DownloadListService;
     streamLoaderService: StreamLoaderService;
-    aliasService: AliasService;
     emitter: Emitter<EventPayloads>;
     appState: AppState;
 }
@@ -20,7 +17,6 @@ export class AppController {
     private actionService: ActionService;
     private downloadListService: DownloadListService;
     private streamLoaderService: StreamLoaderService;
-    private aliasService: AliasService;
     private emitter: Emitter<EventPayloads>;
     private store: AppState;
 
@@ -28,7 +24,6 @@ export class AppController {
         this.actionService = dependencies.actionService;
         this.downloadListService = dependencies.downloadListService;
         this.streamLoaderService = dependencies.streamLoaderService;
-        this.aliasService = dependencies.aliasService;
         this.emitter = dependencies.emitter;
         this.store = dependencies.appState;
     }
@@ -138,18 +133,14 @@ export class AppController {
     private addToDownloadList = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const alias = this.aliasService.getCachedAlias(streamer.streamerId);
-        if (!alias) return;
-        await this.downloadListService.add(alias);
-        this.emitter.emit(Events.APP.UPDATE_UI, { alias });
+        await this.downloadListService.add(streamer.streamerId);
+        this.emitter.emit(Events.APP.UPDATE_UI, { streamerId: streamer.streamerId });
     };
 
     private removeFromDownloadList = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const alias = this.aliasService.getCachedAlias(streamer.streamerId);
-        if (!alias) return;
-        await this.downloadListService.remove(alias);
-        this.emitter.emit(Events.APP.UPDATE_UI, { alias });
+        await this.downloadListService.remove(streamer.streamerId);
+        this.emitter.emit(Events.APP.UPDATE_UI, { streamerId: streamer.streamerId });
     };
 }

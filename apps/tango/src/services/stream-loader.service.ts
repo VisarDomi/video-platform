@@ -62,7 +62,7 @@ export class StreamLoaderService {
             this.aliasService.getAliasesFor(streamersToPrefetch.map(s => s.streamerId), forceUpdate).finally(() => {
                 streamerIdsBeingFetched.forEach((id) => this.prefetching.delete(id));
                 // Signal UI to re-read from cache/memory
-                this.emitter.emit(Events.APP.UPDATE_UI, { alias: '' });
+                this.emitter.emit(Events.APP.UPDATE_UI, { streamerId: '' });
             });
         }
     }

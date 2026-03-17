@@ -75,7 +75,7 @@ export class StreamUnit {
             this.currentStreamer = streamer;
             this._updateNameText(streamer);
             this.updateFollowButton(streamer.isFollowing);
-            this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
+            this.updateDownloadListButton(streamer.streamerId);
             return;
         }
 
@@ -99,14 +99,14 @@ export class StreamUnit {
         // Immediate UI Update (Uses whatever is currently in memory/cache)
         this._updateNameText(streamer);
         this.updateFollowButton(streamer.isFollowing);
-        this.updateDownloadListButton(this.aliasService.getCachedAlias(streamer.streamerId));
+        this.updateDownloadListButton(streamer.streamerId);
 
         // Async: Fetch Alias & Name.
         // We use .then() to trigger a re-render of the text without blocking video loading.
         this.aliasService.getAliasFor(streamer.streamerId).then(() => {
             if (!owns()) return;
             this._updateNameText(this.currentStreamer!);
-            this.updateDownloadListButton(this.aliasService.getCachedAlias(targetStreamerId));
+            this.updateDownloadListButton(targetStreamerId);
         });
 
         // Async: Video
@@ -176,7 +176,7 @@ export class StreamUnit {
         if (this.currentStreamer) {
             this._updateNameText(this.currentStreamer);
             this.updateFollowButton(this.currentStreamer.isFollowing);
-            this.updateDownloadListButton(this.aliasService.getCachedAlias(this.currentStreamer.streamerId));
+            this.updateDownloadListButton(this.currentStreamer.streamerId);
         }
     }
 
@@ -269,14 +269,14 @@ export class StreamUnit {
         }
     }
 
-    private updateDownloadListButton(alias: string | undefined) {
-        if (!alias) {
+    private updateDownloadListButton(streamerId: string | undefined) {
+        if (!streamerId) {
             this.downloadListBtn.dataset.inList = "false";
             this.downloadListBtn.textContent = "📥";
             this.downloadListBtn.classList.remove("btn-unfollow");
             return;
         }
-        const inList = this.downloadListService.isInList(alias);
+        const inList = this.downloadListService.isInList(streamerId);
         this.downloadListBtn.dataset.inList = String(inList);
         this.downloadListBtn.textContent = inList ? "✅" : "📥";
         this.downloadListBtn.classList.toggle("btn-unfollow", inList);

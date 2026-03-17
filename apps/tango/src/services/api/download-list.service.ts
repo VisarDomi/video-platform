@@ -1,32 +1,32 @@
 import { CONSTANTS } from "../../core/constants";
 
 export class DownloadListService {
-    private aliases = new Set<string>();
+    private accountIds = new Set<string>();
     private baseUrl = CONSTANTS.VIDEO_PLATFORM.BASE_URL;
 
     public async fetchList(): Promise<void> {
         try {
             const res = await fetch(`${this.baseUrl}/api/tango/list`);
             const data = await res.json();
-            this.aliases = new Set(Array.isArray(data) ? data : []);
+            this.accountIds = new Set(Array.isArray(data) ? data : []);
         } catch (e) {
             console.error("DownloadListService: failed to fetch list", e);
         }
     }
 
-    public isInList(alias: string): boolean {
-        return this.aliases.has(alias);
+    public isInList(streamerId: string): boolean {
+        return this.accountIds.has(streamerId);
     }
 
-    public async add(alias: string): Promise<boolean> {
+    public async add(streamerId: string): Promise<boolean> {
         try {
             const res = await fetch(`${this.baseUrl}/api/tango/add`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ identifier: alias }),
+                body: JSON.stringify({ identifier: streamerId }),
             });
             if (res.ok) {
-                this.aliases.add(alias);
+                this.accountIds.add(streamerId);
                 return true;
             }
         } catch (e) {
@@ -35,15 +35,15 @@ export class DownloadListService {
         return false;
     }
 
-    public async remove(alias: string): Promise<boolean> {
+    public async remove(streamerId: string): Promise<boolean> {
         try {
             const res = await fetch(`${this.baseUrl}/api/tango/remove`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ identifier: alias }),
+                body: JSON.stringify({ identifier: streamerId }),
             });
             if (res.ok) {
-                this.aliases.delete(alias);
+                this.accountIds.delete(streamerId);
                 return true;
             }
         } catch (e) {

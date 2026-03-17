@@ -10,7 +10,7 @@ export interface Streamer {
 }
 
 export interface UIUpdateState {
-    alias: string;
+    streamerId: string;
 }
 
 export type ViewMode = 'list' | 'video';

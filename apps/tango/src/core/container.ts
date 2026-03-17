@@ -115,7 +115,6 @@ export class ServiceContainer {
                     actionService: c.resolve(ServiceKeys.ACTION_SERVICE),
                     downloadListService: c.resolve(ServiceKeys.DOWNLOAD_LIST_SERVICE),
                     streamLoaderService: c.resolve(ServiceKeys.STREAM_LOADER_SERVICE),
-                    aliasService: c.resolve(ServiceKeys.ALIAS_SERVICE),
                     emitter: c.resolve(ServiceKeys.EMITTER),
                     appState: c.resolve(ServiceKeys.APP_STATE),
                 })
