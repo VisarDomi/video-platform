@@ -5,7 +5,6 @@ import * as path from "path";
 import logger from "../common/logger.js";
 import { FileSystemManager } from "../common/fileSystemManager.js";
 import { StreamDownloader } from "../services/download/streamDownloader.js";
-import { PlaylistManager } from "../services/download/playlistManager.js";
 import { IStreamProvider } from "../services/core/interfaces.js";
 import { DownloadHandle } from "../services/state/downloadsManager.js";
 

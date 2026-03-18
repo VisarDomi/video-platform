@@ -4,7 +4,7 @@ import logger from "../../../common/logger.js";
 import * as config from "../../../common/config.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { TargetManager } from "../../common/targetManager.js";
-import { StreaMonitorAdapter, SegmentEntry } from "../api/streaMonitorAdapter.js";
+import { StreaMonitorAdapter } from "../api/streaMonitorAdapter.js";
 import { PlaylistManager } from "../../download/playlistManager.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 
