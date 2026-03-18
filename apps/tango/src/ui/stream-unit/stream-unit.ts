@@ -272,13 +272,13 @@ export class StreamUnit {
     private updateDownloadListButton(streamerId: string | undefined) {
         if (!streamerId) {
             this.downloadListBtn.dataset.inList = "false";
-            this.downloadListBtn.textContent = "📥";
+            this.downloadListBtn.textContent = "+";
             this.downloadListBtn.classList.remove("btn-unfollow");
             return;
         }
         const inList = this.downloadListService.isInList(streamerId);
         this.downloadListBtn.dataset.inList = String(inList);
-        this.downloadListBtn.textContent = inList ? "✅" : "📥";
+        this.downloadListBtn.textContent = inList ? "−" : "+";
         this.downloadListBtn.classList.toggle("btn-unfollow", inList);
     }
 
