@@ -24,10 +24,6 @@ export class StreamDownloader {
         this.aborted = true;
     }
 
-    public get isAborted(): boolean {
-        return this.aborted;
-    }
-
     public async start() {
         if (!this.downloadHandle.state) {
             logger.error(`Could not find state for download with handle. Aborting.`);
