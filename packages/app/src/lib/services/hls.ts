@@ -9,12 +9,30 @@ export interface PlaylistSegment {
 export interface PlaylistData {
 	segments: PlaylistSegment[];
 	isLive: boolean;
+	isFmp4: boolean;
 }
 
 const cache = new Map<string, PlaylistData>();
 
 export function clearPlaylistCache(filename: string) {
 	cache.delete(filename);
+}
+
+/**
+ * Quick check if a playlist uses fMP4 segments (EXT-X-MAP).
+ * Fetches and caches the playlist if not already cached.
+ */
+export async function isFmp4Playlist(filename: string): Promise<boolean> {
+	const cached = cache.get(filename);
+	if (cached) return cached.isFmp4;
+
+	try {
+		const response = await fetch(API.HLS_PLAYLIST(filename));
+		const text = await response.text();
+		return text.includes('#EXT-X-MAP:');
+	} catch {
+		return false;
+	}
 }
 
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
@@ -26,6 +44,7 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 	const text = await response.text();
 
 	const isLive = !text.includes('#EXT-X-ENDLIST');
+	const isFmp4 = text.includes('#EXT-X-MAP:');
 
 	const lines = text.split('\n');
 	const segments: PlaylistSegment[] = [];
@@ -39,7 +58,7 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 		}
 	}
 
-	const data: PlaylistData = { segments, isLive };
+	const data: PlaylistData = { segments, isLive, isFmp4 };
 	cache.set(video.filename, data);
 	return data;
 }

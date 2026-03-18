@@ -17,6 +17,8 @@ interface ActiveSession {
     jsonlOffset: number;
     masterUrl: string;
     headerWritten: boolean;
+    hasInitSegment: boolean;
+    initSegmentName: string;
     segmentCount: number;
     trackedSince: number;
 }
@@ -97,12 +99,14 @@ export class ScDiscoveryService {
                 jsonlOffset: 0,
                 masterUrl,
                 headerWritten: false,
+                hasInitSegment: false,
+                initSegmentName: "",
                 segmentCount: 0,
                 trackedSince: Date.now(),
             };
 
             this.activeSessions.set(sessionDir, session);
-            logger.info(`[SC] Started tracking session (resume=${existingSegmentCount > 0}, segs=${existingSegmentCount}): ${path.basename(sessionDir)}`);
+            logger.info(`[SC] Started tracking session: ${path.basename(sessionDir)}`);
         }
 
         // Tail segments.jsonl for each active session
@@ -137,30 +141,27 @@ export class ScDiscoveryService {
 
         for (const entry of entries) {
             if (entry.init) {
-                if (!session.headerWritten) {
-                    const playlistPath = path.join(session.sessionDir, "playlist.m3u8");
-                    const header =
-                        "#EXTM3U\n" +
-                        "#EXT-X-VERSION:7\n" +
-                        "#EXT-X-TARGETDURATION:3\n" +
-                        "#EXT-X-MEDIA-SEQUENCE:0\n" +
-                        `#EXT-X-MAP:URI="${entry.name}"\n`;
-                    await FileSystemManager.writeFile(playlistPath, header);
-                    session.headerWritten = true;
-                    logger.info(`[SC] Wrote fMP4 playlist header for ${session.username}`);
-                }
+                session.hasInitSegment = true;
+                session.initSegmentName = entry.name;
                 continue;
             }
 
+            // Write header on first real segment so we know the actual duration
             if (!session.headerWritten) {
+                const targetDuration = Math.ceil(entry.duration);
                 const playlistPath = path.join(session.sessionDir, "playlist.m3u8");
-                const header =
-                    "#EXTM3U\n" +
-                    "#EXT-X-VERSION:3\n" +
-                    "#EXT-X-TARGETDURATION:3\n" +
-                    "#EXT-X-MEDIA-SEQUENCE:0\n";
-                await FileSystemManager.writeFile(playlistPath, header);
+                const lines = [
+                    "#EXTM3U",
+                    session.hasInitSegment ? "#EXT-X-VERSION:7" : "#EXT-X-VERSION:3",
+                    `#EXT-X-TARGETDURATION:${targetDuration}`,
+                    "#EXT-X-MEDIA-SEQUENCE:0",
+                ];
+                if (session.hasInitSegment) {
+                    lines.push(`#EXT-X-MAP:URI="${session.initSegmentName}"`);
+                }
+                await FileSystemManager.writeFile(playlistPath, lines.join("\n") + "\n");
                 session.headerWritten = true;
+                logger.info(`[SC] Wrote playlist header for ${session.username} (targetDuration=${targetDuration})`);
             }
 
             const segment = {
