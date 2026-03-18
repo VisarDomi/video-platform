@@ -19,7 +19,7 @@ import { LadderDiscoveryService } from "./ladder/discovery/discoveryService.js";
 
 // FMP4 Specific Imports
 import { createScTargetManager } from "./fmp4/discovery/targetManager.js";
-import { ScClient } from "./fmp4/api/scClient.js";
+import { StreaMonitorAdapter } from "./fmp4/api/streaMonitorAdapter.js";
 import { ScDiscoveryService } from "./fmp4/discovery/discoveryService.js";
 
 // TsLive Target Manager
@@ -78,11 +78,11 @@ export class DownloaderService {
         const ladderDiscoveryService = new LadderDiscoveryService(ladderTargetManager, ladderClient, downloadsManager);
         // --------------------------
 
-        // --- FMP4 Initialization ---
+        // --- FMP4 Initialization (StreaMonitor backend) ---
         const scTargetManager = createScTargetManager();
-        const scClient = new ScClient();
-        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
-        // -------------------------
+        const scAdapter = new StreaMonitorAdapter();
+        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scAdapter, downloadsManager);
+        // -------------------------------------------------
 
         // --- TsLive Target Manager (for tslive.txt filtering) ---
         const tsliveTargetManager = createTsLiveTargetManager();
