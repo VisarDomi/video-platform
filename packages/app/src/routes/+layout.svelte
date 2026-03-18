@@ -8,6 +8,17 @@
 		e.preventDefault();
 	}
 
+	function handleOrientationChange() {
+		// Force viewport recalculation to prevent iOS PWA auto-zoom on rotation
+		const viewport = document.querySelector('meta[name="viewport"]');
+		if (!viewport) return;
+		const content = viewport.getAttribute('content')!;
+		viewport.setAttribute('content', 'width=device-width');
+		setTimeout(() => {
+			viewport.setAttribute('content', content);
+		}, 10);
+	}
+
 	onMount(() => {
 		initAppDimensions();
 
@@ -19,12 +30,16 @@
 		document.addEventListener('gesturestart', preventZoom, { passive: false });
 		document.addEventListener('gesturechange', preventZoom, { passive: false });
 		document.addEventListener('gestureend', preventZoom, { passive: false });
+
+		// Fix iOS standalone PWA auto-zoom on rotation
+		window.addEventListener('orientationchange', handleOrientationChange);
 	});
 
 	onDestroy(() => {
 		document.removeEventListener('gesturestart', preventZoom);
 		document.removeEventListener('gesturechange', preventZoom);
 		document.removeEventListener('gestureend', preventZoom);
+		window.removeEventListener('orientationchange', handleOrientationChange);
 	});
 </script>
 

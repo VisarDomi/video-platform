@@ -90,7 +90,9 @@
 		navigate: doNavigate,
 		navPeekUpdate: (dy) => engine.navPeekUpdate(dy),
 		navPeekRelease: (dy, onDone) => engine.navPeekRelease(dy, doNavigate, onDone),
-		navPeekCancel: () => engine.navPeekCancel()
+		navPeekCancel: () => engine.navPeekCancel(),
+		applyZoom: (s, x, y) => engine.applyZoom(s, x, y),
+		resetZoom: () => engine.resetZoom()
 	});
 
 	// --- Reconnection / freeze recovery ---

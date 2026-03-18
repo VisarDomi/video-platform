@@ -14,6 +14,8 @@ export interface GestureCallbacks {
 	navPeekUpdate(dy: number): void;
 	navPeekRelease(dy: number, onDone: () => void): void;
 	navPeekCancel(): void;
+	applyZoom(scale: number, x: number, y: number): void;
+	resetZoom(): void;
 }
 
 export class GestureController {
@@ -22,12 +24,25 @@ export class GestureController {
 	private swipeStartX = 0;
 	private swipeStartY = 0;
 	private swipeAxis: 'none' | 'horizontal' | 'vertical' = 'none';
-	private swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' = 'none';
+	private swipeType: 'none' | 'edge-back' | 'seek' | 'nav' | 'ui' | 'pinch' = 'none';
 	private seekBaseTime = 0;
 	private lastMultiTouchTime = 0;
 	private _swipeProgress = 0;
 	private navAnimating = false;
 	private lockDx = 0;
+
+	// Zoom state — persists across gestures, reset on nav or video change
+	private zoomScale = 1;
+	private zoomX = 0;
+	private zoomY = 0;
+
+	// Pinch tracking — per-gesture
+	private pinchStartDist = 0;
+	private pinchStartScale = 1;
+	private pinchStartCenterX = 0;
+	private pinchStartCenterY = 0;
+	private pinchStartZoomX = 0;
+	private pinchStartZoomY = 0;
 
 	swipeProgress = $state(0);
 	isSwiping = $state(false);
@@ -39,6 +54,7 @@ export class GestureController {
 	private readonly UI_SWIPE_THRESHOLD = 80;
 	private readonly SEEK_RATE = 60;
 	private readonly MULTI_TOUCH_DEBOUNCE_MS = 100;
+	private readonly MAX_ZOOM = 4;
 
 	constructor(
 		private store: PlayerStore,
@@ -61,6 +77,52 @@ export class GestureController {
 		};
 	}
 
+	resetZoom(): void {
+		if (this.zoomScale !== 1 || this.zoomX !== 0 || this.zoomY !== 0) {
+			this.zoomScale = 1;
+			this.zoomX = 0;
+			this.zoomY = 0;
+			this.callbacks.resetZoom();
+		}
+	}
+
+	private getTouchDistance(t1: Touch, t2: Touch): number {
+		const dx = t1.clientX - t2.clientX;
+		const dy = t1.clientY - t2.clientY;
+		return Math.sqrt(dx * dx + dy * dy);
+	}
+
+	private getTouchCenter(t1: Touch, t2: Touch): { x: number; y: number } {
+		return {
+			x: (t1.clientX + t2.clientX) / 2,
+			y: (t1.clientY + t2.clientY) / 2
+		};
+	}
+
+	private clampPan(x: number, y: number, scale: number): { x: number; y: number } {
+		if (scale <= 1) return { x: 0, y: 0 };
+		const maxX = (scale - 1) * window.innerWidth / 2;
+		const maxY = (scale - 1) * window.innerHeight / 2;
+		return {
+			x: Math.max(-maxX, Math.min(maxX, x)),
+			y: Math.max(-maxY, Math.min(maxY, y))
+		};
+	}
+
+	private startPinch(e: TouchEvent): void {
+		const t1 = e.touches[0];
+		const t2 = e.touches[1];
+		this.pinchStartDist = this.getTouchDistance(t1, t2);
+		this.pinchStartScale = this.zoomScale;
+		const center = this.getTouchCenter(t1, t2);
+		this.pinchStartCenterX = center.x;
+		this.pinchStartCenterY = center.y;
+		this.pinchStartZoomX = this.zoomX;
+		this.pinchStartZoomY = this.zoomY;
+		this.swipeType = 'pinch';
+		this.swipeAxis = 'none';
+	}
+
 	private handleTouchCancel = (): void => {
 		if (this.swipeType === 'nav') {
 			this.callbacks.navPeekCancel();
@@ -77,10 +139,16 @@ export class GestureController {
 
 	private handleTouchStart = (e: TouchEvent): void => {
 		if (e.touches.length > 1) {
-			this.lastMultiTouchTime = Date.now();
+			// Cancel-and-switch: if no gesture committed yet, start pinch
+			if (this.swipeAxis === 'none' && !this.swipeAnimating && !this.navAnimating && this.swipeType !== 'pinch') {
+				this.startPinch(e);
+			} else {
+				this.lastMultiTouchTime = Date.now();
+			}
 			return;
 		}
 		if (this.swipeAnimating || this.navAnimating) return;
+		if (this.swipeType === 'pinch') return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -91,11 +159,48 @@ export class GestureController {
 	};
 
 	private handleTouchMove = (e: TouchEvent): void => {
+		if (this.swipeAnimating || this.navAnimating) return;
+
+		// Two-finger: pinch + pan
 		if (e.touches.length > 1) {
-			this.lastMultiTouchTime = Date.now();
+			e.preventDefault();
+
+			if (this.swipeType !== 'pinch') {
+				// Cancel-and-switch: still in deadzone, switch to pinch
+				if (this.swipeAxis === 'none') {
+					this.startPinch(e);
+				} else {
+					// Already committed to single-finger gesture, ignore second finger
+					this.lastMultiTouchTime = Date.now();
+					return;
+				}
+			}
+
+			const t1 = e.touches[0];
+			const t2 = e.touches[1];
+			const dist = this.getTouchDistance(t1, t2);
+			const center = this.getTouchCenter(t1, t2);
+
+			// Scale from pinch distance ratio
+			const rawScale = this.pinchStartScale * (dist / this.pinchStartDist);
+			const scale = Math.max(1, Math.min(this.MAX_ZOOM, rawScale));
+
+			// Pan from center point delta
+			const panDx = center.x - this.pinchStartCenterX;
+			const panDy = center.y - this.pinchStartCenterY;
+			const rawX = this.pinchStartZoomX + panDx;
+			const rawY = this.pinchStartZoomY + panDy;
+			const clamped = this.clampPan(rawX, rawY, scale);
+
+			this.zoomScale = scale;
+			this.zoomX = clamped.x;
+			this.zoomY = clamped.y;
+			this.callbacks.applyZoom(scale, clamped.x, clamped.y);
 			return;
 		}
-		if (this.swipeAnimating || this.navAnimating) return;
+
+		// Single finger — ignore during/right after pinch
+		if (this.swipeType === 'pinch') return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
 		const touch = e.touches[0];
@@ -120,6 +225,10 @@ export class GestureController {
 			} else {
 				this.swipeAxis = 'vertical';
 				this.swipeType = 'nav';
+				// Reset zoom when starting nav — nav transforms conflict with zoom transforms
+				if (this.zoomScale > 1) {
+					this.resetZoom();
+				}
 			}
 		}
 
@@ -144,6 +253,24 @@ export class GestureController {
 	};
 
 	private handleTouchEnd = (e: TouchEvent): void => {
+		// Pinch end handling
+		if (this.swipeType === 'pinch') {
+			if (e.touches.length === 0) {
+				// All fingers lifted — finalize
+				this.swipeType = 'none';
+				this.lastMultiTouchTime = Date.now();
+				// Snap to 1x if barely zoomed
+				if (this.zoomScale < 1.05) {
+					this.resetZoom();
+				}
+			} else {
+				// One finger remains — don't let it start a gesture
+				this.swipeType = 'none';
+				this.lastMultiTouchTime = Date.now();
+			}
+			return;
+		}
+
 		const touch = e.changedTouches[0];
 		const dx = touch.clientX - this.swipeStartX;
 		const dy = touch.clientY - this.swipeStartY;

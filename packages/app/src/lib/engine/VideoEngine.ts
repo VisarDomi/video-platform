@@ -589,6 +589,20 @@ export class VideoEngine {
 		}
 	}
 
+	// --- Zoom ---
+
+	applyZoom(scale: number, x: number, y: number): void {
+		const el = this.getActiveElement();
+		if (!el) return;
+		el.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+	}
+
+	resetZoom(): void {
+		const el = this.getActiveElement();
+		if (!el) return;
+		el.style.transform = '';
+	}
+
 	// --- Seek & Mute ---
 
 	handleSeek(time: number): void {
