@@ -53,9 +53,9 @@ export class StreaMonitorAdapter {
      * Sync targets from sc.txt to StreaMonitor via the command API.
      * Adds missing streamers, removes extras.
      */
-    public async syncTargets(targets: string[]): Promise<void> {
+    public async syncTargets(targets: string[]): Promise<boolean> {
         const statuses = await this.pollStatus();
-        if (!statuses) return;
+        if (!statuses) return false;
         const existing = new Set(statuses.map((s) => s.username));
         const desired = new Set(targets);
 
@@ -74,6 +74,7 @@ export class StreaMonitorAdapter {
                 logger.info(`[SC] Removed ${username} from StreaMonitor`);
             }
         }
+        return true;
     }
 
     /**

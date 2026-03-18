@@ -81,7 +81,7 @@ export class OrphanStreamFinalizer {
                     try {
                         const fileStats = await fs.stat(streamPath);
                         const ageMs = Date.now() - fileStats.mtimeMs;
-                        if (ageMs < 2 * 60 * 1000) {
+                        if (ageMs < 60 * 60 * 1000) {
                             continue;
                         }
                     } catch (e) {

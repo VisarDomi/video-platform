@@ -20,15 +20,16 @@ interface ActiveSession {
     hasInitSegment: boolean;
     initSegmentName: string;
     segmentCount: number;
-    trackedSince: number;
+    offlineSince: number | null;
+    lastHeartbeat: number;
 }
 
 export class ScDiscoveryService {
     private targetManager: TargetManager;
     private adapter: StreaMonitorAdapter;
     private downloadsManager: DownloadsManager;
+    // Keyed by username — one active session per streamer
     private activeSessions: Map<string, ActiveSession> = new Map();
-    private finalizedDirs: Set<string> = new Set();
     private lastSyncedTargets: string = "";
 
     constructor(targetManager: TargetManager, adapter: StreaMonitorAdapter, downloadsManager: DownloadsManager) {
@@ -57,33 +58,48 @@ export class ScDiscoveryService {
 
         const statuses = await this.adapter.pollStatus();
 
+        if (statuses === null) {
+            // API unreachable — keep processing existing sessions but
+            // don't start or finalize anything without a reliable signal.
+            for (const session of this.activeSessions.values()) {
+                await this.processSessionSegments(session);
+            }
+            return;
+        }
+
+        const recordingUsernames = new Set(
+            statuses.filter((s) => s.recording).map((s) => s.username)
+        );
+
         const downloaderPath = path.join(config.getConfig().storagePath, "sc", "downloader");
-        const sessionDirs = await this.adapter.findSessionDirs(downloaderPath);
 
-        for (const sessionDir of sessionDirs) {
-            if (this.activeSessions.has(sessionDir)) continue;
-            if (this.finalizedDirs.has(sessionDir)) continue;
+        // --- Start tracking new recordings (API is the authority) ---
+        for (const username of recordingUsernames) {
+            if (this.activeSessions.has(username)) continue;
+            if (this.downloadsManager.hasStreamer(username)) continue;
 
-            const parsed = this.adapter.parseSessionDirName(sessionDir);
-            if (!parsed) continue;
+            const sessionDir = await this.findLatestSessionDir(downloaderPath, username);
+            if (!sessionDir) continue; // Dir not created yet — will pick up next poll
 
-            const jsonlExists = await FileSystemManager.pathExists(path.join(sessionDir, "segments.jsonl"));
-            if (!jsonlExists) continue;
-
-            if (this.downloadsManager.hasStreamer(parsed.username)) continue;
-
-            const existingPlaylist = await FileSystemManager.readFile(path.join(sessionDir, "playlist.m3u8"));
-            if (existingPlaylist && existingPlaylist.includes("#EXT-X-ENDLIST")) {
-                this.finalizedDirs.add(sessionDir);
-                continue;
+            // Finalize stale playlist from prior crash/restart — no resume, clean cut
+            const existingPlaylist = path.join(sessionDir, "playlist.m3u8");
+            if (await FileSystemManager.pathExists(existingPlaylist)) {
+                const content = await FileSystemManager.readFile(existingPlaylist);
+                if (content && !content.includes("#EXT-X-ENDLIST")) {
+                    logger.info(`[SC] Finalizing stale playlist from prior run: ${path.basename(sessionDir)}`);
+                    const pm = new PlaylistManager(sessionDir);
+                    await pm.finalizePlaylist();
+                    // Skip this dir — next poll will pick up a newer one if still recording
+                    continue;
+                }
             }
 
             logger.info(`[SC] New session detected: ${path.basename(sessionDir)}`);
 
-            const masterUrl = `http://streamonitor-sc/${parsed.username}/${path.basename(sessionDir)}`;
+            const masterUrl = `http://streamonitor-sc/${username}/${path.basename(sessionDir)}`;
             const handle = this.downloadsManager.add(masterUrl, {
-                streamerId: parsed.username,
-                alias: parsed.username,
+                streamerId: username,
+                alias: username,
             });
             if (!handle) continue;
 
@@ -91,7 +107,7 @@ export class ScDiscoveryService {
 
             const session: ActiveSession = {
                 sessionDir,
-                username: parsed.username,
+                username,
                 playlistManager: new PlaylistManager(sessionDir),
                 jsonlOffset: 0,
                 masterUrl,
@@ -99,41 +115,79 @@ export class ScDiscoveryService {
                 hasInitSegment: false,
                 initSegmentName: "",
                 segmentCount: 0,
-                trackedSince: Date.now(),
+                offlineSince: null,
+                lastHeartbeat: Date.now(),
             };
 
-            this.activeSessions.set(sessionDir, session);
+            this.activeSessions.set(username, session);
             logger.info(`[SC] Started tracking session: ${path.basename(sessionDir)}`);
         }
 
-        // Tail segments.jsonl for each active session
-        for (const [sessionDir, session] of this.activeSessions) {
+        // --- Process segments and finalize offline sessions ---
+        for (const [username, session] of this.activeSessions) {
             await this.processSessionSegments(session);
 
-            // Only finalize if we have a reliable signal from StreaMonitor.
-            // null means the API call failed — skip finalization to avoid
-            // killing sessions just because StreaMonitor is unreachable.
-            if (statuses === null) continue;
+            // Heartbeat every 30s
+            if (Date.now() - session.lastHeartbeat >= 30_000) {
+                const offlineSec = session.offlineSince ? Math.round((Date.now() - session.offlineSince) / 1000) : 0;
+                logger.debug(`[SC-DEBUG] HEARTBEAT ${username} segments=${session.segmentCount} offlineSec=${offlineSec} dir=${path.basename(session.sessionDir)}`);
+                session.lastHeartbeat = Date.now();
+            }
 
-            const recordingUsernames = new Set(
-                statuses.filter((s) => s.recording).map((s) => s.username)
-            );
-            const age = Date.now() - session.trackedSince;
-            if (!recordingUsernames.has(session.username) && age > FINALIZE_GRACE_MS) {
+            if (recordingUsernames.has(username)) {
+                // Still recording — reset offline timer
+                session.offlineSince = null;
+                continue;
+            }
+
+            // Not recording — start or continue grace period
+            if (session.offlineSince === null) {
+                session.offlineSince = Date.now();
+            }
+
+            if (Date.now() - session.offlineSince > FINALIZE_GRACE_MS) {
+                // Final drain before closing
                 await this.processSessionSegments(session);
 
                 if (session.segmentCount > 0) {
                     await session.playlistManager.finalizePlaylist();
-                    logger.info(`[SC] Finalized session (${session.segmentCount} segments): ${path.basename(sessionDir)}`);
+                    logger.info(`[SC] Finalized session (${session.segmentCount} segments): ${path.basename(session.sessionDir)}`);
                 } else {
-                    logger.warn(`[SC] Session has no segments, skipping finalize: ${path.basename(sessionDir)}`);
+                    logger.warn(`[SC] Session has no segments, skipping finalize: ${path.basename(session.sessionDir)}`);
                 }
 
-                this.finalizedDirs.add(sessionDir);
                 this.downloadsManager.remove(session.masterUrl);
-                this.activeSessions.delete(sessionDir);
+                this.activeSessions.delete(username);
             }
         }
+    }
+
+    /**
+     * Find the latest non-finalized session directory for a username.
+     */
+    private async findLatestSessionDir(downloaderPath: string, username: string): Promise<string | null> {
+        const allDirs = await this.adapter.findSessionDirs(downloaderPath);
+        const matching = allDirs
+            .filter((dir) => {
+                const parsed = this.adapter.parseSessionDirName(dir);
+                return parsed && parsed.username === username;
+            })
+            // Alphabetical sort works because format is "YYYY-MM-DD HHMMSS username"
+            .sort()
+            .reverse();
+
+        // Find the latest non-finalized dir (disk is truth)
+        for (const dir of matching) {
+            const playlistPath = path.join(dir, "playlist.m3u8");
+            if (await FileSystemManager.pathExists(playlistPath)) {
+                const content = await FileSystemManager.readFile(playlistPath);
+                if (content && content.includes("#EXT-X-ENDLIST")) {
+                    continue; // Already finalized
+                }
+            }
+            return dir;
+        }
+        return null;
     }
 
     private async processSessionSegments(session: ActiveSession): Promise<void> {
@@ -184,8 +238,10 @@ export class ScDiscoveryService {
         const key = targets.join(",");
         if (key === this.lastSyncedTargets) return;
 
-        this.lastSyncedTargets = key;
         logger.info(`[SC] Syncing ${targets.length} targets to StreaMonitor`);
-        await this.adapter.syncTargets(targets);
+        const ok = await this.adapter.syncTargets(targets);
+        if (ok) {
+            this.lastSyncedTargets = key;
+        }
     }
 }
