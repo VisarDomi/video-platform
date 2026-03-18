@@ -3,7 +3,7 @@ import * as timersPromises from "timers/promises";
 import * as config from "../../../common/config.js";
 import logger from "../../../common/logger.js";
 import { StreamDownloader } from "../../download/streamDownloader.js";
-import { AliasManager } from "../../state/aliasManager.js";
+import { AliasManager } from "shared";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ApiClient } from "../api/apiClient.js";
 import type { TargetManager } from "../../common/targetManager.js";
@@ -59,12 +59,12 @@ export class StreamDiscoveryService {
                                 continue;
                             }
 
-                            let alias = this.aliasManager.get(streamerId);
+                            let alias = await this.aliasManager.get(streamerId);
                             if (!alias) {
                                 logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
                                 alias = await this.apiClient.getStreamerAlias(streamerId);
                                 if (alias && alias !== streamerId) {
-                                    this.aliasManager.set(streamerId, alias);
+                                    await this.aliasManager.set(streamerId, alias);
                                 }
                             }
 

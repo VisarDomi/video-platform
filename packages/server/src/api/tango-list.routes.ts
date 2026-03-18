@@ -1,13 +1,15 @@
 import { Router } from "express";
 import { promises as fs } from "fs";
 import { createTxtListRoutes } from "./txt-list-routes.js";
-import { TANGO_FILE_PATH } from "../core/config.js";
+import { TANGO_FILE_PATH, ALIASES_PATH } from "../core/config.js";
 import { resolveAlias, fetchAliasesInBatch } from "../services/tango/apiClient.js";
+import { AliasManager } from "shared";
 import logger from "../core/logger.js";
 import { cleanListContent } from "../core/content-processor.js";
 
 const TANGO_URL_PREFIX = "https://tango.me/";
 const baseRouter = createTxtListRoutes({ provider: "tango", filePath: TANGO_FILE_PATH, urlPrefix: "" });
+const aliasManager = new AliasManager(ALIASES_PATH);
 
 const router = Router();
 
@@ -21,17 +23,81 @@ function parseLine(line: string): { accountId: string; alias: string } | null {
     return { accountId: rest.slice(0, spaceIdx), alias: rest.slice(spaceIdx + 1) };
 }
 
-// Override list to return aliases from the new format
+// Override list to return ALL known aliases per accountId (current + historical)
+// On cache miss: fetch from tango API and persist to aliases.json
 router.get("/api/tango/list", async (_req, res) => {
     try {
         const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
-        const identifiers = content.split("\n")
+        const parsed = content.split("\n")
             .map(line => parseLine(line))
-            .filter((p): p is NonNullable<typeof p> => p !== null)
-            .map(p => p.accountId);
-        res.json(identifiers);
+            .filter((p): p is NonNullable<typeof p> => p !== null);
+
+        const forward = await aliasManager.getAll();
+        const identifiers = new Set<string>();
+        const missingAccountIds: string[] = [];
+
+        for (const { accountId, alias } of parsed) {
+            identifiers.add(accountId);
+            identifiers.add(alias);
+            const cached = forward[accountId];
+            if (cached) {
+                for (const a of cached) identifiers.add(a);
+            } else {
+                missingAccountIds.push(accountId);
+            }
+        }
+
+        // Fetch aliases for cache misses from tango API and persist
+        if (missingAccountIds.length > 0) {
+            logger.info(`[Tango] Cache miss for ${missingAccountIds.length} accountIds, fetching from API...`);
+            const profiles = await fetchAliasesInBatch(missingAccountIds);
+            if (profiles) {
+                const newAliases: Record<string, string> = {};
+                for (const accountId of missingAccountIds) {
+                    const alias = profiles[accountId]?.alias;
+                    if (alias) {
+                        newAliases[accountId] = alias;
+                        identifiers.add(alias);
+                    }
+                }
+                if (Object.keys(newAliases).length > 0) {
+                    await aliasManager.batchSet(newAliases);
+                    logger.info(`[Tango] Persisted ${Object.keys(newAliases).length} new aliases to cache`);
+                }
+            }
+        }
+
+        res.json([...identifiers]);
     } catch {
         res.json([]);
+    }
+});
+
+// Override remove: resolve alias → accountId via aliases.json, remove by accountId
+router.post("/api/tango/remove", async (req, res) => {
+    const { identifier } = req.body;
+    if (!identifier || typeof identifier !== "string") {
+        return res.status(400).json({ error: "identifier required" });
+    }
+    try {
+        const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
+        const reverse = await aliasManager.getReverse();
+        const accountId = reverse[identifier];
+
+        const lines = content.split("\n").filter(line => {
+            if (accountId) {
+                return !line.includes(accountId);
+            }
+            // Fallback: match by alias directly
+            return !line.includes(identifier);
+        });
+
+        await fs.writeFile(TANGO_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
+        logger.info(`tango remove: ${identifier}${accountId ? ` (accountId: ${accountId})` : ""}`);
+        res.json({ success: true });
+    } catch (error) {
+        logger.error("Error removing from tango file", { error });
+        res.status(500).json({ error: "Failed to update file" });
     }
 });
 

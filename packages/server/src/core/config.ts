@@ -111,6 +111,7 @@ if (!fs.existsSync(config.sharedStatePath)) {
 
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, constants.FILE_NAMES.LIVE_STATUS);
+export const ALIASES_PATH: string = path.join(config.sharedStatePath, "aliases.json");
 export const FC2_FILE_PATH: string = config.fc2FilePath;
 export const SC_FILE_PATH: string = config.scFilePath;
 export const TANGO_FILE_PATH: string = config.tangoFilePath;

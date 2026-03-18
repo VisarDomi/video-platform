@@ -1,5 +1,5 @@
 import logger from "../../../common/logger.js";
-import { AliasManager } from "../../state/aliasManager.js";
+import { AliasManager } from "shared";
 import { ApiClient } from "../api/apiClient.js";
 
 export class AliasSyncService {
@@ -41,7 +41,7 @@ export class AliasSyncService {
             }
 
             if (Object.keys(aliasMap).length > 0) {
-                this.aliasManager.batchSet(aliasMap);
+                await this.aliasManager.batchSet(aliasMap);
                 logger.info(`[Tango] Alias cache updated with ${Object.keys(aliasMap).length} entries (out of ${streamerIds.length} IDs sent).`);
             } else {
                 logger.warn("[Tango] Could not extract any valid aliases from the batch response. Cache not updated.");
