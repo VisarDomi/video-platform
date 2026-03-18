@@ -37,20 +37,20 @@ router.get("/hls/:filename/playlist.m3u8", async (req, res) => {
 router.get("/hls/:filename/:segmentName", async (req: Request, res) => {
     const { filename, segmentName } = req.params as { filename: string; segmentName: string };
 
-    if (!filename || !segmentName.endsWith(FILE_EXTENSIONS.TS)) {
+    const isTs = segmentName.endsWith(FILE_EXTENSIONS.TS);
+    const isMp4 = segmentName.endsWith(FILE_EXTENSIONS.MP4);
+
+    if (!filename || (!isTs && !isMp4)) {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_SEGMENT_NAME);
     }
 
     try {
-        // Note: findVideoPath does 3 fs checks. This is the cost of "no cache".
-        // If this becomes slow, we can optimize later, but for one user it's fine.
         const videoPath = await utils.findVideoPath(filename);
         const segmentPath = path.join(videoPath, segmentName);
 
-        // We use createReadStream for better memory usage with video files
-        // Express 'res.sendFile' is also an option but we'll stream manually to catch errors easily
         const data = await fs.readFile(segmentPath);
-        res.setHeader(API.HEADERS.CONTENT_TYPE, API.HEADERS.TS_CONTENT_TYPE);
+        const contentType = isMp4 ? API.HEADERS.MP4_CONTENT_TYPE : API.HEADERS.TS_CONTENT_TYPE;
+        res.setHeader(API.HEADERS.CONTENT_TYPE, contentType);
         res.send(data);
 
     } catch (err: any) {

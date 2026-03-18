@@ -9,8 +9,6 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { IStreamProvider } from "../core/interfaces.js";
 import { StreamQualityMonitor } from "./streamQualityMonitor.js";
-// Needed for type checking/casting if we want to call ScClient methods
-import { ScClient } from "../sc/api/scClient.js";
 
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
@@ -186,16 +184,6 @@ export class StreamDownloader {
 
         logger.info(`[SC-DEBUG] FINALIZED ${alias} dir=${path.basename(segmentsDirPath)}`);
 
-        // --- CLEANUP SC SESSION ON DOWNLOAD END ---
-        if (this.streamProvider instanceof ScClient) {
-            const match = this.downloadHandle.masterPlaylistUrl.match(/synthetic-sc\/([^\/]+)\//);
-            const channelId = match ? match[1] : this.downloadHandle.state.streamerId;
-            if (channelId) {
-                logger.info(`[StreamDownloader] Closing SC session for ${channelId}`);
-                await (this.streamProvider as ScClient).forceCloseSession(channelId);
-            }
-        }
-        // ------------------------------------------
 
         logger.info(`[SC-DEBUG] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
         this.downloadHandle.remove();

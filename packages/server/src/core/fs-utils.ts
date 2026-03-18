@@ -36,6 +36,7 @@ export async function getSegmentDuration(tsFilePath: string): Promise<number> {
 
 export async function generatePlaylist(videoPath: string): Promise<void> {
     const files = await fsPromises.readdir(videoPath);
+    const hasInitSegment = files.includes(HLS.INIT_SEGMENT);
     const tsFiles = files
         .filter((f) => f.endsWith(FILE_EXTENSIONS.TS))
         .sort((a, b) => {
@@ -49,13 +50,20 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
 
     if (tsFiles.length === 0) return;
 
-    logger.info(`Generating playlist for ${videoPath} (${tsFiles.length} segments)...`);
+    logger.info(`Generating playlist for ${videoPath} (${tsFiles.length} segments, fMP4=${hasInitSegment})...`);
 
-    const durationPromises = tsFiles.map((file) =>
-        limit(() => getSegmentDuration(path.join(videoPath, file)))
-    );
+    // For fMP4 segments, ffprobe can't determine duration without the init segment.
+    // Try probing with concat protocol for fMP4, fall back to segments.jsonl if available.
+    let durations: number[];
+    if (hasInitSegment) {
+        durations = await getFmp4Durations(videoPath, tsFiles);
+    } else {
+        const durationPromises = tsFiles.map((file) =>
+            limit(() => getSegmentDuration(path.join(videoPath, file)))
+        );
+        durations = await Promise.all(durationPromises);
+    }
 
-    const durations = await Promise.all(durationPromises);
     const validDurations = durations.filter(d => d > 0);
     const targetDuration = validDurations.length > 0
         ? Math.ceil(Math.max(...validDurations))
@@ -68,13 +76,16 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
         `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`
     ];
 
+    if (hasInitSegment) {
+        lines.push(`${HLS.MAP_PREFIX}URI="${HLS.INIT_SEGMENT}"`);
+    }
+
     let lastSequence: number | null = null;
 
     tsFiles.forEach((file, index) => {
         const duration = durations[index];
         if (duration <= 0) return;
 
-        // Check for discontinuity based on numeric sequence
         const currentSequence = extractSegmentNumber(file);
         if (lastSequence !== null && currentSequence !== null && currentSequence !== lastSequence + 1) {
             lines.push(HLS.DISCONTINUITY);
@@ -96,6 +107,31 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
     );
 
     logger.info(`Playlist generated for ${videoPath}`);
+}
+
+async function getFmp4Durations(videoPath: string, tsFiles: string[]): Promise<number[]> {
+    // Try reading durations from segments.jsonl first (written by StreaMonitor)
+    const jsonlPath = path.join(videoPath, "segments.jsonl");
+    try {
+        const content = await fsPromises.readFile(jsonlPath, "utf-8");
+        const durationMap = new Map<string, number>();
+        for (const line of content.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+                const entry = JSON.parse(trimmed);
+                if (entry.name && entry.duration > 0) {
+                    durationMap.set(entry.name, entry.duration);
+                }
+            } catch {}
+        }
+        if (durationMap.size > 0) {
+            return tsFiles.map((f) => durationMap.get(f) || HLS.DEFAULT_TARGET_DURATION);
+        }
+    } catch {}
+
+    // Fallback: use default duration for all fMP4 segments
+    return tsFiles.map(() => 2.0);
 }
 
 const playlistPromises = new Map<string, Promise<void>>();

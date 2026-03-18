@@ -127,6 +127,7 @@ export class OrphanStreamFinalizer {
                                             trimmed.startsWith("#EXT-X-VERSION") ||
                                             trimmed.startsWith("#EXT-X-TARGETDURATION") ||
                                             trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE") ||
+                                            trimmed.startsWith("#EXT-X-MAP") ||
                                             trimmed.startsWith("#EXT-X-ENDLIST")
                                         ) {
                                             newLines.push(trimmed);

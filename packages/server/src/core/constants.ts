@@ -41,6 +41,7 @@ export const DEFAULT_PATHS = {
 
 export const FILE_EXTENSIONS = {
     TS: ".ts",
+    MP4: ".mp4",
 } as const;
 
 export const HLS = {
@@ -49,8 +50,10 @@ export const HLS = {
     MEDIA_SEQUENCE: "#EXT-X-MEDIA-SEQUENCE:0",
     TARGET_DURATION_PREFIX: "#EXT-X-TARGETDURATION:",
     INF_PREFIX: "#EXTINF:",
+    MAP_PREFIX: "#EXT-X-MAP:",
     DISCONTINUITY: "#EXT-X-DISCONTINUITY",
     ENDLIST: "#EXT-X-ENDLIST",
+    INIT_SEGMENT: "init.mp4",
     DEFAULT_TARGET_DURATION: 10,
     DURATION_DECIMAL_PRECISION: 3,
 } as const;
@@ -76,7 +79,7 @@ export const API = {
         INVALID_REQUEST_FILENAME_REQUIRED: "Invalid request: filename is required.",
         INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED: "Invalid request: filename and segments are required.",
         INVALID_REQUEST_DESTINATION: "Invalid request: filename and destination are required. destination can only have the values trash, original, edited",
-        INVALID_REQUEST_SEGMENT_NAME: "Invalid request: filename is required and segment name should end in .ts",
+        INVALID_REQUEST_SEGMENT_NAME: "Invalid request: filename is required and segment name should end in .ts or .mp4",
         VIDEO_NOT_FOUND: "Video not found.",
         SEGMENT_NOT_FOUND: "Segment not found.",
         COULD_NOT_SERVE_SEGMENT: "Could not serve segment.",
@@ -86,6 +89,7 @@ export const API = {
         CACHE_CONTROL: "Cache-Control",
         HLS_CONTENT_TYPE: "application/vnd.apple.mpegurl",
         TS_CONTENT_TYPE: "video/mp2t",
+        MP4_CONTENT_TYPE: "video/mp4",
         NO_CACHE: "max-age=0, no-cache, no-store, must-revalidate",
     },
 } as const;
