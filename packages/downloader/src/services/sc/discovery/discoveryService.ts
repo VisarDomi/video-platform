@@ -56,9 +56,6 @@ export class ScDiscoveryService {
         await this.syncTargetsIfChanged();
 
         const statuses = await this.adapter.pollStatus();
-        const recordingUsernames = new Set(
-            statuses.filter((s) => s.recording).map((s) => s.username)
-        );
 
         const downloaderPath = path.join(config.getConfig().storagePath, "sc", "downloader");
         const sessionDirs = await this.adapter.findSessionDirs(downloaderPath);
@@ -113,6 +110,14 @@ export class ScDiscoveryService {
         for (const [sessionDir, session] of this.activeSessions) {
             await this.processSessionSegments(session);
 
+            // Only finalize if we have a reliable signal from StreaMonitor.
+            // null means the API call failed — skip finalization to avoid
+            // killing sessions just because StreaMonitor is unreachable.
+            if (statuses === null) continue;
+
+            const recordingUsernames = new Set(
+                statuses.filter((s) => s.recording).map((s) => s.username)
+            );
             const age = Date.now() - session.trackedSince;
             if (!recordingUsernames.has(session.username) && age > FINALIZE_GRACE_MS) {
                 await this.processSessionSegments(session);

@@ -4,7 +4,7 @@ import * as readline from "readline";
 import { createReadStream } from "fs";
 import logger from "../../../common/logger.js";
 
-const STREAMONITOR_API = "http://127.0.0.1:5000";
+const STREAMONITOR_API = "http://127.0.0.1:17444";
 
 interface StreamerStatus {
     username: string;
@@ -27,14 +27,14 @@ export class StreaMonitorAdapter {
     /**
      * Poll /api/data to get all streamer statuses.
      */
-    public async pollStatus(): Promise<StreamerStatus[]> {
+    public async pollStatus(): Promise<StreamerStatus[] | null> {
         try {
             const response = await fetch(`${STREAMONITOR_API}/api/data`, {
                 headers: { Authorization: "Basic " + Buffer.from("admin:admin").toString("base64") },
             });
             if (!response.ok) {
                 logger.warn(`[SC] StreaMonitor API returned ${response.status}`);
-                return [];
+                return null;
             }
             const data = await response.json() as any;
             return (data.streamers || []).map((s: any) => ({
@@ -45,7 +45,7 @@ export class StreaMonitorAdapter {
             }));
         } catch (error: any) {
             logger.error(`[SC] Failed to poll StreaMonitor`, { error: error.message });
-            return [];
+            return null;
         }
     }
 
@@ -55,6 +55,7 @@ export class StreaMonitorAdapter {
      */
     public async syncTargets(targets: string[]): Promise<void> {
         const statuses = await this.pollStatus();
+        if (!statuses) return;
         const existing = new Set(statuses.map((s) => s.username));
         const desired = new Set(targets);
 
