@@ -107,64 +107,61 @@ export class OrphanStreamFinalizer {
                         if (await FileSystemManager.pathExists(playlistPath)) {
                             const content = await FileSystemManager.readFile(playlistPath);
                             if (content) {
-                                // 1. Get list of actual files on disk
-                                const filesOnDisk = new Set(allFiles);
+                                const isFinalized = content.includes("#EXT-X-ENDLIST");
 
-                                // 2. Rebuild playlist based on file existence
-                                const lines = content.split("\n");
-                                const newLines: string[] = [];
-                                const metadataBuffer: string[] = [];
-                                let hasChanges = false;
+                                if (isFinalized) {
+                                    // Finalized playlist — only fix TARGETDURATION, never rewrite segment list
+                                    const { content: fixedContent, wasFixed } = fixTargetDuration(content);
+                                    if (wasFixed) {
+                                        await FileSystemManager.writeFile(playlistPath, fixedContent);
+                                        stats.fixed++;
+                                    }
+                                } else {
+                                    // Not finalized — orphaned mid-stream. Rebuild and finalize.
+                                    const filesOnDisk = new Set(allFiles);
+                                    const lines = content.split("\n");
+                                    const newLines: string[] = [];
+                                    const metadataBuffer: string[] = [];
+                                    let hasChanges = false;
 
-                                for (const line of lines) {
-                                    const trimmed = line.trim();
-                                    if (trimmed === "") continue;
+                                    for (const line of lines) {
+                                        const trimmed = line.trim();
+                                        if (trimmed === "") continue;
 
-                                    if (trimmed.startsWith("#")) {
-                                        // Always keep headers
-                                        if (
-                                            trimmed.startsWith("#EXTM3U") ||
-                                            trimmed.startsWith("#EXT-X-VERSION") ||
-                                            trimmed.startsWith("#EXT-X-TARGETDURATION") ||
-                                            trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE") ||
-                                            trimmed.startsWith("#EXT-X-MAP") ||
-                                            trimmed.startsWith("#EXT-X-ENDLIST")
-                                        ) {
-                                            newLines.push(trimmed);
+                                        if (trimmed.startsWith("#")) {
+                                            if (
+                                                trimmed.startsWith("#EXTM3U") ||
+                                                trimmed.startsWith("#EXT-X-VERSION") ||
+                                                trimmed.startsWith("#EXT-X-TARGETDURATION") ||
+                                                trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE") ||
+                                                trimmed.startsWith("#EXT-X-MAP")
+                                            ) {
+                                                newLines.push(trimmed);
+                                            } else {
+                                                metadataBuffer.push(trimmed);
+                                            }
                                         } else {
-                                            // Buffer metadata until we confirm file exists
-                                            metadataBuffer.push(trimmed);
-                                        }
-                                    } else {
-                                        // This is a file entry
-                                        if (filesOnDisk.has(trimmed)) {
-                                            newLines.push(...metadataBuffer);
-                                            newLines.push(trimmed);
-                                            metadataBuffer.length = 0;
-                                        } else {
-                                            // File missing from disk, discard buffer
-                                            hasChanges = true;
-                                            metadataBuffer.length = 0;
-                                            logger.info(`[System] Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
+                                            if (filesOnDisk.has(trimmed)) {
+                                                newLines.push(...metadataBuffer);
+                                                newLines.push(trimmed);
+                                                metadataBuffer.length = 0;
+                                            } else {
+                                                hasChanges = true;
+                                                metadataBuffer.length = 0;
+                                                logger.info(`[System] Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
+                                            }
                                         }
                                     }
-                                }
 
-                                // 3. Ensure Endlist
-                                const hasEndList = newLines.some((l) => l.startsWith("#EXT-X-ENDLIST"));
-                                if (!hasEndList) {
                                     newLines.push("#EXT-X-ENDLIST");
                                     hasChanges = true;
-                                }
 
-                                let finalContent = newLines.join("\n") + "\n";
-                                const { content: fixedContent, wasFixed } = fixTargetDuration(finalContent);
-                                if (wasFixed) {
-                                    finalContent = fixedContent;
-                                    hasChanges = true;
-                                }
+                                    let finalContent = newLines.join("\n") + "\n";
+                                    const { content: fixedContent, wasFixed } = fixTargetDuration(finalContent);
+                                    if (wasFixed) {
+                                        finalContent = fixedContent;
+                                    }
 
-                                if (hasChanges) {
                                     await FileSystemManager.writeFile(playlistPath, finalContent);
                                     stats.fixed++;
                                 }
