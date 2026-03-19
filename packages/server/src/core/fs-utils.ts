@@ -110,20 +110,21 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
 }
 
 async function getFmp4Durations(videoPath: string, tsFiles: string[]): Promise<number[]> {
-    // Try reading durations from segments.jsonl first (written by StreaMonitor)
-    const jsonlPath = path.join(videoPath, "segments.jsonl");
+    // Read durations from existing playlist.m3u8 — it owns the accurate EXTINF values
+    const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
     try {
-        const content = await fsPromises.readFile(jsonlPath, "utf-8");
+        const content = await fsPromises.readFile(playlistPath, "utf-8");
         const durationMap = new Map<string, number>();
-        for (const line of content.split("\n")) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-                const entry = JSON.parse(trimmed);
-                if (entry.name && entry.duration > 0) {
-                    durationMap.set(entry.name, entry.duration);
+        const lines = content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith("#EXTINF:")) {
+                const duration = parseFloat(trimmed.slice("#EXTINF:".length).replace(",", ""));
+                const nextLine = lines[i + 1]?.trim();
+                if (nextLine && !nextLine.startsWith("#") && !isNaN(duration)) {
+                    durationMap.set(nextLine, duration);
                 }
-            } catch {}
+            }
         }
         if (durationMap.size > 0) {
             return tsFiles.map((f) => durationMap.get(f) || HLS.DEFAULT_TARGET_DURATION);

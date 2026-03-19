@@ -18,10 +18,22 @@ export class PlaylistManager {
     private readonly fullPlaylistPath: string;
     private ignoredSegments: Set<string> = new Set();
     private lastSegmentNumber: number = -1;
+    public startSequence: number = 0;
+    private pendingHeader: string[] | null = null;
+    private currentTargetDuration: number = 0;
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;
         this.fullPlaylistPath = path.join(this.segmentsDirPath, "playlist.m3u8");
+    }
+
+    private getExtinfDuration(metadata: string[]): number {
+        const extinf = metadata.find((l) => l.startsWith("#EXTINF:"));
+        if (extinf) {
+            const val = parseFloat(extinf.slice("#EXTINF:".length).replace(",", ""));
+            if (!isNaN(val)) return val;
+        }
+        return 2;
     }
 
     public addIgnoredSegment(segmentName: string): void {
@@ -50,17 +62,30 @@ export class PlaylistManager {
 
         const fileExists = await FileSystemManager.pathExists(this.fullPlaylistPath);
 
-        if (!fileExists) {
+        if (!fileExists && !this.pendingHeader) {
             const headerLines = liveLines.filter(
                 (line) =>
                     line.startsWith("#EXTM3U") ||
                     line.startsWith("#EXT-X-VERSION") ||
                     line.startsWith("#EXT-X-TARGETDURATION") ||
-                    line.startsWith("#EXT-X-MEDIA-SEQUENCE")
+                    line.startsWith("#EXT-X-MEDIA-SEQUENCE") ||
+                    line.startsWith("#EXT-X-MAP")
             );
 
-            const header = headerLines.map(l => l.trim()).join("\n") + "\n";
-            await FileSystemManager.writeFile(this.fullPlaylistPath, header);
+            // Normalize: upgrade for fMP4, fix MAP URI to local file
+            const hasMap = headerLines.some((l) => l.startsWith("#EXT-X-MAP"));
+            this.pendingHeader = headerLines.map((l) => {
+                if (hasMap && l.startsWith("#EXT-X-VERSION")) return "#EXT-X-VERSION:7";
+                if (hasMap && l.startsWith("#EXT-X-MAP")) return '#EXT-X-MAP:URI="init.mp4"';
+                return l;
+            });
+
+            // Extract starting sequence number for fMP4 sequential renaming
+            const seqLine = headerLines.find((l) => l.startsWith("#EXT-X-MEDIA-SEQUENCE"));
+            if (seqLine) {
+                const seq = parseInt(seqLine.split(":")[1], 10);
+                if (!isNaN(seq)) this.startSequence = seq;
+            }
         }
 
         const existingSegments = await this.getExistingLocalSegments();
@@ -74,26 +99,24 @@ export class PlaylistManager {
             // USE THE RESOLVER CALLBACK
             const remoteTsUrl = urlResolver(line);
 
-            // Debug if we are seeing empty segments or issues
-            // logger.debug(`[PlaylistManager] Processing line: ${line} -> ${remoteTsUrl}`);
 
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
             if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName)) {
+                // Only collect tags our playlist owns: EXTINF and DISCONTINUITY.
+                // Live-stream tags (PROGRAM-DATE-TIME, MOUFLON, etc.) stay with the source.
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();
-                    if (metaLine.startsWith("#")) {
-                        const isHeaderTag =
-                            metaLine.startsWith("#EXTM3U") ||
-                            metaLine.startsWith("#EXT-X-VERSION") ||
-                            metaLine.startsWith("#EXT-X-TARGETDURATION") ||
-                            metaLine.startsWith("#EXT-X-MEDIA-SEQUENCE");
-                        if (isHeaderTag) break;
+                    if (metaLine.startsWith("#EXTINF")) {
                         segmentMetadata.unshift(metaLine);
+                    } else if (metaLine === "#EXT-X-DISCONTINUITY") {
+                        segmentMetadata.unshift(metaLine);
+                    } else if (metaLine.startsWith("#")) {
+                        continue; // skip live-stream-owned tags
                     } else {
-                        break;
+                        break; // previous segment line — stop
                     }
                 }
                 newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata });
@@ -106,7 +129,7 @@ export class PlaylistManager {
     public async appendSegmentToPlaylist(segment: SegmentInfo): Promise<void> {
         const currentNumber = parseInt(segment.localName.replace(/\.ts$/, ""), 10);
 
-        if (this.lastSegmentNumber !== -1 && !isNaN(currentNumber) && currentNumber !== this.lastSegmentNumber + 1) {
+        if (!isNaN(currentNumber) && this.lastSegmentNumber !== -1 && currentNumber !== this.lastSegmentNumber + 1) {
             await this.insertDiscontinuity();
         }
 
@@ -118,6 +141,32 @@ export class PlaylistManager {
             const idx = segment.metadata.findIndex(l => l.startsWith("#EXTINF:"));
             if (idx !== -1) {
                 segment.metadata[idx] = `#EXTINF:${segment.accurateDuration.toFixed(3)},`;
+            }
+        }
+
+        const segDuration = segment.accurateDuration ?? this.getExtinfDuration(segment.metadata);
+        const requiredTarget = Math.ceil(segDuration);
+
+        // Deferred header write: use first segment's actual duration for TARGETDURATION
+        if (this.pendingHeader) {
+            this.currentTargetDuration = requiredTarget;
+            const header = this.pendingHeader.map((l) =>
+                l.startsWith("#EXT-X-TARGETDURATION") ? `#EXT-X-TARGETDURATION:${requiredTarget}` : l
+            );
+            await FileSystemManager.writeFile(this.fullPlaylistPath, header.map(l => l.trim()).join("\n") + "\n");
+            this.pendingHeader = null;
+        }
+
+        // If a segment exceeds current TARGETDURATION, rewrite header in-place
+        if (requiredTarget > this.currentTargetDuration) {
+            const content = await FileSystemManager.readFile(this.fullPlaylistPath);
+            if (content) {
+                const updated = content.replace(
+                    /^#EXT-X-TARGETDURATION:\d+$/m,
+                    `#EXT-X-TARGETDURATION:${requiredTarget}`
+                );
+                await FileSystemManager.writeFile(this.fullPlaylistPath, updated);
+                this.currentTargetDuration = requiredTarget;
             }
         }
 

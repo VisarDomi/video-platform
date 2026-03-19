@@ -19,7 +19,7 @@ import { Fc2DiscoveryService } from "./fc2/discovery/discoveryService.js";
 
 // SC Specific Imports
 import { createScTargetManager } from "./sc/discovery/targetManager.js";
-import { StreaMonitorAdapter } from "./sc/api/streaMonitorAdapter.js";
+import { ScClient } from "./sc/api/scClient.js";
 import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
 
 // Tango Target Manager
@@ -78,11 +78,12 @@ export class DownloaderService {
         const fc2DiscoveryService = new Fc2DiscoveryService(fc2TargetManager, fc2Client, downloadsManager);
         // --------------------------
 
-        // --- SC Initialization (StreaMonitor backend) ---
+        // --- SC Initialization (native) ---
         const scTargetManager = createScTargetManager();
-        const scAdapter = new StreaMonitorAdapter();
-        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scAdapter, downloadsManager);
-        // -------------------------------------------------
+        const scClient = new ScClient();
+        await scClient.init();
+        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
+        // -----------------------------------
 
         // --- Tango Target Manager (for tango.txt filtering) ---
         const tangoTargetManager = createTangoTargetManager();
