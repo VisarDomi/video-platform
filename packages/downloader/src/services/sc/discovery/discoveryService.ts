@@ -11,10 +11,10 @@ import { FileSystemManager } from "../../../common/fileSystemManager.js";
 const FINALIZE_GRACE_MS = 30_000;
 
 interface ActiveSession {
-    sessionDir: string;
+    sessionDir: string;          // Owned path — only this session reads/writes here
     username: string;
-    playlistManager: PlaylistManager;
-    jsonlOffset: number;
+    playlistManager: PlaylistManager; // Exclusive writer for playlist.m3u8 in sessionDir
+    jsonlOffset: number;         // Read cursor into segments.jsonl (StreaMonitor is the writer)
     masterUrl: string;
     headerWritten: boolean;
     hasInitSegment: boolean;
@@ -123,8 +123,22 @@ export class ScDiscoveryService {
             logger.info(`[SC] Started tracking session: ${path.basename(sessionDir)}`);
         }
 
-        // --- Process segments and finalize offline sessions ---
+        // --- Process segments, detect stale ownership, finalize offline sessions ---
         for (const [username, session] of this.activeSessions) {
+            // Ownership check: verify we still own a valid session dir.
+            // StreaMonitor may have restarted and created a newer dir,
+            // making our owned dir a zombie. Detect and release.
+            if (recordingUsernames.has(username)) {
+                const currentDir = await this.findLatestSessionDir(downloaderPath, username);
+                if (currentDir && currentDir !== session.sessionDir) {
+                    // StreaMonitor moved to a new dir — release ownership of the old one.
+                    logger.info(`[SC] Session dir changed for ${username}: ${path.basename(session.sessionDir)} → ${path.basename(currentDir)}. Releasing old session.`);
+                    await this.releaseSession(session);
+                    // Next poll iteration will pick up the new dir.
+                    continue;
+                }
+            }
+
             await this.processSessionSegments(session);
 
             // Heartbeat every 30s
@@ -148,18 +162,25 @@ export class ScDiscoveryService {
             if (Date.now() - session.offlineSince > FINALIZE_GRACE_MS) {
                 // Final drain before closing
                 await this.processSessionSegments(session);
-
-                if (session.segmentCount > 0) {
-                    await session.playlistManager.finalizePlaylist();
-                    logger.info(`[SC] Finalized session (${session.segmentCount} segments): ${path.basename(session.sessionDir)}`);
-                } else {
-                    logger.warn(`[SC] Session has no segments, skipping finalize: ${path.basename(session.sessionDir)}`);
-                }
-
-                this.downloadsManager.remove(session.masterUrl);
-                this.activeSessions.delete(username);
+                await this.releaseSession(session);
             }
         }
+    }
+
+    /**
+     * Release ownership of a session. Single exit point — every session
+     * removal must go through here to ensure playlist is finalized,
+     * downloadsManager is updated, and activeSessions is cleaned up.
+     */
+    private async releaseSession(session: ActiveSession): Promise<void> {
+        if (session.segmentCount > 0) {
+            await session.playlistManager.finalizePlaylist();
+            logger.info(`[SC] Finalized session (${session.segmentCount} segments): ${path.basename(session.sessionDir)}`);
+        } else {
+            logger.warn(`[SC] Session has no segments, skipping finalize: ${path.basename(session.sessionDir)}`);
+        }
+        this.downloadsManager.remove(session.masterUrl);
+        this.activeSessions.delete(session.username);
     }
 
     /**
