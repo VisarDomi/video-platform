@@ -14,6 +14,7 @@ export class StreamDownloader {
     private downloadHandle: DownloadHandle;
     private streamProvider: IStreamProvider;
     private aborted = false;
+    private initSegmentDownloaded = false;
 
     constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
         this.downloadHandle = downloadHandle;
@@ -102,6 +103,22 @@ export class StreamDownloader {
 
             if (liveResponse.success && liveResponse.data) {
                 consecutiveFailures = 0;
+
+                // Download fMP4 init segment on first successful response
+                if (!this.initSegmentDownloaded) {
+                    const mapMatch = liveResponse.data.match(/#EXT-X-MAP:URI="([^"]+)"/);
+                    if (mapMatch) {
+                        const initUrl = this.streamProvider.getSegmentUrl(liveUrl!, mapMatch[1]);
+                        const initBuffer = await this.streamProvider.getTsSegment(initUrl);
+                        if (initBuffer) {
+                            const initPath = path.join(segmentsDirPath, "init.mp4");
+                            await FileSystemManager.writeFile(initPath, initBuffer as unknown as Uint8Array);
+                            logger.info(`[StreamDownloader] Downloaded init segment for ${alias}`);
+                        }
+                    }
+                    this.initSegmentDownloaded = true;
+                }
+
                 const segmentsToProcess = await playlistManager.identifyNewSegments(
                     liveResponse.data,
                     (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
@@ -110,6 +127,13 @@ export class StreamDownloader {
                 if (segmentsToProcess.length > 0) {
                     for (const segment of segmentsToProcess) {
                         const tsBuffer = await this.streamProvider.getTsSegment(segment.remoteUrl);
+
+                        // Rename to sequential number for fMP4 streams (non-numeric segment names)
+                        const baseName = segment.localName.replace(/\.\w+$/, "");
+                        if (!/^\d+$/.test(baseName)) {
+                            segment.localName = `${playlistManager.startSequence + segmentCount}.ts`;
+                        }
+
                         const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                         if (!tsBuffer) {
