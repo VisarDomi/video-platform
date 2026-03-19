@@ -17,6 +17,7 @@ export class PlaylistManager {
     private readonly segmentsDirPath: string;
     private readonly fullPlaylistPath: string;
     private ignoredSegments: Set<string> = new Set();
+    private seenRemoteUrls: Set<string> = new Set();
     private lastSegmentNumber: number = -1;
     public startSequence: number = 0;
     private pendingHeader: string[] | null = null;
@@ -103,7 +104,7 @@ export class PlaylistManager {
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
-            if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName)) {
+            if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName) && !this.seenRemoteUrls.has(remoteTsUrl)) {
                 // Only collect tags our playlist owns: EXTINF and DISCONTINUITY.
                 // Live-stream tags (PROGRAM-DATE-TIME, MOUFLON, etc.) stay with the source.
                 const segmentMetadata: string[] = [];
@@ -119,6 +120,7 @@ export class PlaylistManager {
                         break; // previous segment line — stop
                     }
                 }
+                this.seenRemoteUrls.add(remoteTsUrl);
                 newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata });
             }
         }
