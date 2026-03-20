@@ -17,6 +17,47 @@ interface ProfileData {
     firstName: string | null;
 }
 
+interface RecommendationsResponse {
+    categoryInfoList?: Array<{
+        tag?: string;
+        streamInfoList?: {
+            streamDetails?: Array<{
+                anchor?: { encryptedAccountId?: string; firstName?: string };
+                stream?: { id?: string; masterListUrl?: string };
+            }>;
+        };
+    }>;
+}
+
+interface BatchProfileResponse {
+    [streamerId: string]: {
+        encryptedAccountId?: string;
+        basicProfile?: {
+            firstName?: string;
+            aliases?: Array<{ alias?: string }>;
+        };
+    };
+}
+
+interface WatchResponse {
+    multiBroadcast?: {
+        streams?: Array<{
+            stream?: {
+                mbDescriptor?: { accountId?: string; streamId?: string };
+                streamURL?: string;
+            };
+        }>;
+    };
+}
+
+interface FollowingListResponse {
+    followers?: Array<{
+        accountId: string;
+        profileDetails?: { firstName?: string };
+    }>;
+    nextCursor?: string;
+}
+
 function getApiHeaders(): Record<string, string> {
     const tokens = getTokens();
     if (!tokens?.st) {
@@ -76,8 +117,7 @@ export async function fetchStreamers(count: number = 50): Promise<{ following: T
             return { following: [], recommended: [] };
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const recommendations = (await recommendationsResponse.json()) as any;
+        const recommendations = (await recommendationsResponse.json()) as RecommendationsResponse;
         const following: TlStreamer[] = [];
         const recommended: TlStreamer[] = [];
 
@@ -145,8 +185,7 @@ export async function fetchAliasesInBatch(streamerIds: string[]): Promise<Record
         });
         if (!response.ok) return null;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const body = (await response.json()) as Record<string, any>;
+        const body = (await response.json()) as BatchProfileResponse;
         const resultMap: Record<string, ProfileData> = {};
 
         for (const streamerId of Object.keys(body)) {
@@ -184,8 +223,7 @@ export async function fetchMultiBroadcastStreamers(streamId: string): Promise<Tl
             return [];
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = (await watchResponse.json()) as any;
+        const data = (await watchResponse.json()) as WatchResponse;
         const streams = data?.multiBroadcast?.streams;
         if (!Array.isArray(streams) || streams.length === 0) return [];
 
@@ -238,8 +276,7 @@ export async function resolveAlias(alias: string): Promise<{ accountId: string; 
             body: JSON.stringify([alias]),
         });
         if (!response.ok) return null;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const body = (await response.json()) as Record<string, any>;
+        const body = (await response.json()) as BatchProfileResponse;
         const key = Object.keys(body)[0];
         if (!key) return null;
         return {
@@ -263,8 +300,7 @@ export async function fetchFollowingList(): Promise<{ accountId: string; firstNa
                 : `${DISCOVERY_BASE}/followings/me/list?size=50`;
             const response = await fetch(url, { headers });
             if (!response.ok) break;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const data = (await response.json()) as any;
+            const data = (await response.json()) as FollowingListResponse;
             if (Array.isArray(data.followers)) {
                 for (const f of data.followers) {
                     all.push({
