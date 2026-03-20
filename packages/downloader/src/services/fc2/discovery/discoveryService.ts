@@ -24,7 +24,6 @@ export class Fc2DiscoveryService {
         const runLoop = async () => {
             while (true) {
                 await this.processNextTarget();
-                // Rate limit: 1 check per second
                 await timersPromises.setTimeout(1000);
             }
         };
@@ -38,15 +37,11 @@ export class Fc2DiscoveryService {
             return;
         }
 
-        // Round-robin selection
         if (this.queueIndex >= targets.length) {
             this.queueIndex = 0;
         }
         const channelId = targets[this.queueIndex];
         this.queueIndex++;
-
-        // NOISE REDUCTION: Only info log if we actually try to start something
-        // logger.info(`[FC2] Checking target: ${channelId}`);
 
         try {
             if (this.downloadsManager.hasStreamer(channelId)) return;

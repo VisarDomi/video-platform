@@ -16,11 +16,6 @@ interface EphemeralDownload {
     downloader: StreamDownloader;
     startedAt: string;
 }
-
-/**
- * Minimal DownloadHandle-like object for ephemeral downloads.
- * StreamDownloader expects a DownloadHandle with .state, .update(), .remove().
- */
 class EphemeralDownloadHandle {
     public readonly masterPlaylistUrl: string;
     private _state: { streamerId: string; alias: string; liveUrl: string | null; segmentsDirPath: string | null };
@@ -36,17 +31,12 @@ class EphemeralDownloadHandle {
     }
 
     public remove(): void {
-        // No-op for ephemeral downloads
     }
 
     public get state() {
         return this._state;
     }
 }
-
-/**
- * Wrapper IStreamProvider that overrides setupDownloadDir to write to /tmp/
- */
 class EphemeralStreamProvider implements IStreamProvider {
     private inner: IStreamProvider;
     private dirPath: string;
@@ -89,8 +79,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
 
     const activeDownloads = new Map<string, EphemeralDownload>();
 
-    // Server-side active set: client reports which aliases it needs (max 3).
-    // If no heartbeat arrives within STALE_TIMEOUT, stop everything.
     let wantedAliases = new Set<string>();
     let lastActiveTimestamp = 0;
     const CLEANUP_INTERVAL = 10_000;
@@ -101,7 +89,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
         try {
             await fs.rm(dirPath, { recursive: true, force: true });
         } catch {
-            // Directory may not exist
         }
     }
 
@@ -150,7 +137,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
         };
         activeDownloads.set(alias, entry);
 
-        // Start download in background
         downloader.start().then(() => {
             logger.info(`[API] Ephemeral download completed for ${alias}`);
             activeDownloads.delete(alias);
@@ -159,7 +145,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
             activeDownloads.delete(alias);
         });
 
-        // Wait for playlist.m3u8 to appear before responding
         const playlistPath = path.join(dirPath, "playlist.m3u8");
         const POLL_INTERVAL = 200;
         const TIMEOUT = 15000;
@@ -170,7 +155,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
                     const stat = await fs.stat(playlistPath);
                     if (stat.size > 0) return true;
                 } catch {
-                    // Not yet
                 }
                 await new Promise(r => setTimeout(r, POLL_INTERVAL));
             }
@@ -198,7 +182,6 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
             activeDownloads.delete(alias);
         }
 
-        // Clean up directory
         await cleanupDir(alias);
 
         res.json({ success: true });

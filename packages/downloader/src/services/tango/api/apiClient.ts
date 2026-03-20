@@ -125,8 +125,6 @@ export class ApiClient implements IStreamProvider {
         }
     }
 
-    // --- IStreamProvider Implementation ---
-
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
             const tokens = await this.tokenManager.getTokens();
@@ -201,7 +199,6 @@ export class ApiClient implements IStreamProvider {
     }
 
     public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        // Tango currently does not support dynamic quality switching in this downloader context
         return null;
     }
 
@@ -242,13 +239,10 @@ export class ApiClient implements IStreamProvider {
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return { valid: false };
 
-        // Condition 1: Bitrate < 1000 or NaN
         if (isNaN(info.bitRate) || info.bitRate < 1000) return { valid: false };
 
-        // Condition 2: Insane Duration (> 1 hour)
         if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
 
-        // Condition 3: Specific Tango corrupt resolution
         if (info.width === 360 && info.height === 640) return { valid: false };
 
         return { valid: true, duration: info.duration };

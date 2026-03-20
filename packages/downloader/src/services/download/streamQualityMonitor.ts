@@ -7,7 +7,7 @@ export class StreamQualityMonitor {
     private currentLiveUrl: string;
     private initialIntervalMs: number;
     private currentIntervalMs: number;
-    private maxIntervalMs = 300000; // 5 minutes cap
+    private maxIntervalMs = 300000;
     private timer: NodeJS.Timeout | null = null;
     private onQualityChange: (newUrl: string) => void;
     private stopped = false;
@@ -47,15 +47,12 @@ export class StreamQualityMonitor {
                 logger.info(`[QualityMonitor] Quality change detected. \nOld: ${this.currentLiveUrl}\nNew: ${betterUrl}`);
                 this.currentLiveUrl = betterUrl;
                 this.onQualityChange(betterUrl);
-                // Reset to initial interval on upgrade
                 this.currentIntervalMs = this.initialIntervalMs;
             } else {
-                // No upgrade: double interval, cap at max
                 this.currentIntervalMs = Math.min(this.currentIntervalMs * 2, this.maxIntervalMs);
             }
         } catch (error) {
             logger.error(`[QualityMonitor] Error polling variant`, { error: (error as Error).message });
-            // Keep current interval on error
         }
 
         this.scheduleNext();

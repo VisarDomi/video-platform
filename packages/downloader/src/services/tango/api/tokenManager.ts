@@ -70,7 +70,7 @@ export class TokenManager {
             logger.warn("[Tango] Tokens not available. Waiting for session.json to be populated...");
             const loaded = await this._loadTokens();
             if (!loaded) {
-                await timersPromises.setTimeout(5000); // wait 5s before retrying
+                await timersPromises.setTimeout(5000);
             }
         }
         return this.tokens;

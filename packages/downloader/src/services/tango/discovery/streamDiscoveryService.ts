@@ -29,7 +29,7 @@ export class StreamDiscoveryService {
 
     private shouldDownload(streamerId: string): boolean {
         if (!this.targetManager || this.targetManager.size === 0) {
-            return true; // No tango.txt entries = download everything
+            return true;
         }
         return this.targetManager.hasTarget(streamerId);
     }
@@ -57,7 +57,6 @@ export class StreamDiscoveryService {
                         if (!this.downloadsManager.has(masterPlaylistUrl) && !this.downloadsManager.hasStreamer(streamerId)) {
                             if (this.cooldown.isActive(streamerId)) continue;
 
-                            // Filter by streamerId first — no point resolving alias for skipped streamers
                             if (!this.shouldDownload(streamerId)) {
                                 logger.verbose(`[Tango] Skipping ${streamerId} (not in tango.txt)`);
                                 continue;

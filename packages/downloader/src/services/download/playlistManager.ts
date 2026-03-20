@@ -10,7 +10,6 @@ export interface SegmentInfo {
     accurateDuration?: number;
 }
 
-// Define a type for the URL resolver
 export type SegmentUrlResolver = (segmentLine: string) => string;
 
 export class PlaylistManager {
@@ -73,7 +72,6 @@ export class PlaylistManager {
                     line.startsWith("#EXT-X-MAP")
             );
 
-            // Normalize: upgrade for fMP4, fix MAP URI to local file
             const hasMap = headerLines.some((l) => l.startsWith("#EXT-X-MAP"));
             this.pendingHeader = headerLines.map((l) => {
                 if (hasMap && l.startsWith("#EXT-X-VERSION")) return "#EXT-X-VERSION:7";
@@ -81,7 +79,6 @@ export class PlaylistManager {
                 return l;
             });
 
-            // Extract starting sequence number for fMP4 sequential renaming
             const seqLine = headerLines.find((l) => l.startsWith("#EXT-X-MEDIA-SEQUENCE"));
             if (seqLine) {
                 const seq = parseInt(seqLine.split(":")[1], 10);
@@ -97,16 +94,12 @@ export class PlaylistManager {
                 continue;
             }
 
-            // USE THE RESOLVER CALLBACK
             const remoteTsUrl = urlResolver(line);
-
 
             const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
             const localName = tsNameWithQuery.split("?")[0];
 
             if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName) && !this.seenRemoteUrls.has(remoteTsUrl)) {
-                // Only collect tags our playlist owns: EXTINF and DISCONTINUITY.
-                // Live-stream tags (PROGRAM-DATE-TIME, MOUFLON, etc.) stay with the source.
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();
@@ -115,9 +108,9 @@ export class PlaylistManager {
                     } else if (metaLine === "#EXT-X-DISCONTINUITY") {
                         segmentMetadata.unshift(metaLine);
                     } else if (metaLine.startsWith("#")) {
-                        continue; // skip live-stream-owned tags
+                        continue;
                     } else {
-                        break; // previous segment line — stop
+                        break;
                     }
                 }
                 this.seenRemoteUrls.add(remoteTsUrl);
@@ -149,7 +142,6 @@ export class PlaylistManager {
         const segDuration = segment.accurateDuration ?? this.getExtinfDuration(segment.metadata);
         const requiredTarget = Math.ceil(segDuration);
 
-        // Deferred header write: use first segment's actual duration for TARGETDURATION
         if (this.pendingHeader) {
             this.currentTargetDuration = requiredTarget;
             const header = this.pendingHeader.map((l) =>
@@ -159,7 +151,6 @@ export class PlaylistManager {
             this.pendingHeader = null;
         }
 
-        // If a segment exceeds current TARGETDURATION, rewrite header in-place
         if (requiredTarget > this.currentTargetDuration) {
             const content = await FileSystemManager.readFile(this.fullPlaylistPath);
             if (content) {

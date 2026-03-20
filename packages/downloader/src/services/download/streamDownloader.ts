@@ -9,15 +9,6 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { IStreamProvider } from "../core/interfaces.js";
 import { StreamQualityMonitor } from "./streamQualityMonitor.js";
-
-/**
- * Exit result from a download session.
- * Ownership: StreamDownloader produces this, caller (discovery) consumes it to decide retry policy.
- *
- * - "completed": stream ended naturally (stale timeout = streamer went offline). No retry needed.
- * - "aborted": caller requested abort. No retry needed.
- * - "error": download failed (CDN 404, master playlist broken, no segments). Caller should backoff.
- */
 export type DownloadExitReason = "completed" | "aborted" | "error";
 
 export interface DownloadResult {
@@ -108,7 +99,6 @@ export class StreamDownloader {
         const HEARTBEAT_INTERVAL = 30000;
 
         while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
-            // Quality upgrade signal from monitor
             if (this.pendingUpgrade) {
                 this.initCounter++;
                 this.currentInitName = `init_${this.initCounter}.mp4`;
@@ -123,7 +113,6 @@ export class StreamDownloader {
                 consecutiveFailures = 0;
             }
 
-            // Heartbeat
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
                 logger.info(`[SC-DEBUG] HEARTBEAT ${alias} segments=${segmentCount} staleSec=${staleSec} failures=${consecutiveFailures}`);
@@ -135,7 +124,6 @@ export class StreamDownloader {
             if (liveResponse.success && liveResponse.data) {
                 consecutiveFailures = 0;
 
-                // Download fMP4 init segment on first successful response
                 if (!this.initSegmentDownloaded) {
                     const mapMatch = liveResponse.data.match(/#EXT-X-MAP:URI="([^"]+)"/);
                     if (mapMatch) {
@@ -159,7 +147,6 @@ export class StreamDownloader {
                     for (const segment of segmentsToProcess) {
                         const tsBuffer = await this.streamProvider.getTsSegment(segment.remoteUrl);
 
-                        // Rename to sequential number for fMP4 streams (non-numeric segment names)
                         const baseName = segment.localName.replace(/\.\w+$/, "");
                         if (!/^\d+$/.test(baseName)) {
                             segment.localName = `${playlistManager.startSequence + segmentCount}.ts`;
@@ -188,7 +175,7 @@ export class StreamDownloader {
                                 await playlistManager.appendSegmentToPlaylist(segment);
                                 lastDownload = Date.now();
                                 segmentCount++;
-                                reconnectAttempts = 0; // Successful segment = fresh reconnect budget
+                                reconnectAttempts = 0;
                             }
                         } else {
                             logger.error(`Failed to write segment to disk, pausing processing:`, { segmentPath });
@@ -226,10 +213,6 @@ export class StreamDownloader {
             await timersPromises.setTimeout(1000);
         }
 
-        // Determine exit reason:
-        // - aborted: caller requested stop
-        // - completed: stream ended naturally (got segments, then went stale)
-        // - error: never got any segments (CDN broken, master playlist valid but live playlist never worked)
         let exitReason: DownloadExitReason;
         if (this.aborted) {
             exitReason = "aborted";

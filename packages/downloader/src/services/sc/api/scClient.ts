@@ -6,11 +6,6 @@ import logger from "../../../common/logger.js";
 import { IStreamProvider } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 
-/**
- * Parse sidx boxes from fMP4 segment data to get actual duration.
- * fMP4 segments have interleaved video/audio sidx boxes with different timescales.
- * Sums durations per timescale (track), returns the max across tracks.
- */
 function parseFmp4Duration(data: Buffer): number {
     let pos = 0;
     const trackDurations = new Map<number, number>();
@@ -52,7 +47,7 @@ const CDN_TLDS = ["org", "com", "net"];
 const BULK_BATCH_SIZE = 100;
 
 export class ScClient implements IStreamProvider {
-    private roomIdCache = new Map<string, string>(); // username -> roomId (stable, never changes)
+    private roomIdCache = new Map<string, string>();
     private cookies: string[] = [];
 
     constructor() {
@@ -62,8 +57,6 @@ export class ScClient implements IStreamProvider {
     public async init(): Promise<void> {
         await loadMouflonKeys();
     }
-
-    // --- HTTP helpers ---
 
     private getHeaders(): Record<string, string> {
         const headers: Record<string, string> = { "User-Agent": USER_AGENT };
@@ -76,7 +69,6 @@ export class ScClient implements IStreamProvider {
     private async fetchText(url: string): Promise<{ ok: boolean; status: number; text: string; cookies: string[] }> {
         try {
             const response = await fetch(url, { headers: this.getHeaders() });
-            // Accumulate set-cookie headers
             const setCookies: string[] = [];
             const raw = response.headers.getSetCookie?.() ?? [];
             for (const c of raw) {
@@ -124,8 +116,6 @@ export class ScClient implements IStreamProvider {
         this.cookies = [];
     }
 
-    // --- SC-specific methods (used by discovery) ---
-
     private static uniq(length = 16): string {
         const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
         let result = "";
@@ -135,11 +125,6 @@ export class ScClient implements IStreamProvider {
         return result;
     }
 
-    /**
-     * Fetch cam data from API. Always hits the network (no cache).
-     * Caches roomId as a side-effect (stable, never changes).
-     * Returns roomId + fresh streamName.
-     */
     private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
         const data = await this.fetchJson<any>(url);
@@ -155,17 +140,13 @@ export class ScClient implements IStreamProvider {
         const roomId = String(data.user.user.id);
         this.roomIdCache.set(username, roomId);
 
-        const streamName = data.cam?.streamName || roomId; // || not ?? — empty string falls back to roomId
+        const streamName = data.cam?.streamName || roomId;
         const isCamAvailable = data.cam?.isCamAvailable ?? false;
         const isCamActive = data.cam?.isCamActive ?? false;
 
         return { roomId, streamName, isCamAvailable, isCamActive };
     }
 
-    /**
-     * Get cached roomId, or fetch it if not yet resolved.
-     * RoomId is stable (never changes for a username), safe to cache permanently.
-     */
     public async resolveRoomId(username: string): Promise<string | null> {
         const cachedRoomId = this.roomIdCache.get(username);
         if (cachedRoomId) return cachedRoomId;
@@ -174,11 +155,6 @@ export class ScClient implements IStreamProvider {
         return result?.roomId ?? null;
     }
 
-    /**
-     * Fresh API call to get current streamName right before download.
-     * Like StreaMonitor's getVideoUrl() which calls getStatus() first.
-     * Returns null if cam is not available/active (transitional state).
-     */
     public async refreshStreamName(username: string): Promise<string | null> {
         const result = await this.fetchCamData(username);
         if (!result) return null;
@@ -218,8 +194,6 @@ export class ScClient implements IStreamProvider {
         return `https://edge-hls.doppiocdn.${tld}/hls/${streamName}/master/${streamName}_auto.m3u8`;
     }
 
-    // --- Variant selection (pure, no HTTP) ---
-
     private selectBestVariantUrl(content: string, masterUrl: string): string | null {
         const { pkey } = getMouflonUrlParams(content);
         if (!pkey) return null;
@@ -251,8 +225,6 @@ export class ScClient implements IStreamProvider {
         return `${variantUrl}${separator}psch=v2&pkey=${pkey}`;
     }
 
-    // --- IStreamProvider Implementation ---
-
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
         const result = await this.fetchText(masterUrl);
         this.accumulateCookies(result.cookies);
@@ -275,7 +247,7 @@ export class ScClient implements IStreamProvider {
 
     public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
         const result = await this.fetchText(masterUrl);
-        if (!result.ok) return null; // Don't reset session or touch cookies
+        if (!result.ok) return null;
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) return null;
         return bestUrl !== currentLiveUrl ? bestUrl : null;
@@ -299,7 +271,6 @@ export class ScClient implements IStreamProvider {
             return { success: false, data: null };
         }
 
-        // Decrypt mouflon content BEFORE returning — provider encapsulation
         const decrypted = decryptM3u8(result.text);
         return { success: true, data: decrypted };
     }
@@ -354,8 +325,6 @@ export class ScClient implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
-        // fMP4 segments can't be ffprobed standalone (no container header).
-        // Parse sidx boxes to get actual duration from the segment data.
         try {
             const data = await fs.readFile(filePath);
             const duration = parseFmp4Duration(data);
@@ -368,7 +337,6 @@ export class ScClient implements IStreamProvider {
     public async reconnect(streamerId: string): Promise<string | null> {
         logger.info(`[SC] Reconnecting for ${streamerId}...`);
 
-        // Fresh API call — streamName may have changed since the stream started
         const streamName = await this.refreshStreamName(streamerId);
         if (!streamName) {
             logger.warn(`[SC] Reconnect failed: could not get streamName for ${streamerId}`);

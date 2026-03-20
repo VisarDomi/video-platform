@@ -97,11 +97,6 @@ export class DownloadsManager {
     public has(masterPlaylistUrl: string): boolean {
         return this.downloads.has(masterPlaylistUrl);
     }
-
-    /**
-     * Checks if a specific streamer ID is currently being downloaded.
-     * Useful when URLs change dynamically (e.g. FC2).
-     */
     public hasStreamer(streamerId: string): boolean {
         for (const download of this.downloads.values()) {
             if (download.streamerId === streamerId) {
@@ -150,6 +145,6 @@ export class DownloadsManager {
             this._updateFileDebounceTimer = null;
         }
         this.downloads.clear();
-        await this._updateStatusFile(); // Write immediately
+        await this._updateStatusFile();
     }
 }

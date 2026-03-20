@@ -38,11 +38,9 @@ function getSha256(key: string): Buffer {
 
 function decodeSegmentUri(encryptedB64: string, decKey: string): string {
     const hashBytes = getSha256(decKey);
-    // Reverse the base64 string and pad with '=='
     const reversed = encryptedB64.split("").reverse().join("") + "==";
     const encrypted = Buffer.from(reversed, "base64");
 
-    // XOR with cycling SHA256 hash
     const decoded = Buffer.alloc(encrypted.length);
     for (let i = 0; i < encrypted.length; i++) {
         decoded[i] = encrypted[i] ^ hashBytes[i % hashBytes.length];
@@ -68,8 +66,6 @@ function getMouflonParams(content: string): MouflonParams {
         const lineEnd = content.indexOf("\n", absIdx);
         const line = (lineEnd >= 0 ? content.slice(absIdx, lineEnd) : content.slice(absIdx)).trim();
 
-        // Format: #EXT-X-MOUFLON:URI:...:psch:pkey  or  #EXT-X-MOUFLON:psch:pkey
-        // Split by ':' — [#EXT-X-MOUFLON, ...parts, psch, pkey]
         const parts = line.split(":");
         if (parts.length >= 4) {
             const psch = parts[parts.length - 2];
@@ -84,7 +80,6 @@ function getMouflonParams(content: string): MouflonParams {
         start = absIdx + MOUFLON_TAG.length;
     }
 
-    // Fallback: use first available key with v2
     const entries = Object.entries(mouflonKeys);
     if (entries.length > 0) {
         const [pkey, pdkey] = entries[0];
@@ -93,11 +88,6 @@ function getMouflonParams(content: string): MouflonParams {
 
     return { psch: "", pkey: "", pdkey: null };
 }
-
-/**
- * Decrypt mouflon-encrypted m3u8 content.
- * Replaces encrypted segment URIs with decrypted ones.
- */
 export function decryptM3u8(content: string): string {
     const { pdkey } = getMouflonParams(content);
     if (!pdkey) {
@@ -113,7 +103,6 @@ export function decryptM3u8(content: string): string {
         if (line.startsWith(MOUFLON_FILE_ATTR)) {
             const uri = line.slice(MOUFLON_FILE_ATTR.length);
             const parts = uri.split("_");
-            // The encrypted part is second-to-last segment separated by '_'
             if (parts.length >= 2) {
                 const encryptedPart = parts[parts.length - 2];
                 const decodedPart = decodeSegmentUri(encryptedPart, pdkey);
@@ -129,10 +118,6 @@ export function decryptM3u8(content: string): string {
 
     return decoded;
 }
-
-/**
- * Extract psch and pkey from mouflon tags for URL construction.
- */
 export function getMouflonUrlParams(content: string): { psch: string; pkey: string } {
     const { psch, pkey } = getMouflonParams(content);
     return { psch, pkey };

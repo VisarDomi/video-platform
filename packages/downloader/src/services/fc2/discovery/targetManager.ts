@@ -20,5 +20,4 @@ export function createFc2TargetManager(): TargetManager {
     });
 }
 
-// Re-export TargetManager type for consumers
 export { TargetManager };

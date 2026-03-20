@@ -11,13 +11,8 @@ export interface MediaInfo {
 }
 
 export class MediaValidator {
-    /**
-     * Probes the media file and returns raw metadata.
-     * Returns null if ffprobe fails or output is invalid.
-     */
     public static async getMediaInfo(filePath: string): Promise<MediaInfo | null> {
         try {
-            // Check bitrate, duration, and streams using JSON output
             const cmd = `ffprobe -v error -show_format -show_streams -of json "${filePath}"`;
             const { stdout } = await execAsync(cmd);
             const data = JSON.parse(stdout);
@@ -42,7 +37,6 @@ export class MediaValidator {
                 height
             };
         } catch (error) {
-            // ffprobe failed (corrupt header, unreadable file, etc)
             return null;
         }
     }

@@ -25,27 +25,23 @@ export class DiskSpaceMonitor {
                 const cfg = config.getConfig();
                 const stats = await fs.statfs(cfg.storagePath);
                 const availableBytes = stats.bavail * stats.bsize;
-                const limitBytes = 50 * 1024 * 1024 * 1024; // 50GB
+                const limitBytes = 50 * 1024 * 1024 * 1024;
 
                 if (availableBytes < limitBytes) {
                     logger.error(`[System] Disk space limit reached (<50GB). Stopping service to prevent loop.`);
 
-                    // Create marker
                     const dateStr = new Date().toISOString().split("T")[0];
                     const markerPath = path.join(utils.findProjectRoot(__dirname), `no-more-space-${dateStr}.txt`);
                     await fs.writeFile(markerPath, "");
 
-                    // Stop systemd service gracefully instead of crashing
                     exec("systemctl --user stop video-downloader");
 
-                    // Wait forever so we don't loop before PM2 kills us
                     await timersPromises.setTimeout(24 * 60 * 60 * 1000);
                 }
             } catch (error: any) {
                 logger.error("[System] Error checking disk space:", { error: error.message });
             }
 
-            // Check every minute
             await timersPromises.setTimeout(60 * 1000);
         }
     }

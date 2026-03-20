@@ -30,13 +30,12 @@ export class Fc2Client implements IStreamProvider {
 
     constructor() {
         logger.info("[FC2] Client initialized.");
-        // Check for stale sessions every 30 seconds
         this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
     }
 
     private _cleanupStaleSessions() {
         const now = Date.now();
-        const TIMEOUT_MS = 60000; // 60 seconds without access = stale
+        const TIMEOUT_MS = 60000;
 
         for (const [channelId, session] of this.sessions.entries()) {
             if (now - session.lastAccess > TIMEOUT_MS) {
@@ -97,7 +96,6 @@ export class Fc2Client implements IStreamProvider {
 
     private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {
         return new Promise((resolve) => {
-            // Close existing session if any
             this._closeSession(channelId);
 
             const ws = new WebSocket(wsUrl);
@@ -108,7 +106,6 @@ export class Fc2Client implements IStreamProvider {
                 if (!isResolved) {
                     isResolved = true;
                     if (!val) {
-                        // If failed, close the socket
                         try { ws.close(); } catch (e) {}
                     }
                     resolve(val);
@@ -132,14 +129,11 @@ export class Fc2Client implements IStreamProvider {
 
                     if (msg.name === "connect_complete") {
                         this.msgId++;
-                        // Store the ID for the initial handshake request so we can track it if needed,
-                        // though here we just rely on _response_ logic below for the handshake
                         ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
                     }
                     else if (msg.name === "_response_") {
                         const reqId = msg.id;
 
-                        // Check if this is a pending request for polling
                         if (pendingRequests.has(reqId)) {
                             const callback = pendingRequests.get(reqId);
                             if (callback) callback(msg.arguments);
@@ -147,14 +141,12 @@ export class Fc2Client implements IStreamProvider {
                             return;
                         }
 
-                        // Handle Initial Handshake Response
                         if (reqId === this.msgId && !isResolved) {
                             const best = Fc2QualitySelector.selectBestPlaylist(msg.arguments);
 
                             if (best) {
                                 logger.info(`[FC2] Resolved HLS URL for ${channelId}: ${best.url}`);
 
-                                // Start Heartbeat
                                 const heartbeatInterval = setInterval(() => {
                                     try {
                                         this.msgId++;
@@ -164,7 +156,6 @@ export class Fc2Client implements IStreamProvider {
                                     }
                                 }, 30000);
 
-                                // Store Session
                                 this.sessions.set(channelId, {
                                     ws,
                                     channelId,
@@ -275,12 +266,7 @@ export class Fc2Client implements IStreamProvider {
             return null;
         } catch (error) { return null; }
     }
-
-    /**
-     * Extracts Channel ID from URL and updates lastAccess for the active session.
-     */
     private _touchSession(url: string) {
-        // Expected format: /stream/53302993/
         const match = url.match(/\/stream\/(\d+)\//);
         if (match && match[1]) {
             const channelId = match[1];
@@ -292,20 +278,17 @@ export class Fc2Client implements IStreamProvider {
     }
 
     private _extractChannelId(url: string): string | null {
-        // Handle https://live.fc2.com/123456/ (Discovery) or HLS URL structure
         const match = url.match(/live\.fc2\.com\/(\d+)/) || url.match(/\/stream\/(\d+)\//);
         return match ? match[1] : null;
     }
 
     public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        // For FC2, masterUrl in our system is usually the channel/stream HLS Base,
-        // but we can extract channel ID from it or the currentLiveUrl.
         const channelId = this._extractChannelId(masterUrl) || this._extractChannelId(currentLiveUrl);
 
         if (!channelId) return null;
 
         const session = this.sessions.get(channelId);
-        if (!session) return null; // No active WS session
+        if (!session) return null;
 
         session.lastAccess = Date.now();
 
@@ -313,7 +296,6 @@ export class Fc2Client implements IStreamProvider {
             this.msgId++;
             const reqId = this.msgId;
 
-            // Timeout for poll
             const timeout = setTimeout(() => {
                 session.pendingRequests.delete(reqId);
                 resolve(null);
@@ -339,18 +321,11 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        // Logic handled in getHlsUrl (which performs the WS handshake and selection)
-        // If masterUrl comes in as a standard http URL, we might treat it normally,
-        // but for FC2 in this architecture, the 'masterUrl' passed to StreamDownloader
-        // was actually the result of `getHlsUrl` (which is the variant).
-        // However, if we are adhering to the interface strictly:
 
-        // If it looks like an FC2 HLS URL already, return it.
         if (masterUrl.includes(".m3u8")) {
             return masterUrl;
         }
 
-        // Otherwise try to download as text
         const content = await this.getMasterList(masterUrl);
         if (!content) return null;
 

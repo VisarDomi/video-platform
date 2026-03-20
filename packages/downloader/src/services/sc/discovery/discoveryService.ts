@@ -39,8 +39,7 @@ export class ScDiscoveryService {
         const targets = this.targetManager.getTargets();
         if (targets.length === 0) return;
 
-        // Resolve room IDs for all targets (lazy, cached in scClient)
-        const roomIdMap = new Map<string, string>(); // roomId -> username
+        const roomIdMap = new Map<string, string>();
         const roomIds: string[] = [];
 
         for (const username of targets) {
@@ -58,7 +57,6 @@ export class ScDiscoveryService {
 
         if (roomIds.length === 0) return;
 
-        // Bulk status check
         const statuses = await this.scClient.checkStatusBulk(roomIds);
 
         for (const [roomId, statusInfo] of statuses) {
@@ -67,10 +65,8 @@ export class ScDiscoveryService {
 
             if (statusInfo.status !== "public" || !statusInfo.isOnline) continue;
 
-            // Double-check not already downloading (race with previous iteration)
             if (this.downloadsManager.hasStreamer(username)) continue;
 
-            // Fresh API call to get current streamName (like StreaMonitor's getVideoUrl → getStatus)
             const streamName = await this.scClient.refreshStreamName(username);
             if (!streamName) {
                 this.cooldown.recordFailure(username);
@@ -89,13 +85,10 @@ export class ScDiscoveryService {
 
             if (handle) {
                 const downloader = new StreamDownloader(handle, this.scClient);
-                // Discovery retains ownership of retry policy.
-                // StreamDownloader returns the exit reason; discovery decides what to do with it.
                 downloader.start().then((result: DownloadResult) => {
                     if (result.exitReason === "error") {
                         this.cooldown.recordFailure(username);
                     }
-                    // "completed" and "aborted" need no action — next poll will re-check naturally
                 });
             }
         }

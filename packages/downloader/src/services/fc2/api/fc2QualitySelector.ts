@@ -7,7 +7,6 @@ export interface Fc2Playlist {
 }
 
 export class Fc2QualitySelector {
-    // Ported from FC2LiveDL.py
     private static readonly STREAM_QUALITY: { [key: string]: number } = {
         "150Kbps": 10,
         "400Kbps": 20,
@@ -23,9 +22,6 @@ export class Fc2QualitySelector {
         "mid": 2,
     };
 
-    // We default to max settings: 3Mbps + mid latency (latency 2)
-    // Mode calculation: Quality + Latency
-    // 3Mbps (50) + mid (2) = 52
     private static readonly TARGET_QUALITY = "3Mbps";
     private static readonly TARGET_LATENCY = "mid";
 
@@ -36,23 +32,19 @@ export class Fc2QualitySelector {
 
         if (sorted.length === 0) return null;
 
-        // Log available options for debugging
         const availableModes = sorted.map(p => {
             const { quality, latency } = this.formatMode(p.mode);
             return `${quality} (${latency}) [mode: ${p.mode}]`;
         });
         logger.debug(`[FC2] Available qualities: ${availableModes.join(", ")}`);
 
-        // 1. Try exact match
         let selected = sorted.find(p => p.mode === targetMode);
 
-        // 2. If no exact match, ignore quality and find best matching latency
         if (!selected) {
             const targetLatVal = this.STREAM_LATENCY[this.TARGET_LATENCY];
             selected = sorted.find(p => p.mode % 10 === targetLatVal);
         }
 
-        // 3. Fallback to the absolute "best" (highest mode) available
         if (!selected) {
             selected = sorted[0];
         }
@@ -77,10 +69,9 @@ export class Fc2QualitySelector {
 
     private static sortPlaylists(playlists: Fc2Playlist[]): Fc2Playlist[] {
         return playlists.sort((a, b) => {
-            // Normalize sound (90) for sorting if necessary, but higher mode usually means better
             const valA = a.mode >= 90 ? a.mode - 90 : a.mode;
             const valB = b.mode >= 90 ? b.mode - 90 : b.mode;
-            return valB - valA; // Descending
+            return valB - valA;
         });
     }
 
