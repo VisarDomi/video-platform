@@ -7,7 +7,7 @@ import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
-import { IStreamProvider } from "../core/interfaces.js";
+import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
 import { StreamQualityMonitor } from "./streamQualityMonitor.js";
 export type DownloadExitReason = "completed" | "aborted" | "error";
 
@@ -20,6 +20,7 @@ export class StreamDownloader {
     private downloadHandle: DownloadHandle;
     private streamProvider: IStreamProvider;
     private aborted = false;
+    private downloadSession: IDownloadSession;
     private initSegmentDownloaded = false;
     private initCounter = 0;
     private currentInitName = "init.mp4";
@@ -28,6 +29,7 @@ export class StreamDownloader {
     constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
         this.downloadHandle = downloadHandle;
         this.streamProvider = streamProvider;
+        this.downloadSession = streamProvider.createDownloadSession();
     }
 
     public abort(): void {
@@ -91,11 +93,8 @@ export class StreamDownloader {
 
         let lastDownload = Date.now();
         let consecutiveFailures = 0;
-        let reconnectAttempts = 0;
         let segmentCount = 0;
         let lastHeartbeat = Date.now();
-        const MAX_CONSECUTIVE_FAILURES = 5;
-        const MAX_RECONNECT_ATTEMPTS = 3;
         const HEARTBEAT_INTERVAL = 30000;
 
         while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
@@ -109,7 +108,7 @@ export class StreamDownloader {
                 qualityMonitor.updateCurrentUrl(liveUrl);
                 this.initSegmentDownloaded = false;
                 this.pendingUpgrade = null;
-                lastDownload = Date.now();
+                if (segmentCount > 0) lastDownload = Date.now();
                 consecutiveFailures = 0;
             }
 
@@ -119,7 +118,7 @@ export class StreamDownloader {
                 lastHeartbeat = Date.now();
             }
 
-            const liveResponse = await this.streamProvider.getLiveList(liveUrl);
+            const liveResponse = await this.downloadSession.getLiveList(liveUrl);
 
             if (liveResponse.success && liveResponse.data) {
                 consecutiveFailures = 0;
@@ -128,7 +127,7 @@ export class StreamDownloader {
                     const mapMatch = liveResponse.data.match(/#EXT-X-MAP:URI="([^"]+)"/);
                     if (mapMatch) {
                         const initUrl = this.streamProvider.getSegmentUrl(liveUrl!, mapMatch[1]);
-                        const initBuffer = await this.streamProvider.getTsSegment(initUrl);
+                        const initBuffer = await this.downloadSession.getTsSegment(initUrl);
                         if (initBuffer) {
                             const initPath = path.join(segmentsDirPath, this.currentInitName);
                             await FileSystemManager.writeFile(initPath, initBuffer as unknown as Uint8Array);
@@ -145,7 +144,7 @@ export class StreamDownloader {
 
                 if (segmentsToProcess.length > 0) {
                     for (const segment of segmentsToProcess) {
-                        const tsBuffer = await this.streamProvider.getTsSegment(segment.remoteUrl);
+                        const tsBuffer = await this.downloadSession.getTsSegment(segment.remoteUrl);
 
                         const baseName = segment.localName.replace(/\.\w+$/, "");
                         if (!/^\d+$/.test(baseName)) {
@@ -175,7 +174,6 @@ export class StreamDownloader {
                                 await playlistManager.appendSegmentToPlaylist(segment);
                                 lastDownload = Date.now();
                                 segmentCount++;
-                                reconnectAttempts = 0;
                             }
                         } else {
                             logger.error(`Failed to write segment to disk, pausing processing:`, { segmentPath });
@@ -185,30 +183,6 @@ export class StreamDownloader {
                 }
             } else {
                 consecutiveFailures++;
-
-                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES
-                    && reconnectAttempts < MAX_RECONNECT_ATTEMPTS
-                    && this.streamProvider.reconnect) {
-                    const streamerId = this.downloadHandle.state?.streamerId;
-                    if (streamerId) {
-                        reconnectAttempts++;
-                        logger.info(`[StreamDownloader] Attempting reconnect for ${alias} (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-                        const newUrl = await this.streamProvider.reconnect(streamerId);
-
-                        if (newUrl) {
-                            logger.info(`[StreamDownloader] Reconnected ${alias}. Resuming in same folder.`);
-                            await playlistManager.insertDiscontinuity();
-                            liveUrl = newUrl;
-                            this.downloadHandle.update({ liveUrl });
-                            qualityMonitor.updateCurrentUrl(newUrl);
-                            lastDownload = Date.now();
-                            consecutiveFailures = 0;
-                            continue;
-                        } else {
-                            logger.warn(`[StreamDownloader] Reconnect failed for ${alias}.`);
-                        }
-                    }
-                }
             }
             await timersPromises.setTimeout(1000);
         }
