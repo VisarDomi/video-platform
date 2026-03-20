@@ -3,31 +3,16 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { TargetManager } from "../../common/targetManager.js";
 import { ScClient } from "../api/scClient.js";
-import { StreamDownloader } from "../../download/streamDownloader.js";
+import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
+import { RetryCooldown } from "../../common/retryCooldown.js";
 
 const POLL_INTERVAL = 5_000;
-
-/**
- * Tracks per-streamer failure state to prevent infinite retry loops.
- * When a download fails (e.g. empty streamName from API), the streamer
- * enters a cooldown period with exponential backoff before being retried.
- *
- * Ownership: ScDiscoveryService owns this — one instance per streamer.
- * The cooldown is cleared when a download succeeds (streamer goes online→offline→online).
- */
-interface FailureCooldown {
-    failCount: number;
-    cooldownUntil: number; // Date.now() timestamp
-}
-
-const INITIAL_COOLDOWN_MS = 30_000;    // 30s after first failure
-const MAX_COOLDOWN_MS = 10 * 60_000;   // 10 minutes cap
 
 export class ScDiscoveryService {
     private targetManager: TargetManager;
     private scClient: ScClient;
     private downloadsManager: DownloadsManager;
-    private failureCooldowns = new Map<string, FailureCooldown>();
+    private cooldown = new RetryCooldown("SC");
 
     constructor(targetManager: TargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
         this.targetManager = targetManager;
@@ -50,28 +35,6 @@ export class ScDiscoveryService {
         void runLoop();
     }
 
-    private recordFailure(username: string): void {
-        const existing = this.failureCooldowns.get(username);
-        const failCount = (existing?.failCount ?? 0) + 1;
-        const cooldownMs = Math.min(INITIAL_COOLDOWN_MS * Math.pow(2, failCount - 1), MAX_COOLDOWN_MS);
-        this.failureCooldowns.set(username, {
-            failCount,
-            cooldownUntil: Date.now() + cooldownMs,
-        });
-        logger.warn(`[SC] ${username}: download setup failed (attempt ${failCount}). Cooldown ${(cooldownMs / 1000).toFixed(0)}s`);
-    }
-
-    private clearFailure(username: string): void {
-        this.failureCooldowns.delete(username);
-    }
-
-    private isInCooldown(username: string): boolean {
-        const cd = this.failureCooldowns.get(username);
-        if (!cd) return false;
-        if (Date.now() >= cd.cooldownUntil) return false; // cooldown expired
-        return true;
-    }
-
     private async poll(): Promise<void> {
         const targets = this.targetManager.getTargets();
         if (targets.length === 0) return;
@@ -82,7 +45,7 @@ export class ScDiscoveryService {
 
         for (const username of targets) {
             if (this.downloadsManager.hasStreamer(username)) continue;
-            if (this.isInCooldown(username)) continue;
+            if (this.cooldown.isActive(username)) continue;
 
             const roomId = await this.scClient.resolveRoomId(username);
             if (!roomId) {
@@ -110,14 +73,14 @@ export class ScDiscoveryService {
             // Fresh API call to get current streamName (like StreaMonitor's getVideoUrl → getStatus)
             const streamName = await this.scClient.refreshStreamName(username);
             if (!streamName) {
-                this.recordFailure(username);
+                this.cooldown.recordFailure(username);
                 continue;
             }
 
             const masterUrl = this.scClient.buildMasterUrl(streamName);
 
             logger.info(`[SC] ${username} is PUBLIC. Starting download...`);
-            this.clearFailure(username);
+            this.cooldown.clear(username);
 
             const handle = this.downloadsManager.add(masterUrl, {
                 streamerId: username,
@@ -126,7 +89,14 @@ export class ScDiscoveryService {
 
             if (handle) {
                 const downloader = new StreamDownloader(handle, this.scClient);
-                void downloader.start();
+                // Discovery retains ownership of retry policy.
+                // StreamDownloader returns the exit reason; discovery decides what to do with it.
+                downloader.start().then((result: DownloadResult) => {
+                    if (result.exitReason === "error") {
+                        this.cooldown.recordFailure(username);
+                    }
+                    // "completed" and "aborted" need no action — next poll will re-check naturally
+                });
             }
         }
     }

@@ -3,13 +3,15 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { TargetManager } from "../../common/targetManager.js";
 import { Fc2Client } from "../api/fc2Client.js";
-import { StreamDownloader } from "../../download/streamDownloader.js";
+import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
+import { RetryCooldown } from "../../common/retryCooldown.js";
 
 export class Fc2DiscoveryService {
     private targetManager: TargetManager;
     private fc2Client: Fc2Client;
     private downloadsManager: DownloadsManager;
     private queueIndex: number = 0;
+    private cooldown = new RetryCooldown("FC2");
 
     constructor(targetManager: TargetManager, fc2Client: Fc2Client, downloadsManager: DownloadsManager) {
         this.targetManager = targetManager;
@@ -47,12 +49,9 @@ export class Fc2DiscoveryService {
         // logger.info(`[FC2] Checking target: ${channelId}`);
 
         try {
-            if (this.downloadsManager.hasStreamer(channelId)) {
-                // NOISE REDUCTION: Removed debug log
-                return;
-            }
+            if (this.downloadsManager.hasStreamer(channelId)) return;
+            if (this.cooldown.isActive(channelId)) return;
 
-            // Only log checking at debug level now
             logger.debug(`[FC2] Checking status for ${channelId}`);
             const isLive = await this.fc2Client.isOnline(channelId);
 
@@ -71,7 +70,11 @@ export class Fc2DiscoveryService {
 
                     if (handle) {
                         const downloader = new StreamDownloader(handle, this.fc2Client);
-                        void downloader.start();
+                        downloader.start().then((result: DownloadResult) => {
+                            if (result.exitReason === "error") {
+                                this.cooldown.recordFailure(channelId);
+                            }
+                        });
                     }
                 } else {
                     logger.warn(`[FC2] Channel ${channelId} is online but failed to retrieve HLS URL.`);

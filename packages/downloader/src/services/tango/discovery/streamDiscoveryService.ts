@@ -2,17 +2,19 @@ import * as timersPromises from "timers/promises";
 
 import * as config from "../../../common/config.js";
 import logger from "../../../common/logger.js";
-import { StreamDownloader } from "../../download/streamDownloader.js";
+import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
 import { AliasManager } from "shared";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ApiClient } from "../api/apiClient.js";
 import type { TargetManager } from "../../common/targetManager.js";
+import { RetryCooldown } from "../../common/retryCooldown.js";
 
 export class StreamDiscoveryService {
     private readonly apiClient: ApiClient;
     private aliasManager: AliasManager;
     private downloadsManager: DownloadsManager;
     private targetManager: TargetManager | null = null;
+    private cooldown = new RetryCooldown("Tango");
 
     constructor(apiClient: ApiClient, aliasManager: AliasManager, downloadsManager: DownloadsManager) {
         this.apiClient = apiClient;
@@ -52,7 +54,9 @@ export class StreamDiscoveryService {
                     const streamerId = stream.broadcasterId;
 
                     if (stream.kind === "PUBLIC" && streamerId && masterPlaylistUrl) {
-                        if (!this.downloadsManager.has(masterPlaylistUrl)) {
+                        if (!this.downloadsManager.has(masterPlaylistUrl) && !this.downloadsManager.hasStreamer(streamerId)) {
+                            if (this.cooldown.isActive(streamerId)) continue;
+
                             // Filter by streamerId first — no point resolving alias for skipped streamers
                             if (!this.shouldDownload(streamerId)) {
                                 logger.verbose(`[Tango] Skipping ${streamerId} (not in tango.txt)`);
@@ -80,7 +84,11 @@ export class StreamDiscoveryService {
                             if (downloadHandle) {
                                 logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
-                                void streamDownloader.start();
+                                streamDownloader.start().then((result: DownloadResult) => {
+                                    if (result.exitReason === "error") {
+                                        this.cooldown.recordFailure(streamerId);
+                                    }
+                                });
                             }
                         }
                     }

@@ -10,6 +10,21 @@ import { PlaylistManager } from "./playlistManager.js";
 import { IStreamProvider } from "../core/interfaces.js";
 import { StreamQualityMonitor } from "./streamQualityMonitor.js";
 
+/**
+ * Exit result from a download session.
+ * Ownership: StreamDownloader produces this, caller (discovery) consumes it to decide retry policy.
+ *
+ * - "completed": stream ended naturally (stale timeout = streamer went offline). No retry needed.
+ * - "aborted": caller requested abort. No retry needed.
+ * - "error": download failed (CDN 404, master playlist broken, no segments). Caller should backoff.
+ */
+export type DownloadExitReason = "completed" | "aborted" | "error";
+
+export interface DownloadResult {
+    exitReason: DownloadExitReason;
+    segmentCount: number;
+}
+
 export class StreamDownloader {
     private downloadHandle: DownloadHandle;
     private streamProvider: IStreamProvider;
@@ -28,10 +43,11 @@ export class StreamDownloader {
         this.aborted = true;
     }
 
-    public async start() {
+    public async start(): Promise<DownloadResult> {
         if (!this.downloadHandle.state) {
             logger.error(`Could not find state for download with handle. Aborting.`);
-            return;
+            this.downloadHandle.remove();
+            return { exitReason: "error", segmentCount: 0 };
         }
 
         const alias = this.downloadHandle.state.alias;
@@ -52,7 +68,7 @@ export class StreamDownloader {
         if (!liveUrl) {
             logger.info(`[SC-DEBUG] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
             this.downloadHandle.remove();
-            return;
+            return { exitReason: "error", segmentCount: 0 };
         }
 
         this.downloadHandle.update({ liveUrl });
@@ -63,7 +79,7 @@ export class StreamDownloader {
         if (!segmentsDirPath) {
             logger.info(`[SC-DEBUG] EARLY-EXIT ${alias} reason=setupDownloadDir-failed`);
             this.downloadHandle.remove();
-            return;
+            return { exitReason: "error", segmentCount: 0 };
         }
 
         this.downloadHandle.update({ segmentsDirPath });
@@ -210,17 +226,28 @@ export class StreamDownloader {
             await timersPromises.setTimeout(1000);
         }
 
-        const exitReason = this.aborted ? "aborted" : "stale-timeout";
+        // Determine exit reason:
+        // - aborted: caller requested stop
+        // - completed: stream ended naturally (got segments, then went stale)
+        // - error: never got any segments (CDN broken, master playlist valid but live playlist never worked)
+        let exitReason: DownloadExitReason;
+        if (this.aborted) {
+            exitReason = "aborted";
+        } else if (segmentCount > 0) {
+            exitReason = "completed";
+        } else {
+            exitReason = "error";
+        }
+
         const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
         logger.info(`[SC-DEBUG] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
 
         qualityMonitor.stop();
         await playlistManager.finalizePlaylist();
 
-        logger.info(`[SC-DEBUG] FINALIZED ${alias} dir=${path.basename(segmentsDirPath)}`);
-
-
         logger.info(`[SC-DEBUG] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
         this.downloadHandle.remove();
+
+        return { exitReason, segmentCount };
     }
 }
