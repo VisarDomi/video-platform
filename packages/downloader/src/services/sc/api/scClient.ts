@@ -51,13 +51,8 @@ const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const CDN_TLDS = ["org", "com", "net"];
 const BULK_BATCH_SIZE = 100;
 
-interface RoomInfo {
-    roomId: string;
-    streamName: string;
-}
-
 export class ScClient implements IStreamProvider {
-    private roomIdCache = new Map<string, RoomInfo>();
+    private roomIdCache = new Map<string, string>(); // username -> roomId (stable, never changes)
     private cookies: string[] = [];
 
     constructor() {
@@ -140,10 +135,12 @@ export class ScClient implements IStreamProvider {
         return result;
     }
 
-    public async resolveRoomId(username: string): Promise<RoomInfo | null> {
-        const cached = this.roomIdCache.get(username);
-        if (cached) return cached;
-
+    /**
+     * Fetch cam data from API. Always hits the network (no cache).
+     * Caches roomId as a side-effect (stable, never changes).
+     * Returns roomId + fresh streamName.
+     */
+    private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
         const data = await this.fetchJson<any>(url);
         if (!data) return null;
@@ -156,11 +153,37 @@ export class ScClient implements IStreamProvider {
         }
 
         const roomId = String(data.user.user.id);
-        const streamName = data.cam?.streamName ?? roomId;
+        this.roomIdCache.set(username, roomId);
 
-        const info: RoomInfo = { roomId, streamName };
-        this.roomIdCache.set(username, info);
-        return info;
+        const streamName = data.cam?.streamName || roomId; // || not ?? — empty string falls back to roomId
+
+        return { roomId, streamName };
+    }
+
+    /**
+     * Get cached roomId, or fetch it if not yet resolved.
+     * RoomId is stable (never changes for a username), safe to cache permanently.
+     */
+    public async resolveRoomId(username: string): Promise<string | null> {
+        const cachedRoomId = this.roomIdCache.get(username);
+        if (cachedRoomId) return cachedRoomId;
+
+        const result = await this.fetchCamData(username);
+        return result?.roomId ?? null;
+    }
+
+    /**
+     * Refresh cam data to get a fresh streamName right before download.
+     * Like StreaMonitor's getVideoUrl() which calls getStatus() first.
+     */
+    /**
+     * Fresh API call to get current streamName right before download.
+     * Like StreaMonitor's getVideoUrl() which calls getStatus() first.
+     */
+    public async refreshStreamName(username: string): Promise<string | null> {
+        const result = await this.fetchCamData(username);
+        if (!result) return null;
+        return result.streamName;
     }
 
     public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isOnline: boolean }>> {
@@ -190,30 +213,14 @@ export class ScClient implements IStreamProvider {
         return `https://edge-hls.doppiocdn.${tld}/hls/${streamName}/master/${streamName}_auto.m3u8`;
     }
 
-    // --- IStreamProvider Implementation ---
+    // --- Variant selection (pure, no HTTP) ---
 
-    public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        const result = await this.fetchText(masterUrl);
-        this.accumulateCookies(result.cookies);
-
-        if (!result.ok) {
-            logger.warn(`[SC] Master playlist fetch failed: ${result.status} url=${masterUrl}`);
-            this.resetSession();
-            return null;
-        }
-
-        const content = result.text;
+    private selectBestVariantUrl(content: string, masterUrl: string): string | null {
         const { pkey } = getMouflonUrlParams(content);
+        if (!pkey) return null;
 
-        if (!pkey) {
-            logger.warn(`[SC] No mouflon key in master playlist. Resetting session.`);
-            this.resetSession();
-            return null;
-        }
-
-        // Parse variants — select highest bandwidth (best quality: 1080p60 > 1080p > 720p60 etc.)
         const lines = content.split("\n");
-        let bestVariantUrl: string | null = null;
+        let bestRelativeUrl: string | null = null;
         let bestBandwidth = 0;
 
         for (let i = 0; i < lines.length; i++) {
@@ -228,26 +235,45 @@ export class ScClient implements IStreamProvider {
 
             if (bandwidth > bestBandwidth) {
                 bestBandwidth = bandwidth;
-                bestVariantUrl = nextLine;
+                bestRelativeUrl = nextLine;
             }
         }
 
-        if (!bestVariantUrl) {
-            logger.warn(`[SC] No variants found in master playlist: ${masterUrl}`);
-            this.resetSession();
-            return null;
-        }
+        if (!bestRelativeUrl) return null;
 
-        // Resolve relative URL against master
-        const variantUrl = new URL(bestVariantUrl, masterUrl).href;
-
-        // Append mouflon params
+        const variantUrl = new URL(bestRelativeUrl, masterUrl).href;
         const separator = variantUrl.includes("?") ? "&" : "?";
         return `${variantUrl}${separator}psch=v2&pkey=${pkey}`;
     }
 
-    public async pollCurrentVariant(_masterUrl: string, _currentLiveUrl: string): Promise<string | null> {
-        return null; // SC doesn't support mid-stream quality switch
+    // --- IStreamProvider Implementation ---
+
+    public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
+        const result = await this.fetchText(masterUrl);
+        this.accumulateCookies(result.cookies);
+
+        if (!result.ok) {
+            logger.warn(`[SC] Master playlist fetch failed: ${result.status} url=${masterUrl}`);
+            this.resetSession();
+            return null;
+        }
+
+        const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
+        if (!bestUrl) {
+            logger.warn(`[SC] No variants/mouflon key in master playlist: ${masterUrl}`);
+            this.resetSession();
+            return null;
+        }
+
+        return bestUrl;
+    }
+
+    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
+        const result = await this.fetchText(masterUrl);
+        if (!result.ok) return null; // Don't reset session or touch cookies
+        const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
+        if (!bestUrl) return null;
+        return bestUrl !== currentLiveUrl ? bestUrl : null;
     }
 
     public async getMasterList(url: string): Promise<string | null> {
@@ -337,13 +363,14 @@ export class ScClient implements IStreamProvider {
     public async reconnect(streamerId: string): Promise<string | null> {
         logger.info(`[SC] Reconnecting for ${streamerId}...`);
 
-        const roomInfo = await this.resolveRoomId(streamerId);
-        if (!roomInfo) {
-            logger.warn(`[SC] Reconnect failed: could not resolve room ID for ${streamerId}`);
+        // Fresh API call — streamName may have changed since the stream started
+        const streamName = await this.refreshStreamName(streamerId);
+        if (!streamName) {
+            logger.warn(`[SC] Reconnect failed: could not get streamName for ${streamerId}`);
             return null;
         }
 
-        const masterUrl = this.buildMasterUrl(roomInfo.streamName);
+        const masterUrl = this.buildMasterUrl(streamName);
         return this.parseMasterPlaylist(masterUrl);
     }
 }

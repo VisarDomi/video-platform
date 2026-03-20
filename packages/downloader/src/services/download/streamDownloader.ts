@@ -15,6 +15,9 @@ export class StreamDownloader {
     private streamProvider: IStreamProvider;
     private aborted = false;
     private initSegmentDownloaded = false;
+    private initCounter = 0;
+    private currentInitName = "init.mp4";
+    private pendingUpgrade: string | null = null;
 
     constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
         this.downloadHandle = downloadHandle;
@@ -73,10 +76,7 @@ export class StreamDownloader {
             this.downloadHandle.masterPlaylistUrl,
             liveUrl,
             async (newUrl) => {
-                logger.info(`[StreamDownloader] Switching quality for ${alias}`);
-                await playlistManager.insertDiscontinuity();
-                liveUrl = newUrl;
-                this.downloadHandle.update({ liveUrl });
+                this.pendingUpgrade = newUrl;
             },
             10000
         );
@@ -92,6 +92,21 @@ export class StreamDownloader {
         const HEARTBEAT_INTERVAL = 30000;
 
         while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
+            // Quality upgrade signal from monitor
+            if (this.pendingUpgrade) {
+                this.initCounter++;
+                this.currentInitName = `init_${this.initCounter}.mp4`;
+                logger.info(`[StreamDownloader] Quality upgrade for ${alias} — new init: ${this.currentInitName}`);
+                await playlistManager.insertQualityChange(this.currentInitName);
+                liveUrl = this.pendingUpgrade;
+                this.downloadHandle.update({ liveUrl });
+                qualityMonitor.updateCurrentUrl(liveUrl);
+                this.initSegmentDownloaded = false;
+                this.pendingUpgrade = null;
+                lastDownload = Date.now();
+                consecutiveFailures = 0;
+            }
+
             // Heartbeat
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
@@ -111,7 +126,7 @@ export class StreamDownloader {
                         const initUrl = this.streamProvider.getSegmentUrl(liveUrl!, mapMatch[1]);
                         const initBuffer = await this.streamProvider.getTsSegment(initUrl);
                         if (initBuffer) {
-                            const initPath = path.join(segmentsDirPath, "init.mp4");
+                            const initPath = path.join(segmentsDirPath, this.currentInitName);
                             await FileSystemManager.writeFile(initPath, initBuffer as unknown as Uint8Array);
                             logger.info(`[StreamDownloader] Downloaded init segment for ${alias}`);
                         }

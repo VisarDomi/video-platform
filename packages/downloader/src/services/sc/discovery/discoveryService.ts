@@ -6,12 +6,28 @@ import { ScClient } from "../api/scClient.js";
 import { StreamDownloader } from "../../download/streamDownloader.js";
 
 const POLL_INTERVAL = 5_000;
-const PRIVATE_STATUSES = new Set(["private", "groupShow", "p2p", "virtualPrivate", "p2pVoice"]);
+
+/**
+ * Tracks per-streamer failure state to prevent infinite retry loops.
+ * When a download fails (e.g. empty streamName from API), the streamer
+ * enters a cooldown period with exponential backoff before being retried.
+ *
+ * Ownership: ScDiscoveryService owns this — one instance per streamer.
+ * The cooldown is cleared when a download succeeds (streamer goes online→offline→online).
+ */
+interface FailureCooldown {
+    failCount: number;
+    cooldownUntil: number; // Date.now() timestamp
+}
+
+const INITIAL_COOLDOWN_MS = 30_000;    // 30s after first failure
+const MAX_COOLDOWN_MS = 10 * 60_000;   // 10 minutes cap
 
 export class ScDiscoveryService {
     private targetManager: TargetManager;
     private scClient: ScClient;
     private downloadsManager: DownloadsManager;
+    private failureCooldowns = new Map<string, FailureCooldown>();
 
     constructor(targetManager: TargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
         this.targetManager = targetManager;
@@ -34,6 +50,28 @@ export class ScDiscoveryService {
         void runLoop();
     }
 
+    private recordFailure(username: string): void {
+        const existing = this.failureCooldowns.get(username);
+        const failCount = (existing?.failCount ?? 0) + 1;
+        const cooldownMs = Math.min(INITIAL_COOLDOWN_MS * Math.pow(2, failCount - 1), MAX_COOLDOWN_MS);
+        this.failureCooldowns.set(username, {
+            failCount,
+            cooldownUntil: Date.now() + cooldownMs,
+        });
+        logger.warn(`[SC] ${username}: download setup failed (attempt ${failCount}). Cooldown ${(cooldownMs / 1000).toFixed(0)}s`);
+    }
+
+    private clearFailure(username: string): void {
+        this.failureCooldowns.delete(username);
+    }
+
+    private isInCooldown(username: string): boolean {
+        const cd = this.failureCooldowns.get(username);
+        if (!cd) return false;
+        if (Date.now() >= cd.cooldownUntil) return false; // cooldown expired
+        return true;
+    }
+
     private async poll(): Promise<void> {
         const targets = this.targetManager.getTargets();
         if (targets.length === 0) return;
@@ -44,14 +82,15 @@ export class ScDiscoveryService {
 
         for (const username of targets) {
             if (this.downloadsManager.hasStreamer(username)) continue;
+            if (this.isInCooldown(username)) continue;
 
-            const info = await this.scClient.resolveRoomId(username);
-            if (!info) {
+            const roomId = await this.scClient.resolveRoomId(username);
+            if (!roomId) {
                 logger.debug(`[SC] Could not resolve room ID for ${username}`);
                 continue;
             }
-            roomIdMap.set(info.roomId, username);
-            roomIds.push(info.roomId);
+            roomIdMap.set(roomId, username);
+            roomIds.push(roomId);
         }
 
         if (roomIds.length === 0) return;
@@ -68,12 +107,17 @@ export class ScDiscoveryService {
             // Double-check not already downloading (race with previous iteration)
             if (this.downloadsManager.hasStreamer(username)) continue;
 
-            const roomInfo = await this.scClient.resolveRoomId(username);
-            if (!roomInfo) continue;
+            // Fresh API call to get current streamName (like StreaMonitor's getVideoUrl → getStatus)
+            const streamName = await this.scClient.refreshStreamName(username);
+            if (!streamName) {
+                this.recordFailure(username);
+                continue;
+            }
 
-            const masterUrl = this.scClient.buildMasterUrl(roomInfo.streamName);
+            const masterUrl = this.scClient.buildMasterUrl(streamName);
 
             logger.info(`[SC] ${username} is PUBLIC. Starting download...`);
+            this.clearFailure(username);
 
             const handle = this.downloadsManager.add(masterUrl, {
                 streamerId: username,

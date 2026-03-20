@@ -123,6 +123,7 @@ export class OrphanStreamFinalizer {
                                     const newLines: string[] = [];
                                     const metadataBuffer: string[] = [];
                                     let hasChanges = false;
+                                    let headerMapSeen = false;
 
                                     for (const line of lines) {
                                         const trimmed = line.trim();
@@ -133,10 +134,16 @@ export class OrphanStreamFinalizer {
                                                 trimmed.startsWith("#EXTM3U") ||
                                                 trimmed.startsWith("#EXT-X-VERSION") ||
                                                 trimmed.startsWith("#EXT-X-TARGETDURATION") ||
-                                                trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE") ||
-                                                trimmed.startsWith("#EXT-X-MAP")
+                                                trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE")
                                             ) {
                                                 newLines.push(trimmed);
+                                            } else if (trimmed.startsWith("#EXT-X-MAP")) {
+                                                if (!headerMapSeen) {
+                                                    newLines.push(trimmed);
+                                                    headerMapSeen = true;
+                                                } else {
+                                                    metadataBuffer.push(trimmed);
+                                                }
                                             } else {
                                                 metadataBuffer.push(trimmed);
                                             }

@@ -5,10 +5,12 @@ export class StreamQualityMonitor {
     private provider: IStreamProvider;
     private masterUrl: string;
     private currentLiveUrl: string;
-    private intervalMs: number;
+    private initialIntervalMs: number;
+    private currentIntervalMs: number;
+    private maxIntervalMs = 300000; // 5 minutes cap
     private timer: NodeJS.Timeout | null = null;
     private onQualityChange: (newUrl: string) => void;
-    private isPolling = false;
+    private stopped = false;
 
     constructor(
         provider: IStreamProvider,
@@ -21,34 +23,48 @@ export class StreamQualityMonitor {
         this.masterUrl = masterUrl;
         this.currentLiveUrl = initialLiveUrl;
         this.onQualityChange = onQualityChange;
-        this.intervalMs = intervalMs;
+        this.initialIntervalMs = intervalMs;
+        this.currentIntervalMs = intervalMs;
     }
 
     public start(): void {
         if (this.timer) return;
+        this.stopped = false;
+        this.scheduleNext();
+    }
 
-        this.timer = setInterval(async () => {
-            if (this.isPolling) return;
-            this.isPolling = true;
+    private scheduleNext(): void {
+        if (this.stopped) return;
+        this.timer = setTimeout(() => void this.poll(), this.currentIntervalMs);
+    }
 
-            try {
-                const betterUrl = await this.provider.pollCurrentVariant(this.masterUrl, this.currentLiveUrl);
-                if (betterUrl && betterUrl !== this.currentLiveUrl) {
-                    logger.info(`[QualityMonitor] Quality change detected. \nOld: ${this.currentLiveUrl}\nNew: ${betterUrl}`);
-                    this.currentLiveUrl = betterUrl;
-                    this.onQualityChange(betterUrl);
-                }
-            } catch (error) {
-                logger.error(`[QualityMonitor] Error polling variant`, { error: (error as Error).message });
-            } finally {
-                this.isPolling = false;
+    private async poll(): Promise<void> {
+        if (this.stopped) return;
+
+        try {
+            const betterUrl = await this.provider.pollCurrentVariant(this.masterUrl, this.currentLiveUrl);
+            if (betterUrl && betterUrl !== this.currentLiveUrl) {
+                logger.info(`[QualityMonitor] Quality change detected. \nOld: ${this.currentLiveUrl}\nNew: ${betterUrl}`);
+                this.currentLiveUrl = betterUrl;
+                this.onQualityChange(betterUrl);
+                // Reset to initial interval on upgrade
+                this.currentIntervalMs = this.initialIntervalMs;
+            } else {
+                // No upgrade: double interval, cap at max
+                this.currentIntervalMs = Math.min(this.currentIntervalMs * 2, this.maxIntervalMs);
             }
-        }, this.intervalMs);
+        } catch (error) {
+            logger.error(`[QualityMonitor] Error polling variant`, { error: (error as Error).message });
+            // Keep current interval on error
+        }
+
+        this.scheduleNext();
     }
 
     public stop(): void {
+        this.stopped = true;
         if (this.timer) {
-            clearInterval(this.timer);
+            clearTimeout(this.timer);
             this.timer = null;
         }
     }
