@@ -106,3 +106,21 @@ Provider-specific download session behavior:
 - **SC**: own cookie jar, mouflon decryption, no session resets — fail-fast on errors
 - **Tango**: gets fresh auth tokens per request (already stateless)
 - **FC2**: calls `_touchSession` to keep WebSocket alive during downloads
+
+## StreamDownloader logging: every state transition has a cause
+
+The riseshu incident (2026-03-20) showed that `getLiveList` failures were completely silent in the download loop — 43 consecutive failures with zero log output. The download eventually timed out with `segments=0` but no indication of why.
+
+Logging rules for StreamDownloader:
+- `getLiveList` failure: logged at count 1, 5, and every 30th — includes alias, count, segment count, and URL
+- Segment download failure: logged with alias, segment name, and URL
+- Init segment failure: logged with URL
+- Invalid segment rejection: logged at debug level
+- Disk write failure: logged at error level
+- LOOP-EXIT: includes failure count alongside segment count and stale seconds
+
+The `[SC-DEBUG]` prefix was replaced with `[StreamDownloader]` — this code is provider-agnostic. The SC_DEBUG env filter passes `[StreamDownloader]`-tagged messages.
+
+## Quality upgrade: no lastDownload reset at 0 segments
+
+Quality upgrades only reset `lastDownload` when `segmentCount > 0`. Without this guard, the quality monitor kept a zombie download alive indefinitely — the riseshu incident had 8 quality upgrades over 4 minutes with 0 segments, each resetting the stale timer.

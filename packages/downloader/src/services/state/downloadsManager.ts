@@ -83,7 +83,7 @@ export class DownloadsManager {
     public remove(masterPlaylistUrl: string): void {
         const existing = this.downloads.get(masterPlaylistUrl);
         if (existing) {
-            logger.info(`[SC-DEBUG] DM-REMOVE streamer=${existing.streamerId} dir=${existing.segmentsDirPath ? existing.segmentsDirPath.split("/").pop() : "none"}`);
+            logger.info(`[StreamDownloader] DM-REMOVE streamer=${existing.streamerId} dir=${existing.segmentsDirPath ? existing.segmentsDirPath.split("/").pop() : "none"}`);
         }
         if (this.downloads.delete(masterPlaylistUrl)) {
             this._requestStatusFileUpdate();

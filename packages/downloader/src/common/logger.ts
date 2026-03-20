@@ -11,7 +11,7 @@ const projectRoot = utils.findProjectRoot(__dirname);
 const scDebugFilter = winston.format((info) => {
     if (!process.env.SC_DEBUG) return info;
     if (info.level?.includes("error")) return info;
-    if (typeof info.message === "string" && info.message.includes("[SC-DEBUG]")) return info;
+    if (typeof info.message === "string" && info.message.includes("[StreamDownloader]")) return info;
     return false;
 })();
 
