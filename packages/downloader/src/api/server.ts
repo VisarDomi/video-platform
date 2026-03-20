@@ -5,7 +5,7 @@ import * as path from "path";
 import logger from "../common/logger.js";
 import { FileSystemManager } from "../common/fileSystemManager.js";
 import { StreamDownloader } from "../services/download/streamDownloader.js";
-import { IStreamProvider } from "../services/core/interfaces.js";
+import { IDownloadSession, IStreamProvider } from "../services/core/interfaces.js";
 import { DownloadHandle } from "../services/state/downloadsManager.js";
 
 const TL_BASE_PATH = "/tmp/Videos/downloads/tl";
@@ -55,17 +55,14 @@ class EphemeralStreamProvider implements IStreamProvider {
     async getMasterList(url: string) {
         return this.inner.getMasterList(url);
     }
-    async getLiveList(url: string) {
-        return this.inner.getLiveList(url);
-    }
-    async getTsSegment(url: string) {
-        return this.inner.getTsSegment(url);
-    }
     getSegmentUrl(baseUrl: string, segmentLine: string) {
         return this.inner.getSegmentUrl(baseUrl, segmentLine);
     }
     async validateSegment(filePath: string) {
         return this.inner.validateSegment(filePath);
+    }
+    createDownloadSession(): IDownloadSession {
+        return this.inner.createDownloadSession();
     }
     async setupDownloadDir(_alias: string, _date: Date): Promise<string | null> {
         const ok = await FileSystemManager.ensureDirExists(this.dirPath);

@@ -20,9 +20,9 @@ Segments are encrypted with mouflon. Keys are stored in `stripchat_mouflon_keys.
 
 When the CDN returns errors (Cloudflare challenge pages, 403s, empty responses), the first 500 chars of the body are logged. Without this, debugging CDN issues requires reproducing the failure.
 
-## SC: session reset on CDN failure
+## SC: session reset on CDN failure (discovery path only)
 
-When a master playlist fetch fails or returns no mouflon key, the HTTP session (cookies) is reset. Stale Cloudflare cookies accumulate over hours and can cause persistent failures.
+When a master playlist fetch fails or returns no mouflon key, the HTTP session (cookies) is reset on the discovery/API path. Stale Cloudflare cookies accumulate over hours and can cause persistent failures. Download-path fetches (variant playlists, segments) use their own isolated cookie jar via `IDownloadSession` — a 403 on one download cannot nuke cookies for other concurrent downloads.
 
 ## FC2: quality selection ported from FC2LiveDL.py
 
@@ -95,3 +95,14 @@ StreamDownloader.start() returns `{ exitReason, segmentCount }`. Discovery consu
 ## Ephemeral downloads (API server, /tmp)
 
 The API server wraps IStreamProvider to redirect downloads to `/tmp/Videos/downloads/tl/{alias}/`. Uses a heartbeat-based cleanup: client reports wanted aliases via POST /api/download/active. If no heartbeat arrives within 60s, all downloads are stopped and directories cleaned up.
+
+## IDownloadSession: per-download HTTP isolation
+
+`IStreamProvider` owns discovery (API calls, master playlist, session management). Download-path HTTP (variant playlists, segments) is owned by `IDownloadSession`, created per download via `createDownloadSession()`. Each download gets its own cookie jar and fetch context. This prevents the root cause of 403 death spirals: `resetSession()` on one download nuking cookies for all concurrent downloads sharing the same `ScClient`. Matches StreaMonitor's pattern of creating a fresh `requests.Session()` per download in `hls.py`.
+
+The `reconnect` mechanism was removed entirely — discovery retries from scratch on failure, and the stale stream timer handles natural stream endings. Quality monitoring continues to work via the provider's discovery methods.
+
+Provider-specific download session behavior:
+- **SC**: own cookie jar, mouflon decryption, no session resets — fail-fast on errors
+- **Tango**: gets fresh auth tokens per request (already stateless)
+- **FC2**: calls `_touchSession` to keep WebSocket alive during downloads

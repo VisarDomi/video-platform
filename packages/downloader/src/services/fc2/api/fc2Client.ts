@@ -2,7 +2,7 @@ import * as path from "path";
 import * as config from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
-import { IStreamProvider } from "../../core/interfaces.js";
+import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 
@@ -51,7 +51,7 @@ export class Fc2Client implements IStreamProvider {
             clearInterval(session.heartbeatInterval);
             try {
                 session.ws.close();
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
             this.sessions.delete(channelId);
         }
     }
@@ -238,35 +238,11 @@ export class Fc2Client implements IStreamProvider {
         }
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
-        try {
-            this._touchSession(liveUrl);
-            const response = await this._request(liveUrl);
-            if (!response.ok) {
-                logger.debug(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`);
-                return { success: false, data: null };
-            }
-            const data = await response.text();
-            return { success: true, data };
-        } catch (error: any) {
-            logger.error(`[FC2] getLiveList exception`, { error: error.message, liveUrl });
-            return { success: false, data: null };
-        }
+    public createDownloadSession(): IDownloadSession {
+        return new Fc2DownloadSession(this);
     }
 
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
-        try {
-            this._touchSession(tsUrl);
-            const response = await this._request(tsUrl);
-            if (response.ok) {
-                const arr = await response.arrayBuffer();
-                return Buffer.from(arr);
-            }
-            logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
-            return null;
-        } catch (error) { return null; }
-    }
-    private _touchSession(url: string) {
+    public _touchSession(url: string) {
         const match = url.match(/\/stream\/(\d+)\//);
         if (match && match[1]) {
             const channelId = match[1];
@@ -389,11 +365,6 @@ export class Fc2Client implements IStreamProvider {
         return segmentsDirExists ? segmentsDirPath : null;
     }
 
-    public async reconnect(streamerId: string): Promise<string | null> {
-        logger.info(`[FC2] Reconnecting for ${streamerId}...`);
-        return this.getHlsUrl(streamerId);
-    }
-
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return { valid: false };
@@ -402,5 +373,50 @@ export class Fc2Client implements IStreamProvider {
         if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
 
         return { valid: true, duration: info.duration };
+    }
+}
+
+class Fc2DownloadSession implements IDownloadSession {
+    private client: Fc2Client;
+    private readonly HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://live.fc2.com/",
+        "Origin": "https://live.fc2.com",
+        "Connection": "keep-alive",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*"
+    };
+
+    constructor(client: Fc2Client) {
+        this.client = client;
+    }
+
+    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+        try {
+            this.client._touchSession(liveUrl);
+            const response = await fetch(liveUrl, { headers: this.HEADERS });
+            if (!response.ok) {
+                logger.debug(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`);
+                return { success: false, data: null };
+            }
+            const data = await response.text();
+            return { success: true, data };
+        } catch (error: any) {
+            logger.error(`[FC2] getLiveList exception`, { error: error.message, liveUrl });
+            return { success: false, data: null };
+        }
+    }
+
+    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+        try {
+            this.client._touchSession(tsUrl);
+            const response = await fetch(tsUrl, { headers: this.HEADERS });
+            if (response.ok) {
+                const arr = await response.arrayBuffer();
+                return Buffer.from(arr);
+            }
+            logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
+            return null;
+        } catch (error) { return null; }
     }
 }

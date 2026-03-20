@@ -3,7 +3,7 @@ import * as config from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import * as constants from "../../../common/constants.js";
-import { IStreamProvider } from "../../core/interfaces.js";
+import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { TokenManager, Tokens } from "./tokenManager.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 
@@ -136,39 +136,8 @@ export class ApiClient implements IStreamProvider {
         }
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
-        try {
-            const tokens = await this.tokenManager.getTokens();
-            const headers = this._getStreamHeaders(tokens);
-            const options: RequestInit = { method: "GET", headers };
-            const response = await fetch(liveUrl, options);
-
-            if (!response.ok) {
-                return { success: false, data: null };
-            }
-            const data = await response.text();
-            return { success: true, data };
-        } catch (error) {
-            logger.warn(`[Tango] API request to ${liveUrl} failed with network/parsing error.`, { error: (error as Error).message });
-            return { success: false, data: null };
-        }
-    }
-
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
-        try {
-            const tsResponse = await fetch(tsUrl);
-            if (tsResponse.ok) {
-                const tsBuffer = await tsResponse.arrayBuffer();
-                return Buffer.from(tsBuffer);
-            } else {
-                logger.warn(`[Tango] Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
-            }
-        } catch (error: any) {
-            if (error?.message !== "terminated") {
-                logger.warn(`[Tango] Network error downloading TS segment: ${error.message}`, { tsUrl });
-            }
-        }
-        return null;
+    public createDownloadSession(): IDownloadSession {
+        return new TangoDownloadSession(this.tokenManager);
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
@@ -246,5 +215,55 @@ export class ApiClient implements IStreamProvider {
         if (info.width === 360 && info.height === 640) return { valid: false };
 
         return { valid: true, duration: info.duration };
+    }
+}
+
+class TangoDownloadSession implements IDownloadSession {
+    private tokenManager: TokenManager;
+
+    constructor(tokenManager: TokenManager) {
+        this.tokenManager = tokenManager;
+    }
+
+    private _getStreamHeaders(tokens: Tokens): HeadersInit {
+        if (!tokens.tt || !tokens.ttu || !tokens.tte) {
+            throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
+        }
+        const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
+        return { [constants.HEADERS.COOKIE]: cookie };
+    }
+
+    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+        try {
+            const tokens = await this.tokenManager.getTokens();
+            const headers = this._getStreamHeaders(tokens);
+            const response = await fetch(liveUrl, { method: "GET", headers });
+
+            if (!response.ok) {
+                return { success: false, data: null };
+            }
+            const data = await response.text();
+            return { success: true, data };
+        } catch (error) {
+            logger.warn(`[Tango] Live playlist fetch failed.`, { error: (error as Error).message, liveUrl });
+            return { success: false, data: null };
+        }
+    }
+
+    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+        try {
+            const tsResponse = await fetch(tsUrl);
+            if (tsResponse.ok) {
+                const tsBuffer = await tsResponse.arrayBuffer();
+                return Buffer.from(tsBuffer);
+            } else {
+                logger.warn(`[Tango] Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
+            }
+        } catch (error: any) {
+            if (error?.message !== "terminated") {
+                logger.warn(`[Tango] Network error downloading TS segment: ${error.message}`, { tsUrl });
+            }
+        }
+        return null;
     }
 }

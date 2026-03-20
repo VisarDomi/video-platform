@@ -3,7 +3,7 @@ import * as path from "path";
 import * as config from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
-import { IStreamProvider } from "../../core/interfaces.js";
+import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 
 function parseFmp4Duration(data: Buffer): number {
@@ -260,39 +260,8 @@ export class ScClient implements IStreamProvider {
         return result.text;
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
-        const result = await this.fetchText(liveUrl);
-        this.accumulateCookies(result.cookies);
-
-        if (!result.ok) {
-            if (result.status === 403) {
-                this.resetSession();
-            }
-            return { success: false, data: null };
-        }
-
-        const decrypted = decryptM3u8(result.text);
-        return { success: true, data: decrypted };
-    }
-
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
-        try {
-            const response = await fetch(tsUrl, { headers: this.getHeaders() });
-            if (response.ok) {
-                const buf = await response.arrayBuffer();
-                return Buffer.from(buf);
-            }
-            if (response.status === 403 || response.status === 404) {
-                this.resetSession();
-            } else {
-                logger.warn(`[SC] Segment download failed: ${response.status}`, { tsUrl });
-            }
-        } catch (error: any) {
-            if (error?.message !== "terminated") {
-                logger.warn(`[SC] Network error downloading segment: ${error.message}`, { tsUrl });
-            }
-        }
-        return null;
+    public createDownloadSession(): IDownloadSession {
+        return new ScDownloadSession();
     }
 
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
@@ -333,17 +302,76 @@ export class ScClient implements IStreamProvider {
             return { valid: true };
         }
     }
+}
 
-    public async reconnect(streamerId: string): Promise<string | null> {
-        logger.info(`[SC] Reconnecting for ${streamerId}...`);
+class ScDownloadSession implements IDownloadSession {
+    private cookies: string[] = [];
+    private failLog = new Map<string, number>();
 
-        const streamName = await this.refreshStreamName(streamerId);
-        if (!streamName) {
-            logger.warn(`[SC] Reconnect failed: could not get streamName for ${streamerId}`);
-            return null;
+    private getHeaders(): Record<string, string> {
+        const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+        if (this.cookies.length > 0) {
+            headers["Cookie"] = this.cookies.join("; ");
         }
+        return headers;
+    }
 
-        const masterUrl = this.buildMasterUrl(streamName);
-        return this.parseMasterPlaylist(masterUrl);
+    private accumulateCookies(newCookies: string[]): void {
+        const map = new Map<string, string>();
+        for (const c of this.cookies) {
+            const name = c.split("=")[0];
+            map.set(name, c);
+        }
+        for (const c of newCookies) {
+            const name = c.split("=")[0];
+            map.set(name, c);
+        }
+        this.cookies = Array.from(map.values());
+    }
+
+    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+        try {
+            const response = await fetch(liveUrl, { headers: this.getHeaders() });
+            const setCookies: string[] = [];
+            const raw = response.headers.getSetCookie?.() ?? [];
+            for (const c of raw) {
+                const name = c.split(";")[0];
+                if (name) setCookies.push(name);
+            }
+            this.accumulateCookies(setCookies);
+
+            if (!response.ok) {
+                const count = (this.failLog.get(liveUrl) ?? 0) + 1;
+                this.failLog.set(liveUrl, count);
+                if (count === 1 || count % 30 === 0) {
+                    logger.warn(`[SC] Live playlist fetch failed (x${count}): status=${response.status} url=${liveUrl}`);
+                }
+                return { success: false, data: null };
+            }
+
+            this.failLog.delete(liveUrl);
+            const text = await response.text();
+            const decrypted = decryptM3u8(text);
+            return { success: true, data: decrypted };
+        } catch (error: any) {
+            logger.error(`[SC] Live playlist fetch error: ${liveUrl}`, { error: error.message });
+            return { success: false, data: null };
+        }
+    }
+
+    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+        try {
+            const response = await fetch(tsUrl, { headers: this.getHeaders() });
+            if (response.ok) {
+                const buf = await response.arrayBuffer();
+                return Buffer.from(buf);
+            }
+            logger.warn(`[SC] Segment download failed: ${response.status}`, { tsUrl });
+        } catch (error: any) {
+            if (error?.message !== "terminated") {
+                logger.warn(`[SC] Network error downloading segment: ${error.message}`, { tsUrl });
+            }
+        }
+        return null;
     }
 }
