@@ -13,7 +13,6 @@ const aliasManager = new AliasManager(ALIASES_PATH);
 
 const router = Router();
 
-// Parse a tango.txt line: "https://tango.me/{accountId} {alias}" -> { accountId, alias }
 function parseLine(line: string): { accountId: string; alias: string } | null {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(TANGO_URL_PREFIX)) return null;
@@ -23,8 +22,6 @@ function parseLine(line: string): { accountId: string; alias: string } | null {
     return { accountId: rest.slice(0, spaceIdx), alias: rest.slice(spaceIdx + 1) };
 }
 
-// Override list to return ALL known aliases per accountId (current + historical)
-// On cache miss: fetch from tango API and persist to aliases.json
 router.get("/api/tango/list", async (_req, res) => {
     try {
         const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
@@ -47,7 +44,6 @@ router.get("/api/tango/list", async (_req, res) => {
             }
         }
 
-        // Fetch aliases for cache misses from tango API and persist
         if (missingAccountIds.length > 0) {
             logger.info(`[Tango] Cache miss for ${missingAccountIds.length} accountIds, fetching from API...`);
             const profiles = await fetchAliasesInBatch(missingAccountIds);
@@ -73,7 +69,6 @@ router.get("/api/tango/list", async (_req, res) => {
     }
 });
 
-// Override remove: resolve alias → accountId via aliases.json, remove by accountId
 router.post("/api/tango/remove", async (req, res) => {
     const { identifier } = req.body;
     if (!identifier || typeof identifier !== "string") {
@@ -88,7 +83,6 @@ router.post("/api/tango/remove", async (req, res) => {
             if (accountId) {
                 return !line.includes(accountId);
             }
-            // Fallback: match by alias directly
             return !line.includes(identifier);
         });
 
@@ -101,31 +95,26 @@ router.post("/api/tango/remove", async (req, res) => {
     }
 });
 
-// Override add with smart alias resolution
 router.post("/api/tango/add", async (req, res) => {
     const { identifier } = req.body;
     if (!identifier || typeof identifier !== "string") {
         return res.status(400).json({ error: "identifier required" });
     }
     try {
-        // 1. Resolve alias -> accountId
         const resolved = await resolveAlias(identifier);
         if (!resolved) {
             return res.status(404).json({ error: "Could not resolve alias on tango" });
         }
         const { accountId } = resolved;
 
-        // 2. Get latest alias for this accountId
         const profiles = await fetchAliasesInBatch([accountId]);
         const latestAlias = profiles?.[accountId]?.alias || identifier;
 
-        // 3. Read current file
         let content = "";
         try { content = await fs.readFile(TANGO_FILE_PATH, "utf-8"); } catch {}
 
         const lines = content.split("\n");
 
-        // 4. Check if accountId already exists
         const existingIndex = lines.findIndex(line => line.includes(accountId));
 
         if (existingIndex !== -1) {
@@ -134,14 +123,12 @@ router.post("/api/tango/add", async (req, res) => {
                 logger.info(`tango skip: ${accountId} ${latestAlias} (already exists)`);
                 return res.json({ success: true });
             }
-            // Update alias
             lines[existingIndex] = `${TANGO_URL_PREFIX}${accountId} ${latestAlias}`;
             await fs.writeFile(TANGO_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
             logger.info(`tango update: ${accountId} ${existing?.alias} -> ${latestAlias}`);
             return res.json({ success: true });
         }
 
-        // 5. Add new entry
         const entry = `${TANGO_URL_PREFIX}${accountId} ${latestAlias}`;
         const newContent = cleanListContent(content + "\n" + entry);
         await fs.writeFile(TANGO_FILE_PATH, newContent, "utf-8");
@@ -153,7 +140,6 @@ router.post("/api/tango/add", async (req, res) => {
     }
 });
 
-// Override save with smart alias resolution for bare aliases
 router.post("/api/tango", async (req, res) => {
     const { content } = req.body;
     if (typeof content !== "string") {
@@ -169,12 +155,10 @@ router.post("/api/tango", async (req, res) => {
                 resolved.push(raw);
                 continue;
             }
-            // Already in proper format
             if (parseLine(trimmed)) {
                 resolved.push(raw);
                 continue;
             }
-            // Bare alias — resolve to full line
             const alias = trimmed;
             const result = await resolveAlias(alias);
             if (!result) {
@@ -197,7 +181,6 @@ router.post("/api/tango", async (req, res) => {
     }
 });
 
-// Use base router for everything else (HTML editor, raw content, remove)
 router.use(baseRouter);
 
 export default router;

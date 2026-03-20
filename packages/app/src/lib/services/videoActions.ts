@@ -10,7 +10,6 @@ export function saveCurrentVideo() {
 
 	const provider = videoListStore.selectedProvider;
 
-	// Update UI immediately: original → edited (player + list + localStorage)
 	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
@@ -46,16 +45,13 @@ export async function createEditedVideo() {
 
 	const provider = videoListStore.selectedProvider;
 
-	// Update UI immediately: clear segments, mark as edited (player + list + localStorage)
 	playerStore.clearSegments();
 	playerStore.markCurrentAsEdited(provider);
 	playerStore.setLastActioned(filename);
 	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 
-	// Fire edit request in background
 	sendEditRequest(filename, segmentsToSave, provider)
 		.then(() => {
-			// If still watching the same video, reload from start
 			if (playerStore.currentVideo?.filename === filename) {
 				playerStore.reloadCurrentVideo();
 			}
@@ -79,7 +75,6 @@ export function returnToOriginals() {
 
 	const provider = videoListStore.selectedProvider;
 
-	// Update UI immediately: edited → original (player + list + localStorage)
 	playerStore.markCurrentAsOriginal(provider);
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);

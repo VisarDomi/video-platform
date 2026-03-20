@@ -31,12 +31,10 @@ export class GestureController {
 	private navAnimating = false;
 	private lockDx = 0;
 
-	// Zoom state — persists across gestures, reset on nav or video change
 	private zoomScale = 1;
 	private zoomX = 0;
 	private zoomY = 0;
 
-	// Pinch tracking — per-gesture
 	private pinchStartDist = 0;
 	private pinchStartScale = 1;
 	private pinchStartCenterX = 0;
@@ -139,7 +137,6 @@ export class GestureController {
 
 	private handleTouchStart = (e: TouchEvent): void => {
 		if (e.touches.length > 1) {
-			// Cancel-and-switch: if no gesture committed yet, start pinch
 			if (this.swipeAxis === 'none' && !this.swipeAnimating && !this.navAnimating && this.swipeType !== 'pinch') {
 				this.startPinch(e);
 			} else {
@@ -161,16 +158,13 @@ export class GestureController {
 	private handleTouchMove = (e: TouchEvent): void => {
 		if (this.swipeAnimating || this.navAnimating) return;
 
-		// Two-finger: pinch + pan
 		if (e.touches.length > 1) {
 			e.preventDefault();
 
 			if (this.swipeType !== 'pinch') {
-				// Cancel-and-switch: still in deadzone, switch to pinch
 				if (this.swipeAxis === 'none') {
 					this.startPinch(e);
 				} else {
-					// Already committed to single-finger gesture, ignore second finger
 					this.lastMultiTouchTime = Date.now();
 					return;
 				}
@@ -181,11 +175,9 @@ export class GestureController {
 			const dist = this.getTouchDistance(t1, t2);
 			const center = this.getTouchCenter(t1, t2);
 
-			// Scale from pinch distance ratio
 			const rawScale = this.pinchStartScale * (dist / this.pinchStartDist);
 			const scale = Math.max(1, Math.min(this.MAX_ZOOM, rawScale));
 
-			// Pan from center point delta
 			const panDx = center.x - this.pinchStartCenterX;
 			const panDy = center.y - this.pinchStartCenterY;
 			const rawX = this.pinchStartZoomX + panDx;
@@ -199,7 +191,6 @@ export class GestureController {
 			return;
 		}
 
-		// Single finger — ignore during/right after pinch
 		if (this.swipeType === 'pinch') return;
 		if (Date.now() - this.lastMultiTouchTime < this.MULTI_TOUCH_DEBOUNCE_MS) return;
 
@@ -225,14 +216,12 @@ export class GestureController {
 			} else {
 				this.swipeAxis = 'vertical';
 				this.swipeType = 'nav';
-				// Reset zoom when starting nav — nav transforms conflict with zoom transforms
 				if (this.zoomScale > 1) {
 					this.resetZoom();
 				}
 			}
 		}
 
-		// preventDefault AFTER axis lock — don't block scroll before we know it's our gesture
 		e.preventDefault();
 
 		if (this.swipeType === 'edge-back') {
@@ -253,18 +242,14 @@ export class GestureController {
 	};
 
 	private handleTouchEnd = (e: TouchEvent): void => {
-		// Pinch end handling
 		if (this.swipeType === 'pinch') {
 			if (e.touches.length === 0) {
-				// All fingers lifted — finalize
 				this.swipeType = 'none';
 				this.lastMultiTouchTime = Date.now();
-				// Snap to 1x if barely zoomed
 				if (this.zoomScale < 1.05) {
 					this.resetZoom();
 				}
 			} else {
-				// One finger remains — don't let it start a gesture
 				this.swipeType = 'none';
 				this.lastMultiTouchTime = Date.now();
 			}

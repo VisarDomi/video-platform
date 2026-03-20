@@ -37,7 +37,6 @@ export async function addToList(provider: ListProvider, identifier: string): Pro
 }
 
 export function extractIdentifier(filename: string): string {
-	// Filenames are like "2025-02-12 143000 Username" — identifier is the last segment
 	const parts = filename.split(' ');
 	return parts.length >= 3 ? parts.slice(2).join(' ') : filename;
 }

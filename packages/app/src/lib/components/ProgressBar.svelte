@@ -23,7 +23,6 @@
 		`${formatTimePrecise(currentTime)} / ${formatTimePrecise(effectiveDuration)}`
 	);
 
-	// Cached rect — set once on pointerdown, avoids layout thrash on every move
 	let cachedRect: DOMRect | null = null;
 	let lastScrubTime = 0;
 	let rafId = 0;
@@ -66,7 +65,6 @@
 			rafId = 0;
 		}
 		if (isScrubbing && lastScrubTime > 0) {
-			// Final sync on release
 			onseek(lastScrubTime);
 		}
 		isScrubbing = false;

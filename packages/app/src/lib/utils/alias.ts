@@ -1,7 +1,6 @@
 import type { Video } from '../types.js';
 
 export function extractAlias(filename: string): string {
-	// Regular filenames: 18-char timestamp + alias (e.g. "2024-01-01 123456 alias")
 	if (filename.length > 18 && /^\d{4}-/.test(filename)) {
 		return filename.substring(18);
 	}

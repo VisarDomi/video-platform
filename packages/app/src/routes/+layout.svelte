@@ -9,7 +9,6 @@
 	}
 
 	function handleOrientationChange() {
-		// Force viewport recalculation to prevent iOS PWA auto-zoom on rotation
 		const viewport = document.querySelector('meta[name="viewport"]');
 		if (!viewport) return;
 		const content = viewport.getAttribute('content')!;
@@ -26,12 +25,10 @@
 			navigator.serviceWorker.register('/sw.js');
 		}
 
-		// Prevent Safari pinch-zoom gestures
 		document.addEventListener('gesturestart', preventZoom, { passive: false });
 		document.addEventListener('gesturechange', preventZoom, { passive: false });
 		document.addEventListener('gestureend', preventZoom, { passive: false });
 
-		// Fix iOS standalone PWA auto-zoom on rotation
 		window.addEventListener('orientationchange', handleOrientationChange);
 	});
 

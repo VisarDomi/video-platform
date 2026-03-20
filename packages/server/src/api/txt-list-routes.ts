@@ -13,7 +13,6 @@ interface TxtListRoutesOptions {
 export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix = "" }: TxtListRoutesOptions): Router {
     const router = Router();
 
-    // API: Get raw content
     router.get(`/api/${provider}`, async (_req, res) => {
         try {
             const content = await fs.readFile(filePath, "utf-8");
@@ -27,7 +26,6 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Get parsed identifiers
     router.get(`/api/${provider}/list`, async (_req, res) => {
         try {
             const content = await fs.readFile(filePath, "utf-8");
@@ -46,7 +44,6 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Add to list
     router.post(`/api/${provider}/add`, async (req, res) => {
         const { identifier } = req.body;
         if (!identifier || typeof identifier !== "string") {
@@ -69,7 +66,6 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Remove from list
     router.post(`/api/${provider}/remove`, async (req, res) => {
         const { identifier } = req.body;
         if (!identifier || typeof identifier !== "string") {
@@ -87,7 +83,6 @@ export function createTxtListRoutes({ provider, filePath, urlPrefix, urlSuffix =
         }
     });
 
-    // API: Save content
     router.post(`/api/${provider}`, async (req, res) => {
         const { content } = req.body;
         if (typeof content !== 'string') {

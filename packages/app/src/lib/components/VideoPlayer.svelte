@@ -95,7 +95,6 @@
 		resetZoom: () => engine.resetZoom()
 	});
 
-	// --- Reconnection / freeze recovery ---
 	const RESUME_THRESHOLD_MS = 3000;
 	let backgroundedAt = 0;
 	let sentinelId: ReturnType<typeof setInterval> | null = null;
@@ -113,7 +112,6 @@
 			backgroundedAt = Date.now();
 			engine.forceProgressSave();
 			watchdog.stop();
-			// Start sentinel: fallback for iOS missing visibilitychange on return
 			if (sentinelId) clearInterval(sentinelId);
 			let sentinelLast = Date.now();
 			sentinelId = setInterval(() => {
@@ -172,12 +170,10 @@
 		};
 	});
 
-	// Wake lock
 	$effect(() => {
 		engine.updateWakeLock(playerStore.view === 'video' && !!playerStore.currentVideo);
 	});
 
-	// Video removed from list
 	$effect(() => {
 		const filteredList = videoListStore.filteredVideos;
 		untrack(() => {
@@ -201,14 +197,12 @@
 		});
 	});
 
-	// Activate video when it changes
 	$effect(() => {
 		const cv = playerStore.currentVideo;
 		if (!cv || playerStore.view !== 'video') return;
 		engine.activateIfChanged(cv, playerStore.activePlayerIndex, playerStore.startTimeOverride);
 	});
 
-	// Preload adjacent
 	$effect(() => {
 		if (playerStore.view !== 'video') return;
 		const activeIdx = playerStore.activePlayerIndex;

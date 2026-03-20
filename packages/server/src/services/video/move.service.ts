@@ -41,9 +41,6 @@ export async function moveVideo(filename: string, destination: types.Destination
 
         await fsPromises.rename(videoPath, destinationPath);
 
-        // No database or cache cleanup needed anymore.
-        // If the video is moved back, the retrieve service will just read it from the new location on next request.
-
         logger.info(`Moved folder from ${videoPath} to: ${destinationPath}`);
     } else {
         throw new errors.MoveError(LOGS.MESSAGES.MOVE_ERROR);

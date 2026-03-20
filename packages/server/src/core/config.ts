@@ -61,7 +61,6 @@ function generateDefaultPaths(providerName: string): PathConfig {
     };
 }
 
-// tl provider uses /tmp/ paths - ephemeral, created on demand
 const TL_PATHS: PathConfig = {
     downloader: "/tmp/Videos/downloads/tl",
     edited: "/tmp/Videos/downloads/tl",
@@ -84,7 +83,6 @@ const config: IConfig = {
     tangoFilePath: path.join(projectRoot, "..", "downloader", "tango.txt"),
 };
 
-// Validate all paths for all providers (skip tl - ephemeral /tmp dirs created on demand)
 Object.entries(config.providers).filter(([name]) => name !== "tl").map(([, paths]) => paths).forEach(paths => {
     [paths.downloader, paths.edited, paths.converted, paths.trash].forEach((dir) => {
         if (!fs.existsSync(dir)) {
@@ -100,8 +98,6 @@ Object.entries(config.providers).filter(([name]) => name !== "tl").map(([, paths
 });
 
 if (!fs.existsSync(config.frontendDistPath)) {
-    // We create it to prevent crash, but if it's empty the UI won't load.
-    // In a dev environment this might be expected if build hasn't run.
     fs.mkdirSync(config.frontendDistPath, { recursive: true });
 }
 
@@ -129,7 +125,6 @@ export function getAllProviders(): string[] {
     return Object.keys(config.providers);
 }
 
-// Helper to get all possible paths for search operations
 export function getAllSearchPaths() {
     return Object.values(config.providers).flatMap(paths => [
         { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },

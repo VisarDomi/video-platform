@@ -18,7 +18,6 @@ export function startSync(provider: string) {
 				videoListStore.addVideos(newVideos);
 			}
 		} catch {
-			// Silently ignore poll failures
 		} finally {
 			polling = false;
 		}

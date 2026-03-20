@@ -8,7 +8,7 @@ import { FILE_EXTENSIONS, FILE_NAMES, FFMPEG, HLS, MISC } from "./constants.js";
 import { fixTargetDuration } from "shared";
 
 const execFileAsync = promisify(execFile);
-const limit = pLimit(5); // Process 5 segments at a time
+const limit = pLimit(5);
 
 function extractSegmentNumber(filename: string): number | null {
     const match = filename.match(/(\d+)\.ts$/);
@@ -52,8 +52,6 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
 
     logger.info(`Generating playlist for ${videoPath} (${tsFiles.length} segments, fMP4=${hasInitSegment})...`);
 
-    // For fMP4 segments, ffprobe can't determine duration without the init segment.
-    // Try probing with concat protocol for fMP4, fall back to segments.jsonl if available.
     let durations: number[];
     if (hasInitSegment) {
         durations = await getFmp4Durations(videoPath, tsFiles);
@@ -110,7 +108,6 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
 }
 
 async function getFmp4Durations(videoPath: string, tsFiles: string[]): Promise<number[]> {
-    // Read durations from existing playlist.m3u8 — it owns the accurate EXTINF values
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
     try {
         const content = await fsPromises.readFile(playlistPath, "utf-8");
@@ -131,7 +128,6 @@ async function getFmp4Durations(videoPath: string, tsFiles: string[]): Promise<n
         }
     } catch {}
 
-    // Fallback: use default duration for all fMP4 segments
     return tsFiles.map(() => 2.0);
 }
 

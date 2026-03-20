@@ -7,7 +7,6 @@ const router = Router();
 
 const DOWNLOADER_API = "http://localhost:7974";
 
-// --- Stream listing ---
 router.get("/tl/streams", async (_req, res) => {
     try {
         const result = await tangoApi.fetchStreamers(50);
@@ -18,7 +17,6 @@ router.get("/tl/streams", async (_req, res) => {
     }
 });
 
-// --- Multi-broadcast (co-streamers) ---
 router.post("/tl/multi-broadcast", async (req, res) => {
     const { streamId } = req.body;
     if (!streamId) return res.status(400).json({ error: "streamId required" });
@@ -31,7 +29,6 @@ router.post("/tl/multi-broadcast", async (req, res) => {
     }
 });
 
-// --- Social actions ---
 router.post("/tl/follow", async (req, res) => {
     const { streamerId } = req.body;
     if (!streamerId) return res.status(400).json({ error: "streamerId required" });
@@ -53,7 +50,6 @@ router.post("/tl/block", async (req, res) => {
     res.json({ success: ok });
 });
 
-// --- Live filename resolution ---
 router.get("/tl/live-filenames", async (_req, res) => {
     try {
         const filenames = await utils.getLiveFilenames();
@@ -64,7 +60,6 @@ router.get("/tl/live-filenames", async (_req, res) => {
     }
 });
 
-// --- Download proxy ---
 router.post("/tl/download/start", async (req, res) => {
     const { masterPlaylistUrl, alias, streamerId } = req.body;
     if (!masterPlaylistUrl || !alias || !streamerId) {

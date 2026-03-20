@@ -14,7 +14,6 @@ interface ProxySession {
 
 const sessions = new Map<string, ProxySession>();
 
-// Cleanup idle sessions every 30s
 setInterval(() => {
   const now = Date.now();
   for (const [alias, session] of sessions) {
@@ -54,7 +53,6 @@ async function resolveLiveUrl(
   }
 
   if (!relativeLiveUrl) {
-    // Fallback: take the first non-comment line after any #EXT line
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i].startsWith("#") && lines[i].includes("/")) {
         relativeLiveUrl = lines[i];
@@ -73,7 +71,6 @@ async function resolveLiveUrl(
   return liveUrl;
 }
 
-// POST /tl/resolve-live-url — lightweight resolution without creating a proxy session
 router.post("/tl/resolve-live-url", async (req, res) => {
   const { masterPlaylistUrl } = req.body;
   if (!masterPlaylistUrl) {
@@ -94,8 +91,6 @@ router.post("/tl/resolve-live-url", async (req, res) => {
   }
 });
 
-// POST /tl/check-live-url — GET check to see if a liveUrl still serves segments
-// Uses GET (not HEAD) because tango.me HLS endpoints may reject HEAD requests
 router.post("/tl/check-live-url", async (req, res) => {
   const { liveUrl } = req.body;
   if (!liveUrl) {
@@ -111,7 +106,6 @@ router.post("/tl/check-live-url", async (req, res) => {
     const checkRes = await fetch(liveUrl, {
       headers: { Cookie: cookie },
     });
-    // Consume body to avoid leaking the connection
     await checkRes.text();
     res.json({ alive: checkRes.ok });
   } catch {
@@ -119,7 +113,6 @@ router.post("/tl/check-live-url", async (req, res) => {
   }
 });
 
-// POST /tl/proxy/start
 router.post("/tl/proxy/start", async (req, res) => {
   const { masterPlaylistUrl, alias } = req.body;
   if (!masterPlaylistUrl || !alias) {
@@ -128,7 +121,6 @@ router.post("/tl/proxy/start", async (req, res) => {
       .json({ error: "masterPlaylistUrl and alias required" });
   }
 
-  // Return immediately if session already exists
   const existing = sessions.get(alias);
   if (existing) {
     existing.lastAccess = Date.now();
@@ -165,7 +157,6 @@ router.post("/tl/proxy/start", async (req, res) => {
   }
 });
 
-// GET /tl/proxy/:alias/live.m3u8
 router.get("/tl/proxy/:alias/live.m3u8", async (req, res) => {
   const { alias } = req.params;
   const session = sessions.get(alias);
@@ -186,7 +177,6 @@ router.get("/tl/proxy/:alias/live.m3u8", async (req, res) => {
 
     if (!playlistRes.ok) {
       if (playlistRes.status === 404) {
-        // liveUrl confirmed dead on tango.me — signal to frontend
         res.set("X-TL-LiveUrl-Dead", "true");
       }
       return res.status(playlistRes.status).end();
@@ -198,29 +188,24 @@ router.get("/tl/proxy/:alias/live.m3u8", async (req, res) => {
       session.liveUrl.lastIndexOf("/") + 1,
     );
 
-    // Rewrite segment URLs
     const rewritten = body
       .split("\n")
       .map((line) => {
         const trimmed = line.trim();
         if (trimmed === "" || trimmed.startsWith("#")) return line;
 
-        // This is a segment URI line
         let fullUrl: string;
         let filename: string;
 
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-          // Absolute URL
           fullUrl = trimmed;
           const urlPath = new URL(trimmed).pathname;
           filename = urlPath.substring(urlPath.lastIndexOf("/") + 1);
         } else if (trimmed.startsWith("/")) {
-          // Absolute path — resolve against origin
           fullUrl = session.origin + trimmed;
           const pathOnly = trimmed.split("?")[0];
           filename = pathOnly.substring(pathOnly.lastIndexOf("/") + 1);
         } else {
-          // Relative
           fullUrl = liveBase + trimmed;
           const pathOnly = trimmed.split("?")[0];
           filename = pathOnly.substring(pathOnly.lastIndexOf("/") + 1);
@@ -244,7 +229,6 @@ router.get("/tl/proxy/:alias/live.m3u8", async (req, res) => {
   }
 });
 
-// GET /tl/proxy/:alias/:segmentFile
 router.get("/tl/proxy/:alias/:segmentFile", async (req, res) => {
   const { alias, segmentFile } = req.params;
   const session = sessions.get(alias);
@@ -275,7 +259,6 @@ router.get("/tl/proxy/:alias/:segmentFile", async (req, res) => {
   }
 });
 
-// POST /tl/proxy/stop
 router.post("/tl/proxy/stop", async (req, res) => {
   const { alias } = req.body;
   if (!alias) return res.status(400).json({ error: "alias required" });

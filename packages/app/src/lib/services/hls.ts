@@ -17,11 +17,6 @@ const cache = new Map<string, PlaylistData>();
 export function clearPlaylistCache(filename: string) {
 	cache.delete(filename);
 }
-
-/**
- * Quick check if a playlist uses fMP4 segments (EXT-X-MAP).
- * Fetches and caches the playlist if not already cached.
- */
 export async function isFmp4Playlist(filename: string): Promise<boolean> {
 	const cached = cache.get(filename);
 	if (cached) return cached.isFmp4;

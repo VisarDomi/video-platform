@@ -24,14 +24,12 @@ export class VideoEngine {
 	private currentIsLive = false;
 	private overlayEl: HTMLElement | null = null;
 
-	// Internal time tracking — updated 12x/sec, synced to Svelte at 4Hz
 	private _currentTime = 0;
 	private _duration = 0;
 	private _seekableEnd = 0;
 	private _lastTimeSync = 0;
 	private readonly TIME_SYNC_MS = 250;
 
-	// localStorage debounce — save every 3s instead of 12x/sec
 	private _lastProgressSave = 0;
 	private readonly PROGRESS_SAVE_MS = 3000;
 
@@ -44,7 +42,6 @@ export class VideoEngine {
 	init(videoContainer: HTMLElement): () => void {
 		this.videoContainer = videoContainer;
 
-		// Create 3 video elements
 		const els: HTMLVideoElement[] = [];
 		for (let i = 0; i < 3; i++) {
 			const el = document.createElement('video');
@@ -57,7 +54,6 @@ export class VideoEngine {
 		}
 		this.elements = els;
 
-		// Attach timeupdate/volumechange listeners
 		const timeHandlers = els.map((el) => this.makeTimeUpdateHandler(el));
 		const volHandlers = els.map((el) => this.makeVolumeChangeHandler(el));
 		els.forEach((el, i) => {
@@ -84,7 +80,6 @@ export class VideoEngine {
 
 			const now = performance.now();
 
-			// Debounced localStorage save
 			if (
 				this.currentFilename &&
 				!this.currentIsLive &&
@@ -97,7 +92,6 @@ export class VideoEngine {
 				);
 			}
 
-			// Throttled sync to Svelte $state
 			if (now - this._lastTimeSync >= this.TIME_SYNC_MS) {
 				this._lastTimeSync = now;
 				this.callbacks.onTimeUpdate(this._currentTime, this._duration, this._seekableEnd);
@@ -132,8 +126,6 @@ export class VideoEngine {
 		return this.elements[this.activePlayerIndex];
 	}
 
-	// --- Lifecycle methods (called by component) ---
-
 	onViewHidden(): void {
 		this.forceProgressSave();
 		this.getActiveElement()?.pause();
@@ -150,8 +142,6 @@ export class VideoEngine {
 		void this.activatePlayer(el, video, 0);
 	}
 
-	// --- HLS Management ---
-
 	private async activatePlayer(
 		el: HTMLVideoElement,
 		v: Video,
@@ -164,7 +154,6 @@ export class VideoEngine {
 		try {
 			await el.play();
 		} catch (_e) {
-			// autoplay may be blocked
 		}
 		el.style.opacity = '1';
 	}
@@ -361,8 +350,6 @@ export class VideoEngine {
 		delete el.dataset.loadedFilename;
 	}
 
-	// --- Public methods for $effects ---
-
 	activateIfChanged(cv: Video, activeIdx: number, startTimeOverride: number | null): void {
 		if (this.elements.length === 0) return;
 
@@ -429,9 +416,7 @@ export class VideoEngine {
 		}
 	}
 
-	// --- Nav peek (TikTok-style vertical swipe) ---
-
-	private readonly NAV_COMMIT_THRESHOLD = 0.2; // 20% of viewport height
+	private readonly NAV_COMMIT_THRESHOLD = 0.2;
 	private readonly NAV_ANIM_MS = 250;
 
 	navPeekUpdate(dy: number): void {
@@ -453,7 +438,6 @@ export class VideoEngine {
 		const prevEl = this.elements[prevIdx];
 
 		if (dy < 0) {
-			// Swiping up → peek next below
 			if (nextEl.dataset.loadedFilename) {
 				nextEl.style.opacity = '1';
 				nextEl.style.transform = `translateY(${dy + vh}px)`;
@@ -462,7 +446,6 @@ export class VideoEngine {
 			prevEl.style.opacity = '0';
 			prevEl.style.transform = '';
 		} else if (dy > 0) {
-			// Swiping down → peek prev above
 			if (prevEl.dataset.loadedFilename) {
 				prevEl.style.opacity = '1';
 				prevEl.style.transform = `translateY(${dy - vh}px)`;
@@ -487,7 +470,6 @@ export class VideoEngine {
 		const activeEl = this.getActiveElement();
 
 		if (Math.abs(dy) > threshold && hasPeek) {
-			// Commit — animate to final positions
 			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
 			activeEl.style.transition = transition;
 			activeEl.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
@@ -501,7 +483,6 @@ export class VideoEngine {
 			}
 
 			setTimeout(() => {
-				// Hide old active, keep new visible — then navigate resets everything
 				activeEl.style.opacity = '0';
 				if (this.overlayEl) {
 					this.overlayEl.style.transition = '';
@@ -511,7 +492,6 @@ export class VideoEngine {
 				onDone();
 			}, this.NAV_ANIM_MS);
 		} else {
-			// Cancel — snap back
 			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
 			activeEl.style.transition = transition;
 			activeEl.style.transform = 'translateY(0)';
@@ -543,7 +523,6 @@ export class VideoEngine {
 			el.style.transform = '';
 			el.style.transition = '';
 		}
-		// Restore correct opacity: active visible, background hidden
 		this.elements.forEach((el, i) => {
 			if (i !== this.activePlayerIndex) {
 				el.style.opacity = '';
@@ -572,8 +551,6 @@ export class VideoEngine {
 		if (!el.paused) el.pause();
 	}
 
-	// --- Wake Lock ---
-
 	async updateWakeLock(shouldBeActive: boolean): Promise<void> {
 		if (shouldBeActive && !this.wakeLock) {
 			if ('wakeLock' in navigator) {
@@ -589,8 +566,6 @@ export class VideoEngine {
 		}
 	}
 
-	// --- Zoom ---
-
 	applyZoom(scale: number, x: number, y: number): void {
 		const el = this.getActiveElement();
 		if (!el) return;
@@ -602,8 +577,6 @@ export class VideoEngine {
 		if (!el) return;
 		el.style.transform = '';
 	}
-
-	// --- Seek & Mute ---
 
 	handleSeek(time: number): void {
 		const activeEl = this.getActiveElement();
@@ -640,22 +613,14 @@ export class VideoEngine {
 		const activeEl = this.getActiveElement();
 		activeEl.muted = !activeEl.muted;
 	}
-
-	/**
-	 * Resume playback after iOS freeze / app switch / internet reconnect.
-	 * HLS.js: re-triggers manifest fetch via startLoad().
-	 * Native HLS (iOS Safari): reloads the source to force reconnection.
-	 */
 	resume(): void {
 		const el = this.getActiveElement();
 		if (!el || !this.currentFilename) return;
 
 		const hls = this.hlsInstances.get(el);
 		if (hls) {
-			// HLS.js: restart loading from current position
 			hls.startLoad();
 		} else if (el.src) {
-			// Native HLS (iOS Safari): reload the source
 			const currentTime = el.currentTime;
 			const wasLive = this.currentIsLive;
 			el.load();

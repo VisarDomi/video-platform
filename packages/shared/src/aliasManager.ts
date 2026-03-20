@@ -13,8 +13,6 @@ export class AliasManager {
         this.lockPath = aliasesFilePath + ".lock";
     }
 
-    // --- Reads (no lock — atomic rename guarantees consistency) ---
-
     async get(streamerId: string): Promise<string | undefined> {
         const data = await this._read();
         const arr = data[streamerId];
@@ -35,8 +33,6 @@ export class AliasManager {
         }
         return reverse;
     }
-
-    // --- Writes (locked read-modify-write + atomic rename) ---
 
     async set(streamerId: string, alias: string): Promise<void> {
         const release = await acquireLock({ lockPath: this.lockPath });
@@ -76,8 +72,6 @@ export class AliasManager {
             await release();
         }
     }
-
-    // --- Internal ---
 
     private async _read(): Promise<AliasMap> {
         try {

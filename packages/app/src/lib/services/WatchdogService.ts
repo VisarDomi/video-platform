@@ -1,8 +1,3 @@
-/**
- * WatchdogService
- * Detects if the JS event loop has paused (tab backgrounded, phone locked, iOS freeze)
- * by measuring drift between expected and actual interval execution time.
- */
 export class WatchdogService {
 	private lastTick = 0;
 	private intervalId: ReturnType<typeof setInterval> | null = null;

@@ -1,8 +1,3 @@
-/**
- * ConnectionMonitor
- * Listens for visibility and connectivity changes at the browser/document level.
- * Includes iOS PWA fallbacks: pageshow (screen unlock) and focus (window regain).
- */
 export class ConnectionMonitor {
 	isOnline = $state(true);
 	isVisible = $state(true);
@@ -42,7 +37,6 @@ export class ConnectionMonitor {
 			this.onVisibilityChange?.(visible);
 		});
 
-		// iOS PWA: visibilitychange often doesn't fire on screen unlock
 		this.listen(window, 'pageshow', () => {
 			if (document.visibilityState === 'visible' && !this.isVisible) {
 				this.isVisible = true;

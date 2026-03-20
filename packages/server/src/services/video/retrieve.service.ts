@@ -8,10 +8,8 @@ import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 import { getAllMp4Videos } from "./mp4-retrieve.service.js";
 
 export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
-    // tl provider uses /api/tl/streams instead
     if (provider === "tl") return [];
 
-    // mp4 provider uses flat files, not HLS directories
     if (provider === "mp4") return getAllMp4Videos(provider, after);
 
     const liveFolders = await utils.getLiveFolders();
@@ -38,18 +36,14 @@ export async function getAllVideos(provider: string = "tango", after?: string): 
                 }
             });
         } catch (error) {
-            // Directory might not exist or be inaccessible
         }
     }));
 
-    // Filter to only new entries when polling
     const entriesToProcess = after
         ? allEntries.filter(entry => entry.name > after)
         : allEntries;
 
-    // Prepare list for Go
     const pathsToProcess: string[] = [];
-    // Map to quickly find entry by path to assign duration later
     const entryMap = new Map<string, typeof allEntries[0]>();
 
     entriesToProcess.forEach(entry => {
@@ -62,7 +56,6 @@ export async function getAllVideos(provider: string = "tango", after?: string): 
         }
     });
 
-    // Call Go
     const durationMap = await getDurationsFromGo(pathsToProcess);
 
     const videos: types.VideoItem[] = entriesToProcess.map(entry => {

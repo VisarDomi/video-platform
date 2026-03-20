@@ -9,14 +9,11 @@ class VideoListStore {
 	selectedAliases = $state<Set<string>>(new Set());
 	filteredVideos = $derived(filterByAliases(this.videos, this.selectedAliases));
 
-	// Bumped on every initialize() — async ops capture this and bail if stale
 	epoch = 0;
 
-	// tango.txt / fc2.txt / sc.txt download whitelist
 	listIdentifiers = $state<Set<string>>(new Set());
 	listLoading = $state(true);
 
-	// SOLE writer for all provider-scoped state. Atomic transition.
 	initialize(provider: string) {
 		this.epoch++;
 		this.selectedProvider = provider;

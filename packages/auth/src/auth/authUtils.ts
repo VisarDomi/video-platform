@@ -1,10 +1,4 @@
 import logger from "../common/logger.js";
-
-/**
- * Parses the payload of a JSON Web Token (JWT) without verifying its signature.
- * @param token The JWT string.
- * @returns The parsed payload object, or null if parsing fails.
- */
 export function parseJwtPayload(token: string): { [key: string]: any } | null {
     try {
         const base64Url = token.split(".")[1];

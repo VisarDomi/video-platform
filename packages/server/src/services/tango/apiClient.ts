@@ -239,7 +239,6 @@ export async function fetchMultiBroadcastStreamers(streamId: string): Promise<Tl
 
         if (rawStreamers.length === 0) return [];
 
-        // Exclude the parent streamer from co-streamers
         const filtered = rawStreamers.filter((s) => s.streamId !== streamId);
 
         if (filtered.length === 0) return [];

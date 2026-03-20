@@ -42,7 +42,6 @@
 
 	let previousProvider: string | null = null;
 
-	// Validate provider and load videos when it changes
 	$effect(() => {
 		const p = provider ?? DEFAULT_PROVIDER;
 		if (!(PROVIDERS as readonly string[]).includes(p)) {
@@ -77,7 +76,6 @@
 		window.scrollTo(0, saved ? parseFloat(saved) : 0);
 	}
 
-	// Update title reactively
 	$effect(() => {
 		const cv = playerStore.currentVideo;
 		const p = videoListStore.selectedProvider;
@@ -121,7 +119,6 @@
 		}
 	}
 
-	// Scroll document while video overlay covers it
 	$effect(() => {
 		const target = playerStore.scrollTarget;
 		if (!target) return;
@@ -134,7 +131,6 @@
 		scrollY = targetY;
 	});
 
-	// Hide search when entering video view, reset when returning to list
 	$effect(() => {
 		if (playerStore.view === 'video') {
 			searchHidden = true;

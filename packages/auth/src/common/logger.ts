@@ -5,7 +5,6 @@ import * as utils from "./utils.js";
 
 const projectRoot = utils.findProjectRoot()
 
-// Define custom format for console logs
 const consoleFormat = winston.format.combine(
     winston.format.colorize(),
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
@@ -15,21 +14,20 @@ const consoleFormat = winston.format.combine(
     })
 );
 
-// Define custom format for file logs
 const fileFormat = winston.format.combine(
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    winston.format.json() // Log in JSON format to the file
+    winston.format.json()
 );
 
 const logger = winston.createLogger({
-    level: "info", // Log 'info' level and above (info, warn, error)
+    level: "info",
     transports: [
         new winston.transports.Console({
             format: consoleFormat,
         }),
         new winston.transports.File({
             filename: path.join(projectRoot, "error.log"),
-            level: "error", // Only log errors to this file
+            level: "error",
             format: fileFormat,
         }),
     ],

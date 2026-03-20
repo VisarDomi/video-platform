@@ -45,10 +45,8 @@ async function startServer() {
     process.exit(1);
   }
 
-  // Initialize tl token watcher
   startTokenWatcher();
 
-  // Register routes
   app.use("/api", tlProxyRouter);
   app.use("/api", tlRouter);
   app.use("/", fc2Router);
@@ -58,10 +56,8 @@ async function startServer() {
   app.use("/", mp4StreamingRouter);
   app.use("/", hlsRouter);
 
-  // Serve static frontend
   app.use(express.static(FRONTEND_DIST_PATH));
 
-  // Fallback to index.html for SPA routing
   app.get(/.*/, (_req: Request, res: Response) => {
     res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));
   });
