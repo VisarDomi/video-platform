@@ -8,7 +8,6 @@ const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = utils.findProjectRoot(__dirname);
 
-// FMP4_DEBUG=1 env var: only show [FMP4-DEBUG] tagged messages + errors
 const scDebugFilter = winston.format((info) => {
     if (!process.env.FMP4_DEBUG) return info;
     if (info.level?.includes("error")) return info;
