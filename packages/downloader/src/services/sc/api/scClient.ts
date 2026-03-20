@@ -140,7 +140,7 @@ export class ScClient implements IStreamProvider {
      * Caches roomId as a side-effect (stable, never changes).
      * Returns roomId + fresh streamName.
      */
-    private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string } | null> {
+    private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
         const data = await this.fetchJson<any>(url);
         if (!data) return null;
@@ -156,8 +156,10 @@ export class ScClient implements IStreamProvider {
         this.roomIdCache.set(username, roomId);
 
         const streamName = data.cam?.streamName || roomId; // || not ?? — empty string falls back to roomId
+        const isCamAvailable = data.cam?.isCamAvailable ?? false;
+        const isCamActive = data.cam?.isCamActive ?? false;
 
-        return { roomId, streamName };
+        return { roomId, streamName, isCamAvailable, isCamActive };
     }
 
     /**
@@ -173,16 +175,19 @@ export class ScClient implements IStreamProvider {
     }
 
     /**
-     * Refresh cam data to get a fresh streamName right before download.
-     * Like StreaMonitor's getVideoUrl() which calls getStatus() first.
-     */
-    /**
      * Fresh API call to get current streamName right before download.
      * Like StreaMonitor's getVideoUrl() which calls getStatus() first.
+     * Returns null if cam is not available/active (transitional state).
      */
     public async refreshStreamName(username: string): Promise<string | null> {
         const result = await this.fetchCamData(username);
         if (!result) return null;
+
+        if (!result.isCamAvailable || !result.isCamActive) {
+            logger.debug(`[SC] ${username}: cam not ready (available=${result.isCamAvailable}, active=${result.isCamActive})`);
+            return null;
+        }
+
         return result.streamName;
     }
 
@@ -253,14 +258,14 @@ export class ScClient implements IStreamProvider {
         this.accumulateCookies(result.cookies);
 
         if (!result.ok) {
-            logger.warn(`[SC] Master playlist fetch failed: ${result.status} url=${masterUrl}`);
+            logger.warn(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl} body=${result.text.slice(0, 500)}`);
             this.resetSession();
             return null;
         }
 
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) {
-            logger.warn(`[SC] No variants/mouflon key in master playlist: ${masterUrl}`);
+            logger.warn(`[SC] No variants/mouflon key in master playlist: url=${masterUrl} body=${result.text.slice(0, 500)}`);
             this.resetSession();
             return null;
         }
