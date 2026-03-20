@@ -54,7 +54,6 @@
 		playerStore.triggerProviderChange();
 
 		videoListStore.initialize(p);
-		videoListStore.clearAliases();
 		playerStore.initialize(p);
 		loadVideos(p);
 
@@ -158,7 +157,7 @@
 		const newIdx = currentIdx + direction;
 		if (newIdx < 0 || newIdx >= PROVIDERS.length) return;
 		const newProvider = PROVIDERS[newIdx];
-		videoListStore.setProvider(newProvider);
+		localStorage.setItem(STORAGE_KEYS.SELECTED_PROVIDER, newProvider);
 		goto(`/videos/${newProvider}`, { replaceState: true });
 	}
 </script>

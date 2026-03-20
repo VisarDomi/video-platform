@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDER, STORAGE_KEYS } from '../constants.js';
+import { DEFAULT_PROVIDER } from '../constants.js';
 import { filterByAliases } from '../utils/filter.js';
 import type { Video, VideoType } from '../types.js';
 
@@ -14,19 +14,17 @@ class VideoListStore {
 
 	// tango.txt / fc2.txt / sc.txt download whitelist
 	listIdentifiers = $state<Set<string>>(new Set());
+	listLoading = $state(true);
 
+	// SOLE writer for all provider-scoped state. Atomic transition.
 	initialize(provider: string) {
 		this.epoch++;
 		this.selectedProvider = provider;
 		this.isLoading = true;
 		this.videos = [];
 		this.listIdentifiers = new Set();
-	}
-
-	setProvider(newProvider: string) {
-		localStorage.setItem(STORAGE_KEYS.SELECTED_PROVIDER, newProvider);
-		this.epoch++;
-		this.selectedProvider = newProvider;
+		this.listLoading = true;
+		this.selectedAliases = new Set();
 	}
 
 	setVideos(videos: Video[]) {
@@ -52,10 +50,6 @@ class VideoListStore {
 		const next = new Set(this.selectedAliases);
 		next.delete(alias);
 		this.selectedAliases = next;
-	}
-
-	clearAliases() {
-		this.selectedAliases = new Set();
 	}
 
 	addVideos(newVideos: Video[]) {
@@ -90,6 +84,7 @@ class VideoListStore {
 	}
 	setListIdentifiers(identifiers: string[]) {
 		this.listIdentifiers = new Set(identifiers);
+		this.listLoading = false;
 	}
 
 	addListIdentifier(id: string) {

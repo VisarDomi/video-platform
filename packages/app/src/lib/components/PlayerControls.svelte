@@ -27,7 +27,7 @@
 	const hasSegments = $derived(isOriginal && segments.length > 0);
 
 	const provider = $derived(videoListStore.selectedProvider);
-	const showListButton = $derived(isListProvider(provider));
+	const showListButton = $derived(isListProvider(provider) && !videoListStore.listLoading);
 	const identifier = $derived(video ? extractIdentifier(video.filename) : '');
 	const isInList = $derived(videoListStore.listIdentifiers.has(identifier));
 

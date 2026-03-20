@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { PROVIDERS } from '$lib/constants.js';
+	import { PROVIDERS, STORAGE_KEYS } from '$lib/constants.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 
 	function selectProvider(provider: string) {
-		videoListStore.setProvider(provider);
+		localStorage.setItem(STORAGE_KEYS.SELECTED_PROVIDER, provider);
 		goto(`/videos/${provider}`, { replaceState: true });
 	}
 </script>
