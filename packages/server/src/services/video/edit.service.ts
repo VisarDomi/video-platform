@@ -14,10 +14,8 @@ export async function editVideo(filename: string, segments: string[], provider: 
     const allSourceTsFiles = (await fsPromises.readdir(videoPath)).filter((f) => f.endsWith(FILE_EXTENSIONS.TS));
     const segmentSet = new Set(segments);
 
-    // Filter to ensure we only process segments that actually exist on disk
     const validSegments = allSourceTsFiles.filter(f => segmentSet.has(f));
 
-    // Sort them numerically to ensure correct order
     validSegments.sort((a, b) => {
         return parseInt(a, 10) - parseInt(b, 10);
     });
