@@ -17,7 +17,6 @@ router.get("/hls/:filename/playlist.m3u8", async (req, res) => {
     try {
         const videoPath = await utils.findVideoPath(filename);
 
-        // Ensure playlist exists on disk, generate if missing
         await fsUtils.ensurePlaylist(videoPath);
 
         const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
