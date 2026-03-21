@@ -365,6 +365,10 @@ export class Fc2Client implements IStreamProvider {
         return segmentsDirExists ? segmentsDirPath : null;
     }
 
+    public async refreshMasterUrl(_alias: string): Promise<string | null> {
+        return null; // FC2 uses WebSocket-based URL resolution; not applicable
+    }
+
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
         const info = await MediaValidator.getMediaInfo(filePath);
         if (!info) return { valid: false };
@@ -391,23 +395,22 @@ class Fc2DownloadSession implements IDownloadSession {
         this.client = client;
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+    public async fetchPlaylist(url: string): Promise<string | null> {
         try {
-            this.client._touchSession(liveUrl);
-            const response = await fetch(liveUrl, { headers: this.HEADERS });
+            this.client._touchSession(url);
+            const response = await fetch(url, { headers: this.HEADERS });
             if (!response.ok) {
-                logger.debug(`[FC2] getLiveList failed: ${response.status} ${response.statusText}`);
-                return { success: false, data: null };
+                logger.warn(`[FC2] Playlist fetch failed: ${response.status} ${response.statusText} url=${url}`);
+                return null;
             }
-            const data = await response.text();
-            return { success: true, data };
+            return await response.text();
         } catch (error: any) {
-            logger.error(`[FC2] getLiveList exception`, { error: error.message, liveUrl });
-            return { success: false, data: null };
+            logger.error(`[FC2] Playlist fetch error: ${url}`, { error: error.message });
+            return null;
         }
     }
 
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
             this.client._touchSession(tsUrl);
             const response = await fetch(tsUrl, { headers: this.HEADERS });

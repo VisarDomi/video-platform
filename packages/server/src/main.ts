@@ -9,7 +9,7 @@ import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/fc2.routes.js";
-import scRouter from "./api/sc.routes.js";
+import scRouter from "./api/sc-list.routes.js";
 import tangoListRouter from "./api/tango-list.routes.js";
 import tlRouter from "./api/tl.routes.js";
 import tlProxyRouter from "./api/tl-proxy.routes.js";

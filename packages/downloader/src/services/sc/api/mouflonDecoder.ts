@@ -88,11 +88,11 @@ function getMouflonParams(content: string): MouflonParams {
 
     return { psch: "", pkey: "", pdkey: null };
 }
-export function decryptM3u8(content: string): string {
+export function decryptM3u8(content: string): string | null {
     const { pdkey } = getMouflonParams(content);
     if (!pdkey) {
-        logger.warn("[SC] No mouflon decryption key available");
-        return content;
+        logger.warn("[SC] No mouflon decryption key available — cannot decrypt playlist");
+        return null;
     }
 
     const lines = content.split("\n");

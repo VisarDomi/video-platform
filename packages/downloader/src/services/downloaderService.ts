@@ -15,7 +15,7 @@ import { createFc2TargetManager } from "./fc2/discovery/targetManager.js";
 import { Fc2Client } from "./fc2/api/fc2Client.js";
 import { Fc2DiscoveryService } from "./fc2/discovery/discoveryService.js";
 
-import { createScTargetManager } from "./sc/discovery/targetManager.js";
+import { ScTargetManager } from "./sc/discovery/targetManager.js";
 import { ScClient } from "./sc/api/scClient.js";
 import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
 
@@ -66,7 +66,7 @@ export class DownloaderService {
         const fc2Client = new Fc2Client();
         const fc2DiscoveryService = new Fc2DiscoveryService(fc2TargetManager, fc2Client, downloadsManager);
 
-        const scTargetManager = createScTargetManager();
+        const scTargetManager = ScTargetManager.create();
         const scClient = new ScClient();
         await scClient.init();
         const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);

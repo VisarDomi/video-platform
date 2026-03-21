@@ -84,8 +84,10 @@ export class StreamDiscoveryService {
                                 logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
                                 streamDownloader.start().then((result: DownloadResult) => {
-                                    if (result.exitReason === "error") {
+                                    if (!result.aborted && result.segmentCount === 0) {
                                         this.cooldown.recordFailure(streamerId);
+                                    } else if (result.segmentCount > 0) {
+                                        this.cooldown.clear(streamerId);
                                     }
                                 }).catch((err: Error) => {
                                     logger.error(`[Tango] ${resolvedAlias}: unhandled download error`, { error: err.message });

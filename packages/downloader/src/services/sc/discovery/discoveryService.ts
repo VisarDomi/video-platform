@@ -1,7 +1,7 @@
 import * as timersPromises from "timers/promises";
 import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
-import { TargetManager } from "../../common/targetManager.js";
+import { ScTargetManager, ScTarget } from "./targetManager.js";
 import { ScClient } from "../api/scClient.js";
 import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
@@ -9,12 +9,12 @@ import { RetryCooldown } from "../../common/retryCooldown.js";
 const POLL_INTERVAL = 5_000;
 
 export class ScDiscoveryService {
-    private targetManager: TargetManager;
+    private targetManager: ScTargetManager;
     private scClient: ScClient;
     private downloadsManager: DownloadsManager;
     private cooldown = new RetryCooldown("SC");
 
-    constructor(targetManager: TargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
+    constructor(targetManager: ScTargetManager, scClient: ScClient, downloadsManager: DownloadsManager) {
         this.targetManager = targetManager;
         this.scClient = scClient;
         this.downloadsManager = downloadsManager;
@@ -39,20 +39,23 @@ export class ScDiscoveryService {
         const targets = this.targetManager.getTargets();
         if (targets.length === 0) return;
 
-        const roomIdMap = new Map<string, string>();
+        // Build the bulk check list using roomIds directly from the file.
+        // No per-target API calls — roomIds are resolved at add-time by the server.
+        const roomIdMap = new Map<string, ScTarget>();
         const roomIds: string[] = [];
 
-        for (const username of targets) {
-            if (this.downloadsManager.hasStreamer(username)) continue;
-            if (this.cooldown.isActive(username)) continue;
+        for (const target of targets) {
+            if (this.downloadsManager.hasStreamer(target.username)) continue;
+            if (this.cooldown.isActive(target.username)) continue;
 
-            const roomId = await this.scClient.resolveRoomId(username);
-            if (!roomId) {
-                logger.debug(`[SC] Could not resolve room ID for ${username}`);
+            if (!target.roomId) {
+                // Legacy entry without roomId — skip.
+                // User should re-add via API to resolve.
                 continue;
             }
-            roomIdMap.set(roomId, username);
-            roomIds.push(roomId);
+
+            roomIdMap.set(target.roomId, target);
+            roomIds.push(target.roomId);
         }
 
         if (roomIds.length === 0) return;
@@ -60,39 +63,40 @@ export class ScDiscoveryService {
         const statuses = await this.scClient.checkStatusBulk(roomIds);
 
         for (const [roomId, statusInfo] of statuses) {
-            const username = roomIdMap.get(roomId);
-            if (!username) continue;
+            const target = roomIdMap.get(roomId);
+            if (!target) continue;
 
             if (statusInfo.status !== "public" || !statusInfo.isOnline) continue;
 
-            if (this.downloadsManager.hasStreamer(username)) continue;
+            if (this.downloadsManager.hasStreamer(target.username)) continue;
 
-            const streamName = await this.scClient.refreshStreamName(username);
+            const streamName = await this.scClient.refreshStreamName(target.username);
             if (!streamName) {
-                this.cooldown.recordFailure(username);
-                continue;
+                // Username might be stale (renamed). Fall back to roomId as streamName.
+                logger.info(`[SC] ${target.username}: refreshStreamName failed, falling back to roomId=${target.roomId}`);
             }
 
-            const masterUrl = this.scClient.buildMasterUrl(streamName);
+            const masterUrl = this.scClient.buildMasterUrl(streamName || target.roomId);
 
-            logger.info(`[SC] ${username} is PUBLIC. Starting download...`);
-            this.cooldown.clear(username);
+            logger.info(`[SC] ${target.username} is PUBLIC. Starting download...`);
 
             const handle = this.downloadsManager.add(masterUrl, {
-                streamerId: username,
-                alias: username,
+                streamerId: target.username,
+                alias: target.username,
             });
 
             if (handle) {
                 const downloader = new StreamDownloader(handle, this.scClient);
                 downloader.start().then((result: DownloadResult) => {
-                    if (result.exitReason === "error") {
-                        this.cooldown.recordFailure(username);
+                    if (!result.aborted && result.segmentCount === 0) {
+                        this.cooldown.recordFailure(target.username);
+                    } else if (result.segmentCount > 0) {
+                        this.cooldown.clear(target.username);
                     }
                 }).catch((err: Error) => {
-                    logger.error(`[SC] ${username}: unhandled download error`, { error: err.message });
+                    logger.error(`[SC] ${target.username}: unhandled download error`, { error: err.message });
                     handle.remove();
-                    this.cooldown.recordFailure(username);
+                    this.cooldown.recordFailure(target.username);
                 });
             }
         }

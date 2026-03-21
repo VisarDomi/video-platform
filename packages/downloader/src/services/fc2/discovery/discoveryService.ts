@@ -66,8 +66,10 @@ export class Fc2DiscoveryService {
                     if (handle) {
                         const downloader = new StreamDownloader(handle, this.fc2Client);
                         downloader.start().then((result: DownloadResult) => {
-                            if (result.exitReason === "error") {
+                            if (!result.aborted && result.segmentCount === 0) {
                                 this.cooldown.recordFailure(channelId);
+                            } else if (result.segmentCount > 0) {
+                                this.cooldown.clear(channelId);
                             }
                         }).catch((err: Error) => {
                             logger.error(`[FC2] ${channelId}: unhandled download error`, { error: err.message });

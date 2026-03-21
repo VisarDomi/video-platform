@@ -47,8 +47,6 @@ const CDN_TLDS = ["org", "com", "net"];
 const BULK_BATCH_SIZE = 100;
 
 export class ScClient implements IStreamProvider {
-    private roomIdCache = new Map<string, string>();
-    private apiCookies: string[] = [];
 
     constructor() {
         logger.info("[SC] ScClient initialized.");
@@ -58,23 +56,17 @@ export class ScClient implements IStreamProvider {
         await loadMouflonKeys();
     }
 
+    // Stateless — no cookie jar.  Each request stands on its own.
     private async fetchApi<T>(url: string): Promise<T | null> {
         try {
-            const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-            if (this.apiCookies.length > 0) {
-                headers["Cookie"] = this.apiCookies.join("; ");
-            }
-            const response = await fetch(url, { headers });
+            const response = await fetch(url, {
+                headers: { "User-Agent": USER_AGENT },
+            });
 
-            const map = new Map<string, string>();
-            for (const c of this.apiCookies) map.set(c.split("=")[0], c);
-            for (const c of response.headers.getSetCookie?.() ?? []) {
-                const nameVal = c.split(";")[0];
-                if (nameVal) map.set(nameVal.split("=")[0], nameVal);
+            if (!response.ok) {
+                logger.warn(`[SC] API returned ${response.status}: ${url}`);
+                return null;
             }
-            this.apiCookies = Array.from(map.values());
-
-            if (!response.ok) return null;
             return await response.json() as T;
         } catch (error: any) {
             logger.error(`[SC] API fetch failed: ${url}`, { error: error.message });
@@ -118,21 +110,11 @@ export class ScClient implements IStreamProvider {
         }
 
         const roomId = String(data.user.user.id);
-        this.roomIdCache.set(username, roomId);
-
         const streamName = data.cam?.streamName || roomId;
         const isCamAvailable = data.cam?.isCamAvailable ?? false;
         const isCamActive = data.cam?.isCamActive ?? false;
 
         return { roomId, streamName, isCamAvailable, isCamActive };
-    }
-
-    public async resolveRoomId(username: string): Promise<string | null> {
-        const cachedRoomId = this.roomIdCache.get(username);
-        if (cachedRoomId) return cachedRoomId;
-
-        const result = await this.fetchCamData(username);
-        return result?.roomId ?? null;
     }
 
     public async refreshStreamName(username: string): Promise<string | null> {
@@ -156,7 +138,10 @@ export class ScClient implements IStreamProvider {
             const url = `https://stripchat.com/api/front/models/list?${params}`;
 
             const data = await this.fetchApi<any>(url);
-            if (!data?.models) continue;
+            if (!data?.models) {
+                logger.warn(`[SC] Bulk status check failed for batch of ${batch.length} streamers — all treated as offline`);
+                continue;
+            }
 
             for (const model of data.models) {
                 result.set(String(model.id), {
@@ -204,11 +189,18 @@ export class ScClient implements IStreamProvider {
             }
         }
 
+        const namedCount = lines.filter(l => l.trim().startsWith("#EXT-X-STREAM-INF") && l.includes("RESOLUTION=")).length;
+        const autoCount = lines.filter(l => l.trim().startsWith("#EXT-X-STREAM-INF") && !l.includes("RESOLUTION=")).length;
+
         const best = bestNamed ?? bestAuto;
         if (!best) return null;
 
         if (!bestNamed) {
-            logger.warn(`[SC] No named variants (RESOLUTION=) in master playlist, falling back to auto variant: ${bestAuto!.url}`);
+            logger.warn(`[SC] No named variants in master playlist (auto=${autoCount}), falling back to auto variant: ${bestAuto!.url}`);
+        } else {
+            const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestNamed!.bandwidth}`) && l.includes("RESOLUTION="))?.match(/RESOLUTION=(\S+)/);
+            const res = resMatch ? resMatch[1].replace(/,.*/, "") : "unknown";
+            logger.info(`[SC] Master has ${namedCount} named + ${autoCount} auto variants. Best: ${res} @ ${bestNamed.bandwidth}bps → ${bestNamed.url}`);
         }
 
         const variantUrl = new URL(best.url, masterUrl).href;
@@ -230,25 +222,10 @@ export class ScClient implements IStreamProvider {
             return null;
         }
 
-        logger.info(`[SC] Selected variant: ${bestUrl.split("?")[0]}`);
+        const edgeMatch = bestUrl.match(/doppiocdn\.\w+\/(b-hls-\d+)\//);
+        const edge = edgeMatch ? edgeMatch[1] : "unknown";
+        logger.info(`[SC] Selected variant: ${bestUrl.split("?")[0]} (edge=${edge})`);
         return bestUrl;
-    }
-
-    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        const result = await this.fetchCdn(masterUrl);
-        if (!result.ok) return null;
-        const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
-        if (!bestUrl) return null;
-        const currentBase = currentLiveUrl.split("?")[0];
-        const newBase = bestUrl.split("?")[0];
-        if (newBase === currentBase) return null;
-        return bestUrl;
-    }
-
-    public async getMasterList(url: string): Promise<string | null> {
-        const result = await this.fetchCdn(url);
-        if (!result.ok) return null;
-        return result.text;
     }
 
     public createDownloadSession(): IDownloadSession {
@@ -258,7 +235,8 @@ export class ScClient implements IStreamProvider {
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
         try {
             return new URL(segmentLine, baseUrl).href;
-        } catch {
+        } catch (error: any) {
+            logger.warn(`[SC] Malformed segment URL — possible decryption failure: segment=${segmentLine} base=${baseUrl}`);
             return segmentLine;
         }
     }
@@ -289,8 +267,9 @@ export class ScClient implements IStreamProvider {
             const data = await fs.readFile(filePath);
             const duration = parseFmp4Duration(data);
             return { valid: true, duration: duration > 0 ? duration : undefined };
-        } catch {
-            return { valid: true };
+        } catch (error: any) {
+            logger.warn(`[SC] validateSegment failed for ${filePath}: ${error.message}`);
+            return { valid: false };
         }
     }
 }
@@ -298,32 +277,29 @@ export class ScClient implements IStreamProvider {
 const CDN_HEADERS = { "User-Agent": USER_AGENT };
 
 class ScDownloadSession implements IDownloadSession {
-    private consecutiveFailures = 0;
-
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+    public async fetchPlaylist(url: string): Promise<string | null> {
         try {
-            const response = await fetch(liveUrl, { headers: CDN_HEADERS });
+            const response = await fetch(url, { headers: CDN_HEADERS });
 
             if (!response.ok) {
-                this.consecutiveFailures++;
-                if (this.consecutiveFailures === 1 || this.consecutiveFailures === 5 || this.consecutiveFailures % 30 === 0) {
-                    logger.warn(`[SC] Live playlist fetch failed (x${this.consecutiveFailures}): status=${response.status} url=${liveUrl}`);
-                }
-                return { success: false, data: null };
+                logger.warn(`[SC] Playlist fetch failed: status=${response.status} url=${url}`);
+                return null;
             }
 
-            this.consecutiveFailures = 0;
             const text = await response.text();
             const decrypted = decryptM3u8(text);
-            return { success: true, data: decrypted };
+            if (!decrypted) {
+                logger.warn(`[SC] Playlist decryption failed (mouflon keys missing or wrong): url=${url}`);
+                return null;
+            }
+            return decrypted;
         } catch (error: any) {
-            this.consecutiveFailures++;
-            logger.error(`[SC] Live playlist fetch error: ${liveUrl}`, { error: error.message });
-            return { success: false, data: null };
+            logger.error(`[SC] Playlist fetch error: ${url}`, { error: error.message });
+            return null;
         }
     }
 
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
             const response = await fetch(tsUrl, { headers: CDN_HEADERS });
             if (response.ok) {

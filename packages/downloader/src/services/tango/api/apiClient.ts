@@ -171,6 +171,10 @@ export class ApiClient implements IStreamProvider {
         return null;
     }
 
+    public async refreshMasterUrl(_alias: string): Promise<string | null> {
+        return null; // Tango master URLs come from the discovery API, not refreshable per-stream
+    }
+
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
         if (segmentLine.startsWith("/")) {
             const urlObj = new URL(baseUrl);
@@ -233,24 +237,24 @@ class TangoDownloadSession implements IDownloadSession {
         return { [constants.HEADERS.COOKIE]: cookie };
     }
 
-    public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
+    public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             const tokens = await this.tokenManager.getTokens();
             const headers = this._getStreamHeaders(tokens);
-            const response = await fetch(liveUrl, { method: "GET", headers });
+            const response = await fetch(url, { method: "GET", headers });
 
             if (!response.ok) {
-                return { success: false, data: null };
+                logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
+                return null;
             }
-            const data = await response.text();
-            return { success: true, data };
+            return await response.text();
         } catch (error) {
-            logger.warn(`[Tango] Live playlist fetch failed.`, { error: (error as Error).message, liveUrl });
-            return { success: false, data: null };
+            logger.warn(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
+            return null;
         }
     }
 
-    public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
             const tsResponse = await fetch(tsUrl);
             if (tsResponse.ok) {

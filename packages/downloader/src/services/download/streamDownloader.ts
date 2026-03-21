@@ -8,211 +8,213 @@ import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
-import { StreamQualityMonitor } from "./streamQualityMonitor.js";
-export type DownloadExitReason = "completed" | "aborted" | "error";
 
 export interface DownloadResult {
-    exitReason: DownloadExitReason;
     segmentCount: number;
+    aborted: boolean;
 }
 
-export class StreamDownloader {
-    private downloadHandle: DownloadHandle;
-    private streamProvider: IStreamProvider;
-    private aborted = false;
-    private downloadSession: IDownloadSession;
-    private initSegmentDownloaded = false;
-    private initCounter = 0;
-    private currentInitName = "init.mp4";
-    private pendingUpgrade: string | null = null;
+const HEARTBEAT_INTERVAL = 30_000;
+const QUALITY_CHECK_INTERVAL = 10_000;
 
-    constructor(downloadHandle: DownloadHandle, streamProvider: IStreamProvider) {
-        this.downloadHandle = downloadHandle;
-        this.streamProvider = streamProvider;
-        this.downloadSession = streamProvider.createDownloadSession();
+export class StreamDownloader {
+    private handle: DownloadHandle;
+    private provider: IStreamProvider;
+    private _aborted = false;
+
+    constructor(handle: DownloadHandle, provider: IStreamProvider) {
+        this.handle = handle;
+        this.provider = provider;
     }
 
     public abort(): void {
-        this.aborted = true;
+        this._aborted = true;
     }
 
     public async start(): Promise<DownloadResult> {
-        if (!this.downloadHandle.state) {
+        if (!this.handle.state) {
             logger.error(`Could not find state for download with handle. Aborting.`);
-            this.downloadHandle.remove();
-            return { exitReason: "error", segmentCount: 0 };
+            this.handle.remove();
+            return { segmentCount: 0, aborted: false };
         }
 
-        const alias = this.downloadHandle.state.alias;
-        let liveUrl: string | null = null;
-        const MAX_RETRIES = 3;
-        const RETRY_DELAY = 5000;
-
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            const resolvedUrl = await this.streamProvider.parseMasterPlaylist(this.downloadHandle.masterPlaylistUrl);
-            if (resolvedUrl) {
-                liveUrl = resolvedUrl;
-                break;
-            }
-            logger.warn(`Failed to resolve live URL for ${alias} (attempt ${attempt}/${MAX_RETRIES}). Retrying in ${RETRY_DELAY / 1000}s...`);
-            if (attempt < MAX_RETRIES) await timersPromises.setTimeout(RETRY_DELAY);
-        }
+        const alias = this.handle.state.alias;
+        const liveUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
 
         if (!liveUrl) {
             logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
-            this.downloadHandle.remove();
-            return { exitReason: "error", segmentCount: 0 };
+            this.handle.remove();
+            return { segmentCount: 0, aborted: false };
         }
 
-        this.downloadHandle.update({ liveUrl });
+        this.handle.update({ liveUrl });
 
-        const startDate = new Date();
-        const segmentsDirPath = await this.streamProvider.setupDownloadDir(alias, startDate);
-
+        const segmentsDirPath = await this.provider.setupDownloadDir(alias, new Date());
         if (!segmentsDirPath) {
             logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=setupDownloadDir-failed`);
-            this.downloadHandle.remove();
-            return { exitReason: "error", segmentCount: 0 };
+            this.handle.remove();
+            return { segmentCount: 0, aborted: false };
         }
 
-        this.downloadHandle.update({ segmentsDirPath });
-        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
+        this.handle.update({ segmentsDirPath });
+        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} url=${this.handle.masterPlaylistUrl}`);
 
+        const session = this.provider.createDownloadSession();
         const playlistManager = new PlaylistManager(segmentsDirPath);
 
-        const qualityMonitor = new StreamQualityMonitor(
-            this.streamProvider,
-            this.downloadHandle.masterPlaylistUrl,
-            liveUrl,
-            async (newUrl) => {
-                this.pendingUpgrade = newUrl;
-            },
-            10000
-        );
-        qualityMonitor.start();
+        const result = await this.downloadLoop(alias, liveUrl, segmentsDirPath, session, playlistManager);
 
+        await playlistManager.finalizePlaylist();
+
+        logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.handle.masterPlaylistUrl}`);
+        this.handle.remove();
+
+        return result;
+    }
+
+    /**
+     * Check if a better quality variant is available by re-parsing the master
+     * playlist.  Called inline by the download loop — no concurrent timer,
+     * no shared mutable state.  The download loop is the sole owner of liveUrl.
+     */
+    private async checkForQualityUpgrade(
+        currentLiveUrl: string,
+    ): Promise<string | null> {
+        const betterUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
+        if (!betterUrl) return null;
+
+        // Compare ignoring query params and CDN TLD differences
+        const normalize = (url: string) =>
+            url.split("?")[0].replace(/doppiocdn\.(org|com|net)/g, "doppiocdn._");
+
+        if (normalize(betterUrl) === normalize(currentLiveUrl)) return null;
+        return betterUrl;
+    }
+
+    private async downloadLoop(
+        alias: string,
+        initialLiveUrl: string,
+        segmentsDirPath: string,
+        session: IDownloadSession,
+        playlistManager: PlaylistManager,
+    ): Promise<DownloadResult> {
+        // All download state is local. No class fields, no concurrent mutation.
+        let liveUrl = initialLiveUrl;
         let lastDownload = Date.now();
-        let consecutiveFailures = 0;
         let segmentCount = 0;
         let lastHeartbeat = Date.now();
-        const HEARTBEAT_INTERVAL = 30000;
+        let lastQualityCheck = Date.now();
+        let currentMapUri: string | null = null;
+        let initName = "init.mp4";
+        const staleTimeout = config.getConfig().timeouts.staleStream;
 
-        while (!this.aborted && Date.now() - lastDownload < config.getConfig().timeouts.staleStream) {
-            if (this.pendingUpgrade) {
-                this.initCounter++;
-                this.currentInitName = `init_${this.initCounter}.mp4`;
-                logger.info(`[StreamDownloader] Quality upgrade for ${alias} — new init: ${this.currentInitName}`);
-                await playlistManager.insertQualityChange(this.currentInitName);
-                liveUrl = this.pendingUpgrade;
-                this.downloadHandle.update({ liveUrl });
-                qualityMonitor.updateCurrentUrl(liveUrl);
-                this.initSegmentDownloaded = false;
-                this.pendingUpgrade = null;
-                if (segmentCount > 0) lastDownload = Date.now();
-                consecutiveFailures = 0;
-            }
-
+        while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
+            // Heartbeat
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${segmentCount} staleSec=${staleSec} failures=${consecutiveFailures}`);
+                logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${segmentCount} staleSec=${staleSec}`);
                 lastHeartbeat = Date.now();
             }
 
-            const liveResponse = await this.downloadSession.getLiveList(liveUrl);
-
-            if (!liveResponse.success || !liveResponse.data) {
-                consecutiveFailures++;
-                if (consecutiveFailures === 1 || consecutiveFailures === 5 || consecutiveFailures % 30 === 0) {
-                    logger.warn(`[StreamDownloader] ${alias} getLiveList failed (x${consecutiveFailures}) segments=${segmentCount} url=${liveUrl}`);
+            // Periodic quality check — inline, no concurrent timer.
+            // The download loop owns liveUrl exclusively.
+            if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL) {
+                lastQualityCheck = Date.now();
+                const betterUrl = await this.checkForQualityUpgrade(liveUrl);
+                if (betterUrl) {
+                    logger.info(`[StreamDownloader] Quality upgrade for ${alias}: ${betterUrl.split("?")[0]}`);
+                    liveUrl = betterUrl;
+                    this.handle.update({ liveUrl });
+                    // Don't reset any counters or timestamps — only real segments count.
+                    // The new liveUrl will produce a different EXT-X-MAP if the resolution
+                    // changed, which the init segment tracking below handles naturally.
                 }
-                await timersPromises.setTimeout(1000);
-                continue;
             }
 
-            consecutiveFailures = 0;
+            // Fetch playlist. Null means stop — we don't ask why.
+            const content = await session.fetchPlaylist(liveUrl);
+            if (!content) {
+                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${segmentCount})`);
+                break;
+            }
 
-            if (!this.initSegmentDownloaded) {
-                const mapMatch = liveResponse.data.match(/#EXT-X-MAP:URI="([^"]+)"/);
-                if (mapMatch) {
-                    const initUrl = this.streamProvider.getSegmentUrl(liveUrl!, mapMatch[1]);
-                    const initBuffer = await this.downloadSession.getTsSegment(initUrl);
-                    if (initBuffer) {
-                        const initPath = path.join(segmentsDirPath, this.currentInitName);
-                        await FileSystemManager.writeFile(initPath, initBuffer as unknown as Uint8Array);
-                        logger.info(`[StreamDownloader] Downloaded init segment for ${alias}`);
-                    } else {
+            // Track init segment changes via EXT-X-MAP in the variant playlist.
+            // Handles both first-time init and mid-stream resolution changes.
+            const mapMatch = content.match(/#EXT-X-MAP:URI="([^"]+)"/);
+            if (mapMatch) {
+                const mapUri = mapMatch[1];
+                if (mapUri !== currentMapUri) {
+                    const initUrl = this.provider.getSegmentUrl(liveUrl, mapUri);
+                    const initBuffer = await session.fetchSegment(initUrl);
+                    if (!initBuffer) {
                         logger.warn(`[StreamDownloader] ${alias} init segment download failed url=${initUrl}`);
+                        await timersPromises.setTimeout(1000);
+                        continue;
                     }
+
+                    if (currentMapUri !== null) {
+                        // Not the first init — stream re-initialized mid-recording
+                        initName = `init_${segmentCount}.mp4`;
+                        await playlistManager.insertQualityChange(initName);
+                    }
+
+                    await FileSystemManager.writeFile(
+                        path.join(segmentsDirPath, initName),
+                        initBuffer as unknown as Uint8Array,
+                    );
+                    logger.info(`[StreamDownloader] Downloaded init segment for ${alias} (${initName})`);
+                    currentMapUri = mapUri;
                 }
-                this.initSegmentDownloaded = true;
             }
 
-            const segmentsToProcess = await playlistManager.identifyNewSegments(
-                liveResponse.data,
-                (line) => this.streamProvider.getSegmentUrl(liveUrl!, line)
+            // Download new segments
+            const segments = await playlistManager.identifyNewSegments(
+                content,
+                (line) => this.provider.getSegmentUrl(liveUrl, line),
             );
 
-            if (segmentsToProcess.length > 0) {
-                for (const segment of segmentsToProcess) {
-                    const tsBuffer = await this.downloadSession.getTsSegment(segment.remoteUrl);
+            for (const segment of segments) {
+                const tsBuffer = await session.fetchSegment(segment.remoteUrl);
 
-                    const baseName = segment.localName.replace(/\.\w+$/, "");
-                    if (!/^\d+$/.test(baseName)) {
-                        segment.localName = `${playlistManager.startSequence + segmentCount}.ts`;
+                const baseName = segment.localName.replace(/\.\w+$/, "");
+                if (!/^\d+$/.test(baseName)) {
+                    segment.localName = `${playlistManager.startSequence + segmentCount}.ts`;
+                }
+
+                const segmentPath = path.join(segmentsDirPath, segment.localName);
+
+                if (!tsBuffer) {
+                    logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl}`);
+                    break;
+                }
+
+                const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                if (!writeSuccess) {
+                    logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath}`);
+                    break;
+                }
+
+                const result = await this.provider.validateSegment(segmentPath);
+                if (!result.valid) {
+                    await fs.unlink(segmentPath).catch(() => {});
+                    playlistManager.addIgnoredSegment(segment.localName);
+                    logger.warn(`[StreamDownloader] ${alias} rejected invalid segment=${segment.localName}`);
+                } else {
+                    if (result.duration !== undefined) {
+                        segment.accurateDuration = result.duration;
                     }
-
-                    const segmentPath = path.join(segmentsDirPath, segment.localName);
-
-                    if (!tsBuffer) {
-                        logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl}`);
-                        break;
-                    }
-
-                    const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
-
-                    if (writeSuccess) {
-                        const result = await this.streamProvider.validateSegment(segmentPath);
-
-                        if (!result.valid) {
-                            await fs.unlink(segmentPath).catch(() => {});
-                            playlistManager.addIgnoredSegment(segment.localName);
-                            logger.debug(`[StreamDownloader] ${alias} rejected invalid segment=${segment.localName}`);
-                            lastDownload = Date.now();
-                        } else {
-                            if (result.duration !== undefined) {
-                                segment.accurateDuration = result.duration;
-                            }
-                            await playlistManager.appendSegmentToPlaylist(segment);
-                            lastDownload = Date.now();
-                            segmentCount++;
-                        }
-                    } else {
-                        logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath}`);
-                        break;
-                    }
+                    await playlistManager.appendSegmentToPlaylist(segment);
+                    lastDownload = Date.now();
+                    segmentCount++;
                 }
             }
+
             await timersPromises.setTimeout(1000);
         }
 
-        let exitReason: DownloadExitReason;
-        if (this.aborted) {
-            exitReason = "aborted";
-        } else if (segmentCount > 0) {
-            exitReason = "completed";
-        } else {
-            exitReason = "error";
-        }
-
         const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${segmentCount} failures=${consecutiveFailures} dir=${path.basename(segmentsDirPath)}`);
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} aborted=${this._aborted} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
 
-        qualityMonitor.stop();
-        await playlistManager.finalizePlaylist();
-
-        logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.downloadHandle.masterPlaylistUrl}`);
-        this.downloadHandle.remove();
-
-        return { exitReason, segmentCount };
+        return { segmentCount, aborted: this._aborted };
     }
 }

@@ -17,7 +17,7 @@ interface EphemeralDownload {
     startedAt: string;
 }
 class EphemeralDownloadHandle {
-    public readonly masterPlaylistUrl: string;
+    public masterPlaylistUrl: string;
     private _state: { streamerId: string; alias: string; liveUrl: string | null; segmentsDirPath: string | null };
 
     constructor(masterPlaylistUrl: string, streamerId: string, alias: string) {
@@ -28,6 +28,10 @@ class EphemeralDownloadHandle {
     public update(updates: Record<string, any>) {
         Object.assign(this._state, updates);
         return this._state;
+    }
+
+    public updateMasterUrl(newUrl: string): void {
+        this.masterPlaylistUrl = newUrl;
     }
 
     public remove(): void {
@@ -48,12 +52,6 @@ class EphemeralStreamProvider implements IStreamProvider {
 
     async parseMasterPlaylist(masterUrl: string) {
         return this.inner.parseMasterPlaylist(masterUrl);
-    }
-    async pollCurrentVariant(masterUrl: string, currentLiveUrl: string) {
-        return this.inner.pollCurrentVariant(masterUrl, currentLiveUrl);
-    }
-    async getMasterList(url: string) {
-        return this.inner.getMasterList(url);
     }
     getSegmentUrl(baseUrl: string, segmentLine: string) {
         return this.inner.getSegmentUrl(baseUrl, segmentLine);
