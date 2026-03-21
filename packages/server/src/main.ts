@@ -9,7 +9,7 @@ import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import ladderRouter from "./api/ladder.routes.js";
-import scRouter from "./api/fmp4.routes.js";
+import scRouter from "./api/fmp4-list.routes.js";
 import tsliveListRouter from "./api/tslive-list.routes.js";
 import tlRouter from "./api/tl.routes.js";
 import tlProxyRouter from "./api/tl-proxy.routes.js";
