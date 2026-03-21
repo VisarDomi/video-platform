@@ -89,6 +89,10 @@ export class ScDiscoveryService {
                     if (result.exitReason === "error") {
                         this.cooldown.recordFailure(username);
                     }
+                }).catch((err: Error) => {
+                    logger.error(`[SC] ${username}: unhandled download error`, { error: err.message });
+                    handle.remove();
+                    this.cooldown.recordFailure(username);
                 });
             }
         }

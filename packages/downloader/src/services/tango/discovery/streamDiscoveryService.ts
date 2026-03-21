@@ -87,6 +87,10 @@ export class StreamDiscoveryService {
                                     if (result.exitReason === "error") {
                                         this.cooldown.recordFailure(streamerId);
                                     }
+                                }).catch((err: Error) => {
+                                    logger.error(`[Tango] ${resolvedAlias}: unhandled download error`, { error: err.message });
+                                    downloadHandle.remove();
+                                    this.cooldown.recordFailure(streamerId);
                                 });
                             }
                         }

@@ -69,6 +69,10 @@ export class Fc2DiscoveryService {
                             if (result.exitReason === "error") {
                                 this.cooldown.recordFailure(channelId);
                             }
+                        }).catch((err: Error) => {
+                            logger.error(`[FC2] ${channelId}: unhandled download error`, { error: err.message });
+                            handle.remove();
+                            this.cooldown.recordFailure(channelId);
                         });
                     }
                 } else {
