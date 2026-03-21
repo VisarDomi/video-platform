@@ -48,7 +48,7 @@ const BULK_BATCH_SIZE = 100;
 
 export class ScClient implements IStreamProvider {
     private roomIdCache = new Map<string, string>();
-    private cookies: string[] = [];
+    private apiCookies: string[] = [];
 
     constructor() {
         logger.info("[SC] ScClient initialized.");
@@ -58,62 +58,42 @@ export class ScClient implements IStreamProvider {
         await loadMouflonKeys();
     }
 
-    private getHeaders(): Record<string, string> {
-        const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-        if (this.cookies.length > 0) {
-            headers["Cookie"] = this.cookies.join("; ");
-        }
-        return headers;
-    }
-
-    private async fetchText(url: string): Promise<{ ok: boolean; status: number; text: string; cookies: string[] }> {
+    private async fetchApi<T>(url: string): Promise<T | null> {
         try {
-            const response = await fetch(url, { headers: this.getHeaders() });
-            const setCookies: string[] = [];
-            const raw = response.headers.getSetCookie?.() ?? [];
-            for (const c of raw) {
-                const name = c.split(";")[0];
-                if (name) setCookies.push(name);
+            const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+            if (this.apiCookies.length > 0) {
+                headers["Cookie"] = this.apiCookies.join("; ");
             }
-            return {
-                ok: response.ok,
-                status: response.status,
-                text: await response.text(),
-                cookies: setCookies,
-            };
-        } catch (error: any) {
-            logger.error(`[SC] Fetch failed: ${url}`, { error: error.message });
-            return { ok: false, status: 0, text: "", cookies: [] };
-        }
-    }
+            const response = await fetch(url, { headers });
 
-    private async fetchJson<T>(url: string): Promise<T | null> {
-        const result = await this.fetchText(url);
-        if (!result.ok) return null;
-        try {
-            return JSON.parse(result.text) as T;
-        } catch {
-            logger.warn(`[SC] Failed to parse JSON from ${url}`);
+            const map = new Map<string, string>();
+            for (const c of this.apiCookies) map.set(c.split("=")[0], c);
+            for (const c of response.headers.getSetCookie?.() ?? []) {
+                const nameVal = c.split(";")[0];
+                if (nameVal) map.set(nameVal.split("=")[0], nameVal);
+            }
+            this.apiCookies = Array.from(map.values());
+
+            if (!response.ok) return null;
+            return await response.json() as T;
+        } catch (error: any) {
+            logger.error(`[SC] API fetch failed: ${url}`, { error: error.message });
             return null;
         }
     }
 
-    private accumulateCookies(newCookies: string[]): void {
-        const map = new Map<string, string>();
-        for (const c of this.cookies) {
-            const name = c.split("=")[0];
-            map.set(name, c);
+    private async fetchCdn(url: string): Promise<{ ok: boolean; status: number; text: string }> {
+        try {
+            const response = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+            return {
+                ok: response.ok,
+                status: response.status,
+                text: await response.text(),
+            };
+        } catch (error: any) {
+            logger.error(`[SC] CDN fetch failed: ${url}`, { error: error.message });
+            return { ok: false, status: 0, text: "" };
         }
-        for (const c of newCookies) {
-            const name = c.split("=")[0];
-            map.set(name, c);
-        }
-        this.cookies = Array.from(map.values());
-    }
-
-    public resetSession(): void {
-        logger.warn("[SC] Resetting HTTP session (clearing cookies)");
-        this.cookies = [];
     }
 
     private static uniq(length = 16): string {
@@ -127,7 +107,7 @@ export class ScClient implements IStreamProvider {
 
     private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
-        const data = await this.fetchJson<any>(url);
+        const data = await this.fetchApi<any>(url);
         if (!data) return null;
 
         if (!data.user?.user?.id) {
@@ -175,7 +155,7 @@ export class ScClient implements IStreamProvider {
             const params = batch.map((id) => `modelIds[]=${id}`).join("&");
             const url = `https://stripchat.com/api/front/models/list?${params}`;
 
-            const data = await this.fetchJson<any>(url);
+            const data = await this.fetchApi<any>(url);
             if (!data?.models) continue;
 
             for (const model of data.models) {
@@ -233,19 +213,16 @@ export class ScClient implements IStreamProvider {
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
-        const result = await this.fetchText(masterUrl);
-        this.accumulateCookies(result.cookies);
+        const result = await this.fetchCdn(masterUrl);
 
         if (!result.ok) {
             logger.warn(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl} body=${result.text.slice(0, 500)}`);
-            this.resetSession();
             return null;
         }
 
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) {
             logger.warn(`[SC] No variants/mouflon key in master playlist: url=${masterUrl} body=${result.text.slice(0, 500)}`);
-            this.resetSession();
             return null;
         }
 
@@ -253,7 +230,7 @@ export class ScClient implements IStreamProvider {
     }
 
     public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        const result = await this.fetchText(masterUrl);
+        const result = await this.fetchCdn(masterUrl);
         if (!result.ok) return null;
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) return null;
@@ -264,8 +241,7 @@ export class ScClient implements IStreamProvider {
     }
 
     public async getMasterList(url: string): Promise<string | null> {
-        const result = await this.fetchText(url);
-        this.accumulateCookies(result.cookies);
+        const result = await this.fetchCdn(url);
         if (!result.ok) return null;
         return result.text;
     }
@@ -314,56 +290,29 @@ export class ScClient implements IStreamProvider {
     }
 }
 
+const CDN_HEADERS = { "User-Agent": USER_AGENT };
+
 class ScDownloadSession implements IDownloadSession {
-    private cookies: string[] = [];
-    private failLog = new Map<string, number>();
-
-    private getHeaders(): Record<string, string> {
-        const headers: Record<string, string> = { "User-Agent": USER_AGENT };
-        if (this.cookies.length > 0) {
-            headers["Cookie"] = this.cookies.join("; ");
-        }
-        return headers;
-    }
-
-    private accumulateCookies(newCookies: string[]): void {
-        const map = new Map<string, string>();
-        for (const c of this.cookies) {
-            const name = c.split("=")[0];
-            map.set(name, c);
-        }
-        for (const c of newCookies) {
-            const name = c.split("=")[0];
-            map.set(name, c);
-        }
-        this.cookies = Array.from(map.values());
-    }
+    private consecutiveFailures = 0;
 
     public async getLiveList(liveUrl: string): Promise<{ success: boolean; data: string | null }> {
         try {
-            const response = await fetch(liveUrl, { headers: this.getHeaders() });
-            const setCookies: string[] = [];
-            const raw = response.headers.getSetCookie?.() ?? [];
-            for (const c of raw) {
-                const name = c.split(";")[0];
-                if (name) setCookies.push(name);
-            }
-            this.accumulateCookies(setCookies);
+            const response = await fetch(liveUrl, { headers: CDN_HEADERS });
 
             if (!response.ok) {
-                const count = (this.failLog.get(liveUrl) ?? 0) + 1;
-                this.failLog.set(liveUrl, count);
-                if (count === 1 || count % 30 === 0) {
-                    logger.warn(`[SC] Live playlist fetch failed (x${count}): status=${response.status} url=${liveUrl}`);
+                this.consecutiveFailures++;
+                if (this.consecutiveFailures === 1 || this.consecutiveFailures === 5 || this.consecutiveFailures % 30 === 0) {
+                    logger.warn(`[SC] Live playlist fetch failed (x${this.consecutiveFailures}): status=${response.status} url=${liveUrl}`);
                 }
                 return { success: false, data: null };
             }
 
-            this.failLog.delete(liveUrl);
+            this.consecutiveFailures = 0;
             const text = await response.text();
             const decrypted = decryptM3u8(text);
             return { success: true, data: decrypted };
         } catch (error: any) {
+            this.consecutiveFailures++;
             logger.error(`[SC] Live playlist fetch error: ${liveUrl}`, { error: error.message });
             return { success: false, data: null };
         }
@@ -371,7 +320,7 @@ class ScDownloadSession implements IDownloadSession {
 
     public async getTsSegment(tsUrl: string): Promise<Buffer | null> {
         try {
-            const response = await fetch(tsUrl, { headers: this.getHeaders() });
+            const response = await fetch(tsUrl, { headers: CDN_HEADERS });
             if (response.ok) {
                 const buf = await response.arrayBuffer();
                 return Buffer.from(buf);
