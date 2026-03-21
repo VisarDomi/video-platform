@@ -1,134 +1,69 @@
 # Downloader Decisions
 
-## SC: `||` not `??` for streamName fallback
+## Download loop must be boring (2026-03-21)
 
-`data.cam?.streamName || roomId` — the SC API sometimes returns `streamName: ""` (empty string). `??` only catches null/undefined, not empty string. StreaMonitor uses Python's `.get("streamName", self.room_id)` which catches any falsy value.
+The download loop mirrors StreaMonitor's `hls.py`: fetch → download → if anything fails, stop. No in-loop recovery, no concurrent timers, no shared mutable state. Discovery handles retry with a fresh everything.
 
-## SC: roomId is cached, streamName is always fresh
+**Why:** The previous architecture had a concurrent quality monitor timer, in-loop URL re-resolution, and counter resets that masked persistent failures. CDN TLD flips (.org/.net/.com) triggered phantom quality changes that kept zombie downloads alive for hours — the 0o_NON_o0 incident ran for over an hour with only 16 real segments.
 
-roomId never changes for a username — safe to cache permanently. streamName is session-volatile and must be fetched fresh before each download attempt. This matches StreaMonitor's pattern where `getVideoUrl()` calls `getStatus()` to refresh `lastInfo` before every download.
+## No self-healing in the download path
 
-## SC: isCamAvailable/isCamActive gate
+Every error must be surfaced, never masked. No silent catches, no fallback-to-success on failure, no counter resets on non-download events. If something goes wrong, the download dies and the log says why.
 
-The bulk API returns `isOnline` but the per-user `/cam` endpoint has `isCamAvailable` and `isCamActive`. A streamer can be `status: "public"` + `isOnline: true` in bulk but have `isCamAvailable: false` during transitional states (going live/ending). `refreshStreamName` rejects these to avoid wasted CDN requests.
+**Why:** Three rounds of "fixes" added self-healing (re-resolve on 403, reset counters on quality change, return valid:true on read error). Each fix masked the symptoms of the previous fix's side effects. The root cause — a concurrent timer mutating shared state — was hidden for weeks because every surface symptom was individually "fixed."
 
-## SC: mouflon decryption
+## Room IDs are the source of truth for SC
 
-Segments are encrypted with mouflon. Keys are stored in `stripchat_mouflon_keys.json`. The decrypt algorithm: reverse base64, pad with `==`, XOR with cycling SHA256 hash of the decryption key. Mouflon params come from `#EXT-X-MOUFLON:` tags in the m3u8. If psch is `v1`, use the key from the tag. Otherwise fall back to first available key with `v2`.
+The stable identifier is the numeric room ID, not the username. Usernames can be renamed. Room IDs are resolved once at add-time by the server, persisted in sc.txt, and never re-resolved during polling.
 
-## SC: two-tier variant selection — named preferred, auto fallback
+**Why:** Four accounts were 404-ing on every 5-second poll (16 warn lines/minute) because they were renamed/deleted. The old code resolved usernames to room IDs on every poll cycle — if the username was stale, it failed silently and the streamer was never monitored.
 
-`selectBestVariantUrl` collects variants into named (has RESOLUTION=) and auto (no RESOLUTION=) buckets. Picks highest bandwidth from named; falls back to auto only if no named variants exist. CDN (CloudFront) returns 403 for auto variant URLs (e.g. `121964773.m3u8` without `_720p` suffix). Confirmed by curl 2026-03-21. Logs a warning on auto fallback so CDN behavior changes surface immediately. The selected variant base URL is logged in `parseMasterPlaylist`.
+## Flat 20s cooldown, no exponential backoff
 
-## SC: quality monitor compares base URLs only
+**Why:** Exponential backoff (30s→10min) meant a transient 403 at 3am could escalate to 10-minute waits, missing the stream entirely. StreaMonitor uses a flat 20s sleep. If the stream is gone, the bulk status check prevents downloads — the backoff doesn't need to gate retries.
 
-`pollCurrentVariant` strips query params before comparing variant URLs. CDN rotates query params between polls (`playlistType=standard`, `preferredVideoCodec=h264`). Full-string comparison caused false quality changes every ~10s. Evidence: 841_yayoi logs showed Quality upgrade spam with alternating query param variants, each triggering unnecessary discontinuity + init segment re-download.
+## CDN TLD round-robin, not random
 
-## SC: master playlist error logs include response body
+**Why:** Random pick from 3 TLDs has 33% chance of hitting the same one that just rejected us. Round-robin guarantees a different edge on each retry.
 
-When the CDN returns errors (Cloudflare challenge pages, 403s, empty responses), the first 500 chars of the body are logged. Without this, debugging CDN issues requires reproducing the failure.
+## Quality monitoring is inline, not concurrent
 
-## SC: domain-scoped HTTP — fetchApi vs fetchCdn
+The quality check runs inside the download loop on the same thread. No timer, no shared mutable field, no races.
 
-`ScClient` talks to two unrelated domains. `fetchApi` handles `stripchat.com` (Cloudflare, sets `__cf_bm` with 30min TTL and `_cfuvid`), accumulates cookies and sends them back. `fetchCdn` handles `*.doppiocdn.*` (CloudFront, stateless, never sets cookies). Previously a single domain-blind cookie jar mixed both — `fetchJson` silently dropped API cookies while CDN methods accumulated from a cookieless source. `ScDownloadSession` is also stateless — CDN never sends `Set-Cookie` (confirmed by curl against live streams 2026-03-21).
+**Why:** The concurrent `StreamQualityMonitor` timer was the root cause of the zombie download bug. It wrote to `pendingUpgrade` which the download loop consumed — but TLD flips triggered phantom quality changes every 10 seconds, each resetting failure counters and the stale timeout.
 
-## FC2: quality selection ported from FC2LiveDL.py
+## Segment failure stops the download
 
-Mode = Quality + Latency. Quality values: 150Kbps=10, 400Kbps=20, 1.2Mbps=30, 2Mbps=40, 3Mbps=50, sound=90. Latency values: low=0, high=1, mid=2. Target: 3Mbps + mid = mode 52. Selection: exact match → best matching latency → highest available.
+**Why:** The previous behavior (break inner loop, continue outer loop) meant a persistently failing segment was retried every second for 60 seconds. StreaMonitor stops immediately — if a segment can't be fetched, the session is probably dead.
 
-## FC2: WebSocket session lifecycle
+## Fetch timeout on all HTTP calls (30s)
 
-FC2 streams require a WebSocket connection for HLS URL negotiation and heartbeats. Sessions are cleaned up after 60s without access. The `_touchSession` method extracts channel ID from URLs to keep sessions alive during downloads.
+**Why:** Node's fetch has no default timeout. A CDN that accepts a TCP connection but never responds hangs the download forever — no heartbeats, no exit, no recovery. The absence of log output is impossible to notice at 3am.
 
-## FC2: parseMasterPlaylist receives pre-resolved URLs
+## No cookie accumulation across API calls
 
-The `masterUrl` passed to StreamDownloader is already the variant URL from `getHlsUrl` (WebSocket handshake). If it already contains `.m3u8`, return it directly. Otherwise treat as master playlist.
+**Why:** The old cookie jar merged Set-Cookie headers from all API calls for all 43 streamers. A bad Cloudflare cookie from one request poisoned every subsequent request. StreaMonitor's `_reset_session()` works by dropping all cookies; we achieve the same by never accumulating them.
 
-## Tango: tango.txt is optional
+## SC mouflon decryption returns null, not raw content
 
-If `tango.txt` has no entries (or doesn't exist), all followed streamers are downloaded. If it has entries, only those streamer IDs are downloaded. Format: `https://tango.me/{accountId} {alias}` — the alias after the space is for human readability only, accountId is the stable identifier.
+**Why:** The old code returned the encrypted playlist as-is when decryption failed. The download loop parsed it as HLS, found encrypted gibberish URIs, and tried to fetch them — producing generic "segment download failed" logs with no hint that decryption was the root cause.
 
-## Tango: 360x640 resolution is corrupt
+## SC streamName uses `||` not `??`
 
-Tango sometimes serves segments at 360x640 resolution which are corrupt/unwatchable. These are rejected during validation.
+**Why:** The API sometimes returns `streamName: ""`. Nullish coalescing doesn't catch empty strings.
 
-## Stale stream timeout: 60s
+## SC isCamAvailable/isCamActive gate before download
 
-Increased from default to 60s to prevent premature SC disconnects during buffering/transcoding lags on the CDN side.
+**Why:** A streamer can be `public` + `isOnline` in the bulk API but have `isCamAvailable: false` during transitional states. Downloading during this window wastes CDN requests that will fail.
 
-## fMP4 segment validation: sidx box parsing, not ffprobe
+## fMP4 duration from sidx boxes, not ffprobe
 
-SC uses fMP4 segments which can't be ffprobed standalone (no container header in each segment). Duration is extracted by parsing sidx boxes directly from the binary data. Sums durations per timescale (track), returns the max across tracks.
+**Why:** SC fMP4 segments can't be ffprobed standalone — they have no container header.
 
-## fMP4 segment renaming
+## Tango 360x640 rejected
 
-fMP4 streams have non-numeric segment names (hashes). These are renamed to sequential numbers (`{startSequence + count}.ts`) for playlist consistency.
+**Why:** Tango sometimes serves corrupt/unwatchable segments at this resolution.
 
-## Playlist tag ownership
+## Disk space monitor stops the service at 50GB
 
-When copying segments from live playlists to local playlists, only EXTINF and DISCONTINUITY tags are kept. Live-stream-owned tags (PROGRAM-DATE-TIME, MOUFLON, etc.) are dropped — they belong to the source, not our recording.
-
-## Deferred playlist header write
-
-The playlist header (including TARGETDURATION) is not written until the first segment arrives, so the actual segment duration can be used instead of guessing.
-
-## Quality upgrade: new init segment per switch
-
-When StreamQualityMonitor detects a better variant, a new init segment is downloaded with a numbered name (`init_1.mp4`, `init_2.mp4`). A `#EXT-X-DISCONTINUITY` + `#EXT-X-MAP` marker is inserted in the playlist. The pending upgrade is applied via a flag checked at the top of the download loop to avoid race conditions with the async quality monitor.
-
-## Quality monitor: adaptive polling with exponential backoff
-
-Starts at 10s interval. Doubles on each poll with no upgrade, caps at 5 minutes. Resets to initial interval when an upgrade is detected.
-
-## Orphan stream finalizer: two-pass boot cleanup
-
-First pass runs immediately on boot (catches crashes from before restart). Second pass runs 5 minutes later (catches folders that were too fresh on the first pass — 1 hour age threshold). Then every 24 hours. Orphan playlists missing `#EXT-X-ENDLIST` are rebuilt from files on disk and finalized. Empty folders (no .ts segments) are deleted.
-
-## Orphan stream finalizer: MAP header dedup
-
-When rebuilding orphan playlists, the first `#EXT-X-MAP` tag goes in the header. Subsequent MAP tags (from quality changes) are treated as segment metadata and kept inline with their segments.
-
-## Disk space monitor: 50GB threshold
-
-When available space drops below 50GB, the service stops itself via systemd and creates a marker file (`no-more-space-{date}.txt`) to prevent restart loops.
-
-## RetryCooldown: provider-agnostic backoff
-
-All three discovery services (SC, FC2, Tango) compose with RetryCooldown. Exponential backoff: 30s → 60s → 120s → ... → 10min cap. Cleared on successful download start. All discovery services have `.catch()` on `downloader.start()` — unhandled rejections remove the download handle and record cooldown to prevent zombie entries in downloadsManager.
-
-## DownloadResult: return type closes the ownership gap
-
-StreamDownloader.start() returns `{ exitReason, segmentCount }`. Discovery consumes this to decide retry policy. "error" (0 segments) triggers cooldown. "completed" (stream ended naturally) and "aborted" (caller stopped) need no action. This prevents the fire-and-forget pattern where failure info was lost when the handle was dropped.
-
-## Ephemeral downloads (API server, /tmp)
-
-The API server wraps IStreamProvider to redirect downloads to `/tmp/Videos/downloads/tl/{alias}/`. Uses a heartbeat-based cleanup: client reports wanted aliases via POST /api/download/active. If no heartbeat arrives within 60s, all downloads are stopped and directories cleaned up.
-
-## IDownloadSession: per-download HTTP isolation
-
-`IStreamProvider` owns discovery (API calls, master playlist, session management). Download-path HTTP (variant playlists, segments) is owned by `IDownloadSession`, created per download via `createDownloadSession()`. Each download gets its own cookie jar and fetch context. This prevents the root cause of 403 death spirals: `resetSession()` on one download nuking cookies for all concurrent downloads sharing the same `ScClient`. Matches StreaMonitor's pattern of creating a fresh `requests.Session()` per download in `hls.py`.
-
-The `reconnect` mechanism was removed entirely — discovery retries from scratch on failure, and the stale stream timer handles natural stream endings. Quality monitoring continues to work via the provider's discovery methods.
-
-Provider-specific download session behavior:
-- **SC**: stateless (CDN never sets cookies), mouflon decryption, fail-fast on errors
-- **Tango**: gets fresh auth tokens per request (already stateless)
-- **FC2**: calls `_touchSession` to keep WebSocket alive during downloads
-
-## StreamDownloader logging: every state transition has a cause
-
-The riseshu incident (2026-03-20) showed that `getLiveList` failures were completely silent in the download loop — 43 consecutive failures with zero log output. The download eventually timed out with `segments=0` but no indication of why.
-
-Logging rules for StreamDownloader:
-- `getLiveList` failure: logged at count 1, 5, and every 30th — includes alias, count, segment count, and URL
-- Segment download failure: logged with alias, segment name, and URL
-- Init segment failure: logged with URL
-- Invalid segment rejection: logged at debug level
-- Disk write failure: logged at error level
-- LOOP-EXIT: includes failure count alongside segment count and stale seconds
-
-The `[SC-DEBUG]` prefix was replaced with `[StreamDownloader]` — this code is provider-agnostic. The SC_DEBUG env filter passes `[StreamDownloader]`-tagged messages.
-
-## Quality upgrade: no lastDownload reset at 0 segments
-
-Quality upgrades only reset `lastDownload` when `segmentCount > 0`. Without this guard, the quality monitor kept a zombie download alive indefinitely — the riseshu incident had 8 quality upgrades over 4 minutes with 0 segments, each resetting the stale timer.
+**Why:** Prevents the disk from filling completely, which would corrupt in-progress recordings and potentially the OS. A marker file prevents restart loops.
