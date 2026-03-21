@@ -57,7 +57,7 @@ export class StreamDownloader {
         }
 
         this.handle.update({ segmentsDirPath });
-        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} url=${this.handle.masterPlaylistUrl}`);
+        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} master=${this.handle.masterPlaylistUrl} variant=${liveUrl.split("?")[0]}`);
 
         const session = this.provider.createDownloadSession();
         const playlistManager = new PlaylistManager(segmentsDirPath);
@@ -83,7 +83,7 @@ export class StreamDownloader {
     ): Promise<string | null> {
         const betterUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
         if (!betterUrl) {
-            logger.debug(`[StreamDownloader] ${alias} quality check: master playlist unavailable, keeping current variant`);
+            logger.debug(`[StreamDownloader] ${alias} quality check: master playlist unavailable`);
             return null;
         }
 
@@ -91,7 +91,10 @@ export class StreamDownloader {
         const normalize = (url: string) =>
             url.split("?")[0].replace(/doppiocdn\.(org|com|net)/g, "doppiocdn._");
 
-        if (normalize(betterUrl) === normalize(currentLiveUrl)) return null;
+        if (normalize(betterUrl) === normalize(currentLiveUrl)) {
+            logger.debug(`[StreamDownloader] ${alias} quality check: no change`);
+            return null;
+        }
         return betterUrl;
     }
 

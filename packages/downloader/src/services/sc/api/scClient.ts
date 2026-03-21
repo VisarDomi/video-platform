@@ -200,7 +200,7 @@ export class ScClient implements IStreamProvider {
         } else {
             const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestNamed!.bandwidth}`) && l.includes("RESOLUTION="))?.match(/RESOLUTION=(\S+)/);
             const res = resMatch ? resMatch[1].replace(/,.*/, "") : "unknown";
-            logger.info(`[SC] Master has ${namedCount} named + ${autoCount} auto variants. Best: ${res} @ ${bestNamed.bandwidth}bps → ${bestNamed.url}`);
+            logger.debug(`[SC] Master has ${namedCount} named + ${autoCount} auto variants. Best: ${res} @ ${bestNamed.bandwidth}bps → ${bestNamed.url}`);
         }
 
         const variantUrl = new URL(best.url, masterUrl).href;
@@ -224,7 +224,7 @@ export class ScClient implements IStreamProvider {
 
         const edgeMatch = bestUrl.match(/doppiocdn\.\w+\/(b-hls-\d+)\//);
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
-        logger.info(`[SC] Selected variant: ${bestUrl.split("?")[0]} (edge=${edge})`);
+        logger.debug(`[SC] Selected variant: ${bestUrl.split("?")[0]} (edge=${edge})`);
         return bestUrl;
     }
 
