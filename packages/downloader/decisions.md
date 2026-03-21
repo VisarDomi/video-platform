@@ -16,13 +16,21 @@ The bulk API returns `isOnline` but the per-user `/cam` endpoint has `isCamAvail
 
 Segments are encrypted with mouflon. Keys are stored in `stripchat_mouflon_keys.json`. The decrypt algorithm: reverse base64, pad with `==`, XOR with cycling SHA256 hash of the decryption key. Mouflon params come from `#EXT-X-MOUFLON:` tags in the m3u8. If psch is `v1`, use the key from the tag. Otherwise fall back to first available key with `v2`.
 
+## SC: two-tier variant selection — named preferred, auto fallback
+
+`selectBestVariantUrl` collects variants into named (has RESOLUTION=) and auto (no RESOLUTION=) buckets. Picks highest bandwidth from named; falls back to auto only if no named variants exist. CDN (CloudFront) returns 403 for auto variant URLs (e.g. `121964773.m3u8` without `_720p` suffix). Confirmed by curl 2026-03-21. Logs a warning on auto fallback so CDN behavior changes surface immediately. The selected variant base URL is logged in `parseMasterPlaylist`.
+
+## SC: quality monitor compares base URLs only
+
+`pollCurrentVariant` strips query params before comparing variant URLs. CDN rotates query params between polls (`playlistType=standard`, `preferredVideoCodec=h264`). Full-string comparison caused false quality changes every ~10s. Evidence: 841_yayoi logs showed Quality upgrade spam with alternating query param variants, each triggering unnecessary discontinuity + init segment re-download.
+
 ## SC: master playlist error logs include response body
 
 When the CDN returns errors (Cloudflare challenge pages, 403s, empty responses), the first 500 chars of the body are logged. Without this, debugging CDN issues requires reproducing the failure.
 
-## SC: session reset on CDN failure (discovery path only)
+## SC: domain-scoped HTTP — fetchApi vs fetchCdn
 
-When a master playlist fetch fails or returns no mouflon key, the HTTP session (cookies) is reset on the discovery/API path. Stale Cloudflare cookies accumulate over hours and can cause persistent failures. Download-path fetches (variant playlists, segments) use their own isolated cookie jar via `IDownloadSession` — a 403 on one download cannot nuke cookies for other concurrent downloads.
+`ScClient` talks to two unrelated domains. `fetchApi` handles `stripchat.com` (Cloudflare, sets `__cf_bm` with 30min TTL and `_cfuvid`), accumulates cookies and sends them back. `fetchCdn` handles `*.doppiocdn.*` (CloudFront, stateless, never sets cookies). Previously a single domain-blind cookie jar mixed both — `fetchJson` silently dropped API cookies while CDN methods accumulated from a cookieless source. `ScDownloadSession` is also stateless — CDN never sends `Set-Cookie` (confirmed by curl against live streams 2026-03-21).
 
 ## FC2: quality selection ported from FC2LiveDL.py
 
@@ -86,7 +94,7 @@ When available space drops below 50GB, the service stops itself via systemd and 
 
 ## RetryCooldown: provider-agnostic backoff
 
-All three discovery services (SC, FC2, Tango) compose with RetryCooldown. Exponential backoff: 30s → 60s → 120s → ... → 10min cap. Cleared on successful download start.
+All three discovery services (SC, FC2, Tango) compose with RetryCooldown. Exponential backoff: 30s → 60s → 120s → ... → 10min cap. Cleared on successful download start. All discovery services have `.catch()` on `downloader.start()` — unhandled rejections remove the download handle and record cooldown to prevent zombie entries in downloadsManager.
 
 ## DownloadResult: return type closes the ownership gap
 
@@ -103,7 +111,7 @@ The API server wraps IStreamProvider to redirect downloads to `/tmp/Videos/downl
 The `reconnect` mechanism was removed entirely — discovery retries from scratch on failure, and the stale stream timer handles natural stream endings. Quality monitoring continues to work via the provider's discovery methods.
 
 Provider-specific download session behavior:
-- **SC**: own cookie jar, mouflon decryption, no session resets — fail-fast on errors
+- **SC**: stateless (CDN never sets cookies), mouflon decryption, fail-fast on errors
 - **Tango**: gets fresh auth tokens per request (already stateless)
 - **FC2**: calls `_touchSession` to keep WebSocket alive during downloads
 
