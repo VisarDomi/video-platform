@@ -15,7 +15,7 @@ import { createLadderTargetManager } from "./ladder/discovery/targetManager.js";
 import { LadderClient } from "./ladder/api/ladderClient.js";
 import { LadderDiscoveryService } from "./ladder/discovery/discoveryService.js";
 
-import { createScTargetManager } from "./fmp4/discovery/targetManager.js";
+import { ScTargetManager } from "./fmp4/discovery/targetManager.js";
 import { ScClient } from "./fmp4/api/scClient.js";
 import { ScDiscoveryService } from "./fmp4/discovery/discoveryService.js";
 
@@ -66,7 +66,7 @@ export class DownloaderService {
         const ladderClient = new LadderClient();
         const ladderDiscoveryService = new LadderDiscoveryService(ladderTargetManager, ladderClient, downloadsManager);
 
-        const scTargetManager = createScTargetManager();
+        const scTargetManager = ScTargetManager.create();
         const scClient = new ScClient();
         await scClient.init();
         const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
