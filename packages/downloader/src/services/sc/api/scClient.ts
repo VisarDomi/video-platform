@@ -154,8 +154,11 @@ export class ScClient implements IStreamProvider {
         return result;
     }
 
+    private cdnTldIndex = 0;
+
     public buildMasterUrl(streamName: string): string {
-        const tld = CDN_TLDS[Math.floor(Math.random() * CDN_TLDS.length)];
+        const tld = CDN_TLDS[this.cdnTldIndex % CDN_TLDS.length];
+        this.cdnTldIndex++;
         return `https://edge-hls.doppiocdn.${tld}/hls/${streamName}/master/${streamName}_auto.m3u8`;
     }
 
