@@ -109,6 +109,7 @@ export class StreamDownloader {
         let liveUrl = initialLiveUrl;
         let lastDownload = Date.now();
         let segmentCount = 0;
+        let segmentFailed = false;
         let lastHeartbeat = Date.now();
         let lastQualityCheck = Date.now();
         let currentMapUri: string | null = null;
@@ -180,6 +181,8 @@ export class StreamDownloader {
                 (line) => this.provider.getSegmentUrl(liveUrl, line),
             );
 
+            let downloadedThisIteration = false;
+
             for (const segment of segments) {
                 const tsBuffer = await session.fetchSegment(segment.remoteUrl);
 
@@ -191,13 +194,16 @@ export class StreamDownloader {
                 const segmentPath = path.join(segmentsDirPath, segment.localName);
 
                 if (!tsBuffer) {
-                    logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl}`);
+                    // Segment non-200 → stop download (same as StreaMonitor: `if m_resp.status_code != 200: return`)
+                    logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
+                    segmentFailed = true;
                     break;
                 }
 
                 const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                 if (!writeSuccess) {
-                    logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath}`);
+                    logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
+                    segmentFailed = true;
                     break;
                 }
 
@@ -213,10 +219,18 @@ export class StreamDownloader {
                     await playlistManager.appendSegmentToPlaylist(segment);
                     lastDownload = Date.now();
                     segmentCount++;
+                    downloadedThisIteration = true;
                 }
             }
 
-            await timersPromises.setTimeout(1000);
+            if (segmentFailed) break;
+
+            // Only sleep when no new segments — the playlist fetch itself
+            // is the natural throttle (HLS playlists update every 2-4s).
+            // Same as StreaMonitor: `if not did_download: sleep(10)`
+            if (!downloadedThisIteration) {
+                await timersPromises.setTimeout(1000);
+            }
         }
 
         const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
@@ -224,6 +238,8 @@ export class StreamDownloader {
         let exitReason: string;
         if (this._aborted) {
             exitReason = "aborted";
+        } else if (segmentFailed) {
+            exitReason = "segment-failed";
         } else if (staleTimedOut) {
             exitReason = "stale-timeout";
         } else {
