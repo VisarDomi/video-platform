@@ -229,11 +229,17 @@ class TangoDownloadSession implements IDownloadSession {
         return { [constants.HEADERS.COOKIE]: cookie };
     }
 
+    private static readonly FETCH_TIMEOUT_MS = 30_000;
+
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             const tokens = await this.tokenManager.getTokens();
             const headers = this._getStreamHeaders(tokens);
-            const response = await fetch(url, { method: "GET", headers });
+            const response = await fetch(url, {
+                method: "GET",
+                headers,
+                signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
+            });
 
             if (!response.ok) {
                 logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
@@ -248,17 +254,16 @@ class TangoDownloadSession implements IDownloadSession {
 
     public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
-            const tsResponse = await fetch(tsUrl);
+            const tsResponse = await fetch(tsUrl, {
+                signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
+            });
             if (tsResponse.ok) {
                 const tsBuffer = await tsResponse.arrayBuffer();
                 return Buffer.from(tsBuffer);
-            } else {
-                logger.warn(`[Tango] Failed to download TS segment, status: ${tsResponse.status}`, { tsUrl });
             }
+            logger.warn(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
         } catch (error: any) {
-            if (error?.message !== "terminated") {
-                logger.warn(`[Tango] Network error downloading TS segment: ${error.message}`, { tsUrl });
-            }
+            logger.warn(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
         }
         return null;
     }

@@ -348,10 +348,15 @@ class Fc2DownloadSession implements IDownloadSession {
         this.client = client;
     }
 
+    private static readonly FETCH_TIMEOUT_MS = 30_000;
+
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             this.client._touchSession(url);
-            const response = await fetch(url, { headers: this.HEADERS });
+            const response = await fetch(url, {
+                headers: this.HEADERS,
+                signal: AbortSignal.timeout(Fc2DownloadSession.FETCH_TIMEOUT_MS),
+            });
             if (!response.ok) {
                 logger.warn(`[FC2] Playlist fetch failed: ${response.status} ${response.statusText} url=${url}`);
                 return null;
@@ -366,13 +371,18 @@ class Fc2DownloadSession implements IDownloadSession {
     public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
             this.client._touchSession(tsUrl);
-            const response = await fetch(tsUrl, { headers: this.HEADERS });
+            const response = await fetch(tsUrl, {
+                headers: this.HEADERS,
+                signal: AbortSignal.timeout(Fc2DownloadSession.FETCH_TIMEOUT_MS),
+            });
             if (response.ok) {
                 const arr = await response.arrayBuffer();
                 return Buffer.from(arr);
             }
             logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
-            return null;
-        } catch (error) { return null; }
+        } catch (error: any) {
+            logger.warn(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
+        }
+        return null;
     }
 }

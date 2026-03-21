@@ -61,6 +61,7 @@ export class ScClient implements IStreamProvider {
         try {
             const response = await fetch(url, {
                 headers: { "User-Agent": USER_AGENT },
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
             });
 
             if (!response.ok) {
@@ -76,7 +77,10 @@ export class ScClient implements IStreamProvider {
 
     private async fetchCdn(url: string): Promise<{ ok: boolean; status: number; text: string }> {
         try {
-            const response = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+            const response = await fetch(url, {
+                headers: { "User-Agent": USER_AGENT },
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            });
             return {
                 ok: response.ok,
                 status: response.status,
@@ -279,10 +283,19 @@ export class ScClient implements IStreamProvider {
 
 const CDN_HEADERS = { "User-Agent": USER_AGENT };
 
+// Fetch timeout — if the CDN accepts a connection but never responds,
+// the fetch aborts after this duration.  Without this, a hung TCP
+// connection blocks the download loop forever (no heartbeats, no exit,
+// no re-download).  Node's fetch has no default timeout.
+const FETCH_TIMEOUT_MS = 30_000;
+
 class ScDownloadSession implements IDownloadSession {
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
-            const response = await fetch(url, { headers: CDN_HEADERS });
+            const response = await fetch(url, {
+                headers: CDN_HEADERS,
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            });
 
             if (!response.ok) {
                 logger.warn(`[SC] Playlist fetch failed: status=${response.status} url=${url}`);
@@ -304,16 +317,17 @@ class ScDownloadSession implements IDownloadSession {
 
     public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
         try {
-            const response = await fetch(tsUrl, { headers: CDN_HEADERS });
+            const response = await fetch(tsUrl, {
+                headers: CDN_HEADERS,
+                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+            });
             if (response.ok) {
                 const buf = await response.arrayBuffer();
                 return Buffer.from(buf);
             }
             logger.warn(`[SC] Segment download failed: ${response.status}`, { tsUrl });
         } catch (error: any) {
-            if (error?.message !== "terminated") {
-                logger.warn(`[SC] Network error downloading segment: ${error.message}`, { tsUrl });
-            }
+            logger.warn(`[SC] Segment fetch error: ${error.message}`, { tsUrl });
         }
         return null;
     }
