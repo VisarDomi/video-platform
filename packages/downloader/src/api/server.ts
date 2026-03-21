@@ -30,10 +30,6 @@ class EphemeralDownloadHandle {
         return this._state;
     }
 
-    public updateMasterUrl(newUrl: string): void {
-        this.masterPlaylistUrl = newUrl;
-    }
-
     public remove(): void {
     }
 

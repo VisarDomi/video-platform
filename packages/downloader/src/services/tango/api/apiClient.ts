@@ -167,14 +167,6 @@ export class ApiClient implements IStreamProvider {
         return livePlaylistUrl;
     }
 
-    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        return null;
-    }
-
-    public async refreshMasterUrl(_alias: string): Promise<string | null> {
-        return null; // Tango master URLs come from the discovery API, not refreshable per-stream
-    }
-
     public getSegmentUrl(baseUrl: string, segmentLine: string): string {
         if (segmentLine.startsWith("/")) {
             const urlObj = new URL(baseUrl);

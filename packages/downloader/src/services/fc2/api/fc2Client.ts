@@ -253,49 +253,6 @@ export class Fc2Client implements IStreamProvider {
         }
     }
 
-    private _extractChannelId(url: string): string | null {
-        const match = url.match(/live\.fc2\.com\/(\d+)/) || url.match(/\/stream\/(\d+)\//);
-        return match ? match[1] : null;
-    }
-
-    public async pollCurrentVariant(masterUrl: string, currentLiveUrl: string): Promise<string | null> {
-        const channelId = this._extractChannelId(masterUrl) || this._extractChannelId(currentLiveUrl);
-
-        if (!channelId) return null;
-
-        const session = this.sessions.get(channelId);
-        if (!session) return null;
-
-        session.lastAccess = Date.now();
-
-        return new Promise((resolve) => {
-            this.msgId++;
-            const reqId = this.msgId;
-
-            const timeout = setTimeout(() => {
-                session.pendingRequests.delete(reqId);
-                resolve(null);
-            }, 5000);
-
-            session.pendingRequests.set(reqId, (args: any) => {
-                clearTimeout(timeout);
-                const best = Fc2QualitySelector.selectBestPlaylist(args);
-                if (best && best.url !== currentLiveUrl) {
-                    resolve(best.url);
-                } else {
-                    resolve(null);
-                }
-            });
-
-            try {
-                session.ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: reqId }));
-            } catch (e) {
-                session.pendingRequests.delete(reqId);
-                resolve(null);
-            }
-        });
-    }
-
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
 
         if (masterUrl.includes(".m3u8")) {
@@ -363,10 +320,6 @@ export class Fc2Client implements IStreamProvider {
         const segmentsDirPath = path.resolve(storageLocation, baseFilename);
         const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
         return segmentsDirExists ? segmentsDirPath : null;
-    }
-
-    public async refreshMasterUrl(_alias: string): Promise<string | null> {
-        return null; // FC2 uses WebSocket-based URL resolution; not applicable
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
