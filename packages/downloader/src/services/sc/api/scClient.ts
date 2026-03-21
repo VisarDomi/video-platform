@@ -207,6 +207,10 @@ export class ScClient implements IStreamProvider {
         const best = bestNamed ?? bestAuto;
         if (!best) return null;
 
+        if (!bestNamed) {
+            logger.warn(`[SC] No named variants (RESOLUTION=) in master playlist, falling back to auto variant: ${bestAuto!.url}`);
+        }
+
         const variantUrl = new URL(best.url, masterUrl).href;
         const separator = variantUrl.includes("?") ? "&" : "?";
         return `${variantUrl}${separator}psch=v2&pkey=${pkey}`;
@@ -226,6 +230,7 @@ export class ScClient implements IStreamProvider {
             return null;
         }
 
+        logger.info(`[SC] Selected variant: ${bestUrl.split("?")[0]}`);
         return bestUrl;
     }
 
