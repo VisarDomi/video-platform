@@ -199,8 +199,8 @@ export class ScClient implements IStreamProvider {
         if (!pkey) return null;
 
         const lines = content.split("\n");
-        let bestRelativeUrl: string | null = null;
-        let bestBandwidth = 0;
+        let bestNamed: { url: string; bandwidth: number } | null = null;
+        let bestAuto: { url: string; bandwidth: number } | null = null;
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
@@ -211,16 +211,23 @@ export class ScClient implements IStreamProvider {
 
             const bwMatch = line.match(/BANDWIDTH=(\d+)/);
             const bandwidth = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            const hasResolution = line.includes("RESOLUTION=");
 
-            if (bandwidth > bestBandwidth) {
-                bestBandwidth = bandwidth;
-                bestRelativeUrl = nextLine;
+            if (hasResolution) {
+                if (!bestNamed || bandwidth > bestNamed.bandwidth) {
+                    bestNamed = { url: nextLine, bandwidth };
+                }
+            } else {
+                if (!bestAuto || bandwidth > bestAuto.bandwidth) {
+                    bestAuto = { url: nextLine, bandwidth };
+                }
             }
         }
 
-        if (!bestRelativeUrl) return null;
+        const best = bestNamed ?? bestAuto;
+        if (!best) return null;
 
-        const variantUrl = new URL(bestRelativeUrl, masterUrl).href;
+        const variantUrl = new URL(best.url, masterUrl).href;
         const separator = variantUrl.includes("?") ? "&" : "?";
         return `${variantUrl}${separator}psch=v2&pkey=${pkey}`;
     }
@@ -250,7 +257,10 @@ export class ScClient implements IStreamProvider {
         if (!result.ok) return null;
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) return null;
-        return bestUrl !== currentLiveUrl ? bestUrl : null;
+        const currentBase = currentLiveUrl.split("?")[0];
+        const newBase = bestUrl.split("?")[0];
+        if (newBase === currentBase) return null;
+        return bestUrl;
     }
 
     public async getMasterList(url: string): Promise<string | null> {
