@@ -89,8 +89,10 @@ export class ScDiscoveryService {
                 const downloader = new StreamDownloader(handle, this.scClient);
                 downloader.start().then((result: DownloadResult) => {
                     if (!result.aborted && result.segmentCount === 0) {
+                        logger.warn(`[SC] ${target.username}: download ended with 0 segments — cooldown`);
                         this.cooldown.recordFailure(target.username);
                     } else if (result.segmentCount > 0) {
+                        logger.info(`[SC] ${target.username}: download completed (${result.segmentCount} segments)`);
                         this.cooldown.clear(target.username);
                     }
                 }).catch((err: Error) => {

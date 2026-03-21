@@ -78,10 +78,14 @@ export class StreamDownloader {
      * no shared mutable state.  The download loop is the sole owner of liveUrl.
      */
     private async checkForQualityUpgrade(
+        alias: string,
         currentLiveUrl: string,
     ): Promise<string | null> {
         const betterUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
-        if (!betterUrl) return null;
+        if (!betterUrl) {
+            logger.debug(`[StreamDownloader] ${alias} quality check: master playlist unavailable, keeping current variant`);
+            return null;
+        }
 
         // Compare ignoring query params and CDN TLD differences
         const normalize = (url: string) =>
@@ -120,7 +124,7 @@ export class StreamDownloader {
             // The download loop owns liveUrl exclusively.
             if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL) {
                 lastQualityCheck = Date.now();
-                const betterUrl = await this.checkForQualityUpgrade(liveUrl);
+                const betterUrl = await this.checkForQualityUpgrade(alias, liveUrl);
                 if (betterUrl) {
                     logger.info(`[StreamDownloader] Quality upgrade for ${alias}: ${betterUrl.split("?")[0]}`);
                     liveUrl = betterUrl;
@@ -131,10 +135,10 @@ export class StreamDownloader {
                 }
             }
 
-            // Fetch playlist. Null means stop — we don't ask why.
+            // Fetch playlist. Null means stop — reason was logged by the session.
             const content = await session.fetchPlaylist(liveUrl);
             if (!content) {
-                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${segmentCount})`);
+                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${segmentCount} url=${liveUrl})`);
                 break;
             }
 
@@ -213,7 +217,16 @@ export class StreamDownloader {
         }
 
         const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} aborted=${this._aborted} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
+        const staleTimedOut = Date.now() - lastDownload >= staleTimeout;
+        let exitReason: string;
+        if (this._aborted) {
+            exitReason = "aborted";
+        } else if (staleTimedOut) {
+            exitReason = "stale-timeout";
+        } else {
+            exitReason = "fetch-failed";
+        }
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
 
         return { segmentCount, aborted: this._aborted };
     }
