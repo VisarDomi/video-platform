@@ -24,12 +24,6 @@ export class DownloadHandle {
         return this.downloadsManager.update(this.masterPlaylistUrl, updates);
     }
 
-    /** Re-key this handle to a new master URL (e.g., after CDN edge re-assignment). */
-    public updateMasterUrl(newMasterUrl: string): void {
-        this.downloadsManager.rekey(this.masterPlaylistUrl, newMasterUrl);
-        this.masterPlaylistUrl = newMasterUrl;
-    }
-
     public remove(): void {
         this.downloadsManager.remove(this.masterPlaylistUrl);
     }
@@ -84,14 +78,6 @@ export class DownloadsManager {
         this.downloads.set(masterPlaylistUrl, updated);
         this._requestStatusFileUpdate();
         return updated;
-    }
-
-    public rekey(oldUrl: string, newUrl: string): void {
-        const existing = this.downloads.get(oldUrl);
-        if (!existing) return;
-        this.downloads.delete(oldUrl);
-        this.downloads.set(newUrl, existing);
-        this._requestStatusFileUpdate();
     }
 
     public remove(masterPlaylistUrl: string): void {
