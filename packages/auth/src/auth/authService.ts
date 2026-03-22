@@ -6,7 +6,11 @@ import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
 
 const AUTH_RETRY_INTERVAL_MS = 30 * 1000;
-const BACKGROUND_JOB_FAILURE_RETRY_MS = 15 * 1000;
+/** Retry at the same cadence as the normal refresh cycle.
+ *  Must be <= stream token TTL (10s), otherwise a single
+ *  failed refresh leaves expired tokens on disk with no
+ *  recovery until this timer fires. */
+const BACKGROUND_JOB_FAILURE_RETRY_MS = 5 * 1000;
 
 export class AuthService {
     private readonly account: Account;
