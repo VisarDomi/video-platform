@@ -184,8 +184,9 @@ export class ScClient implements IStreamProvider {
             const bwMatch = line.match(/BANDWIDTH=(\d+)/);
             const bandwidth = bwMatch ? parseInt(bwMatch[1], 10) : 0;
             const hasResolution = line.includes("RESOLUTION=");
+            const isSource = line.includes('NAME="source"');
 
-            if (hasResolution) {
+            if (hasResolution && !isSource) {
                 if (!bestNamed || bandwidth > bestNamed.bandwidth) {
                     bestNamed = { url: nextLine, bandwidth };
                 }
