@@ -218,8 +218,6 @@ export class ApiClient implements IStreamProvider {
     }
 }
 
-const MIN_STREAM_TTL = 3;
-
 class TangoDownloadSession implements IDownloadSession {
     private tokenManager: TokenManager;
 
@@ -251,7 +249,7 @@ class TangoDownloadSession implements IDownloadSession {
                 if (response.status === 401 && tokens.tte) {
                     const ttl = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
                     const tokenAge = this.tokenManager.tokenAgeMs;
-                    if (ttl >= MIN_STREAM_TTL) {
+                    if (ttl >= TokenManager.expectedMinTtl) {
                         logger.error(`[Tango] Playlist 401 with VALID tokens — ttl=${ttl}s tokenAge=${(tokenAge / 1000).toFixed(1)}s, CDN rejected valid credentials, url=${url}`);
                     } else {
                         logger.error(`[Tango] Playlist 401 — ttl=${ttl}s tokenAge=${(tokenAge / 1000).toFixed(1)}s (expired/near-expiry), url=${url}`);

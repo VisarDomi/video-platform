@@ -91,8 +91,9 @@ export class TangoAuthProvider implements IAuthProvider {
         }
 
         const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
-        if (ttl < 5) {
-            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s`);
+        const expectedTtl = 10; // stream token TTL from Tango API
+        if (ttl < expectedTtl - 2) {
+            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${expectedTtl}s)`);
         }
 
         return { extras: { tt, ttu, tte } };

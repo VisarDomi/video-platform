@@ -13,7 +13,17 @@ export interface Tokens {
     tte: string | null;
 }
 
-const AUTH_STALE_THRESHOLD_MS = 15_000;
+/**
+ * Stream token TTL is 10s. Auth refresh cycle is 5s.
+ * A freshly-read token should have 5-10s remaining.
+ * Below this threshold means the auth cycle lagged.
+ */
+const STREAM_TOKEN_TTL = 10;
+const AUTH_REFRESH_CYCLE = 5;
+const EXPECTED_MIN_TTL = STREAM_TOKEN_TTL - AUTH_REFRESH_CYCLE;
+
+/** Auth file older than 3 missed cycles = auth service is dead. */
+const AUTH_STALE_THRESHOLD_MS = AUTH_REFRESH_CYCLE * 3 * 1000;
 
 export class TokenManager {
     private tokens: Tokens | null = null;
@@ -60,29 +70,20 @@ export class TokenManager {
 
         if (session.tangoST && session.tt && session.ttu && session.tte) {
             const newTte = session.tte;
+            const ttlAtRead = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
 
-            // Detect: auth service wrote the file but tte didn't change.
-            // This means either the Tango API returned the same token or
-            // the auth refresh failed silently without updating the file.
-            if (this.lastTte !== null && newTte === this.lastTte) {
-                const ttl = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
-                if (ttl < 3) {
-                    logger.warn(`[Tango] Token tte unchanged across reads (ttl=${ttl}s) — auth may be stuck`);
-                }
+            if (this.lastTte !== null && newTte === this.lastTte && ttlAtRead < EXPECTED_MIN_TTL) {
+                logger.warn(`[Tango] Token tte unchanged across reads (ttl=${ttlAtRead}s) — auth may be stuck`);
             }
 
-            // Detect: the token we just read is already near-expiry.
-            // With 10s TTL and 5s refresh, a freshly-read token should
-            // have 5-10s remaining. Anything below 3s is anomalous.
-            const ttlAtRead = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
-            if (ttlAtRead < 3 && this.lastTte !== newTte) {
+            if (ttlAtRead < EXPECTED_MIN_TTL && this.lastTte !== newTte) {
                 let fileMtimeInfo = "";
                 try {
                     const stat = await fsPromises.stat(this.sessionFilePath);
                     const ageMs = Date.now() - stat.mtimeMs;
                     fileMtimeInfo = ` fileAge=${(ageMs / 1000).toFixed(1)}s`;
                 } catch {}
-                logger.warn(`[Tango] Token near-expiry at read time: ttl=${ttlAtRead}s tte=${newTte}${fileMtimeInfo}`);
+                logger.warn(`[Tango] Token near-expiry at read time: ttl=${ttlAtRead}s (expected>=${EXPECTED_MIN_TTL}s)${fileMtimeInfo}`);
             }
 
             this.lastTte = newTte;
@@ -119,9 +120,12 @@ export class TokenManager {
         }).catch(() => {});
     }
 
-    /** Age of the cached tokens in milliseconds. */
     public get tokenAgeMs(): number {
         return this.lastLoadedAt > 0 ? Date.now() - this.lastLoadedAt : -1;
+    }
+
+    public static get expectedMinTtl(): number {
+        return EXPECTED_MIN_TTL;
     }
 
     public async getTokens(): Promise<Tokens> {
