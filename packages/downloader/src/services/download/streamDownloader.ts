@@ -62,7 +62,7 @@ export class StreamDownloader {
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
         logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} edge=${edge} variant=${liveUrl.split("?")[0]}`);
 
-        const session = this.provider.createDownloadSession();
+        let session = this.provider.createDownloadSession();
         const playlistManager = new PlaylistManager(segmentsDirPath);
         const initTracker = new InitTracker(segmentsDirPath);
 
@@ -140,11 +140,44 @@ export class StreamDownloader {
                 }
             }
 
-            // Fetch playlist. Null means stop — reason was logged by the session.
-            const content = await session.fetchPlaylist(liveUrl);
+            // Fetch playlist. Null means the variant URL failed.
+            let content = await session.fetchPlaylist(liveUrl);
             if (!content) {
-                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${initTracker.count} url=${liveUrl})`);
-                break;
+                // Variant dead. Ask the provider to find a working one.
+                const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
+                if (!recovered) {
+                    // All alternatives exhausted. Sleep and retry — stale timeout is the exit.
+                    logger.info(`[StreamDownloader] ${alias} variant failed, no recovery available (segments=${initTracker.count} url=${liveUrl})`);
+                    await timersPromises.setTimeout(5000);
+                    continue;
+                }
+
+                // Found a working variant. Detect if it's a different edge.
+                const oldEdge = playlistManager.timeline.edge;
+                const newEdgeMatch = recovered.match(/\/(b-hls-\d+)\//);
+                const newEdge = newEdgeMatch ? newEdgeMatch[1] : null;
+
+                if (newEdge && newEdge !== oldEdge) {
+                    playlistManager.setEdge(recovered);
+                    playlistManager.onEdgeSwitch(oldEdge, newEdge);
+                    logger.info(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge} variant=${recovered.split("?")[0]}`);
+                } else {
+                    logger.info(`[StreamDownloader] ${alias} variant recovered (same edge) variant=${recovered.split("?")[0]}`);
+                }
+
+                liveUrl = recovered;
+                this.handle.update({ liveUrl });
+
+                // Re-create the session — the old session's CDN connection state is stale.
+                session = this.provider.createDownloadSession();
+
+                // Fetch from the new variant immediately.
+                content = await session.fetchPlaylist(liveUrl);
+                if (!content) {
+                    logger.warn(`[StreamDownloader] ${alias} recovered variant also failed — retrying`);
+                    await timersPromises.setTimeout(5000);
+                    continue;
+                }
             }
 
             // Track init segment changes via EXT-X-MAP in the variant playlist.
@@ -186,6 +219,13 @@ export class StreamDownloader {
             let downloadedThisIteration = false;
 
             for (const segment of segments) {
+                // PDT-based dedup after edge switch: skip segments we already
+                // have from the previous edge. Only fires when the unproven
+                // claim holds (edges share the broadcast timeline). Logs either way.
+                if (playlistManager.shouldSkipByTimeline(segment)) {
+                    continue;
+                }
+
                 const tsBuffer = await session.fetchSegment(segment.remoteUrl);
 
                 const baseName = segment.localName.replace(/\.\w+$/, "");
@@ -219,6 +259,7 @@ export class StreamDownloader {
                         segment.accurateDuration = result.duration;
                     }
                     await playlistManager.appendSegmentToPlaylist(segment);
+                    playlistManager.recordDownloadedPDT(segment.programDateTime);
                     lastDownload = Date.now();
                     initTracker.incrementSegmentCount();
                     downloadedThisIteration = true;
