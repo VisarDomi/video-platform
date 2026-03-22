@@ -83,7 +83,7 @@ export class StreamDiscoveryService {
                             if (downloadHandle) {
                                 logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
                                 const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
-                                streamDownloader.start().then((result: DownloadResult) => {
+                                const completion = streamDownloader.start().then((result: DownloadResult) => {
                                     if (!result.aborted && result.segmentCount === 0) {
                                         this.cooldown.recordFailure(streamerId);
                                     } else if (result.segmentCount > 0) {
@@ -94,6 +94,7 @@ export class StreamDiscoveryService {
                                     downloadHandle.remove();
                                     this.cooldown.recordFailure(streamerId);
                                 });
+                                this.downloadsManager.registerDownloader(masterPlaylistUrl, () => streamDownloader.abort(), completion);
                             }
                         }
                     }

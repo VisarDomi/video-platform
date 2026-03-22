@@ -11,6 +11,11 @@ interface Download {
     segmentsDirPath: string | null;
 }
 
+interface ActiveDownloader {
+    abort: () => void;
+    completion: Promise<void>;
+}
+
 export class DownloadHandle {
     public masterPlaylistUrl: string;
     private downloadsManager: DownloadsManager;
@@ -35,6 +40,7 @@ export class DownloadHandle {
 
 export class DownloadsManager {
     private downloads: Map<string, Download> = new Map();
+    private activeDownloaders: Map<string, ActiveDownloader> = new Map();
     private readonly statusFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -80,6 +86,13 @@ export class DownloadsManager {
         return updated;
     }
 
+    public registerDownloader(masterPlaylistUrl: string, abort: () => void, completion: Promise<void>): void {
+        this.activeDownloaders.set(masterPlaylistUrl, { abort, completion });
+        completion.finally(() => {
+            this.activeDownloaders.delete(masterPlaylistUrl);
+        });
+    }
+
     public remove(masterPlaylistUrl: string): void {
         const existing = this.downloads.get(masterPlaylistUrl);
         if (existing) {
@@ -88,6 +101,28 @@ export class DownloadsManager {
         if (this.downloads.delete(masterPlaylistUrl)) {
             this._requestStatusFileUpdate();
         }
+    }
+
+    /**
+     * Abort all active downloads and wait for their finalization.
+     * Called on SIGTERM/SIGINT. Each download loop will exit via
+     * the _aborted flag, run finalizePlaylist, and resolve.
+     */
+    public async shutdownAll(): Promise<void> {
+        const count = this.activeDownloaders.size;
+        if (count === 0) return;
+
+        logger.info(`[General] Shutting down ${count} active download(s)...`);
+
+        for (const downloader of this.activeDownloaders.values()) {
+            downloader.abort();
+        }
+
+        await Promise.allSettled(
+            Array.from(this.activeDownloaders.values()).map(d => d.completion)
+        );
+
+        logger.info(`[General] All downloads finalized.`);
     }
 
     public get(masterPlaylistUrl: string): Download | undefined {

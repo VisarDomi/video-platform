@@ -65,7 +65,7 @@ export class Fc2DiscoveryService {
 
                     if (handle) {
                         const downloader = new StreamDownloader(handle, this.fc2Client);
-                        downloader.start().then((result: DownloadResult) => {
+                        const completion = downloader.start().then((result: DownloadResult) => {
                             if (!result.aborted && result.segmentCount === 0) {
                                 this.cooldown.recordFailure(channelId);
                             } else if (result.segmentCount > 0) {
@@ -76,6 +76,7 @@ export class Fc2DiscoveryService {
                             handle.remove();
                             this.cooldown.recordFailure(channelId);
                         });
+                        this.downloadsManager.registerDownloader(masterUrl, () => downloader.abort(), completion);
                     }
                 } else {
                     logger.warn(`[FC2] Channel ${channelId} is online but failed to retrieve HLS URL.`);

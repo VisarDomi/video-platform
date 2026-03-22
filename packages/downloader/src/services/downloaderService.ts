@@ -26,12 +26,10 @@ export class DownloaderService {
     private apiClient: ApiClient;
     private aliasSyncService: AliasSyncService;
     private streamDiscoveryService: StreamDiscoveryService;
-
     private fc2DiscoveryService: Fc2DiscoveryService;
-
     private scDiscoveryService: ScDiscoveryService;
-
     private orphanStreamFinalizer: OrphanStreamFinalizer;
+    private downloadsManager: DownloadsManager;
 
     private constructor(
         tokenManager: TokenManager,
@@ -40,7 +38,8 @@ export class DownloaderService {
         streamDiscoveryService: StreamDiscoveryService,
         fc2DiscoveryService: Fc2DiscoveryService,
         scDiscoveryService: ScDiscoveryService,
-        orphanStreamFinalizer: OrphanStreamFinalizer
+        orphanStreamFinalizer: OrphanStreamFinalizer,
+        downloadsManager: DownloadsManager,
     ) {
         this.tokenManager = tokenManager;
         this.apiClient = apiClient;
@@ -49,6 +48,7 @@ export class DownloaderService {
         this.fc2DiscoveryService = fc2DiscoveryService;
         this.scDiscoveryService = scDiscoveryService;
         this.orphanStreamFinalizer = orphanStreamFinalizer;
+        this.downloadsManager = downloadsManager;
         logger.debug("[General] DownloaderService initialized.");
     }
 
@@ -83,12 +83,17 @@ export class DownloaderService {
             streamDiscoveryService,
             fc2DiscoveryService,
             scDiscoveryService,
-            orphanStreamFinalizer
+            orphanStreamFinalizer,
+            downloadsManager,
         );
     }
 
     public getTangoApiClient(): ApiClient {
         return this.apiClient;
+    }
+
+    public async shutdown(): Promise<void> {
+        await this.downloadsManager.shutdownAll();
     }
 
     public async start() {
