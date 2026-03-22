@@ -3,6 +3,7 @@ import { ZERO_SEGMENT_COOLDOWN_MS } from "../../common/timing.js";
 
 export class RetryCooldown {
     private cooldownUntil = new Map<string, number>();
+    private recentlyCleared = new Set<string>();
     private label: string;
 
     constructor(label: string) {
@@ -21,6 +22,18 @@ export class RetryCooldown {
     public isActive(id: string): boolean {
         const until = this.cooldownUntil.get(id);
         if (!until) return false;
-        return Date.now() < until;
+        if (Date.now() < until) return true;
+        // Cooldown just expired
+        this.cooldownUntil.delete(id);
+        this.recentlyCleared.add(id);
+        return false;
+    }
+
+    public wasRecentlyCleared(id: string): boolean {
+        if (this.recentlyCleared.has(id)) {
+            this.recentlyCleared.delete(id);
+            return true;
+        }
+        return false;
     }
 }
