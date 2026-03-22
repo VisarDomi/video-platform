@@ -6,12 +6,14 @@ async function main() {
     const downloaderService = await DownloaderService.create();
 
     const shutdown = async (signal: string) => {
-        logger.info(`Received ${signal}. Shutting down services...`);
+        logger.info(`Received ${signal}. Finalizing active downloads...`);
+        await downloaderService.shutdown();
+        logger.info("Graceful shutdown complete.");
         process.exit(0);
     };
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
 
     await downloaderService.start();
 
