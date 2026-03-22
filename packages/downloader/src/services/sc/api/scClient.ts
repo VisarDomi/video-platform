@@ -133,8 +133,8 @@ export class ScClient implements IStreamProvider {
         return result.streamName;
     }
 
-    public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isOnline: boolean }>> {
-        const result = new Map<string, { status: string; isOnline: boolean }>();
+    public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isLive: boolean }>> {
+        const result = new Map<string, { status: string; isLive: boolean }>();
 
         for (let i = 0; i < roomIds.length; i += BULK_BATCH_SIZE) {
             const batch = roomIds.slice(i, i + BULK_BATCH_SIZE);
@@ -150,7 +150,7 @@ export class ScClient implements IStreamProvider {
             for (const model of data.models) {
                 result.set(String(model.id), {
                     status: model.status ?? "unknown",
-                    isOnline: model.isOnline ?? false,
+                    isLive: model.isLive ?? false,
                 });
             }
         }

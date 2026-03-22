@@ -52,9 +52,15 @@ The quality check runs inside the download loop on the same thread. No timer, no
 
 **Why:** The API sometimes returns `streamName: ""`. Nullish coalescing doesn't catch empty strings.
 
+## SC bulk status uses `isLive`, not `isOnline` (2026-03-22)
+
+The bulk API (`/api/front/models/list`) returns both `isOnline` and `isLive`. Use `isLive`. The old code used `isOnline` which returns `false` for some streamers that are actively broadcasting (`status=public`, `isLive=true`, cam API confirms `isCamAvailable=true`). The cam API's `isCamActive` is the per-streamer confirmation; the bulk API's `isLive` is the bulk equivalent.
+
+**Why:** Sui_Hcup was live and visible in the browser but the downloader skipped it because `isOnline=false`. The `/cam` endpoint confirmed the stream was active. `isOnline` appears to track a different concept (possibly account online status vs active broadcast).
+
 ## SC isCamAvailable/isCamActive gate before download
 
-**Why:** A streamer can be `public` + `isOnline` in the bulk API but have `isCamAvailable: false` during transitional states. Downloading during this window wastes CDN requests that will fail.
+**Why:** A streamer can be `public` + `isLive` in the bulk API but have `isCamAvailable: false` during transitional states. Downloading during this window wastes CDN requests that will fail.
 
 ## fMP4 duration from sidx boxes, not ffprobe
 

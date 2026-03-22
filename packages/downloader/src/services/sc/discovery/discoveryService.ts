@@ -66,7 +66,7 @@ export class ScDiscoveryService {
             const target = roomIdMap.get(roomId);
             if (!target) continue;
 
-            if (statusInfo.status !== "public" || !statusInfo.isOnline) continue;
+            if (statusInfo.status !== "public" || !statusInfo.isLive) continue;
 
             if (this.downloadsManager.hasStreamer(target.username)) continue;
 
