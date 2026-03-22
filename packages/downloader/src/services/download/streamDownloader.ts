@@ -9,6 +9,7 @@ import type { PlaylistManager } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS } from "../../common/timing.js";
 
 export type ExitReason = "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
 
@@ -18,9 +19,6 @@ export interface DownloadResult {
     exitReason: ExitReason;
     lastLiveUrl: string | null;
 }
-
-const HEARTBEAT_INTERVAL = 30_000;
-const QUALITY_CHECK_INTERVAL = 10_000;
 
 export class StreamDownloader {
     private handle: DownloadHandle;
@@ -103,16 +101,16 @@ export class StreamDownloader {
         let segmentFailed = false;
         let lastHeartbeat = Date.now();
         let lastQualityCheck = Date.now();
-        const staleTimeout = 60_000;
+        const staleTimeout = STALE_STREAM_TIMEOUT_MS;
 
         while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
-            if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
+            if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
                 logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
                 lastHeartbeat = Date.now();
             }
 
-            if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL) {
+            if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
                 lastQualityCheck = Date.now();
                 const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
                 if (betterUrl) {
@@ -127,7 +125,7 @@ export class StreamDownloader {
                 const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
                 if (!recovered) {
                     logger.info(`[StreamDownloader] ${alias} variant failed, no recovery available (segments=${initTracker.count} url=${liveUrl})`);
-                    await timersPromises.setTimeout(5000);
+                    await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
 
@@ -150,7 +148,7 @@ export class StreamDownloader {
                 content = await session.fetchPlaylist(liveUrl);
                 if (!content) {
                     logger.warn(`[StreamDownloader] ${alias} recovered variant also failed — retrying`);
-                    await timersPromises.setTimeout(5000);
+                    await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
             }
@@ -167,7 +165,7 @@ export class StreamDownloader {
 
                     if (!result) {
                         logger.warn(`[StreamDownloader] ${alias} init segment failed — retrying`);
-                        await timersPromises.setTimeout(1000);
+                        await timersPromises.setTimeout(INIT_RETRY_SLEEP_MS);
                         continue;
                     }
 
@@ -245,7 +243,7 @@ export class StreamDownloader {
             if (segmentFailed) break;
 
             if (!downloadedThisIteration) {
-                await timersPromises.setTimeout(1000);
+                await timersPromises.setTimeout(NO_NEW_SEGMENTS_SLEEP_MS);
             }
         }
 
