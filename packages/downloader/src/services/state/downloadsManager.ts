@@ -103,11 +103,6 @@ export class DownloadsManager {
         }
     }
 
-    /**
-     * Abort all active downloads and wait for their finalization.
-     * Called on SIGTERM/SIGINT. Each download loop will exit via
-     * the _aborted flag, run finalizePlaylist, and resolve.
-     */
     public async shutdownAll(): Promise<void> {
         const count = this.activeDownloaders.size;
         if (count === 0) return;

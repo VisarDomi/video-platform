@@ -34,11 +34,6 @@ export class StreamDownloader {
         this._aborted = true;
     }
 
-    /**
-     * Run a single download attempt. Does not own the folder, playlist,
-     * or init tracker — those are owned by StreamSession and survive
-     * across retries. Does not finalize or remove the handle.
-     */
     public async run(
         masterUrl: string,
         playlistManager: PlaylistManager,
@@ -208,7 +203,6 @@ export class StreamDownloader {
                 }
                 const tsBuffer = fetchResult.data;
 
-                // First byte write: DiskSession materializes the dir here.
                 if (!await disk.materialize()) {
                     logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
                     segmentFailed = true;

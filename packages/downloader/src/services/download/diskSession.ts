@@ -2,17 +2,6 @@ import * as path from "path";
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 
-/**
- * Owns the download directory on disk and its visibility in live-status.json.
- *
- * Nothing is created until materialize() is called — which happens at
- * first byte write. When the dir is created, the handle is updated
- * atomically — the system cannot observe a dir that exists without
- * the handle knowing about it, and vice versa.
- *
- * All disk writers (InitTracker, PlaylistManager, segment writes)
- * go through this object.
- */
 export class DiskSession {
     private readonly alias: string;
     private readonly handle: DownloadHandle;
@@ -41,11 +30,6 @@ export class DiskSession {
         return this._dirPath;
     }
 
-    /**
-     * Create the download dir on disk and update the handle atomically.
-     * After this call, the dir exists AND live-status.json reflects it.
-     * Called once, right before the first byte needs to be written.
-     */
     public async materialize(): Promise<boolean> {
         if (this._materialized) return true;
 

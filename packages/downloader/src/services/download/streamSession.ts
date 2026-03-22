@@ -15,16 +15,6 @@ export interface SessionResult {
     aborted: boolean;
 }
 
-/**
- * Owns the lifecycle of a single stream recording session.
- *
- * One session = one folder on disk. The session retries the download
- * when it fails, asking the provider "should I retry?" between attempts.
- * The provider owns the liveness decision (different per platform).
- *
- * Owns: DiskSession, PlaylistManager, InitTracker, DownloadHandle.
- * StreamDownloader is created per-attempt and receives these as inputs.
- */
 export class StreamSession {
     private readonly streamerId: string;
     private readonly alias: string;
