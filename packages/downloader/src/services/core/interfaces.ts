@@ -12,4 +12,11 @@ export interface IStreamProvider {
     setupDownloadDir(alias: string, date: Date): Promise<string | null>;
     validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }>;
     createDownloadSession(): IDownloadSession;
+
+    /**
+     * Attempt to find a working variant when the current one failed (404/403).
+     * CDN-specific: SC tries all 3 TLDs in parallel and picks the best variant.
+     * Providers without multi-edge CDNs return null.
+     */
+    recoverVariant(masterPlaylistUrl: string): Promise<string | null>;
 }

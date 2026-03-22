@@ -212,6 +212,10 @@ export class ApiClient implements IStreamProvider {
 
         return { valid: true, duration: info.duration };
     }
+
+    public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {
+        return null;
+    }
 }
 
 const MIN_STREAM_TTL = 3;

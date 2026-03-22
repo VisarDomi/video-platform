@@ -331,6 +331,10 @@ export class Fc2Client implements IStreamProvider {
 
         return { valid: true, duration: info.duration };
     }
+
+    public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {
+        return null;
+    }
 }
 
 class Fc2DownloadSession implements IDownloadSession {

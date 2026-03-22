@@ -62,6 +62,9 @@ class EphemeralStreamProvider implements IStreamProvider {
         const ok = await FileSystemManager.ensureDirExists(this.dirPath);
         return ok ? this.dirPath : null;
     }
+    async recoverVariant(masterPlaylistUrl: string): Promise<string | null> {
+        return this.inner.recoverVariant(masterPlaylistUrl);
+    }
 }
 
 export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {

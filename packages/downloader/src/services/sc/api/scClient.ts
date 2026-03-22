@@ -279,6 +279,32 @@ export class ScClient implements IStreamProvider {
             return { valid: false };
         }
     }
+
+    /**
+     * On variant failure, try all 3 TLDs in parallel for the master playlist.
+     * Returns the best variant from whichever TLD responds, or null if all fail.
+     */
+    public async recoverVariant(masterPlaylistUrl: string): Promise<string | null> {
+        const streamMatch = masterPlaylistUrl.match(/\/hls\/([^/]+)\/master\//);
+        if (!streamMatch) return null;
+        const streamName = streamMatch[1];
+
+        const attempts = CDN_TLDS.map(async (tld) => {
+            const masterUrl = `https://edge-hls.doppiocdn.${tld}/hls/${streamName}/master/${streamName}_auto.m3u8`;
+            const variant = await this.parseMasterPlaylist(masterUrl);
+            return variant;
+        });
+
+        const results = await Promise.allSettled(attempts);
+
+        for (const result of results) {
+            if (result.status === "fulfilled" && result.value) {
+                return result.value;
+            }
+        }
+
+        return null;
+    }
 }
 
 const CDN_HEADERS = { "User-Agent": USER_AGENT };
