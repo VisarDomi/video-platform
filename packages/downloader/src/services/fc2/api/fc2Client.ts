@@ -85,11 +85,14 @@ export class Fc2Client implements IStreamProvider {
 
             logger.debug(`[FC2] memberApi response for ${channelId}: is_publish=${json?.data?.channel_data?.is_publish}`);
 
-            const isPublish = json?.data?.channel_data?.is_publish > 0;
-            if (!isPublish) {
-                logger.debug(`[FC2] Channel ${channelId} is offline`);
-            }
-            return isPublish;
+            const channelData = json?.data?.channel_data;
+            const isPublish = channelData?.is_publish > 0;
+            const isPaid = channelData?.fee > 0;
+
+            if (!isPublish) return false;
+            if (isPaid) return false;
+
+            return true;
         } catch (error: any) {
             logger.error(`[FC2] Error checking isOnline for ${channelId}`, { error: error.message });
             return false;
