@@ -6,6 +6,114 @@ import logger from "../../common/logger.js";
 import { fixTargetDuration } from "shared";
 import { DownloadsManager } from "../state/downloadsManager.js";
 
+interface PlaylistSection {
+    mapLine: string | null;
+    entries: { metadata: string[]; segmentName: string }[];
+}
+
+interface ParsedPlaylist {
+    headerLines: string[];
+    sections: PlaylistSection[];
+}
+
+function parsePlaylist(content: string): ParsedPlaylist {
+    const lines = content.split("\n");
+    const headerLines: string[] = [];
+    const sections: PlaylistSection[] = [];
+    let currentSection: PlaylistSection = { mapLine: null, entries: [] };
+    let metadataBuffer: string[] = [];
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === "" || trimmed === "#EXT-X-ENDLIST") continue;
+
+        if (
+            trimmed.startsWith("#EXTM3U") ||
+            trimmed.startsWith("#EXT-X-VERSION") ||
+            trimmed.startsWith("#EXT-X-TARGETDURATION") ||
+            trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE")
+        ) {
+            headerLines.push(trimmed);
+            continue;
+        }
+
+        if (trimmed.startsWith("#EXT-X-MAP")) {
+            if (currentSection.mapLine === null && currentSection.entries.length === 0) {
+                // First MAP in this section — assign it
+                currentSection.mapLine = trimmed;
+            } else {
+                // New section starts (quality change)
+                sections.push(currentSection);
+                currentSection = { mapLine: trimmed, entries: [] };
+            }
+            metadataBuffer = [];
+            continue;
+        }
+
+        if (trimmed.startsWith("#")) {
+            metadataBuffer.push(trimmed);
+            continue;
+        }
+
+        // Segment line
+        currentSection.entries.push({
+            metadata: [...metadataBuffer],
+            segmentName: trimmed,
+        });
+        metadataBuffer = [];
+    }
+
+    sections.push(currentSection);
+    return { headerLines, sections };
+}
+
+function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): string {
+    const lines: string[] = [];
+
+    // Reconstruct header if missing
+    if (parsed.headerLines.length === 0) {
+        parsed.headerLines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:7",
+            "#EXT-X-TARGETDURATION:10",
+            "#EXT-X-MEDIA-SEQUENCE:0",
+        ];
+    }
+    lines.push(...parsed.headerLines);
+
+    let isFirstSection = true;
+
+    for (const section of parsed.sections) {
+        // Filter to segments that exist on disk
+        const validEntries = section.entries.filter(e => filesOnDisk.has(e.segmentName));
+        if (validEntries.length === 0) continue;
+
+        // First section's MAP goes right after the header.
+        // Subsequent sections get DISCONTINUITY + MAP.
+        if (section.mapLine) {
+            if (!isFirstSection) {
+                lines.push("#EXT-X-DISCONTINUITY");
+            }
+            lines.push(section.mapLine);
+        }
+
+        for (const entry of validEntries) {
+            lines.push(...entry.metadata);
+            lines.push(entry.segmentName);
+        }
+
+        isFirstSection = false;
+    }
+
+    lines.push("#EXT-X-ENDLIST");
+
+    let result = lines.join("\n") + "\n";
+    const { content: fixed, wasFixed } = fixTargetDuration(result);
+    if (wasFixed) result = fixed;
+
+    return result;
+}
+
 export class OrphanStreamFinalizer {
     private downloadsManager: DownloadsManager;
     private readonly checkInterval: number = 24 * 60 * 60 * 1000;
@@ -108,58 +216,17 @@ export class OrphanStreamFinalizer {
                                     }
                                 } else {
                                     const filesOnDisk = new Set(allFiles);
-                                    const lines = content.split("\n");
-                                    const newLines: string[] = [];
-                                    const metadataBuffer: string[] = [];
-                                    let hasChanges = false;
-                                    let headerMapSeen = false;
-
-                                    for (const line of lines) {
-                                        const trimmed = line.trim();
-                                        if (trimmed === "") continue;
-
-                                        if (trimmed.startsWith("#")) {
-                                            if (
-                                                trimmed.startsWith("#EXTM3U") ||
-                                                trimmed.startsWith("#EXT-X-VERSION") ||
-                                                trimmed.startsWith("#EXT-X-TARGETDURATION") ||
-                                                trimmed.startsWith("#EXT-X-MEDIA-SEQUENCE")
-                                            ) {
-                                                newLines.push(trimmed);
-                                            } else if (trimmed.startsWith("#EXT-X-MAP")) {
-                                                if (!headerMapSeen) {
-                                                    newLines.push(trimmed);
-                                                    headerMapSeen = true;
-                                                } else {
-                                                    metadataBuffer.push(trimmed);
-                                                }
-                                            } else {
-                                                metadataBuffer.push(trimmed);
-                                            }
-                                        } else {
-                                            if (filesOnDisk.has(trimmed)) {
-                                                newLines.push(...metadataBuffer);
-                                                newLines.push(trimmed);
-                                                metadataBuffer.length = 0;
-                                            } else {
-                                                hasChanges = true;
-                                                metadataBuffer.length = 0;
-                                                logger.info(`[System] Removing missing segment from orphan playlist: ${trimmed} in ${dirent.name}`);
-                                            }
-                                        }
-                                    }
-
-                                    newLines.push("#EXT-X-ENDLIST");
-                                    hasChanges = true;
-
-                                    let finalContent = newLines.join("\n") + "\n";
-                                    const { content: fixedContent, wasFixed } = fixTargetDuration(finalContent);
-                                    if (wasFixed) {
-                                        finalContent = fixedContent;
-                                    }
-
-                                    await FileSystemManager.writeFile(playlistPath, finalContent);
+                                    const parsed = parsePlaylist(content);
+                                    const rebuilt = rebuildPlaylist(parsed, filesOnDisk);
+                                    await FileSystemManager.writeFile(playlistPath, rebuilt);
                                     stats.fixed++;
+
+                                    const removedCount = parsed.sections
+                                        .flatMap(s => s.entries)
+                                        .filter(e => !filesOnDisk.has(e.segmentName)).length;
+                                    if (removedCount > 0) {
+                                        logger.info(`[System] Rebuilt orphan playlist ${dirent.name}: removed ${removedCount} missing segment(s)`);
+                                    }
                                 }
                             }
                         }
