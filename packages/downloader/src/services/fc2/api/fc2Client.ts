@@ -6,6 +6,7 @@ import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
+import { FC2_SESSION_CLEANUP_INTERVAL_MS, FC2_SESSION_STALE_MS, FC2_WS_HANDSHAKE_TIMEOUT_MS, FC2_WS_HEARTBEAT_INTERVAL_MS } from "../../../common/timing.js";
 
 interface Fc2Session {
     ws: WebSocket;
@@ -31,12 +32,12 @@ export class Fc2Client implements IStreamProvider {
 
     constructor() {
         logger.info("[FC2] Client initialized.");
-        this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), 30000);
+        this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), FC2_SESSION_CLEANUP_INTERVAL_MS);
     }
 
     private _cleanupStaleSessions() {
         const now = Date.now();
-        const TIMEOUT_MS = 60000;
+        const TIMEOUT_MS = FC2_SESSION_STALE_MS;
 
         for (const [channelId, session] of this.sessions.entries()) {
             if (now - session.lastAccess > TIMEOUT_MS) {
@@ -118,7 +119,7 @@ export class Fc2Client implements IStreamProvider {
                     logger.warn(`[FC2] WebSocket handshake timed out for ${channelId}`);
                     safeResolve(null);
                 }
-            }, 15000);
+            }, FC2_WS_HANDSHAKE_TIMEOUT_MS);
 
             ws.onopen = () => {
                 logger.debug(`[FC2] WebSocket connected for ${channelId}`);
@@ -155,7 +156,7 @@ export class Fc2Client implements IStreamProvider {
                                     } catch (e) {
                                         logger.warn(`[FC2] Failed to send heartbeat for ${channelId}`);
                                     }
-                                }, 30000);
+                                }, FC2_WS_HEARTBEAT_INTERVAL_MS);
 
                                 this.sessions.set(channelId, {
                                     ws,

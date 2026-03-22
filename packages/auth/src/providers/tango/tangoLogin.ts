@@ -3,6 +3,14 @@ import logger from "../../common/logger.js";
 import { Account, TokenBag } from "../interfaces.js";
 import * as constants from "./constants.js";
 
+const BROWSER_ELEMENT_TIMEOUT_MS = 10_000;
+const BROWSER_INPUT_TIMEOUT_MS = 5_000;
+const BROWSER_BUTTON_TIMEOUT_MS = 15_000;
+const BROWSER_POPUP_CLOSE_TIMEOUT_MS = 20_000;
+const BROWSER_PAGE_TIMEOUT_MS = 30_000;
+const BROWSER_LOGIN_FLOW_TIMEOUT_MS = 30_000;
+const BROWSER_RESPONSE_TIMEOUT_MS = 60_000;
+
 async function findAndClickLoginButton(page: Page, account: Account): Promise<void> {
     const loginButtonSelectors = [
         { testId: "join-now" },
@@ -14,11 +22,11 @@ async function findAndClickLoginButton(page: Page, account: Account): Promise<vo
     for (const selector of loginButtonSelectors) {
         try {
             if (selector.testId) {
-                await page.getByTestId(selector.testId).click({ timeout: 10000 });
+                await page.getByTestId(selector.testId).click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
             } else if (selector.xpath) {
-                await page.locator(selector.xpath).click({ timeout: 10000 });
+                await page.locator(selector.xpath).click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
             }
-            await page.getByTestId("GOOGLE").click({ timeout: 10000 });
+            await page.getByTestId("GOOGLE").click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
             logger.info(`Successfully initiated Google login for ${account.email}`);
             return;
         } catch (error) {
@@ -37,21 +45,21 @@ async function handleGoogleLogin(popup: Page, account: Account): Promise<void> {
             logger.info(`Google login attempt ${attempt}/${maxRetries} for ${account.email}...`);
 
             try {
-                await popup.locator("#identifierId").fill(account.email, { timeout: 5000 });
+                await popup.locator("#identifierId").fill(account.email, { timeout: BROWSER_INPUT_TIMEOUT_MS });
                 await popup.getByRole("button", { name: "Next" }).click();
             } catch (e) {
                 logger.info(`Email input not found for ${account.email}, proceeding.`);
             }
 
             try {
-                await popup.locator('input[type="password"]').fill(account.password, { timeout: 5000 });
+                await popup.locator('input[type="password"]').fill(account.password, { timeout: BROWSER_INPUT_TIMEOUT_MS });
                 await popup.getByRole("button", { name: "Next" }).click();
             } catch (e) {
                 logger.info(`Password input not found for ${account.email}, proceeding.`);
             }
 
-            await popup.getByRole("button", { name: "Continue" }).click({ timeout: 15000 });
-            await popup.waitForEvent("close", { timeout: 20000 });
+            await popup.getByRole("button", { name: "Continue" }).click({ timeout: BROWSER_BUTTON_TIMEOUT_MS });
+            await popup.waitForEvent("close", { timeout: BROWSER_POPUP_CLOSE_TIMEOUT_MS });
             logger.info(`Google login successful for ${account.email}.`);
             return;
         } catch (error: any) {
@@ -101,10 +109,10 @@ async function runLoginFlow(browser: Browser, account: Account): Promise<TokenBa
     const page = await context.newPage();
 
     try {
-        const responsePromise = page.waitForResponse(constants.TANGO_URLS.GOOGLE_LOGIN, { timeout: 60000 });
-        const popupPromise = page.waitForEvent("popup", { timeout: 30000 });
+        const responsePromise = page.waitForResponse(constants.TANGO_URLS.GOOGLE_LOGIN, { timeout: BROWSER_RESPONSE_TIMEOUT_MS });
+        const popupPromise = page.waitForEvent("popup", { timeout: BROWSER_PAGE_TIMEOUT_MS });
 
-        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: BROWSER_PAGE_TIMEOUT_MS });
 
         await findAndClickLoginButton(page, account);
         const googlePopup = await popupPromise;
@@ -132,7 +140,7 @@ export async function extractTokens(account: Account): Promise<TokenBag | null> 
     });
     try {
         const timeoutPromise = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error("Browser login flow exceeded 30 seconds limit")), 30000);
+            setTimeout(() => reject(new Error("Browser login flow timed out")), BROWSER_LOGIN_FLOW_TIMEOUT_MS);
         });
 
         return await Promise.race([

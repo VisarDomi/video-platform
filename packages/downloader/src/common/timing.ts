@@ -41,3 +41,9 @@ export const AUTH_API_RATE_LIMIT_MS = 1_000;
 // File system debounce
 export const FILE_WATCHER_DEBOUNCE_MS = 500;
 export const STATUS_FILE_DEBOUNCE_MS = 200;
+
+// FC2 WebSocket protocol
+export const FC2_SESSION_CLEANUP_INTERVAL_MS = 30_000;
+export const FC2_SESSION_STALE_MS = 60_000;
+export const FC2_WS_HANDSHAKE_TIMEOUT_MS = 15_000;
+export const FC2_WS_HEARTBEAT_INTERVAL_MS = 30_000;
