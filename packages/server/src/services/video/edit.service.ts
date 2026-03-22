@@ -85,7 +85,7 @@ export async function editVideo(filename: string, segments: string[], provider: 
                 "utf-8"
             );
         } catch {
-            // Original playlist unreadable — ensurePlaylist will regenerate on access
+            // Original playlist unreadable — video will serve without a playlist (404)
         }
 
         logger.info(`Edited ${filename} with ${validSegments.length} segments at ${destinationPath}`);
