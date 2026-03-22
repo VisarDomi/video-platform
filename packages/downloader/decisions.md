@@ -78,11 +78,11 @@ The "source" variant is the raw broadcaster feed — the CDN restricts it with 4
 
 **Why:** mayu_nyann was stuck in an infinite recovery loop on the restricted source variant.
 
-## Auth health via file mtime, not token TTL
+## No token cache — read from disk on every request (2026-03-22)
 
-The downloader checks the session file's mtime to detect whether the auth service is alive. 3 missed refresh cycles = stale. It does NOT validate token TTL values.
+TokenManager has no watcher, no cache. `getTokens()` reads the session file on every call. The token is always fresh because it was just read.
 
-**Why:** The 10s TTL tokens normally have 2-7s remaining when read. A TTL threshold check treated normal operation as an error.
+**Why:** The watcher cached tokens for up to 5s. With 10s TTL, a token read at 4.7s cache age had 0.3s remaining — not enough for network latency. This caused intermittent 401s that the session recovered from but shouldn't have happened. Reading from disk costs one file read per playlist fetch (~15ms on SSD). The network fetch that follows takes 50-200ms. The disk read is negligible.
 
 ## Tango API timing: derive from TTL source of truth
 
@@ -107,6 +107,24 @@ The stable identifier is the numeric room ID. Resolved once at add-time, persist
 20s cooldown after a 0-segment session. Logs "live again after cooldown" when a streamer is detected live immediately after cooldown expiry — this data will show if 20s is too long.
 
 **Why:** Exponential backoff (30s→10min) meant a transient failure at 3am could escalate to 10-minute waits.
+
+## FC2 skip paid streams (fee>0) (2026-03-22)
+
+The memberApi returns `fee>0` for paid streams. Only download `fee=0`.
+
+**Why:** Paid streams pass the `is_publish` check but the WebSocket handshake for HLS URL retrieval fails without payment, causing "online but failed to retrieve HLS URL" warnings every 60s.
+
+## No frontend playlist cache (2026-03-22)
+
+`fetchAndParsePlaylist` reads from the server on every call. No Map cache.
+
+**Why:** Frontend logging showed playlist fetches take 13-45ms on localhost HTTPS (median 18ms). Cache hit rate was 10%. The cache saved 18ms on revisits but froze `isLive` state, causing live streams to appear as VOD.
+
+## Frontend passthrough logging (2026-03-22)
+
+`POST /api/log` accepts `{ event, data }` from the frontend, writes to the server journal with `[Frontend]` tag. Fire-and-forget, no batching.
+
+**Why:** The frontend is a client-side SPA with no logging. Performance claims (cache saves Xms) couldn't be verified without data.
 
 ## Disk space monitor stops the service at 50GB
 
