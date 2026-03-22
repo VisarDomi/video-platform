@@ -6,11 +6,6 @@ import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
 
 const AUTH_RETRY_INTERVAL_MS = 30 * 1000;
-/** Retry at the same cadence as the normal refresh cycle.
- *  Must be <= stream token TTL (10s), otherwise a single
- *  failed refresh leaves expired tokens on disk with no
- *  recovery until this timer fires. */
-const BACKGROUND_JOB_FAILURE_RETRY_MS = 5 * 1000;
 
 export class AuthService {
     private readonly account: Account;
@@ -114,8 +109,8 @@ export class AuthService {
             } catch (error) {
                 const tte = this.authContext.getTokenBag()?.extras?.tte;
                 const ttl = tte ? parseInt(tte, 10) - Math.floor(Date.now() / 1000) : -1;
-                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. On-disk tokens have ttl=${ttl}s. Retrying in ${BACKGROUND_JOB_FAILURE_RETRY_MS / 1000}s.`, { error: (error as Error).message });
-                await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
+                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. On-disk tokens have ttl=${ttl}s. Retrying in ${this.provider.intervals.shortTokenRefresh / 1000}s.`, { error: (error as Error).message });
+                await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             }
         }
     }
@@ -148,7 +143,7 @@ export class AuthService {
                     logger.warn(`Session maintenance failed for ${this.account.email}. Retrying after delay.`, { error: errorMessage });
                 }
             }
-            await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
+            await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
         }
     }
 }

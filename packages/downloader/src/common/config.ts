@@ -4,6 +4,7 @@ import * as url from "url";
 import * as os from "os";
 
 import * as utils from "./utils.js";
+import { TANGO_STREAM_TOKEN_REFRESH_MS } from "shared";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +28,7 @@ const defaultConfig: IConfig = {
     sharedStatePath: path.join(os.homedir(), ".local", "share", "video-services"),
     intervals: {
         pollFollowing: 1000,
-        shortTokenRefresh: 5000,
+        shortTokenRefresh: TANGO_STREAM_TOKEN_REFRESH_MS,
     },
     timeouts: {
         staleStream: 60000,

@@ -4,13 +4,14 @@ import * as authUtils from "../../auth/authUtils.js";
 import { Account, IAuthProvider, TokenBag, RefreshResult, ShortTokenResult } from "../interfaces.js";
 import * as constants from "./constants.js";
 import { extractTokens } from "./tangoLogin.js";
+import { TANGO_STREAM_TOKEN_TTL_S, TANGO_STREAM_TOKEN_REFRESH_MS, TANGO_SESSION_REFRESH_MS } from "shared";
 
 export class TangoAuthProvider implements IAuthProvider {
     readonly name = "tango";
 
     readonly intervals = {
-        shortTokenRefresh: 5000,
-        sessionRefresh: 30 * 60 * 1000,
+        shortTokenRefresh: TANGO_STREAM_TOKEN_REFRESH_MS,
+        sessionRefresh: TANGO_SESSION_REFRESH_MS,
     };
 
     async login(account: Account): Promise<TokenBag> {
@@ -91,9 +92,8 @@ export class TangoAuthProvider implements IAuthProvider {
         }
 
         const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
-        const expectedTtl = 10;
-        if (ttl < expectedTtl * 0.8) {
-            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${expectedTtl}s)`);
+        if (ttl < TANGO_STREAM_TOKEN_TTL_S * 0.8) {
+            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${TANGO_STREAM_TOKEN_TTL_S}s)`);
         }
 
         return { extras: { tt, ttu, tte } };
