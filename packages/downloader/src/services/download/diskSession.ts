@@ -1,23 +1,32 @@
 import * as path from "path";
-import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
+import { DownloadHandle } from "../state/downloadsManager.js";
 
 /**
- * Owns the download directory on disk. Nothing is created until
- * materialize() is called — which happens at first byte write.
+ * Owns the download directory on disk and its visibility in live-status.json.
+ *
+ * Nothing is created until materialize() is called — which happens at
+ * first byte write. When the dir is created, the handle is updated
+ * atomically — the system cannot observe a dir that exists without
+ * the handle knowing about it, and vice versa.
  *
  * All disk writers (InitTracker, PlaylistManager, segment writes)
- * go through this object. The dir and playlist header are created
- * together, atomically, the first time any writer needs disk.
+ * go through this object.
  */
 export class DiskSession {
     private readonly alias: string;
+    private readonly handle: DownloadHandle;
     private readonly setupDir: () => Promise<string | null>;
     private _dirPath: string | null = null;
     private _materialized = false;
 
-    constructor(alias: string, setupDir: () => Promise<string | null>) {
+    constructor(
+        alias: string,
+        handle: DownloadHandle,
+        setupDir: () => Promise<string | null>,
+    ) {
         this.alias = alias;
+        this.handle = handle;
         this.setupDir = setupDir;
     }
 
@@ -33,9 +42,9 @@ export class DiskSession {
     }
 
     /**
-     * Create the download dir on disk. Called once, right before
-     * the first byte needs to be written. Returns false if the dir
-     * could not be created.
+     * Create the download dir on disk and update the handle atomically.
+     * After this call, the dir exists AND live-status.json reflects it.
+     * Called once, right before the first byte needs to be written.
      */
     public async materialize(): Promise<boolean> {
         if (this._materialized) return true;
@@ -47,6 +56,7 @@ export class DiskSession {
         }
 
         this._dirPath = dirPath;
+        this.handle.update({ segmentsDirPath: dirPath });
         this._materialized = true;
         logger.info(`[DiskSession] ${this.alias}: dir materialized at ${path.basename(dirPath)}`);
         return true;
