@@ -65,14 +65,15 @@ export class StreamDownloader {
         let session = this.provider.createDownloadSession();
         playlistManager.setEdge(liveUrl);
 
-        return await this.downloadLoop(alias, liveUrl, session, playlistManager, initTracker, disk);
+        return await this.downloadLoop(alias, masterUrl, liveUrl, session, playlistManager, initTracker, disk);
     }
 
     private async checkForQualityUpgrade(
         alias: string,
+        masterUrl: string,
         currentLiveUrl: string,
     ): Promise<string | null> {
-        const betterUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
+        const betterUrl = await this.provider.parseMasterPlaylist(masterUrl);
         if (!betterUrl) {
             logger.debug(`[StreamDownloader] ${alias} quality check: master playlist unavailable`);
             return null;
@@ -90,6 +91,7 @@ export class StreamDownloader {
 
     private async downloadLoop(
         alias: string,
+        masterUrl: string,
         initialLiveUrl: string,
         initialSession: IDownloadSession,
         playlistManager: PlaylistManager,
@@ -113,7 +115,7 @@ export class StreamDownloader {
 
             if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL) {
                 lastQualityCheck = Date.now();
-                const betterUrl = await this.checkForQualityUpgrade(alias, liveUrl);
+                const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
                 if (betterUrl) {
                     logger.info(`[StreamDownloader] Quality upgrade for ${alias}: ${betterUrl.split("?")[0]}`);
                     liveUrl = betterUrl;

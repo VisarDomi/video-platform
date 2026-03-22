@@ -1,4 +1,5 @@
 import * as path from "path";
+import * as timersPromises from "timers/promises";
 
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
@@ -61,7 +62,6 @@ export class StreamSession {
         let totalSegments = 0;
 
         while (!this._aborted) {
-            this.handle.masterPlaylistUrl = masterUrl;
             const downloader = new StreamDownloader(this.handle, this.provider);
             this.activeDownloader = downloader;
             const result = await downloader.run(masterUrl, playlistManager, initTracker, disk);
@@ -85,6 +85,7 @@ export class StreamSession {
 
             masterUrl = retryUrl;
             logger.info(`[StreamSession] ${this.alias}: retrying (reason=${result.exitReason}, newMaster=${masterUrl !== context.lastMasterUrl})`);
+            await timersPromises.setTimeout(5000);
         }
 
         if (disk.materialized) {
