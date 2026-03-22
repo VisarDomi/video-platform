@@ -1,4 +1,5 @@
 import * as timersPromises from "timers/promises";
+import * as fsPromises from "fs/promises";
 import * as path from "path";
 
 import * as config from "../../../common/config.js";
@@ -13,16 +14,20 @@ export interface Tokens {
 }
 
 /**
- * Minimum remaining TTL (seconds) before we consider stream tokens usable.
- * If tte is closer than this to now, we force a reload from disk rather
- * than sending tokens the CDN will reject.
+ * Maximum age (ms) of the session file before we consider the auth
+ * service stalled. The auth service writes every 5s (shortTokenRefresh).
+ * Two missed cycles = something is wrong.
  */
-const MIN_TTL_SECONDS = 3;
+const AUTH_STALE_THRESHOLD_MS = 15_000;
 
 export class TokenManager {
     private tokens: Tokens | null = null;
+    private sessionFilePath: string;
+    private authStaleLogged = false;
 
     private constructor() {
+        const cfg = config.getConfig();
+        this.sessionFilePath = path.resolve(cfg.sharedStatePath, "session", "diusminus@gmail.com.json");
         logger.info("[Tango] TokenManager initialized.");
     }
 
@@ -38,6 +43,7 @@ export class TokenManager {
             await timersPromises.setTimeout(refreshInterval);
             while (true) {
                 await this._loadTokens();
+                this._checkAuthHealth();
                 await timersPromises.setTimeout(refreshInterval);
             }
         };
@@ -45,9 +51,7 @@ export class TokenManager {
     }
 
     private async _loadTokens(): Promise<boolean> {
-        const cfg = config.getConfig();
-        const sessionFilePath = path.resolve(cfg.sharedStatePath, "session", "diusminus@gmail.com.json");
-        const session = await FileSystemManager.readJsonFile<any>(sessionFilePath);
+        const session = await FileSystemManager.readJsonFile<any>(this.sessionFilePath);
 
         if (!session) {
             if (this.tokens) {
@@ -72,11 +76,29 @@ export class TokenManager {
         }
     }
 
-    private streamTokenTtl(): number {
-        if (!this.tokens?.tte) return -1;
-        const tte = parseInt(this.tokens.tte, 10);
-        if (isNaN(tte)) return -1;
-        return tte - Math.floor(Date.now() / 1000);
+    /**
+     * Check if the auth service is alive by looking at the session file's
+     * mtime. The auth service is the sole writer — if the file is stale,
+     * the auth service stopped refreshing and our tokens will expire.
+     * Logs once on detection, clears when the file is fresh again.
+     */
+    private _checkAuthHealth(): void {
+        fsPromises.stat(this.sessionFilePath).then((stat) => {
+            const ageMs = Date.now() - stat.mtimeMs;
+            if (ageMs > AUTH_STALE_THRESHOLD_MS) {
+                if (!this.authStaleLogged) {
+                    logger.error(`[Tango] Auth service stale — session file age=${(ageMs / 1000).toFixed(0)}s (threshold=${AUTH_STALE_THRESHOLD_MS / 1000}s). Stream tokens will expire.`);
+                    this.authStaleLogged = true;
+                }
+            } else {
+                if (this.authStaleLogged) {
+                    logger.info(`[Tango] Auth service recovered — session file fresh (age=${(ageMs / 1000).toFixed(0)}s)`);
+                }
+                this.authStaleLogged = false;
+            }
+        }).catch(() => {
+            // stat failed — _loadTokens already handles missing file
+        });
     }
 
     public async getTokens(): Promise<Tokens> {
@@ -87,19 +109,6 @@ export class TokenManager {
                 await timersPromises.setTimeout(5000);
             }
         }
-
-        const ttl = this.streamTokenTtl();
-        if (ttl < MIN_TTL_SECONDS) {
-            logger.warn(`[Tango] Stream tokens near expiry (ttl=${ttl}s), forcing reload`);
-            const loaded = await this._loadTokens();
-            if (loaded) {
-                const newTtl = this.streamTokenTtl();
-                if (newTtl < MIN_TTL_SECONDS) {
-                    logger.error(`[Tango] Stream tokens STILL near expiry after reload (ttl=${newTtl}s) — auth service may be stalled`);
-                }
-            }
-        }
-
-        return this.tokens!;
+        return this.tokens;
     }
 }
