@@ -8,6 +8,7 @@ export interface SegmentInfo {
     localName: string;
     metadata: string[];
     accurateDuration?: number;
+    programDateTime?: string;
 }
 
 export type SegmentUrlResolver = (segmentLine: string) => string;
@@ -56,9 +57,55 @@ export class PlaylistManager {
         firstProgramDateTime: null,
         lastProgramDateTime: null,
     };
+    private lastDownloadedPDT: string | null = null;
+    private _edgeSwitchActive = false;
 
     public get timeline(): Readonly<PlaylistTimeline> {
         return this._timeline;
+    }
+
+    /**
+     * Call when the variant URL changed to a different edge.
+     * Enables PDT-based dedup for subsequent segments until
+     * we're past the overlap window.
+     */
+    public onEdgeSwitch(oldEdge: string | null, newEdge: string): void {
+        this._edgeSwitchActive = this.lastDownloadedPDT !== null;
+        if (this._edgeSwitchActive) {
+            logger.info(`[PlaylistManager] Edge switch ${oldEdge ?? "none"} → ${newEdge}, PDT dedup active (lastPDT=${this.lastDownloadedPDT})`);
+        }
+    }
+
+    /**
+     * Check if a segment should be skipped because we already downloaded
+     * content covering that broadcast moment from the previous edge.
+     * Only active after an edge switch. Logs defensively.
+     */
+    public shouldSkipByTimeline(segment: SegmentInfo): boolean {
+        if (!this._edgeSwitchActive || !segment.programDateTime || !this.lastDownloadedPDT) {
+            return false;
+        }
+
+        if (segment.programDateTime <= this.lastDownloadedPDT) {
+            logger.info(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
+            return true;
+        }
+
+        // First segment past the overlap — dedup window is over.
+        const lastDate = new Date(this.lastDownloadedPDT).getTime();
+        const segDate = new Date(segment.programDateTime).getTime();
+        const gapMs = segDate - lastDate;
+        if (gapMs > 4000) {
+            logger.warn(`[PlaylistManager] EDGE-GAP ${(gapMs / 1000).toFixed(1)}s between lastPDT=${this.lastDownloadedPDT} and newPDT=${segment.programDateTime}`);
+        }
+        this._edgeSwitchActive = false;
+        return false;
+    }
+
+    public recordDownloadedPDT(pdt: string | undefined): void {
+        if (pdt) {
+            this.lastDownloadedPDT = pdt;
+        }
     }
 
     constructor(segmentsDirPath: string) {
@@ -150,9 +197,18 @@ export class PlaylistManager {
 
         const existingSegments = await this.getExistingLocalSegments();
 
+        let currentPDT: string | null = null;
+
         for (let i = 0; i < liveLines.length; i++) {
             const line = liveLines[i].trim();
-            if (line === "" || line.startsWith("#")) {
+            if (line === "") continue;
+
+            if (line.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) {
+                currentPDT = line.slice("#EXT-X-PROGRAM-DATE-TIME:".length);
+                continue;
+            }
+
+            if (line.startsWith("#")) {
                 continue;
             }
 
@@ -176,8 +232,10 @@ export class PlaylistManager {
                     }
                 }
                 this.seenRemoteUrls.add(remoteTsUrl);
-                newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata });
+                newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata, programDateTime: currentPDT ?? undefined });
             }
+
+            currentPDT = null;
         }
 
         return newSegments;
