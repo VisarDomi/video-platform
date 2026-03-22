@@ -54,23 +54,22 @@ export async function resolveAlias(alias: string): Promise<{ accountId: string; 
     if (!headers) return null;
 
     try {
-        const url = `https://gateway.tango.me/discovery/v2/search?query=${encodeURIComponent(alias)}&size=5`;
-        const response = await fetch(url, { headers });
+        const url = `${API_BASE}/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify([alias]),
+        });
 
         if (!response.ok) return null;
-        const data: any = await response.json();
+        const body: any = await response.json();
+        const key = Object.keys(body)[0];
+        if (!key) return null;
 
-        const hits = data?.searchResults || [];
-        for (const hit of hits) {
-            const hitAlias = hit?.basicProfile?.aliases?.[0]?.alias;
-            if (hitAlias?.toLowerCase() === alias.toLowerCase()) {
-                return {
-                    accountId: hit.basicProfile.encryptedAccountId,
-                    firstName: hit.basicProfile.firstName || alias,
-                };
-            }
-        }
-        return null;
+        return {
+            accountId: body[key].encryptedAccountId || key,
+            firstName: body[key].basicProfile?.firstName || "",
+        };
     } catch (error) {
         logger.error("[Tango] Failed to resolve alias", { alias, error: (error as Error).message });
         return null;
