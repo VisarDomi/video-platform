@@ -7,6 +7,7 @@ import { exec } from "child_process";
 import logger from "../../common/logger.js";
 import { config } from "../../common/config.js";
 import * as utils from "../../common/utils.js";
+import { DISK_CHECK_INTERVAL_MS, DISK_FULL_SLEEP_MS } from "../../common/timing.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,13 +36,13 @@ export class DiskSpaceMonitor {
 
                     exec("systemctl --user stop video-downloader");
 
-                    await timersPromises.setTimeout(24 * 60 * 60 * 1000);
+                    await timersPromises.setTimeout(DISK_FULL_SLEEP_MS);
                 }
             } catch (error: any) {
                 logger.error("[System] Error checking disk space:", { error: error.message });
             }
 
-            await timersPromises.setTimeout(60 * 1000);
+            await timersPromises.setTimeout(DISK_CHECK_INTERVAL_MS);
         }
     }
 }

@@ -5,8 +5,7 @@ import { ScTargetManager, ScTarget } from "./targetManager.js";
 import { ScClient } from "../api/scClient.js";
 import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
-
-const POLL_INTERVAL = 5_000;
+import { SC_POLL_MS } from "../../../common/timing.js";
 
 export class ScDiscoveryService {
     private targetManager: ScTargetManager;
@@ -29,7 +28,7 @@ export class ScDiscoveryService {
                 } catch (error: any) {
                     logger.error("[SC] Poll error", { error: error.message });
                 }
-                await timersPromises.setTimeout(POLL_INTERVAL);
+                await timersPromises.setTimeout(SC_POLL_MS);
             }
         };
         void runLoop();

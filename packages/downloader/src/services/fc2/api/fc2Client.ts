@@ -5,6 +5,7 @@ import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
+import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
 interface Fc2Session {
     ws: WebSocket;
@@ -361,7 +362,7 @@ class Fc2DownloadSession implements IDownloadSession {
         this.client = client;
     }
 
-    private static readonly FETCH_TIMEOUT_MS = 30_000;
+    private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {

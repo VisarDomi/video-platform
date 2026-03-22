@@ -5,6 +5,7 @@ import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
+import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
 function parseFmp4Duration(data: Buffer): number {
     let pos = 0;
@@ -61,7 +62,7 @@ export class ScClient implements IStreamProvider {
         try {
             const response = await fetch(url, {
                 headers: { "User-Agent": USER_AGENT },
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
 
             if (!response.ok) {
@@ -79,7 +80,7 @@ export class ScClient implements IStreamProvider {
         try {
             const response = await fetch(url, {
                 headers: { "User-Agent": USER_AGENT },
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
             return {
                 ok: response.ok,
@@ -323,14 +324,14 @@ const CDN_HEADERS = { "User-Agent": USER_AGENT };
 // the fetch aborts after this duration.  Without this, a hung TCP
 // connection blocks the download loop forever (no heartbeats, no exit,
 // no re-download).  Node's fetch has no default timeout.
-const FETCH_TIMEOUT_MS = 30_000;
+
 
 class ScDownloadSession implements IDownloadSession {
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             const response = await fetch(url, {
                 headers: CDN_HEADERS,
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
 
             if (!response.ok) {
@@ -355,7 +356,7 @@ class ScDownloadSession implements IDownloadSession {
         try {
             const response = await fetch(tsUrl, {
                 headers: CDN_HEADERS,
-                signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
             if (response.ok) {
                 const buf = await response.arrayBuffer();

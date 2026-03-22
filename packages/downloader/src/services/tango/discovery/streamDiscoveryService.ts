@@ -1,6 +1,7 @@
 import * as timersPromises from "timers/promises";
 
 import logger from "../../../common/logger.js";
+import { TANGO_POLL_MS } from "../../../common/timing.js";
 import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { AliasManager } from "shared";
 import { DownloadsManager } from "../../state/downloadsManager.js";
@@ -101,7 +102,9 @@ export class StreamDiscoveryService {
             } else {
                 logger.verbose("[Tango] Poll complete: No new streams found or unable to fetch.");
             }
-            await timersPromises.setTimeout(1000);
+            // Executive decision: 1s poll gives near-instant pickup when a followed
+            // streamer goes live. Lower values waste API calls, higher values delay recording start.
+            await timersPromises.setTimeout(TANGO_POLL_MS);
         }
     }
 }

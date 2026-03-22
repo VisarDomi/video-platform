@@ -5,7 +5,7 @@ import { Account, IAuthProvider } from "../providers/interfaces.js";
 import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
 
-const AUTH_RETRY_INTERVAL_MS = 30 * 1000;
+const AUTH_LOGIN_RETRY_MS = 30_000;
 
 export class AuthService {
     private readonly account: Account;
@@ -35,7 +35,7 @@ export class AuthService {
                         break;
                     } else {
                         logger.error(`Failed to establish session for ${this.account.email}: ${errorMessage}. Retrying...`);
-                        await timersPromises.setTimeout(AUTH_RETRY_INTERVAL_MS);
+                        await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
                     }
                 }
             }
@@ -50,7 +50,7 @@ export class AuthService {
             } catch (error) {
                 const errorMessage = (error as Error).message;
                 logger.error(`Browser login failed for ${this.account.email}: ${errorMessage}. Retrying...`);
-                await timersPromises.setTimeout(AUTH_RETRY_INTERVAL_MS);
+                await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
             }
         }
     }

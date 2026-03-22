@@ -5,6 +5,7 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { fixTargetDuration } from "shared";
 import { DownloadsManager } from "../state/downloadsManager.js";
+import { ORPHAN_SECOND_CHECK_MS, ORPHAN_CYCLE_MS, ORPHAN_MIN_AGE_MS } from "../../common/timing.js";
 
 interface PlaylistSection {
     mapLine: string | null;
@@ -116,7 +117,7 @@ function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): stri
 
 export class OrphanStreamFinalizer {
     private downloadsManager: DownloadsManager;
-    private readonly checkInterval: number = 24 * 60 * 60 * 1000;
+    private readonly checkInterval = ORPHAN_CYCLE_MS;
 
     constructor(downloadsManager: DownloadsManager) {
         this.downloadsManager = downloadsManager;
@@ -124,7 +125,7 @@ export class OrphanStreamFinalizer {
 
     public start(): void {
         void this.processOrphans();
-        setTimeout(() => void this.processOrphans(), 5 * 60 * 1000);
+        setTimeout(() => void this.processOrphans(), ORPHAN_SECOND_CHECK_MS);
         setTimeout(() => {
             const runLoop = async () => {
                 await this.processOrphans();
@@ -181,7 +182,7 @@ export class OrphanStreamFinalizer {
                     try {
                         const fileStats = await fs.stat(streamPath);
                         const ageMs = Date.now() - fileStats.mtimeMs;
-                        if (ageMs < 60 * 60 * 1000) {
+                        if (ageMs < ORPHAN_MIN_AGE_MS) {
                             continue;
                         }
                     } catch (e) {

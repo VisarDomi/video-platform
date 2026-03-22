@@ -2,6 +2,7 @@ import * as path from "path";
 import * as timersPromises from "timers/promises";
 
 import logger from "../../common/logger.js";
+import { SESSION_RETRY_SLEEP_MS } from "../../common/timing.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { IStreamProvider, DownloadExitContext } from "../core/interfaces.js";
 import { StreamDownloader, DownloadResult } from "./streamDownloader.js";
@@ -85,7 +86,7 @@ export class StreamSession {
 
             masterUrl = retryUrl;
             logger.info(`[StreamSession] ${this.alias}: retrying (reason=${result.exitReason}, newMaster=${masterUrl !== context.lastMasterUrl})`);
-            await timersPromises.setTimeout(5000);
+            await timersPromises.setTimeout(SESSION_RETRY_SLEEP_MS);
         }
 
         if (disk.materialized) {

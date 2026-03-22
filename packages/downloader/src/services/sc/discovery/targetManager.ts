@@ -3,6 +3,7 @@ import * as path from "path";
 import * as url from "url";
 import * as utils from "../../../common/utils.js";
 import logger from "../../../common/logger.js";
+import { FILE_WATCHER_DEBOUNCE_MS } from "../../../common/timing.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -119,7 +120,7 @@ export class ScTargetManager {
                     logger.info(`[SC] sc.txt changed. Reloading targets...`);
                     this.loadTargets();
                     this.debounceTimer = null;
-                }, 500);
+                }, FILE_WATCHER_DEBOUNCE_MS);
             }
         });
     }

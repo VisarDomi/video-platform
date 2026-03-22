@@ -6,6 +6,7 @@ import * as constants from "../../../common/constants.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { TokenManager, Tokens } from "./tokenManager.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
+import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
 export class ApiClient implements IStreamProvider {
     private tokenManager: TokenManager;
@@ -259,7 +260,7 @@ class TangoDownloadSession implements IDownloadSession {
         return { [constants.HEADERS.COOKIE]: cookie };
     }
 
-    private static readonly FETCH_TIMEOUT_MS = 30_000;
+    private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {

@@ -5,6 +5,7 @@ import { TargetManager } from "../../common/targetManager.js";
 import { Fc2Client } from "../api/fc2Client.js";
 import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
+import { FC2_POLL_MS } from "../../../common/timing.js";
 
 export class Fc2DiscoveryService {
     private targetManager: TargetManager;
@@ -24,7 +25,7 @@ export class Fc2DiscoveryService {
         const runLoop = async () => {
             while (true) {
                 await this.processNextTarget();
-                await timersPromises.setTimeout(1000);
+                await timersPromises.setTimeout(FC2_POLL_MS);
             }
         };
         void runLoop();
