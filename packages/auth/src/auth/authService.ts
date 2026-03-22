@@ -104,7 +104,12 @@ export class AuthService {
         while (true) {
             try {
                 await this.setTokenData();
+                const tte = this.authContext.getTokenBag()?.extras?.tte;
+                const ttl = tte ? parseInt(tte, 10) - Math.floor(Date.now() / 1000) : -1;
                 await this.authContext.saveTokenToFile();
+                if (ttl < (this.provider.intervals.shortTokenRefresh / 1000)) {
+                    logger.warn(`[Auth] Wrote stream tokens with ttl=${ttl}s (below refresh cycle ${this.provider.intervals.shortTokenRefresh / 1000}s)`);
+                }
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             } catch (error) {
                 const tte = this.authContext.getTokenBag()?.extras?.tte;
