@@ -57,7 +57,9 @@ export class StreamDownloader {
 
         // DiskSession defers dir creation to first byte write.
         // Nothing touches disk until actual content is ready.
-        const disk = new DiskSession(alias, () => this.provider.setupDownloadDir(alias, new Date()));
+        // The handle is updated atomically when the dir is created —
+        // live-status.json reflects the dir the moment it exists.
+        const disk = new DiskSession(alias, this.handle, () => this.provider.setupDownloadDir(alias, new Date()));
         const playlistManager = new PlaylistManager(disk);
         const initTracker = new InitTracker(disk);
         let session = this.provider.createDownloadSession();
@@ -68,7 +70,6 @@ export class StreamDownloader {
 
         if (disk.materialized) {
             await playlistManager.finalizePlaylist();
-            this.handle.update({ segmentsDirPath: disk.dirPath });
             logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(disk.dirPath)} url=${this.handle.masterPlaylistUrl}`);
         } else {
             logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} (no content written) url=${this.handle.masterPlaylistUrl}`);
