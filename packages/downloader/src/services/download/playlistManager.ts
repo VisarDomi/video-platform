@@ -2,6 +2,7 @@ import * as path from "path";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { fixTargetDuration } from "shared";
+import { DiskSession } from "./diskSession.js";
 
 export interface SegmentInfo {
     remoteUrl: string;
@@ -42,8 +43,7 @@ export interface PlaylistTimeline {
  * DISCONTINUITY+MAP entry that would later be overwritten.
  */
 export class PlaylistManager {
-    private readonly segmentsDirPath: string;
-    private readonly fullPlaylistPath: string;
+    private readonly disk: DiskSession;
     private ignoredSegments: Set<string> = new Set();
     private seenRemoteUrls: Set<string> = new Set();
     private lastSegmentNumber: number = -1;
@@ -108,9 +108,12 @@ export class PlaylistManager {
         }
     }
 
-    constructor(segmentsDirPath: string) {
-        this.segmentsDirPath = segmentsDirPath;
-        this.fullPlaylistPath = path.join(this.segmentsDirPath, "playlist.m3u8");
+    private get fullPlaylistPath(): string {
+        return path.join(this.disk.dirPath, "playlist.m3u8");
+    }
+
+    constructor(disk: DiskSession) {
+        this.disk = disk;
     }
 
     private getExtinfDuration(metadata: string[]): number {
@@ -127,6 +130,7 @@ export class PlaylistManager {
     }
 
     private async getExistingLocalSegments(): Promise<Set<string>> {
+        if (!this.disk.materialized) return new Set();
         const content = await FileSystemManager.readFile(this.fullPlaylistPath);
         if (!content) {
             return new Set();
@@ -166,7 +170,7 @@ export class PlaylistManager {
             }
         }
 
-        const fileExists = await FileSystemManager.pathExists(this.fullPlaylistPath);
+        const fileExists = this.disk.materialized && await FileSystemManager.pathExists(this.fullPlaylistPath);
 
         if (!fileExists && !this.pendingHeader) {
             const headerLines = liveLines.filter(

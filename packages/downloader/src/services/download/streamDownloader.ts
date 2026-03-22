@@ -8,6 +8,7 @@ import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { InitTracker } from "./initTracker.js";
+import { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
 
 export interface DownloadResult {
@@ -50,39 +51,33 @@ export class StreamDownloader {
 
         this.handle.update({ liveUrl });
 
-        const segmentsDirPath = await this.provider.setupDownloadDir(alias, new Date());
-        if (!segmentsDirPath) {
-            logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=setupDownloadDir-failed`);
-            this.handle.remove();
-            return { segmentCount: 0, aborted: false };
-        }
-
-        this.handle.update({ segmentsDirPath });
         const edgeMatch = liveUrl.match(/\/(b-hls-\d+)\//);
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
-        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} edge=${edge} variant=${liveUrl.split("?")[0]}`);
+        logger.info(`[StreamDownloader] START ${alias} edge=${edge} variant=${liveUrl.split("?")[0]}`);
 
+        // DiskSession defers dir creation to first byte write.
+        // Nothing touches disk until actual content is ready.
+        const disk = new DiskSession(alias, () => this.provider.setupDownloadDir(alias, new Date()));
+        const playlistManager = new PlaylistManager(disk);
+        const initTracker = new InitTracker(disk);
         let session = this.provider.createDownloadSession();
-        const playlistManager = new PlaylistManager(segmentsDirPath);
-        const initTracker = new InitTracker(segmentsDirPath);
 
         playlistManager.setEdge(liveUrl);
 
-        const result = await this.downloadLoop(alias, liveUrl, segmentsDirPath, session, playlistManager, initTracker);
+        const result = await this.downloadLoop(alias, liveUrl, session, playlistManager, initTracker, disk);
 
-        await playlistManager.finalizePlaylist();
-
-        logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(segmentsDirPath)} url=${this.handle.masterPlaylistUrl}`);
+        if (disk.materialized) {
+            await playlistManager.finalizePlaylist();
+            this.handle.update({ segmentsDirPath: disk.dirPath });
+            logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(disk.dirPath)} url=${this.handle.masterPlaylistUrl}`);
+        } else {
+            logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} (no content written) url=${this.handle.masterPlaylistUrl}`);
+        }
         this.handle.remove();
 
         return result;
     }
 
-    /**
-     * Check if a better quality variant is available by re-parsing the master
-     * playlist.  Called inline by the download loop — no concurrent timer,
-     * no shared mutable state.  The download loop is the sole owner of liveUrl.
-     */
     private async checkForQualityUpgrade(
         alias: string,
         currentLiveUrl: string,
@@ -93,7 +88,6 @@ export class StreamDownloader {
             return null;
         }
 
-        // Compare ignoring query params and CDN TLD differences
         const normalize = (url: string) =>
             url.split("?")[0].replace(/doppiocdn\.(org|com|net)/g, "doppiocdn._");
 
@@ -107,13 +101,13 @@ export class StreamDownloader {
     private async downloadLoop(
         alias: string,
         initialLiveUrl: string,
-        segmentsDirPath: string,
-        session: IDownloadSession,
+        initialSession: IDownloadSession,
         playlistManager: PlaylistManager,
         initTracker: InitTracker,
+        disk: DiskSession,
     ): Promise<DownloadResult> {
-        // All download state is local. No class fields, no concurrent mutation.
         let liveUrl = initialLiveUrl;
+        let session = initialSession;
         let lastDownload = Date.now();
         let segmentFailed = false;
         let lastHeartbeat = Date.now();
@@ -121,15 +115,12 @@ export class StreamDownloader {
         const staleTimeout = config.getConfig().timeouts.staleStream;
 
         while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
-            // Heartbeat
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
                 logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
                 lastHeartbeat = Date.now();
             }
 
-            // Periodic quality check — inline, no concurrent timer.
-            // The download loop owns liveUrl exclusively.
             if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL) {
                 lastQualityCheck = Date.now();
                 const betterUrl = await this.checkForQualityUpgrade(alias, liveUrl);
@@ -140,19 +131,15 @@ export class StreamDownloader {
                 }
             }
 
-            // Fetch playlist. Null means the variant URL failed.
             let content = await session.fetchPlaylist(liveUrl);
             if (!content) {
-                // Variant dead. Ask the provider to find a working one.
                 const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
                 if (!recovered) {
-                    // All alternatives exhausted. Sleep and retry — stale timeout is the exit.
                     logger.info(`[StreamDownloader] ${alias} variant failed, no recovery available (segments=${initTracker.count} url=${liveUrl})`);
                     await timersPromises.setTimeout(5000);
                     continue;
                 }
 
-                // Found a working variant. Detect if it's a different edge.
                 const oldEdge = playlistManager.timeline.edge;
                 const newEdgeMatch = recovered.match(/\/(b-hls-\d+)\//);
                 const newEdge = newEdgeMatch ? newEdgeMatch[1] : null;
@@ -167,11 +154,8 @@ export class StreamDownloader {
 
                 liveUrl = recovered;
                 this.handle.update({ liveUrl });
-
-                // Re-create the session — the old session's CDN connection state is stale.
                 session = this.provider.createDownloadSession();
 
-                // Fetch from the new variant immediately.
                 content = await session.fetchPlaylist(liveUrl);
                 if (!content) {
                     logger.warn(`[StreamDownloader] ${alias} recovered variant also failed — retrying`);
@@ -180,9 +164,6 @@ export class StreamDownloader {
                 }
             }
 
-            // Track init segment changes via EXT-X-MAP in the variant playlist.
-            // InitTracker owns the mapUri↔file relationship. State only advances
-            // when the file is confirmed on disk.
             const mapMatch = content.match(/#EXT-X-MAP:URI="([^"]+)"/);
             if (mapMatch) {
                 const mapUri = mapMatch[1];
@@ -199,9 +180,6 @@ export class StreamDownloader {
                         continue;
                     }
 
-                    // Quality change: tell the playlist manager, which buffers
-                    // the entry until the next segment flush (guarantees header
-                    // is written first).
                     if (result.isQualityChange) {
                         playlistManager.bufferQualityChange(result.fileName);
                     }
@@ -210,7 +188,6 @@ export class StreamDownloader {
                 }
             }
 
-            // Download new segments
             const segments = await playlistManager.identifyNewSegments(
                 content,
                 (line) => this.provider.getSegmentUrl(liveUrl, line),
@@ -219,9 +196,6 @@ export class StreamDownloader {
             let downloadedThisIteration = false;
 
             for (const segment of segments) {
-                // PDT-based dedup after edge switch: skip segments we already
-                // have from the previous edge. Only fires when the unproven
-                // claim holds (edges share the broadcast timeline). Logs either way.
                 if (playlistManager.shouldSkipByTimeline(segment)) {
                     continue;
                 }
@@ -233,15 +207,20 @@ export class StreamDownloader {
                     segment.localName = `${playlistManager.startSequence + initTracker.count}.ts`;
                 }
 
-                const segmentPath = path.join(segmentsDirPath, segment.localName);
-
                 if (!tsBuffer) {
-                    // Segment non-200 → stop download (same as StreaMonitor: `if m_resp.status_code != 200: return`)
                     logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
                     segmentFailed = true;
                     break;
                 }
 
+                // First byte write: DiskSession materializes the dir here.
+                if (!await disk.materialize()) {
+                    logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
+                    segmentFailed = true;
+                    break;
+                }
+
+                const segmentPath = path.join(disk.dirPath, segment.localName);
                 const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
                 if (!writeSuccess) {
                     logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
@@ -268,9 +247,6 @@ export class StreamDownloader {
 
             if (segmentFailed) break;
 
-            // Only sleep when no new segments — the playlist fetch itself
-            // is the natural throttle (HLS playlists update every 2-4s).
-            // Same as StreaMonitor: `if not did_download: sleep(10)`
             if (!downloadedThisIteration) {
                 await timersPromises.setTimeout(1000);
             }
@@ -290,7 +266,7 @@ export class StreamDownloader {
         }
         const tl = playlistManager.timeline;
         const tlStr = tl.edge ? ` edge=${tl.edge} seq=${tl.mediaSequence} firstPDT=${tl.firstProgramDateTime ?? "none"} lastPDT=${tl.lastProgramDateTime ?? "none"}` : "";
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count} dir=${path.basename(segmentsDirPath)}${tlStr}`);
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${tlStr}`);
 
         return { segmentCount: initTracker.count, aborted: this._aborted };
     }

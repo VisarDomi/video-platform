@@ -1,6 +1,7 @@
 import * as path from "path";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
+import { DiskSession } from "./diskSession.js";
 
 export interface InitCommitResult {
     fileName: string;
@@ -15,14 +16,17 @@ export interface InitCommitResult {
  * currentMapUri stays at its previous value, so the next loop iteration
  * will retry. There is no state where currentMapUri references a file
  * that doesn't exist.
+ *
+ * Disk writes go through DiskSession, which materializes the dir on
+ * first write.
  */
 export class InitTracker {
     private currentMapUri: string | null = null;
     private segmentCount: number = 0;
-    private readonly segmentsDirPath: string;
+    private readonly disk: DiskSession;
 
-    constructor(segmentsDirPath: string) {
-        this.segmentsDirPath = segmentsDirPath;
+    constructor(disk: DiskSession) {
+        this.disk = disk;
     }
 
     public needsUpdate(mapUri: string): boolean {
@@ -44,8 +48,8 @@ export class InitTracker {
      * On failure, currentMapUri is NOT updated — the caller should
      * retry on the next loop iteration.
      *
-     * The fileName is derived from the current segmentCount at commit
-     * time, tying the init file's identity to the download timeline.
+     * Materializes the disk session on first call — the dir is created
+     * here, not before.
      */
     public async commitInit(
         mapUri: string,
@@ -54,12 +58,14 @@ export class InitTracker {
         const buffer = await downloadFn();
         if (!buffer) return null;
 
+        if (!await this.disk.materialize()) return null;
+
         const isQualityChange = this.currentMapUri !== null;
         const fileName = isQualityChange
             ? `init_${this.segmentCount}.mp4`
             : "init.mp4";
 
-        const filePath = path.join(this.segmentsDirPath, fileName);
+        const filePath = path.join(this.disk.dirPath, fileName);
         const ok = await FileSystemManager.writeFile(filePath, buffer as unknown as Uint8Array);
         if (!ok) {
             logger.warn(`[InitTracker] Write failed for ${fileName} — will retry`);

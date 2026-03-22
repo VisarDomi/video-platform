@@ -100,6 +100,14 @@ Edge switch within the same session uses PROGRAM-DATE-TIME-based dedup to skip s
 
 **Unverified claim (defensive):** Different SC CDN edges share the same broadcast PROGRAM-DATE-TIME for the same content moment. Logs (EDGE-DEDUP, EDGE-GAP) will prove or disprove this on the next edge rotation.
 
+## Nothing on disk until first byte write (2026-03-22)
+
+DiskSession defers dir creation to the moment the first segment or init byte is ready to be written. The dir, playlist header, and first content file are created together. Before that moment, nothing exists on disk — no empty dirs, no placeholder playlists.
+
+**Why:** The old code created the dir eagerly after `parseMasterPlaylist` succeeded, before the variant playlist was even fetched. If the variant URL was broken (mayu_nyann: variant 403, edge failover retrying same broken edge), an empty dir was created with no playlist. The frontend showed the video in the list (from live-status.json), tried to load the playlist, got a 500 (ENOENT), and failed. The dir was never cleaned up until the orphan finalizer ran hours later.
+
+DiskSession is the single gate for all disk writers (InitTracker, PlaylistManager, segment writes). They receive a DiskSession, not a raw path string. `disk.dirPath` throws if accessed before `materialize()` — making it impossible to write to a non-existent dir.
+
 ## Disk space monitor stops the service at 50GB
 
 **Why:** Prevents the disk from filling completely, which would corrupt in-progress recordings and potentially the OS. A marker file prevents restart loops.
