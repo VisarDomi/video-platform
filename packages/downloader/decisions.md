@@ -1,16 +1,20 @@
 # Downloader Decisions
 
-## Download loop must be boring (2026-03-21)
+## Download loop must be boring (2026-03-21, updated 2026-03-22)
 
-The download loop mirrors StreaMonitor's `hls.py`: fetch → download → if anything fails, stop. No in-loop recovery, no concurrent timers, no shared mutable state. Discovery handles retry with a fresh everything.
+The download loop has no concurrent timers, no shared mutable state. Quality checks are inline. Segment failure stops the download. The stale timeout (60s with no new segments) is the only exit condition for transient failures.
 
-**Why:** The previous architecture had a concurrent quality monitor timer, in-loop URL re-resolution, and counter resets that masked persistent failures. CDN TLD flips (.org/.net/.com) triggered phantom quality changes that kept zombie downloads alive for hours — the 0o_NON_o0 incident ran for over an hour with only 16 real segments.
+On variant playlist failure (404/403), the loop asks the provider to find an alternative via `recoverVariant()` instead of dying. SC tries all 3 CDN TLDs in parallel; tango/fc2 return null (no multi-edge CDN). If no recovery is found, the loop sleeps and retries until the stale timeout exits. This replaced the old "one failure = death = new folder" behavior that split single streams into dozens of directories on CDN edge rotations.
 
-## No self-healing in the download path
+**Why (original):** The concurrent `StreamQualityMonitor` timer caused zombie downloads. The 0o_NON_o0 incident ran for over an hour with only 16 segments.
 
-Every error must be surfaced, never masked. No silent catches, no fallback-to-success on failure, no counter resets on non-download events. If something goes wrong, the download dies and the log says why.
+**Why (update):** The "any failure = stop" rule correctly killed zombie downloads but also killed healthy downloads on transient CDN edge rotations. The akaneppi_ session was split into 5 folders with 30min of lost content because each 404 created a new directory. The recovery is provider-scoped (not generic self-healing) and every transition is logged (EDGE-SWITCH, EDGE-DEDUP, EDGE-GAP).
 
-**Why:** Three rounds of "fixes" added self-healing (re-resolve on 403, reset counters on quality change, return valid:true on read error). Each fix masked the symptoms of the previous fix's side effects. The root cause — a concurrent timer mutating shared state — was hidden for weeks because every surface symptom was individually "fixed."
+## No silent recovery — every transition is logged
+
+Recovery from CDN failures is allowed, but every state change must be visible in logs. No silent catches, no fallback-to-success on failure, no counter resets on non-download events.
+
+**Why:** Three rounds of "fixes" added self-healing that masked symptoms. The distinction: the old self-healing was invisible (reset counters, swallow errors). The new recovery is explicit — EDGE-SWITCH logs the old and new edge, EDGE-DEDUP logs each skipped segment with its PROGRAM-DATE-TIME, EDGE-GAP logs content loss duration.
 
 ## Room IDs are the source of truth for SC
 
@@ -69,6 +73,32 @@ The bulk API (`/api/front/models/list`) returns both `isOnline` and `isLive`. Us
 ## Tango 360x640 rejected
 
 **Why:** Tango sometimes serves corrupt/unwatchable segments at this resolution.
+
+## InitTracker owns mapUri↔file atomicity (2026-03-22)
+
+The `currentMapUri` state only advances after the init file is confirmed written to disk. If the download or write fails, the tracker stays at the previous mapUri and the next loop iteration retries. The segment count lives in the tracker (not a bare variable in the loop) because it determines init filenames.
+
+**Why:** The old code set `currentMapUri` unconditionally after `writeFile`. A silently failed init write left the tracker thinking the file existed, permanently preventing retry. Combined with `insertQualityChange` writing to the playlist before the header existed, this produced playlists starting with `#EXT-X-DISCONTINUITY` instead of `#EXTM3U` (Mio_ecstasy incident).
+
+## PlaylistManager buffers quality changes (2026-03-22)
+
+Quality changes are buffered via `bufferQualityChange()`, not appended directly to the playlist file. They're flushed atomically with the header when the first segment is appended.
+
+**Why:** `insertQualityChange` used `appendFile` which created the playlist file if it didn't exist. If a quality change happened before any segment was appended, the file started with DISCONTINUITY+MAP. When the first segment was later appended, `writeFile` (overwrite) for the header destroyed the quality change entries.
+
+## Auth health via file mtime, not token TTL (2026-03-22)
+
+The downloader checks the session file's mtime to detect whether the auth service is alive. If the file is older than 15s (3 missed auth cycles), it logs once. It does NOT inspect or validate token TTL values.
+
+**Why:** The auth service owns the tokens. The 10s TTL stream tokens normally have 2-7s remaining when the downloader reads them (5s auth write cycle, 5s downloader read cycle, random alignment). A `MIN_TTL_SECONDS=3` check treated this normal operation as an error, causing force-reloads and warning spam on every token read.
+
+## SC edge failover via parallel TLD resolution (2026-03-22)
+
+On variant 404/403, `ScClient.recoverVariant()` fetches the master playlist from all 3 TLDs (.org/.com/.net) in parallel. Returns the best variant from whichever TLD responds. Different TLDs can disagree on stream availability — proven from logs where .org returned 404 while .com returned 200 for the same stream.
+
+Edge switch within the same session uses PROGRAM-DATE-TIME-based dedup to skip segments already downloaded from the previous edge. Quality change on edge switch is handled naturally by InitTracker (different MAP URI triggers new init). A new download session is created on recovery — the old session's CDN connection state is stale.
+
+**Unverified claim (defensive):** Different SC CDN edges share the same broadcast PROGRAM-DATE-TIME for the same content moment. Logs (EDGE-DEDUP, EDGE-GAP) will prove or disprove this on the next edge rotation.
 
 ## Disk space monitor stops the service at 50GB
 
