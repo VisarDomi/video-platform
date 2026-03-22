@@ -13,6 +13,25 @@ export interface SegmentInfo {
 export type SegmentUrlResolver = (segmentLine: string) => string;
 
 /**
+ * Broadcast timeline metadata extracted from the variant playlist.
+ * Owned by PlaylistManager, read-only for the download loop.
+ *
+ * Used to verify whether different CDN edges serve the same content
+ * timeline (same PROGRAM-DATE-TIME range) despite having different
+ * MEDIA-SEQUENCE numbers and edge hostnames.
+ */
+export interface PlaylistTimeline {
+    /** CDN edge extracted from the variant URL (e.g. "b-hls-32") */
+    edge: string | null;
+    /** EXT-X-MEDIA-SEQUENCE from the first playlist fetch */
+    mediaSequence: number;
+    /** First EXT-X-PROGRAM-DATE-TIME seen in this session */
+    firstProgramDateTime: string | null;
+    /** Most recent EXT-X-PROGRAM-DATE-TIME seen */
+    lastProgramDateTime: string | null;
+}
+
+/**
  * Owns the playlist file. All writes go through this class.
  *
  * Invariant: the playlist file is never created without a valid header.
@@ -31,6 +50,16 @@ export class PlaylistManager {
     private pendingHeader: string[] | null = null;
     private pendingQualityChanges: string[] = [];
     private currentTargetDuration: number = 0;
+    private _timeline: PlaylistTimeline = {
+        edge: null,
+        mediaSequence: 0,
+        firstProgramDateTime: null,
+        lastProgramDateTime: null,
+    };
+
+    public get timeline(): Readonly<PlaylistTimeline> {
+        return this._timeline;
+    }
 
     constructor(segmentsDirPath: string) {
         this.segmentsDirPath = segmentsDirPath;
@@ -66,9 +95,29 @@ export class PlaylistManager {
         return segments;
     }
 
+    public setEdge(variantUrl: string): void {
+        const edgeMatch = variantUrl.match(/\/(b-hls-\d+)\//);
+        if (edgeMatch) {
+            this._timeline.edge = edgeMatch[1];
+        }
+    }
+
     public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
         const newSegments: SegmentInfo[] = [];
+
+        // Extract PROGRAM-DATE-TIME values from this playlist fetch.
+        // The last one corresponds to the most recent segment in the playlist.
+        for (const line of liveLines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) {
+                const pdt = trimmed.slice("#EXT-X-PROGRAM-DATE-TIME:".length);
+                if (!this._timeline.firstProgramDateTime) {
+                    this._timeline.firstProgramDateTime = pdt;
+                }
+                this._timeline.lastProgramDateTime = pdt;
+            }
+        }
 
         const fileExists = await FileSystemManager.pathExists(this.fullPlaylistPath);
 
@@ -92,7 +141,10 @@ export class PlaylistManager {
             const seqLine = headerLines.find((l) => l.startsWith("#EXT-X-MEDIA-SEQUENCE"));
             if (seqLine) {
                 const seq = parseInt(seqLine.split(":")[1], 10);
-                if (!isNaN(seq)) this.startSequence = seq;
+                if (!isNaN(seq)) {
+                    this.startSequence = seq;
+                    this._timeline.mediaSequence = seq;
+                }
             }
         }
 
