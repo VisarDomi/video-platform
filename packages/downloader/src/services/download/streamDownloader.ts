@@ -7,6 +7,7 @@ import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import { PlaylistManager } from "./playlistManager.js";
+import { InitTracker } from "./initTracker.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
 
 export interface DownloadResult {
@@ -61,8 +62,9 @@ export class StreamDownloader {
 
         const session = this.provider.createDownloadSession();
         const playlistManager = new PlaylistManager(segmentsDirPath);
+        const initTracker = new InitTracker(segmentsDirPath);
 
-        const result = await this.downloadLoop(alias, liveUrl, segmentsDirPath, session, playlistManager);
+        const result = await this.downloadLoop(alias, liveUrl, segmentsDirPath, session, playlistManager, initTracker);
 
         await playlistManager.finalizePlaylist();
 
@@ -104,23 +106,21 @@ export class StreamDownloader {
         segmentsDirPath: string,
         session: IDownloadSession,
         playlistManager: PlaylistManager,
+        initTracker: InitTracker,
     ): Promise<DownloadResult> {
         // All download state is local. No class fields, no concurrent mutation.
         let liveUrl = initialLiveUrl;
         let lastDownload = Date.now();
-        let segmentCount = 0;
         let segmentFailed = false;
         let lastHeartbeat = Date.now();
         let lastQualityCheck = Date.now();
-        let currentMapUri: string | null = null;
-        let initName = "init.mp4";
         const staleTimeout = config.getConfig().timeouts.staleStream;
 
         while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
             // Heartbeat
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${segmentCount} staleSec=${staleSec}`);
+                logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
                 lastHeartbeat = Date.now();
             }
 
@@ -133,50 +133,43 @@ export class StreamDownloader {
                     logger.info(`[StreamDownloader] Quality upgrade for ${alias}: ${betterUrl.split("?")[0]}`);
                     liveUrl = betterUrl;
                     this.handle.update({ liveUrl });
-                    // Don't reset any counters or timestamps — only real segments count.
-                    // The new liveUrl will produce a different EXT-X-MAP if the resolution
-                    // changed, which the init segment tracking below handles naturally.
                 }
             }
 
             // Fetch playlist. Null means stop — reason was logged by the session.
             const content = await session.fetchPlaylist(liveUrl);
             if (!content) {
-                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${segmentCount} url=${liveUrl})`);
+                logger.info(`[StreamDownloader] ${alias} playlist fetch failed — stopping (segments=${initTracker.count} url=${liveUrl})`);
                 break;
             }
 
             // Track init segment changes via EXT-X-MAP in the variant playlist.
-            // Handles both first-time init and mid-stream resolution changes.
+            // InitTracker owns the mapUri↔file relationship. State only advances
+            // when the file is confirmed on disk.
             const mapMatch = content.match(/#EXT-X-MAP:URI="([^"]+)"/);
             if (mapMatch) {
                 const mapUri = mapMatch[1];
-                if (mapUri !== currentMapUri) {
+                if (initTracker.needsUpdate(mapUri)) {
                     const initUrl = this.provider.getSegmentUrl(liveUrl, mapUri);
-                    const initBuffer = await session.fetchSegment(initUrl);
-                    if (!initBuffer) {
-                        logger.warn(`[StreamDownloader] ${alias} init segment download failed url=${initUrl}`);
-                        await timersPromises.setTimeout(1000);
-                        continue;
-                    }
-
-                    if (currentMapUri !== null) {
-                        // Not the first init — stream re-initialized mid-recording
-                        initName = `init_${segmentCount}.mp4`;
-                        await playlistManager.insertQualityChange(initName);
-                    }
-
-                    const initWriteOk = await FileSystemManager.writeFile(
-                        path.join(segmentsDirPath, initName),
-                        initBuffer as unknown as Uint8Array,
+                    const result = await initTracker.commitInit(
+                        mapUri,
+                        () => session.fetchSegment(initUrl),
                     );
-                    if (!initWriteOk) {
-                        logger.warn(`[StreamDownloader] ${alias} init segment write failed for ${initName} — retrying`);
+
+                    if (!result) {
+                        logger.warn(`[StreamDownloader] ${alias} init segment failed — retrying`);
                         await timersPromises.setTimeout(1000);
                         continue;
                     }
-                    logger.info(`[StreamDownloader] Downloaded init segment for ${alias} (${initName})`);
-                    currentMapUri = mapUri;
+
+                    // Quality change: tell the playlist manager, which buffers
+                    // the entry until the next segment flush (guarantees header
+                    // is written first).
+                    if (result.isQualityChange) {
+                        playlistManager.bufferQualityChange(result.fileName);
+                    }
+
+                    logger.info(`[StreamDownloader] Downloaded init segment for ${alias} (${result.fileName})`);
                 }
             }
 
@@ -193,7 +186,7 @@ export class StreamDownloader {
 
                 const baseName = segment.localName.replace(/\.\w+$/, "");
                 if (!/^\d+$/.test(baseName)) {
-                    segment.localName = `${playlistManager.startSequence + segmentCount}.ts`;
+                    segment.localName = `${playlistManager.startSequence + initTracker.count}.ts`;
                 }
 
                 const segmentPath = path.join(segmentsDirPath, segment.localName);
@@ -223,7 +216,7 @@ export class StreamDownloader {
                     }
                     await playlistManager.appendSegmentToPlaylist(segment);
                     lastDownload = Date.now();
-                    segmentCount++;
+                    initTracker.incrementSegmentCount();
                     downloadedThisIteration = true;
                 }
             }
@@ -250,8 +243,8 @@ export class StreamDownloader {
         } else {
             exitReason = "fetch-failed";
         }
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${segmentCount} dir=${path.basename(segmentsDirPath)}`);
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count} dir=${path.basename(segmentsDirPath)}`);
 
-        return { segmentCount, aborted: this._aborted };
+        return { segmentCount: initTracker.count, aborted: this._aborted };
     }
 }
