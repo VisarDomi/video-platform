@@ -12,6 +12,13 @@ export interface Tokens {
     tte: string | null;
 }
 
+/**
+ * Minimum remaining TTL (seconds) before we consider stream tokens usable.
+ * If tte is closer than this to now, we force a reload from disk rather
+ * than sending tokens the CDN will reject.
+ */
+const MIN_TTL_SECONDS = 3;
+
 export class TokenManager {
     private tokens: Tokens | null = null;
 
@@ -65,6 +72,13 @@ export class TokenManager {
         }
     }
 
+    private streamTokenTtl(): number {
+        if (!this.tokens?.tte) return -1;
+        const tte = parseInt(this.tokens.tte, 10);
+        if (isNaN(tte)) return -1;
+        return tte - Math.floor(Date.now() / 1000);
+    }
+
     public async getTokens(): Promise<Tokens> {
         while (!this.tokens) {
             logger.warn("[Tango] Tokens not available. Waiting for session.json to be populated...");
@@ -73,6 +87,19 @@ export class TokenManager {
                 await timersPromises.setTimeout(5000);
             }
         }
-        return this.tokens;
+
+        const ttl = this.streamTokenTtl();
+        if (ttl < MIN_TTL_SECONDS) {
+            logger.warn(`[Tango] Stream tokens near expiry (ttl=${ttl}s), forcing reload`);
+            const loaded = await this._loadTokens();
+            if (loaded) {
+                const newTtl = this.streamTokenTtl();
+                if (newTtl < MIN_TTL_SECONDS) {
+                    logger.error(`[Tango] Stream tokens STILL near expiry after reload (ttl=${newTtl}s) — auth service may be stalled`);
+                }
+            }
+        }
+
+        return this.tokens!;
     }
 }

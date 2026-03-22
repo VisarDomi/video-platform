@@ -242,7 +242,12 @@ class TangoDownloadSession implements IDownloadSession {
             });
 
             if (!response.ok) {
-                logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
+                if (response.status === 401 && tokens.tte) {
+                    const ttl = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
+                    logger.error(`[Tango] Playlist 401 — tte ttl=${ttl}s at request time, url=${url}`);
+                } else {
+                    logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
+                }
                 return null;
             }
             return await response.text();
