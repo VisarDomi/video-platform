@@ -56,7 +56,7 @@ export class DownloaderService {
         const downloadsManager = await DownloadsManager.create();
         const aliasManager = new AliasManager(path.join(config.sharedStatePath, "aliases.json"));
 
-        const tokenManager = await TokenManager.create();
+        const tokenManager = new TokenManager();
         const apiClient = new ApiClient(tokenManager);
         const aliasSyncService = new AliasSyncService(apiClient, aliasManager);
         const streamDiscoveryService = new StreamDiscoveryService(apiClient, aliasManager, downloadsManager);
@@ -97,7 +97,6 @@ export class DownloaderService {
         this.orphanStreamFinalizer.start();
         DiskSpaceMonitor.run();
 
-        this.tokenManager.startTokenWatcher();
         this.aliasSyncService.start();
         void this.streamDiscoveryService.start();
 
