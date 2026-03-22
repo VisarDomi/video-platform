@@ -1,9 +1,17 @@
+export interface SegmentFetchResult {
+    data: Buffer | null;
+    /** True if the failure was a timeout or transient network error.
+     *  False (or absent) if the CDN returned an HTTP error (4xx/5xx).
+     *  The download loop uses this to decide: retry vs stop. */
+    retryable?: boolean;
+}
+
 export interface IDownloadSession {
     /** Fetch and decode the live playlist. Returns content or null.
      *  Null means stop — the caller doesn't need to know why.
      *  The reason is logged inside the implementation. */
     fetchPlaylist(url: string): Promise<string | null>;
-    fetchSegment(url: string): Promise<Buffer | null>;
+    fetchSegment(url: string): Promise<SegmentFetchResult>;
 }
 
 export interface IStreamProvider {
