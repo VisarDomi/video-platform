@@ -69,6 +69,10 @@ export class ScDiscoveryService {
 
             if (this.downloadsManager.hasStreamer(target.username)) continue;
 
+            if (this.cooldown.wasRecentlyCleared(target.username)) {
+                logger.info(`[SC] ${target.username}: live again after cooldown`);
+            }
+
             const streamName = await this.scClient.refreshStreamName(target.username);
             if (!streamName) {
                 // Username might be stale (renamed). Fall back to roomId as streamName.
