@@ -6,14 +6,18 @@ import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
-import { PlaylistManager } from "./playlistManager.js";
-import { InitTracker } from "./initTracker.js";
-import { DiskSession } from "./diskSession.js";
+import type { PlaylistManager } from "./playlistManager.js";
+import type { InitTracker } from "./initTracker.js";
+import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
+
+export type ExitReason = "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
 
 export interface DownloadResult {
     segmentCount: number;
     aborted: boolean;
+    exitReason: ExitReason;
+    lastLiveUrl: string | null;
 }
 
 const HEARTBEAT_INTERVAL = 30_000;
@@ -33,20 +37,23 @@ export class StreamDownloader {
         this._aborted = true;
     }
 
-    public async start(): Promise<DownloadResult> {
-        if (!this.handle.state) {
-            logger.error(`Could not find state for download with handle. Aborting.`);
-            this.handle.remove();
-            return { segmentCount: 0, aborted: false };
-        }
-
-        const alias = this.handle.state.alias;
-        const liveUrl = await this.provider.parseMasterPlaylist(this.handle.masterPlaylistUrl);
+    /**
+     * Run a single download attempt. Does not own the folder, playlist,
+     * or init tracker — those are owned by StreamSession and survive
+     * across retries. Does not finalize or remove the handle.
+     */
+    public async run(
+        masterUrl: string,
+        playlistManager: PlaylistManager,
+        initTracker: InitTracker,
+        disk: DiskSession,
+    ): Promise<DownloadResult> {
+        const alias = this.handle.state?.alias ?? "unknown";
+        const liveUrl = await this.provider.parseMasterPlaylist(masterUrl);
 
         if (!liveUrl) {
             logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
-            this.handle.remove();
-            return { segmentCount: 0, aborted: false };
+            return { segmentCount: 0, aborted: false, exitReason: "fetch-failed", lastLiveUrl: null };
         }
 
         this.handle.update({ liveUrl });
@@ -55,28 +62,10 @@ export class StreamDownloader {
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
         logger.info(`[StreamDownloader] START ${alias} edge=${edge} variant=${liveUrl.split("?")[0]}`);
 
-        // DiskSession defers dir creation to first byte write.
-        // Nothing touches disk until actual content is ready.
-        // The handle is updated atomically when the dir is created —
-        // live-status.json reflects the dir the moment it exists.
-        const disk = new DiskSession(alias, this.handle, () => this.provider.setupDownloadDir(alias, new Date()));
-        const playlistManager = new PlaylistManager(disk);
-        const initTracker = new InitTracker(disk);
         let session = this.provider.createDownloadSession();
-
         playlistManager.setEdge(liveUrl);
 
-        const result = await this.downloadLoop(alias, liveUrl, session, playlistManager, initTracker, disk);
-
-        if (disk.materialized) {
-            await playlistManager.finalizePlaylist();
-            logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} dir=${path.basename(disk.dirPath)} url=${this.handle.masterPlaylistUrl}`);
-        } else {
-            logger.info(`[StreamDownloader] HANDLE-REMOVE ${alias} (no content written) url=${this.handle.masterPlaylistUrl}`);
-        }
-        this.handle.remove();
-
-        return result;
+        return await this.downloadLoop(alias, liveUrl, session, playlistManager, initTracker, disk);
     }
 
     private async checkForQualityUpgrade(
@@ -261,7 +250,7 @@ export class StreamDownloader {
 
         const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
         const staleTimedOut = Date.now() - lastDownload >= staleTimeout;
-        let exitReason: string;
+        let exitReason: ExitReason;
         if (this._aborted) {
             exitReason = "aborted";
         } else if (segmentFailed) {
@@ -275,6 +264,6 @@ export class StreamDownloader {
         const tlStr = tl.edge ? ` edge=${tl.edge} seq=${tl.mediaSequence} firstPDT=${tl.firstProgramDateTime ?? "none"} lastPDT=${tl.lastProgramDateTime ?? "none"}` : "";
         logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${tlStr}`);
 
-        return { segmentCount: initTracker.count, aborted: this._aborted };
+        return { segmentCount: initTracker.count, aborted: this._aborted, exitReason, lastLiveUrl: liveUrl };
     }
 }
