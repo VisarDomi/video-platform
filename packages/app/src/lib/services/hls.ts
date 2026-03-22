@@ -13,15 +13,7 @@ export interface PlaylistData {
 	isFmp4: boolean;
 }
 
-const cache = new Map<string, PlaylistData>();
-
-export function clearPlaylistCache(filename: string) {
-	cache.delete(filename);
-}
 export async function isFmp4Playlist(filename: string): Promise<boolean> {
-	const cached = cache.get(filename);
-	if (cached) return cached.isFmp4;
-
 	try {
 		const response = await fetch(API.HLS_PLAYLIST(filename));
 		const text = await response.text();
@@ -32,11 +24,6 @@ export async function isFmp4Playlist(filename: string): Promise<boolean> {
 }
 
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
-	if (cache.has(video.filename)) {
-		logEvent('playlist-cache-hit', { filename: video.filename });
-		return cache.get(video.filename)!;
-	}
-
 	const start = performance.now();
 	const response = await fetch(API.HLS_PLAYLIST(video.filename));
 	const text = await response.text();
@@ -57,9 +44,6 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 		}
 	}
 
-	const data: PlaylistData = { segments, isLive, isFmp4 };
-	cache.set(video.filename, data);
-
 	logEvent('playlist-fetch', {
 		filename: video.filename,
 		fetchMs: Math.round(fetchMs),
@@ -69,7 +53,7 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 		bytes: text.length
 	});
 
-	return data;
+	return { segments, isLive, isFmp4 };
 }
 
 export function calculateSegmentsToKeep(

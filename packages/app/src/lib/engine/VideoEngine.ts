@@ -1,6 +1,5 @@
 import Hls from 'hls.js';
 import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '../constants.js';
-import { clearPlaylistCache } from '../services/hls.js';
 import { getSavedTime } from '../utils/navigation.js';
 import type { Video } from '../types.js';
 
@@ -171,7 +170,6 @@ export class VideoEngine {
 		} else if (v.isLive) {
 			this.currentIsLive = false;
 			this.callbacks.onLiveStatusChanged(v.filename, false);
-			clearPlaylistCache(v.filename);
 		}
 	}
 
@@ -221,7 +219,6 @@ export class VideoEngine {
 				if (isActivePlayer) {
 					this.currentIsLive = false;
 					this.callbacks.onLiveStatusChanged(v.filename, false);
-					clearPlaylistCache(v.filename);
 				}
 			}
 		});
@@ -277,7 +274,6 @@ export class VideoEngine {
 				if (isActivePlayer) {
 					this.currentIsLive = false;
 					this.callbacks.onLiveStatusChanged(v.filename, false);
-					clearPlaylistCache(v.filename);
 				}
 			}
 		};
