@@ -41,3 +41,9 @@ export const AUTH_API_RATE_LIMIT_MS = 1_000;
 // File system debounce
 export const FILE_WATCHER_DEBOUNCE_MS = 500;
 export const STATUS_FILE_DEBOUNCE_MS = 200;
+
+// LADDER WebSocket protocol
+export const LADDER_SESSION_CLEANUP_INTERVAL_MS = 30_000;
+export const LADDER_SESSION_STALE_MS = 60_000;
+export const LADDER_WS_HANDSHAKE_TIMEOUT_MS = 15_000;
+export const LADDER_WS_HEARTBEAT_INTERVAL_MS = 30_000;
