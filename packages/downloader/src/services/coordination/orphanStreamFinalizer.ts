@@ -40,10 +40,8 @@ function parsePlaylist(content: string): ParsedPlaylist {
 
         if (trimmed.startsWith("#EXT-X-MAP")) {
             if (currentSection.mapLine === null && currentSection.entries.length === 0) {
-                // First MAP in this section — assign it
                 currentSection.mapLine = trimmed;
             } else {
-                // New section starts (quality change)
                 sections.push(currentSection);
                 currentSection = { mapLine: trimmed, entries: [] };
             }
@@ -56,7 +54,6 @@ function parsePlaylist(content: string): ParsedPlaylist {
             continue;
         }
 
-        // Segment line
         currentSection.entries.push({
             metadata: [...metadataBuffer],
             segmentName: trimmed,
@@ -71,7 +68,6 @@ function parsePlaylist(content: string): ParsedPlaylist {
 function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): string {
     const lines: string[] = [];
 
-    // Reconstruct header if missing
     if (parsed.headerLines.length === 0) {
         parsed.headerLines = [
             "#EXTM3U",
@@ -85,12 +81,9 @@ function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): stri
     let isFirstSection = true;
 
     for (const section of parsed.sections) {
-        // Filter to segments that exist on disk
         const validEntries = section.entries.filter(e => filesOnDisk.has(e.segmentName));
         if (validEntries.length === 0) continue;
 
-        // First section's MAP goes right after the header.
-        // Subsequent sections get DISCONTINUITY + MAP.
         if (section.mapLine) {
             if (!isFirstSection) {
                 lines.push("#EXT-X-DISCONTINUITY");

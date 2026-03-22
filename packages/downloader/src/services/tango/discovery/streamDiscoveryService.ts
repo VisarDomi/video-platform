@@ -102,8 +102,6 @@ export class StreamDiscoveryService {
             } else {
                 logger.verbose("[Tango] Poll complete: No new streams found or unable to fetch.");
             }
-            // Executive decision: 1s poll gives near-instant pickup when a followed
-            // streamer goes live. Lower values waste API calls, higher values delay recording start.
             await timersPromises.setTimeout(TANGO_POLL_MS);
         }
     }

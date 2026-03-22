@@ -221,17 +221,10 @@ export class ApiClient implements IStreamProvider {
     public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
         if (context.exitReason === "aborted") return null;
 
-        // The liveUrl is the source of truth for Tango — the following
-        // feed can go stale while the CDN is still serving.
-        // On fetch-failed (401 token timing, CDN hiccup): retry same master URL.
-        // The next attempt gets fresh tokens and re-parses the master.
         if (context.exitReason === "fetch-failed") {
             return context.lastMasterUrl;
         }
 
-        // On stale-timeout or segment-failed: the liveUrl stopped delivering.
-        // Try the following feed for a new master URL (stream may have
-        // reconnected with a different CDN path).
         const body = await this.getFollowingResponseBody();
         if (!body?.entities?.stream) return null;
 

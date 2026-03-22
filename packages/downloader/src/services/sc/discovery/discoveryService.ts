@@ -38,8 +38,6 @@ export class ScDiscoveryService {
         const targets = this.targetManager.getTargets();
         if (targets.length === 0) return;
 
-        // Build the bulk check list using roomIds directly from the file.
-        // No per-target API calls — roomIds are resolved at add-time by the server.
         const roomIdMap = new Map<string, ScTarget>();
         const roomIds: string[] = [];
 
@@ -48,8 +46,6 @@ export class ScDiscoveryService {
             if (this.cooldown.isActive(target.username)) continue;
 
             if (!target.roomId) {
-                // Legacy entry without roomId — skip.
-                // User should re-add via API to resolve.
                 continue;
             }
 
@@ -75,7 +71,6 @@ export class ScDiscoveryService {
 
             const streamName = await this.scClient.refreshStreamName(target.username);
             if (!streamName) {
-                // Username might be stale (renamed). Fall back to roomId as streamName.
                 logger.info(`[SC] ${target.username}: refreshStreamName failed, falling back to roomId=${target.roomId}`);
             }
 

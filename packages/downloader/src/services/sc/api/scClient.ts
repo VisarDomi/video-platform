@@ -57,7 +57,6 @@ export class ScClient implements IStreamProvider {
         await loadMouflonKeys();
     }
 
-    // Stateless — no cookie jar.  Each request stands on its own.
     private async fetchApi<T>(url: string): Promise<T | null> {
         try {
             const response = await fetch(url, {
@@ -291,10 +290,6 @@ export class ScClient implements IStreamProvider {
         return this.buildMasterUrl(streamName);
     }
 
-    /**
-     * On variant failure, try all 3 TLDs in parallel for the master playlist.
-     * Returns the best variant from whichever TLD responds, or null if all fail.
-     */
     public async recoverVariant(masterPlaylistUrl: string): Promise<string | null> {
         const streamMatch = masterPlaylistUrl.match(/\/hls\/([^/]+)\/master\//);
         if (!streamMatch) return null;
@@ -320,10 +315,6 @@ export class ScClient implements IStreamProvider {
 
 const CDN_HEADERS = { "User-Agent": USER_AGENT };
 
-// Fetch timeout — if the CDN accepts a connection but never responds,
-// the fetch aborts after this duration.  Without this, a hung TCP
-// connection blocks the download loop forever (no heartbeats, no exit,
-// no re-download).  Node's fetch has no default timeout.
 
 
 class ScDownloadSession implements IDownloadSession {

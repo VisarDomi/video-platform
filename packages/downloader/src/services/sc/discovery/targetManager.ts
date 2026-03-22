@@ -13,14 +13,6 @@ export interface ScTarget {
     roomId: string;
 }
 
-/**
- * SC-specific target manager.  Parses sc.txt lines in the format:
- *   https://stripchat.com/{username} {roomId}
- *
- * The roomId is the stable identifier (set at add-time by the server).
- * The username is a display label that may go stale on renames.
- * Lines without a roomId are supported for backward compat but log a warning.
- */
 export class ScTargetManager {
     private targets: Map<string, ScTarget> = new Map(); // keyed by username
     private readonly filePath: string;
@@ -58,19 +50,16 @@ export class ScTargetManager {
         let username = trimmed;
         let roomId = "";
 
-        // Extract username from URL
         if (trimmed.includes("stripchat.com/")) {
             const parts = trimmed.split("stripchat.com/");
             if (!parts[1]) return null;
             const rest = parts[1].split("/")[0].split("?")[0];
-            // Check for "username roomId" format
             const spaceIdx = rest.indexOf(" ");
             if (spaceIdx !== -1) {
                 username = rest.slice(0, spaceIdx);
                 roomId = rest.slice(spaceIdx + 1);
             } else {
                 username = rest;
-                // roomId might be after the full URL: "https://stripchat.com/user 12345"
                 const fullSpaceIdx = trimmed.indexOf(" ", trimmed.indexOf("stripchat.com/"));
                 if (fullSpaceIdx !== -1) {
                     roomId = trimmed.slice(fullSpaceIdx + 1).trim();

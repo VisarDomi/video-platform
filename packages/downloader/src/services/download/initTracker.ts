@@ -8,18 +8,6 @@ export interface InitCommitResult {
     isQualityChange: boolean;
 }
 
-/**
- * Owns the relationship between MAP URIs and init segment files on disk.
- *
- * Invariant: currentMapUri is only updated AFTER the corresponding init
- * file is confirmed written to disk. If the download or write fails,
- * currentMapUri stays at its previous value, so the next loop iteration
- * will retry. There is no state where currentMapUri references a file
- * that doesn't exist.
- *
- * Disk writes go through DiskSession, which materializes the dir on
- * first write.
- */
 export class InitTracker {
     private currentMapUri: string | null = null;
     private segmentCount: number = 0;
@@ -41,16 +29,6 @@ export class InitTracker {
         return this.segmentCount;
     }
 
-    /**
-     * Atomically download, write, and commit a new init segment.
-     *
-     * Returns the committed result on success, null on failure.
-     * On failure, currentMapUri is NOT updated — the caller should
-     * retry on the next loop iteration.
-     *
-     * Materializes the disk session on first call — the dir is created
-     * here, not before.
-     */
     public async commitInit(
         mapUri: string,
         downloadFn: () => Promise<import("../core/interfaces.js").SegmentFetchResult>,
@@ -73,7 +51,6 @@ export class InitTracker {
             return null;
         }
 
-        // STATE TRANSITION: only after file is confirmed on disk.
         this.currentMapUri = mapUri;
         return { fileName, isQualityChange };
     }
