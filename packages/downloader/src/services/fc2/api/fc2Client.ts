@@ -372,7 +372,7 @@ class Fc2DownloadSession implements IDownloadSession {
         }
     }
 
-    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             this.client._touchSession(tsUrl);
             const response = await fetch(tsUrl, {
@@ -381,12 +381,14 @@ class Fc2DownloadSession implements IDownloadSession {
             });
             if (response.ok) {
                 const arr = await response.arrayBuffer();
-                return Buffer.from(arr);
+                return { data: Buffer.from(arr) };
             }
             logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
+            return { data: null, retryable: false };
         } catch (error: any) {
-            logger.warn(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
+            const isTimeout = error.name === "TimeoutError" || error.message?.includes("aborted");
+            logger.warn(`[FC2] Segment fetch error: ${error.message} (retryable=${isTimeout})`, { tsUrl });
+            return { data: null, retryable: isTimeout };
         }
-        return null;
     }
 }

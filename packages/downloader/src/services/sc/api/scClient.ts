@@ -342,7 +342,7 @@ class ScDownloadSession implements IDownloadSession {
         }
     }
 
-    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             const response = await fetch(tsUrl, {
                 headers: CDN_HEADERS,
@@ -350,12 +350,14 @@ class ScDownloadSession implements IDownloadSession {
             });
             if (response.ok) {
                 const buf = await response.arrayBuffer();
-                return Buffer.from(buf);
+                return { data: Buffer.from(buf) };
             }
             logger.warn(`[SC] Segment download failed: ${response.status}`, { tsUrl });
+            return { data: null, retryable: false };
         } catch (error: any) {
-            logger.warn(`[SC] Segment fetch error: ${error.message}`, { tsUrl });
+            const isTimeout = error.name === "TimeoutError" || error.message?.includes("aborted");
+            logger.warn(`[SC] Segment fetch error: ${error.message} (retryable=${isTimeout})`, { tsUrl });
+            return { data: null, retryable: isTimeout };
         }
-        return null;
     }
 }

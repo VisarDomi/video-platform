@@ -108,7 +108,9 @@ export class AuthService {
                 await this.authContext.saveTokenToFile();
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             } catch (error) {
-                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. Retrying after delay.`, { error: (error as Error).message });
+                const tte = this.authContext.getTokenBag()?.extras?.tte;
+                const ttl = tte ? parseInt(tte, 10) - Math.floor(Date.now() / 1000) : -1;
+                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. On-disk tokens have ttl=${ttl}s. Retrying in ${BACKGROUND_JOB_FAILURE_RETRY_MS / 1000}s.`, { error: (error as Error).message });
                 await timersPromises.setTimeout(BACKGROUND_JOB_FAILURE_RETRY_MS);
             }
         }

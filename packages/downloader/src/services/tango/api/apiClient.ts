@@ -250,10 +250,11 @@ class TangoDownloadSession implements IDownloadSession {
             if (!response.ok) {
                 if (response.status === 401 && tokens.tte) {
                     const ttl = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
+                    const tokenAge = this.tokenManager.tokenAgeMs;
                     if (ttl >= MIN_STREAM_TTL) {
-                        logger.error(`[Tango] Playlist 401 with VALID tokens — ttl=${ttl}s, CDN rejected valid credentials, url=${url}`);
+                        logger.error(`[Tango] Playlist 401 with VALID tokens — ttl=${ttl}s tokenAge=${(tokenAge / 1000).toFixed(1)}s, CDN rejected valid credentials, url=${url}`);
                     } else {
-                        logger.error(`[Tango] Playlist 401 — tte ttl=${ttl}s (expired/near-expiry), url=${url}`);
+                        logger.error(`[Tango] Playlist 401 — ttl=${ttl}s tokenAge=${(tokenAge / 1000).toFixed(1)}s (expired/near-expiry), url=${url}`);
                     }
                 } else {
                     logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
@@ -267,19 +268,21 @@ class TangoDownloadSession implements IDownloadSession {
         }
     }
 
-    public async fetchSegment(tsUrl: string): Promise<Buffer | null> {
+    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             const tsResponse = await fetch(tsUrl, {
                 signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
             });
             if (tsResponse.ok) {
                 const tsBuffer = await tsResponse.arrayBuffer();
-                return Buffer.from(tsBuffer);
+                return { data: Buffer.from(tsBuffer) };
             }
             logger.warn(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
+            return { data: null, retryable: false };
         } catch (error: any) {
-            logger.warn(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
+            const isTimeout = error.name === "TimeoutError" || error.message?.includes("aborted");
+            logger.warn(`[Tango] Segment fetch error: ${error.message} (retryable=${isTimeout})`, { tsUrl });
+            return { data: null, retryable: isTimeout };
         }
-        return null;
     }
 }

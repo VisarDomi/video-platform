@@ -90,6 +90,11 @@ export class TangoAuthProvider implements IAuthProvider {
             throw new Error("Token data response was missing one or more required cookies (tt, ttu, tte).");
         }
 
+        const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
+        if (ttl < 5) {
+            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s`);
+        }
+
         return { extras: { tt, ttu, tte } };
     }
 

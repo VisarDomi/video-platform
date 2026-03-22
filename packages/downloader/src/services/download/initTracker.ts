@@ -53,10 +53,11 @@ export class InitTracker {
      */
     public async commitInit(
         mapUri: string,
-        downloadFn: () => Promise<Buffer | null>,
+        downloadFn: () => Promise<import("../core/interfaces.js").SegmentFetchResult>,
     ): Promise<InitCommitResult | null> {
-        const buffer = await downloadFn();
-        if (!buffer) return null;
+        const result = await downloadFn();
+        if (!result.data) return null;
+        const buffer = result.data;
 
         if (!await this.disk.materialize()) return null;
 

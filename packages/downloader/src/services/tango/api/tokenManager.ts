@@ -13,17 +13,14 @@ export interface Tokens {
     tte: string | null;
 }
 
-/**
- * Maximum age (ms) of the session file before we consider the auth
- * service stalled. The auth service writes every 5s (shortTokenRefresh).
- * Two missed cycles = something is wrong.
- */
 const AUTH_STALE_THRESHOLD_MS = 15_000;
 
 export class TokenManager {
     private tokens: Tokens | null = null;
     private sessionFilePath: string;
     private authStaleLogged = false;
+    private lastTte: string | null = null;
+    private lastLoadedAt: number = 0;
 
     private constructor() {
         const cfg = config.getConfig();
@@ -62,6 +59,35 @@ export class TokenManager {
         }
 
         if (session.tangoST && session.tt && session.ttu && session.tte) {
+            const newTte = session.tte;
+
+            // Detect: auth service wrote the file but tte didn't change.
+            // This means either the Tango API returned the same token or
+            // the auth refresh failed silently without updating the file.
+            if (this.lastTte !== null && newTte === this.lastTte) {
+                const ttl = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
+                if (ttl < 3) {
+                    logger.warn(`[Tango] Token tte unchanged across reads (ttl=${ttl}s) — auth may be stuck`);
+                }
+            }
+
+            // Detect: the token we just read is already near-expiry.
+            // With 10s TTL and 5s refresh, a freshly-read token should
+            // have 5-10s remaining. Anything below 3s is anomalous.
+            const ttlAtRead = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
+            if (ttlAtRead < 3 && this.lastTte !== newTte) {
+                let fileMtimeInfo = "";
+                try {
+                    const stat = await fsPromises.stat(this.sessionFilePath);
+                    const ageMs = Date.now() - stat.mtimeMs;
+                    fileMtimeInfo = ` fileAge=${(ageMs / 1000).toFixed(1)}s`;
+                } catch {}
+                logger.warn(`[Tango] Token near-expiry at read time: ttl=${ttlAtRead}s tte=${newTte}${fileMtimeInfo}`);
+            }
+
+            this.lastTte = newTte;
+            this.lastLoadedAt = Date.now();
+
             this.tokens = {
                 st: session.tangoST,
                 tt: session.tt,
@@ -76,12 +102,6 @@ export class TokenManager {
         }
     }
 
-    /**
-     * Check if the auth service is alive by looking at the session file's
-     * mtime. The auth service is the sole writer — if the file is stale,
-     * the auth service stopped refreshing and our tokens will expire.
-     * Logs once on detection, clears when the file is fresh again.
-     */
     private _checkAuthHealth(): void {
         fsPromises.stat(this.sessionFilePath).then((stat) => {
             const ageMs = Date.now() - stat.mtimeMs;
@@ -96,9 +116,12 @@ export class TokenManager {
                 }
                 this.authStaleLogged = false;
             }
-        }).catch(() => {
-            // stat failed — _loadTokens already handles missing file
-        });
+        }).catch(() => {});
+    }
+
+    /** Age of the cached tokens in milliseconds. */
+    public get tokenAgeMs(): number {
+        return this.lastLoadedAt > 0 ? Date.now() - this.lastLoadedAt : -1;
     }
 
     public async getTokens(): Promise<Tokens> {

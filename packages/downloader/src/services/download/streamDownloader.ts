@@ -201,18 +201,24 @@ export class StreamDownloader {
                     continue;
                 }
 
-                const tsBuffer = await session.fetchSegment(segment.remoteUrl);
+                const fetchResult = await session.fetchSegment(segment.remoteUrl);
 
                 const baseName = segment.localName.replace(/\.\w+$/, "");
                 if (!/^\d+$/.test(baseName)) {
                     segment.localName = `${playlistManager.startSequence + initTracker.count}.ts`;
                 }
 
-                if (!tsBuffer) {
+                if (!fetchResult.data) {
+                    if (fetchResult.retryable) {
+                        logger.warn(`[StreamDownloader] ${alias} segment timeout segment=${segment.localName} — skipping`);
+                        playlistManager.addIgnoredSegment(segment.localName);
+                        continue;
+                    }
                     logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
                     segmentFailed = true;
                     break;
                 }
+                const tsBuffer = fetchResult.data;
 
                 // First byte write: DiskSession materializes the dir here.
                 if (!await disk.materialize()) {
