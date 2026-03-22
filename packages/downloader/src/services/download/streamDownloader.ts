@@ -58,11 +58,15 @@ export class StreamDownloader {
         }
 
         this.handle.update({ segmentsDirPath });
-        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} master=${this.handle.masterPlaylistUrl} variant=${liveUrl.split("?")[0]}`);
+        const edgeMatch = liveUrl.match(/\/(b-hls-\d+)\//);
+        const edge = edgeMatch ? edgeMatch[1] : "unknown";
+        logger.info(`[StreamDownloader] START ${alias} dir=${path.basename(segmentsDirPath)} edge=${edge} variant=${liveUrl.split("?")[0]}`);
 
         const session = this.provider.createDownloadSession();
         const playlistManager = new PlaylistManager(segmentsDirPath);
         const initTracker = new InitTracker(segmentsDirPath);
+
+        playlistManager.setEdge(liveUrl);
 
         const result = await this.downloadLoop(alias, liveUrl, segmentsDirPath, session, playlistManager, initTracker);
 
@@ -243,7 +247,9 @@ export class StreamDownloader {
         } else {
             exitReason = "fetch-failed";
         }
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count} dir=${path.basename(segmentsDirPath)}`);
+        const tl = playlistManager.timeline;
+        const tlStr = tl.edge ? ` edge=${tl.edge} seq=${tl.mediaSequence} firstPDT=${tl.firstProgramDateTime ?? "none"} lastPDT=${tl.lastProgramDateTime ?? "none"}` : "";
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count} dir=${path.basename(segmentsDirPath)}${tlStr}`);
 
         return { segmentCount: initTracker.count, aborted: this._aborted };
     }
