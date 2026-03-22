@@ -5,7 +5,8 @@ import * as path from "path";
 import { config } from "../../../common/config.js";
 import logger from "../../../common/logger.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
-import { TANGO_STREAM_TOKEN_TTL_S, TANGO_STREAM_TOKEN_REFRESH_MS } from "shared";
+import { TANGO_STREAM_TOKEN_REFRESH_MS } from "shared";
+
 
 export interface Tokens {
     st: string | null;
@@ -14,15 +15,12 @@ export interface Tokens {
     tte: string | null;
 }
 
-const REFRESH_CYCLE_S = TANGO_STREAM_TOKEN_REFRESH_MS / 1000;
-const EXPECTED_MIN_TTL_S = TANGO_STREAM_TOKEN_TTL_S - REFRESH_CYCLE_S;
-const AUTH_STALE_THRESHOLD_MS = REFRESH_CYCLE_S * 3 * 1000;
+const AUTH_STALE_THRESHOLD_MS = (TANGO_STREAM_TOKEN_REFRESH_MS / 1000) * 3 * 1000;
 
 export class TokenManager {
     private tokens: Tokens | null = null;
     private sessionFilePath: string;
     private authStaleLogged = false;
-    private lastTte: string | null = null;
     private lastLoadedAt: number = 0;
 
     private constructor() {
@@ -38,12 +36,11 @@ export class TokenManager {
 
     public startTokenWatcher(): void {
         const watch = async () => {
-            const refreshInterval = TANGO_STREAM_TOKEN_REFRESH_MS;
-            await timersPromises.setTimeout(refreshInterval);
+            await timersPromises.setTimeout(TANGO_STREAM_TOKEN_REFRESH_MS);
             while (true) {
                 await this._loadTokens();
                 this._checkAuthHealth();
-                await timersPromises.setTimeout(refreshInterval);
+                await timersPromises.setTimeout(TANGO_STREAM_TOKEN_REFRESH_MS);
             }
         };
         void watch();
@@ -61,26 +58,7 @@ export class TokenManager {
         }
 
         if (session.tangoST && session.tt && session.ttu && session.tte) {
-            const newTte = session.tte;
-            const ttlAtRead = parseInt(newTte, 10) - Math.floor(Date.now() / 1000);
-
-            if (this.lastTte !== null && newTte === this.lastTte && ttlAtRead < EXPECTED_MIN_TTL_S) {
-                logger.warn(`[Tango] Token tte unchanged across reads (ttl=${ttlAtRead}s) — auth may be stuck`);
-            }
-
-            if (ttlAtRead < EXPECTED_MIN_TTL_S && this.lastTte !== newTte) {
-                let fileMtimeInfo = "";
-                try {
-                    const stat = await fsPromises.stat(this.sessionFilePath);
-                    const ageMs = Date.now() - stat.mtimeMs;
-                    fileMtimeInfo = ` fileAge=${(ageMs / 1000).toFixed(1)}s`;
-                } catch {}
-                logger.warn(`[Tango] Token near-expiry at read time: ttl=${ttlAtRead}s (expected>=${EXPECTED_MIN_TTL_S}s)${fileMtimeInfo}`);
-            }
-
-            this.lastTte = newTte;
             this.lastLoadedAt = Date.now();
-
             this.tokens = {
                 st: session.tangoST,
                 tt: session.tt,
@@ -114,10 +92,6 @@ export class TokenManager {
 
     public get tokenAgeMs(): number {
         return this.lastLoadedAt > 0 ? Date.now() - this.lastLoadedAt : -1;
-    }
-
-    public static get expectedMinTtl(): number {
-        return EXPECTED_MIN_TTL_S;
     }
 
     public async getTokens(): Promise<Tokens> {
