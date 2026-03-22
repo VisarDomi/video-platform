@@ -12,6 +12,7 @@ import ladderRouter from "./api/ladder.routes.js";
 import scRouter from "./api/fmp4-list.routes.js";
 import tsliveListRouter from "./api/tslive-list.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
+import frontendLogRouter from "./api/frontend-log.routes.js";
 import { startTokenWatcher } from "./services/tslive/tokenManager.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
@@ -45,6 +46,7 @@ async function startServer() {
 
   startTokenWatcher();
 
+  app.use("/", frontendLogRouter);
   app.use("/", ladderRouter);
   app.use("/", scRouter);
   app.use("/", tsliveListRouter);
