@@ -23,7 +23,6 @@ export class RetryCooldown {
         const until = this.cooldownUntil.get(id);
         if (!until) return false;
         if (Date.now() < until) return true;
-        // Cooldown just expired
         this.cooldownUntil.delete(id);
         this.recentlyCleared.add(id);
         return false;
