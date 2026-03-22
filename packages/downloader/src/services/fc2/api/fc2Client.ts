@@ -1,5 +1,5 @@
 import * as path from "path";
-import * as config from "../../../common/config.js";
+import { config } from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
@@ -309,7 +309,7 @@ export class Fc2Client implements IStreamProvider {
         };
 
         const baseFilename = generateDownloadBaseName(alias, date);
-        const storageLocation = path.join(config.getConfig().storagePath, "fc2", "downloader");
+        const storageLocation = path.join(config.storagePath, "fc2", "downloader");
 
         const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
         if (!storageLocationExists) {

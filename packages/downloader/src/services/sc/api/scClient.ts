@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import * as config from "../../../common/config.js";
+import { config } from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
@@ -258,7 +258,7 @@ export class ScClient implements IStreamProvider {
         const seconds = String(date.getSeconds()).padStart(2, "0");
         const baseName = `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
 
-        const storageLocation = path.join(config.getConfig().storagePath, "sc", "downloader");
+        const storageLocation = path.join(config.storagePath, "sc", "downloader");
         const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
         if (!storageLocationExists) {
             logger.error(`[SC] Could not create or access storage folder at: ${storageLocation}`);

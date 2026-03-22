@@ -1,6 +1,5 @@
 import * as timersPromises from "timers/promises";
 
-import * as config from "../../../common/config.js";
 import logger from "../../../common/logger.js";
 import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { AliasManager } from "shared";
@@ -102,7 +101,7 @@ export class StreamDiscoveryService {
             } else {
                 logger.verbose("[Tango] Poll complete: No new streams found or unable to fetch.");
             }
-            await timersPromises.setTimeout(config.getConfig().intervals.pollFollowing);
+            await timersPromises.setTimeout(1000);
         }
     }
 }

@@ -1,5 +1,5 @@
 import * as path from "path";
-import * as config from "../../../common/config.js";
+import { config } from "../../../common/config.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import * as constants from "../../../common/constants.js";
@@ -187,7 +187,7 @@ export class ApiClient implements IStreamProvider {
         };
 
         const baseFilename = generateDownloadBaseName(alias, date);
-        const storageLocation = path.join(config.getConfig().storagePath, "tango", "downloader");
+        const storageLocation = path.join(config.storagePath, "tango", "downloader");
 
         const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
         if (!storageLocationExists) {

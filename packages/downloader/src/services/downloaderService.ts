@@ -2,7 +2,7 @@ import logger from "../common/logger.js";
 import { DownloadsManager } from "./state/downloadsManager.js";
 import { AliasManager } from "shared";
 import * as path from "path";
-import * as config from "../common/config.js";
+import { config } from "../common/config.js";
 import { OrphanStreamFinalizer } from "./coordination/orphanStreamFinalizer.js";
 import { DiskSpaceMonitor } from "./coordination/diskSpaceMonitor.js";
 
@@ -54,8 +54,7 @@ export class DownloaderService {
 
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
-        const cfg = config.getConfig();
-        const aliasManager = new AliasManager(path.join(cfg.sharedStatePath, "aliases.json"));
+        const aliasManager = new AliasManager(path.join(config.sharedStatePath, "aliases.json"));
 
         const tokenManager = await TokenManager.create();
         const apiClient = new ApiClient(tokenManager);

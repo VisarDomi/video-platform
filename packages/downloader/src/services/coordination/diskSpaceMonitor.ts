@@ -5,7 +5,7 @@ import * as timersPromises from "timers/promises";
 import { exec } from "child_process";
 
 import logger from "../../common/logger.js";
-import * as config from "../../common/config.js";
+import { config } from "../../common/config.js";
 import * as utils from "../../common/utils.js";
 
 const __filename = url.fileURLToPath(import.meta.url);
@@ -22,8 +22,7 @@ export class DiskSpaceMonitor {
 
         while (true) {
             try {
-                const cfg = config.getConfig();
-                const stats = await fs.statfs(cfg.storagePath);
+                const stats = await fs.statfs(config.storagePath);
                 const availableBytes = stats.bavail * stats.bsize;
                 const limitBytes = 50 * 1024 * 1024 * 1024;
 

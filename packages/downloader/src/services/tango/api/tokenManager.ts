@@ -2,7 +2,7 @@ import * as timersPromises from "timers/promises";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 
-import * as config from "../../../common/config.js";
+import { config } from "../../../common/config.js";
 import logger from "../../../common/logger.js";
 import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import { TANGO_STREAM_TOKEN_TTL_S, TANGO_STREAM_TOKEN_REFRESH_MS } from "shared";
@@ -26,8 +26,7 @@ export class TokenManager {
     private lastLoadedAt: number = 0;
 
     private constructor() {
-        const cfg = config.getConfig();
-        this.sessionFilePath = path.resolve(cfg.sharedStatePath, "session", "diusminus@gmail.com.json");
+        this.sessionFilePath = path.resolve(config.sharedStatePath, "session", "diusminus@gmail.com.json");
         logger.info("[Tango] TokenManager initialized.");
     }
 
@@ -39,7 +38,7 @@ export class TokenManager {
 
     public startTokenWatcher(): void {
         const watch = async () => {
-            const refreshInterval = config.getConfig().intervals.shortTokenRefresh;
+            const refreshInterval = TANGO_STREAM_TOKEN_REFRESH_MS;
             await timersPromises.setTimeout(refreshInterval);
             while (true) {
                 await this._loadTokens();
@@ -126,7 +125,7 @@ export class TokenManager {
             logger.warn("[Tango] Tokens not available. Waiting for session.json to be populated...");
             const loaded = await this._loadTokens();
             if (!loaded) {
-                await timersPromises.setTimeout(5000);
+                await timersPromises.setTimeout(TANGO_STREAM_TOKEN_REFRESH_MS);
             }
         }
         return this.tokens;

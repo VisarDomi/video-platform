@@ -1,7 +1,7 @@
 import * as path from "path";
 
 import logger from "../../common/logger.js";
-import * as config from "../../common/config.js";
+import { config } from "../../common/config.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 
 interface Download {
@@ -45,8 +45,7 @@ export class DownloadsManager {
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
-        const cfg = config.getConfig();
-        this.statusFilePath = path.join(cfg.sharedStatePath, "live-status.json");
+        this.statusFilePath = path.join(config.sharedStatePath, "live-status.json");
         logger.info(`[General] DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 

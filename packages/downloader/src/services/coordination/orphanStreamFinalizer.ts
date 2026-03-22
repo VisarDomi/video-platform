@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import * as config from "../../common/config.js";
+import { config } from "../../common/config.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { fixTargetDuration } from "shared";
@@ -136,7 +136,6 @@ export class OrphanStreamFinalizer {
 
     private async processOrphans(): Promise<void> {
         logger.info("[System] Starting orphan stream finalizer check...");
-        const cfg = config.getConfig();
         const activePaths = this.downloadsManager.getActiveSegmentPaths();
 
         const services = ["tango", "fc2", "sc"];
@@ -146,7 +145,7 @@ export class OrphanStreamFinalizer {
         let totalDeleted = 0;
 
         for (const service of services) {
-            const streamsLocation = path.join(cfg.storagePath, service, "downloader");
+            const streamsLocation = path.join(config.storagePath, service, "downloader");
             const stats = await this.cleanServiceDirectory(streamsLocation, activePaths);
 
             totalProcessed += stats.processed;

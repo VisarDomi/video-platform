@@ -2,7 +2,6 @@ import * as timersPromises from "timers/promises";
 import * as path from "path";
 import * as fs from "fs/promises";
 
-import * as config from "../../common/config.js";
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
@@ -104,7 +103,7 @@ export class StreamDownloader {
         let segmentFailed = false;
         let lastHeartbeat = Date.now();
         let lastQualityCheck = Date.now();
-        const staleTimeout = config.getConfig().timeouts.staleStream;
+        const staleTimeout = 60_000;
 
         while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
             if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL) {
