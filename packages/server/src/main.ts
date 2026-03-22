@@ -12,6 +12,7 @@ import fc2Router from "./api/fc2.routes.js";
 import scRouter from "./api/sc-list.routes.js";
 import tangoListRouter from "./api/tango-list.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
+import frontendLogRouter from "./api/frontend-log.routes.js";
 import { startTokenWatcher } from "./services/tango/tokenManager.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
@@ -45,6 +46,7 @@ async function startServer() {
 
   startTokenWatcher();
 
+  app.use("/", frontendLogRouter);
   app.use("/", fc2Router);
   app.use("/", scRouter);
   app.use("/", tangoListRouter);

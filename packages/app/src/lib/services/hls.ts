@@ -1,5 +1,6 @@
 import { API, HLS } from '../constants.js';
 import type { Video } from '../types.js';
+import { logEvent } from './log.js';
 
 export interface PlaylistSegment {
 	name: string;
@@ -32,11 +33,14 @@ export async function isFmp4Playlist(filename: string): Promise<boolean> {
 
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
 	if (cache.has(video.filename)) {
+		logEvent('playlist-cache-hit', { filename: video.filename });
 		return cache.get(video.filename)!;
 	}
 
+	const start = performance.now();
 	const response = await fetch(API.HLS_PLAYLIST(video.filename));
 	const text = await response.text();
+	const fetchMs = performance.now() - start;
 
 	const isLive = !text.includes('#EXT-X-ENDLIST');
 	const isFmp4 = text.includes('#EXT-X-MAP:');
@@ -55,6 +59,16 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 
 	const data: PlaylistData = { segments, isLive, isFmp4 };
 	cache.set(video.filename, data);
+
+	logEvent('playlist-fetch', {
+		filename: video.filename,
+		fetchMs: Math.round(fetchMs),
+		segments: segments.length,
+		isLive,
+		isFmp4,
+		bytes: text.length
+	});
+
 	return data;
 }
 
