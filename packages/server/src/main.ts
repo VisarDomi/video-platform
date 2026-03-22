@@ -11,8 +11,6 @@ import hlsRouter from "./api/hls.routes.js";
 import ladderRouter from "./api/ladder.routes.js";
 import scRouter from "./api/fmp4-list.routes.js";
 import tsliveListRouter from "./api/tslive-list.routes.js";
-import tlRouter from "./api/tl.routes.js";
-import tlProxyRouter from "./api/tl-proxy.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
 import { startTokenWatcher } from "./services/tslive/tokenManager.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
@@ -47,8 +45,6 @@ async function startServer() {
 
   startTokenWatcher();
 
-  app.use("/api", tlProxyRouter);
-  app.use("/api", tlRouter);
   app.use("/", ladderRouter);
   app.use("/", scRouter);
   app.use("/", tsliveListRouter);
