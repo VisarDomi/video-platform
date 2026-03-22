@@ -12,6 +12,15 @@ export interface SegmentInfo {
 
 export type SegmentUrlResolver = (segmentLine: string) => string;
 
+/**
+ * Owns the playlist file. All writes go through this class.
+ *
+ * Invariant: the playlist file is never created without a valid header.
+ * Quality changes that arrive before the first segment are buffered
+ * and flushed atomically with the header when the first segment is
+ * appended. This prevents the file from starting with a bare
+ * DISCONTINUITY+MAP entry that would later be overwritten.
+ */
 export class PlaylistManager {
     private readonly segmentsDirPath: string;
     private readonly fullPlaylistPath: string;
@@ -20,6 +29,7 @@ export class PlaylistManager {
     private lastSegmentNumber: number = -1;
     public startSequence: number = 0;
     private pendingHeader: string[] | null = null;
+    private pendingQualityChanges: string[] = [];
     private currentTargetDuration: number = 0;
 
     constructor(segmentsDirPath: string) {
@@ -121,6 +131,16 @@ export class PlaylistManager {
         return newSegments;
     }
 
+    /**
+     * Buffer a quality change. NOT written to the file immediately.
+     * Flushed to the file when the next segment is appended via
+     * appendSegmentToPlaylist, which guarantees the header exists first.
+     */
+    public bufferQualityChange(initSegmentName: string): void {
+        this.pendingQualityChanges.push(initSegmentName);
+        logger.debug(`[PlaylistManager] Buffered quality change: ${initSegmentName}`);
+    }
+
     public async appendSegmentToPlaylist(segment: SegmentInfo): Promise<void> {
         const currentNumber = parseInt(segment.localName.replace(/\.ts$/, ""), 10);
 
@@ -142,13 +162,31 @@ export class PlaylistManager {
         const segDuration = segment.accurateDuration ?? this.getExtinfDuration(segment.metadata);
         const requiredTarget = Math.ceil(segDuration);
 
+        // Flush header + buffered quality changes atomically on first segment.
+        // After this block, pendingHeader is null and the file exists with
+        // a valid header followed by any quality change markers.
         if (this.pendingHeader) {
             this.currentTargetDuration = requiredTarget;
             const header = this.pendingHeader.map((l) =>
                 l.startsWith("#EXT-X-TARGETDURATION") ? `#EXT-X-TARGETDURATION:${requiredTarget}` : l
             );
-            await FileSystemManager.writeFile(this.fullPlaylistPath, header.map(l => l.trim()).join("\n") + "\n");
+
+            let initialContent = header.map(l => l.trim()).join("\n") + "\n";
+
+            for (const initName of this.pendingQualityChanges) {
+                initialContent += `#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="${initName}"\n`;
+            }
+            this.pendingQualityChanges = [];
+
+            await FileSystemManager.writeFile(this.fullPlaylistPath, initialContent);
             this.pendingHeader = null;
+        } else if (this.pendingQualityChanges.length > 0) {
+            // Header already written — flush buffered quality changes now.
+            for (const initName of this.pendingQualityChanges) {
+                const tag = `#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="${initName}"\n`;
+                await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
+            }
+            this.pendingQualityChanges = [];
         }
 
         if (requiredTarget > this.currentTargetDuration) {
@@ -167,16 +205,10 @@ export class PlaylistManager {
         await FileSystemManager.appendFile(this.fullPlaylistPath, entry);
     }
 
-    public async insertDiscontinuity(): Promise<void> {
+    private async insertDiscontinuity(): Promise<void> {
         const tag = "#EXT-X-DISCONTINUITY\n";
         await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
         logger.debug(`[PlaylistManager] Inserted discontinuity tag.`);
-    }
-
-    public async insertQualityChange(initSegmentName: string): Promise<void> {
-        const tag = `#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="${initSegmentName}"\n`;
-        await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
-        logger.debug(`[PlaylistManager] Inserted quality change: ${initSegmentName}`);
     }
 
     public async finalizePlaylist(): Promise<void> {
