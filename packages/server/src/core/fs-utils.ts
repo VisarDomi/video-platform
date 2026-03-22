@@ -36,7 +36,10 @@ export async function getSegmentDuration(tsFilePath: string): Promise<number> {
 
 export async function generatePlaylist(videoPath: string): Promise<void> {
     const files = await fsPromises.readdir(videoPath);
-    const hasInitSegment = files.includes(HLS.INIT_SEGMENT);
+    const initSegment = files.includes(HLS.INIT_SEGMENT)
+        ? HLS.INIT_SEGMENT
+        : files.filter(f => f.startsWith("init_") && f.endsWith(".mp4")).sort()[0] || null;
+    const hasInitSegment = initSegment !== null;
     const tsFiles = files
         .filter((f) => f.endsWith(FILE_EXTENSIONS.TS))
         .sort((a, b) => {
@@ -75,7 +78,7 @@ export async function generatePlaylist(videoPath: string): Promise<void> {
     ];
 
     if (hasInitSegment) {
-        lines.push(`${HLS.MAP_PREFIX}URI="${HLS.INIT_SEGMENT}"`);
+        lines.push(`${HLS.MAP_PREFIX}URI="${initSegment}"`);
     }
 
     let lastSequence: number | null = null;
@@ -131,6 +134,27 @@ async function getFmp4Durations(videoPath: string, tsFiles: string[]): Promise<n
     return tsFiles.map(() => 2.0);
 }
 
+function repairPlaylistHeader(content: string): string {
+    const lines = content.split("\n");
+    let maxExtinf = 0;
+    for (const line of lines) {
+        if (line.trim().startsWith("#EXTINF:")) {
+            const duration = parseFloat(line.trim().slice("#EXTINF:".length).replace(",", ""));
+            if (!isNaN(duration) && duration > maxExtinf) maxExtinf = duration;
+        }
+    }
+    const targetDuration = maxExtinf > 0 ? Math.ceil(maxExtinf) : HLS.DEFAULT_TARGET_DURATION;
+
+    const header = [
+        HLS.HEADER,
+        HLS.VERSION,
+        `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`,
+        HLS.MEDIA_SEQUENCE,
+    ].join("\n");
+
+    return header + "\n" + content;
+}
+
 const playlistPromises = new Map<string, Promise<void>>();
 
 export function ensurePlaylist(videoPath: string): Promise<void> {
@@ -147,7 +171,14 @@ export function ensurePlaylist(videoPath: string): Promise<void> {
             return;
         }
 
-        const content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
+        let content = await fsPromises.readFile(playlistPath, MISC.ENCODING_UTF8);
+
+        if (!content.trimStart().startsWith("#EXTM3U")) {
+            content = repairPlaylistHeader(content);
+            await fsPromises.writeFile(playlistPath, content, MISC.ENCODING_UTF8);
+            logger.info(`Repaired missing header in ${playlistPath}`);
+        }
+
         const { content: fixed, wasFixed } = fixTargetDuration(content);
         if (wasFixed) {
             await fsPromises.writeFile(playlistPath, fixed, MISC.ENCODING_UTF8);

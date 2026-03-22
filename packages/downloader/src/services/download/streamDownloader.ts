@@ -166,10 +166,15 @@ export class StreamDownloader {
                         await playlistManager.insertQualityChange(initName);
                     }
 
-                    await FileSystemManager.writeFile(
+                    const initWriteOk = await FileSystemManager.writeFile(
                         path.join(segmentsDirPath, initName),
                         initBuffer as unknown as Uint8Array,
                     );
+                    if (!initWriteOk) {
+                        logger.warn(`[StreamDownloader] ${alias} init segment write failed for ${initName} — retrying`);
+                        await timersPromises.setTimeout(1000);
+                        continue;
+                    }
                     logger.info(`[StreamDownloader] Downloaded init segment for ${alias} (${initName})`);
                     currentMapUri = mapUri;
                 }
