@@ -5,6 +5,9 @@ import * as path from "path";
 import logger from "../common/logger.js";
 import { FileSystemManager } from "../common/fileSystemManager.js";
 import { StreamDownloader } from "../services/download/streamDownloader.js";
+import { PlaylistManager } from "../services/download/playlistManager.js";
+import { InitTracker } from "../services/download/initTracker.js";
+import { DiskSession } from "../services/download/diskSession.js";
 import { IDownloadSession, IStreamProvider } from "../services/core/interfaces.js";
 import { DownloadHandle } from "../services/state/downloadsManager.js";
 
@@ -65,6 +68,9 @@ class EphemeralStreamProvider implements IStreamProvider {
     async recoverVariant(masterPlaylistUrl: string): Promise<string | null> {
         return this.inner.recoverVariant(masterPlaylistUrl);
     }
+    async shouldRetry(): Promise<string | null> {
+        return null;
+    }
 }
 
 export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
@@ -121,6 +127,9 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
         const dirPath = path.join(TL_BASE_PATH, alias);
         const ephemeralProvider = new EphemeralStreamProvider(tangoApiClient, dirPath);
         const handle = new EphemeralDownloadHandle(masterPlaylistUrl, streamerId, alias) as unknown as DownloadHandle;
+        const disk = new DiskSession(alias, handle as unknown as DownloadHandle, () => ephemeralProvider.setupDownloadDir(alias, new Date()));
+        const playlistManager = new PlaylistManager(disk);
+        const initTracker = new InitTracker(disk);
         const downloader = new StreamDownloader(handle, ephemeralProvider);
 
         const entry: EphemeralDownload = {
@@ -131,7 +140,7 @@ export function createApiServer(tangoApiClient: IStreamProvider, port = 7974) {
         };
         activeDownloads.set(alias, entry);
 
-        downloader.start().then(() => {
+        downloader.run(masterPlaylistUrl, playlistManager, initTracker, disk).then(() => {
             logger.info(`[API] Ephemeral download completed for ${alias}`);
             activeDownloads.delete(alias);
         }).catch((err) => {

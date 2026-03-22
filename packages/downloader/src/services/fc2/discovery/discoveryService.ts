@@ -3,7 +3,7 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { TargetManager } from "../../common/targetManager.js";
 import { Fc2Client } from "../api/fc2Client.js";
-import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
+import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
 
 export class Fc2DiscoveryService {
@@ -64,19 +64,19 @@ export class Fc2DiscoveryService {
                     });
 
                     if (handle) {
-                        const downloader = new StreamDownloader(handle, this.fc2Client);
-                        const completion = downloader.start().then((result: DownloadResult) => {
-                            if (!result.aborted && result.segmentCount === 0) {
+                        const session = new StreamSession(channelId, channelId, handle, this.fc2Client);
+                        const completion = session.run(masterUrl).then((result: SessionResult) => {
+                            if (!result.aborted && result.totalSegments === 0) {
                                 this.cooldown.recordFailure(channelId);
-                            } else if (result.segmentCount > 0) {
+                            } else if (result.totalSegments > 0) {
                                 this.cooldown.clear(channelId);
                             }
                         }).catch((err: Error) => {
-                            logger.error(`[FC2] ${channelId}: unhandled download error`, { error: err.message });
+                            logger.error(`[FC2] ${channelId}: unhandled session error`, { error: err.message });
                             handle.remove();
                             this.cooldown.recordFailure(channelId);
                         });
-                        this.downloadsManager.registerDownloader(masterUrl, () => downloader.abort(), completion);
+                        this.downloadsManager.registerDownloader(masterUrl, () => session.abort(), completion);
                     }
                 } else {
                     logger.warn(`[FC2] Channel ${channelId} is online but failed to retrieve HLS URL.`);

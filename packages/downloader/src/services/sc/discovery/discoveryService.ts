@@ -3,7 +3,7 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ScTargetManager, ScTarget } from "./targetManager.js";
 import { ScClient } from "../api/scClient.js";
-import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
+import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
 
 const POLL_INTERVAL = 5_000;
@@ -86,21 +86,21 @@ export class ScDiscoveryService {
             });
 
             if (handle) {
-                const downloader = new StreamDownloader(handle, this.scClient);
-                const completion = downloader.start().then((result: DownloadResult) => {
-                    if (!result.aborted && result.segmentCount === 0) {
-                        logger.warn(`[SC] ${target.username}: download ended with 0 segments — cooldown`);
+                const session = new StreamSession(target.username, target.username, handle, this.scClient);
+                const completion = session.run(masterUrl).then((result: SessionResult) => {
+                    if (!result.aborted && result.totalSegments === 0) {
+                        logger.warn(`[SC] ${target.username}: session ended with 0 segments — cooldown`);
                         this.cooldown.recordFailure(target.username);
-                    } else if (result.segmentCount > 0) {
-                        logger.info(`[SC] ${target.username}: download completed (${result.segmentCount} segments)`);
+                    } else if (result.totalSegments > 0) {
+                        logger.info(`[SC] ${target.username}: session completed (${result.totalSegments} segments)`);
                         this.cooldown.clear(target.username);
                     }
                 }).catch((err: Error) => {
-                    logger.error(`[SC] ${target.username}: unhandled download error`, { error: err.message });
+                    logger.error(`[SC] ${target.username}: unhandled session error`, { error: err.message });
                     handle.remove();
                     this.cooldown.recordFailure(target.username);
                 });
-                this.downloadsManager.registerDownloader(masterUrl, () => downloader.abort(), completion);
+                this.downloadsManager.registerDownloader(masterUrl, () => session.abort(), completion);
             }
         }
     }

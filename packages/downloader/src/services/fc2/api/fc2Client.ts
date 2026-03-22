@@ -335,6 +335,15 @@ export class Fc2Client implements IStreamProvider {
     public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {
         return null;
     }
+
+    public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
+        if (context.exitReason === "aborted") return null;
+
+        const isLive = await this.isOnline(context.streamerId);
+        if (!isLive) return null;
+
+        return this.getHlsUrl(context.streamerId);
+    }
 }
 
 class Fc2DownloadSession implements IDownloadSession {

@@ -2,7 +2,7 @@ import * as timersPromises from "timers/promises";
 
 import * as config from "../../../common/config.js";
 import logger from "../../../common/logger.js";
-import { StreamDownloader, DownloadResult } from "../../download/streamDownloader.js";
+import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { AliasManager } from "shared";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ApiClient } from "../api/apiClient.js";
@@ -81,20 +81,20 @@ export class StreamDiscoveryService {
                             });
 
                             if (downloadHandle) {
-                                logger.info(`[Tango] Initiating download for ${resolvedAlias}...`);
-                                const streamDownloader = new StreamDownloader(downloadHandle, this.apiClient);
-                                const completion = streamDownloader.start().then((result: DownloadResult) => {
-                                    if (!result.aborted && result.segmentCount === 0) {
+                                logger.info(`[Tango] Initiating session for ${resolvedAlias}...`);
+                                const session = new StreamSession(streamerId, resolvedAlias, downloadHandle, this.apiClient);
+                                const completion = session.run(masterPlaylistUrl).then((result: SessionResult) => {
+                                    if (!result.aborted && result.totalSegments === 0) {
                                         this.cooldown.recordFailure(streamerId);
-                                    } else if (result.segmentCount > 0) {
+                                    } else if (result.totalSegments > 0) {
                                         this.cooldown.clear(streamerId);
                                     }
                                 }).catch((err: Error) => {
-                                    logger.error(`[Tango] ${resolvedAlias}: unhandled download error`, { error: err.message });
+                                    logger.error(`[Tango] ${resolvedAlias}: unhandled session error`, { error: err.message });
                                     downloadHandle.remove();
                                     this.cooldown.recordFailure(streamerId);
                                 });
-                                this.downloadsManager.registerDownloader(masterPlaylistUrl, () => streamDownloader.abort(), completion);
+                                this.downloadsManager.registerDownloader(masterPlaylistUrl, () => session.abort(), completion);
                             }
                         }
                     }

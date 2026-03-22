@@ -27,4 +27,23 @@ export interface IStreamProvider {
      * Providers without multi-edge CDNs return null.
      */
     recoverVariant(masterPlaylistUrl: string): Promise<string | null>;
+
+    /**
+     * After a download attempt exits, the provider decides whether to retry.
+     * The provider owns this decision because "is the stream still live?"
+     * means different things per platform:
+     *   SC: cam API (isCamActive) is the source of truth
+     *   Tango: the liveUrl itself is the source of truth (feed is stale)
+     *   FC2: memberApi (is_publish) is the source of truth
+     *
+     * Returns a master URL to retry with, or null to stop.
+     */
+    shouldRetry(context: DownloadExitContext): Promise<string | null>;
+}
+
+export interface DownloadExitContext {
+    streamerId: string;
+    exitReason: "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
+    lastMasterUrl: string;
+    lastLiveUrl: string | null;
 }

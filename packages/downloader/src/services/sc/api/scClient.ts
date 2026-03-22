@@ -281,6 +281,15 @@ export class ScClient implements IStreamProvider {
         }
     }
 
+    public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
+        if (context.exitReason === "aborted") return null;
+
+        const streamName = await this.refreshStreamName(context.streamerId);
+        if (!streamName) return null;
+
+        return this.buildMasterUrl(streamName);
+    }
+
     /**
      * On variant failure, try all 3 TLDs in parallel for the master playlist.
      * Returns the best variant from whichever TLD responds, or null if all fail.
