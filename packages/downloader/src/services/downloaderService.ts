@@ -88,10 +88,6 @@ export class DownloaderService {
         );
     }
 
-    public getTangoApiClient(): ApiClient {
-        return this.apiClient;
-    }
-
     public async shutdown(): Promise<void> {
         await this.downloadsManager.shutdownAll();
     }

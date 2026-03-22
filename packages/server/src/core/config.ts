@@ -61,20 +61,12 @@ function generateDefaultPaths(providerName: string): PathConfig {
     };
 }
 
-const TL_PATHS: PathConfig = {
-    downloader: "/tmp/Videos/downloads/tl",
-    edited: "/tmp/Videos/downloads/tl",
-    trash: "/tmp/Videos/downloads/tl",
-    converted: "/tmp/Videos/downloads/tl",
-};
-
 const config: IConfig = {
     providers: {
         ...DEFAULT_PROVIDERS.reduce((acc, provider) => {
             acc[provider] = generateDefaultPaths(provider);
             return acc;
         }, {} as Record<string, PathConfig>),
-        tl: TL_PATHS,
     },
     frontendDistPath: path.join(projectRoot, "..", "app", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
@@ -83,7 +75,7 @@ const config: IConfig = {
     tangoFilePath: path.join(projectRoot, "..", "downloader", "tango.txt"),
 };
 
-Object.entries(config.providers).filter(([name]) => name !== "tl").map(([, paths]) => paths).forEach(paths => {
+Object.entries(config.providers).map(([, paths]) => paths).forEach(paths => {
     [paths.downloader, paths.edited, paths.converted, paths.trash].forEach((dir) => {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });

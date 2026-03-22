@@ -8,8 +8,6 @@ import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 import { getAllMp4Videos } from "./mp4-retrieve.service.js";
 
 export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
-    if (provider === "tl") return [];
-
     if (provider === "mp4") return getAllMp4Videos(provider, after);
 
     const liveFolders = await utils.getLiveFolders();

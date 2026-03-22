@@ -11,8 +11,6 @@ import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/fc2.routes.js";
 import scRouter from "./api/sc-list.routes.js";
 import tangoListRouter from "./api/tango-list.routes.js";
-import tlRouter from "./api/tl.routes.js";
-import tlProxyRouter from "./api/tl-proxy.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
 import { startTokenWatcher } from "./services/tango/tokenManager.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
@@ -47,8 +45,6 @@ async function startServer() {
 
   startTokenWatcher();
 
-  app.use("/api", tlProxyRouter);
-  app.use("/api", tlRouter);
   app.use("/", fc2Router);
   app.use("/", scRouter);
   app.use("/", tangoListRouter);

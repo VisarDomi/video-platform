@@ -1,5 +1,4 @@
 import { DownloaderService } from "./services/downloaderService.js";
-import { createApiServer } from "./api/server.js";
 import logger from "./common/logger.js";
 
 async function main() {
@@ -16,9 +15,6 @@ async function main() {
     process.on('SIGINT', () => void shutdown('SIGINT'));
 
     await downloaderService.start();
-
-    const tangoApiClient = downloaderService.getTangoApiClient();
-    createApiServer(tangoApiClient);
 }
 
 void main();
