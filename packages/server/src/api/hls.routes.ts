@@ -3,7 +3,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import logger from "../core/logger.js";
 import * as utils from "../core/utils.js";
-import * as fsUtils from "../core/fs-utils.js";
 import { API, FILE_EXTENSIONS, FILE_NAMES, MISC } from "../core/constants.js";
 
 const router = Router();
@@ -16,9 +15,6 @@ router.get("/hls/:filename/playlist.m3u8", async (req, res) => {
 
     try {
         const videoPath = await utils.findVideoPath(filename);
-
-        await fsUtils.ensurePlaylist(videoPath);
-
         const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
         const content = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
 
