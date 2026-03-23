@@ -44,8 +44,11 @@ router.post("/edit", async (req, res) => {
     const targetProvider = provider || "tango";
 
     if (!filename || !segments || segments.length === 0) {
+        logger.warn(`[api/edit] rejected: filename=${filename ?? "missing"} segments=${segments?.length ?? "missing"} provider=${targetProvider}`);
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED);
     }
+
+    logger.info(`[api/edit] request: filename=${filename} segments=${segments.length} provider=${targetProvider}`);
 
     try {
         if (targetProvider === "mp4") {
@@ -61,7 +64,7 @@ router.post("/edit", async (req, res) => {
         await editService.editVideo(filename, segments, targetProvider);
         res.json({ success: true });
     } catch (error: any) {
-        logger.error(`Error editing:`, { message: error.message });
+        logger.error(`[api/edit] failed: filename=${filename} provider=${targetProvider}`, { message: error.message });
         res.status(500).json({ success: false, error: error.message });
     }
 });

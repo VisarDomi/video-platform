@@ -58,7 +58,8 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 
 export function calculateSegmentsToKeep(
 	videoSegments: PlaylistSegment[],
-	timeSegments: readonly number[]
+	timeSegments: readonly number[],
+	filename: string
 ): string[] {
 	const segmentsToKeep = new Set<string>();
 	let cumulativeTime = 0;
@@ -78,5 +79,17 @@ export function calculateSegmentsToKeep(
 		}
 	}
 
-	return Array.from(segmentsToKeep);
+	const result = Array.from(segmentsToKeep);
+
+	logEvent('edit-segments-calculated', {
+		filename,
+		totalPlaylistSegments: videoSegments.length,
+		timeRanges: timeSegments.length / 2,
+		totalDuration: Math.round(cumulativeTime),
+		segmentsToKeep: result.length,
+		firstKept: result[0] ?? null,
+		lastKept: result[result.length - 1] ?? null,
+	});
+
+	return result;
 }

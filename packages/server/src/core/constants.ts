@@ -17,8 +17,6 @@ export const ALL_VIDEO_PATHS_TYPES = {
 export const FILE_NAMES = {
     PACKAGE_JSON: "package.json",
     LIVE_STATUS: "live-status.json",
-    ERROR_LOG: "error.log",
-    PROFILING_LOG: "profiling.log",
     HLS_PLAYLIST: "playlist.m3u8",
     INDEX_HTML: "index.html",
 } as const;
@@ -95,11 +93,6 @@ export const API = {
 } as const;
 
 export const LOGS = {
-    LEVELS: {
-        INFO: "info",
-        ERROR: "error",
-    },
-    TIMESTAMP_FORMAT: "YYYY-MM-DD HH:mm:ss",
     MESSAGES: {
         LAN_ACCESS: (address: string, port: number) => `LAN Access: https://${address}:${port}`,
         MOVE_ERROR: "File is already at the destination.",
