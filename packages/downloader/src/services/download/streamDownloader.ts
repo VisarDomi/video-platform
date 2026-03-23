@@ -94,15 +94,15 @@ export class StreamDownloader {
         let session = initialSession;
         let lastDownload = Date.now();
         let segmentFailed = false;
-        let lastHeartbeat = Date.now();
+        let health: 'ok' | 'stale' = 'ok';
         let lastQualityCheck = Date.now();
         const staleTimeout = STALE_STREAM_TIMEOUT_MS;
 
         while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
-            if (Date.now() - lastHeartbeat > HEARTBEAT_INTERVAL_MS) {
+            if (health === 'ok' && Date.now() - lastDownload > HEARTBEAT_INTERVAL_MS) {
+                health = 'stale';
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                logger.info(`[StreamDownloader] HEARTBEAT ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
-                lastHeartbeat = Date.now();
+                logger.warn(`[StreamDownloader] STALE ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
             }
 
             if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
@@ -228,6 +228,11 @@ export class StreamDownloader {
                     }
                     await playlistManager.appendSegmentToPlaylist(segment);
                     playlistManager.recordDownloadedPDT(segment.programDateTime);
+                    if (health === 'stale') {
+                        health = 'ok';
+                        const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
+                        logger.info(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
+                    }
                     lastDownload = Date.now();
                     initTracker.incrementSegmentCount();
                     downloadedThisIteration = true;
