@@ -75,7 +75,9 @@ export class AuthContext {
         try {
             if (this.tokenBag) {
                 const serialized = this.provider.serializeTokens(this.tokenBag);
-                await fsPromises.writeFile(filePath, JSON.stringify(serialized, null, 2));
+                const tmpPath = filePath + '.tmp';
+                await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2));
+                await fsPromises.rename(tmpPath, filePath);
                 logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
