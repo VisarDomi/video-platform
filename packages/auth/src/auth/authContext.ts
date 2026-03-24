@@ -75,6 +75,7 @@ export class AuthContext {
         try {
             if (this.tokenBag) {
                 const serialized = this.provider.serializeTokens(this.tokenBag);
+                serialized.lastWriteMs = Date.now();
                 const tmpPath = filePath + '.tmp';
                 await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2));
                 await fsPromises.rename(tmpPath, filePath);
