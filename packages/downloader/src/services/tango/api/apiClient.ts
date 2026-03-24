@@ -293,9 +293,8 @@ class TangoDownloadSession implements IDownloadSession {
             logger.warn(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
             return { data: null, retryable: false };
         } catch (error: any) {
-            const isTimeout = error.name === "TimeoutError" || error.message?.includes("aborted");
-            logger.warn(`[Tango] Segment fetch error: ${error.message} (retryable=${isTimeout})`, { tsUrl });
-            return { data: null, retryable: isTimeout };
+            logger.warn(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
+            return { data: null, retryable: true };
         }
     }
 }

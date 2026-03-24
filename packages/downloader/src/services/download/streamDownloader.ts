@@ -193,7 +193,7 @@ export class StreamDownloader {
 
                 if (!fetchResult.data) {
                     if (fetchResult.retryable) {
-                        logger.warn(`[StreamDownloader] ${alias} segment timeout segment=${segment.localName} — skipping`);
+                        logger.warn(`[StreamDownloader] ${alias} segment skipped segment=${segment.localName}`);
                         playlistManager.addIgnoredSegment(segment.localName);
                         continue;
                     }

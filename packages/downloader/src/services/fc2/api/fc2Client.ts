@@ -400,9 +400,8 @@ class Fc2DownloadSession implements IDownloadSession {
             logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
             return { data: null, retryable: false };
         } catch (error: any) {
-            const isTimeout = error.name === "TimeoutError" || error.message?.includes("aborted");
-            logger.warn(`[FC2] Segment fetch error: ${error.message} (retryable=${isTimeout})`, { tsUrl });
-            return { data: null, retryable: isTimeout };
+            logger.warn(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
+            return { data: null, retryable: true };
         }
     }
 }
