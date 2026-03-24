@@ -267,8 +267,8 @@ class TangoDownloadSession implements IDownloadSession {
 
             if (!response.ok) {
                 if (response.status === 401 && tokens.tte) {
-                    const ttl = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
-                    logger.error(`[Tango] Playlist 401 — ttl=${ttl}s url=${url}`);
+                    const ttlNow = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
+                    logger.error(`[Tango] Playlist 401 — ttlAtUse=${tokens.ttlAtReadSec}s ttlNow=${ttlNow}s tokenAge=${tokens.tokenAgeMs}ms url=${url}`);
                 } else {
                     logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
                 }

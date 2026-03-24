@@ -25,7 +25,7 @@ export class AuthService {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             while (true) {
                 try {
-                    await this.ensureValidTokens();
+                    await this.ensureValidTokens("init");
                     logger.info(`Session successfully established for ${this.account.email} using token from file.`);
                     return;
                 } catch (error) {
@@ -66,12 +66,29 @@ export class AuthService {
         this.authContext.updateFromLogin(tokens);
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
+        this.logTokenWrite("login");
     }
 
-    private async ensureValidTokens() {
+    private async ensureValidTokens(source: string) {
         await this.refreshSession();
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
+        this.logTokenWrite(source);
+    }
+
+    private logTokenWrite(source: string): void {
+        const tte = this.authContext.getTokenBag()?.extras?.tte;
+        if (!tte) {
+            logger.warn(`[Tango] Token write — source=${source} tte=none`);
+            return;
+        }
+        const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
+        const refreshCycleSec = this.provider.intervals.shortTokenRefresh / 1000;
+        if (ttl < refreshCycleSec) {
+            logger.warn(`[Tango] Token write — source=${source} tte=${tte} ttl=${ttl}s (below ${refreshCycleSec}s refresh cycle)`);
+        } else {
+            logger.info(`[Tango] Token write — source=${source} tte=${tte} ttl=${ttl}s`);
+        }
     }
 
     private async refreshSession() {
@@ -104,17 +121,12 @@ export class AuthService {
         while (true) {
             try {
                 await this.setTokenData();
-                const tte = this.authContext.getTokenBag()?.extras?.tte;
-                const ttl = tte ? parseInt(tte, 10) - Math.floor(Date.now() / 1000) : -1;
                 await this.authContext.saveTokenToFile();
-                if (ttl < (this.provider.intervals.shortTokenRefresh / 1000)) {
-                    logger.warn(`[Auth] Wrote stream tokens with ttl=${ttl}s (below refresh cycle ${this.provider.intervals.shortTokenRefresh / 1000}s)`);
-                }
+                this.logTokenWrite("short-refresh");
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             } catch (error) {
-                const tte = this.authContext.getTokenBag()?.extras?.tte;
-                const ttl = tte ? parseInt(tte, 10) - Math.floor(Date.now() / 1000) : -1;
-                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. On-disk tokens have ttl=${ttl}s. Retrying in ${this.provider.intervals.shortTokenRefresh / 1000}s.`, { error: (error as Error).message });
+                this.logTokenWrite("short-refresh-failed");
+                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. Retrying in ${this.provider.intervals.shortTokenRefresh / 1000}s.`, { error: (error as Error).message });
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             }
         }
@@ -130,7 +142,7 @@ export class AuthService {
     private async maintainSession() {
         while (true) {
             try {
-                await this.ensureValidTokens();
+                await this.ensureValidTokens("session-maintain");
                 logger.info(`Session successfully maintained for ${this.account.email}.`);
                 return;
             } catch (error) {
