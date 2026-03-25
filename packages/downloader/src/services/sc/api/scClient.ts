@@ -285,7 +285,10 @@ export class ScClient implements IStreamProvider {
         if (context.exitReason === "aborted") return null;
 
         const streamName = await this.refreshStreamName(context.streamerId);
-        if (!streamName) return null;
+        if (!streamName) {
+            logger.info(`[SC] ${context.streamerId}: shouldRetry=no (offline/unavailable after ${context.exitReason})`);
+            return null;
+        }
 
         return this.buildMasterUrl(streamName);
     }

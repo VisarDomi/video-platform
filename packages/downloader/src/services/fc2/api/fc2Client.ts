@@ -89,8 +89,14 @@ export class Fc2Client implements IStreamProvider {
             const isPublish = channelData?.is_publish > 0;
             const isPaid = channelData?.fee > 0;
 
-            if (!isPublish) return false;
-            if (isPaid) return false;
+            if (!isPublish) {
+                logger.debug(`[FC2] ${channelId}: offline (is_publish=${channelData?.is_publish})`);
+                return false;
+            }
+            if (isPaid) {
+                logger.info(`[FC2] ${channelId}: live but paid (fee=${channelData?.fee}) — skipping`);
+                return false;
+            }
 
             return true;
         } catch (error: any) {
@@ -192,6 +198,8 @@ export class Fc2Client implements IStreamProvider {
                 if (this.sessions.has(channelId)) {
                     logger.info(`[FC2] WebSocket closed remotely for ${channelId}`);
                     this._closeSession(channelId);
+                } else if (!isResolved) {
+                    logger.warn(`[FC2] WebSocket closed during handshake for ${channelId}`);
                 }
                 safeResolve(null);
             };
@@ -224,7 +232,11 @@ export class Fc2Client implements IStreamProvider {
             }
 
             const wsUrl = `${ctrlData.url}?control_token=${ctrlData.control_token}`;
-            return await this._performWsHandshake(wsUrl, channelId);
+            const hlsUrl = await this._performWsHandshake(wsUrl, channelId);
+            if (!hlsUrl) {
+                logger.warn(`[FC2] ${channelId}: WebSocket handshake completed but no HLS URL returned`);
+            }
+            return hlsUrl;
         } catch (error: any) {
             logger.error(`[FC2] Error fetching HLS URL for ${channelId}`, { error: error.message });
             return null;
@@ -235,7 +247,10 @@ export class Fc2Client implements IStreamProvider {
         try {
             this._touchSession(masterListUrl);
             const response = await this._request(masterListUrl);
-            if (!response.ok) return null;
+            if (!response.ok) {
+                logger.warn(`[FC2] getMasterList ${response.status} ${response.statusText} url=${masterListUrl}`);
+                return null;
+            }
             return await response.text();
         } catch (error: any) {
             logger.error(`[FC2] getMasterList failed for ${masterListUrl}`, { error: error.message });
@@ -265,7 +280,10 @@ export class Fc2Client implements IStreamProvider {
         }
 
         const content = await this.getMasterList(masterUrl);
-        if (!content) return null;
+        if (!content) {
+            logger.warn(`[FC2] parseMasterPlaylist: getMasterList returned empty for ${masterUrl.split("?")[0]}`);
+            return null;
+        }
 
         if (content.includes("#EXT-X-STREAM-INF")) {
             logger.info(`[FC2] Detected Master Playlist. Parsing for best variant...`);
@@ -328,11 +346,21 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
+        const name = path.basename(filePath);
         const info = await MediaValidator.getMediaInfo(filePath);
-        if (!info) return { valid: false };
+        if (!info) {
+            logger.warn(`[FC2] validateSegment: ffprobe failed for ${name}`);
+            return { valid: false };
+        }
 
-        if (isNaN(info.bitRate) || info.bitRate < 1000) return { valid: false };
-        if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
+        if (isNaN(info.bitRate) || info.bitRate < 1000) {
+            logger.warn(`[FC2] validateSegment: bad bitrate ${info.bitRate} for ${name}`);
+            return { valid: false };
+        }
+        if (!isNaN(info.duration) && info.duration > 3600) {
+            logger.warn(`[FC2] validateSegment: duration ${info.duration}s too long for ${name}`);
+            return { valid: false };
+        }
 
         return { valid: true, duration: info.duration };
     }
@@ -345,9 +373,16 @@ export class Fc2Client implements IStreamProvider {
         if (context.exitReason === "aborted") return null;
 
         const isLive = await this.isOnline(context.streamerId);
-        if (!isLive) return null;
+        if (!isLive) {
+            logger.info(`[FC2] ${context.streamerId}: shouldRetry=no (offline or paid after ${context.exitReason})`);
+            return null;
+        }
 
-        return this.getHlsUrl(context.streamerId);
+        const url = await this.getHlsUrl(context.streamerId);
+        if (!url) {
+            logger.warn(`[FC2] ${context.streamerId}: shouldRetry=no (getHlsUrl failed, stream is live)`);
+        }
+        return url;
     }
 }
 

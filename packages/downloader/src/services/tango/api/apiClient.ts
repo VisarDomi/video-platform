@@ -226,7 +226,10 @@ export class ApiClient implements IStreamProvider {
         }
 
         const body = await this.getFollowingResponseBody();
-        if (!body?.entities?.stream) return null;
+        if (!body?.entities?.stream) {
+            logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (no stream data after ${context.exitReason})`);
+            return null;
+        }
 
         for (const streamId of Object.keys(body.entities.stream)) {
             const stream = body.entities.stream[streamId];
@@ -234,6 +237,7 @@ export class ApiClient implements IStreamProvider {
                 return stream.playlistUrl;
             }
         }
+        logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (not found in following feed after ${context.exitReason})`);
         return null;
     }
 }
