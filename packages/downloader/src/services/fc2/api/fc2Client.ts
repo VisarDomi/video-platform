@@ -20,6 +20,7 @@ export class Fc2Client implements IStreamProvider {
     private msgId = 0;
     private sessions: Map<string, Fc2Session> = new Map();
     private cleanupInterval: NodeJS.Timeout;
+    private paidChannels = new Set<string>();
 
     private readonly HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -91,13 +92,24 @@ export class Fc2Client implements IStreamProvider {
 
             if (!isPublish) {
                 logger.debug(`[FC2] ${channelId}: offline (is_publish=${channelData?.is_publish})`);
+                if (this.paidChannels.has(channelId)) {
+                    logger.info(`[FC2] ${channelId}: no longer live (was paid)`);
+                    this.paidChannels.delete(channelId);
+                }
                 return false;
             }
             if (isPaid) {
-                logger.info(`[FC2] ${channelId}: live but paid (fee=${channelData?.fee}) — skipping`);
+                if (!this.paidChannels.has(channelId)) {
+                    logger.info(`[FC2] ${channelId}: live but paid (fee=${channelData?.fee}) — skipping`);
+                    this.paidChannels.add(channelId);
+                }
                 return false;
             }
 
+            if (this.paidChannels.has(channelId)) {
+                logger.info(`[FC2] ${channelId}: transitioned from paid to free`);
+                this.paidChannels.delete(channelId);
+            }
             return true;
         } catch (error: any) {
             logger.error(`[FC2] Error checking isOnline for ${channelId}`, { error: error.message });

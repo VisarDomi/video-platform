@@ -57,7 +57,7 @@ export class ScClient implements IStreamProvider {
         await loadMouflonKeys();
     }
 
-    private async fetchApi<T>(url: string): Promise<T | null> {
+    private async fetchApi<T>(url: string, silent = false): Promise<T | null> {
         try {
             const response = await fetch(url, {
                 headers: { "User-Agent": USER_AGENT },
@@ -65,15 +65,17 @@ export class ScClient implements IStreamProvider {
             });
 
             if (!response.ok) {
-                logger.warn(`[SC] API returned ${response.status}: ${url}`);
+                if (!silent) logger.warn(`[SC] API returned ${response.status}: ${url}`);
                 return null;
             }
             return await response.json() as T;
         } catch (error: any) {
-            logger.error(`[SC] API fetch failed: ${url}`, { error: error.message });
+            if (!silent) logger.error(`[SC] API fetch failed: ${url}`, { error: error.message });
             return null;
         }
     }
+
+    private cdnFetchFailCount = 0;
 
     private async fetchCdn(url: string): Promise<{ ok: boolean; status: number; text: string }> {
         try {
@@ -81,13 +83,20 @@ export class ScClient implements IStreamProvider {
                 headers: { "User-Agent": USER_AGENT },
                 signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
+            if (response.ok && this.cdnFetchFailCount > 0) {
+                logger.info(`[SC] CDN fetch recovered after ${this.cdnFetchFailCount} failures`);
+                this.cdnFetchFailCount = 0;
+            }
             return {
                 ok: response.ok,
                 status: response.status,
                 text: await response.text(),
             };
         } catch (error: any) {
-            logger.error(`[SC] CDN fetch failed: ${url}`, { error: error.message });
+            this.cdnFetchFailCount++;
+            if (this.cdnFetchFailCount === 1) {
+                logger.error(`[SC] CDN fetch failed: ${url}`, { error: error.message });
+            }
             return { ok: false, status: 0, text: "" };
         }
     }
@@ -141,10 +150,18 @@ export class ScClient implements IStreamProvider {
             const params = batch.map((id) => `modelIds[]=${id}`).join("&");
             const url = `https://stripchat.com/api/front/models/list?${params}`;
 
-            const data = await this.fetchApi<any>(url);
+            const data = await this.fetchApi<any>(url, true);
             if (!data?.models) {
-                logger.warn(`[SC] Bulk status check failed for batch of ${batch.length} streamers — all treated as offline`);
+                this.bulkFailCount++;
+                if (this.bulkFailCount === 1) {
+                    logger.warn(`[SC] Bulk status check failed for batch of ${batch.length} streamers — all treated as offline`);
+                }
                 continue;
+            }
+
+            if (this.bulkFailCount > 0) {
+                logger.info(`[SC] Bulk status check recovered after ${this.bulkFailCount} failures`);
+                this.bulkFailCount = 0;
             }
 
             for (const model of data.models) {
@@ -159,6 +176,8 @@ export class ScClient implements IStreamProvider {
     }
 
     private cdnTldIndex = 0;
+    private masterFailCounts = new Map<string, number>();
+    private bulkFailCount = 0;
 
     public buildMasterUrl(streamName: string): string {
         const tld = CDN_TLDS[this.cdnTldIndex % CDN_TLDS.length];
@@ -220,7 +239,13 @@ export class ScClient implements IStreamProvider {
         const result = await this.fetchCdn(masterUrl);
 
         if (!result.ok) {
-            logger.warn(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl} body=${result.text.slice(0, 500)}`);
+            const streamMatch = masterUrl.match(/\/hls\/([^/]+)\//);
+            const key = streamMatch ? streamMatch[1] : masterUrl;
+            const count = (this.masterFailCounts.get(key) ?? 0) + 1;
+            this.masterFailCounts.set(key, count);
+            if (count === 1) {
+                logger.warn(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl}`);
+            }
             return null;
         }
 
@@ -321,6 +346,9 @@ const CDN_HEADERS = { "User-Agent": USER_AGENT };
 
 
 class ScDownloadSession implements IDownloadSession {
+    private playlistFailCount = 0;
+    private lastPlaylistFailStatus = 0;
+
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             const response = await fetch(url, {
@@ -329,8 +357,18 @@ class ScDownloadSession implements IDownloadSession {
             });
 
             if (!response.ok) {
-                logger.warn(`[SC] Playlist fetch failed: status=${response.status} url=${url}`);
+                this.playlistFailCount++;
+                if (response.status !== this.lastPlaylistFailStatus) {
+                    logger.warn(`[SC] Playlist fetch failed: status=${response.status} url=${url}`);
+                    this.lastPlaylistFailStatus = response.status;
+                }
                 return null;
+            }
+
+            if (this.playlistFailCount > 0) {
+                logger.info(`[SC] Playlist fetch recovered after ${this.playlistFailCount} failures url=${url}`);
+                this.playlistFailCount = 0;
+                this.lastPlaylistFailStatus = 0;
             }
 
             const text = await response.text();
@@ -341,7 +379,10 @@ class ScDownloadSession implements IDownloadSession {
             }
             return decrypted;
         } catch (error: any) {
-            logger.error(`[SC] Playlist fetch error: ${url}`, { error: error.message });
+            this.playlistFailCount++;
+            if (this.playlistFailCount === 1) {
+                logger.error(`[SC] Playlist fetch error: ${url}`, { error: error.message });
+            }
             return null;
         }
     }

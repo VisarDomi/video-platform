@@ -14,23 +14,19 @@ export class AliasSyncService {
 
     public start(): void {
         const performSync = async () => {
-            logger.info("[Tango] Performing hourly alias cache update...");
-
             const followingsResponse = await this.apiClient.getAllFollowing();
             if (!followingsResponse || !followingsResponse.followers || followingsResponse.followers.length === 0) {
-                logger.warn("[Tango] Alias update failed: Did not receive a valid list of followers from the 'allfollow' endpoint.");
+                logger.warn("[Tango] Alias sync failed: no followers from allfollow endpoint");
                 return;
             }
             const followers = followingsResponse.followers;
-            logger.info(`[Tango] Step 1/2 SUCCESS: Fetched ${followers.length} followed accounts from 'allfollow' endpoint.`);
             const streamerIds = followers.map((f: any) => f.accountId);
 
             const batchResponse = await this.apiClient.getAliasesInBatch(streamerIds);
             if (!batchResponse) {
-                logger.error("[Tango] Alias update failed: The POST request to the 'batch' endpoint returned no data.");
+                logger.error("[Tango] Alias sync failed: batch endpoint returned no data");
                 return;
             }
-            logger.info(`[Tango] Step 2/2 SUCCESS: Received response from 'batch' endpoint.`);
 
             const aliasMap: { [key: string]: string } = {};
             for (const streamerId in batchResponse) {
@@ -42,9 +38,9 @@ export class AliasSyncService {
 
             if (Object.keys(aliasMap).length > 0) {
                 await this.aliasManager.batchSet(aliasMap);
-                logger.info(`[Tango] Alias cache updated with ${Object.keys(aliasMap).length} entries (out of ${streamerIds.length} IDs sent).`);
+                logger.info(`[Tango] Alias cache synced: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved`);
             } else {
-                logger.warn("[Tango] Could not extract any valid aliases from the batch response. Cache not updated.");
+                logger.warn("[Tango] Alias sync: no valid aliases in batch response");
             }
         };
 

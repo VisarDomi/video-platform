@@ -118,15 +118,28 @@ export class AuthService {
     }
 
     private async refreshShortLivedTokens() {
+        let consecutiveOk = 0;
+        let consecutiveFail = 0;
+        let wasHealthy = true;
+
         while (true) {
             try {
                 await this.setTokenData();
                 await this.authContext.saveTokenToFile();
-                this.logTokenWrite("short-refresh");
+                consecutiveOk++;
+                if (!wasHealthy) {
+                    logger.info(`[Tango] Short-refresh recovered after ${consecutiveFail} failures — tte=${this.authContext.getTokenBag()?.extras?.tte}`);
+                    wasHealthy = true;
+                    consecutiveFail = 0;
+                }
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             } catch (error) {
-                this.logTokenWrite("short-refresh-failed");
-                logger.warn(`Failed to refresh short-lived tokens for ${this.account.email}. Retrying in ${this.provider.intervals.shortTokenRefresh / 1000}s.`, { error: (error as Error).message });
+                consecutiveFail++;
+                if (wasHealthy) {
+                    logger.warn(`[Tango] Short-refresh failed for ${this.account.email} after ${consecutiveOk} successes: ${(error as Error).message}`);
+                    wasHealthy = false;
+                    consecutiveOk = 0;
+                }
                 await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
             }
         }

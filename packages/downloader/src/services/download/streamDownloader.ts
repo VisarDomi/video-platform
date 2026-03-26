@@ -24,6 +24,7 @@ export class StreamDownloader {
     private handle: DownloadHandle;
     private provider: IStreamProvider;
     private _aborted = false;
+    private rejectedCount = 0;
 
     constructor(handle: DownloadHandle, provider: IStreamProvider) {
         this.handle = handle;
@@ -221,7 +222,7 @@ export class StreamDownloader {
                 if (!result.valid) {
                     await fs.unlink(segmentPath).catch(() => {});
                     playlistManager.addIgnoredSegment(segment.localName);
-                    logger.warn(`[StreamDownloader] ${alias} rejected invalid segment=${segment.localName}`);
+                    this.rejectedCount++;
                 } else {
                     if (result.duration !== undefined) {
                         segment.accurateDuration = result.duration;
@@ -260,7 +261,8 @@ export class StreamDownloader {
         }
         const tl = playlistManager.timeline;
         const tlStr = tl.edge ? ` edge=${tl.edge} seq=${tl.mediaSequence} firstPDT=${tl.firstProgramDateTime ?? "none"} lastPDT=${tl.lastProgramDateTime ?? "none"}` : "";
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${tlStr}`);
+        const rejStr = this.rejectedCount > 0 ? ` rejected=${this.rejectedCount}` : "";
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${rejStr}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${tlStr}`);
 
         return { segmentCount: initTracker.count, aborted: this._aborted, exitReason, lastLiveUrl: liveUrl };
     }
