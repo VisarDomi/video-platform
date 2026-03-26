@@ -1,7 +1,7 @@
 import winston from "winston";
 
 const TIMESTAMP_FORMAT = "YYYY-MM-DD HH:mm:ss";
-const JSON_INDENT = 2;
+const JSON_INDENT = 0;
 
 export function createLogger(service: string): winston.Logger {
     return winston.createLogger({
