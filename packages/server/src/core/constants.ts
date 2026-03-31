@@ -56,19 +56,6 @@ export const HLS = {
     DURATION_DECIMAL_PRECISION: 3,
 } as const;
 
-export const FFMPEG = {
-    COMMAND: "ffprobe",
-    ARGS: {
-        QUIET: "-v",
-        QUIET_LEVEL: "quiet",
-        PRINT_FORMAT: "-print_format",
-        FORMAT_JSON: "json",
-        SHOW_FORMAT: "-show_format",
-        SHOW_STREAMS: "-show_streams",
-    },
-    CODEC_TYPE_VIDEO: "video",
-} as const;
-
 export const API = {
     PORT: 7973,
     HOST: "0.0.0.0",
@@ -121,5 +108,4 @@ export const MISC = {
     RADIX_DECIMAL: 10,
     JSON_INDENT: 2,
     NEW_LINE: "\n",
-    HASH_SYMBOL: "#",
 } as const;

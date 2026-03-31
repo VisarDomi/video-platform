@@ -67,26 +67,3 @@ export async function getLiveFolders(): Promise<Set<string>> {
     }
 }
 
-export async function getLiveFilenames(): Promise<Record<string, string>> {
-    try {
-        const content = await fsPromises.readFile(LIVE_STATUS_PATH, constants.MISC.ENCODING_UTF8);
-        const liveData: types.LiveStatus = JSON.parse(content);
-        const result: Record<string, string> = {};
-
-        if (liveData && Array.isArray(liveData.downloads)) {
-            for (const download of liveData.downloads) {
-                const alias = download.alias;
-                const dirPath = download.segmentsDirPath;
-                if (alias && typeof dirPath === constants.MISC.JS_TYPES.STRING) {
-                    result[alias] = path.basename(dirPath);
-                }
-            }
-        }
-        return result;
-    } catch (error: any) {
-        if (error.code !== constants.MISC.ERROR_CODE.ENOENT) {
-            logger.error(`Failed to read or parse ${LIVE_STATUS_PATH}`, { error });
-        }
-        return {};
-    }
-}
