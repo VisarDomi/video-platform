@@ -3,13 +3,14 @@ import { promises as fs } from "fs";
 import { createTxtListRoutes } from "./txt-list-routes.js";
 import { TANGO_FILE_PATH, ALIASES_PATH } from "../core/config.js";
 import { resolveAlias, fetchAliasesInBatch } from "../services/tango/apiClient.js";
-import { AliasManager } from "shared";
+import { AliasRegistry } from "shared";
 import logger from "../core/logger.js";
 import { cleanListContent } from "../core/content-processor.js";
 
 const TANGO_URL_PREFIX = "https://tango.me/";
 const baseRouter = createTxtListRoutes({ provider: "tango", filePath: TANGO_FILE_PATH, urlPrefix: "" });
-const aliasManager = new AliasManager(ALIASES_PATH);
+const registry = new AliasRegistry(ALIASES_PATH);
+void registry.load();
 
 const router = Router();
 
@@ -29,37 +30,17 @@ router.get("/api/tango/list", async (_req, res) => {
             .map(line => parseLine(line))
             .filter((p): p is NonNullable<typeof p> => p !== null);
 
-        const forward = await aliasManager.getAll();
+        // Reload from disk to pick up downloader's latest writes
+        await registry.load();
+        const allAliases = registry.getAllWithHistory();
         const identifiers = new Set<string>();
-        const missingAccountIds: string[] = [];
 
         for (const { accountId, alias } of parsed) {
             identifiers.add(accountId);
             identifiers.add(alias);
-            const cached = forward[accountId];
+            const cached = allAliases[accountId];
             if (cached) {
                 for (const a of cached) identifiers.add(a);
-            } else {
-                missingAccountIds.push(accountId);
-            }
-        }
-
-        if (missingAccountIds.length > 0) {
-            logger.info(`[Tango] Cache miss for ${missingAccountIds.length} accountIds, fetching from API...`);
-            const profiles = await fetchAliasesInBatch(missingAccountIds);
-            if (profiles) {
-                const newAliases: Record<string, string> = {};
-                for (const accountId of missingAccountIds) {
-                    const alias = profiles[accountId]?.alias;
-                    if (alias) {
-                        newAliases[accountId] = alias;
-                        identifiers.add(alias);
-                    }
-                }
-                if (Object.keys(newAliases).length > 0) {
-                    await aliasManager.batchSet(newAliases);
-                    logger.info(`[Tango] Persisted ${Object.keys(newAliases).length} new aliases to cache`);
-                }
             }
         }
 
@@ -76,7 +57,7 @@ router.post("/api/tango/remove", async (req, res) => {
     }
     try {
         const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
-        const reverse = await aliasManager.getReverse();
+        const reverse = registry.getReverse();
         const accountId = reverse[identifier];
 
         const lines = content.split("\n").filter(line => {

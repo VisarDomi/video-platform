@@ -3,7 +3,7 @@ import * as timersPromises from "timers/promises";
 import logger from "../../../common/logger.js";
 import { TANGO_POLL_MS } from "../../../common/timing.js";
 import { StreamSession, SessionResult } from "../../download/streamSession.js";
-import { AliasManager } from "shared";
+import { AliasRegistry } from "shared";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ApiClient } from "../api/apiClient.js";
 import type { TargetManager } from "../../common/targetManager.js";
@@ -11,14 +11,14 @@ import { RetryCooldown } from "../../common/retryCooldown.js";
 
 export class StreamDiscoveryService {
     private readonly apiClient: ApiClient;
-    private aliasManager: AliasManager;
+    private readonly registry: AliasRegistry;
     private downloadsManager: DownloadsManager;
     private targetManager: TargetManager | null = null;
     private cooldown = new RetryCooldown("Tango");
 
-    constructor(apiClient: ApiClient, aliasManager: AliasManager, downloadsManager: DownloadsManager) {
+    constructor(apiClient: ApiClient, registry: AliasRegistry, downloadsManager: DownloadsManager) {
         this.apiClient = apiClient;
-        this.aliasManager = aliasManager;
+        this.registry = registry;
         this.downloadsManager = downloadsManager;
         logger.debug("[Tango] StreamDiscoveryService initialized.");
     }
@@ -62,16 +62,10 @@ export class StreamDiscoveryService {
                                 continue;
                             }
 
-                            let alias = await this.aliasManager.get(streamerId);
-                            if (!alias) {
-                                logger.info(`[Tango] Alias for ${streamerId} not in cache. Fetching from API...`);
-                                alias = await this.apiClient.getStreamerAlias(streamerId);
-                                if (alias && alias !== streamerId) {
-                                    await this.aliasManager.set(streamerId, alias);
-                                }
-                            }
-
-                            const resolvedAlias = alias || streamerId;
+                            const resolvedAlias = await this.registry.resolveOrFetch(
+                                streamerId,
+                                (id) => this.apiClient.getStreamerAlias(id),
+                            );
 
                             logger.info(`[Tango] Discovered new stream from ${resolvedAlias}.`);
 

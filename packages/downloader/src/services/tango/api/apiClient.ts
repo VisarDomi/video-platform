@@ -90,7 +90,7 @@ export class ApiClient implements IStreamProvider {
         try {
             const tokens = await this.tokenManager.getTokens();
             const headers = this._getApiHeaders(tokens);
-            const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=500`;
+            const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=5000`;
             return this._makeApiRequest<any>(url, "GET", headers, "json");
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getAllFollowing`, { error: (error as Error).message });

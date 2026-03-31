@@ -1,5 +1,11 @@
 # Video Platform
 
+## Svelte 5 Pitfalls
+
+IMPORTANT: Before writing or modifying any `.svelte` or `.svelte.ts` file, read BOTH of these:
+- [svelte5-pitfalls.md](/home/visar/.claude/projects/-home-visar/memory/svelte5-pitfalls.md) — quick rules
+- [svelte5-pitfalls-detail.md](/home/visar/.claude/projects/-home-visar/memory/svelte5-pitfalls-detail.md) — detailed explanations with code examples
+
 Monorepo. 5 packages: app (Svelte 5 SPA), server (Express, port 7973), downloader (stream capture, port 7974), auth (token refresh daemon), shared (HLS utils).
 Sibling repo: `~/Documents/wip/video-repos/video-descriptor/` (frame analysis + AI descriptions, port 7975).
 
