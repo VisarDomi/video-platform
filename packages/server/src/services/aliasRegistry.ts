@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import * as path from "path";
-import { acquireLock, createLogger } from "shared";
+import { createLogger } from "shared";
+import { acquireLock } from "./fileLock.js";
 
 const logger = createLogger("AliasRegistry");
 

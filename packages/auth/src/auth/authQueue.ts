@@ -9,17 +9,16 @@ interface QueuedRequest<T> {
     options: RequestInit;
     resolve: (value: T) => void;
     reject: (reason?: any) => void;
-    responseType: "json" | "text" | "raw";
 }
 
 class RequestQueue {
     private queue: QueuedRequest<any>[] = [];
     private isProcessing = false;
-    public add<T>(url: string, options: RequestInit, responseType: "json" | "text" | "raw" = "json"): Promise<T> {
+    public add<T>(url: string, options: RequestInit): Promise<T> {
         return new Promise<T>((resolve, reject) => {
-            this.queue.push({ url, options, resolve, reject, responseType });
+            this.queue.push({ url, options, resolve, reject });
             logger.verbose(`Request for ${url} added to the queue. Queue size: ${this.queue.length}`);
-            
+
             if (!this.isProcessing) {
                 void this._processQueue();
             }
@@ -38,14 +37,14 @@ class RequestQueue {
 
         if (!request) {
             this.isProcessing = false;
-            return; 
+            return;
         }
 
         logger.verbose(`Processing request for ${request.url}. Remaining in queue: ${this.queue.length}`);
 
         try {
             const response = await fetch(request.url, request.options);
-            
+
             request.resolve(response);
 
         } catch (error) {

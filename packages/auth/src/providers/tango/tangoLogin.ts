@@ -81,18 +81,9 @@ async function extractLoginTokensFromResponse(response: any, accountEmail: strin
         throw new Error(`Login response for ${accountEmail} did not contain set-cookie header.`);
     }
 
-    let foundRT: string | null = null;
-    let foundST: string | null = null;
     const cookies = setCookieHeader.split("\n");
-
-    for (const cookie of cookies) {
-        if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
-            foundRT = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
-        }
-        if (cookie.trim().startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
-            foundST = cookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
-        }
-    }
+    const foundRT = constants.extractCookie(cookies, constants.COOKIE_NAMES.TANGO_RT_PREFIX);
+    const foundST = constants.extractCookie(cookies, constants.COOKIE_NAMES.TANGO_ST_PREFIX);
 
     if (!foundRT || !foundST) {
         throw new Error(`Could not find Tango-RT and/or Tango-ST for ${accountEmail} in cookies.`);

@@ -1,6 +1,7 @@
 import * as path from "path";
 import { config } from "../../../common/config.js";
-import { FileSystemManager, readTokens } from "shared";
+import { readTokens } from "shared";
+import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";

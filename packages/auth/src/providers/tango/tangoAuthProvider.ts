@@ -4,14 +4,13 @@ import * as authUtils from "../../auth/authUtils.js";
 import { Account, IAuthProvider, TokenBag, RefreshResult, ShortTokenResult } from "../interfaces.js";
 import * as constants from "./constants.js";
 import { extractTokens } from "./tangoLogin.js";
-import { TANGO_STREAM_TOKEN_TTL_S, TANGO_STREAM_TOKEN_REFRESH_MS, TANGO_SESSION_REFRESH_MS } from "shared";
 
 export class TangoAuthProvider implements IAuthProvider {
     readonly name = "tango";
 
     readonly intervals = {
-        shortTokenRefresh: TANGO_STREAM_TOKEN_REFRESH_MS,
-        sessionRefresh: TANGO_SESSION_REFRESH_MS,
+        shortTokenRefresh: constants.TANGO_STREAM_TOKEN_REFRESH_MS,
+        sessionRefresh: constants.TANGO_SESSION_REFRESH_MS,
     };
 
     async login(account: Account): Promise<TokenBag> {
@@ -45,17 +44,8 @@ export class TangoAuthProvider implements IAuthProvider {
         }
 
         const allCookies = response.headers.getSetCookie();
-        let newSessionToken: string | null = null;
-        let newRefreshToken: string | null = null;
-
-        for (const cookieString of allCookies) {
-            const trimmedCookie = cookieString.trim();
-            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TANGO_ST_PREFIX)) {
-                newSessionToken = trimmedCookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_ST_PREFIX.length);
-            } else if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TANGO_RT_PREFIX)) {
-                newRefreshToken = trimmedCookie.split(";")[0].substring(constants.COOKIE_NAMES.TANGO_RT_PREFIX.length);
-            }
-        }
+        const newSessionToken = constants.extractCookie(allCookies, constants.COOKIE_NAMES.TANGO_ST_PREFIX);
+        const newRefreshToken = constants.extractCookie(allCookies, constants.COOKIE_NAMES.TANGO_RT_PREFIX);
 
         if (!newSessionToken) {
             throw new Error("Refresh endpoint did not return a new session token cookie.");
@@ -76,24 +66,17 @@ export class TangoAuthProvider implements IAuthProvider {
         }
 
         const allCookies = response.headers.getSetCookie();
-        let tt: string | null = null;
-        let ttu: string | null = null;
-        let tte: string | null = null;
-
-        for (const cookieString of allCookies) {
-            const trimmedCookie = cookieString.trim();
-            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TT_PREFIX)) tt = trimmedCookie.split("=")[1].split(";")[0];
-            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TTU_PREFIX)) ttu = trimmedCookie.split("=")[1].split(";")[0];
-            if (trimmedCookie.startsWith(constants.COOKIE_NAMES.TTE_PREFIX)) tte = trimmedCookie.split("=")[1].split(";")[0];
-        }
+        const tt = constants.extractCookie(allCookies, constants.COOKIE_NAMES.TT_PREFIX);
+        const ttu = constants.extractCookie(allCookies, constants.COOKIE_NAMES.TTU_PREFIX);
+        const tte = constants.extractCookie(allCookies, constants.COOKIE_NAMES.TTE_PREFIX);
 
         if (!tt || !ttu || !tte) {
             throw new Error("Token data response was missing one or more required cookies (tt, ttu, tte).");
         }
 
         const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
-        if (ttl < TANGO_STREAM_TOKEN_TTL_S * 0.8) {
-            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${TANGO_STREAM_TOKEN_TTL_S}s)`);
+        if (ttl < constants.TANGO_STREAM_TOKEN_TTL_S * 0.8) {
+            logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${constants.TANGO_STREAM_TOKEN_TTL_S}s)`);
         }
 
         return { extras: { tt, ttu, tte } };

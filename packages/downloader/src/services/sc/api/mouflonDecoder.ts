@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import * as path from "path";
 import * as url from "url";
-import { FileSystemManager } from "shared";
+import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import * as utils from "../../../common/utils.js";
 

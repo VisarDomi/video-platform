@@ -13,16 +13,6 @@ export interface PlaylistData {
 	isFmp4: boolean;
 }
 
-export async function isFmp4Playlist(filename: string): Promise<boolean> {
-	try {
-		const response = await fetch(API.HLS_PLAYLIST(filename));
-		const text = await response.text();
-		return text.includes('#EXT-X-MAP:');
-	} catch {
-		return false;
-	}
-}
-
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
 	const start = performance.now();
 	const response = await fetch(API.HLS_PLAYLIST(video.filename));

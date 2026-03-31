@@ -55,12 +55,3 @@ export async function sendReturnRequest(video: Video, provider: string): Promise
 	if (!response.ok) throw new ApiError(response.status, `Return failed: ${response.statusText}`);
 }
 
-export async function sendDeleteRequest(video: Video, provider: string): Promise<void> {
-	const response = await fetch(
-		`${API.TRASH(video.filename)}?provider=${encodeURIComponent(provider)}`,
-		{
-			method: 'POST'
-		}
-	);
-	if (!response.ok) throw new ApiError(response.status, `Delete failed: ${response.statusText}`);
-}
