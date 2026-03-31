@@ -1,4 +1,4 @@
-import { FC2_FILE_PATH } from "../core/config.js";
+import { FC2_FILE_PATH } from "../../core/config.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 
 const PREFIX = "https://live.fc2.com/";

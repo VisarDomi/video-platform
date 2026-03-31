@@ -1,6 +1,6 @@
-import { TANGO_FILE_PATH } from "../core/config.js";
-import { resolveAlias, fetchAliasesInBatch } from "../services/tango/apiClient.js";
-import { registry } from "../services/aliasRefreshService.js";
+import { TANGO_FILE_PATH } from "../../core/config.js";
+import { resolveAlias, fetchAliasesInBatch } from "../../services/tango/apiClient.js";
+import { registry } from "../../services/aliasRefreshService.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 
 const PREFIX = "https://tango.me/";

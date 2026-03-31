@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { promises as fs } from "fs";
-import logger from "../core/logger.js";
-import { cleanListContent } from "../core/content-processor.js";
+import logger from "../../core/logger.js";
+import { cleanListContent } from "../../core/content-processor.js";
 
 interface ParsedEntry {
     id: string;

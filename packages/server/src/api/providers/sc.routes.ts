@@ -1,5 +1,5 @@
-import { SC_FILE_PATH } from "../core/config.js";
-import { resolveScUsername } from "../services/sc/apiClient.js";
+import { SC_FILE_PATH } from "../../core/config.js";
+import { resolveScUsername } from "../../services/sc/apiClient.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 
 const PREFIX = "https://stripchat.com/";
