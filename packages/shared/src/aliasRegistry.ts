@@ -85,7 +85,7 @@ export class AliasRegistry {
 
     /**
      * Resolves alias from cache. On miss, calls fetcher for this single ID,
-     * records the result, persists, and returns it.
+     * records the result in memory only (no disk write — only refresh() persists).
      */
     async resolveOrFetch(streamerId: string, fetcher: (id: string) => Promise<string>): Promise<string> {
         const cached = this.resolve(streamerId);
@@ -95,7 +95,6 @@ export class AliasRegistry {
         const alias = await fetcher(streamerId);
         if (alias && alias !== streamerId) {
             this.recordAlias(streamerId, alias);
-            await this.persistToDisk();
         }
         return alias || streamerId;
     }
