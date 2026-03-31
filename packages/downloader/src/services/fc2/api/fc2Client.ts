@@ -1,8 +1,7 @@
 import * as path from "path";
-import { config } from "../../../common/config.js";
-import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
+import { resolveSegmentUrl } from "../../core/downloadUtils.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
@@ -17,6 +16,7 @@ interface Fc2Session {
 }
 
 export class Fc2Client implements IStreamProvider {
+    public readonly providerName = "fc2";
     private msgId = 0;
     private sessions: Map<string, Fc2Session> = new Map();
     private cleanupInterval: NodeJS.Timeout;
@@ -307,7 +307,7 @@ export class Fc2Client implements IStreamProvider {
                     if (i + 1 < lines.length) {
                         const variantLine = lines[i+1].trim();
                         if (variantLine && !variantLine.startsWith("#")) {
-                            bestVariantUrl = this.getSegmentUrl(masterUrl, variantLine);
+                            bestVariantUrl = resolveSegmentUrl(masterUrl, variantLine);
                             break;
                         }
                     }
@@ -322,39 +322,6 @@ export class Fc2Client implements IStreamProvider {
             }
         }
         return masterUrl;
-    }
-
-    public getSegmentUrl(baseUrl: string, segmentLine: string): string {
-        try {
-            return new URL(segmentLine, baseUrl).href;
-        } catch (e) {
-            return segmentLine;
-        }
-    }
-
-    public async setupDownloadDir(alias: string, date: Date): Promise<string | null> {
-        const generateDownloadBaseName = (alias: string, date: Date): string => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            const day = String(date.getDate()).padStart(2, "0");
-            const hours = String(date.getHours()).padStart(2, "0");
-            const minutes = String(date.getMinutes()).padStart(2, "0");
-            const seconds = String(date.getSeconds()).padStart(2, "0");
-            return `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
-        };
-
-        const baseFilename = generateDownloadBaseName(alias, date);
-        const storageLocation = path.join(config.storagePath, "fc2", "downloader");
-
-        const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
-        if (!storageLocationExists) {
-            logger.error(`[FC2] Could not create or access storage folder at: ${storageLocation}`);
-            return null;
-        }
-
-        const segmentsDirPath = path.resolve(storageLocation, baseFilename);
-        const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
-        return segmentsDirExists ? segmentsDirPath : null;
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {

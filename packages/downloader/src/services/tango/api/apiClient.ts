@@ -1,14 +1,20 @@
-import * as path from "path";
-import { config } from "../../../common/config.js";
 import { readTokens } from "shared";
-import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
+function getStreamHeaders(tokens: Tokens): HeadersInit {
+    if (!tokens.tt || !tokens.ttu || !tokens.tte) {
+        throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
+    }
+    return { cookie: `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}` };
+}
+
 export class ApiClient implements IStreamProvider {
+    public readonly providerName = "tango";
+
     public constructor() {
         logger.info("[Tango] ApiClient initialized.");
     }
@@ -21,14 +27,6 @@ export class ApiClient implements IStreamProvider {
             cookie: `Tango-ST=${tokens.st}`,
             Accept: "application/json",
         };
-    }
-
-    private _getStreamHeaders(tokens: Tokens): HeadersInit {
-        if (!tokens.tt || !tokens.ttu || !tokens.tte) {
-            throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
-        }
-        const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
-        return { cookie };
     }
 
     private async _makeApiRequest<T>(
@@ -87,7 +85,7 @@ export class ApiClient implements IStreamProvider {
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
             const tokens = await readTokens();
-            const headers = this._getStreamHeaders(tokens);
+            const headers = getStreamHeaders(tokens);
             return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
@@ -124,39 +122,6 @@ export class ApiClient implements IStreamProvider {
             livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
         }
         return livePlaylistUrl;
-    }
-
-    public getSegmentUrl(baseUrl: string, segmentLine: string): string {
-        if (segmentLine.startsWith("/")) {
-            const urlObj = new URL(baseUrl);
-            return `${urlObj.origin}${segmentLine}`;
-        }
-        return segmentLine;
-    }
-
-    public async setupDownloadDir(alias: string, date: Date): Promise<string | null> {
-        const generateDownloadBaseName = (alias: string, date: Date): string => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            const day = String(date.getDate()).padStart(2, "0");
-            const hours = String(date.getHours()).padStart(2, "0");
-            const minutes = String(date.getMinutes()).padStart(2, "0");
-            const seconds = String(date.getSeconds()).padStart(2, "0");
-            return `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
-        };
-
-        const baseFilename = generateDownloadBaseName(alias, date);
-        const storageLocation = path.join(config.storagePath, "tango", "downloader");
-
-        const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
-        if (!storageLocationExists) {
-            logger.error(`[Tango] Could not create or access storage folder at: ${storageLocation}`);
-            return null;
-        }
-
-        const segmentsDirPath = path.resolve(storageLocation, baseFilename);
-        const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
-        return segmentsDirExists ? segmentsDirPath : null;
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
@@ -201,20 +166,12 @@ export class ApiClient implements IStreamProvider {
 }
 
 class TangoDownloadSession implements IDownloadSession {
-    private _getStreamHeaders(tokens: Tokens): HeadersInit {
-        if (!tokens.tt || !tokens.ttu || !tokens.tte) {
-            throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
-        }
-        const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
-        return { cookie };
-    }
-
     private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
             const tokens = await readTokens();
-            const headers = this._getStreamHeaders(tokens);
+            const headers = getStreamHeaders(tokens);
             const response = await fetch(url, {
                 method: "GET",
                 headers,

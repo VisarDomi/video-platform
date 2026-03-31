@@ -1,7 +1,5 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { config } from "../../../common/config.js";
-import { FileSystemManager } from "../../../common/fileSystemManager.js";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
@@ -48,6 +46,7 @@ const CDN_TLDS = ["org", "com", "net"];
 const BULK_BATCH_SIZE = 100;
 
 export class ScClient implements IStreamProvider {
+    public readonly providerName = "sc";
 
     constructor() {
         logger.info("[SC] ScClient initialized.");
@@ -263,36 +262,6 @@ export class ScClient implements IStreamProvider {
 
     public createDownloadSession(): IDownloadSession {
         return new ScDownloadSession();
-    }
-
-    public getSegmentUrl(baseUrl: string, segmentLine: string): string {
-        try {
-            return new URL(segmentLine, baseUrl).href;
-        } catch (error: any) {
-            logger.warn(`[SC] Malformed segment URL — possible decryption failure: segment=${segmentLine} base=${baseUrl}`);
-            return segmentLine;
-        }
-    }
-
-    public async setupDownloadDir(alias: string, date: Date): Promise<string | null> {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        const seconds = String(date.getSeconds()).padStart(2, "0");
-        const baseName = `${year}-${month}-${day} ${hours}${minutes}${seconds} ${alias}`;
-
-        const storageLocation = path.join(config.storagePath, "sc", "downloader");
-        const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
-        if (!storageLocationExists) {
-            logger.error(`[SC] Could not create or access storage folder at: ${storageLocation}`);
-            return null;
-        }
-
-        const segmentsDirPath = path.resolve(storageLocation, baseName);
-        const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
-        return segmentsDirExists ? segmentsDirPath : null;
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {

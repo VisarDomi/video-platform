@@ -9,9 +9,8 @@ export interface IDownloadSession {
 }
 
 export interface IStreamProvider {
+    readonly providerName: string;
     parseMasterPlaylist(masterUrl: string): Promise<string | null>;
-    getSegmentUrl(baseUrl: string, segmentLine: string): string;
-    setupDownloadDir(alias: string, date: Date): Promise<string | null>;
     validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }>;
     createDownloadSession(): IDownloadSession;
 

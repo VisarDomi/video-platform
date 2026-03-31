@@ -9,6 +9,7 @@ import type { PlaylistManager } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
+import { resolveSegmentUrl } from "../core/downloadUtils.js";
 import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS } from "../../common/timing.js";
 
 export type ExitReason = "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
@@ -153,7 +154,7 @@ export class StreamDownloader {
             if (mapMatch) {
                 const mapUri = mapMatch[1];
                 if (initTracker.needsUpdate(mapUri)) {
-                    const initUrl = this.provider.getSegmentUrl(liveUrl, mapUri);
+                    const initUrl = resolveSegmentUrl(liveUrl, mapUri);
                     const result = await initTracker.commitInit(
                         mapUri,
                         () => session.fetchSegment(initUrl),
@@ -175,7 +176,7 @@ export class StreamDownloader {
 
             const segments = await playlistManager.identifyNewSegments(
                 content,
-                (line) => this.provider.getSegmentUrl(liveUrl, line),
+                (line) => resolveSegmentUrl(liveUrl, line),
             );
 
             let downloadedThisIteration = false;
