@@ -17,7 +17,6 @@
 
 	const ITEM_HEIGHT = 52;
 	const SCROLL_BUFFER = 10;
-	const MIN_LIST_ITEMS = 100;
 
 	let lastScrollY = 0;
 	let searchHidden = $state(false);
@@ -27,7 +26,7 @@
 
 	const filteredVideos = $derived(videoListStore.filteredVideos);
 
-	const totalHeight = $derived(Math.max(MIN_LIST_ITEMS, filteredVideos.length) * ITEM_HEIGHT);
+	const totalHeight = $derived(filteredVideos.length * ITEM_HEIGHT);
 	const startIdx = $derived(Math.max(0, Math.floor(scrollY / ITEM_HEIGHT) - SCROLL_BUFFER));
 	const endIdx = $derived(
 		Math.min(
