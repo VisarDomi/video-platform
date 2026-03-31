@@ -47,7 +47,7 @@ export class GestureController {
 	swipeAnimating = $state(false);
 
 	private readonly EDGE_ZONE_RATIO = 0.077;
-	private readonly DEADZONE_RATIO = 0.026;
+	private readonly DEADZONE_RATIO = 0.013;
 	private readonly EDGE_BACK_THRESHOLD = 0.3;
 	private readonly UI_SWIPE_THRESHOLD = 80;
 	private readonly SEEK_RATE = 60;
