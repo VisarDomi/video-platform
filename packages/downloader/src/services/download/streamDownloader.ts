@@ -4,7 +4,7 @@ import * as fs from "fs/promises";
 
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
-import { FileSystemManager } from "shared";
+import { FileSystemManager } from "../../common/fileSystemManager.js";
 import type { PlaylistManager } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
