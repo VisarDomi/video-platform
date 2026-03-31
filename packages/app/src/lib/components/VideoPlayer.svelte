@@ -9,6 +9,7 @@
 	import { WatchdogService } from '$lib/services/WatchdogService.js';
 	import { findAdjacentVideo } from '$lib/utils/navigation.js';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
+	import { logEvent } from '$lib/services/log.js';
 
 	import ProgressBar from './ProgressBar.svelte';
 	import PlayerControls from './PlayerControls.svelte';
@@ -102,7 +103,7 @@
 	const watchdog = new WatchdogService();
 	watchdog.setOnFreeze(() => {
 		if (playerStore.view === 'video' && playerStore.currentVideo) {
-			console.log('[VideoPlayer] Watchdog freeze → resuming');
+			logEvent('watchdog-freeze-resume', {});
 			engine.resume();
 		}
 	});
@@ -119,7 +120,7 @@
 				const delta = now - sentinelLast;
 				sentinelLast = now;
 				if (delta > 3000 && document.visibilityState === 'visible') {
-					console.log(`[VideoPlayer] Sentinel: visibilitychange missed, forcing resume (frozen ${Math.round(delta / 1000)}s)`);
+					logEvent('sentinel-resume', { frozenSec: Math.round(delta / 1000) });
 					executeResume();
 				}
 			}, 1000);
@@ -137,14 +138,14 @@
 		const elapsed = backgroundedAt > 0 ? Date.now() - backgroundedAt : 0;
 		backgroundedAt = 0;
 		if (elapsed > RESUME_THRESHOLD_MS && playerStore.view === 'video' && playerStore.currentVideo) {
-			console.log(`[VideoPlayer] Resuming after ${Math.round(elapsed / 1000)}s`);
+			logEvent('background-resume', { elapsedSec: Math.round(elapsed / 1000) });
 			engine.resume();
 		}
 	}
 
 	function handleConnectivityChange(online: boolean) {
 		if (online && playerStore.view === 'video' && playerStore.currentVideo) {
-			console.log('[VideoPlayer] Back online → resuming');
+			logEvent('online-resume', {});
 			engine.resume();
 		}
 	}
