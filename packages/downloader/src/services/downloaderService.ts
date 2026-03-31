@@ -5,7 +5,6 @@ import * as path from "path";
 import { config } from "../common/config.js";
 import { DiskSpaceMonitor } from "./coordination/diskSpaceMonitor.js";
 
-import { TokenManager } from "./tango/api/tokenManager.js";
 import { ApiClient } from "./tango/api/apiClient.js";
 import { StreamDiscoveryService } from "./tango/discovery/streamDiscoveryService.js";
 
@@ -43,8 +42,7 @@ export class DownloaderService {
         const registry = new AliasRegistry(path.join(config.sharedStatePath, "aliases.json"));
         await registry.load();
 
-        const tokenManager = new TokenManager();
-        const apiClient = new ApiClient(tokenManager);
+        const apiClient = new ApiClient();
         const streamDiscoveryService = new StreamDiscoveryService(apiClient, registry, downloadsManager);
 
         const fc2TargetManager = createFc2TargetManager();

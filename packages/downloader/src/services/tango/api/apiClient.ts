@@ -1,18 +1,14 @@
 import * as path from "path";
 import { config } from "../../../common/config.js";
-import { FileSystemManager } from "../../../common/fileSystemManager.js";
+import { FileSystemManager, readTokens } from "shared";
+import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
-import * as constants from "../../../common/constants.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
-import { TokenManager, Tokens } from "./tokenManager.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
 export class ApiClient implements IStreamProvider {
-    private tokenManager: TokenManager;
-
-    public constructor(tokenManager: TokenManager) {
-        this.tokenManager = tokenManager;
+    public constructor() {
         logger.info("[Tango] ApiClient initialized.");
     }
 
@@ -21,7 +17,7 @@ export class ApiClient implements IStreamProvider {
             throw new Error("Cannot create API headers: Tango-ST is missing from tokens.");
         }
         return {
-            [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokens.st}`,
+            cookie: `Tango-ST=${tokens.st}`,
             Accept: "application/json",
         };
     }
@@ -31,7 +27,7 @@ export class ApiClient implements IStreamProvider {
             throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
         }
         const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
-        return { [constants.HEADERS.COOKIE]: cookie };
+        return { cookie };
     }
 
     private async _makeApiRequest<T>(
@@ -72,7 +68,7 @@ export class ApiClient implements IStreamProvider {
 
     public async getFollowingResponseBody(): Promise<any | null> {
         try {
-            const tokens = await this.tokenManager.getTokens();
+            const tokens = await readTokens();
             const headers = this._getApiHeaders(tokens);
             return this._makeApiRequest<any>(
                 "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200",
@@ -88,7 +84,7 @@ export class ApiClient implements IStreamProvider {
 
     public async getStreamerAlias(streamerId: string): Promise<string> {
         try {
-            const tokens = await this.tokenManager.getTokens();
+            const tokens = await readTokens();
             const headers = this._getApiHeaders(tokens);
             const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
             const response = await this._makeApiRequest<any>(url, "GET", headers, "json");
@@ -104,7 +100,7 @@ export class ApiClient implements IStreamProvider {
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
-            const tokens = await this.tokenManager.getTokens();
+            const tokens = await readTokens();
             const headers = this._getStreamHeaders(tokens);
             return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
         } catch (error) {
@@ -114,7 +110,7 @@ export class ApiClient implements IStreamProvider {
     }
 
     public createDownloadSession(): IDownloadSession {
-        return new TangoDownloadSession(this.tokenManager);
+        return new TangoDownloadSession();
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
@@ -219,25 +215,19 @@ export class ApiClient implements IStreamProvider {
 }
 
 class TangoDownloadSession implements IDownloadSession {
-    private tokenManager: TokenManager;
-
-    constructor(tokenManager: TokenManager) {
-        this.tokenManager = tokenManager;
-    }
-
     private _getStreamHeaders(tokens: Tokens): HeadersInit {
         if (!tokens.tt || !tokens.ttu || !tokens.tte) {
             throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
         }
         const cookie = `tt=${tokens.tt};ttu=${tokens.ttu};tte=${tokens.tte}`;
-        return { [constants.HEADERS.COOKIE]: cookie };
+        return { cookie };
     }
 
     private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
-            const tokens = await this.tokenManager.getTokens();
+            const tokens = await readTokens();
             const headers = this._getStreamHeaders(tokens);
             const response = await fetch(url, {
                 method: "GET",

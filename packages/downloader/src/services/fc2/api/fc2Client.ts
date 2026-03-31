@@ -1,6 +1,6 @@
 import * as path from "path";
 import { config } from "../../../common/config.js";
-import { FileSystemManager } from "../../../common/fileSystemManager.js";
+import { FileSystemManager } from "shared";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";

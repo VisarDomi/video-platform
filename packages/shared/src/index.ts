@@ -2,5 +2,8 @@ export { fixTargetDuration } from "./hlsUtils.js";
 export { AliasRegistry } from "./aliasRegistry.js";
 export type { AliasFetcher } from "./aliasRegistry.js";
 export { acquireLock } from "./fileLock.js";
+export { readTokens } from "./tokenManager.js";
+export type { Tokens } from "./tokenManager.js";
+export { FileSystemManager } from "./fileSystemManager.js";
 export { TANGO_STREAM_TOKEN_TTL_S, TANGO_SESSION_TOKEN_TTL_S, TANGO_STREAM_TOKEN_REFRESH_MS, TANGO_SESSION_REFRESH_MS } from "./tangoApi.js";
 export { createLogger } from "./logger.js";

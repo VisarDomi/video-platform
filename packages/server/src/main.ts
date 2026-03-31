@@ -13,7 +13,6 @@ import scRouter from "./api/sc-list.routes.js";
 import tangoListRouter from "./api/tango-list.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
 import frontendLogRouter from "./api/frontend-log.routes.js";
-import { startTokenWatcher } from "./services/tango/tokenManager.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startOrphanStreamFinalizer } from "./services/orphanStreamFinalizer.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
@@ -46,7 +45,6 @@ async function startServer() {
     process.exit(1);
   }
 
-  startTokenWatcher();
   startAliasRefresh();
   startOrphanStreamFinalizer();
 

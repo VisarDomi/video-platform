@@ -1,5 +1,5 @@
 import logger from "../../core/logger.js";
-import { getTokens } from "./tokenManager.js";
+import { readTokens } from "shared";
 
 const API_BASE = "https://gateway.tango.me/proxycador/api/public/v1";
 
@@ -8,8 +8,8 @@ interface ProfileData {
     firstName: string | null;
 }
 
-function getApiHeaders(): Record<string, string> | null {
-    const tokens = getTokens();
+async function getApiHeaders(): Promise<Record<string, string> | null> {
+    const tokens = await readTokens();
     if (!tokens?.st) return null;
     return {
         cookie: `Tango-ST=${tokens.st}`,
@@ -18,7 +18,7 @@ function getApiHeaders(): Record<string, string> | null {
 }
 
 export async function fetchAliasesInBatch(streamerIds: string[]): Promise<Record<string, ProfileData> | null> {
-    const headers = getApiHeaders();
+    const headers = await getApiHeaders();
     if (!headers) return null;
 
     try {
@@ -50,7 +50,7 @@ export async function fetchAliasesInBatch(streamerIds: string[]): Promise<Record
 }
 
 export async function resolveAlias(alias: string): Promise<{ accountId: string; firstName: string } | null> {
-    const headers = getApiHeaders();
+    const headers = await getApiHeaders();
     if (!headers) return null;
 
     try {

@@ -1,7 +1,6 @@
 import * as path from "path";
-import { FileSystemManager } from "../../common/fileSystemManager.js";
+import { FileSystemManager, fixTargetDuration } from "shared";
 import logger from "../../common/logger.js";
-import { fixTargetDuration } from "shared";
 import { DiskSession } from "./diskSession.js";
 
 export interface SegmentInfo {

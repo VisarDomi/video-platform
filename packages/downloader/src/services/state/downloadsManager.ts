@@ -2,7 +2,7 @@ import * as path from "path";
 
 import logger from "../../common/logger.js";
 import { config } from "../../common/config.js";
-import { FileSystemManager } from "../../common/fileSystemManager.js";
+import { FileSystemManager } from "shared";
 import { STATUS_FILE_DEBOUNCE_MS } from "../../common/timing.js";
 
 interface Download {

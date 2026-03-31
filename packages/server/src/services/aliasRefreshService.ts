@@ -1,7 +1,6 @@
-import { AliasRegistry } from "shared";
+import { AliasRegistry, readTokens } from "shared";
 import type { AliasFetcher } from "shared";
 import { ALIASES_PATH, TANGO_FILE_PATH } from "../core/config.js";
-import { getTokens } from "./tango/tokenManager.js";
 import logger from "../core/logger.js";
 
 const ALIAS_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -9,8 +8,8 @@ const BATCH_CHUNK_SIZE = 500;
 
 const API_BASE = "https://gateway.tango.me";
 
-function getApiHeaders(): Record<string, string> | null {
-    const tokens = getTokens();
+async function getApiHeaders(): Promise<Record<string, string> | null> {
+    const tokens = await readTokens();
     if (!tokens?.st) return null;
     return {
         cookie: `Tango-ST=${tokens.st}`,
@@ -19,7 +18,7 @@ function getApiHeaders(): Record<string, string> | null {
 }
 
 async function getAllFollowingIds(): Promise<string[]> {
-    const headers = getApiHeaders();
+    const headers = await getApiHeaders();
     if (!headers) return [];
 
     try {
@@ -38,7 +37,7 @@ async function getAllFollowingIds(): Promise<string[]> {
 }
 
 const fetcher: AliasFetcher = async (ids: string[]) => {
-    const headers = getApiHeaders();
+    const headers = await getApiHeaders();
     if (!headers) return {};
 
     const result: Record<string, string> = {};
