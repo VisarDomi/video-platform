@@ -86,30 +86,6 @@ export class ApiClient implements IStreamProvider {
         }
     }
 
-    public async getAllFollowing(): Promise<any | null> {
-        try {
-            const tokens = await this.tokenManager.getTokens();
-            const headers = this._getApiHeaders(tokens);
-            const url = `https://gateway.tango.me/discovery/v3/followings/me/list?size=5000`;
-            return this._makeApiRequest<any>(url, "GET", headers, "json");
-        } catch (error) {
-            logger.error(`[Tango] Unexpected error in getAllFollowing`, { error: (error as Error).message });
-            return null;
-        }
-    }
-
-    public async getAliasesInBatch(streamerIds: string[]): Promise<any | null> {
-        try {
-            const tokens = await this.tokenManager.getTokens();
-            const headers = this._getApiHeaders(tokens);
-            const url = `https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`;
-            return this._makeApiRequest<any>(url, "POST", headers, "json", streamerIds);
-        } catch (error) {
-            logger.error(`[Tango] Unexpected error in getAliasesInBatch`, { error: (error as Error).message });
-            return null;
-        }
-    }
-
     public async getStreamerAlias(streamerId: string): Promise<string> {
         try {
             const tokens = await this.tokenManager.getTokens();

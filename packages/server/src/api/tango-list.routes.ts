@@ -1,16 +1,14 @@
 import { Router } from "express";
 import { promises as fs } from "fs";
 import { createTxtListRoutes } from "./txt-list-routes.js";
-import { TANGO_FILE_PATH, ALIASES_PATH } from "../core/config.js";
+import { TANGO_FILE_PATH } from "../core/config.js";
 import { resolveAlias, fetchAliasesInBatch } from "../services/tango/apiClient.js";
-import { AliasRegistry } from "shared";
+import { registry } from "../services/aliasRefreshService.js";
 import logger from "../core/logger.js";
 import { cleanListContent } from "../core/content-processor.js";
 
 const TANGO_URL_PREFIX = "https://tango.me/";
 const baseRouter = createTxtListRoutes({ provider: "tango", filePath: TANGO_FILE_PATH, urlPrefix: "" });
-const registry = new AliasRegistry(ALIASES_PATH);
-void registry.load();
 
 const router = Router();
 
@@ -30,8 +28,6 @@ router.get("/api/tango/list", async (_req, res) => {
             .map(line => parseLine(line))
             .filter((p): p is NonNullable<typeof p> => p !== null);
 
-        // Reload from disk to pick up downloader's latest writes
-        await registry.load();
         const allAliases = registry.getAllWithHistory();
         const identifiers = new Set<string>();
 
