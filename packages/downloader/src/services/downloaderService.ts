@@ -3,7 +3,6 @@ import { DownloadsManager } from "./state/downloadsManager.js";
 import { AliasRegistry } from "shared";
 import * as path from "path";
 import { config } from "../common/config.js";
-import { DiskSpaceMonitor } from "./coordination/diskSpaceMonitor.js";
 
 import { ApiClient } from "./tango/api/apiClient.js";
 import { StreamDiscoveryService } from "./tango/discovery/streamDiscoveryService.js";
@@ -71,8 +70,6 @@ export class DownloaderService {
 
     public async start() {
         logger.info("[General] Starting all services...");
-
-        DiskSpaceMonitor.run();
 
         void this.streamDiscoveryService.start();
 
