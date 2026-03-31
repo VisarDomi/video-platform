@@ -1,7 +1,6 @@
 import { promises as fs } from "fs";
 import * as path from "path";
-import { acquireLock } from "./fileLock.js";
-import { createLogger } from "./logger.js";
+import { acquireLock, createLogger } from "shared";
 
 const logger = createLogger("AliasRegistry");
 
@@ -13,15 +12,12 @@ interface AliasEntry {
     lastVerifiedAt: number;
 }
 
-type AliasMap = Record<string, AliasEntry>;
-
 export type AliasFetcher = (streamerIds: string[]) => Promise<Record<string, string>>;
 
 export class AliasRegistry {
     private readonly filePath: string;
     private readonly lockPath: string;
     private state: Map<string, AliasEntry> = new Map();
-    private loaded = false;
 
     constructor(aliasesFilePath: string) {
         this.filePath = aliasesFilePath;
@@ -31,7 +27,6 @@ export class AliasRegistry {
     async load(): Promise<void> {
         const raw = await this.readDisk();
         this.state = raw;
-        this.loaded = true;
         logger.info(`Loaded ${this.state.size} aliases from disk`);
     }
 
@@ -64,18 +59,6 @@ export class AliasRegistry {
             }
         }
         return reverse;
-    }
-
-    async resolveOrFetch(streamerId: string, fetcher: (id: string) => Promise<string>): Promise<string> {
-        const cached = this.resolve(streamerId);
-        if (cached) return cached;
-
-        logger.info(`Cache miss for ${streamerId}, fetching...`);
-        const alias = await fetcher(streamerId);
-        if (alias && alias !== streamerId) {
-            this.recordAlias(streamerId, alias);
-        }
-        return alias || streamerId;
     }
 
     async refresh(fetcher: AliasFetcher, streamerIds: string[]): Promise<void> {

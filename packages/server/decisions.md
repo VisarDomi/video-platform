@@ -37,3 +37,15 @@ Server supervises the downloader — stops it via `systemctl --user stop video-d
 resolveScUsername is called once at add-time. The stable numeric room ID is persisted to sc.txt alongside the username. Usernames can change; room IDs don't.
 
 **Why:** Renamed/deleted accounts caused 404s on every poll cycle.
+
+## AliasRegistry is server-only
+
+AliasRegistry lives in the server, not shared. Only the server reads/writes aliases.json — the downloader doesn't touch it. The downloader gets folder names from tango.txt (which the server's alias refresh keeps in sync). The frontend consumes aliases.json via the /api/tango/list endpoint for search across current + historical aliases.
+
+## Alias refresh: hourly batch + tango.txt sync
+
+Hourly cycle: fetch all following IDs (size=5000), batch-fetch aliases (chunked in groups of 500), persist to aliases.json, then rewrite stale alias portions in tango.txt. The downloader's TargetManager picks up tango.txt changes via fs.watch.
+
+## Batch alias endpoint caps at 500
+
+The Tango batch profile API returns at most 500 results per request. The fetcher chunks requests in groups of 500 sequentially.

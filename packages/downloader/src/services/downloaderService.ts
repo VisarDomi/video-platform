@@ -1,11 +1,9 @@
 import logger from "../common/logger.js";
 import { DownloadsManager } from "./state/downloadsManager.js";
-import { AliasRegistry } from "shared";
-import * as path from "path";
-import { config } from "../common/config.js";
 
 import { ApiClient } from "./tango/api/apiClient.js";
 import { StreamDiscoveryService } from "./tango/discovery/streamDiscoveryService.js";
+import { TangoTargetManager } from "./tango/discovery/targetManager.js";
 
 import { createFc2TargetManager } from "./fc2/discovery/targetManager.js";
 import { Fc2Client } from "./fc2/api/fc2Client.js";
@@ -14,8 +12,6 @@ import { Fc2DiscoveryService } from "./fc2/discovery/discoveryService.js";
 import { ScTargetManager } from "./sc/discovery/targetManager.js";
 import { ScClient } from "./sc/api/scClient.js";
 import { ScDiscoveryService } from "./sc/discovery/discoveryService.js";
-
-import { createTangoTargetManager } from "./tango/discovery/targetManager.js";
 
 export class DownloaderService {
     private streamDiscoveryService: StreamDiscoveryService;
@@ -38,11 +34,10 @@ export class DownloaderService {
 
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
-        const registry = new AliasRegistry(path.join(config.sharedStatePath, "aliases.json"));
-        await registry.load();
 
         const apiClient = new ApiClient();
-        const streamDiscoveryService = new StreamDiscoveryService(apiClient, registry, downloadsManager);
+        const tangoTargetManager = TangoTargetManager.create();
+        const streamDiscoveryService = new StreamDiscoveryService(apiClient, tangoTargetManager, downloadsManager);
 
         const fc2TargetManager = createFc2TargetManager();
         const fc2Client = new Fc2Client();
@@ -52,9 +47,6 @@ export class DownloaderService {
         const scClient = new ScClient();
         await scClient.init();
         const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
-
-        const tangoTargetManager = createTangoTargetManager();
-        streamDiscoveryService.setTargetManager(tangoTargetManager);
 
         return new DownloaderService(
             streamDiscoveryService,

@@ -82,21 +82,6 @@ export class ApiClient implements IStreamProvider {
         }
     }
 
-    public async getStreamerAlias(streamerId: string): Promise<string> {
-        try {
-            const tokens = await readTokens();
-            const headers = this._getApiHeaders(tokens);
-            const url = `https://gateway.tango.me/proxycador/api/profiles/v2/single?id=${streamerId}&basicProfile=true&liveStats=false&followStats=false`;
-            const response = await this._makeApiRequest<any>(url, "GET", headers, "json");
-            if (response?.basicProfile?.aliases?.[0]?.alias) {
-                return response.basicProfile.aliases[0].alias;
-            }
-            return streamerId;
-        } catch (error) {
-            logger.error(`[Tango] Unexpected error in getStreamerAlias for ${streamerId}`, { error: (error as Error).message });
-            return streamerId;
-        }
-    }
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {

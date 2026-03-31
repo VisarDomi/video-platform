@@ -1,5 +1,6 @@
-import { AliasRegistry, readTokens } from "shared";
-import type { AliasFetcher } from "shared";
+import { readTokens } from "shared";
+import { AliasRegistry } from "./aliasRegistry.js";
+import type { AliasFetcher } from "./aliasRegistry.js";
 import { ALIASES_PATH, TANGO_FILE_PATH } from "../core/config.js";
 import logger from "../core/logger.js";
 
