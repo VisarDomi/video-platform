@@ -1,11 +1,9 @@
 import logger from "../common/logger.js";
 import { DownloadsManager } from "./state/downloadsManager.js";
-import { AliasRegistry } from "shared";
-import * as path from "path";
-import { config } from "../common/config.js";
 
 import { ApiClient } from "./tslive/api/apiClient.js";
 import { StreamDiscoveryService } from "./tslive/discovery/streamDiscoveryService.js";
+import { TsLiveTargetManager } from "./tslive/discovery/targetManager.js";
 
 import { createLadderTargetManager } from "./ladder/discovery/targetManager.js";
 import { LadderClient } from "./ladder/api/ladderClient.js";
@@ -14,8 +12,6 @@ import { LadderDiscoveryService } from "./ladder/discovery/discoveryService.js";
 import { ScTargetManager } from "./fmp4/discovery/targetManager.js";
 import { ScClient } from "./fmp4/api/scClient.js";
 import { ScDiscoveryService } from "./fmp4/discovery/discoveryService.js";
-
-import { createTsLiveTargetManager } from "./tslive/discovery/targetManager.js";
 
 export class DownloaderService {
     private streamDiscoveryService: StreamDiscoveryService;
@@ -38,11 +34,10 @@ export class DownloaderService {
 
     public static async create(): Promise<DownloaderService> {
         const downloadsManager = await DownloadsManager.create();
-        const registry = new AliasRegistry(path.join(config.sharedStatePath, "aliases.json"));
-        await registry.load();
 
         const apiClient = new ApiClient();
-        const streamDiscoveryService = new StreamDiscoveryService(apiClient, registry, downloadsManager);
+        const tsliveTargetManager = TsLiveTargetManager.create();
+        const streamDiscoveryService = new StreamDiscoveryService(apiClient, tsliveTargetManager, downloadsManager);
 
         const ladderTargetManager = createLadderTargetManager();
         const ladderClient = new LadderClient();
@@ -52,9 +47,6 @@ export class DownloaderService {
         const scClient = new ScClient();
         await scClient.init();
         const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
-
-        const tsliveTargetManager = createTsLiveTargetManager();
-        streamDiscoveryService.setTargetManager(tsliveTargetManager);
 
         return new DownloaderService(
             streamDiscoveryService,
