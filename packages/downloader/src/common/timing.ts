@@ -16,12 +16,7 @@ export const CDN_FETCH_TIMEOUT_MS = 30_000;
 
 export const ZERO_SEGMENT_COOLDOWN_MS = 20_000;
 
-export const ORPHAN_SECOND_CHECK_MS = 5 * 60 * 1_000;
-export const ORPHAN_CYCLE_MS = 24 * 60 * 60 * 1_000;
-export const ORPHAN_MIN_AGE_MS = 60 * 60 * 1_000;
 
-export const DISK_CHECK_INTERVAL_MS = 60_000;
-export const DISK_FULL_SLEEP_MS = 24 * 60 * 60 * 1_000;
 
 export const AUTH_LOGIN_RETRY_MS = 30_000;
 export const AUTH_API_RATE_LIMIT_MS = 1_000;
