@@ -15,15 +15,8 @@ interface AliasEntry {
 
 type AliasMap = Record<string, AliasEntry>;
 
-/** Function that batch-fetches aliases from an external API. */
 export type AliasFetcher = (streamerIds: string[]) => Promise<Record<string, string>>;
 
-/**
- * Single owner of alias state. Only this class reads/writes aliases.json.
- *
- * Consumers borrow via resolve() or resolveOrFetch().
- * The periodic refresh cycle and tango.txt sync live here.
- */
 export class AliasRegistry {
     private readonly filePath: string;
     private readonly lockPath: string;
@@ -35,8 +28,6 @@ export class AliasRegistry {
         this.lockPath = aliasesFilePath + ".lock";
     }
 
-    // ── Bootstrap ──────────────────────────────────────────────
-
     async load(): Promise<void> {
         const raw = await this.readDisk();
         this.state = raw;
@@ -44,14 +35,10 @@ export class AliasRegistry {
         logger.info(`Loaded ${this.state.size} aliases from disk`);
     }
 
-    // ── Borrow (read-only) ─────────────────────────────────────
-
-    /** Returns the current alias for a streamerId, or undefined if unknown. */
     resolve(streamerId: string): string | undefined {
         return this.state.get(streamerId)?.current;
     }
 
-    /** Returns a snapshot of all aliases: streamerId -> current alias. */
     resolveAll(): Record<string, string> {
         const result: Record<string, string> = {};
         for (const [id, entry] of this.state) {
@@ -60,7 +47,6 @@ export class AliasRegistry {
         return result;
     }
 
-    /** Returns a snapshot of the full history: streamerId -> string[]. */
     getAllWithHistory(): Record<string, string[]> {
         const result: Record<string, string[]> = {};
         for (const [id, entry] of this.state) {
@@ -69,7 +55,6 @@ export class AliasRegistry {
         return result;
     }
 
-    /** Reverse lookup: alias -> streamerId. Checks current + history. */
     getReverse(): Record<string, string> {
         const reverse: Record<string, string> = {};
         for (const [id, entry] of this.state) {
@@ -81,12 +66,6 @@ export class AliasRegistry {
         return reverse;
     }
 
-    // ── Borrow + lazy fetch on miss ────────────────────────────
-
-    /**
-     * Resolves alias from cache. On miss, calls fetcher for this single ID,
-     * records the result in memory only (no disk write — only refresh() persists).
-     */
     async resolveOrFetch(streamerId: string, fetcher: (id: string) => Promise<string>): Promise<string> {
         const cached = this.resolve(streamerId);
         if (cached) return cached;
@@ -99,12 +78,6 @@ export class AliasRegistry {
         return alias || streamerId;
     }
 
-    // ── Refresh (periodic owner duty) ──────────────────────────
-
-    /**
-     * Batch-refreshes all known aliases via the fetcher.
-     * Absorbs the old AliasSyncService's job.
-     */
     async refresh(fetcher: AliasFetcher, streamerIds: string[]): Promise<void> {
         if (streamerIds.length === 0) return;
 
@@ -122,10 +95,6 @@ export class AliasRegistry {
         logger.info(`Refresh complete: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved, ${updated} updated`);
     }
 
-    /**
-     * Starts the periodic refresh loop. Runs immediately, then every intervalMs.
-     * Returns a cleanup function to stop the timer.
-     */
     startPeriodicRefresh(
         intervalMs: number,
         getStreamerIds: () => Promise<string[]>,
@@ -149,18 +118,12 @@ export class AliasRegistry {
         return () => clearInterval(timer);
     }
 
-    // ── tango.txt sync ─────────────────────────────────────────
-
-    /**
-     * Rewrites alias portions in tango.txt to match current truth.
-     * Only touches lines where the alias has changed. Preserves comments + ordering.
-     */
     async syncTangoTxt(filePath: string): Promise<void> {
         let content: string;
         try {
             content = await fs.readFile(filePath, "utf-8");
         } catch {
-            return; // file doesn't exist yet
+            return;
         }
 
         const lines = content.split("\n");
@@ -190,11 +153,6 @@ export class AliasRegistry {
         }
     }
 
-    // ── Internal mutation (private — only this class writes) ───
-
-    /**
-     * Records an alias for a streamerId. Returns true if the alias was new/changed.
-     */
     private recordAlias(streamerId: string, alias: string): boolean {
         const existing = this.state.get(streamerId);
         const now = Date.now();
@@ -204,7 +162,6 @@ export class AliasRegistry {
                 existing.lastVerifiedAt = now;
                 return false;
             }
-            // Alias changed — move old current to history
             existing.history.push(existing.current);
             existing.current = alias;
             existing.lastVerifiedAt = now;
@@ -214,8 +171,6 @@ export class AliasRegistry {
         this.state.set(streamerId, { current: alias, history: [], lastVerifiedAt: now });
         return true;
     }
-
-    // ── Disk I/O ───────────────────────────────────────────────
 
     private async readDisk(): Promise<Map<string, AliasEntry>> {
         try {
@@ -242,7 +197,6 @@ export class AliasRegistry {
     private async persistToDisk(): Promise<void> {
         const release = await acquireLock({ lockPath: this.lockPath });
         try {
-            // Serialize in the same format as the old AliasManager: streamerId -> string[]
             const data: Record<string, string[]> = {};
             for (const [id, entry] of this.state) {
                 data[id] = [...entry.history, entry.current];

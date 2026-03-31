@@ -10,11 +10,8 @@ export interface Tokens {
     tt: string | null;
     ttu: string | null;
     tte: string | null;
-    /** Epoch ms when these tokens were read from disk */
     readAtMs: number;
-    /** Seconds until tte expiry, computed at read time. Negative = already expired. null = tte missing. */
     ttlAtReadSec: number | null;
-    /** Ms since auth service last wrote this token to disk. null = lastWriteMs missing. */
     tokenAgeMs: number | null;
 }
 

@@ -54,15 +54,9 @@ On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions a
 
 **Why:** The old `process.exit(0)` killed downloads mid-write, leaving playlists without `#EXT-X-ENDLIST`. The orphan finalizer was the only recovery, running hours later.
 
-## Orphan finalizer: structured parse for crash recovery
-
-The non-finalized playlist rebuild parses into header lines + sections (each with a MAP + entries), then serializes back. Handles both MPEG-TS (no MAP) and fMP4 (MAP per quality section). Missing headers are reconstructed.
-
-**Why:** The old line-by-line rebuild with positional heuristics produced headerless playlists when the first MAP wasn't in the expected position (power loss during header write).
-
 ## Server serves, not heals
 
-The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns playlist correctness; the orphan finalizer owns crash recovery.
+The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns playlist correctness; the orphan finalizer (in server) owns crash recovery.
 
 **Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
 
@@ -96,12 +90,6 @@ TokenManager has no watcher, no cache. `getTokens()` reads the session file on e
 
 **Why:** Timing values were scattered across 16 files as bare numbers. The same value (30s CDN timeout) was hardcoded independently in 3 providers.
 
-## Room IDs are the source of truth for SC
-
-The stable identifier is the numeric room ID. Resolved once at add-time, persisted in sc.txt.
-
-**Why:** Renamed/deleted accounts caused 404s on every poll cycle.
-
 ## Flat cooldown, no exponential backoff
 
 20s cooldown after a 0-segment session. Logs "live again after cooldown" when a streamer is detected live immediately after cooldown expiry — this data will show if 20s is too long.
@@ -126,6 +114,3 @@ The memberApi returns `fee>0` for paid streams. Only download `fee=0`.
 
 **Why:** The frontend is a client-side SPA with no logging. Performance claims (cache saves Xms) couldn't be verified without data.
 
-## Disk space monitor stops the service at 50GB
-
-**Why:** Prevents disk from filling completely, which would corrupt in-progress recordings.

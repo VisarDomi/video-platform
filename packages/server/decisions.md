@@ -19,3 +19,21 @@ For fMP4 segments, ffprobe can't determine duration from a single segment withou
 ## Segment processing: pLimit(5)
 
 Concurrent segment processing is capped at 5 to avoid overwhelming ffprobe with too many parallel invocations.
+
+## Orphan finalizer: structured parse for crash recovery
+
+The non-finalized playlist rebuild parses into header lines + sections (each with a MAP + entries), then serializes back. Handles both MPEG-TS (no MAP) and fMP4 (MAP per quality section). Missing headers are reconstructed. Reads live-status.json to avoid touching dirs with active downloads.
+
+**Why:** The old line-by-line rebuild with positional heuristics produced headerless playlists when the first MAP wasn't in the expected position (power loss during header write).
+
+## Disk space monitor stops the downloader at 50GB
+
+Server supervises the downloader — stops it via `systemctl --user stop video-downloader` when available disk drops below 50GB.
+
+**Why:** Prevents disk from filling completely, which would corrupt in-progress recordings. Lives in the server so the downloader doesn't need to restart for monitoring logic changes.
+
+## SC room IDs resolved at write-time
+
+resolveScUsername is called once at add-time. The stable numeric room ID is persisted to sc.txt alongside the username. Usernames can change; room IDs don't.
+
+**Why:** Renamed/deleted accounts caused 404s on every poll cycle.

@@ -7,11 +7,6 @@ export interface ScResolvedUser {
     roomId: string;
 }
 
-/**
- * Resolve an SC username to a stable room ID via the cam API.
- * This is the write-time resolution — called once at add time,
- * result is persisted to sc.txt.
- */
 export async function resolveScUsername(username: string): Promise<ScResolvedUser | null> {
     const uniq = Array.from({ length: 16 }, () =>
         "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]

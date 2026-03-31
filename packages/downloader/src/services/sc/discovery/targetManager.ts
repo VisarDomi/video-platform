@@ -14,7 +14,7 @@ export interface ScTarget {
 }
 
 export class ScTargetManager {
-    private targets: Map<string, ScTarget> = new Map(); // keyed by username
+    private targets: Map<string, ScTarget> = new Map();
     private readonly filePath: string;
     private debounceTimer: NodeJS.Timeout | null = null;
 

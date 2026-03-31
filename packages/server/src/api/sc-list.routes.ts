@@ -68,7 +68,6 @@ router.post("/api/sc/add", async (req, res) => {
 
         const lines = content.split("\n");
 
-        // Check if roomId already exists in the file
         const existingIndex = lines.findIndex(line => line.includes(resolved.roomId));
 
         if (existingIndex !== -1) {
@@ -77,7 +76,6 @@ router.post("/api/sc/add", async (req, res) => {
                 logger.info(`sc skip: ${resolved.username} ${resolved.roomId} (already exists)`);
                 return res.json({ success: true });
             }
-            // Room ID exists but username changed — update the label
             lines[existingIndex] = `${SC_URL_PREFIX}${resolved.username} ${resolved.roomId}`;
             await fs.writeFile(SC_FILE_PATH, cleanListContent(lines.join("\n")), "utf-8");
             logger.info(`sc update: ${existing?.username} -> ${resolved.username} (roomId=${resolved.roomId})`);
@@ -113,7 +111,6 @@ router.post("/api/sc/remove", async (req, res) => {
     }
 });
 
-// Smart save from web editor — resolve bare usernames, pass through already-resolved lines
 router.post("/api/sc", async (req, res) => {
     const { content } = req.body;
     if (typeof content !== "string") {
@@ -131,11 +128,9 @@ router.post("/api/sc", async (req, res) => {
             }
             const parsed = parseLine(trimmed);
             if (parsed && parsed.roomId) {
-                // Already has roomId — pass through
                 resolved.push(raw);
                 continue;
             }
-            // Bare username or URL without roomId — resolve it
             const username = parseUsername(trimmed);
             const result = await resolveScUsername(username);
             if (!result) {
