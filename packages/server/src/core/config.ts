@@ -116,11 +116,3 @@ export function getProviderPaths(provider: string): PathConfig {
 export function getAllProviders(): string[] {
     return Object.keys(config.providers);
 }
-
-export function getAllSearchPaths() {
-    return Object.values(config.providers).flatMap(paths => [
-        { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
-        { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
-        { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
-    ]);
-}

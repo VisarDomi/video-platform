@@ -54,12 +54,12 @@
 			const next = findAdjacentVideo(cv, filteredList, 1);
 			if (next) {
 				engine.forceProgressSave();
-				playerStore.navigateVideo(next, 1, videoListStore.selectedProvider);
+				playerStore.navigateVideo(next, 1);
 				void fetchAndParsePlaylist(next);
 			} else if (filteredList.length > 0) {
 				const first = filteredList[0];
 				engine.forceProgressSave();
-				playerStore.navigateVideo(first, 1, videoListStore.selectedProvider);
+				playerStore.navigateVideo(first, 1);
 				void fetchAndParsePlaylist(first);
 			} else {
 				playerStore.showList();
@@ -73,7 +73,7 @@
 		const target = findAdjacentVideo(cv, videoListStore.filteredVideos, dir);
 		if (target) {
 			engine.forceProgressSave();
-			playerStore.navigateVideo(target, dir, videoListStore.selectedProvider);
+			playerStore.navigateVideo(target, dir);
 			playerStore.updateScrollTarget(target);
 			void fetchAndParsePlaylist(target);
 		}
@@ -184,12 +184,12 @@
 				const next = findAdjacentVideo(cv, filteredList, 1);
 				if (next) {
 					engine.forceProgressSave();
-					playerStore.navigateVideo(next, 1, videoListStore.selectedProvider);
+					playerStore.navigateVideo(next, 1);
 					void fetchAndParsePlaylist(next);
 				} else if (filteredList.length > 0) {
 					const first = filteredList[0];
 					engine.forceProgressSave();
-					playerStore.navigateVideo(first, 1, videoListStore.selectedProvider);
+					playerStore.navigateVideo(first, 1);
 					void fetchAndParsePlaylist(first);
 				} else {
 					playerStore.showList();

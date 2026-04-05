@@ -6,6 +6,7 @@ import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as mp4EditService from "../services/video/mp4-edit.service.js";
+import * as utils from "../core/utils.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
@@ -61,9 +62,13 @@ router.post("/edit", async (req, res) => {
             return;
         }
 
-        await editService.editVideo(filename, segments, targetProvider);
+        const ref = await utils.resolveVideo(filename, targetProvider);
+        await editService.editVideo(ref, segments);
         res.json({ success: true });
     } catch (error: any) {
+        if (error.name === "FileNotFoundError") {
+            return res.status(404).json({ success: false, error: error.message });
+        }
         logger.error(`[api/edit] failed: filename=${filename} provider=${targetProvider}`, { message: error.message });
         res.status(500).json({ success: false, error: error.message });
     }
@@ -77,9 +82,13 @@ router.post("/videos/:filename/:destination", async (req, res) => {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_DESTINATION);
     }
     try {
-        await moveService.moveVideo(filename, destination, provider);
+        const ref = await utils.resolveVideo(filename, provider);
+        await moveService.moveVideo(ref, destination);
         res.json({ success: true });
     } catch (error: any) {
+        if (error.name === "FileNotFoundError") {
+            return res.status(404).json({ success: false, error: error.message });
+        }
         logger.error(`Error moving:`, { message: error.message });
         res.status(500).json({ success: false, error: error.message });
     }

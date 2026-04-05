@@ -4,7 +4,8 @@ import path from "path";
 import { getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import { FileNotFoundError, FfmpegError } from "../../core/errors.js";
-import { DESTINATIONS } from "../../core/constants.js";
+import { DESTINATIONS, ALL_VIDEO_PATHS_TYPES } from "../../core/constants.js";
+import type { VideoRef } from "../../core/types.js";
 import * as moveService from "./move.service.js";
 
 type EditJob = {
@@ -130,6 +131,14 @@ export function getVideoDuration(filePath: string): Promise<number> {
     });
 }
 
+function resolveMp4Ref(filename: string, provider: string, fullPath: string, baseDir: string): VideoRef {
+    const paths = getProviderPaths(provider);
+    const type = baseDir === paths.downloader
+        ? ALL_VIDEO_PATHS_TYPES.ORIGINAL
+        : ALL_VIDEO_PATHS_TYPES.EDITED;
+    return { filename, provider, type, dirPath: fullPath };
+}
+
 async function findMp4File(filename: string, provider: string): Promise<{ fullPath: string; baseDir: string }> {
     const paths = getProviderPaths(provider);
     const searchDirs = [paths.downloader, paths.edited, paths.converted];
@@ -166,7 +175,8 @@ async function processVideoEdit(job: EditJob) {
         await fsPromises.rename(tempOutputPath, finalOutputPath);
         logger.info(`Successfully created edited MP4 video: ${finalOutputPath}`);
 
-        await moveService.moveVideo(filename, DESTINATIONS.TRASH, provider);
+        const ref = resolveMp4Ref(filename, provider, sourcePath, found.baseDir);
+        await moveService.moveVideo(ref, DESTINATIONS.TRASH);
     } catch (error) {
         logger.error(`MP4 processing failed for ${filename}. Cleaning up temporary file.`, { error });
         try {

@@ -29,16 +29,16 @@ class PlayerStore {
 		}
 	}
 
-	playVideo(video: Video, provider: string) {
+	playVideo(video: Video) {
 		this.startTimeOverride = null;
-		this._startPlaying(video, provider);
+		this._startPlaying(video);
 		this.activePlayerIndex = 0;
 	}
 
-	navigateVideo(video: Video, direction: 1 | -1, provider: string) {
+	navigateVideo(video: Video, direction: 1 | -1) {
 		const newIndex = (this.activePlayerIndex + direction + 3) % 3;
 		this.startTimeOverride = null;
-		this._startPlaying(video, provider);
+		this._startPlaying(video);
 		this.activePlayerIndex = newIndex;
 	}
 
@@ -101,19 +101,19 @@ class PlayerStore {
 		this.lastActionedVideoFilename = filename;
 	}
 
-	markCurrentAsEdited(provider: string) {
+	markCurrentAsEdited() {
 		if (this.currentVideo) {
 			const updated = { ...this.currentVideo, type: VIDEO_TYPE.EDITED };
 			this.currentVideo = updated;
-			this._persistVideo(updated, provider);
+			this._persistVideo(updated);
 		}
 	}
 
-	markCurrentAsOriginal(provider: string) {
+	markCurrentAsOriginal() {
 		if (this.currentVideo) {
 			const updated = { ...this.currentVideo, type: VIDEO_TYPE.ORIGINAL };
 			this.currentVideo = updated;
-			this._persistVideo(updated, provider);
+			this._persistVideo(updated);
 		}
 	}
 
@@ -133,15 +133,15 @@ class PlayerStore {
 		this.isUiVisible = !this.isUiVisible;
 	}
 
-	private _persistVideo(video: Video, provider: string) {
-		localStorage.setItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`, JSON.stringify(video));
+	private _persistVideo(video: Video) {
+		localStorage.setItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${video.provider}`, JSON.stringify(video));
 		this.lastPlayedVideo = video;
 	}
 
-	private _startPlaying(video: Video, provider: string) {
+	private _startPlaying(video: Video) {
 		stopSync();
-		this._lastProvider = provider;
-		this._persistVideo(video, provider);
+		this._lastProvider = video.provider;
+		this._persistVideo(video);
 		this.currentVideo = video;
 		this.segments = [];
 		this.view = 'video';

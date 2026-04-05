@@ -9,19 +9,17 @@ export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.ORIGINAL || playerStore.segments.length > 0) return;
 
-	const provider = videoListStore.selectedProvider;
-
-	playerStore.markCurrentAsEdited(provider);
+	playerStore.markCurrentAsEdited();
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
-	sendSaveRequest(video, provider).catch((err) => {
+	sendSaveRequest(video, video.provider).catch((err) => {
 		if (err instanceof ApiError && err.status === 404) {
 			videoListStore.removeVideo(video.filename);
 			playerStore.showList();
 			return;
 		}
 		if (playerStore.currentVideo?.filename === video.filename) {
-			playerStore.markCurrentAsOriginal(provider);
+			playerStore.markCurrentAsOriginal();
 		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 	});
@@ -54,14 +52,12 @@ export async function createEditedVideo() {
 	const segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments, video.filename);
 	const filename = video.filename;
 
-	const provider = videoListStore.selectedProvider;
-
 	playerStore.clearSegments();
-	playerStore.markCurrentAsEdited(provider);
+	playerStore.markCurrentAsEdited();
 	playerStore.setLastActioned(filename);
 	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 
-	sendEditRequest(filename, segmentsToSave, provider)
+	sendEditRequest(filename, segmentsToSave, video.provider)
 		.then(() => {
 			if (playerStore.currentVideo?.filename === filename) {
 				playerStore.reloadCurrentVideo();
@@ -74,7 +70,7 @@ export async function createEditedVideo() {
 				return;
 			}
 			if (playerStore.currentVideo?.filename === filename) {
-				playerStore.markCurrentAsOriginal(provider);
+				playerStore.markCurrentAsOriginal();
 			}
 			videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 		});
@@ -84,19 +80,17 @@ export function returnToOriginals() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.EDITED) return;
 
-	const provider = videoListStore.selectedProvider;
-
-	playerStore.markCurrentAsOriginal(provider);
+	playerStore.markCurrentAsOriginal();
 	playerStore.setLastActioned(video.filename);
 	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
-	sendReturnRequest(video, provider).catch((err) => {
+	sendReturnRequest(video, video.provider).catch((err) => {
 		if (err instanceof ApiError && err.status === 404) {
 			videoListStore.removeVideo(video.filename);
 			playerStore.showList();
 			return;
 		}
 		if (playerStore.currentVideo?.filename === video.filename) {
-			playerStore.markCurrentAsEdited(provider);
+			playerStore.markCurrentAsEdited();
 		}
 		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 	});

@@ -157,8 +157,8 @@ export class VideoEngine {
 		el.style.opacity = '1';
 	}
 
-	private resolveStreamUrl(filename: string): string {
-		return API.HLS_PLAYLIST(filename);
+	private resolveStreamUrl(v: Video): string {
+		return API.HLS_PLAYLIST(v.provider, v.filename);
 	}
 
 	private syncLiveStatus(el: HTMLVideoElement, v: Video, isActivePlayer: boolean): void {
@@ -311,7 +311,7 @@ export class VideoEngine {
 				delete el.dataset.loadedFilename;
 			}
 
-			const url = this.resolveStreamUrl(v.filename);
+			const url = this.resolveStreamUrl(v);
 
 			if (!USE_NATIVE_HLS && Hls.isSupported()) {
 				this.setupHlsJs(el, url, v, startTime, isActivePlayer, resolve);

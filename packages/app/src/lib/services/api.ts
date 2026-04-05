@@ -13,13 +13,15 @@ export class ApiError extends Error {
 export async function fetchVideos(provider: string): Promise<Video[]> {
 	const url = `${API.VIDEOS}?provider=${encodeURIComponent(provider)}`;
 	const response = await fetch(url);
-	return await response.json();
+	const items: Omit<Video, 'provider'>[] = await response.json();
+	return items.map((v) => ({ ...v, provider }));
 }
 
 export async function fetchNewVideos(provider: string, after: string): Promise<Video[]> {
 	const url = `${API.VIDEOS}?provider=${encodeURIComponent(provider)}&after=${encodeURIComponent(after)}`;
 	const response = await fetch(url);
-	return await response.json();
+	const items: Omit<Video, 'provider'>[] = await response.json();
+	return items.map((v) => ({ ...v, provider }));
 }
 
 export async function sendSaveRequest(video: Video, provider: string): Promise<void> {

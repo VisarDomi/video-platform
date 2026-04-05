@@ -93,7 +93,7 @@
 		}
 
 		searchHidden = true;
-		playerStore.playVideo(video, videoListStore.selectedProvider);
+		playerStore.playVideo(video);
 		void fetchAndParsePlaylist(video);
 	}
 

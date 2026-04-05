@@ -19,7 +19,7 @@ export const API = {
 	TRASH: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/trash`,
 	ORIGINAL: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/original`,
 	EDITED: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/edited`,
-	HLS_PLAYLIST: (filename: string) => `/hls/${encodeURIComponent(filename)}/playlist.m3u8`
+	HLS_PLAYLIST: (provider: string, filename: string) => `/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
 } as const;
 
 export const SC_API = {

@@ -15,7 +15,7 @@ export interface PlaylistData {
 
 export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData | null> {
 	const start = performance.now();
-	const response = await fetch(API.HLS_PLAYLIST(video.filename));
+	const response = await fetch(API.HLS_PLAYLIST(video.provider, video.filename));
 	const text = await response.text();
 	const fetchMs = performance.now() - start;
 
