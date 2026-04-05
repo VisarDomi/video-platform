@@ -10,6 +10,13 @@ export type VideoItem = {
     isLive: boolean;
 };
 
+export interface VideoRef {
+    readonly filename: string;
+    readonly provider: string;
+    readonly type: VideoType;
+    readonly dirPath: string;
+}
+
 export interface LiveDownload {
     alias?: string;
     segmentsDirPath: string;
