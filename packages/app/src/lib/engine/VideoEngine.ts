@@ -80,42 +80,49 @@ export class VideoEngine {
 	}
 
 	private makeTimeUpdateHandler(unit: PlayerUnit): () => void {
+		let lastSync = 0;
 		return () => {
 			const el = unit.video;
-			if (el !== this.getActiveElement()) return;
-			this._currentTime = el.currentTime;
-			this._duration = el.duration;
-			if (el.duration === Infinity && el.seekable.length > 0) {
-				this._seekableEnd = el.seekable.end(el.seekable.length - 1);
+			const ct = el.currentTime;
+			const dur = el.duration;
+			let se = unit.state.seekableEnd;
+			if (dur === Infinity && el.seekable.length > 0) {
+				se = el.seekable.end(el.seekable.length - 1);
 			}
 
 			const now = performance.now();
+			const isActive = el === this.getActiveElement();
 
-			const activeFilename = el.dataset.loadedFilename;
-			if (
-				activeFilename &&
-				!this.currentIsLive &&
-				now - this._lastProgressSave >= this.PROGRESS_SAVE_MS
-			) {
-				this._lastProgressSave = now;
-				localStorage.setItem(
-					STORAGE_KEYS.PROGRESS_PREFIX + activeFilename,
-					String(Math.round(el.currentTime))
-				);
+			if (isActive) {
+				this._currentTime = ct;
+				this._duration = dur;
+				this._seekableEnd = se;
+
+				const activeFilename = el.dataset.loadedFilename;
+				if (
+					activeFilename &&
+					!this.currentIsLive &&
+					now - this._lastProgressSave >= this.PROGRESS_SAVE_MS
+				) {
+					this._lastProgressSave = now;
+					localStorage.setItem(
+						STORAGE_KEYS.PROGRESS_PREFIX + activeFilename,
+						String(Math.round(ct))
+					);
+				}
 			}
 
-			if (now - this._lastTimeSync >= this.TIME_SYNC_MS) {
-				this._lastTimeSync = now;
-				unit.state.currentTime = this._currentTime;
-				unit.state.duration = this._duration;
-				unit.state.seekableEnd = this._seekableEnd;
+			if (now - lastSync >= this.TIME_SYNC_MS) {
+				lastSync = now;
+				unit.state.currentTime = ct;
+				unit.state.duration = dur;
+				unit.state.seekableEnd = se;
 			}
 		};
 	}
 
 	private makeVolumeChangeHandler(unit: PlayerUnit): () => void {
 		return () => {
-			if (unit.video !== this.getActiveElement()) return;
 			unit.state.isMuted = unit.video.muted;
 		};
 	}
