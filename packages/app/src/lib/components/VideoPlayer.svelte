@@ -1,43 +1,34 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { mount, unmount, onMount } from 'svelte';
 	import { playerStore } from '$lib/stores/player.svelte.js';
 	import { videoListStore } from '$lib/stores/videoList.svelte.js';
 	import { untrack } from 'svelte';
 	import { VideoEngine } from '$lib/engine/VideoEngine.js';
+	import { PlayerOverlayState } from '$lib/engine/PlayerOverlayState.svelte.js';
+	import PlayerOverlay from './PlayerOverlay.svelte';
 	import { GestureController } from '$lib/engine/GestureController.svelte.js';
 	import { ConnectionMonitor } from '$lib/services/ConnectionMonitor.svelte.js';
 	import { WatchdogService } from '$lib/services/WatchdogService.js';
 	import { findAdjacentVideo } from '$lib/utils/navigation.js';
 	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
-	import { logEvent } from '$lib/services/log.js';
-
-	import ProgressBar from './ProgressBar.svelte';
-	import PlayerControls from './PlayerControls.svelte';
+	import { logService } from '$lib/services/LogService.js';
 
 	let videoViewEl = $state<HTMLElement | null>(null);
 	let videoContainer = $state<HTMLElement | null>(null);
-	let topBarEl = $state<HTMLElement | null>(null);
-	let currentTime = $state(0);
-	let duration = $state(0);
-	let seekableEnd = $state(0);
-	let isMuted = $state(true);
 
 	const isVisible = $derived(playerStore.view === 'video');
-	const video = $derived(playerStore.currentVideo);
-	const displayDuration = $derived(
-		duration === Infinity && seekableEnd > 0 ? seekableEnd : duration
-	);
+
+	const emit = logService.emit;
+
+	const overlayStates = [
+		new PlayerOverlayState(),
+		new PlayerOverlayState(),
+		new PlayerOverlayState(),
+	];
 
 	const engine = new VideoEngine({
-		onTimeUpdate(ct, dur, se) {
-			currentTime = ct;
-			duration = dur;
-			seekableEnd = se;
-		},
-		onMuteChange(muted) {
-			isMuted = muted;
-		},
 		onLiveStatusChanged(filename, isLive) {
+			emit('live-status-changed', { filename, isLive });
 			if (isLive) {
 				playerStore.setCurrentVideoLive();
 				videoListStore.updateVideoLive(filename, true);
@@ -47,6 +38,7 @@
 			}
 		},
 		onVideoRemoved(filename) {
+			emit('video-removed', { filename });
 			videoListStore.removeVideo(filename);
 			const cv = playerStore.currentVideo;
 			if (!cv) return;
@@ -65,7 +57,7 @@
 				playerStore.showList();
 			}
 		}
-	});
+	}, emit);
 
 	const doNavigate = (dir: 1 | -1) => {
 		const cv = playerStore.currentVideo;
@@ -103,7 +95,7 @@
 	const watchdog = new WatchdogService();
 	watchdog.setOnFreeze(() => {
 		if (playerStore.view === 'video' && playerStore.currentVideo) {
-			logEvent('watchdog-freeze-resume', {});
+			emit('watchdog-freeze-resume');
 			engine.resume();
 		}
 	});
@@ -120,7 +112,7 @@
 				const delta = now - sentinelLast;
 				sentinelLast = now;
 				if (delta > 3000 && document.visibilityState === 'visible') {
-					logEvent('sentinel-resume', { frozenSec: Math.round(delta / 1000) });
+					emit('sentinel-resume', { frozenSec: Math.round(delta / 1000) });
 					executeResume();
 				}
 			}, 1000);
@@ -138,31 +130,51 @@
 		const elapsed = backgroundedAt > 0 ? Date.now() - backgroundedAt : 0;
 		backgroundedAt = 0;
 		if (elapsed > RESUME_THRESHOLD_MS && playerStore.view === 'video' && playerStore.currentVideo) {
-			logEvent('background-resume', { elapsedSec: Math.round(elapsed / 1000) });
+			emit('background-resume', { elapsedSec: Math.round(elapsed / 1000) });
 			engine.resume();
 		}
 	}
 
 	function handleConnectivityChange(online: boolean) {
 		if (online && playerStore.view === 'video' && playerStore.currentVideo) {
-			logEvent('online-resume', {});
+			emit('online-resume');
 			engine.resume();
 		}
 	}
 
 	const connectionMonitor = new ConnectionMonitor(handleConnectivityChange, handleVisibilityChange);
 
+	let mountedOverlays: ReturnType<typeof mount>[] = [];
+
 	onMount(() => {
-		const engineCleanup = engine.init(videoContainer!);
-		engine.setOverlay(topBarEl);
+		const engineCleanup = engine.init(videoContainer!, overlayStates);
 		const gestureCleanup = gesture.init(videoViewEl!);
 		watchdog.start();
+
+		for (let i = 0; i < 3; i++) {
+			const wrapper = engine.getUnitWrapper(i);
+			const instance = mount(PlayerOverlay, {
+				target: wrapper,
+				props: {
+					overlay: overlayStates[i],
+					onseek: (t: number) => engine.handleSeek(t),
+					onseekdirect: (t: number) => engine.seekDirect(t),
+					ontoggleMute: () => engine.toggleMute(),
+					getCurrentTime: () => engine.getCurrentTime(),
+				}
+			});
+			mountedOverlays.push(instance);
+		}
 
 		playerStore.onShowList(() => engine.onViewHidden());
 		playerStore.onProviderChange(() => engine.onProviderChange());
 		playerStore.onReload(() => engine.forceReloadStream(playerStore.currentVideo!));
 
 		return () => {
+			for (const instance of mountedOverlays) {
+				unmount(instance);
+			}
+			mountedOverlays = [];
 			engineCleanup();
 			gestureCleanup();
 			connectionMonitor.destroy();
@@ -225,22 +237,7 @@
 	role="application"
 	bind:this={videoViewEl}
 >
-	<div class="video-container">
-		<div
-			class="video-player"
-			bind:this={videoContainer}
-		></div>
-
-		<div class="top-bar" class:ui-visible={playerStore.isUiVisible && !!video} bind:this={topBarEl}>
-			{#if video}
-				<div class="streamer-name">{video.filename}</div>
-
-				<ProgressBar {currentTime} duration={displayDuration} onseek={(t) => engine.handleSeek(t)} onseekdirect={(t) => engine.seekDirect(t)} />
-
-				<PlayerControls {isMuted} getCurrentTime={() => engine.getCurrentTime()} ontoggleMute={() => engine.toggleMute()} />
-			{/if}
-		</div>
-	</div>
+	<div class="video-container" bind:this={videoContainer}></div>
 </div>
 
 <style>
@@ -273,15 +270,26 @@
 		background-color: #000;
 	}
 
-	.video-player {
-		width: 100%;
-		height: 100%;
+	.video-container :global(.player-unit) {
 		position: absolute;
 		top: 0;
 		left: 0;
+		width: 100%;
+		height: 100%;
+		background-color: #000;
 	}
 
-	.video-player :global(video) {
+	.video-container :global(.active-unit) {
+		z-index: 5;
+		opacity: 1;
+	}
+
+	.video-container :global(.background-unit) {
+		z-index: 1;
+		opacity: 0;
+	}
+
+	.video-container :global(.player-unit video) {
 		width: 100% !important;
 		height: 100% !important;
 		object-fit: contain;
@@ -294,42 +302,6 @@
 		display: block;
 	}
 
-	.video-player :global(.active-player) {
-		z-index: 5;
-		opacity: 1;
-	}
-
-	.video-player :global(.background-player) {
-		z-index: 1;
-		opacity: 0;
-	}
-
-	.top-bar {
-		position: absolute;
-		top: 0;
-		left: 0;
-		width: 100%;
-		padding: calc(env(safe-area-inset-top, 0px) + 15px) 15px 15px 15px;
-		box-sizing: border-box;
-		background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
-		z-index: 20;
-		transition: opacity 0.3s ease;
-		opacity: 0;
-		pointer-events: none;
-	}
-
-	.top-bar.ui-visible {
-		opacity: 1;
-		pointer-events: auto;
-	}
-
-	.streamer-name {
-		font-size: 1.2em;
-		font-weight: bold;
-		text-shadow: 1px 1px 2px black;
-		margin-bottom: 10px;
-		word-break: break-all;
-	}
 	.video-view.swipe-active {
 		box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
 	}

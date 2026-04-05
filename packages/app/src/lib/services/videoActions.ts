@@ -3,7 +3,7 @@ import { playerStore } from '../stores/player.svelte.js';
 import { VIDEO_TYPE } from '../constants.js';
 import { sendSaveRequest, sendEditRequest, sendReturnRequest, ApiError } from './api.js';
 import { fetchAndParsePlaylist, calculateSegmentsToKeep } from './hls.js';
-import { logEvent } from './log.js';
+import { logService } from './LogService.js';
 
 export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
@@ -38,11 +38,11 @@ export async function createEditedVideo() {
 
 	const playlistData = await fetchAndParsePlaylist(video);
 	if (!playlistData) {
-		logEvent('edit-playlist-fetch-failed', { filename: video.filename });
+		logService.emit('edit-playlist-fetch-failed', { filename: video.filename });
 		return;
 	}
 
-	logEvent('edit-begin', {
+	logService.emit('edit-begin', {
 		filename: video.filename,
 		isFmp4: playlistData.isFmp4,
 		playlistSegments: playlistData.segments.length,

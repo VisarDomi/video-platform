@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { initAppDimensions } from '$lib/state/appDimensions';
+	import { logService } from '$lib/services/LogService.js';
 
 	let { children } = $props();
 
@@ -20,6 +21,7 @@
 
 	onMount(() => {
 		initAppDimensions();
+		logService.start();
 
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/sw.js');

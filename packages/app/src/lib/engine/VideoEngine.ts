@@ -2,26 +2,30 @@ import Hls from 'hls.js';
 import { STORAGE_KEYS, API, USE_NATIVE_HLS } from '../constants.js';
 import { getSavedTime } from '../utils/navigation.js';
 import type { Video } from '../types.js';
+import type { LogEmit } from '../services/LogService.js';
+import type { PlayerOverlayState } from './PlayerOverlayState.svelte.js';
 
 export interface VideoEngineCallbacks {
-	onTimeUpdate(currentTime: number, duration: number, seekableEnd: number): void;
-	onMuteChange(isMuted: boolean): void;
 	onLiveStatusChanged(filename: string, isLive: boolean): void;
 	onVideoRemoved(filename: string): void;
 }
 
+interface PlayerUnit {
+	wrapper: HTMLElement;
+	video: HTMLVideoElement;
+	state: PlayerOverlayState;
+}
+
 export class VideoEngine {
-	private elements: HTMLVideoElement[] = [];
+	private units: PlayerUnit[] = [];
 	private videoContainer!: HTMLElement;
 	private hlsInstances = new Map<HTMLVideoElement, Hls>();
 	private nativeAbortControllers = new Map<HTMLVideoElement, AbortController>();
-	private currentFilename: string | null = null;
 	private wakeLock: WakeLockSentinel | null = null;
 	private navCounter = 0;
 
 	private activePlayerIndex = 0;
 	private currentIsLive = false;
-	private overlayEl: HTMLElement | null = null;
 
 	private _currentTime = 0;
 	private _duration = 0;
@@ -32,44 +36,52 @@ export class VideoEngine {
 	private _lastProgressSave = 0;
 	private readonly PROGRESS_SAVE_MS = 3000;
 
-	constructor(private callbacks: VideoEngineCallbacks) {}
+	private emit: LogEmit;
 
-	setOverlay(el: HTMLElement | null): void {
-		this.overlayEl = el;
+	constructor(private callbacks: VideoEngineCallbacks, emit: LogEmit) {
+		this.emit = emit;
 	}
 
-	init(videoContainer: HTMLElement): () => void {
+	init(videoContainer: HTMLElement, overlayStates: PlayerOverlayState[]): () => void {
 		this.videoContainer = videoContainer;
 
-		const els: HTMLVideoElement[] = [];
 		for (let i = 0; i < 3; i++) {
-			const el = document.createElement('video');
-			el.playsInline = true;
-			el.preload = 'auto';
-			el.muted = true;
-			el.className = 'background-player';
-			videoContainer.appendChild(el);
-			els.push(el);
-		}
-		this.elements = els;
+			const wrapper = document.createElement('div');
+			wrapper.className = 'player-unit background-unit';
 
-		const timeHandlers = els.map((el) => this.makeTimeUpdateHandler(el));
-		const volHandlers = els.map((el) => this.makeVolumeChangeHandler(el));
-		els.forEach((el, i) => {
-			el.addEventListener('timeupdate', timeHandlers[i]);
-			el.addEventListener('volumechange', volHandlers[i]);
+			const video = document.createElement('video');
+			video.playsInline = true;
+			video.preload = 'auto';
+			video.muted = true;
+
+			wrapper.appendChild(video);
+			videoContainer.appendChild(wrapper);
+
+			this.units.push({ wrapper, video, state: overlayStates[i] });
+		}
+
+		const timeHandlers = this.units.map((u) => this.makeTimeUpdateHandler(u));
+		const volHandlers = this.units.map((u) => this.makeVolumeChangeHandler(u));
+		this.units.forEach((u, i) => {
+			u.video.addEventListener('timeupdate', timeHandlers[i]);
+			u.video.addEventListener('volumechange', volHandlers[i]);
 		});
 
 		return () => {
-			els.forEach((el, i) => {
-				el.removeEventListener('timeupdate', timeHandlers[i]);
-				el.removeEventListener('volumechange', volHandlers[i]);
+			this.units.forEach((u, i) => {
+				u.video.removeEventListener('timeupdate', timeHandlers[i]);
+				u.video.removeEventListener('volumechange', volHandlers[i]);
 			});
 		};
 	}
 
-	private makeTimeUpdateHandler(el: HTMLVideoElement): () => void {
+	getUnitWrapper(index: number): HTMLElement {
+		return this.units[index].wrapper;
+	}
+
+	private makeTimeUpdateHandler(unit: PlayerUnit): () => void {
 		return () => {
+			const el = unit.video;
 			if (el !== this.getActiveElement()) return;
 			this._currentTime = el.currentTime;
 			this._duration = el.duration;
@@ -79,50 +91,61 @@ export class VideoEngine {
 
 			const now = performance.now();
 
+			const activeFilename = el.dataset.loadedFilename;
 			if (
-				this.currentFilename &&
+				activeFilename &&
 				!this.currentIsLive &&
 				now - this._lastProgressSave >= this.PROGRESS_SAVE_MS
 			) {
 				this._lastProgressSave = now;
 				localStorage.setItem(
-					STORAGE_KEYS.PROGRESS_PREFIX + this.currentFilename,
+					STORAGE_KEYS.PROGRESS_PREFIX + activeFilename,
 					String(Math.round(el.currentTime))
 				);
 			}
 
 			if (now - this._lastTimeSync >= this.TIME_SYNC_MS) {
 				this._lastTimeSync = now;
-				this.callbacks.onTimeUpdate(this._currentTime, this._duration, this._seekableEnd);
+				unit.state.currentTime = this._currentTime;
+				unit.state.duration = this._duration;
+				unit.state.seekableEnd = this._seekableEnd;
 			}
 		};
 	}
 
-	private makeVolumeChangeHandler(el: HTMLVideoElement): () => void {
+	private makeVolumeChangeHandler(unit: PlayerUnit): () => void {
 		return () => {
-			if (el !== this.getActiveElement()) return;
-			this.callbacks.onMuteChange(el.muted);
+			if (unit.video !== this.getActiveElement()) return;
+			unit.state.isMuted = unit.video.muted;
 		};
 	}
 
 	forceTimeSync(): void {
 		this._lastTimeSync = performance.now();
-		this.callbacks.onTimeUpdate(this._currentTime, this._duration, this._seekableEnd);
+		const unit = this.getActiveUnit();
+		unit.state.currentTime = this._currentTime;
+		unit.state.duration = this._duration;
+		unit.state.seekableEnd = this._seekableEnd;
 	}
 
 	forceProgressSave(): void {
-		if (!this.currentFilename || this.currentIsLive) return;
 		const el = this.getActiveElement();
+		const activeFilename = el?.dataset.loadedFilename;
+		if (!activeFilename || this.currentIsLive) return;
 		if (!el || isNaN(el.currentTime)) return;
 		localStorage.setItem(
-			STORAGE_KEYS.PROGRESS_PREFIX + this.currentFilename,
+			STORAGE_KEYS.PROGRESS_PREFIX + activeFilename,
 			String(Math.round(el.currentTime))
 		);
 		this._lastProgressSave = performance.now();
 	}
 
 	private getActiveElement(): HTMLVideoElement {
-		return this.elements[this.activePlayerIndex];
+		return this.units[this.activePlayerIndex].video;
+	}
+
+	private getActiveUnit(): PlayerUnit {
+		return this.units[this.activePlayerIndex];
 	}
 
 	onViewHidden(): void {
@@ -131,30 +154,29 @@ export class VideoEngine {
 	}
 
 	onProviderChange(): void {
-		this.elements.forEach((el) => this.clearStream(el));
-		this.currentFilename = null;
+		this.units.forEach((u) => this.clearStream(u));
 	}
 
 	forceReloadStream(video: Video): void {
-		const el = this.getActiveElement();
-		delete el.dataset.loadedFilename;
-		void this.activatePlayer(el, video, 0);
+		const unit = this.getActiveUnit();
+		delete unit.video.dataset.loadedFilename;
+		void this.activatePlayer(unit, video, 0);
 	}
 
 	private async activatePlayer(
-		el: HTMLVideoElement,
+		unit: PlayerUnit,
 		v: Video,
 		startTime: number,
 		thisNav?: number
 	): Promise<void> {
-		await this.loadStream(el, v, startTime, true);
+		await this.loadStream(unit, v, startTime, true);
 		if (thisNav !== undefined && this.navCounter !== thisNav) return;
 
 		try {
-			await el.play();
+			await unit.video.play();
 		} catch (_e) {
 		}
-		el.style.opacity = '1';
+		unit.wrapper.style.opacity = '1';
 	}
 
 	private resolveStreamUrl(v: Video): string {
@@ -292,11 +314,12 @@ export class VideoEngine {
 	}
 
 	private loadStream(
-		el: HTMLVideoElement,
+		unit: PlayerUnit,
 		v: Video,
 		startTime: number,
 		isActivePlayer = false
 	): Promise<void> {
+		const el = unit.video;
 		return new Promise((resolve) => {
 			const hasActiveStream = this.hlsInstances.has(el) || this.nativeAbortControllers.has(el);
 			const streamAlive =
@@ -320,12 +343,19 @@ export class VideoEngine {
 			}
 
 			el.dataset.loadedFilename = v.filename;
+			unit.state.video = v;
+			unit.state.currentTime = 0;
+			unit.state.duration = 0;
+			unit.state.seekableEnd = 0;
+			const slot = this.units.indexOf(unit);
+			this.emit('unit-load', { slot, filename: v.filename, provider: v.provider });
 		});
 	}
 
-	private clearStream(el: HTMLVideoElement): void {
+	private clearStream(unit: PlayerUnit): void {
+		const el = unit.video;
 		el.pause();
-		el.style.opacity = '';
+		unit.wrapper.style.opacity = '';
 
 		const hls = this.hlsInstances.get(el);
 		if (hls) {
@@ -344,39 +374,45 @@ export class VideoEngine {
 			el.load();
 		}
 		delete el.dataset.loadedFilename;
+		unit.state.video = null;
+		unit.state.currentTime = 0;
+		unit.state.duration = 0;
+		unit.state.seekableEnd = 0;
 	}
 
 	activateIfChanged(cv: Video, activeIdx: number, startTimeOverride: number | null): void {
-		if (this.elements.length === 0) return;
+		if (this.units.length === 0) return;
 
-		const videoChanged = this.currentFilename !== cv.filename;
-		this.currentFilename = cv.filename;
+		const activeUnit = this.units[activeIdx];
+		const slotFilename = activeUnit.video.dataset.loadedFilename;
+		const videoChanged = slotFilename !== cv.filename;
 		this.activePlayerIndex = activeIdx;
 		this.currentIsLive = cv.isLive ?? false;
 
-		this.elements.forEach((el, i) => {
-			el.style.transform = '';
-			el.style.transition = '';
+		this.units.forEach((u, i) => {
+			u.wrapper.style.transform = '';
+			u.wrapper.style.transition = '';
+			u.state.isActive = i === activeIdx;
 			if (i === activeIdx) {
-				const needsLoad = videoChanged && el.dataset.loadedFilename !== cv.filename;
-				if (needsLoad) el.style.opacity = '0';
-				el.className = 'active-player';
+				if (videoChanged) u.wrapper.style.opacity = '0';
+				u.wrapper.className = 'player-unit active-unit';
 			} else {
-				el.style.opacity = '';
-				el.className = 'background-player';
-				el.muted = true;
+				u.wrapper.style.opacity = '';
+				u.wrapper.className = 'player-unit background-unit';
+				u.video.muted = true;
 			}
 		});
 
-		const activeEl = this.elements[activeIdx];
-		this.callbacks.onMuteChange(activeEl.muted);
+		this.emit('unit-activate', { slot: activeIdx, filename: cv.filename, videoChanged });
+
+		activeUnit.state.isMuted = activeUnit.video.muted;
 
 		if (videoChanged) {
-			const startTime = this.resolveStartTime(activeEl, cv, startTimeOverride);
+			const startTime = this.resolveStartTime(activeUnit.video, cv, startTimeOverride);
 			const thisNav = ++this.navCounter;
-			void this.activatePlayer(activeEl, cv, startTime, thisNav);
-		} else if (activeEl.paused) {
-			void activeEl.play();
+			void this.activatePlayer(activeUnit, cv, startTime, thisNav);
+		} else if (activeUnit.video.paused) {
+			void activeUnit.video.play();
 		}
 	}
 
@@ -387,7 +423,7 @@ export class VideoEngine {
 	}
 
 	preloadForVideo(cv: Video, activeIdx: number, filteredList: Video[]): void {
-		if (this.elements.length === 0) return;
+		if (this.units.length === 0) return;
 
 		const idx = filteredList.findIndex(
 			(v) => v.filename === cv.filename && v.type === cv.type
@@ -397,18 +433,18 @@ export class VideoEngine {
 		const nextVideo = idx < filteredList.length - 1 ? filteredList[idx + 1] : null;
 		const prevVideo = idx > 0 ? filteredList[idx - 1] : null;
 
-		const nextPlayer = this.elements[(activeIdx + 1) % 3];
+		const nextUnit = this.units[(activeIdx + 1) % 3];
 		if (nextVideo) {
-			void this.preloadAndPlay(nextPlayer, nextVideo);
+			void this.preloadAndPlay(nextUnit, nextVideo);
 		} else {
-			this.clearStream(nextPlayer);
+			this.clearStream(nextUnit);
 		}
 
-		const prevPlayer = this.elements[(activeIdx + 2) % 3];
+		const prevUnit = this.units[(activeIdx + 2) % 3];
 		if (prevVideo) {
-			void this.preloadAndPause(prevPlayer, prevVideo);
+			void this.preloadAndPause(prevUnit, prevVideo);
 		} else {
-			this.clearStream(prevPlayer);
+			this.clearStream(prevUnit);
 		}
 	}
 
@@ -416,44 +452,39 @@ export class VideoEngine {
 	private readonly NAV_ANIM_MS = 250;
 
 	navPeekUpdate(dy: number): void {
-		if (this.elements.length === 0) return;
+		if (this.units.length === 0) return;
 		const vh = window.innerHeight;
-		const activeEl = this.getActiveElement();
+		const activeUnit = this.getActiveUnit();
 
-		activeEl.style.transform = `translateY(${dy}px)`;
-		activeEl.style.transition = 'none';
-
-		if (this.overlayEl) {
-			this.overlayEl.style.transform = `translateY(${dy}px)`;
-			this.overlayEl.style.transition = 'none';
-		}
+		activeUnit.wrapper.style.transform = `translateY(${dy}px)`;
+		activeUnit.wrapper.style.transition = 'none';
 
 		const nextIdx = (this.activePlayerIndex + 1) % 3;
 		const prevIdx = (this.activePlayerIndex + 2) % 3;
-		const nextEl = this.elements[nextIdx];
-		const prevEl = this.elements[prevIdx];
+		const nextUnit = this.units[nextIdx];
+		const prevUnit = this.units[prevIdx];
 
 		if (dy < 0) {
-			if (nextEl.dataset.loadedFilename) {
-				nextEl.style.opacity = '1';
-				nextEl.style.transform = `translateY(${dy + vh}px)`;
-				nextEl.style.transition = 'none';
+			if (nextUnit.video.dataset.loadedFilename) {
+				nextUnit.wrapper.style.opacity = '1';
+				nextUnit.wrapper.style.transform = `translateY(${dy + vh}px)`;
+				nextUnit.wrapper.style.transition = 'none';
 			}
-			prevEl.style.opacity = '0';
-			prevEl.style.transform = '';
+			prevUnit.wrapper.style.opacity = '0';
+			prevUnit.wrapper.style.transform = '';
 		} else if (dy > 0) {
-			if (prevEl.dataset.loadedFilename) {
-				prevEl.style.opacity = '1';
-				prevEl.style.transform = `translateY(${dy - vh}px)`;
-				prevEl.style.transition = 'none';
+			if (prevUnit.video.dataset.loadedFilename) {
+				prevUnit.wrapper.style.opacity = '1';
+				prevUnit.wrapper.style.transform = `translateY(${dy - vh}px)`;
+				prevUnit.wrapper.style.transition = 'none';
 			}
-			nextEl.style.opacity = '0';
-			nextEl.style.transform = '';
+			nextUnit.wrapper.style.opacity = '0';
+			nextUnit.wrapper.style.transform = '';
 		}
 	}
 
 	navPeekRelease(dy: number, onNavigate: (dir: 1 | -1) => void, onDone: () => void): void {
-		if (this.elements.length === 0) { onDone(); return; }
+		if (this.units.length === 0) { onDone(); return; }
 
 		const vh = window.innerHeight;
 		const threshold = vh * this.NAV_COMMIT_THRESHOLD;
@@ -461,47 +492,37 @@ export class VideoEngine {
 		const peekIdx = dir === 1
 			? (this.activePlayerIndex + 1) % 3
 			: (this.activePlayerIndex + 2) % 3;
-		const peekEl = this.elements[peekIdx];
-		const hasPeek = !!peekEl.dataset.loadedFilename;
-		const activeEl = this.getActiveElement();
+		const peekUnit = this.units[peekIdx];
+		const hasPeek = !!peekUnit.video.dataset.loadedFilename;
+		const activeUnit = this.getActiveUnit();
 
 		if (Math.abs(dy) > threshold && hasPeek) {
+			this.emit('peek-commit', { dir, peekFilename: peekUnit.video.dataset.loadedFilename ?? null });
+
 			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
-			activeEl.style.transition = transition;
-			activeEl.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
+			activeUnit.wrapper.style.transition = transition;
+			activeUnit.wrapper.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
 
-			peekEl.style.transition = transition;
-			peekEl.style.transform = 'translateY(0)';
-
-			if (this.overlayEl) {
-				this.overlayEl.style.transition = transition;
-				this.overlayEl.style.transform = `translateY(${dir === 1 ? -vh : vh}px)`;
-			}
+			peekUnit.wrapper.style.transition = transition;
+			peekUnit.wrapper.style.transform = 'translateY(0)';
 
 			setTimeout(() => {
-				activeEl.style.opacity = '0';
-				if (this.overlayEl) {
-					this.overlayEl.style.transition = '';
-					this.overlayEl.style.transform = '';
-				}
+				activeUnit.wrapper.style.opacity = '0';
 				onNavigate(dir);
 				onDone();
 			}, this.NAV_ANIM_MS);
 		} else {
 			const transition = `transform ${this.NAV_ANIM_MS}ms ease-out`;
-			activeEl.style.transition = transition;
-			activeEl.style.transform = 'translateY(0)';
-
-			if (this.overlayEl) {
-				this.overlayEl.style.transition = transition;
-				this.overlayEl.style.transform = 'translateY(0)';
-			}
+			activeUnit.wrapper.style.transition = transition;
+			activeUnit.wrapper.style.transform = 'translateY(0)';
 
 			if (hasPeek && Math.abs(dy) > 0) {
-				peekEl.style.transition = `transform ${this.NAV_ANIM_MS}ms ease-out, opacity ${this.NAV_ANIM_MS}ms ease-out`;
-				peekEl.style.transform = `translateY(${dir === 1 ? vh : -vh}px)`;
-				peekEl.style.opacity = '0';
+				peekUnit.wrapper.style.transition = `transform ${this.NAV_ANIM_MS}ms ease-out, opacity ${this.NAV_ANIM_MS}ms ease-out`;
+				peekUnit.wrapper.style.transform = `translateY(${dir === 1 ? vh : -vh}px)`;
+				peekUnit.wrapper.style.opacity = '0';
 			}
+
+			this.emit('peek-cancel');
 
 			setTimeout(() => {
 				this.clearPeekStyles();
@@ -515,36 +536,30 @@ export class VideoEngine {
 	}
 
 	private clearPeekStyles(): void {
-		for (const el of this.elements) {
-			el.style.transform = '';
-			el.style.transition = '';
-		}
-		this.elements.forEach((el, i) => {
+		this.units.forEach((u, i) => {
+			u.wrapper.style.transform = '';
+			u.wrapper.style.transition = '';
 			if (i !== this.activePlayerIndex) {
-				el.style.opacity = '';
+				u.wrapper.style.opacity = '';
 			}
 		});
-		if (this.overlayEl) {
-			this.overlayEl.style.transform = '';
-			this.overlayEl.style.transition = '';
-		}
 	}
 
-	private async preloadAndPlay(el: HTMLVideoElement, v: Video): Promise<void> {
+	private async preloadAndPlay(unit: PlayerUnit, v: Video): Promise<void> {
 		const startTime = getSavedTime(v);
-		await this.loadStream(el, v, startTime);
-		el.muted = true;
+		await this.loadStream(unit, v, startTime);
+		unit.video.muted = true;
 		try {
-			if (el.paused) await el.play();
+			if (unit.video.paused) await unit.video.play();
 		} catch (e) {
 			console.warn('Autoplay muted failed', e);
 		}
 	}
 
-	private async preloadAndPause(el: HTMLVideoElement, v: Video): Promise<void> {
+	private async preloadAndPause(unit: PlayerUnit, v: Video): Promise<void> {
 		const startTime = getSavedTime(v);
-		await this.loadStream(el, v, startTime);
-		if (!el.paused) el.pause();
+		await this.loadStream(unit, v, startTime);
+		if (!unit.video.paused) unit.video.pause();
 	}
 
 	async updateWakeLock(shouldBeActive: boolean): Promise<void> {
@@ -609,9 +624,10 @@ export class VideoEngine {
 		const activeEl = this.getActiveElement();
 		activeEl.muted = !activeEl.muted;
 	}
+
 	resume(): void {
 		const el = this.getActiveElement();
-		if (!el || !this.currentFilename) return;
+		if (!el || !el.dataset.loadedFilename) return;
 
 		const hls = this.hlsInstances.get(el);
 		if (hls) {

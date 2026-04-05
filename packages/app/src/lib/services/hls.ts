@@ -1,6 +1,6 @@
 import { API, HLS } from '../constants.js';
 import type { Video } from '../types.js';
-import { logEvent } from './log.js';
+import { logService } from './LogService.js';
 
 export interface PlaylistSegment {
 	name: string;
@@ -34,7 +34,7 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 		}
 	}
 
-	logEvent('playlist-fetch', {
+	logService.emit('playlist-fetch', {
 		filename: video.filename,
 		fetchMs: Math.round(fetchMs),
 		segments: segments.length,
@@ -71,7 +71,7 @@ export function calculateSegmentsToKeep(
 
 	const result = Array.from(segmentsToKeep);
 
-	logEvent('edit-segments-calculated', {
+	logService.emit('edit-segments-calculated', {
 		filename,
 		totalPlaylistSegments: videoSegments.length,
 		timeRanges: timeSegments.length / 2,
