@@ -350,7 +350,7 @@ export class VideoEngine {
 			}
 
 			el.dataset.loadedFilename = v.filename;
-			unit.state.video = v;
+			unit.state.loadedFilename = v.filename;
 			unit.state.currentTime = 0;
 			unit.state.duration = 0;
 			unit.state.seekableEnd = 0;
@@ -381,7 +381,7 @@ export class VideoEngine {
 			el.load();
 		}
 		delete el.dataset.loadedFilename;
-		unit.state.video = null;
+		unit.state.loadedFilename = null;
 		unit.state.currentTime = 0;
 		unit.state.duration = 0;
 		unit.state.seekableEnd = 0;

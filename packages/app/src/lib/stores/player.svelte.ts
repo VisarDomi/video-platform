@@ -1,12 +1,23 @@
 import { STORAGE_KEYS, VIDEO_TYPE } from '../constants.js';
 import { startSync, stopSync } from '../services/sync.js';
+import { videoListStore } from './videoList.svelte.js';
 import type { Video, VideoType } from '../types.js';
 
 class PlayerStore {
 	view = $state<'list' | 'video'>('list');
-	currentVideo = $state<Video | null>(null);
+	playingFilename = $state<string | null>(null);
+	currentVideo = $derived(
+		this.playingFilename
+			? videoListStore.videos.find((v) => v.filename === this.playingFilename) ?? null
+			: null
+	);
 	startTimeOverride = $state<number | null>(null);
-	lastPlayedVideo = $state<Video | null>(null);
+	lastPlayedFilename = $state<string | null>(null);
+	lastPlayedVideo = $derived(
+		this.lastPlayedFilename
+			? videoListStore.videos.find((v) => v.filename === this.lastPlayedFilename) ?? null
+			: null
+	);
 	segments = $state<number[]>([]);
 	lastActionedVideoFilename = $state<string | null>(null);
 	activePlayerIndex = $state(0);
@@ -25,7 +36,12 @@ class PlayerStore {
 	initialize(provider: string) {
 		const saved = localStorage.getItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`);
 		if (saved) {
-			this.lastPlayedVideo = JSON.parse(saved);
+			try {
+				const parsed = JSON.parse(saved);
+				this.lastPlayedFilename = parsed.filename ?? null;
+			} catch {
+				this.lastPlayedFilename = null;
+			}
 		}
 	}
 
@@ -74,17 +90,14 @@ class PlayerStore {
 	}
 
 	addSegment(time: number) {
-		if (!this.currentVideo || this.currentVideo.type !== VIDEO_TYPE.ORIGINAL) return;
+		const cv = this.currentVideo;
+		if (!cv || cv.type !== VIDEO_TYPE.ORIGINAL) return;
 		this.segments = [...this.segments, time].sort((a, b) => a - b);
 	}
 
 	removeLastSegment() {
-		if (
-			!this.currentVideo ||
-			this.currentVideo.type !== VIDEO_TYPE.ORIGINAL ||
-			this.segments.length === 0
-		)
-			return;
+		const cv = this.currentVideo;
+		if (!cv || cv.type !== VIDEO_TYPE.ORIGINAL || this.segments.length === 0) return;
 		this.segments = this.segments.slice(0, -1);
 	}
 
@@ -101,48 +114,23 @@ class PlayerStore {
 		this.lastActionedVideoFilename = filename;
 	}
 
-	markCurrentAsEdited() {
-		if (this.currentVideo) {
-			const updated = { ...this.currentVideo, type: VIDEO_TYPE.EDITED };
-			this.currentVideo = updated;
-			this._persistVideo(updated);
-		}
-	}
-
-	markCurrentAsOriginal() {
-		if (this.currentVideo) {
-			const updated = { ...this.currentVideo, type: VIDEO_TYPE.ORIGINAL };
-			this.currentVideo = updated;
-			this._persistVideo(updated);
-		}
-	}
-
-	setCurrentVideoLive() {
-		if (this.currentVideo && !this.currentVideo.isLive) {
-			this.currentVideo = { ...this.currentVideo, isLive: true };
-		}
-	}
-
-	setCurrentVideoNotLive() {
-		if (this.currentVideo?.isLive) {
-			this.currentVideo = { ...this.currentVideo, isLive: false };
-		}
-	}
-
 	toggleUi() {
 		this.isUiVisible = !this.isUiVisible;
 	}
 
-	private _persistVideo(video: Video) {
-		localStorage.setItem(`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${video.provider}`, JSON.stringify(video));
-		this.lastPlayedVideo = video;
+	private _persistFilename(filename: string, provider: string) {
+		localStorage.setItem(
+			`${STORAGE_KEYS.LAST_PLAYED_VIDEO}-${provider}`,
+			JSON.stringify({ filename })
+		);
+		this.lastPlayedFilename = filename;
 	}
 
 	private _startPlaying(video: Video) {
 		stopSync();
 		this._lastProvider = video.provider;
-		this._persistVideo(video);
-		this.currentVideo = video;
+		this._persistFilename(video.filename, video.provider);
+		this.playingFilename = video.filename;
 		this.segments = [];
 		this.view = 'video';
 		this.lastActionedVideoFilename = null;

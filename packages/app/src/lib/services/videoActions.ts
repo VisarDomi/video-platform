@@ -9,19 +9,17 @@ export function saveCurrentVideo() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.ORIGINAL || playerStore.segments.length > 0) return;
 
-	playerStore.markCurrentAsEdited();
-	playerStore.setLastActioned(video.filename);
-	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+	const filename = video.filename;
+	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+	playerStore.setLastActioned(filename);
+
 	sendSaveRequest(video, video.provider).catch((err) => {
 		if (err instanceof ApiError && err.status === 404) {
-			videoListStore.removeVideo(video.filename);
+			videoListStore.removeVideo(filename);
 			playerStore.showList();
 			return;
 		}
-		if (playerStore.currentVideo?.filename === video.filename) {
-			playerStore.markCurrentAsOriginal();
-		}
-		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+		videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 	});
 }
 
@@ -53,9 +51,8 @@ export async function createEditedVideo() {
 	const filename = video.filename;
 
 	playerStore.clearSegments();
-	playerStore.markCurrentAsEdited();
-	playerStore.setLastActioned(filename);
 	videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+	playerStore.setLastActioned(filename);
 
 	sendEditRequest(filename, segmentsToSave, video.provider)
 		.then(() => {
@@ -69,9 +66,6 @@ export async function createEditedVideo() {
 				playerStore.showList();
 				return;
 			}
-			if (playerStore.currentVideo?.filename === filename) {
-				playerStore.markCurrentAsOriginal();
-			}
 			videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
 		});
 }
@@ -80,18 +74,16 @@ export function returnToOriginals() {
 	const video = playerStore.currentVideo;
 	if (!video || video.type !== VIDEO_TYPE.EDITED) return;
 
-	playerStore.markCurrentAsOriginal();
-	playerStore.setLastActioned(video.filename);
-	videoListStore.updateVideoType(video.filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+	const filename = video.filename;
+	videoListStore.updateVideoType(filename, VIDEO_TYPE.EDITED, VIDEO_TYPE.ORIGINAL);
+	playerStore.setLastActioned(filename);
+
 	sendReturnRequest(video, video.provider).catch((err) => {
 		if (err instanceof ApiError && err.status === 404) {
-			videoListStore.removeVideo(video.filename);
+			videoListStore.removeVideo(filename);
 			playerStore.showList();
 			return;
 		}
-		if (playerStore.currentVideo?.filename === video.filename) {
-			playerStore.markCurrentAsEdited();
-		}
-		videoListStore.updateVideoType(video.filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
+		videoListStore.updateVideoType(filename, VIDEO_TYPE.ORIGINAL, VIDEO_TYPE.EDITED);
 	});
 }

@@ -29,13 +29,7 @@
 	const engine = new VideoEngine({
 		onLiveStatusChanged(filename, isLive) {
 			emit('live-status-changed', { filename, isLive });
-			if (isLive) {
-				playerStore.setCurrentVideoLive();
-				videoListStore.updateVideoLive(filename, true);
-			} else {
-				playerStore.setCurrentVideoNotLive();
-				videoListStore.updateVideoLive(filename, false);
-			}
+			videoListStore.updateVideoLive(filename, isLive);
 		},
 		onVideoRemoved(filename) {
 			emit('video-removed', { filename });
