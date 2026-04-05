@@ -35,3 +35,15 @@ HLS.js: `startLoad()` from current position. Native HLS (iOS Safari): must reloa
 ## videoList: sole writer pattern
 
 `initialize()` is the sole writer for all provider-scoped state. Atomic transition — all state is set in one synchronous block after async data arrives, gated by epoch check.
+
+## No frontend playlist cache
+
+`fetchAndParsePlaylist` reads from the server on every call. No Map cache.
+
+**Why:** Frontend logging showed playlist fetches take 13-45ms on localhost HTTPS (median 18ms). Cache hit rate was 10%. The cache saved 18ms on revisits but froze `isLive` state, causing live streams to appear as VOD.
+
+## Frontend passthrough logging
+
+`POST /api/log` accepts `{ event, data }` from the frontend, writes to the server journal with `[Frontend]` tag. Fire-and-forget, no batching.
+
+**Why:** The frontend is a client-side SPA with no logging. Performance claims (cache saves Xms) couldn't be verified without data.
