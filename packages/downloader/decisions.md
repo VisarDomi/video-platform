@@ -1,6 +1,6 @@
 # Downloader Decisions
 
-## StreamSession owns the recording lifecycle (2026-03-22)
+## StreamSession owns the recording lifecycle
 
 One session = one folder. StreamSession owns DiskSession, PlaylistManager, InitTracker, and the retry loop. StreamDownloader is a single download attempt that receives these as inputs — it doesn't create, finalize, or remove anything.
 
@@ -10,19 +10,19 @@ After each download attempt exits, the session calls `provider.shouldRetry(conte
 - **Tango:** liveUrl is the source of truth (the following feed is stale). On fetch-failed (401 token timing), retry same master URL. On stale-timeout or segment-failed, try the feed for a new URL.
 - **FC2:** memberApi (is_publish). If still online, get fresh HLS URL.
 
-**Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content. StreaMonitor's bot pattern — download until you can't, check status, retry — avoids this.
+**Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content.
 
 ## Download loop: no concurrent timers, no shared mutable state
 
-Quality checks are inline. The stale timeout (60s) is the exit condition. On variant 404/403, the loop asks `recoverVariant()` for an alternative (SC tries all 3 TLDs in parallel; tango/fc2 return null). If no recovery, the loop sleeps and retries until stale timeout.
+Quality checks are inline. The stale timeout (60s) is the exit condition. On variant 404/403, the loop asks `recoverVariant()` for an alternative. If no recovery, the loop sleeps and retries until stale timeout.
 
 **Why:** The concurrent `StreamQualityMonitor` timer was the root cause of the zombie download bug.
 
 ## SegmentFetchResult: timeout vs HTTP error
 
-`fetchSegment` returns `{ data, retryable }`. Timeouts are retryable (skip the segment, continue). HTTP errors are fatal (stop the download). This prevents killing sessions over a single slow CDN response.
+`fetchSegment` returns `{ data, retryable }`. Timeouts are retryable (skip the segment, continue). HTTP errors are fatal (stop the download).
 
-**Why:** mei_love's 800-segment session was killed because one segment timed out (30s AbortSignal). The old code treated all null returns as fatal.
+**Why:** An 800-segment session was killed because one segment timed out (30s AbortSignal). The old code treated all null returns as fatal.
 
 ## No silent recovery — every transition is logged
 
@@ -36,11 +36,11 @@ DiskSession defers dir creation to the moment the first segment or init byte is 
 
 **Why:** The old code created dirs eagerly. If the variant URL was broken, an empty dir existed with no playlist. The frontend showed it as a video, tried to load the playlist, got a 500.
 
-## InitTracker owns mapUri↔file atomicity
+## InitTracker owns mapUri-file atomicity
 
 The `currentMapUri` state only advances after the init file is confirmed written to disk. The segment count lives in the tracker because it determines init filenames.
 
-**Why:** The old code set `currentMapUri` unconditionally after `writeFile`. A silently failed init write permanently prevented retry (Mio_ecstasy incident).
+**Why:** The old code set `currentMapUri` unconditionally after `writeFile`. A silently failed init write permanently prevented retry.
 
 ## PlaylistManager buffers quality changes
 
@@ -64,53 +64,34 @@ The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generat
 
 The bulk API returns both. `isOnline` returns `false` for some actively broadcasting streamers. `isLive` is the correct field.
 
-**Why:** Sui_Hcup was live but the downloader skipped it because `isOnline=false`.
-
 ## SC skip NAME="source" variant
 
 The "source" variant is the raw broadcaster feed — the CDN restricts it with 403. Select the highest bandwidth transcoded variant instead.
 
-**Why:** mayu_nyann was stuck in an infinite recovery loop on the restricted source variant.
+## No token cache — read from disk on every request
 
-## No token cache — read from disk on every request (2026-03-22)
+TokenManager has no watcher, no cache. `getTokens()` reads the session file on every call.
 
-TokenManager has no watcher, no cache. `getTokens()` reads the session file on every call. The token is always fresh because it was just read.
-
-**Why:** The watcher cached tokens for up to 5s. With 10s TTL, a token read at 4.7s cache age had 0.3s remaining — not enough for network latency. This caused intermittent 401s that the session recovered from but shouldn't have happened. Reading from disk costs one file read per playlist fetch (~15ms on SSD). The network fetch that follows takes 50-200ms. The disk read is negligible.
+**Why:** The watcher cached tokens for up to 5s. With 10s TTL, a token read at 4.7s cache age had 0.3s remaining — not enough for network latency. Reading from disk costs ~15ms on SSD; the network fetch that follows takes 50-200ms.
 
 ## Tango API timing: derive from TTL source of truth
 
-`TANGO_STREAM_TOKEN_TTL_S=10` and `TANGO_SESSION_TOKEN_TTL_S=3600` are the external API constants. Refresh cadences derive as half the TTL (5s, 30min). All other Tango timing thresholds derive from these.
-
-**Why:** The old code had 5000ms and 30min hardcoded in multiple packages, diverging silently.
+`TANGO_STREAM_TOKEN_TTL_S=10` and `TANGO_SESSION_TOKEN_TTL_S=3600` are the external API constants. Refresh cadences derive as half the TTL. All other Tango timing thresholds derive from these.
 
 ## All timing constants in one file
 
-`common/timing.ts` contains every timing value as a named constant. No inline magic numbers. No config.json. Values are executive decisions, not derived from external sources (except Tango TTLs in shared).
+`common/timing.ts` contains every timing value as a named constant. No inline magic numbers.
 
-**Why:** Timing values were scattered across 16 files as bare numbers. The same value (30s CDN timeout) was hardcoded independently in 3 providers.
+**Why:** Timing values were scattered across 16 files as bare numbers.
 
 ## Flat cooldown, no exponential backoff
 
-20s cooldown after a 0-segment session. Logs "live again after cooldown" when a streamer is detected live immediately after cooldown expiry — this data will show if 20s is too long.
+20s cooldown after a 0-segment session.
 
-**Why:** Exponential backoff (30s→10min) meant a transient failure at 3am could escalate to 10-minute waits.
+**Why:** Exponential backoff (30s-10min) meant a transient failure at 3am could escalate to 10-minute waits.
 
-## FC2 skip paid streams (fee>0) (2026-03-22)
+## FC2 skip paid streams (fee>0)
 
 The memberApi returns `fee>0` for paid streams. Only download `fee=0`.
 
-**Why:** Paid streams pass the `is_publish` check but the WebSocket handshake for HLS URL retrieval fails without payment, causing "online but failed to retrieve HLS URL" warnings every 60s.
-
-## No frontend playlist cache (2026-03-22)
-
-`fetchAndParsePlaylist` reads from the server on every call. No Map cache.
-
-**Why:** Frontend logging showed playlist fetches take 13-45ms on localhost HTTPS (median 18ms). Cache hit rate was 10%. The cache saved 18ms on revisits but froze `isLive` state, causing live streams to appear as VOD.
-
-## Frontend passthrough logging (2026-03-22)
-
-`POST /api/log` accepts `{ event, data }` from the frontend, writes to the server journal with `[Frontend]` tag. Fire-and-forget, no batching.
-
-**Why:** The frontend is a client-side SPA with no logging. Performance claims (cache saves Xms) couldn't be verified without data.
-
+**Why:** Paid streams pass the `is_publish` check but the WebSocket handshake for HLS URL retrieval fails without payment.
