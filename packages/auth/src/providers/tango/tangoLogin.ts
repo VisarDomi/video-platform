@@ -127,7 +127,7 @@ export async function extractTokens(account: Account): Promise<TokenBag | null> 
     let browser: Browser;
     browser = await chromium.launch({
         headless: false,
-        args: ["--disable-blink-features=AutomationControlled"],
+        args: ["--disable-blink-features=AutomationControlled", "--disable-gpu", "--disable-gpu-compositing"],
     });
     try {
         const timeoutPromise = new Promise<never>((_, reject) => {
