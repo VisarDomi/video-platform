@@ -54,3 +54,25 @@ Single writer per resource, no cross-process write contention.
 | `tango.txt` | server (routes + AliasRegistry.syncTangoTxt) | downloader TangoTargetManager |
 | `live-status.json` | downloader (DownloadsManager) | server (orphan finalizer) |
 | session tokens on disk | auth daemon | server + downloader (shared readTokens()) |
+
+## Frontend gesture model uses full touch ownership (2026-04-14)
+
+The video player frontend owns touch handling completely on the active video surface.
+
+- Use `touch-action: none` on the video view.
+- Classify gestures once after a deadzone into `edge-back`, `seek`, `nav`, or `ui`.
+- Keep `touchcancel` handling and animation locks so gesture state cannot get stuck.
+- Use the 3-player carousel so swipe navigation feels instant.
+
+**Why:** Native browser gesture handling conflicted with custom swipe navigation and seek behavior. The fully-owned gesture model was the only reliable way to get native-feel behavior in the PWA.
+
+## Video list virtualization uses native window scroll (2026-04-14)
+
+Large provider lists should virtualize on top of native `window` scrolling instead of a custom fixed/overflow scroll container.
+
+- Fixed row height: `52px`
+- Buffer: `SCROLL_BUFFER = 10`
+- Spacer div provides total height
+- Visible rows are positioned with `translateY`
+
+**Why:** iOS Safari/PWA behavior around fixed custom scroll containers caused viewport, bounce, and momentum problems. Native window scroll plus simple virtualization preserves iOS feel and keeps the DOM small.
