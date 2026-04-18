@@ -13,9 +13,13 @@ export type LogEvent =
     | { event: 'unit-activate'; slot: number; filename: string; videoChanged: boolean }
     | { event: 'unit-clear'; slot: number; filename: string | null }
     // Playback
-    | { event: 'playlist-fetch'; filename: string; fetchMs: number; segments: number; isLive: boolean; isFmp4: boolean; bytes: number }
+    | { event: 'playlist-fetch'; filename: string; fetchMs: number; segments: number; isLive: boolean; isFmp4: boolean; bytes: number; totalDuration: number; firstSegment: string | null; lastSegment: string | null }
     | { event: 'live-status-changed'; filename: string; isLive: boolean }
     | { event: 'video-removed'; filename: string }
+    | { event: 'playback-tech-selected'; slot: number; filename: string; tech: 'hls.js' | 'native'; startTime: number; storeIsLive: boolean }
+    | { event: 'manifest-state'; slot: number; filename: string; tech: 'hls.js' | 'native'; phase: string; manifestIsLive: boolean; manifestDuration: number; fragmentCount: number; startSN: number | null; endSN: number | null }
+    | { event: 'media-state'; slot: number; filename: string; phase: string; currentTime: number; duration: number | null; seekableEnd: number | null; readyState: number; paused: boolean; ended: boolean; currentIsLive: boolean; storeIsLive: boolean }
+    | { event: 'media-duration-mismatch'; slot: number; filename: string; phase: string; playlistDuration: number; mediaDuration: number | null; seekableEnd: number | null; durationDelta: number | null; seekableDelta: number | null }
     // Edit actions
     | { event: 'edit-begin'; filename: string; isFmp4: boolean; playlistSegments: number; timeMarkers: number }
     | { event: 'edit-playlist-fetch-failed'; filename: string }

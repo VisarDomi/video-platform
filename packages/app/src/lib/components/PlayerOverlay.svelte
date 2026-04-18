@@ -29,6 +29,7 @@
 	const currentTime = $derived(overlay.currentTime);
 	const duration = $derived(overlay.duration);
 	const seekableEnd = $derived(overlay.seekableEnd);
+	const playbackIsLive = $derived(overlay.isLive);
 	const isMuted = $derived(overlay.isMuted);
 	const isActive = $derived(overlay.isActive);
 	const displayDuration = $derived(
@@ -44,7 +45,7 @@
 
 	// Controls
 	const segments = $derived(isActive ? playerStore.segments : []);
-	const isLive = $derived(video?.isLive === true);
+	const isLive = $derived(playbackIsLive);
 	const isOriginal = $derived(video?.type === VIDEO_TYPE.ORIGINAL && !isLive);
 	const isEdited = $derived(video?.type === VIDEO_TYPE.EDITED);
 	const hasSegments = $derived(isOriginal && segments.length > 0);

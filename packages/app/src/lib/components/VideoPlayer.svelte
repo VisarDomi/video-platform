@@ -25,6 +25,7 @@
 		new PlayerOverlayState(),
 		new PlayerOverlayState(),
 	];
+	let playlistSyncToken = 0;
 
 	const engine = new VideoEngine({
 		onLiveStatusChanged(filename, isLive) {
@@ -41,17 +42,26 @@
 			if (next) {
 				engine.forceProgressSave();
 				playerStore.navigateVideo(next, 1);
-				void fetchAndParsePlaylist(next);
 			} else if (filteredList.length > 0) {
 				const first = filteredList[0];
 				engine.forceProgressSave();
 				playerStore.navigateVideo(first, 1);
-				void fetchAndParsePlaylist(first);
 			} else {
 				playerStore.showList();
 			}
 		}
 	}, emit);
+
+	async function syncPlaylistTruth(video: (typeof videoListStore.videos)[number]) {
+		const token = ++playlistSyncToken;
+		const playlistData = await fetchAndParsePlaylist(video);
+		if (token !== playlistSyncToken || !playlistData) return;
+		const totalDuration = playlistData.segments.reduce((sum, segment) => sum + segment.duration, 0);
+		engine.applyPlaylistTruth(video.filename, {
+			isLive: playlistData.isLive,
+			totalDuration
+		});
+	}
 
 	const doNavigate = (dir: 1 | -1) => {
 		const cv = playerStore.currentVideo;
@@ -61,7 +71,6 @@
 			engine.forceProgressSave();
 			playerStore.navigateVideo(target, dir);
 			playerStore.updateScrollTarget(target);
-			void fetchAndParsePlaylist(target);
 		}
 	};
 
@@ -191,17 +200,26 @@
 				if (next) {
 					engine.forceProgressSave();
 					playerStore.navigateVideo(next, 1);
-					void fetchAndParsePlaylist(next);
 				} else if (filteredList.length > 0) {
 					const first = filteredList[0];
 					engine.forceProgressSave();
 					playerStore.navigateVideo(first, 1);
-					void fetchAndParsePlaylist(first);
 				} else {
 					playerStore.showList();
 				}
 			}
 		});
+	});
+
+	$effect(() => {
+		if (playerStore.view === 'video') return;
+		playlistSyncToken += 1;
+	});
+
+	$effect(() => {
+		const cv = playerStore.currentVideo;
+		if (!cv || playerStore.view !== 'video') return;
+		void syncPlaylistTruth(cv);
 	});
 
 	$effect(() => {

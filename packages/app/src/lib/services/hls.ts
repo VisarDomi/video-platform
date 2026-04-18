@@ -34,13 +34,20 @@ export async function fetchAndParsePlaylist(video: Video): Promise<PlaylistData 
 		}
 	}
 
+	const totalDuration = segments.reduce((sum, segment) => sum + segment.duration, 0);
+	const firstSegment = segments[0]?.name ?? null;
+	const lastSegment = segments[segments.length - 1]?.name ?? null;
+
 	logService.emit('playlist-fetch', {
 		filename: video.filename,
 		fetchMs: Math.round(fetchMs),
 		segments: segments.length,
 		isLive,
 		isFmp4,
-		bytes: text.length
+		bytes: text.length,
+		totalDuration,
+		firstSegment,
+		lastSegment
 	});
 
 	return { segments, isLive, isFmp4 };

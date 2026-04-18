@@ -11,7 +11,6 @@
 	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
-	import { fetchAndParsePlaylist } from '$lib/services/hls.js';
 	import { fetchListIdentifiers, isListProvider } from '$lib/services/list-api.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
 
@@ -94,7 +93,6 @@
 
 		searchHidden = true;
 		playerStore.playVideo(video);
-		void fetchAndParsePlaylist(video);
 	}
 
 	function handleScroll() {

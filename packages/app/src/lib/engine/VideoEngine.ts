@@ -4,6 +4,7 @@ import { getSavedTime } from '../utils/navigation.js';
 import type { Video } from '../types.js';
 import type { LogEmit } from '../services/LogService.js';
 import type { PlayerOverlayState } from './PlayerOverlayState.svelte.js';
+import { PlaybackTimeline, type PlaylistTruth } from './PlaybackTimeline.js';
 
 export interface VideoEngineCallbacks {
 	onLiveStatusChanged(filename: string, isLive: boolean): void;
@@ -14,6 +15,7 @@ interface PlayerUnit {
 	wrapper: HTMLElement;
 	video: HTMLVideoElement;
 	state: PlayerOverlayState;
+	timeline: PlaybackTimeline;
 }
 
 export class VideoEngine {
@@ -35,6 +37,9 @@ export class VideoEngine {
 
 	private _lastProgressSave = 0;
 	private readonly PROGRESS_SAVE_MS = 3000;
+	private readonly MEDIA_MISMATCH_LOG_DELTA_SEC = 0.75;
+	private readonly MEDIA_MISMATCH_LOG_COOLDOWN_MS = 2000;
+	private mismatchLogTimes = new Map<string, number>();
 
 	private emit: LogEmit;
 
@@ -57,7 +62,12 @@ export class VideoEngine {
 			wrapper.appendChild(video);
 			videoContainer.appendChild(wrapper);
 
-			this.units.push({ wrapper, video, state: overlayStates[i] });
+			this.units.push({
+				wrapper,
+				video,
+				state: overlayStates[i],
+				timeline: new PlaybackTimeline()
+			});
 		}
 
 		const timeHandlers = this.units.map((u) => this.makeTimeUpdateHandler(u));
@@ -83,21 +93,11 @@ export class VideoEngine {
 		let lastSync = 0;
 		return () => {
 			const el = unit.video;
-			const ct = el.currentTime;
-			const dur = el.duration;
-			let se = unit.state.seekableEnd;
-			if (dur === Infinity && el.seekable.length > 0) {
-				se = el.seekable.end(el.seekable.length - 1);
-			}
-
 			const now = performance.now();
 			const isActive = el === this.getActiveElement();
+			const snapshot = this.observeTimeline(unit);
 
 			if (isActive) {
-				this._currentTime = ct;
-				this._duration = dur;
-				this._seekableEnd = se;
-
 				const activeFilename = el.dataset.loadedFilename;
 				if (
 					activeFilename &&
@@ -107,16 +107,18 @@ export class VideoEngine {
 					this._lastProgressSave = now;
 					localStorage.setItem(
 						STORAGE_KEYS.PROGRESS_PREFIX + activeFilename,
-						String(Math.round(ct))
+						String(Math.round(snapshot.currentTime))
 					);
 				}
 			}
 
 			if (now - lastSync >= this.TIME_SYNC_MS) {
 				lastSync = now;
-				unit.state.currentTime = ct;
-				unit.state.duration = dur;
-				unit.state.seekableEnd = se;
+				this.applyTimelineState(unit, snapshot, isActive);
+			}
+
+			if (isActive) {
+				this.logMediaMismatchIfNeeded(unit, 'timeupdate');
 			}
 		};
 	}
@@ -130,9 +132,7 @@ export class VideoEngine {
 	forceTimeSync(): void {
 		this._lastTimeSync = performance.now();
 		const unit = this.getActiveUnit();
-		unit.state.currentTime = this._currentTime;
-		unit.state.duration = this._duration;
-		unit.state.seekableEnd = this._seekableEnd;
+		this.applyTimelineState(unit);
 	}
 
 	forceProgressSave(): void {
@@ -153,6 +153,31 @@ export class VideoEngine {
 
 	private getActiveUnit(): PlayerUnit {
 		return this.units[this.activePlayerIndex];
+	}
+
+	private observeTimeline(unit: PlayerUnit) {
+		const el = unit.video;
+		unit.timeline.observeMedia({
+			currentTime: el.currentTime,
+			duration: this.toLoggedDuration(el.duration),
+			seekableEnd: this.toLoggedSeekableEnd(el),
+			isLive: el.duration === Infinity,
+			ended: el.ended
+		});
+		return unit.timeline.snapshot();
+	}
+
+	private applyTimelineState(unit: PlayerUnit, snapshot = this.observeTimeline(unit), isActive = unit.video === this.getActiveElement()): void {
+		unit.state.currentTime = snapshot.currentTime;
+		unit.state.duration = snapshot.duration;
+		unit.state.seekableEnd = snapshot.seekMax;
+		unit.state.isLive = snapshot.isLive;
+
+		if (!isActive) return;
+		this._currentTime = snapshot.currentTime;
+		this._duration = snapshot.duration;
+		this._seekableEnd = snapshot.seekMax;
+		this.currentIsLive = snapshot.isLive;
 	}
 
 	onViewHidden(): void {
@@ -190,9 +215,104 @@ export class VideoEngine {
 		return API.HLS_PLAYLIST(v.provider, v.filename);
 	}
 
-	private syncLiveStatus(el: HTMLVideoElement, v: Video, isActivePlayer: boolean): void {
+	private getUnitSlot(unit: PlayerUnit): number {
+		return this.units.indexOf(unit);
+	}
+
+	private getElementSeekableEnd(el: HTMLVideoElement): number {
+		if (el.seekable.length === 0) return 0;
+		try {
+			return el.seekable.end(el.seekable.length - 1);
+		} catch {
+			return 0;
+		}
+	}
+
+	private toLoggedDuration(value: number): number | null {
+		if (Number.isNaN(value) || value === Infinity) return null;
+		return value;
+	}
+
+	private toLoggedSeekableEnd(el: HTMLVideoElement): number | null {
+		const seekableEnd = this.getElementSeekableEnd(el);
+		return seekableEnd > 0 ? seekableEnd : null;
+	}
+
+	private emitMediaState(unit: PlayerUnit, phase: string): void {
+		const el = unit.video;
+		const filename = el.dataset.loadedFilename;
+		if (!filename) return;
+
+		this.emit('media-state', {
+			slot: this.getUnitSlot(unit),
+			filename,
+			phase,
+			currentTime: el.currentTime || 0,
+			duration: this.toLoggedDuration(el.duration),
+			seekableEnd: this.toLoggedSeekableEnd(el),
+			readyState: el.readyState,
+			paused: el.paused,
+			ended: el.ended,
+			currentIsLive: this.currentIsLive,
+			storeIsLive: unit.state.video?.isLive === true
+		});
+	}
+
+	applyPlaylistTruth(filename: string, playlistTruth: PlaylistTruth): void {
+		for (const unit of this.units) {
+			if (unit.video.dataset.loadedFilename !== filename) continue;
+			unit.timeline.setPlaylistTruth(playlistTruth);
+			this.applyTimelineState(unit);
+		}
+	}
+
+	private clearPlaylistTruth(filename: string | undefined): void {
+		if (!filename) return;
+		this.mismatchLogTimes.delete(filename);
+		for (const unit of this.units) {
+			if (unit.video.dataset.loadedFilename === filename) {
+				unit.timeline.clear();
+			}
+		}
+	}
+
+	private logMediaMismatchIfNeeded(unit: PlayerUnit, phase: string): void {
+		const filename = unit.video.dataset.loadedFilename;
+		if (!filename) return;
+
+		const truth = unit.timeline.getPlaylistTruth();
+		if (!truth || truth.isLive) return;
+
+		const snapshot = unit.timeline.snapshot();
+		const mediaDuration = snapshot.mediaDuration;
+		const seekableEnd = snapshot.seekableEnd;
+		const durationDelta = mediaDuration === null ? null : truth.totalDuration - mediaDuration;
+		const seekableDelta = seekableEnd === null ? null : truth.totalDuration - seekableEnd;
+		const hasMismatch =
+			(durationDelta !== null && Math.abs(durationDelta) >= this.MEDIA_MISMATCH_LOG_DELTA_SEC) ||
+			(seekableDelta !== null && Math.abs(seekableDelta) >= this.MEDIA_MISMATCH_LOG_DELTA_SEC);
+		if (!hasMismatch) return;
+
+		const now = performance.now();
+		const lastLoggedAt = this.mismatchLogTimes.get(filename) ?? 0;
+		if (now - lastLoggedAt < this.MEDIA_MISMATCH_LOG_COOLDOWN_MS) return;
+		this.mismatchLogTimes.set(filename, now);
+
+		this.emit('media-duration-mismatch', {
+			slot: this.getUnitSlot(unit),
+			filename,
+			phase,
+			playlistDuration: truth.totalDuration,
+			mediaDuration,
+			seekableEnd,
+			durationDelta,
+			seekableDelta
+		});
+	}
+
+	private syncLiveStatus(unit: PlayerUnit, v: Video, isActivePlayer: boolean): void {
 		if (!isActivePlayer) return;
-		const isLive = el.duration === Infinity;
+		const isLive = unit.timeline.snapshot().isLive;
 		if (isLive) {
 			this.currentIsLive = true;
 			this.callbacks.onLiveStatusChanged(v.filename, true);
@@ -203,6 +323,7 @@ export class VideoEngine {
 	}
 
 	private setupHlsJs(
+		unit: PlayerUnit,
 		el: HTMLVideoElement,
 		url: string,
 		v: Video,
@@ -228,6 +349,22 @@ export class VideoEngine {
 
 		hls.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
 			const isLive = data.details.live;
+			const totalDuration = data.details.totalduration ?? 0;
+			const fragmentCount = data.details.fragments?.length ?? 0;
+			const startSN = typeof data.details.startSN === 'number' ? data.details.startSN : null;
+			const endSN = typeof data.details.endSN === 'number' ? data.details.endSN : null;
+			this.applyPlaylistTruth(v.filename, { isLive, totalDuration });
+			this.emit('manifest-state', {
+				slot: this.getUnitSlot(unit),
+				filename: v.filename,
+				tech: 'hls.js',
+				phase: initialLoadDone ? 'reload' : 'initial',
+				manifestIsLive: isLive,
+				manifestDuration: totalDuration,
+				fragmentCount,
+				startSN,
+				endSN
+			});
 
 			if (!initialLoadDone) {
 				initialLoadDone = true;
@@ -240,6 +377,8 @@ export class VideoEngine {
 				} else if (startTime > 0) {
 					el.currentTime = startTime;
 				}
+				this.emitMediaState(unit, 'hls-level-loaded');
+				this.logMediaMismatchIfNeeded(unit, 'hls-level-loaded');
 				return;
 			}
 
@@ -250,9 +389,12 @@ export class VideoEngine {
 					this.callbacks.onLiveStatusChanged(v.filename, false);
 				}
 			}
+			this.emitMediaState(unit, 'hls-level-loaded');
+			this.logMediaMismatchIfNeeded(unit, 'hls-level-loaded');
 		});
 
 		hls.on(Hls.Events.ERROR, (_event, data) => {
+			this.emitMediaState(unit, `hls-error:${data.type}`);
 			if (data.fatal) {
 				if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
 					if (data.response?.code === 404) {
@@ -271,6 +413,7 @@ export class VideoEngine {
 	}
 
 	private setupNativeHls(
+		unit: PlayerUnit,
 		el: HTMLVideoElement,
 		url: string,
 		v: Video,
@@ -286,6 +429,20 @@ export class VideoEngine {
 
 		let nativeWasLive = false;
 		const onReady = () => {
+			const duration = this.toLoggedDuration(el.duration) ?? 0;
+			const manifestIsLive = el.duration === Infinity;
+			this.applyPlaylistTruth(v.filename, { isLive: manifestIsLive, totalDuration: duration });
+			this.emit('manifest-state', {
+				slot: this.getUnitSlot(unit),
+				filename: v.filename,
+				tech: 'native',
+				phase: 'loadedmetadata',
+				manifestIsLive,
+				manifestDuration: duration,
+				fragmentCount: 0,
+				startSN: null,
+				endSN: null
+			});
 			if (el.duration === Infinity) {
 				nativeWasLive = true;
 				if (isActivePlayer) {
@@ -295,6 +452,8 @@ export class VideoEngine {
 			} else if (startTime > 0) {
 				el.currentTime = startTime;
 			}
+			this.emitMediaState(unit, 'loadedmetadata');
+			this.logMediaMismatchIfNeeded(unit, 'loadedmetadata');
 			resolve();
 		};
 		const onDurationChange = () => {
@@ -305,18 +464,33 @@ export class VideoEngine {
 					this.callbacks.onLiveStatusChanged(v.filename, false);
 				}
 			}
+			const duration = this.toLoggedDuration(el.duration) ?? 0;
+			this.applyPlaylistTruth(v.filename, { isLive: el.duration === Infinity, totalDuration: duration });
+			this.emitMediaState(unit, 'durationchange');
+			this.logMediaMismatchIfNeeded(unit, 'durationchange');
 		};
 		const onError = () => {
 			const mediaError = el.error;
 			if (mediaError) {
+				this.emitMediaState(unit, `native-error:${mediaError.code}`);
 				console.warn('Native HLS error', mediaError.code, mediaError.message);
 				if (!isActivePlayer) return;
 				this.callbacks.onVideoRemoved(v.filename);
 			}
 		};
+		const onEnded = () => {
+			this.emitMediaState(unit, 'ended');
+			this.logMediaMismatchIfNeeded(unit, 'ended');
+		};
+		const onStall = () => {
+			this.emitMediaState(unit, 'waiting');
+			this.logMediaMismatchIfNeeded(unit, 'waiting');
+		};
 		el.addEventListener('loadedmetadata', onReady, { once: true, signal });
 		el.addEventListener('durationchange', onDurationChange, { signal });
 		el.addEventListener('error', onError, { signal });
+		el.addEventListener('ended', onEnded, { signal });
+		el.addEventListener('waiting', onStall, { signal });
 		el.src = url;
 	}
 
@@ -332,8 +506,9 @@ export class VideoEngine {
 			const streamAlive =
 				el.dataset.loadedFilename === v.filename && hasActiveStream && !!el.src;
 			if (streamAlive) {
-				this.syncLiveStatus(el, v, isActivePlayer);
-				if (startTime > 0) el.currentTime = startTime;
+				this.syncLiveStatus(unit, v, isActivePlayer);
+				if (startTime > 0) el.currentTime = unit.timeline.clampSeekTarget(startTime);
+				this.applyTimelineState(unit, undefined, isActivePlayer);
 				resolve();
 				return;
 			}
@@ -342,18 +517,28 @@ export class VideoEngine {
 			}
 
 			const url = this.resolveStreamUrl(v);
+			const tech: 'hls.js' | 'native' = !USE_NATIVE_HLS && Hls.isSupported() ? 'hls.js' : 'native';
+			this.emit('playback-tech-selected', {
+				slot: this.getUnitSlot(unit),
+				filename: v.filename,
+				tech,
+				startTime,
+				storeIsLive: v.isLive === true
+			});
 
-			if (!USE_NATIVE_HLS && Hls.isSupported()) {
-				this.setupHlsJs(el, url, v, startTime, isActivePlayer, resolve);
+			if (tech === 'hls.js') {
+				this.setupHlsJs(unit, el, url, v, startTime, isActivePlayer, resolve);
 			} else {
-				this.setupNativeHls(el, url, v, startTime, isActivePlayer, resolve);
+				this.setupNativeHls(unit, el, url, v, startTime, isActivePlayer, resolve);
 			}
 
+			unit.timeline.clear();
 			el.dataset.loadedFilename = v.filename;
 			unit.state.loadedFilename = v.filename;
 			unit.state.currentTime = 0;
 			unit.state.duration = 0;
 			unit.state.seekableEnd = 0;
+			unit.state.isLive = v.isLive === true;
 			const slot = this.units.indexOf(unit);
 			this.emit('unit-load', { slot, filename: v.filename, provider: v.provider });
 		});
@@ -361,6 +546,8 @@ export class VideoEngine {
 
 	private clearStream(unit: PlayerUnit): void {
 		const el = unit.video;
+		this.emitMediaState(unit, 'clear-stream');
+		this.clearPlaylistTruth(el.dataset.loadedFilename);
 		el.pause();
 		unit.wrapper.style.opacity = '';
 
@@ -381,10 +568,12 @@ export class VideoEngine {
 			el.load();
 		}
 		delete el.dataset.loadedFilename;
+		unit.timeline.clear();
 		unit.state.loadedFilename = null;
 		unit.state.currentTime = 0;
 		unit.state.duration = 0;
 		unit.state.seekableEnd = 0;
+		unit.state.isLive = false;
 	}
 
 	activateIfChanged(cv: Video, activeIdx: number, startTimeOverride: number | null): void {
@@ -597,22 +786,24 @@ export class VideoEngine {
 	}
 
 	handleSeek(time: number): void {
-		const activeEl = this.getActiveElement();
-		if (!isNaN(activeEl.duration)) {
-			activeEl.pause();
-			activeEl.currentTime = time;
-			this._currentTime = time;
-			this.forceTimeSync();
-			activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
-		}
+		const activeUnit = this.getActiveUnit();
+		const activeEl = activeUnit.video;
+		const targetTime = activeUnit.timeline.clampSeekTarget(time);
+		if (activeUnit.timeline.snapshot().seekMax <= 0) return;
+		activeEl.pause();
+		activeEl.currentTime = targetTime;
+		this._currentTime = targetTime;
+		this.forceTimeSync();
+		activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
 	}
 
 	seekDirect(time: number): void {
-		const activeEl = this.getActiveElement();
-		if (!isNaN(activeEl.duration)) {
-			activeEl.currentTime = time;
-			this._currentTime = time;
-		}
+		const activeUnit = this.getActiveUnit();
+		const activeEl = activeUnit.video;
+		const targetTime = activeUnit.timeline.clampSeekTarget(time);
+		if (activeUnit.timeline.snapshot().seekMax <= 0) return;
+		activeEl.currentTime = targetTime;
+		this._currentTime = targetTime;
 	}
 
 	getCurrentTime(): number {
