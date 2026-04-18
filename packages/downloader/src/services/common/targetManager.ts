@@ -59,6 +59,7 @@ export class TargetManager {
         }
 
         try {
+            const previousTargets = new Set(this.targets);
             const content = fs.readFileSync(this.targetsFilePath, "utf-8");
             const lines = content.split("\n");
             const newTargets = new Set<string>();
@@ -76,7 +77,18 @@ export class TargetManager {
             }
 
             this.targets = newTargets;
-            logger.info(`[${this.label}] Loaded ${this.targets.size} targets: ${[...this.targets].join(", ")}`);
+            const added = [...newTargets].filter(id => !previousTargets.has(id));
+            const removed = [...previousTargets].filter(id => !newTargets.has(id));
+            const stats = fs.statSync(this.targetsFilePath);
+            logger.info(
+                `[${this.label}] Loaded ${this.targets.size} targets (added=${added.length}, removed=${removed.length}, mtime=${stats.mtime.toISOString()})`,
+            );
+            if (added.length > 0) {
+                logger.info(`[${this.label}] Added targets: ${added.join(", ")}`);
+            }
+            if (removed.length > 0) {
+                logger.info(`[${this.label}] Removed targets: ${removed.join(", ")}`);
+            }
         } catch (error: any) {
             logger.error(`[${this.label}] Error reading ${path.basename(this.targetsFilePath)}`, { error: error.message });
         }
@@ -84,6 +96,7 @@ export class TargetManager {
 
     private watchFile(): void {
         fs.watch(this.targetsFilePath, (eventType) => {
+            logger.info(`[${this.label}] ${path.basename(this.targetsFilePath)} watch event: ${eventType}`);
             if (eventType === "change") {
                 if (this.debounceTimer) clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(() => {

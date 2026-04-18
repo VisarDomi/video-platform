@@ -37,6 +37,10 @@ export class TangoTargetManager {
         return this.targets.has(accountId);
     }
 
+    public getTargets(): TangoTarget[] {
+        return Array.from(this.targets.values());
+    }
+
     public getAlias(accountId: string): string | undefined {
         return this.targets.get(accountId)?.alias;
     }
@@ -53,6 +57,7 @@ export class TangoTargetManager {
         }
 
         try {
+            const previousTargets = new Map(this.targets);
             const content = fs.readFileSync(this.filePath, "utf-8");
             const newTargets = new Map<string, TangoTarget>();
 
@@ -70,7 +75,23 @@ export class TangoTargetManager {
             }
 
             this.targets = newTargets;
-            logger.info(`[Tango] Loaded ${this.targets.size} targets: ${[...this.targets.keys()].join(", ")}`);
+            const added = [...newTargets.values()]
+                .filter(target => !previousTargets.has(target.accountId))
+                .map(target => `${target.alias} (${target.accountId})`);
+            const removed = [...previousTargets.values()]
+                .filter(target => !newTargets.has(target.accountId))
+                .map(target => `${target.alias} (${target.accountId})`);
+            const stats = fs.statSync(this.filePath);
+
+            logger.info(
+                `[Tango] Loaded ${this.targets.size} targets (added=${added.length}, removed=${removed.length}, mtime=${stats.mtime.toISOString()})`,
+            );
+            if (added.length > 0) {
+                logger.info(`[Tango] Added targets: ${added.join(", ")}`);
+            }
+            if (removed.length > 0) {
+                logger.info(`[Tango] Removed targets: ${removed.join(", ")}`);
+            }
         } catch (error: any) {
             logger.error(`[Tango] Error reading tango.txt`, { error: error.message });
         }
@@ -78,6 +99,7 @@ export class TangoTargetManager {
 
     private watchFile(): void {
         fs.watch(this.filePath, (eventType) => {
+            logger.info(`[Tango] tango.txt watch event: ${eventType}`);
             if (eventType === "change") {
                 if (this.debounceTimer) clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(() => {

@@ -28,6 +28,12 @@ export class RetryCooldown {
         return false;
     }
 
+    public getRemainingMs(id: string): number {
+        const until = this.cooldownUntil.get(id);
+        if (!until) return 0;
+        return Math.max(0, until - Date.now());
+    }
+
     public wasRecentlyCleared(id: string): boolean {
         if (this.recentlyCleared.has(id)) {
             this.recentlyCleared.delete(id);
