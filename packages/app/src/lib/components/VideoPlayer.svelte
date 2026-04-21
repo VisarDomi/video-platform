@@ -82,7 +82,7 @@
 			return dur === Infinity && se > 0 ? se : dur;
 		},
 		seekDirect: (t) => engine.seekDirect(t),
-		seekFinish: () => engine.forceTimeSync(),
+		seekFinish: () => engine.finishDirectSeek(),
 		navigate: doNavigate,
 		navPeekUpdate: (dy) => engine.navPeekUpdate(dy),
 		navPeekRelease: (dy, onDone) => engine.navPeekRelease(dy, doNavigate, onDone),

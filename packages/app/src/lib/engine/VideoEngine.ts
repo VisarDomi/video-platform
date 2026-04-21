@@ -39,6 +39,7 @@ export class VideoEngine {
 	private readonly PROGRESS_SAVE_MS = 3000;
 	private readonly MEDIA_MISMATCH_LOG_DELTA_SEC = 0.75;
 	private readonly MEDIA_MISMATCH_LOG_COOLDOWN_MS = 2000;
+	private readonly SEEK_END_EPSILON_SEC = 0.1;
 	private mismatchLogTimes = new Map<string, number>();
 
 	private emit: LogEmit;
@@ -785,25 +786,61 @@ export class VideoEngine {
 		el.style.transform = '';
 	}
 
+	private resolveSeekTarget(unit: PlayerUnit, time: number): { targetTime: number; shouldResume: boolean } | null {
+		const snapshot = unit.timeline.snapshot();
+		if (snapshot.seekMax <= 0) return null;
+
+		const clampedTime = Math.max(0, Math.min(time, snapshot.seekMax));
+		if (snapshot.isLive) {
+			return { targetTime: clampedTime, shouldResume: true };
+		}
+
+		const terminalCandidates = [snapshot.seekableEnd, snapshot.mediaDuration, snapshot.seekMax].filter(
+			(value): value is number => typeof value === 'number' && value > 0
+		);
+		const terminalTime = terminalCandidates.length > 0 ? Math.min(...terminalCandidates) : snapshot.seekMax;
+		if (clampedTime < terminalTime - this.SEEK_END_EPSILON_SEC) {
+			return { targetTime: clampedTime, shouldResume: true };
+		}
+
+		return {
+			targetTime: terminalTime > this.SEEK_END_EPSILON_SEC ? terminalTime - this.SEEK_END_EPSILON_SEC : 0,
+			shouldResume: false
+		};
+	}
+
 	handleSeek(time: number): void {
 		const activeUnit = this.getActiveUnit();
 		const activeEl = activeUnit.video;
-		const targetTime = activeUnit.timeline.clampSeekTarget(time);
-		if (activeUnit.timeline.snapshot().seekMax <= 0) return;
+		const seek = this.resolveSeekTarget(activeUnit, time);
+		if (!seek) return;
 		activeEl.pause();
-		activeEl.currentTime = targetTime;
-		this._currentTime = targetTime;
+		activeEl.currentTime = seek.targetTime;
+		this._currentTime = seek.targetTime;
 		this.forceTimeSync();
-		activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
+		if (seek.shouldResume) {
+			activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
+		}
 	}
 
 	seekDirect(time: number): void {
 		const activeUnit = this.getActiveUnit();
 		const activeEl = activeUnit.video;
-		const targetTime = activeUnit.timeline.clampSeekTarget(time);
-		if (activeUnit.timeline.snapshot().seekMax <= 0) return;
-		activeEl.currentTime = targetTime;
-		this._currentTime = targetTime;
+		const seek = this.resolveSeekTarget(activeUnit, time);
+		if (!seek) return;
+		activeEl.currentTime = seek.targetTime;
+		this._currentTime = seek.targetTime;
+	}
+
+	finishDirectSeek(): void {
+		const activeUnit = this.getActiveUnit();
+		const activeEl = this.getActiveElement();
+		if (!activeEl) return;
+		this.forceTimeSync();
+		const seek = this.resolveSeekTarget(activeUnit, activeEl.currentTime);
+		if (seek?.shouldResume) {
+			void activeEl.play().catch(() => {});
+		}
 	}
 
 	getCurrentTime(): number {
