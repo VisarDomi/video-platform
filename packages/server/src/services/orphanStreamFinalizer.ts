@@ -5,8 +5,7 @@ import logger from "../core/logger.js";
 import { getProviderPaths, LIVE_STATUS_PATH } from "../core/config.js";
 import type { LiveStatus } from "../core/types.js";
 
-const ORPHAN_SECOND_CHECK_MS = 5 * 60 * 1_000;
-const ORPHAN_CYCLE_MS = 24 * 60 * 60 * 1_000;
+const ORPHAN_SWEEP_MS = 10 * 60 * 1_000;
 const ORPHAN_MIN_AGE_MS = 60 * 60 * 1_000;
 
 const PROVIDERS = ["tango", "fc2", "sc"];
@@ -19,6 +18,36 @@ interface PlaylistSection {
 interface ParsedPlaylist {
     headerLines: string[];
     sections: PlaylistSection[];
+}
+
+interface SegmentInventory {
+    validSegments: Set<string>;
+    corruptSegments: string[];
+}
+
+interface PlaylistRecovery {
+    content: string;
+    removedSegmentCount: number;
+    strippedNulBytes: number;
+    wasRebuilt: boolean;
+    targetDurationFixed: boolean;
+}
+
+type OrphanRepairResult =
+    | { kind: "deleted-empty" }
+    | { kind: "unchanged" }
+    | { kind: "repaired"; removedSegmentCount: number; strippedNulBytes: number; deletedCorruptSegmentCount: number };
+
+function sanitizePlaylistContent(content: string): { content: string; strippedNulBytes: number } {
+    const strippedNulBytes = content.length - content.replaceAll("\0", "").length;
+    if (strippedNulBytes === 0) {
+        return { content, strippedNulBytes: 0 };
+    }
+
+    return {
+        content: content.replaceAll("\0", ""),
+        strippedNulBytes,
+    };
 }
 
 function parsePlaylist(content: string): ParsedPlaylist {
@@ -69,7 +98,11 @@ function parsePlaylist(content: string): ParsedPlaylist {
     return { headerLines, sections };
 }
 
-function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): string {
+function getPlaylistSegmentNames(parsed: ParsedPlaylist): string[] {
+    return parsed.sections.flatMap((section) => section.entries.map((entry) => entry.segmentName));
+}
+
+function rebuildPlaylist(parsed: ParsedPlaylist, validSegments: Set<string>): string {
     const lines: string[] = [];
 
     if (parsed.headerLines.length === 0) {
@@ -85,7 +118,7 @@ function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): stri
     let isFirstSection = true;
 
     for (const section of parsed.sections) {
-        const validEntries = section.entries.filter(e => filesOnDisk.has(e.segmentName));
+        const validEntries = section.entries.filter(e => validSegments.has(e.segmentName));
         if (validEntries.length === 0) continue;
 
         if (section.mapLine) {
@@ -112,6 +145,33 @@ function rebuildPlaylist(parsed: ParsedPlaylist, filesOnDisk: Set<string>): stri
     return result;
 }
 
+function recoverPlaylist(playlistContent: string, inventory: SegmentInventory): PlaylistRecovery {
+    const sanitized = sanitizePlaylistContent(playlistContent);
+    const parsed = parsePlaylist(sanitized.content);
+    const referencedSegments = getPlaylistSegmentNames(parsed);
+    const removedSegmentCount = referencedSegments.filter((segmentName) => !inventory.validSegments.has(segmentName)).length;
+    const isFinalized = sanitized.content.includes("#EXT-X-ENDLIST");
+
+    if (!isFinalized || sanitized.strippedNulBytes > 0 || removedSegmentCount > 0) {
+        return {
+            content: rebuildPlaylist(parsed, inventory.validSegments),
+            removedSegmentCount,
+            strippedNulBytes: sanitized.strippedNulBytes,
+            wasRebuilt: true,
+            targetDurationFixed: false,
+        };
+    }
+
+    const { content, wasFixed } = fixTargetDuration(sanitized.content);
+    return {
+        content,
+        removedSegmentCount: 0,
+        strippedNulBytes: 0,
+        wasRebuilt: false,
+        targetDurationFixed: wasFixed,
+    };
+}
+
 async function getActiveSegmentPaths(): Promise<Set<string>> {
     try {
         const content = await fs.readFile(LIVE_STATUS_PATH, "utf-8");
@@ -125,6 +185,83 @@ async function getActiveSegmentPaths(): Promise<Set<string>> {
         }
     } catch {}
     return new Set();
+}
+
+async function buildSegmentInventory(streamPath: string, allFiles: string[]): Promise<SegmentInventory> {
+    const validSegments = new Set<string>();
+    const corruptSegments: string[] = [];
+
+    for (const fileName of allFiles) {
+        if (!fileName.endsWith(".ts")) continue;
+
+        try {
+            const stats = await fs.stat(path.join(streamPath, fileName));
+            if (stats.size > 0) {
+                validSegments.add(fileName);
+            } else {
+                corruptSegments.push(fileName);
+            }
+        } catch {
+            corruptSegments.push(fileName);
+        }
+    }
+
+    return { validSegments, corruptSegments };
+}
+
+async function deleteCorruptSegments(streamPath: string, segmentNames: string[]): Promise<number> {
+    let deletedCount = 0;
+
+    for (const segmentName of segmentNames) {
+        try {
+            await fs.rm(path.join(streamPath, segmentName), { force: true });
+            deletedCount++;
+        } catch (err: any) {
+            logger.warn(`[System] Failed to delete corrupt segment ${segmentName} in ${path.basename(streamPath)}`, { error: err.message });
+        }
+    }
+
+    return deletedCount;
+}
+
+async function repairOrphan(streamPath: string): Promise<OrphanRepairResult> {
+    const allFiles = await fs.readdir(streamPath);
+    const inventory = await buildSegmentInventory(streamPath, allFiles);
+
+    if (inventory.validSegments.size === 0) {
+        logger.info(`[System] Orphan folder ${path.basename(streamPath)} contains no valid segments. Deleting folder.`);
+        await fs.rm(streamPath, { recursive: true, force: true });
+        return { kind: "deleted-empty" };
+    }
+
+    const deletedCorruptSegmentCount = await deleteCorruptSegments(streamPath, inventory.corruptSegments);
+    const playlistPath = path.join(streamPath, "playlist.m3u8");
+    let playlistContent: string | null = null;
+    try {
+        playlistContent = await fs.readFile(playlistPath, "utf-8");
+    } catch {}
+
+    if (!playlistContent) {
+        return deletedCorruptSegmentCount > 0
+            ? { kind: "repaired", removedSegmentCount: 0, strippedNulBytes: 0, deletedCorruptSegmentCount }
+            : { kind: "unchanged" };
+    }
+
+    const recovery = recoverPlaylist(playlistContent, inventory);
+    if (recovery.wasRebuilt || recovery.targetDurationFixed) {
+        await fs.writeFile(playlistPath, recovery.content);
+    }
+
+    if (!recovery.wasRebuilt && !recovery.targetDurationFixed && deletedCorruptSegmentCount === 0) {
+        return { kind: "unchanged" };
+    }
+
+    return {
+        kind: "repaired",
+        removedSegmentCount: recovery.removedSegmentCount,
+        strippedNulBytes: recovery.strippedNulBytes,
+        deletedCorruptSegmentCount,
+    };
 }
 
 async function processOrphans(): Promise<void> {
@@ -177,44 +314,15 @@ async function cleanServiceDirectory(streamsLocation: string, activePaths: Set<s
             stats.processed++;
 
             try {
-                const allFiles = await fs.readdir(streamPath);
-                const tsFiles = allFiles.filter((f) => f.endsWith(".ts"));
-
-                if (tsFiles.length === 0) {
-                    logger.info(`[System] Orphan folder ${dirent.name} contains no segments. Deleting folder.`);
-                    await fs.rm(streamPath, { recursive: true, force: true });
+                const result = await repairOrphan(streamPath);
+                if (result.kind === "deleted-empty") {
                     stats.deleted++;
-                    continue;
-                }
-
-                const playlistPath = path.join(streamPath, "playlist.m3u8");
-                let playlistContent: string | null = null;
-                try {
-                    playlistContent = await fs.readFile(playlistPath, "utf-8");
-                } catch {}
-
-                if (playlistContent) {
-                    const isFinalized = playlistContent.includes("#EXT-X-ENDLIST");
-
-                    if (isFinalized) {
-                        const { content: fixedContent, wasFixed } = fixTargetDuration(playlistContent);
-                        if (wasFixed) {
-                            await fs.writeFile(playlistPath, fixedContent);
-                            stats.fixed++;
-                        }
-                    } else {
-                        const filesOnDisk = new Set(allFiles);
-                        const parsed = parsePlaylist(playlistContent);
-                        const rebuilt = rebuildPlaylist(parsed, filesOnDisk);
-                        await fs.writeFile(playlistPath, rebuilt);
-                        stats.fixed++;
-
-                        const removedCount = parsed.sections
-                            .flatMap(s => s.entries)
-                            .filter(e => !filesOnDisk.has(e.segmentName)).length;
-                        if (removedCount > 0) {
-                            logger.info(`[System] Rebuilt orphan playlist ${dirent.name}: removed ${removedCount} missing segment(s)`);
-                        }
+                } else if (result.kind === "repaired") {
+                    stats.fixed++;
+                    if (result.removedSegmentCount > 0 || result.strippedNulBytes > 0 || result.deletedCorruptSegmentCount > 0) {
+                        logger.info(
+                            `[System] Rebuilt orphan playlist ${dirent.name}: removed ${result.removedSegmentCount} invalid referenced segment(s), stripped ${result.strippedNulBytes} NUL byte(s), deleted ${result.deletedCorruptSegmentCount} corrupt segment file(s)`
+                        );
                     }
                 }
             } catch (err: any) {
@@ -229,13 +337,22 @@ async function cleanServiceDirectory(streamsLocation: string, activePaths: Set<s
 }
 
 export function startOrphanStreamFinalizer(): void {
-    void processOrphans();
-    setTimeout(() => void processOrphans(), ORPHAN_SECOND_CHECK_MS);
-    setTimeout(() => {
-        const runLoop = async () => {
+    let running = false;
+
+    const runOnce = async () => {
+        if (running) {
+            logger.warn("[System] Skipping orphan stream finalizer check because the previous run is still active.");
+            return;
+        }
+
+        running = true;
+        try {
             await processOrphans();
-            setTimeout(runLoop, ORPHAN_CYCLE_MS);
-        };
-        void runLoop();
-    }, ORPHAN_CYCLE_MS);
+        } finally {
+            running = false;
+        }
+    };
+
+    void runOnce();
+    setInterval(() => void runOnce(), ORPHAN_SWEEP_MS);
 }
