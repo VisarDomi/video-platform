@@ -5,7 +5,8 @@ import logger from "../core/logger.js";
 import { getProviderPaths, LIVE_STATUS_PATH } from "../core/config.js";
 import type { LiveStatus } from "../core/types.js";
 
-const ORPHAN_SWEEP_MS = 10 * 60 * 1_000;
+const ORPHAN_STARTUP_DELAY_MS = 20 * 60 * 1_000;
+const ORPHAN_SWEEP_MS = 24 * 60 * 60 * 1_000;
 const ORPHAN_MIN_AGE_MS = 60 * 60 * 1_000;
 
 const PROVIDERS = ["tango", "fc2", "sc"];
@@ -353,6 +354,8 @@ export function startOrphanStreamFinalizer(): void {
         }
     };
 
-    void runOnce();
-    setInterval(() => void runOnce(), ORPHAN_SWEEP_MS);
+    setTimeout(() => {
+        void runOnce();
+        setInterval(() => void runOnce(), ORPHAN_SWEEP_MS);
+    }, ORPHAN_STARTUP_DELAY_MS);
 }
