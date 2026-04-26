@@ -1,9 +1,20 @@
+import { promises as fs } from "fs";
 import { TANGO_FILE_PATH } from "../../core/config.js";
 import { resolveAlias, fetchAliasesInBatch } from "../../services/tango/apiClient.js";
 import { registry } from "../../services/aliasRefreshService.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 
 const PREFIX = "https://tango.me/";
+
+function parseAccountId(identifier: string): string | null {
+    const trimmed = identifier.trim();
+    if (trimmed.startsWith(PREFIX)) {
+        const rest = trimmed.slice(PREFIX.length);
+        const accountId = rest.split(" ")[0]?.trim();
+        return accountId || null;
+    }
+    return null;
+}
 
 const adapter: ListProviderAdapter = {
     name: "tango",
@@ -48,9 +59,25 @@ const adapter: ListProviderAdapter = {
         return [...identifiers];
     },
 
-    resolveForRemove(identifier: string) {
+    async resolveForRemove(identifier: string) {
+        const accountId = parseAccountId(identifier);
+        if (accountId) return accountId;
+
         const reverse = registry.getReverse();
-        return reverse[identifier] || identifier;
+        if (reverse[identifier]) return reverse[identifier];
+
+        try {
+            const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
+            for (const line of content.split("\n")) {
+                const parsed = adapter.parseLine(line);
+                if (parsed?.label === identifier) {
+                    return parsed.id;
+                }
+            }
+        } catch {
+        }
+
+        return identifier;
     },
 };
 

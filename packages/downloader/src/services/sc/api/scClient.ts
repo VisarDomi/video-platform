@@ -109,7 +109,7 @@ export class ScClient implements IStreamProvider {
         return result;
     }
 
-    private async fetchCamData(username: string): Promise<{ roomId: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
+    private async fetchCamData(username: string): Promise<{ roomId: string; username: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
         const data = await this.fetchApi<any>(url);
         if (!data) return null;
@@ -122,11 +122,12 @@ export class ScClient implements IStreamProvider {
         }
 
         const roomId = String(data.user.user.id);
+        const currentUsername = data.user.user.username || username;
         const streamName = data.cam?.streamName || roomId;
         const isCamAvailable = data.cam?.isCamAvailable ?? false;
         const isCamActive = data.cam?.isCamActive ?? false;
 
-        return { roomId, streamName, isCamAvailable, isCamActive };
+        return { roomId, username: currentUsername, streamName, isCamAvailable, isCamActive };
     }
 
     public async refreshStreamName(username: string): Promise<string | null> {
@@ -139,6 +140,17 @@ export class ScClient implements IStreamProvider {
         }
 
         return result.streamName;
+    }
+
+    public async refreshTarget(username: string): Promise<{ roomId: string; username: string; streamName: string | null } | null> {
+        const result = await this.fetchCamData(username);
+        if (!result) return null;
+
+        return {
+            roomId: result.roomId,
+            username: result.username,
+            streamName: result.isCamAvailable && result.isCamActive ? result.streamName : null,
+        };
     }
 
     public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isLive: boolean }>> {
@@ -278,7 +290,8 @@ export class ScClient implements IStreamProvider {
     public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
         if (context.exitReason === "aborted") return null;
 
-        const streamName = await this.refreshStreamName(context.streamerId);
+        const lookupAlias = context.lookupAlias ?? context.streamerId;
+        const streamName = await this.refreshStreamName(lookupAlias);
         if (!streamName) {
             logger.info(`[SC] ${context.streamerId}: shouldRetry=no (offline/unavailable after ${context.exitReason})`);
             return null;

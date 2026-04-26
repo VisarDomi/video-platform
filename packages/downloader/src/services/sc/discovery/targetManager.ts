@@ -9,8 +9,8 @@ const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export interface ScTarget {
-    username: string;
     roomId: string;
+    username: string;
 }
 
 export class ScTargetManager {
@@ -35,8 +35,8 @@ export class ScTargetManager {
         return Array.from(this.targets.values());
     }
 
-    public hasTarget(username: string): boolean {
-        return this.targets.has(username);
+    public hasTarget(roomId: string): boolean {
+        return this.targets.has(roomId);
     }
 
     public get size(): number {
@@ -90,12 +90,12 @@ export class ScTargetManager {
             for (const line of content.split("\n")) {
                 const target = this.parseLine(line);
                 if (target) {
-                    newTargets.set(target.username, target);
+                    newTargets.set(target.roomId || target.username, target);
                 }
             }
 
             this.targets = newTargets;
-            logger.info(`[SC] Loaded ${this.targets.size} targets: ${[...this.targets.keys()].join(", ")}`);
+            logger.info(`[SC] Loaded ${this.targets.size} targets: ${[...this.targets.values()].map((target) => `${target.username} (${target.roomId})`).join(", ")}`);
         } catch (error: any) {
             logger.error(`[SC] Error reading sc.txt`, { error: error.message });
         }

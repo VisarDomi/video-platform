@@ -12,6 +12,17 @@ function parseUsername(identifier: string): string {
     return identifier;
 }
 
+function parseRoomId(identifier: string): string | null {
+    const trimmed = identifier.trim();
+    if (/^\d+$/.test(trimmed)) return trimmed;
+    if (trimmed.includes(" ")) {
+        const parts = trimmed.split(" ");
+        const maybeId = parts[parts.length - 1]?.trim();
+        if (maybeId && /^\d+$/.test(maybeId)) return maybeId;
+    }
+    return null;
+}
+
 const adapter: ListProviderAdapter = {
     name: "sc",
     filePath: SC_FILE_PATH,
@@ -39,6 +50,15 @@ const adapter: ListProviderAdapter = {
 
     formatEntry(entry) {
         return `${PREFIX}${entry.label} ${entry.id}`;
+    },
+
+    async resolveForRemove(identifier: string) {
+        const roomId = parseRoomId(identifier);
+        if (roomId) return roomId;
+
+        const username = parseUsername(identifier);
+        const resolved = await resolveScUsername(username);
+        return resolved?.roomId || username;
     },
 };
 

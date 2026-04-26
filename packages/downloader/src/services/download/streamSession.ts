@@ -64,6 +64,7 @@ export class StreamSession {
 
             const context: DownloadExitContext = {
                 streamerId: this.streamerId,
+                lookupAlias: this.alias,
                 exitReason: result.exitReason,
                 lastMasterUrl: masterUrl,
                 lastLiveUrl: result.lastLiveUrl,

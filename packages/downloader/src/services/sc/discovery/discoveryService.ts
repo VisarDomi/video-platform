@@ -42,8 +42,8 @@ export class ScDiscoveryService {
         const roomIds: string[] = [];
 
         for (const target of targets) {
-            if (this.downloadsManager.hasStreamer(target.username)) continue;
-            if (this.cooldown.isActive(target.username)) continue;
+            if (this.downloadsManager.hasStreamer(target.roomId)) continue;
+            if (this.cooldown.isActive(target.roomId)) continue;
 
             if (!target.roomId) {
                 continue;
@@ -63,40 +63,42 @@ export class ScDiscoveryService {
 
             if (statusInfo.status !== "public" || !statusInfo.isLive) continue;
 
-            if (this.downloadsManager.hasStreamer(target.username)) continue;
+            if (this.downloadsManager.hasStreamer(target.roomId)) continue;
 
-            if (this.cooldown.wasRecentlyCleared(target.username)) {
-                logger.info(`[SC] ${target.username}: live again after cooldown`);
+            if (this.cooldown.wasRecentlyCleared(target.roomId)) {
+                logger.info(`[SC] ${target.username} (${target.roomId}): live again after cooldown`);
             }
 
-            const streamName = await this.scClient.refreshStreamName(target.username);
+            const refreshedTarget = await this.scClient.refreshTarget(target.username);
+            const currentAlias = refreshedTarget?.username ?? target.username;
+            const streamName = refreshedTarget?.streamName ?? null;
             if (!streamName) {
-                logger.info(`[SC] ${target.username}: refreshStreamName failed, falling back to roomId=${target.roomId}`);
+                logger.info(`[SC] ${currentAlias}: refreshStreamName failed, falling back to roomId=${target.roomId}`);
             }
 
             const masterUrl = this.scClient.buildMasterUrl(streamName || target.roomId);
 
-            logger.info(`[SC] ${target.username} is PUBLIC. Starting download...`);
+            logger.info(`[SC] ${currentAlias} is PUBLIC. Starting download...`);
 
             const handle = this.downloadsManager.add(masterUrl, {
-                streamerId: target.username,
-                alias: target.username,
+                streamerId: target.roomId,
+                alias: currentAlias,
             });
 
             if (handle) {
-                const session = new StreamSession(target.username, target.username, handle, this.scClient);
+                const session = new StreamSession(target.roomId, currentAlias, handle, this.scClient);
                 const completion = session.run(masterUrl).then((result: SessionResult) => {
                     if (!result.aborted && result.totalSegments === 0) {
-                        logger.warn(`[SC] ${target.username}: session ended with 0 segments — cooldown`);
-                        this.cooldown.recordFailure(target.username);
+                        logger.warn(`[SC] ${currentAlias}: session ended with 0 segments — cooldown`);
+                        this.cooldown.recordFailure(target.roomId);
                     } else if (result.totalSegments > 0) {
-                        logger.info(`[SC] ${target.username}: session completed (${result.totalSegments} segments)`);
-                        this.cooldown.clear(target.username);
+                        logger.info(`[SC] ${currentAlias}: session completed (${result.totalSegments} segments)`);
+                        this.cooldown.clear(target.roomId);
                     }
                 }).catch((err: Error) => {
-                    logger.error(`[SC] ${target.username}: unhandled session error`, { error: err.message });
+                    logger.error(`[SC] ${currentAlias}: unhandled session error`, { error: err.message });
                     handle.remove();
-                    this.cooldown.recordFailure(target.username);
+                    this.cooldown.recordFailure(target.roomId);
                 });
                 this.downloadsManager.registerDownloader(masterUrl, () => session.abort(), completion);
             }

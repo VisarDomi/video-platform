@@ -14,6 +14,7 @@ import tangoRouter from "./api/providers/tango.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
 import frontendLogRouter from "./api/frontend-log.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
+import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startOrphanStreamFinalizer } from "./services/orphanStreamFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
@@ -47,6 +48,7 @@ async function startServer() {
   }
 
   startAliasRefresh();
+  startScAliasRefresh();
   startOrphanStreamFinalizer();
   startDiskSpaceMonitor();
 
