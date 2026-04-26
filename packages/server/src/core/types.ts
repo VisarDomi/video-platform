@@ -18,6 +18,7 @@ export interface VideoRef {
 }
 
 export interface LiveDownload {
+    streamerId?: string;
     alias?: string;
     segmentsDirPath: string;
 }
