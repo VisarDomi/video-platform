@@ -5,7 +5,8 @@ export const STORAGE_KEYS = {
 	LAST_PLAYED_VIDEO: 'last-played-video',
 	PROGRESS_PREFIX: 'video-progress-',
 	SCROLL_PREFIX: 'scroll-',
-	SELECTED_PROVIDER: 'selected-provider'
+	SELECTED_PROVIDER: 'selected-provider',
+	FILTER_LINKS_PREFIX: 'filter-links-'
 } as const;
 
 export const VIDEO_TYPE = {
@@ -19,7 +20,8 @@ export const API = {
 	TRASH: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/trash`,
 	ORIGINAL: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/original`,
 	EDITED: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/edited`,
-	HLS_PLAYLIST: (provider: string, filename: string) => `/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
+	HLS_PLAYLIST: (provider: string, filename: string) =>
+		`/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
 } as const;
 
 export const SC_API = {

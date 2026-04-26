@@ -11,7 +11,7 @@
 	import AliasSelector from '$lib/components/AliasSelector.svelte';
 	import VideoItem from '$lib/components/VideoItem.svelte';
 	import VideoPlayer from '$lib/components/VideoPlayer.svelte';
-	import { fetchListIdentifiers, isListProvider } from '$lib/services/list-api.js';
+	import { fetchListMetadata, isListProvider } from '$lib/services/list-api.js';
 	import { VIDEO_TYPE, API } from '$lib/constants.js';
 
 	const ITEM_HEIGHT = 52;
@@ -63,9 +63,10 @@
 		if (videoListStore.epoch !== epoch) return;
 		videoListStore.setVideos(videos);
 		if (isListProvider(p)) {
-			fetchListIdentifiers(p).then((ids) => {
+			fetchListMetadata(p).then((metadata) => {
 				if (videoListStore.epoch !== epoch) return;
-				videoListStore.setListIdentifiers(ids);
+				videoListStore.setListIdentifiers(metadata.identifiers);
+				videoListStore.setIdentityAliasGroups(metadata.identityGroups);
 			});
 		}
 		startSync(p);
@@ -85,7 +86,9 @@
 	});
 
 	async function handleVideoClick(video: (typeof videoListStore.videos)[number]) {
-		const idx = filteredVideos.findIndex(v => v.filename === video.filename && v.type === video.type);
+		const idx = filteredVideos.findIndex(
+			(v) => v.filename === video.filename && v.type === video.type
+		);
 		if (idx !== -1) {
 			const itemTop = idx * ITEM_HEIGHT - window.scrollY;
 			playerStore.captureScrollAnchor(itemTop / window.innerHeight);
@@ -161,7 +164,15 @@
 	<AliasSelector />
 </div>
 
-<div class="list-container" use:swipeable={{ providers: PROVIDERS, getProvider: () => videoListStore.selectedProvider, onSwitch: switchProvider, isEnabled: () => playerStore.view === 'list' }}>
+<div
+	class="list-container"
+	use:swipeable={{
+		providers: PROVIDERS,
+		getProvider: () => videoListStore.selectedProvider,
+		onSwitch: switchProvider,
+		isEnabled: () => playerStore.view === 'list'
+	}}
+>
 	{#if videoListStore.isLoading}
 		<p class="info-message">Loading...</p>
 	{:else if filteredVideos.length === 0}
