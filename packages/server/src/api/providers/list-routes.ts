@@ -16,7 +16,7 @@ export interface ListProviderAdapter {
     resolveIdentifier(input: string): Promise<ParsedEntry | null>;
     formatEntry(entry: ParsedEntry): string;
     enrichList?(parsed: ParsedEntry[]): string[];
-    resolveForRemove?(identifier: string): string;
+    resolveForRemove?(identifier: string): Promise<string> | string;
 }
 
 export function createListRoutes(adapter: ListProviderAdapter): Router {
@@ -66,7 +66,7 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
             try { content = await fs.readFile(adapter.filePath, "utf-8"); } catch {}
 
             const lines = content.split("\n");
-            const existingIndex = lines.findIndex(line => line.includes(resolved.id));
+            const existingIndex = lines.findIndex((line) => adapter.parseLine(line)?.id === resolved.id);
 
             if (existingIndex !== -1) {
                 const existing = adapter.parseLine(lines[existingIndex]);
@@ -97,10 +97,15 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
         }
         try {
             const resolvedId = adapter.resolveForRemove
-                ? adapter.resolveForRemove(identifier)
+                ? await adapter.resolveForRemove(identifier)
                 : identifier;
             const content = await fs.readFile(adapter.filePath, "utf-8");
-            const lines = content.split("\n").filter(line => !line.includes(resolvedId));
+            const lines = content
+                .split("\n")
+                .filter((line) => {
+                    const parsed = adapter.parseLine(line);
+                    return parsed ? parsed.id !== resolvedId : true;
+                });
             await fs.writeFile(adapter.filePath, cleanListContent(lines.join("\n")), "utf-8");
             logger.info(`${adapter.name} remove: ${identifier}${resolvedId !== identifier ? ` (id: ${resolvedId})` : ""}`);
             res.json({ success: true });
