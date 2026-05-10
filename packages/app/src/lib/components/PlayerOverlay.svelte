@@ -29,6 +29,7 @@
 	const currentTime = $derived(overlay.currentTime);
 	const duration = $derived(overlay.duration);
 	const seekableEnd = $derived(overlay.seekableEnd);
+	const currentSegmentName = $derived(overlay.currentSegmentName);
 	const playbackIsLive = $derived(overlay.isLive);
 	const isMuted = $derived(overlay.isMuted);
 	const isActive = $derived(overlay.isActive);
@@ -121,7 +122,7 @@
 
 	function handleOkOrCut() {
 		if (hasSegments) {
-			void createEditedVideo();
+			void createEditedVideo(effectiveDuration);
 		} else {
 			saveCurrentVideo();
 		}
@@ -149,6 +150,9 @@
 
 		<div class="time-display-container">
 			<span class="time-display">{timeText}</span>
+			{#if currentSegmentName}
+				<span class="segment-display">{currentSegmentName}</span>
+			{/if}
 		</div>
 
 		<div
@@ -243,9 +247,15 @@
 	.time-display-container {
 		text-align: center;
 		margin-bottom: 8px;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
 	}
 
-	.time-display {
+	.time-display,
+	.segment-display {
 		display: inline-block;
 		background-color: rgba(0, 0, 0, 0.5);
 		padding: 4px 12px;
@@ -255,6 +265,10 @@
 		font-weight: bold;
 		text-shadow: 1px 1px 2px black;
 		color: #f0f0f0;
+	}
+
+	.segment-display {
+		color: #ffd166;
 	}
 
 	.progress-bar {

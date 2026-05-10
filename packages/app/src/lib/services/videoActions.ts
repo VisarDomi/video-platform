@@ -23,7 +23,7 @@ export function saveCurrentVideo() {
 	});
 }
 
-export async function createEditedVideo() {
+export async function createEditedVideo(playbackDuration?: number) {
 	const video = playerStore.currentVideo;
 	const timeSegments = playerStore.segments;
 	if (
@@ -47,7 +47,12 @@ export async function createEditedVideo() {
 		timeMarkers: timeSegments.length,
 	});
 
-	const segmentsToSave = calculateSegmentsToKeep(playlistData.segments, timeSegments, video.filename);
+	const segmentsToSave = calculateSegmentsToKeep(
+		playlistData.segments,
+		timeSegments,
+		video.filename,
+		playbackDuration
+	);
 	const filename = video.filename;
 
 	playerStore.clearSegments();

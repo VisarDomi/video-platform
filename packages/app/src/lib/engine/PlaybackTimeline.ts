@@ -1,6 +1,13 @@
 export interface PlaylistTruth {
 	totalDuration: number;
 	isLive: boolean;
+	segments?: PlaylistSegmentTruth[];
+}
+
+export interface PlaylistSegmentTruth {
+	name: string;
+	start: number;
+	end: number;
 }
 
 export interface MediaObservation {
@@ -19,6 +26,8 @@ export interface TimelineSnapshot {
 	mediaDuration: number | null;
 	seekableEnd: number | null;
 	ended: boolean;
+	playlistTime: number | null;
+	currentSegmentName: string | null;
 }
 
 export class PlaybackTimeline {
@@ -32,7 +41,10 @@ export class PlaybackTimeline {
 	};
 
 	setPlaylistTruth(playlistTruth: PlaylistTruth): void {
-		this.playlistTruth = playlistTruth;
+		this.playlistTruth = {
+			...playlistTruth,
+			segments: playlistTruth.segments ?? this.playlistTruth?.segments
+		};
 	}
 
 	clear(): void {
@@ -68,16 +80,17 @@ export class PlaybackTimeline {
 				isLive: true,
 				mediaDuration,
 				seekableEnd,
-				ended: this.media.ended
+				ended: this.media.ended,
+				playlistTime: null,
+				currentSegmentName: null
 			};
 		}
 
 		const declaredDuration = this.playlistTruth?.totalDuration ?? 0;
-		const resolvedDuration = Math.max(
-			declaredDuration,
-			seekableEnd ?? 0,
-			mediaDuration ?? 0
-		);
+		const fallbackDuration = declaredDuration > 0 ? declaredDuration : seekableEnd ?? 0;
+		const resolvedDuration = mediaDuration ?? fallbackDuration;
+
+		const playlistPosition = this.resolvePlaylistPosition(currentTime, resolvedDuration);
 
 		return {
 			currentTime,
@@ -86,12 +99,58 @@ export class PlaybackTimeline {
 			isLive: false,
 			mediaDuration,
 			seekableEnd,
-			ended: this.media.ended
+			ended: this.media.ended,
+			playlistTime: playlistPosition.playlistTime,
+			currentSegmentName: playlistPosition.segmentName
 		};
 	}
 
 	clampSeekTarget(time: number): number {
 		const { seekMax } = this.snapshot();
 		return Math.max(0, Math.min(time, seekMax));
+	}
+
+	private resolvePlaylistPosition(
+		playbackTime: number,
+		playbackDuration: number
+	): { playlistTime: number | null; segmentName: string | null } {
+		const truth = this.playlistTruth;
+		const segments = truth?.segments;
+		if (!truth || !segments || segments.length === 0 || truth.totalDuration <= 0) {
+			return { playlistTime: null, segmentName: null };
+		}
+
+		const scale = playbackDuration > 0 ? truth.totalDuration / playbackDuration : 1;
+		const playlistTime = Math.max(0, Math.min(playbackTime * scale, truth.totalDuration));
+		const segment = this.findSegmentAt(segments, playlistTime, truth.totalDuration);
+
+		return {
+			playlistTime,
+			segmentName: segment?.name ?? null
+		};
+	}
+
+	private findSegmentAt(
+		segments: PlaylistSegmentTruth[],
+		playlistTime: number,
+		totalDuration: number
+	): PlaylistSegmentTruth | null {
+		if (playlistTime >= totalDuration) return segments[segments.length - 1] ?? null;
+
+		let low = 0;
+		let high = segments.length - 1;
+		while (low <= high) {
+			const mid = Math.floor((low + high) / 2);
+			const segment = segments[mid];
+			if (playlistTime < segment.start) {
+				high = mid - 1;
+			} else if (playlistTime >= segment.end) {
+				low = mid + 1;
+			} else {
+				return segment;
+			}
+		}
+
+		return null;
 	}
 }

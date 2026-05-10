@@ -10,6 +10,7 @@ export class PlayerOverlayState {
 	currentTime = $state(0);
 	duration = $state(0);
 	seekableEnd = $state(0);
+	currentSegmentName = $state<string | null>(null);
 	isLive = $state(false);
 	isMuted = $state(true);
 	isActive = $state(false);

@@ -23,7 +23,7 @@ export type LogEvent =
     // Edit actions
     | { event: 'edit-begin'; filename: string; isFmp4: boolean; playlistSegments: number; timeMarkers: number }
     | { event: 'edit-playlist-fetch-failed'; filename: string }
-    | { event: 'edit-segments-calculated'; filename: string; totalPlaylistSegments: number; timeRanges: number; totalDuration: number; segmentsToKeep: number; firstKept: string | null; lastKept: string | null }
+    | { event: 'edit-segments-calculated'; filename: string; totalPlaylistSegments: number; timeRanges: number; totalDuration: number; playbackDuration: number | null; playbackToPlaylistScale: number; markerTimes: number[]; scaledRanges: Array<{ start: number; end: number }>; segmentsToKeep: number; firstKept: string | null; lastKept: string | null }
     // UI state
     | { event: 'ui-visibility'; visible: boolean; source: string }
     | { event: 'overlay-state'; action: 'hide' | 'show'; activeFilename: string | null }

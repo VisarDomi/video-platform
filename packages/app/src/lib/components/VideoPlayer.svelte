@@ -59,7 +59,8 @@
 		const totalDuration = playlistData.segments.reduce((sum, segment) => sum + segment.duration, 0);
 		engine.applyPlaylistTruth(video.filename, {
 			isLive: playlistData.isLive,
-			totalDuration
+			totalDuration,
+			segments: playlistData.segments
 		});
 	}
 

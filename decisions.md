@@ -76,3 +76,22 @@ Large provider lists should virtualize on top of native `window` scrolling inste
 - Visible rows are positioned with `translateY`
 
 **Why:** iOS Safari/PWA behavior around fixed custom scroll containers caused viewport, bounce, and momentum problems. Native window scroll plus simple virtualization preserves iOS feel and keeps the DOM small.
+
+## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
+
+Cut/edit behavior has two owners:
+
+- Frontend owns WYSIWYG marker intent. Markers are browser playback times from the visible player. When the browser's playable duration differs from playlist `#EXTINF` duration, the frontend maps marker times onto playlist time before choosing `.ts` segment names.
+- Backend owns file operations. It accepts explicit segment names, verifies they exist, moves exactly those files, and derives the edited playlist from the original playlist plus the requested segment set.
+
+Evidence from logs on 2026-05-10 showed browser duration can diverge from playlist duration near the tail. Examples:
+
+- `2026-05-10 070628 elliiieeee`: playlist `497.87s`, browser ended at `481.529s`.
+- `2026-05-10 014252 nektarinka`: playlist `824.078s`, browser ended at `795.053s`.
+- `2026-05-09 235946 nektarinka`: playlist `480.314s`, observed ended positions varied around `476.884s` to `480.214s`.
+
+For historical cuts, backend execution matched the frontend request: frontend calculated segment count, API request count, backend matched count, and derived playlist kept count all agreed. The missing evidence was user intent: old logs had `timeMarkers` count, first/last kept segment, and count, but not the raw marker times. New `edit-segments-calculated` logs must include `markerTimes`, `playbackDuration`, `playbackToPlaylistScale`, and `scaledRanges` so future investigations can answer whether the frontend request matched what the user marked visually.
+
+Do not move WYSIWYG time interpretation into the backend unless the API contract changes to accept marker ranges plus playback duration. Under the current contract, backend should remain a segment-file executor, not a second timeline interpreter.
+
+The visible current segment name belongs to the same timeline ownership boundary. Playlist parsing produces ordered segment metadata (`name`, `start`, `end`); `PlaybackTimeline` maps browser playback time to playlist time and current segment; `PlayerOverlay` only renders `currentSegmentName`. Do not make the overlay parse manifests or infer segment names from filename numbering.

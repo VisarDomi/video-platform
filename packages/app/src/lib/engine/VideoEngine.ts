@@ -172,6 +172,7 @@ export class VideoEngine {
 		unit.state.currentTime = snapshot.currentTime;
 		unit.state.duration = snapshot.duration;
 		unit.state.seekableEnd = snapshot.seekMax;
+		unit.state.currentSegmentName = snapshot.currentSegmentName;
 		unit.state.isLive = snapshot.isLive;
 
 		if (!isActive) return;
@@ -539,6 +540,7 @@ export class VideoEngine {
 			unit.state.currentTime = 0;
 			unit.state.duration = 0;
 			unit.state.seekableEnd = 0;
+			unit.state.currentSegmentName = null;
 			unit.state.isLive = v.isLive === true;
 			const slot = this.units.indexOf(unit);
 			this.emit('unit-load', { slot, filename: v.filename, provider: v.provider });
