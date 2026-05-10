@@ -269,6 +269,7 @@
 
 	.segment-display {
 		color: #ffd166;
+		font-size: 9px;
 	}
 
 	.progress-bar {
