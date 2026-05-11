@@ -10,6 +10,8 @@ export interface PlaylistRepairSummary {
     durationMode: "media-timeline";
     segmentCount: number;
     probedCount: number;
+    byteProbeCount: number;
+    ffprobeProbeCount: number;
     failedProbeCount: number;
     changedDurationCount: number;
     missingSegmentCount: number;
@@ -51,6 +53,7 @@ interface SegmentProbe {
     videoDuration: number | null;
     audioDuration: number | null;
     formatDuration: number | null;
+    needsFfprobeFallback: boolean;
 }
 
 interface ParsedPlaylist {
@@ -255,12 +258,102 @@ function probeSegment(segmentPath: string): Promise<SegmentProbe | null> {
                     videoDuration: parseProbeNumber(video?.duration),
                     audioDuration: parseProbeNumber(audio?.duration),
                     formatDuration: parseProbeNumber(data.format?.duration),
+                    needsFfprobeFallback: false,
                 });
             } catch {
                 resolve(null);
             }
         });
     });
+}
+
+function parseTsPts(buffer: Buffer, offset: number): number {
+    const p32to30 = (buffer[offset] >> 1) & 0x07;
+    const p29to15 = ((buffer[offset + 1] << 8) | buffer[offset + 2]) >> 1;
+    const p14to0 = ((buffer[offset + 3] << 8) | buffer[offset + 4]) >> 1;
+    return ((p32to30 * 2 ** 30) + (p29to15 * 2 ** 15) + p14to0) / 90000;
+}
+
+function estimateDurationFromPts(ptsValues: number[]): number | null {
+    if (ptsValues.length < 4) return null;
+
+    const deltas: number[] = [];
+    for (let index = 1; index < ptsValues.length; index++) {
+        const delta = ptsValues[index] - ptsValues[index - 1];
+        if (Number.isFinite(delta) && delta > 0) {
+            deltas.push(delta);
+        }
+    }
+    if (deltas.length === 0) return null;
+
+    const minDelta = Math.min(...deltas);
+    const maxDelta = Math.max(...deltas);
+    if (minDelta <= 0 || maxDelta / minDelta > 1.5) {
+        return null;
+    }
+
+    return (ptsValues[ptsValues.length - 1] - ptsValues[0]) + minDelta;
+}
+
+function probeTsSegment(buffer: Buffer): SegmentProbe | null {
+    const packetSize = 188;
+    const videoPtsValues: number[] = [];
+    const audioPtsValues: number[] = [];
+    let videoPid: number | null = null;
+    let audioPid: number | null = null;
+
+    for (let packetStart = 0; packetStart + packetSize <= buffer.length; packetStart += packetSize) {
+        if (buffer[packetStart] !== 0x47) continue;
+        if ((buffer[packetStart + 1] & 0x40) === 0) continue;
+
+        const pid = ((buffer[packetStart + 1] & 0x1f) << 8) | buffer[packetStart + 2];
+        const adaptationControl = (buffer[packetStart + 3] >> 4) & 0x03;
+        if (adaptationControl === 0 || adaptationControl === 2) continue;
+
+        let payloadOffset = packetStart + 4;
+        if (adaptationControl === 3) {
+            payloadOffset += 1 + buffer[payloadOffset];
+        }
+        if (payloadOffset + 14 > packetStart + packetSize) continue;
+        if (buffer[payloadOffset] !== 0 || buffer[payloadOffset + 1] !== 0 || buffer[payloadOffset + 2] !== 1) continue;
+
+        const streamId = buffer[payloadOffset + 3];
+        const ptsDtsFlags = (buffer[payloadOffset + 7] >> 6) & 0x03;
+        if ((ptsDtsFlags & 0x02) === 0) continue;
+
+        const pts = parseTsPts(buffer, payloadOffset + 9);
+        if (streamId >= 0xe0 && streamId <= 0xef) {
+            videoPid ??= pid;
+            if (pid === videoPid) {
+                videoPtsValues.push(pts);
+            }
+        } else if (streamId >= 0xc0 && streamId <= 0xdf) {
+            audioPid ??= pid;
+            if (pid === audioPid) {
+                audioPtsValues.push(pts);
+            }
+        }
+    }
+
+    if (videoPtsValues.length === 0 && audioPtsValues.length === 0) {
+        return null;
+    }
+
+    return {
+        videoStart: videoPtsValues[0] ?? null,
+        videoDuration: estimateDurationFromPts(videoPtsValues),
+        audioDuration: estimateDurationFromPts(audioPtsValues),
+        formatDuration: null,
+        needsFfprobeFallback: true,
+    };
+}
+
+async function probeSegmentBytes(segmentPath: string): Promise<SegmentProbe | null> {
+    const buffer = await fs.readFile(segmentPath);
+    if (buffer.length < 188 || buffer[0] !== 0x47) {
+        return null;
+    }
+    return probeTsSegment(buffer);
 }
 
 async function writeFileAtomic(filePath: string, content: string): Promise<void> {
@@ -276,6 +369,8 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
     const limit = pLimit(PROBE_CONCURRENCY);
 
     let probedCount = 0;
+    let byteProbeCount = 0;
+    let ffprobeProbeCount = 0;
     let failedProbeCount = 0;
     let missingSegmentCount = 0;
     let changedDurationCount = 0;
@@ -301,14 +396,22 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
             return;
         }
 
-        const probe = await probeSegment(segmentPath);
+        const probe = await probeSegmentBytes(segmentPath);
         if (probe === null) {
-            failedProbeCount++;
-            segment.probeFailed = true;
-            segment.repairedDuration = segment.originalDuration;
+            const ffprobe = await probeSegment(segmentPath);
+            if (ffprobe === null) {
+                failedProbeCount++;
+                segment.probeFailed = true;
+                segment.repairedDuration = segment.originalDuration;
+                return;
+            }
+            segment.probe = ffprobe;
+            ffprobeProbeCount++;
+            probedCount++;
             return;
         }
 
+        byteProbeCount++;
         probedCount++;
         segment.probe = probe;
     })));
@@ -316,7 +419,22 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
     for (let index = 0; index < parsed.segments.length; index++) {
         const segment = parsed.segments[index];
         const nextSegment = parsed.segments[index + 1] ?? null;
-        const { duration, source } = chooseTimelineDuration(segment, nextSegment);
+        let { duration, source } = chooseTimelineDuration(segment, nextSegment);
+
+        if ((duration === null || (source === "stream-duration" && segment.probe?.needsFfprobeFallback)) && !segment.probeFailed) {
+            const fallbackProbe = await probeSegment(path.join(videoPath, segment.name));
+            if (fallbackProbe !== null) {
+                ffprobeProbeCount++;
+                segment.probe = {
+                    videoStart: segment.probe?.videoStart ?? fallbackProbe.videoStart,
+                    videoDuration: fallbackProbe.videoDuration,
+                    audioDuration: fallbackProbe.audioDuration,
+                    formatDuration: fallbackProbe.formatDuration,
+                    needsFfprobeFallback: false,
+                };
+                ({ duration, source } = chooseTimelineDuration(segment, nextSegment));
+            }
+        }
 
         if (duration === null) {
             if (!segment.probeFailed) {
@@ -360,6 +478,8 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
         durationMode: "media-timeline",
         segmentCount: parsed.segments.length,
         probedCount,
+        byteProbeCount,
+        ffprobeProbeCount,
         failedProbeCount,
         changedDurationCount,
         missingSegmentCount,
