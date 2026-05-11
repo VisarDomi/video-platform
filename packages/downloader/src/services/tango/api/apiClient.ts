@@ -1,3 +1,4 @@
+import * as path from "path";
 import { readTokens } from "shared";
 import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
@@ -133,6 +134,17 @@ export class ApiClient implements IStreamProvider {
         if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
 
         if (info.width === 360 && info.height === 640) return { valid: false };
+
+        if (info.videoDuration <= 0 && info.audioDuration <= 0 && info.formatDuration > 0) {
+            logger.warn(`[Tango] validateSegment: using format duration fallback for ${path.basename(filePath)}`);
+        } else if (info.videoDuration > 0 && info.formatDuration > 0 && Math.abs(info.formatDuration - info.videoDuration) > 0.01) {
+            logger.debug(`[Tango] validateSegment: media duration differs from format duration for ${path.basename(filePath)}`, {
+                videoDuration: info.videoDuration,
+                audioDuration: info.audioDuration,
+                formatDuration: info.formatDuration,
+                selectedDuration: info.duration,
+            });
+        }
 
         return { valid: true, duration: info.duration };
     }

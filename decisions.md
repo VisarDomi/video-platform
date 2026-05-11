@@ -95,3 +95,36 @@ For historical cuts, backend execution matched the frontend request: frontend ca
 Do not move WYSIWYG time interpretation into the backend unless the API contract changes to accept marker ranges plus playback duration. Under the current contract, backend should remain a segment-file executor, not a second timeline interpreter.
 
 The visible current segment name belongs to the same timeline ownership boundary. Playlist parsing produces ordered segment metadata (`name`, `start`, `end`); `PlaybackTimeline` maps browser playback time to playlist time and current segment; `PlayerOverlay` only renders `currentSegmentName`. Do not make the overlay parse manifests or infer segment names from filename numbering.
+
+## Ownership: Playlist timeline decides terminal playback state (2026-05-11)
+
+For VOD playback, parsed `playlist.m3u8` duration and segment intervals are the frontend source of truth once available. Native media fields such as `duration` and `ended` are observations, not authority, because native HLS can collapse `media.duration` to the current playhead and fire `ended` while `seekableEnd` and the playlist still prove playable media remains.
+
+`PlaybackTimeline` owns terminal classification through `assessNativeEnded()`. It compares the native ended event against playlist/seekable truth and returns an explicit verdict:
+
+- `playback-ended-confirmed` when the playlist authority is exhausted, or when no playlist/seekable authority exists.
+- `native-ended-rejected` when native HLS reports ended but playlist/seekable truth still has remaining media.
+
+`VideoEngine` only wires browser events into this authority and emits the verdict. It must not self-heal by nudging currentTime, auto-resuming, or masking the native failure. If native HLS rejects terminal state, the error is surfaced in logs with current segment, playlist time, terminal time, remaining time, media duration, and seekable end.
+
+## Ownership: playlist.m3u8 is the HLS media timeline authority (2026-05-11)
+
+`playlist.m3u8` is the canonical timeline artifact for HLS VOD folders. Do not add a sidecar timeline file for segment durations. If a playlist cannot be trusted, repair or reject the playlist itself and surface the reason in logs/API output.
+
+Safari/iOS mismatch evidence from `2026-05-10 235819 milkyway999` showed the old `#EXTINF` values matched ffprobe `format.duration`, but that was the wrong clock:
+
+- Old playlist/format total: `2247.684252s`.
+- Video stream total: `2127.746011s`.
+- Rewritten playlist total using video PTS advancement: `2127.729645s`.
+- After rewrite, frontend logs showed native duration and playlist duration agreeing around `2127.729s`, playback reached `2137.ts`, and terminal verdict changed from rejected early-ended events with `9-12s` remaining to `playback-ended-confirmed`.
+
+The correct duration source is the media timeline Safari plays, not the MPEG-TS container span. `PlaylistAuthority` repairs historical playlists by probing segments and writing `#EXTINF` from video PTS advancement within each continuity section, falling back to stream duration at discontinuities/tails. It recomputes `#EXT-X-TARGETDURATION` and publishes via temp file + rename.
+
+Future downloader writes must use media stream duration for `accurateDuration`. Tango/FC2 segment validation must not pass `format.duration` to `PlaylistManager`; the preferred order is video stream duration, audio stream duration, then format duration only as a fallback. Edit playlists inherit canonical `#EXTINF` from the source playlist, so historical source playlists should be repaired before editing old recordings.
+
+Ownership boundary:
+
+- Downloader owns active playlist append for new live captures and writes media-duration `#EXTINF` when each segment is accepted.
+- Server `PlaylistAuthority` owns historical/batch repair and any operational rewrite of finalized playlists.
+- HLS routes serve playlists read-only and must not silently heal on GET.
+- Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.

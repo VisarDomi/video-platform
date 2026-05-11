@@ -5,6 +5,9 @@ const execAsync = promisify(exec);
 
 export interface MediaInfo {
     duration: number;
+    formatDuration: number;
+    videoDuration: number;
+    audioDuration: number;
     bitRate: number;
     width: number;
     height: number;
@@ -17,21 +20,35 @@ export class MediaValidator {
             const { stdout } = await execAsync(cmd);
             const data = JSON.parse(stdout);
 
-            const duration = parseFloat(data.format.duration);
+            const formatDuration = parseFloat(data.format.duration);
             const bitRate = parseFloat(data.format.bit_rate);
             let width = 0;
             let height = 0;
+            let videoDuration = NaN;
+            let audioDuration = NaN;
 
             if (data.streams && Array.isArray(data.streams)) {
                 const videoStream = data.streams.find((stream: any) => stream.codec_type === 'video');
                 if (videoStream) {
                     width = videoStream.width || 0;
                     height = videoStream.height || 0;
+                    videoDuration = parseFloat(videoStream.duration);
+                }
+
+                const audioStream = data.streams.find((stream: any) => stream.codec_type === 'audio');
+                if (audioStream) {
+                    audioDuration = parseFloat(audioStream.duration);
                 }
             }
 
+            const duration = [videoDuration, audioDuration, formatDuration]
+                .find((value) => !isNaN(value) && value > 0) ?? 0;
+
             return {
-                duration: isNaN(duration) ? 0 : duration,
+                duration,
+                formatDuration: isNaN(formatDuration) ? 0 : formatDuration,
+                videoDuration: isNaN(videoDuration) ? 0 : videoDuration,
+                audioDuration: isNaN(audioDuration) ? 0 : audioDuration,
                 bitRate: isNaN(bitRate) ? 0 : bitRate,
                 width,
                 height

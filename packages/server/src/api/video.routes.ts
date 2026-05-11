@@ -6,7 +6,9 @@ import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as mp4EditService from "../services/video/mp4-edit.service.js";
+import * as playlistAuthority from "../services/hls/playlistAuthority.js";
 import * as utils from "../core/utils.js";
+import { getProviderPaths, LIVE_STATUS_PATH } from "../core/config.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
@@ -73,6 +75,70 @@ router.post("/edit", async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+router.post("/videos/:filename/repair-playlist", async (req, res) => {
+    const { filename } = req.params as { filename: string };
+    const provider = (req.query.provider as string) || "tango";
+
+    try {
+        const ref = await utils.resolveVideo(filename, provider);
+        logger.info(`[api/repair-playlist] request: filename=${filename} provider=${provider} path=${ref.dirPath}`);
+        const result = await playlistAuthority.repairPlaylistDurations(ref.dirPath);
+        res.json({ success: true, result });
+    } catch (error: any) {
+        if (error.name === "FileNotFoundError") {
+            return res.status(404).json({ success: false, error: error.message });
+        }
+        logger.error(`[api/repair-playlist] failed: filename=${filename} provider=${provider}`, { message: error.message });
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+router.post("/videos/repair-playlists", async (req, res) => {
+    const provider = (req.query.provider as string) || "tango";
+    const scope = (req.query.scope as string) || "all";
+
+    try {
+        const paths = getProviderPaths(provider);
+        const activeDownloadFolders = await getActiveDownloadFolders();
+        const roots = [
+            ...(scope === "all" || scope === "downloads" ? [{ scope: "downloads", path: paths.downloader }] : []),
+            ...(scope === "all" || scope === "edited" ? [{ scope: "edited", path: paths.edited }] : []),
+        ];
+
+        if (roots.length === 0) {
+            return res.status(400).json({ success: false, error: "scope must be all, downloads, or edited" });
+        }
+
+        logger.info("[api/repair-playlists] request", { provider, scope, roots: roots.map((root) => root.path) });
+        const results = [];
+        for (const root of roots) {
+            const skipFolders = root.scope === "downloads" ? activeDownloadFolders : new Set<string>();
+            results.push({ scope: root.scope, result: await playlistAuthority.repairPlaylistDurationsUnder(root.path, skipFolders) });
+        }
+        res.json({ success: true, provider, scope, results });
+    } catch (error: any) {
+        logger.error("[api/repair-playlists] failed", { provider, scope, message: error.message });
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+async function getActiveDownloadFolders(): Promise<Set<string>> {
+    try {
+        const content = await fs.promises.readFile(LIVE_STATUS_PATH, "utf-8");
+        const liveStatus = JSON.parse(content);
+        if (!Array.isArray(liveStatus.downloads)) {
+            return new Set();
+        }
+        return new Set(
+            liveStatus.downloads
+                .map((download: any) => download?.segmentsDirPath)
+                .filter((value: unknown): value is string => typeof value === "string")
+        );
+    } catch {
+        return new Set();
+    }
+}
 
 router.post("/videos/:filename/:destination", async (req, res) => {
     const { filename, destination } = req.params as { filename: string; destination: types.Destination };

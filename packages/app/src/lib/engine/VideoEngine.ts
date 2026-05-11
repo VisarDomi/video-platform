@@ -41,6 +41,7 @@ export class VideoEngine {
 	private readonly MEDIA_MISMATCH_LOG_COOLDOWN_MS = 2000;
 	private readonly SEEK_END_EPSILON_SEC = 0.1;
 	private mismatchLogTimes = new Map<string, number>();
+	private segmentSampleKeys = new Map<string, string>();
 
 	private emit: LogEmit;
 
@@ -120,6 +121,7 @@ export class VideoEngine {
 
 			if (isActive) {
 				this.logMediaMismatchIfNeeded(unit, 'timeupdate');
+				this.logSegmentSampleIfNeeded(unit, snapshot, 'timeupdate');
 			}
 		};
 	}
@@ -271,6 +273,7 @@ export class VideoEngine {
 	private clearPlaylistTruth(filename: string | undefined): void {
 		if (!filename) return;
 		this.mismatchLogTimes.delete(filename);
+		this.segmentSampleKeys.delete(filename);
 		for (const unit of this.units) {
 			if (unit.video.dataset.loadedFilename === filename) {
 				unit.timeline.clear();
@@ -308,7 +311,43 @@ export class VideoEngine {
 			mediaDuration,
 			seekableEnd,
 			durationDelta,
-			seekableDelta
+			seekableDelta,
+			currentTime: snapshot.currentTime,
+			durationSource: snapshot.durationSource,
+			playlistTime: snapshot.playlistTime,
+			playbackToPlaylistScale: snapshot.playbackToPlaylistScale,
+			currentSegmentName: snapshot.currentSegmentName,
+			currentSegmentStart: snapshot.currentSegmentStart,
+			currentSegmentEnd: snapshot.currentSegmentEnd
+		});
+	}
+
+	private logSegmentSampleIfNeeded(unit: PlayerUnit, snapshot = unit.timeline.snapshot(), phase: string): void {
+		const filename = unit.video.dataset.loadedFilename;
+		if (!filename || snapshot.isLive || !snapshot.currentSegmentName) return;
+
+		const key = [
+			snapshot.currentSegmentName,
+			Math.round(snapshot.playbackToPlaylistScale * 1_000_000)
+		].join(':');
+		if (this.segmentSampleKeys.get(filename) === key) return;
+		this.segmentSampleKeys.set(filename, key);
+
+		const truth = unit.timeline.getPlaylistTruth();
+		this.emit('timeline-segment-sample', {
+			slot: this.getUnitSlot(unit),
+			filename,
+			phase,
+			currentTime: snapshot.currentTime,
+			playlistTime: snapshot.playlistTime,
+			mediaDuration: snapshot.mediaDuration,
+			seekableEnd: snapshot.seekableEnd,
+			playlistDuration: truth?.totalDuration ?? null,
+			durationSource: snapshot.durationSource,
+			playbackToPlaylistScale: snapshot.playbackToPlaylistScale,
+			currentSegmentName: snapshot.currentSegmentName,
+			currentSegmentStart: snapshot.currentSegmentStart,
+			currentSegmentEnd: snapshot.currentSegmentEnd
 		});
 	}
 
@@ -483,6 +522,16 @@ export class VideoEngine {
 		const onEnded = () => {
 			this.emitMediaState(unit, 'ended');
 			this.logMediaMismatchIfNeeded(unit, 'ended');
+			const assessment = unit.timeline.assessNativeEnded();
+			const event =
+				assessment.verdict === 'confirmed'
+					? 'playback-ended-confirmed'
+					: 'native-ended-rejected';
+			this.emit(event, {
+				slot: this.getUnitSlot(unit),
+				filename: v.filename,
+				...assessment
+			});
 		};
 		const onStall = () => {
 			this.emitMediaState(unit, 'waiting');
@@ -797,10 +846,10 @@ export class VideoEngine {
 			return { targetTime: clampedTime, shouldResume: true };
 		}
 
-		const terminalCandidates = [snapshot.seekableEnd, snapshot.mediaDuration, snapshot.seekMax].filter(
-			(value): value is number => typeof value === 'number' && value > 0
-		);
-		const terminalTime = terminalCandidates.length > 0 ? Math.min(...terminalCandidates) : snapshot.seekMax;
+		const terminalTime =
+			snapshot.seekableEnd !== null && snapshot.seekableEnd > 0
+				? Math.min(snapshot.seekableEnd, snapshot.seekMax)
+				: snapshot.seekMax;
 		if (clampedTime < terminalTime - this.SEEK_END_EPSILON_SEC) {
 			return { targetTime: clampedTime, shouldResume: true };
 		}
@@ -820,6 +869,7 @@ export class VideoEngine {
 		activeEl.currentTime = seek.targetTime;
 		this._currentTime = seek.targetTime;
 		this.forceTimeSync();
+		this.logSegmentSampleIfNeeded(activeUnit, activeUnit.timeline.snapshot(), 'seek');
 		if (seek.shouldResume) {
 			activeEl.addEventListener('seeked', () => void activeEl.play(), { once: true });
 		}
@@ -832,6 +882,7 @@ export class VideoEngine {
 		if (!seek) return;
 		activeEl.currentTime = seek.targetTime;
 		this._currentTime = seek.targetTime;
+		this.logSegmentSampleIfNeeded(activeUnit, activeUnit.timeline.snapshot(), 'seek-direct');
 	}
 
 	finishDirectSeek(): void {

@@ -12,6 +12,14 @@ Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-
 - Decisions:
   `~/Documents/work/video/video-platform/decisions.md`
 
+## Logs
+
+- Start debugging by checking the managed service logs.
+- Use direct `journalctl` for bounded reads:
+  `journalctl --user -u video-server.service -u video-downloader.service -n 300 --no-pager`
+- For a time window, usually the specific time after a build so that you get the logs from the user tests:
+  `journalctl --user -u video-server.service -u video-downloader.service --since '2026-05-11 10:54:30' --until now --no-pager`
+
 ## Routes
 
 - App frontend:

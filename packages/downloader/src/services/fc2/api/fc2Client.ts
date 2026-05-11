@@ -341,6 +341,17 @@ export class Fc2Client implements IStreamProvider {
             return { valid: false };
         }
 
+        if (info.videoDuration <= 0 && info.audioDuration <= 0 && info.formatDuration > 0) {
+            logger.warn(`[FC2] validateSegment: using format duration fallback for ${name}`);
+        } else if (info.videoDuration > 0 && info.formatDuration > 0 && Math.abs(info.formatDuration - info.videoDuration) > 0.01) {
+            logger.debug(`[FC2] validateSegment: media duration differs from format duration for ${name}`, {
+                videoDuration: info.videoDuration,
+                audioDuration: info.audioDuration,
+                formatDuration: info.formatDuration,
+                selectedDuration: info.duration,
+            });
+        }
+
         return { valid: true, duration: info.duration };
     }
 
