@@ -111,12 +111,16 @@ For VOD playback, parsed `playlist.m3u8` duration and segment intervals are the 
 
 `playlist.m3u8` is the canonical timeline artifact for HLS VOD folders. Do not add a sidecar timeline file for segment durations. If a playlist cannot be trusted, repair or reject the playlist itself and surface the reason in logs/API output.
 
+The root bug was treating MPEG-TS container duration as playback truth. Safari/iOS follows the media timeline, not the TS container span. A global frontend scale between browser duration and playlist duration can align endpoints while still assigning intermediate frames to the wrong `.ts`; segment identity and edit cuts must be grounded in one canonical playlist timeline.
+
 Safari/iOS mismatch evidence from `2026-05-10 235819 milkyway999` showed the old `#EXTINF` values matched ffprobe `format.duration`, but that was the wrong clock:
 
 - Old playlist/format total: `2247.684252s`.
 - Video stream total: `2127.746011s`.
+- Audio stream total: `2123.703008s`.
 - Rewritten playlist total using video PTS advancement: `2127.729645s`.
-- After rewrite, frontend logs showed native duration and playlist duration agreeing around `2127.729s`, playback reached `2137.ts`, and terminal verdict changed from rejected early-ended events with `9-12s` remaining to `playback-ended-confirmed`.
+- The edit discontinuity `433.ts -> #EXT-X-DISCONTINUITY -> 438.ts` was preserved.
+- After rewrite, frontend logs showed `playlist-fetch totalDuration=2127.729645`, native duration/seekable end around `2127.729s`, playback reached `2137.ts`, and terminal verdict changed from rejected early-ended events with `9-12s` remaining to `playback-ended-confirmed`.
 
 The correct duration source is the media timeline Safari plays, not the MPEG-TS container span. `PlaylistAuthority` repairs historical playlists by probing segments and writing `#EXTINF` from video PTS advancement within each continuity section, falling back to stream duration at discontinuities/tails. It recomputes `#EXT-X-TARGETDURATION` and publishes via temp file + rename.
 
@@ -124,9 +128,29 @@ Future downloader writes must use media stream duration for `accurateDuration`. 
 
 For `.ts` historical repair, `PlaylistAuthority` should parse MPEG-TS bytes before spawning ffprobe. The common-case duration is `firstVideoPts(next segment) - firstVideoPts(current segment)`, read from PES PTS timestamps. This matched the ffprobe-derived good playlist for `2026-05-10 235819 milkyway999` exactly across `2126` adjacent segment boundaries and reduced that repair from thousands of ffprobe calls to byte probes plus two ffprobe fallbacks. ffprobe remains the fallback for boundaries that TS bytes cannot define alone, such as the segment before a discontinuity and the final tail segment.
 
+fMP4 is not part of the MPEG-TS repair. Playlists with `#EXT-X-MAP` are skipped with `skipped:true`, `skipReason:"fmp4-map"`, and zero byte/ffprobe probes. SC already writes fMP4 durations from `sidx` parsing, so the TS repairer must not touch it unless there is a separate SC-specific bug.
+
+Historical batch results:
+
+- FC2 `scope=all` ran on 2026-05-11 from `11:43:28` to `11:51:24`; repaired `120` playlists, processed `337823` segments, failed `0`, and removed about `9087.536333s` from playlists.
+- Tango `scope=all` ran on 2026-05-11 from `11:53:50` to `13:11:52`; repaired `3014` playlists plus one already-correct long sample, processed `2101775` segments, failed `0`, and removed about `81544.660632s` from playlists.
+- Active downloader folders are skipped from downloader-scope batch repair via `live-status.json`.
+
+Operational behavior:
+
+- Repair is idempotent: rerunning a fixed playlist should produce `changedDurationCount:0` and `wrotePlaylist:false`.
+- Repair is crash-safe per playlist: writes use temp file + rename, so power loss leaves either the old playlist or the complete repaired playlist.
+- Batch repair is not checkpointed. If interrupted, rerun is safe but starts scanning from the beginning.
+
 Ownership boundary:
 
 - Downloader owns active playlist append for new live captures and writes media-duration `#EXTINF` when each segment is accepted.
 - Server `PlaylistAuthority` owns historical/batch repair and any operational rewrite of finalized playlists.
 - HLS routes serve playlists read-only and must not silently heal on GET.
 - Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.
+
+Remaining hardening:
+
+- Add tests for `PlaylistAuthority` parser/serializer, discontinuity handling, fMP4 skip behavior, and byte-derived PTS duration.
+- Consider a checkpointed background repair job if future migrations are large enough that rerunning from the beginning is wasteful.
+- Consider hls.js fragment events if exact decoded-fragment identity is needed at segment boundaries.
