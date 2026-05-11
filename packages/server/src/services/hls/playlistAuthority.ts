@@ -8,6 +8,8 @@ import { FILE_NAMES, HLS, MISC } from "../../core/constants.js";
 export interface PlaylistRepairSummary {
     playlistPath: string;
     durationMode: "media-timeline";
+    skipped: boolean;
+    skipReason: string | null;
     segmentCount: number;
     probedCount: number;
     byteProbeCount: number;
@@ -31,6 +33,7 @@ export interface PlaylistRepairBatchSummary {
     playlistCount: number;
     skippedCount: number;
     repairedCount: number;
+    skippedPlaylistCount: number;
     failedCount: number;
     segmentCount: number;
     changedDurationCount: number;
@@ -60,6 +63,7 @@ interface ParsedPlaylist {
     lines: Array<PlaylistLine>;
     segments: PlaylistSegment[];
     targetDuration: number | null;
+    hasMap: boolean;
 }
 
 type PlaylistLine =
@@ -95,10 +99,14 @@ function parsePlaylist(content: string): ParsedPlaylist {
     const segments: PlaylistSegment[] = [];
     let metadataBuffer: string[] = [];
     let targetDuration: number | null = null;
+    let hasMap = false;
 
     for (const rawLine of rawLines) {
         const trimmed = rawLine.trim();
         if (trimmed === "") continue;
+        if (trimmed.startsWith(HLS.MAP_PREFIX)) {
+            hasMap = true;
+        }
 
         if (trimmed.startsWith(HLS.TARGET_DURATION_PREFIX)) {
             const parsed = Number.parseInt(trimmed.slice(HLS.TARGET_DURATION_PREFIX.length), MISC.RADIX_DECIMAL);
@@ -137,7 +145,7 @@ function parsePlaylist(content: string): ParsedPlaylist {
         lines.push({ kind: "line", value: metadataLine });
     }
 
-    return { lines, segments, targetDuration };
+    return { lines, segments, targetDuration, hasMap };
 }
 
 function normalizeHeaderOrder(lines: string[]): string[] {
@@ -366,6 +374,34 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
     const originalContent = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
     const parsed = parsePlaylist(originalContent);
+
+    if (parsed.hasMap) {
+        const summary: PlaylistRepairSummary = {
+            playlistPath,
+            durationMode: "media-timeline",
+            skipped: true,
+            skipReason: "fmp4-map",
+            segmentCount: parsed.segments.length,
+            probedCount: 0,
+            byteProbeCount: 0,
+            ffprobeProbeCount: 0,
+            failedProbeCount: 0,
+            changedDurationCount: 0,
+            missingSegmentCount: 0,
+            videoTimelineCount: 0,
+            streamDurationCount: 0,
+            totalDurationBefore: Number(parsed.segments.reduce((sum, segment) => sum + (segment.originalDuration ?? 0), 0).toFixed(6)),
+            totalDurationAfter: Number(parsed.segments.reduce((sum, segment) => sum + (segment.originalDuration ?? 0), 0).toFixed(6)),
+            totalDurationDelta: 0,
+            maxSegmentDelta: 0,
+            targetDurationBefore: parsed.targetDuration,
+            targetDurationAfter: parsed.targetDuration ?? 0,
+            wrotePlaylist: false,
+        };
+        logger.info("[PlaylistAuthority] playlist-media-timeline-repair-skipped", summary);
+        return summary;
+    }
+
     const limit = pLimit(PROBE_CONCURRENCY);
 
     let probedCount = 0;
@@ -476,6 +512,8 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
     const summary: PlaylistRepairSummary = {
         playlistPath,
         durationMode: "media-timeline",
+        skipped: false,
+        skipReason: null,
         segmentCount: parsed.segments.length,
         probedCount,
         byteProbeCount,
@@ -558,6 +596,7 @@ export async function repairPlaylistDurationsUnder(rootPath: string, skipFolders
         playlistCount: playlistFolders.length,
         skippedCount: skipFolders.size,
         repairedCount: results.filter((result) => result.wrotePlaylist).length,
+        skippedPlaylistCount: results.filter((result) => result.skipped).length,
         failedCount: failures.length,
         segmentCount: results.reduce((sum, result) => sum + result.segmentCount, 0),
         changedDurationCount: results.reduce((sum, result) => sum + result.changedDurationCount, 0),
@@ -571,6 +610,7 @@ export async function repairPlaylistDurationsUnder(rootPath: string, skipFolders
         playlistCount: summary.playlistCount,
         skippedCount: summary.skippedCount,
         repairedCount: summary.repairedCount,
+        skippedPlaylistCount: summary.skippedPlaylistCount,
         failedCount: summary.failedCount,
         segmentCount: summary.segmentCount,
         changedDurationCount: summary.changedDurationCount,
