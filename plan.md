@@ -14,6 +14,7 @@ Core responsibilities:
 
 - Parse existing `playlist.m3u8` into structured segments and header state.
 - Probe segment media timing with `ffprobe` when needed.
+- Prefer byte-level MPEG-TS PTS parsing for `.ts` files and reserve ffprobe for fallbacks.
 - Rewrite `#EXTINF` directly in `playlist.m3u8`.
 - Recompute `#EXT-X-TARGETDURATION` directly in `playlist.m3u8`.
 - Publish playlist changes atomically with temp file + rename.
@@ -45,7 +46,8 @@ Acceptance:
 
 - Done: structured parser/serializer preserves segment metadata and `#EXT-X-DISCONTINUITY`.
 - Done: atomic temp-file rename publication.
-- Done: bounded ffprobe worker with low concurrency.
+- Done: byte-first `.ts` probing reads PES PTS timestamps for adjacent media timeline durations.
+- Done: bounded ffprobe fallback remains for tail/discontinuity cases bytes cannot fully define.
 - Done: repair summaries include changed counts, missing/probe failures, total duration delta, and target duration.
 
 Acceptance:

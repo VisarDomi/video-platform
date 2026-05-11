@@ -122,6 +122,8 @@ The correct duration source is the media timeline Safari plays, not the MPEG-TS 
 
 Future downloader writes must use media stream duration for `accurateDuration`. Tango/FC2 segment validation must not pass `format.duration` to `PlaylistManager`; the preferred order is video stream duration, audio stream duration, then format duration only as a fallback. Edit playlists inherit canonical `#EXTINF` from the source playlist, so historical source playlists should be repaired before editing old recordings.
 
+For `.ts` historical repair, `PlaylistAuthority` should parse MPEG-TS bytes before spawning ffprobe. The common-case duration is `firstVideoPts(next segment) - firstVideoPts(current segment)`, read from PES PTS timestamps. This matched the ffprobe-derived good playlist for `2026-05-10 235819 milkyway999` exactly across `2126` adjacent segment boundaries and reduced that repair from thousands of ffprobe calls to byte probes plus two ffprobe fallbacks. ffprobe remains the fallback for boundaries that TS bytes cannot define alone, such as the segment before a discontinuity and the final tail segment.
+
 Ownership boundary:
 
 - Downloader owns active playlist append for new live captures and writes media-duration `#EXTINF` when each segment is accepted.

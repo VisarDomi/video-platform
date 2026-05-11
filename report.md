@@ -10,6 +10,7 @@ There are two jobs:
 
 - Historical repair: server `PlaylistAuthority` probes existing `.ts` files, rewrites `playlist.m3u8` atomically, recomputes target duration, and reports probe/missing-file failures in logs/API output.
 - Future correctness: downloader validation must stop passing MPEG-TS container `format.duration` into `PlaylistManager`. For Tango/FC2 it now uses video stream duration first, then audio stream duration, with format duration only as a fallback.
+- Historical repair is now byte-first for `.ts`: it reads MPEG-TS PES PTS timestamps and uses `firstVideoPts(next) - firstVideoPts(current)` for normal adjacent segment durations, falling back to ffprobe only where bytes cannot define the duration cleanly.
 
 ## Observed Evidence
 
@@ -33,6 +34,14 @@ The decisive sample was `/home/visar/Videos/downloads/tango/editor/edited/2026-0
 
 Before the rewrite, logs showed `native-ended-rejected` around `2126.ts`/`2128.ts` with `9-12s` of playlist time remaining. After the rewrite, the remaining time at terminal was about `-0.051s`, which is inside normal boundary tolerance.
 
+Follow-up byte-probe validation on the same file showed:
+
+- `2126` adjacent durations compared from `.ts` bytes.
+- `0` mismatches against the repaired playlist.
+- Total comparable delta: `0`.
+- Full repair check used `2128` byte probes and only `2` ffprobe fallbacks.
+- Runtime was under one second on the local machine, instead of roughly a minute with one ffprobe process per segment.
+
 ## Current Code Findings
 
 The frontend currently applies one global scale:
@@ -51,7 +60,7 @@ Playlist ownership was split:
 That was functional but not tight enough. The new boundary keeps `playlist.m3u8` canonical while making the duration source explicit:
 
 - Downloader writes future accepted segments with media stream duration, not container duration.
-- Server `PlaylistAuthority` owns historical/batch repair and uses video PTS advancement.
+- Server `PlaylistAuthority` owns historical/batch repair and uses byte-derived video PTS advancement first, with ffprobe fallback only when needed.
 - Frontend logs native/media disagreement but does not patch around it.
 
 ## Reference Implementations Checked
