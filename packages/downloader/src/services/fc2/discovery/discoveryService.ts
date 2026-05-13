@@ -3,9 +3,9 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { TargetManager } from "../../common/targetManager.js";
 import { Fc2Client } from "../api/fc2Client.js";
-import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
 import { FC2_POLL_MS } from "../../../common/timing.js";
+import { startStreamSession } from "../../common/sessionStarter.js";
 
 export class Fc2DiscoveryService {
     private targetManager: TargetManager;
@@ -59,26 +59,11 @@ export class Fc2DiscoveryService {
                 if (masterUrl) {
                     logger.info(`[FC2] Channel ${channelId} is LIVE. Starting download...`);
 
-                    const handle = this.downloadsManager.add(masterUrl, {
+                    startStreamSession("FC2", {
                         streamerId: channelId,
-                        alias: channelId
-                    });
-
-                    if (handle) {
-                        const session = new StreamSession(channelId, channelId, handle, this.fc2Client);
-                        const completion = session.run(masterUrl).then((result: SessionResult) => {
-                            if (!result.aborted && result.totalSegments === 0) {
-                                this.cooldown.recordFailure(channelId);
-                            } else if (result.totalSegments > 0) {
-                                this.cooldown.clear(channelId);
-                            }
-                        }).catch((err: Error) => {
-                            logger.error(`[FC2] ${channelId}: unhandled session error`, { error: err.message });
-                            handle.remove();
-                            this.cooldown.recordFailure(channelId);
-                        });
-                        this.downloadsManager.registerDownloader(masterUrl, () => session.abort(), completion);
-                    }
+                        alias: channelId,
+                        masterPlaylistUrl: masterUrl,
+                    }, this.fc2Client, this.downloadsManager, this.cooldown);
                 } else {
                     logger.warn(`[FC2] Channel ${channelId} is online but failed to retrieve HLS URL.`);
                 }

@@ -3,9 +3,9 @@ import logger from "../../../common/logger.js";
 import { DownloadsManager } from "../../state/downloadsManager.js";
 import { ScTargetManager, ScTarget } from "./targetManager.js";
 import { ScClient } from "../api/scClient.js";
-import { StreamSession, SessionResult } from "../../download/streamSession.js";
 import { RetryCooldown } from "../../common/retryCooldown.js";
 import { SC_POLL_MS } from "../../../common/timing.js";
+import { startStreamSession } from "../../common/sessionStarter.js";
 
 export class ScDiscoveryService {
     private targetManager: ScTargetManager;
@@ -80,28 +80,11 @@ export class ScDiscoveryService {
 
             logger.info(`[SC] ${currentAlias} is PUBLIC. Starting download...`);
 
-            const handle = this.downloadsManager.add(masterUrl, {
+            startStreamSession("SC", {
                 streamerId: target.roomId,
                 alias: currentAlias,
-            });
-
-            if (handle) {
-                const session = new StreamSession(target.roomId, currentAlias, handle, this.scClient);
-                const completion = session.run(masterUrl).then((result: SessionResult) => {
-                    if (!result.aborted && result.totalSegments === 0) {
-                        logger.warn(`[SC] ${currentAlias}: session ended with 0 segments — cooldown`);
-                        this.cooldown.recordFailure(target.roomId);
-                    } else if (result.totalSegments > 0) {
-                        logger.info(`[SC] ${currentAlias}: session completed (${result.totalSegments} segments)`);
-                        this.cooldown.clear(target.roomId);
-                    }
-                }).catch((err: Error) => {
-                    logger.error(`[SC] ${currentAlias}: unhandled session error`, { error: err.message });
-                    handle.remove();
-                    this.cooldown.recordFailure(target.roomId);
-                });
-                this.downloadsManager.registerDownloader(masterUrl, () => session.abort(), completion);
-            }
+                masterPlaylistUrl: masterUrl,
+            }, this.scClient, this.downloadsManager, this.cooldown);
         }
     }
 }

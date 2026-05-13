@@ -7,10 +7,16 @@ One session = one folder. StreamSession owns DiskSession, PlaylistManager, InitT
 After each download attempt exits, the session calls `provider.shouldRetry(context)` with the exit reason, last master URL, and last live URL. The provider owns the "is this stream still live?" decision because the source of truth differs per platform:
 
 - **SC:** cam API (isCamActive). On any exit, check the API. If still active, build fresh master URL.
-- **Tango:** liveUrl is the source of truth (the following feed is stale). On fetch-failed (401 token timing), retry same master URL. On stale-timeout or segment-failed, try the feed for a new URL.
+- **Tango:** account lookup by encrypted account id is the source of truth. Discovery reads `tango.txt`, asks `/stream/social/v2/list/byEncryptedAccountIds` for those ids, and starts only `LIVING` + public streams with a master playlist. On fetch-failed (401 token timing), retry same master URL. On stale-timeout or segment-failed, ask the same account lookup for a fresh master URL.
 - **FC2:** memberApi (is_publish). If still online, get fresh HLS URL.
 
 **Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content.
+
+## Discovery normalizes to session candidates
+
+Provider discovery code owns only provider-specific knowledge: target parsing, status APIs, public/paid rules, stream-name refresh, and master URL derivation. Once a provider has `{ streamerId, alias, masterPlaylistUrl }`, `startStreamSession` owns the common lifecycle: add to `DownloadsManager`, create `StreamSession`, register abort/completion, and update zero-segment cooldown state.
+
+**Why:** Tango, SC, and FC2 had repeated session-start code with subtly different logs. The shared helper keeps one writer for download lifecycle registration while preserving provider ownership of discovery decisions. Runtime proof after the change: Tango account lookup started public targets from `tango.txt`, FC2 started a live target after `fc2.txt` changed, and SC continued to start public active targets through its cam API path.
 
 ## Download loop: no concurrent timers, no shared mutable state
 

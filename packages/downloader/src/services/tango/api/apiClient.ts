@@ -6,6 +6,14 @@ import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { MediaValidator } from "../../../common/mediaValidator.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
+export interface TangoLiveStream {
+    accountId: string;
+    streamId: string;
+    masterPlaylistUrl: string;
+    status: string;
+    kind: string;
+}
+
 function getStreamHeaders(tokens: Tokens): HeadersInit {
     if (!tokens.tt || !tokens.ttu || !tokens.tte) {
         throw new Error("Cannot create stream headers: tt, ttu, or tte are missing from tokens.");
@@ -78,6 +86,76 @@ export class ApiClient implements IStreamProvider {
             );
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getFollowingResponseBody`, { error: (error as Error).message });
+            return null;
+        }
+    }
+
+    public async getLiveStreamsByAccountIds(accountIds: string[]): Promise<Map<string, TangoLiveStream> | null> {
+        if (accountIds.length === 0) {
+            return new Map();
+        }
+
+        try {
+            const tokens = await readTokens();
+            const headers = this._getApiHeaders(tokens);
+            const response = await this._makeApiRequest<any>(
+                `https://gateway.tango.me/stream/social/v2/list/byEncryptedAccountIds?pageSize=${accountIds.length}`,
+                "POST",
+                headers,
+                "json",
+                {
+                    moderationLevel: 5,
+                    accountIds,
+                    forceAllowPulsz: false,
+                },
+            );
+
+            if (!response) return null;
+
+            const liveStreams = new Map<string, TangoLiveStream>();
+            const records = Array.isArray(response.records) ? response.records : [];
+
+            for (const record of records) {
+                const stream = record?.stream;
+                const accountId = stream?.encryptedAccountId;
+                const masterPlaylistUrl = stream?.masterListUrl ?? record?.viewInfo?.hlsStreamInfo?.masterUrl;
+                const status = stream?.status;
+                const kind = stream?.streamKind;
+                const isPublic = kind === "PUBLIC" || record?.isPublic === true;
+                const isLiving = typeof status !== "string" || status === "LIVING";
+
+                if (
+                    typeof accountId !== "string" ||
+                    typeof masterPlaylistUrl !== "string"
+                ) {
+                    continue;
+                }
+
+                if (!isLiving || !isPublic) {
+                    logger.info(`[Tango] Account stream rejected`, {
+                        accountId,
+                        status,
+                        kind,
+                        isPublic: record?.isPublic,
+                    });
+                    continue;
+                }
+
+                liveStreams.set(accountId, {
+                    accountId,
+                    streamId: stream.id ?? record?.viewInfo?.streamId ?? "",
+                    masterPlaylistUrl,
+                    status: typeof status === "string" ? status : "LIVING",
+                    kind: typeof kind === "string" ? kind : "PUBLIC",
+                });
+            }
+
+            logger.info(
+                `[Tango] Account stream lookup: requested=${accountIds.length} returned=${records.length} livePublic=${liveStreams.size}`,
+            );
+            return liveStreams;
+        } catch (error) {
+            logger.error(`[Tango] Unexpected error in getLiveStreamsByAccountIds`, { error: (error as Error).message });
             return null;
         }
     }
@@ -160,19 +238,17 @@ export class ApiClient implements IStreamProvider {
             return context.lastMasterUrl;
         }
 
-        const body = await this.getFollowingResponseBody();
-        if (!body?.entities?.stream) {
-            logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (no stream data after ${context.exitReason})`);
+        const liveStreams = await this.getLiveStreamsByAccountIds([context.streamerId]);
+        if (!liveStreams) {
+            logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (stream lookup failed after ${context.exitReason})`);
             return null;
         }
 
-        for (const streamId of Object.keys(body.entities.stream)) {
-            const stream = body.entities.stream[streamId];
-            if (stream.broadcasterId === context.streamerId && stream.kind === "PUBLIC" && stream.playlistUrl) {
-                return stream.playlistUrl;
-            }
+        const stream = liveStreams.get(context.streamerId);
+        if (stream) {
+            return stream.masterPlaylistUrl;
         }
-        logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (not found in following feed after ${context.exitReason})`);
+        logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (not live/public in account lookup after ${context.exitReason})`);
         return null;
     }
 }
