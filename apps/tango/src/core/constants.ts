@@ -1,4 +1,5 @@
 const API_BASE_URL = "https://gateway.tango.me/proxycador/api/public/v1";
+const GATEWAY_BASE_URL = "https://gateway.tango.me";
 
 export const CONSTANTS = {
     API: {
@@ -6,6 +7,8 @@ export const CONSTANTS = {
         FOLLOW_ADD: `${API_BASE_URL}/follow/add`,
         FOLLOW_REMOVE: `${API_BASE_URL}/follow/remove`,
         BLOCK_LIST: `${API_BASE_URL}/blockList`,
+        MY_FOLLOWINGS: `${GATEWAY_BASE_URL}/discovery/v3/followings/me/list`,
+        LIVE_BY_ACCOUNT_IDS: `${GATEWAY_BASE_URL}/stream/social/v2/list/byEncryptedAccountIds`,
         RECOMMENDATIONS: `${API_BASE_URL}/recommendations/following?tags=`,
         STREAM_WATCH: `${API_BASE_URL}/live/stream/v2/watch?requestId=`,
         ALIAS: "https://gateway.tango.me/proxycador/api/profiles/v2/single",
@@ -28,10 +31,16 @@ VIDEO: {
         TARGET_RESOLUTION: "RESOLUTION=1280x720",
     },
     USERSCRIPT: {
-        MATCH_URL: "https://tango.me/live/recommended",
+        MATCH_URLS: [
+            "https://tango.me/live/recommended",
+            "https://www.tango.me/live/recommended",
+        ],
     },
     APP: {
         FETCH_BATCH_SIZE: 50,
+        FOLLOWINGS_PAGE_SIZE: 5000,
+        LIVE_CHECK_BATCH_SIZE: 100,
+        LIVE_CHECK_BATCH_DELAY_MS: 1000,
     },
     VIDEO_PLATFORM: {
         BASE_URL: "https://192.168.1.197:7973",

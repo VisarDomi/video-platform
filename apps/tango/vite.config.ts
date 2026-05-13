@@ -40,7 +40,7 @@ export default defineConfig({
             entry: "src/main.ts",
             userscript: {
                 name: `${pkg.name} v${pkg.version}`,
-                match: CONSTANTS.USERSCRIPT.MATCH_URL,
+                match: CONSTANTS.USERSCRIPT.MATCH_URLS,
                 "run-at": "document-start",
             },
         }),

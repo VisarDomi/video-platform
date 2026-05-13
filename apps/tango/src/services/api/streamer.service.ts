@@ -6,6 +6,68 @@ export interface ProfileData {
     firstName: string | null;
 }
 
+interface FollowingEntry {
+    encryptedAccountId?: string;
+    accountId?: string;
+    id?: string;
+    account?: {
+        encryptedAccountId?: string;
+        accountId?: string;
+        id?: string;
+    };
+    profile?: {
+        encryptedAccountId?: string;
+        accountId?: string;
+        id?: string;
+    };
+}
+
+interface LiveRecord {
+    isPublic?: boolean;
+    account?: {
+        encryptedAccountId?: string;
+        firstName?: string;
+    };
+    anchor?: {
+        encryptedAccountId?: string;
+        firstName?: string;
+    };
+    stream?: {
+        id?: string;
+        streamId?: string;
+        encryptedAccountId?: string;
+        accountId?: string;
+        broadcasterId?: string;
+        masterListUrl?: string;
+        streamKind?: string;
+        status?: string;
+    };
+    viewInfo?: {
+        streamId?: string;
+        hlsStreamInfo?: {
+            masterUrl?: string;
+        };
+    };
+}
+
+interface RecommendationCategory {
+    tag?: string;
+    streamInfoList?: {
+        streamDetails?: RecommendationDetail[];
+    };
+}
+
+interface RecommendationDetail {
+    anchor?: {
+        encryptedAccountId?: string;
+        firstName?: string;
+    };
+    stream?: {
+        id?: string;
+        masterListUrl?: string;
+    };
+}
+
 export class StreamerService {
     private defaultInit: RequestInit;
     private blockListCache: string[] | null = null;
@@ -31,7 +93,143 @@ export class StreamerService {
         return [];
     }
 
-    public async fetchStreamers(count: number): Promise<Streamer[]> {
+    private extractFollowingId(entry: FollowingEntry): string | null {
+        return entry.encryptedAccountId
+            || entry.accountId
+            || entry.id
+            || entry.account?.encryptedAccountId
+            || entry.account?.accountId
+            || entry.account?.id
+            || entry.profile?.encryptedAccountId
+            || entry.profile?.accountId
+            || entry.profile?.id
+            || null;
+    }
+
+    private async fetchFollowingIds(): Promise<string[]> {
+        try {
+            const followingIds = new Set<string>();
+            let cursor: string | null = null;
+
+            do {
+                const params = new URLSearchParams({ size: String(CONSTANTS.APP.FOLLOWINGS_PAGE_SIZE) });
+                if (cursor) {
+                    params.set("cursor", cursor);
+                }
+                const response = await fetch(`${CONSTANTS.API.MY_FOLLOWINGS}?${params.toString()}`, this.defaultInit);
+
+                if (!response.ok) {
+                    console.error(`Failed to fetch following ids, status: ${response.status}`);
+                    return [...followingIds];
+                }
+
+                const body = await response.json();
+                const rawFollowings = body?.followers || body?.followings || body?.records || body?.items || [];
+
+                if (!Array.isArray(rawFollowings)) {
+                    return [...followingIds];
+                }
+
+                rawFollowings
+                    .map((entry: FollowingEntry) => this.extractFollowingId(entry))
+                    .filter((id: string | null): id is string => Boolean(id))
+                    .forEach((id: string) => followingIds.add(id));
+
+                cursor = body?.nextCursor || null;
+            } while (cursor);
+
+            return [...followingIds];
+        } catch (error) {
+            console.error("Failed to fetch following ids:", error);
+            return [];
+        }
+    }
+
+    private async delay(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    private liveRecordToStreamer(record: LiveRecord, blockList: string[]): Streamer | null {
+        const stream = record.stream;
+        const streamerId = stream?.encryptedAccountId || stream?.accountId || stream?.broadcasterId || record.account?.encryptedAccountId || record.anchor?.encryptedAccountId;
+        const streamId = stream?.id || stream?.streamId || record.viewInfo?.streamId;
+        const masterListUrl = stream?.masterListUrl || record.viewInfo?.hlsStreamInfo?.masterUrl;
+        const isLive = typeof stream?.status !== "string" || stream.status === "LIVING";
+        const isPublic = stream?.streamKind === "PUBLIC" || record.isPublic === true;
+
+        if (!streamerId || !streamId || !masterListUrl || !isLive || !isPublic || blockList.includes(streamerId)) {
+            return null;
+        }
+
+        return {
+            streamerId,
+            streamId,
+            masterListUrl,
+            firstName: record.account?.firstName || record.anchor?.firstName || "...",
+            isFollowing: true,
+        };
+    }
+
+    private async fetchLiveFollowings(accountIds: string[], blockList: string[]): Promise<Streamer[]> {
+        const streamers: Streamer[] = [];
+        const batchSize = CONSTANTS.APP.LIVE_CHECK_BATCH_SIZE;
+
+        for (let index = 0; index < accountIds.length; index += batchSize) {
+            const batch = accountIds.slice(index, index + batchSize);
+            const response = await fetch(`${CONSTANTS.API.LIVE_BY_ACCOUNT_IDS}?pageSize=${batch.length}`, {
+                ...this.defaultInit,
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    moderationLevel: 5,
+                    accountIds: batch,
+                    forceAllowPulsz: false,
+                }),
+            });
+
+            if (!response.ok) {
+                console.error(`Failed to fetch live followings batch, status: ${response.status}`);
+            } else {
+                const body = await response.json();
+                const records = body?.records || body?.items || [];
+
+                if (Array.isArray(records)) {
+                    for (const record of records) {
+                        const streamer = this.liveRecordToStreamer(record, blockList);
+                        if (streamer) {
+                            streamers.push(streamer);
+                        }
+                    }
+                }
+            }
+
+            if (index + batchSize < accountIds.length) {
+                await this.delay(CONSTANTS.APP.LIVE_CHECK_BATCH_DELAY_MS);
+            }
+        }
+
+        return streamers;
+    }
+
+    private recommendationToStreamer(detail: RecommendationDetail, blockList: string[], isFollowing: boolean): Streamer | null {
+        const streamerId = detail.anchor?.encryptedAccountId;
+        const streamId = detail.stream?.id;
+        const masterListUrl = detail.stream?.masterListUrl;
+
+        if (!streamerId || !streamId || !masterListUrl || blockList.includes(streamerId)) {
+            return null;
+        }
+
+        return {
+            streamerId,
+            streamId,
+            masterListUrl,
+            firstName: detail.anchor?.firstName || "...",
+            isFollowing,
+        };
+    }
+
+    private async fetchRecommendedStreamers(count: number, blockList: string[]): Promise<Streamer[]> {
         const recommendationsInit = {
             ...this.defaultInit,
             method: "POST",
@@ -50,34 +248,57 @@ export class StreamerService {
         };
 
         try {
-            const [recommendationsResponse, blockList] = await Promise.all([fetch(CONSTANTS.API.RECOMMENDATIONS, recommendationsInit), this._fetchBlockList()]);
+            const response = await fetch(CONSTANTS.API.RECOMMENDATIONS, recommendationsInit);
+            if (!response.ok) {
+                console.error(`Failed to fetch recommended streamers, status: ${response.status}`);
+                return [];
+            }
 
-            if (recommendationsResponse.ok) {
-                const recommendations = await recommendationsResponse.json();
-                const streamers: Streamer[] = [];
+            const recommendations = await response.json();
+            const categories = recommendations?.categoryInfoList || [];
+            const streamers: Streamer[] = [];
 
-                if (recommendations?.categoryInfoList) {
-                    for (const category of recommendations.categoryInfoList) {
-                        if (category.streamInfoList?.streamDetails) {
-                            for (const detail of category.streamInfoList.streamDetails) {
-                                if (detail.anchor?.encryptedAccountId && detail.stream?.masterListUrl && detail.stream?.id) {
-                                    const streamerId = detail.anchor.encryptedAccountId;
-                                    if (!blockList.includes(streamerId)) {
-                                        streamers.push({
-                                            streamerId,
-                                            streamId: detail.stream.id,
-                                            masterListUrl: detail.stream.masterListUrl,
-                                            firstName: detail.anchor.firstName,
-                                            isFollowing: category.tag === "following",
-                                        });
-                                    }
-                                }
-                            }
-                        }
+            if (!Array.isArray(categories)) {
+                return [];
+            }
+
+            for (const category of categories as RecommendationCategory[]) {
+                const details = category.streamInfoList?.streamDetails || [];
+                for (const detail of details) {
+                    const streamer = this.recommendationToStreamer(detail, blockList, category.tag === "following");
+                    if (streamer) {
+                        streamers.push(streamer);
                     }
                 }
-                return streamers;
             }
+
+            return streamers;
+        } catch (error) {
+            console.error("Failed to fetch recommended streamers:", error);
+            return [];
+        }
+    }
+
+    private dedupeStreamers(streamers: Streamer[]): Streamer[] {
+        const byStreamerId = new Map<string, Streamer>();
+
+        for (const streamer of streamers) {
+            const existing = byStreamerId.get(streamer.streamerId);
+            if (!existing || (!existing.isFollowing && streamer.isFollowing)) {
+                byStreamerId.set(streamer.streamerId, streamer);
+            }
+        }
+
+        return [...byStreamerId.values()];
+    }
+
+    public async fetchStreamers(count: number): Promise<Streamer[]> {
+        try {
+            const [followingIds, blockList] = await Promise.all([this.fetchFollowingIds(), this._fetchBlockList()]);
+            const followedLiveStreamers = followingIds.length > 0 ? await this.fetchLiveFollowings(followingIds, blockList) : [];
+            const recommendedStreamers = await this.fetchRecommendedStreamers(count, blockList);
+
+            return this.dedupeStreamers([...followedLiveStreamers, ...recommendedStreamers]);
         } catch (error) {
             console.error("Failed to fetch streamers:", error);
         }
