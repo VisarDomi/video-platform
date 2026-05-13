@@ -128,6 +128,7 @@ export class AppController {
 
     private insertStreamersAfterCurrent = (streamers: Streamer[]) => {
         this.store.insertStreamersAfterCurrent(streamers);
+        this.streamLoaderService.prefetchAliases(streamers, false);
     };
 
     private addToDownloadList = async () => {

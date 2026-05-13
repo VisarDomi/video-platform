@@ -71,6 +71,7 @@ interface RecommendationDetail {
 export class StreamerService {
     private defaultInit: RequestInit;
     private blockListCache: string[] | null = null;
+    private followingIdsCache: Set<string> | null = null;
 
     constructor(defaultInit: RequestInit) {
         this.defaultInit = defaultInit;
@@ -107,6 +108,10 @@ export class StreamerService {
     }
 
     private async fetchFollowingIds(): Promise<string[]> {
+        if (this.followingIdsCache !== null) {
+            return [...this.followingIdsCache];
+        }
+
         try {
             const followingIds = new Set<string>();
             let cursor: string | null = null;
@@ -120,6 +125,7 @@ export class StreamerService {
 
                 if (!response.ok) {
                     console.error(`Failed to fetch following ids, status: ${response.status}`);
+                    this.followingIdsCache = followingIds;
                     return [...followingIds];
                 }
 
@@ -127,6 +133,7 @@ export class StreamerService {
                 const rawFollowings = body?.followers || body?.followings || body?.records || body?.items || [];
 
                 if (!Array.isArray(rawFollowings)) {
+                    this.followingIdsCache = followingIds;
                     return [...followingIds];
                 }
 
@@ -138,6 +145,7 @@ export class StreamerService {
                 cursor = body?.nextCursor || null;
             } while (cursor);
 
+            this.followingIdsCache = followingIds;
             return [...followingIds];
         } catch (error) {
             console.error("Failed to fetch following ids:", error);
@@ -307,14 +315,16 @@ export class StreamerService {
 
     public async fetchMultiBroadcastStreamers(streamId: string): Promise<Streamer[]> {
         try {
-            const [multiBroadcastResponse, blockList] = await Promise.all([
+            const [multiBroadcastResponse, blockList, followingIds] = await Promise.all([
                 fetch(CONSTANTS.API.STREAM_WATCH, {
                     ...this.defaultInit,
                     method: "POST",
                     body: streamId,
                 }),
                 this._fetchBlockList(),
+                this.fetchFollowingIds(),
             ]);
+            const followingIdSet = new Set(followingIds);
 
             if (multiBroadcastResponse.ok) {
                 const data = await multiBroadcastResponse.json();
@@ -333,7 +343,7 @@ export class StreamerService {
                                 streamId: descriptor.streamId,
                                 masterListUrl: item.stream.streamURL,
                                 firstName: "...", // Will be updated by AliasService
-                                isFollowing: false,
+                                isFollowing: followingIdSet.has(descriptor.accountId),
                             };
                         }
                         return null;
