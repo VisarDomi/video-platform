@@ -32,8 +32,8 @@ VIDEO: {
     },
     USERSCRIPT: {
         MATCH_URLS: [
-            "https://tango.me/live/recommended",
-            "https://www.tango.me/live/recommended",
+            "https://tango.me/*",
+            "https://www.tango.me/*",
         ],
     },
     APP: {
@@ -48,4 +48,4 @@ VIDEO: {
     DEBUG: {
         ENABLED: false,
     },
-} as const;
+};
