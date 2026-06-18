@@ -15,7 +15,7 @@ export class LiveUrlService {
             return cachedUrl;
         }
 
-        const liveResponse = await fetch(streamer.masterListUrl, { credentials: "include" });
+        const liveResponse = await fetch(streamer.masterListUrl, { credentials: "include", mode: "cors" });
         if (liveResponse.ok) {
             const live = await liveResponse.text();
             const liveUrl = this._parseLiveUrlFromPlaylist(streamer.masterListUrl, live);
