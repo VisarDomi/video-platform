@@ -2,7 +2,6 @@ import { AppState } from "../core/app.state";
 import { AliasService } from "./alias.service";
 import { StreamerService } from "./api/streamer.service";
 import { Streamer, EventPayloads } from "../types";
-import { CONSTANTS } from "../core/constants";
 import { Emitter } from "../core/emitter";
 import { Events } from "../core/events";
 
@@ -35,7 +34,7 @@ export class StreamLoaderService {
 
         this.isFetching = true;
         try {
-            const newStreamers = await this.streamerService.fetchStreamers(CONSTANTS.APP.FETCH_BATCH_SIZE);
+            const newStreamers = await this.streamerService.fetchStreamers();
 
             this.appState.appendStreamers(newStreamers);
 

@@ -9,7 +9,7 @@ function finalBundlePlugin(): Plugin {
 
         renderChunk(code: string) {
             const injectorWrapper = `
-(function() {
+
     'use strict';
     async function main() {
 ${code}
@@ -18,7 +18,7 @@ ${code}
     script.id = '${CONSTANTS.DOM.INJECTED_SCRIPT_ID}';
     script.textContent = '(' + main.toString() + ')();';
     document.documentElement.appendChild(script);
-})();`;
+`;
 
             return {
                 code: injectorWrapper,

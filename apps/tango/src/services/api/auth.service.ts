@@ -26,11 +26,36 @@ export class AuthService {
     }
 
     public async ensureTokens(): Promise<void> {
-        await this.refreshTokens();
+        const accountId = localStorage.getItem("latest_account_id");
+        const sessionId = sessionStorage.getItem("username");
+
+        if (!accountId || !sessionId) {
+            document.body?.insertAdjacentHTML("beforeend", `<div style="position:fixed;top:0;left:0;right:0;background:red;color:#fff;font:20px monospace;padding:16px;z-index:99999">[tango] No session. Are you logged into tango.me?</div>`);
+            throw new Error("[tango] No session credentials (accountId or sessionId missing from storage).");
+        }
+
+        try {
+            const response = await new Promise<{ status: number }>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", "https://gateway.tango.me/session-service/public/v2/session/web/refresh");
+                xhr.withCredentials = true;
+                xhr.setRequestHeader("Content-Type", "application/json");
+                xhr.setRequestHeader("Accept", "application/json");
+                xhr.onload = () => resolve({ status: xhr.status });
+                xhr.onerror = () => reject(new Error("XHR network error"));
+                xhr.send(JSON.stringify({ accountId, sessionId }));
+            });
+
+            if (response.status !== 200) {
+                console.warn(`[tango] Session refresh returned ${response.status}`);
+            }
+        } catch (error) {
+            console.error("[tango] Failed to refresh session:", error);
+        }
     }
 
     public startTokenRefresh(originalSetInterval: typeof window.setInterval) {
-        this.refreshTokens();
+        void this.refreshTokens();
         originalSetInterval(() => this.refreshTokens(), 5000);
     }
 }

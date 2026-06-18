@@ -22,51 +22,6 @@ interface FollowingEntry {
     };
 }
 
-interface LiveRecord {
-    isPublic?: boolean;
-    account?: {
-        encryptedAccountId?: string;
-        firstName?: string;
-    };
-    anchor?: {
-        encryptedAccountId?: string;
-        firstName?: string;
-    };
-    stream?: {
-        id?: string;
-        streamId?: string;
-        encryptedAccountId?: string;
-        accountId?: string;
-        broadcasterId?: string;
-        masterListUrl?: string;
-        streamKind?: string;
-        status?: string;
-    };
-    viewInfo?: {
-        streamId?: string;
-        hlsStreamInfo?: {
-            masterUrl?: string;
-        };
-    };
-}
-
-interface RecommendationCategory {
-    tag?: string;
-    streamInfoList?: {
-        streamDetails?: RecommendationDetail[];
-    };
-}
-
-interface RecommendationDetail {
-    anchor?: {
-        encryptedAccountId?: string;
-        firstName?: string;
-    };
-    stream?: {
-        id?: string;
-        masterListUrl?: string;
-    };
-}
 
 export class StreamerService {
     private defaultInit: RequestInit;
@@ -84,7 +39,8 @@ export class StreamerService {
         try {
             const response = await fetch(CONSTANTS.API.BLOCK_LIST, this.defaultInit);
             if (response.ok) {
-                const blockList = await response.json();
+                const body = await response.json();
+                const blockList = Array.isArray(body) ? body : (body?.users || []);
                 this.blockListCache = blockList;
                 return blockList;
             }
@@ -153,17 +109,12 @@ export class StreamerService {
         }
     }
 
-    private async delay(ms: number): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    private liveRecordToStreamer(record: LiveRecord, blockList: string[]): Streamer | null {
-        const stream = record.stream;
-        const streamerId = stream?.encryptedAccountId || stream?.accountId || stream?.broadcasterId || record.account?.encryptedAccountId || record.anchor?.encryptedAccountId;
-        const streamId = stream?.id || stream?.streamId || record.viewInfo?.streamId;
-        const masterListUrl = stream?.masterListUrl || record.viewInfo?.hlsStreamInfo?.masterUrl;
-        const isLive = typeof stream?.status !== "string" || stream.status === "LIVING";
-        const isPublic = stream?.streamKind === "PUBLIC" || record.isPublic === true;
+    private recommendatorRecordToStreamer(record: any, blockList: string[]): Streamer | null {
+        const streamerId = record.anchor?.encryptedAccountId || record.stream?.encryptedAccountId;
+        const streamId = record.stream?.id;
+        const masterListUrl = record.stream?.masterListUrl;
+        const isLive = record.stream?.status === "LIVING";
+        const isPublic = record.isPublic === true || record.stream?.streamKind === "PUBLIC";
 
         if (!streamerId || !streamId || !masterListUrl || !isLive || !isPublic || blockList.includes(streamerId)) {
             return null;
@@ -173,119 +124,53 @@ export class StreamerService {
             streamerId,
             streamId,
             masterListUrl,
-            firstName: record.account?.firstName || record.anchor?.firstName || "...",
+            firstName: record.anchor?.firstName || "...",
             isFollowing: true,
         };
     }
 
-    private async fetchLiveFollowings(accountIds: string[], blockList: string[]): Promise<Streamer[]> {
-        const streamers: Streamer[] = [];
-        const batchSize = CONSTANTS.APP.LIVE_CHECK_BATCH_SIZE;
+    private _xhrFetchJSON(url: string, init?: RequestInit): Promise<{ status: number; ok: boolean; json(): Promise<any> }> {
+        const { promise, resolve, reject } = Promise.withResolvers<{ status: number; ok: boolean; json(): Promise<any> }>();
+        const xhr = new XMLHttpRequest();
+        xhr.open(init?.method ?? "GET", url);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader("Accept", "application/json; charset=UTF-8");
+        if (init?.headers) {
+            const h = init.headers as Record<string, string>;
+            Object.keys(h).forEach(k => xhr.setRequestHeader(k, h[k]));
+        }
+        xhr.onload = () => resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, json: () => Promise.resolve(JSON.parse(xhr.responseText)) });
+        xhr.onerror = () => reject(new Error("XHR network error"));
+        xhr.send(init?.body as XMLHttpRequestBodyInit | null ?? null);
+        return promise;
+    }
 
-        for (let index = 0; index < accountIds.length; index += batchSize) {
-            const batch = accountIds.slice(index, index + batchSize);
-            const response = await fetch(`${CONSTANTS.API.LIVE_BY_ACCOUNT_IDS}?pageSize=${batch.length}`, {
-                ...this.defaultInit,
+    private async _fetchRecommendator(url: string, blockList: string[]): Promise<Streamer[]> {
+        try {
+            const response = await this._xhrFetchJSON(url, {
+                ...this.defaultInit as any,
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    moderationLevel: 5,
-                    accountIds: batch,
-                    forceAllowPulsz: false,
-                }),
+                body: JSON.stringify({}),
             });
-
             if (!response.ok) {
-                console.error(`Failed to fetch live followings batch, status: ${response.status}`);
-            } else {
-                const body = await response.json();
-                const records = body?.records || body?.items || [];
-
-                if (Array.isArray(records)) {
-                    for (const record of records) {
-                        const streamer = this.liveRecordToStreamer(record, blockList);
-                        if (streamer) {
-                            streamers.push(streamer);
-                        }
-                    }
-                }
-            }
-
-            if (index + batchSize < accountIds.length) {
-                await this.delay(CONSTANTS.APP.LIVE_CHECK_BATCH_DELAY_MS);
-            }
-        }
-
-        return streamers;
-    }
-
-    private recommendationToStreamer(detail: RecommendationDetail, blockList: string[], isFollowing: boolean): Streamer | null {
-        const streamerId = detail.anchor?.encryptedAccountId;
-        const streamId = detail.stream?.id;
-        const masterListUrl = detail.stream?.masterListUrl;
-
-        if (!streamerId || !streamId || !masterListUrl || blockList.includes(streamerId)) {
-            return null;
-        }
-
-        return {
-            streamerId,
-            streamId,
-            masterListUrl,
-            firstName: detail.anchor?.firstName || "...",
-            isFollowing,
-        };
-    }
-
-    private async fetchRecommendedStreamers(count: number, blockList: string[]): Promise<Streamer[]> {
-        const recommendationsInit = {
-            ...this.defaultInit,
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                sessionId: "",
-                locale: "en_US",
-                region: "AL",
-                categoryPageSize: count,
-                streamPageSize: count,
-                page: 0,
-                moderationLevel: 5,
-                nsfwModerationLevel: 5,
-                accessToPremium: false,
-            }),
-        };
-
-        try {
-            const response = await fetch(CONSTANTS.API.RECOMMENDATIONS, recommendationsInit);
-            if (!response.ok) {
-                console.error(`Failed to fetch recommended streamers, status: ${response.status}`);
+                console.error(`[tango] Recommendator fetch failed, status: ${response.status}, url: ${url.split("/").slice(-2).join("/")}`);
                 return [];
             }
-
-            const recommendations = await response.json();
-            const categories = recommendations?.categoryInfoList || [];
-            const streamers: Streamer[] = [];
-
-            if (!Array.isArray(categories)) {
-                return [];
-            }
-
-            for (const category of categories as RecommendationCategory[]) {
-                const details = category.streamInfoList?.streamDetails || [];
-                for (const detail of details) {
-                    const streamer = this.recommendationToStreamer(detail, blockList, category.tag === "following");
-                    if (streamer) {
-                        streamers.push(streamer);
-                    }
-                }
-            }
-
-            return streamers;
+            const body = await response.json();
+            const records = body?.records || [];
+            if (!Array.isArray(records)) return [];
+            return records
+                .map((r: any) => this.recommendatorRecordToStreamer(r, blockList))
+                .filter((s: Streamer | null): s is Streamer => s !== null);
         } catch (error) {
-            console.error("Failed to fetch recommended streamers:", error);
-            return [];
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(`[tango] Recommendator fetch error: ${msg}`);
         }
+        return [];
     }
+
+
 
     private dedupeStreamers(streamers: Streamer[]): Streamer[] {
         const byStreamerId = new Map<string, Streamer>();
@@ -300,15 +185,16 @@ export class StreamerService {
         return [...byStreamerId.values()];
     }
 
-    public async fetchStreamers(count: number): Promise<Streamer[]> {
+    public async fetchStreamers(): Promise<Streamer[]> {
         try {
-            const [followingIds, blockList] = await Promise.all([this.fetchFollowingIds(), this._fetchBlockList()]);
-            const followedLiveStreamers = followingIds.length > 0 ? await this.fetchLiveFollowings(followingIds, blockList) : [];
-            const recommendedStreamers = await this.fetchRecommendedStreamers(count, blockList);
-
-            return this.dedupeStreamers([...followedLiveStreamers, ...recommendedStreamers]);
+            const blockList = await this._fetchBlockList();
+            const [followed, recommended] = await Promise.all([
+                this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_FOLLOWING, blockList),
+                this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_RECOMMENDATIONS, blockList),
+            ]);
+            return this.dedupeStreamers([...followed, ...recommended]);
         } catch (error) {
-            console.error("Failed to fetch streamers:", error);
+            console.error("[tango] Failed to fetch streamers:", error);
         }
         return [];
     }
@@ -329,7 +215,6 @@ export class StreamerService {
             if (multiBroadcastResponse.ok) {
                 const data = await multiBroadcastResponse.json();
                 const multiBroadcastStreams = data?.multiBroadcast?.streams;
-
                 if (!Array.isArray(multiBroadcastStreams)) {
                     return [];
                 }

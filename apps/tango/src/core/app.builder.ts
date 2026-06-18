@@ -49,7 +49,7 @@ export class ApplicationBuilder {
         await authService.ensureTokens();
 
         const streamerService = new StreamerService(this.defaultInit);
-        this.streamers = await streamerService.fetchStreamers(CONSTANTS.APP.FETCH_BATCH_SIZE);
+        this.streamers = await streamerService.fetchStreamers();
         return this;
     }
 
@@ -71,7 +71,7 @@ export class ApplicationBuilder {
 
     public build(): BuiltApplication {
         if (this.streamers.length === 0) {
-            console.log("No streamers found or API failed. Stopping script.");
+            alert("[tango] No streamers found or API failed. Refreshing page...");
             return { run: async () => {} };
         }
 
