@@ -136,3 +136,17 @@ After `SWAP 95.=106:` on a method, lines 112-115 from the old implementation sur
 **Cause:** The SWAP range was too narrow — the old method had trailing lines beyond line 106.
 
 **Fix:** Make the range wide enough to cover the entire construct. After editing, `read` the surrounding lines to check for orphans, then `DEL` them.
+
+### F6. Auto-repair drops a structural delimiter silently
+
+Example: `SWAP 43.=53` on a method triggered auto-repair "delimiter-balance mismatch" — dropped the `}`
+closing `if (!this.defaultInit) {` inside the new body. The `}` was treated as a duplicated trailing payload
+line. The build caught it only on the *next* method (`Expected ";" but found "async"`), off-by-one.
+
+**Cause:** Replacement body restated a closing brace that the tool matched against a surviving delimiter below
+the range. F3/F4 auto-repair kicks in and drops the duplicate — but the surviving one is a DIFFERENT
+delimiter (e.g. the method's `}` vs the `if`'s `}`).
+
+**Fix:** After ANY auto-repair warning (F3 or F4), immediately re-read the edited area to verify all
+structural delimiters are intact. Do not proceed to another edit or build from that snapshot.
+A `read path:40-70` catches the missing brace before the build errors on an unrelated line.
