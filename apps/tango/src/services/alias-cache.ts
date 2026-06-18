@@ -8,11 +8,9 @@ export interface IAliasCache {
 
 const CACHE_KEY = "tango_alias_cache";
 
-export function createAliasCache(setTimeoutFn: typeof window.setTimeout): IAliasCache {
+export function createAliasCache(): IAliasCache {
     let aliases: Record<string, string> = {};
     let names: Record<string, string> = {};
-    let isSaving = false;
-    let isDirty = false;
 
     const stored = localStorage.getItem(CACHE_KEY);
     if (stored) {
@@ -21,37 +19,18 @@ export function createAliasCache(setTimeoutFn: typeof window.setTimeout): IAlias
         names = parsed.names || {};
     }
 
-    async function processSaveQueue() {
-        if (isSaving) return;
-        isSaving = true;
-
-        while (isDirty) {
-            isDirty = false;
-            await new Promise<void>((resolve) =>
-                setTimeoutFn(() => {
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({aliases, names}));
-                    resolve();
-                }, 0)
-            );
-        }
-        isSaving = false;
-    }
-
-    function update(target: Record<string, string>, key: string, value: string) {
-        target[key] = value;
-        isDirty = true;
-        void processSaveQueue();
+    function save() {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ aliases, names }));
     }
 
     return {
         getAlias: (streamerId: string) => aliases[streamerId],
-        setAlias: (streamerId: string, alias: string) => update(aliases, streamerId, alias),
+        setAlias: (streamerId: string, alias: string) => { aliases[streamerId] = alias; save(); },
         getName: (streamerId: string) => names[streamerId],
-        setName: (streamerId: string, name: string) => update(names, streamerId, name),
+        setName: (streamerId: string, name: string) => { names[streamerId] = name; save(); },
         clear: () => {
             aliases = {};
             names = {};
-            isDirty = false;
             localStorage.removeItem(CACHE_KEY);
         },
     };

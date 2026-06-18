@@ -21,39 +21,27 @@ interface VideoManagerDependencies {
 }
 
 export class VideoManager {
-    private videosContainer: HTMLDivElement;
-    private emitter: Emitter<EventPayloads>;
-    private liveUrlService: LiveUrlService;
-    private streamerService: StreamerService;
-    private aliasService: AliasService;
-    private downloadListService: DownloadListService;
-    private gestureElements: GestureElements;
-    private originalSetTimeout: typeof window.setTimeout;
-    private originalAddEventListener: typeof EventTarget.prototype.addEventListener;
     private previousIndex: number = 0;
     private processedForMulti: Set<string> = new Set();
     private lastStreamerId: string | null = null;
-
     private units: StreamUnit[] = [];
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
-
     private stateGeneration: number = 0;
-
     private readonly NAV_COMMIT_THRESHOLD = 0.2;
     private readonly NAV_ANIM_MS = 250;
 
-    constructor(dependencies: VideoManagerDependencies) {
-        this.videosContainer = dependencies.videosContainer;
-        this.gestureElements = dependencies.gestureElements;
-        this.emitter = dependencies.emitter;
-        this.liveUrlService = dependencies.liveUrlService;
-        this.streamerService = dependencies.streamerService;
-        this.aliasService = dependencies.aliasService;
-        this.downloadListService = dependencies.downloadListService;
-        this.originalSetTimeout = dependencies.originalSetTimeout;
-        this.originalAddEventListener = dependencies.originalAddEventListener;
-    }
+    constructor(private readonly deps: VideoManagerDependencies) {}
+
+    private get videosContainer() { return this.deps.videosContainer; }
+    private get emitter() { return this.deps.emitter; }
+    private get liveUrlService() { return this.deps.liveUrlService; }
+    private get streamerService() { return this.deps.streamerService; }
+    private get aliasService() { return this.deps.aliasService; }
+    private get downloadListService() { return this.deps.downloadListService; }
+    private get gestureElements() { return this.deps.gestureElements; }
+    private get originalSetTimeout() { return this.deps.originalSetTimeout; }
+    private get originalAddEventListener() { return this.deps.originalAddEventListener; }
 
     public registerListeners() {
         this.emitter.on(Events.APP.STATE_CHANGED, this.onStateChanged);

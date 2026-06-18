@@ -10,7 +10,6 @@ export class StreamLoaderService {
     private aliasService: AliasService;
     private appState: AppState;
     private emitter: Emitter<EventPayloads>;
-    private prefetching: Set<string> = new Set();
     private isFetching: boolean = false;
 
     constructor(
@@ -51,14 +50,8 @@ export class StreamLoaderService {
     }
 
     private _prefetchAliasesFor(streamersToProcess: Streamer[], forceUpdate: boolean): void {
-        const streamersToPrefetch: Streamer[] = streamersToProcess.filter((streamer) => !this.prefetching.has(streamer.streamerId));
-
-        if (streamersToPrefetch.length > 0) {
-            const streamerIdsBeingFetched = streamersToPrefetch.map((s) => s.streamerId);
-            streamerIdsBeingFetched.forEach((id) => this.prefetching.add(id));
-
-            this.aliasService.getAliasesFor(streamersToPrefetch.map(s => s.streamerId), forceUpdate).finally(() => {
-                streamerIdsBeingFetched.forEach((id) => this.prefetching.delete(id));
+        if (streamersToProcess.length > 0) {
+            this.aliasService.getAliasesFor(streamersToProcess.map(s => s.streamerId), forceUpdate).then(() => {
                 this.emitter.emit(Events.APP.UPDATE_UI, { streamerId: '' });
             });
         }
