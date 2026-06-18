@@ -19,7 +19,7 @@ export class AuthService {
             throw new Error("Not logged in");
         }
 
-        const response = await xhrFetch("https://gateway.tango.me/session-service/public/v2/session/web/refresh", {
+        const response = await xhrFetch(CONSTANTS.API.REFRESH_ENDPOINT, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ accountId, sessionId }),

@@ -3,6 +3,7 @@ const API_BASE_URL = `${GATEWAY_BASE_URL}/proxycador/api/public/v1`;
 
 export const CONSTANTS = {
     API: {
+        REFRESH_ENDPOINT: `${GATEWAY_BASE_URL}/session-service/public/v2/session/web/refresh`,
         BLOCK_LIST: `${GATEWAY_BASE_URL}/abregistrar/connection/v1/blocklist`,
         MY_FOLLOWINGS: `${GATEWAY_BASE_URL}/discovery/v3/followings/me/list`,
         RECOMMENDATOR_FOLLOWING: `${GATEWAY_BASE_URL}/recommendator/social/v2/list/following?includeAlias=true`,
