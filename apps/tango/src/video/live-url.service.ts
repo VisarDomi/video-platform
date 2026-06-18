@@ -1,50 +1,28 @@
-import { CONSTANTS } from "../core/constants";
-import { Emitter } from "../core/emitter";
-import { Events } from "../core/events";
-import { EventPayloads, Streamer } from "../types";
-import { ILiveUrlCache } from "./live-url-cache";
+import {CONSTANTS} from "../core/constants";
+import {Streamer} from "../types";
+import {ILiveUrlCache} from "./live-url-cache";
 
 export class LiveUrlService {
-    private defaultInit: RequestInit;
     private cache: ILiveUrlCache;
-    private emitter: Emitter<EventPayloads>;
 
-    constructor(defaultInit: RequestInit, cache: ILiveUrlCache, emitter: Emitter<EventPayloads>) {
-        this.defaultInit = defaultInit;
+    constructor(cache: ILiveUrlCache) {
         this.cache = cache;
-        this.emitter = emitter;
     }
 
-    public async fetchAndParseLiveUrl(streamer: Streamer, displayName: string): Promise<string | undefined> {
+    public async fetchAndParseLiveUrl(streamer: Streamer): Promise<string | undefined> {
         const cachedUrl = this.cache.get(streamer.streamerId);
         if (cachedUrl) {
             return cachedUrl;
         }
 
-        try {
-            const liveResponse = await fetch(streamer.masterListUrl, this.defaultInit);
-            if (liveResponse.ok) {
-                const live = await liveResponse.text();
-                const liveUrl = this._parseLiveUrlFromPlaylist(streamer.masterListUrl, live);
-                if (liveUrl) {
-                    this.emitter.emit(Events.DEBUG.LOG, {
-                        message: `${displayName} -> Master: OK`,
-                        type: 'success'
-                    });
-                    this.cache.set(streamer.streamerId, liveUrl);
-                    return liveUrl;
-                }
+        const liveResponse = await fetch(streamer.masterListUrl, { credentials: "include" });
+        if (liveResponse.ok) {
+            const live = await liveResponse.text();
+            const liveUrl = this._parseLiveUrlFromPlaylist(streamer.masterListUrl, live);
+            if (liveUrl) {
+                this.cache.set(streamer.streamerId, liveUrl);
+                return liveUrl;
             }
-            this.emitter.emit(Events.DEBUG.LOG, {
-                message: `${displayName} -> Master: EMPTY`,
-                type: 'error'
-            });
-        } catch (e: any) {
-            this.emitter.emit(Events.DEBUG.LOG, {
-                message: `${displayName} -> Master: FAIL (${e?.message})`,
-                type: 'error'
-            });
-            console.error(`Failed to fetch and parse live URL for ${streamer.streamerId}: ${e?.message}`);
         }
         return undefined;
     }

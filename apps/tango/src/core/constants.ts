@@ -1,18 +1,18 @@
-const API_BASE_URL = "https://gateway.tango.me/proxycador/api/public/v1";
 const GATEWAY_BASE_URL = "https://gateway.tango.me";
+const API_BASE_URL = `${GATEWAY_BASE_URL}/proxycador/api/public/v1`;
 
 export const CONSTANTS = {
     API: {
-        TOKEN_DATA: `${API_BASE_URL}/live/stream/v1/tokenData`,
-        FOLLOW_ADD: `${API_BASE_URL}/follow/add`,
-        FOLLOW_REMOVE: `${API_BASE_URL}/follow/remove`,
         BLOCK_LIST: `${GATEWAY_BASE_URL}/abregistrar/connection/v1/blocklist`,
         MY_FOLLOWINGS: `${GATEWAY_BASE_URL}/discovery/v3/followings/me/list`,
         RECOMMENDATOR_FOLLOWING: `${GATEWAY_BASE_URL}/recommendator/social/v2/list/following?includeAlias=true`,
         RECOMMENDATOR_RECOMMENDATIONS: `${GATEWAY_BASE_URL}/recommendator/social/v2/list/following_recommendations`,
+        ALIAS: `${GATEWAY_BASE_URL}/proxycador/api/profiles/v2/single`,
+        BATCH_ALIAS: `${GATEWAY_BASE_URL}/proxycador/api/public/v1/profiles/v2/batch`,
+        TOKEN_DATA: `${API_BASE_URL}/live/stream/v1/tokenData`,
+        FOLLOW_ADD: `${API_BASE_URL}/follow/add`,
+        FOLLOW_REMOVE: `${API_BASE_URL}/follow/remove`,
         STREAM_WATCH: `${API_BASE_URL}/live/stream/v2/watch?requestId=`,
-        ALIAS: "https://gateway.tango.me/proxycador/api/profiles/v2/single",
-        BATCH_ALIAS: "https://gateway.tango.me/proxycador/api/public/v1/profiles/v2/batch",
     },
     DOM: {
         SCRIPT_ELEMENT_ID_PREFIX: "donotremove",
@@ -22,9 +22,7 @@ export const CONSTANTS = {
         BODY_ID: "donotremove4",
         HEAD_ID: "donotremove5",
         STYLE_ELEMENT_ID: "donotremove6",
-
         LIST_VIEW: "listView",
-        LIST_CONTAINER: "listContainer",
         VIDEO_ITEMS_WRAPPER: "videoItemsWrapper",
     },
 VIDEO: {
@@ -38,13 +36,8 @@ VIDEO: {
     },
     APP: {
         FOLLOWINGS_PAGE_SIZE: 5000,
-        LIVE_CHECK_BATCH_SIZE: 100,
-        LIVE_CHECK_BATCH_DELAY_MS: 1000,
     },
     VIDEO_PLATFORM: {
         BASE_URL: "https://192.168.1.197:7973",
-    },
-    DEBUG: {
-        ENABLED: false,
     },
 };

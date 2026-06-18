@@ -1,4 +1,4 @@
-import { Events } from "./core/events";
+import {Events} from "./core/events";
 
 export interface Streamer {
     streamerId: string;
@@ -6,7 +6,7 @@ export interface Streamer {
     masterListUrl: string;
     firstName: string;
     isFollowing: boolean;
-    parentStreamerId?: string; // New field to track origin
+    parentStreamerId?: string;
 }
 
 export interface UIUpdateState {
@@ -31,11 +31,6 @@ export interface IPlayerStrategy {
     destroy(): void;
 }
 
-export interface DebugLogPayload {
-    message: string;
-    type: 'success' | 'error' | 'info';
-}
-
 export type EventPayloads = {
     [Events.UI.FOLLOW]: void;
     [Events.UI.UNFOLLOW]: void;
@@ -46,17 +41,13 @@ export type EventPayloads = {
     [Events.UI.PREVIOUS]: void;
     [Events.UI.TOGGLE_MUTE]: void;
     [Events.UI.SHOW_LIST]: void;
-    [Events.UI.PLAY_STREAMER]: string; // streamerId
+    [Events.UI.PLAY_STREAMER]: string;
     [Events.UI.SET_UI_VISIBLE]: boolean;
     [Events.UI.CAPTURE_SCROLL_ANCHOR]: number;
-
     [Events.VIDEO.MULTI_BROADCAST_FETCH_START]: void;
     [Events.VIDEO.MULTI_BROADCAST_FETCH_END]: void;
-
     [Events.APP.UPDATE_UI]: UIUpdateState;
     [Events.APP.STATE_CHANGED]: IApplicationState;
-    [Events.APP.REMOVE_STREAMER]: string; // streamerId
+    [Events.APP.REMOVE_STREAMER]: string;
     [Events.APP.INSERT_STREAMERS_AFTER_CURRENT]: Streamer[];
-
-    [Events.DEBUG.LOG]: DebugLogPayload;
 };

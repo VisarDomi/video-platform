@@ -51,7 +51,6 @@ export class StreamLoaderService {
     }
 
     private _prefetchAliasesFor(streamersToProcess: Streamer[], forceUpdate: boolean): void {
-        // We filter out IDs that are currently being fetched to avoid network duplication
         const streamersToPrefetch: Streamer[] = streamersToProcess.filter((streamer) => !this.prefetching.has(streamer.streamerId));
 
         if (streamersToPrefetch.length > 0) {
@@ -60,7 +59,6 @@ export class StreamLoaderService {
 
             this.aliasService.getAliasesFor(streamersToPrefetch.map(s => s.streamerId), forceUpdate).finally(() => {
                 streamerIdsBeingFetched.forEach((id) => this.prefetching.delete(id));
-                // Signal UI to re-read from cache/memory
                 this.emitter.emit(Events.APP.UPDATE_UI, { streamerId: '' });
             });
         }

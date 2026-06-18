@@ -1,8 +1,8 @@
-import { CONSTANTS } from "../../core/constants";
-import { Emitter } from "../../core/emitter";
-import { Events } from "../../core/events";
-import { AliasService } from "../../services/alias.service";
-import { EventPayloads, IApplicationState, Streamer } from "../../types";
+import {CONSTANTS} from "../../core/constants";
+import {Emitter} from "../../core/emitter";
+import {Events} from "../../core/events";
+import {AliasService} from "../../services/alias.service";
+import {EventPayloads, IApplicationState, Streamer} from "../../types";
 
 export class ListManager {
     private dom: {
@@ -34,13 +34,13 @@ export class ListManager {
 
     public initialize(state: IApplicationState) {
         this.lastState = state;
-        this.render(state);
+        void this.render(state);
 
     }
 
     private onStateChanged = (state: IApplicationState) => {
         this.lastState = state;
-        this.render(state);
+        void this.render(state);
 
         if (state.viewMode === 'video') {
             this.scrollToTarget(state);
@@ -51,7 +51,7 @@ export class ListManager {
 
     private onUiUpdate = () => {
         if (this.lastState) {
-            this.render(this.lastState);
+            void this.render(this.lastState);
         }
     }
 
@@ -66,10 +66,9 @@ export class ListManager {
     }
 
     private async render(state: IApplicationState) {
-        const { streamers, currentIndex } = state;
+        const {streamers, currentIndex} = state;
         const activeStreamer = streamers[currentIndex];
 
-        // Include names in signature to detect when "..." changes to "RealName"
         const currentDisplayNames = streamers.map(s => this.getDisplayName(s));
 
         const currentStateSignature = JSON.stringify({
@@ -117,7 +116,6 @@ export class ListManager {
         const alias = this.aliasService.getCachedAlias(streamer.streamerId);
         const displayAlias = alias || streamer.streamerId;
 
-        // Check cache for name, fallback to streamer object (which might be "..." or might be updated in memory)
         const cachedName = this.aliasService.getCachedName(streamer.streamerId);
         const displayName = cachedName || streamer.firstName;
 

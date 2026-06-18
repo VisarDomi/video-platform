@@ -1,28 +1,14 @@
 import { CONSTANTS } from "../../core/constants";
+import { xhrFetch } from "../../core/xhr-fetch";
 
 export class AuthService {
-    private defaultInit: RequestInit;
-
-    constructor(defaultInit: RequestInit) {
-        this.defaultInit = defaultInit;
-    }
-
-    private async refreshTokens(): Promise<boolean> {
-        try {
-            const tokenResponse = await fetch(CONSTANTS.API.TOKEN_DATA, this.defaultInit);
-            if (tokenResponse.status === 200) {
-                const tokenResponseBody = await tokenResponse.json();
-                const expires = new Date(tokenResponseBody.expireAt * 1000).toUTCString();
-
-                document.cookie = `tt=${tokenResponseBody.token}; expires=${expires}; domain=.tango.me; path=/`;
-                document.cookie = `tte=${tokenResponseBody.expireAt}; expires=${expires}; domain=.tango.me; path=/`;
-                document.cookie = `ttu=${tokenResponseBody.username}; expires=${expires}; domain=.tango.me; path=/`;
-                return true;
-            }
-        } catch (error) {
-            console.error("Failed to refresh tokens:", error);
-        }
-        return false;
+    private async refreshTokens(): Promise<void> {
+        const tokenResponse = await xhrFetch(CONSTANTS.API.TOKEN_DATA);
+        const tokenResponseBody = await tokenResponse.json();
+        const expires = new Date(tokenResponseBody.expireAt * 1000).toUTCString();
+        document.cookie = `tt=${tokenResponseBody.token}; expires=${expires}; domain=.tango.me; path=/`;
+        document.cookie = `tte=${tokenResponseBody.expireAt}; expires=${expires}; domain=.tango.me; path=/`;
+        document.cookie = `ttu=${tokenResponseBody.username}; expires=${expires}; domain=.tango.me; path=/`;
     }
 
     public async ensureTokens(): Promise<void> {
@@ -30,27 +16,17 @@ export class AuthService {
         const sessionId = sessionStorage.getItem("username");
 
         if (!accountId || !sessionId) {
-            document.body?.insertAdjacentHTML("beforeend", `<div style="position:fixed;top:0;left:0;right:0;background:red;color:#fff;font:20px monospace;padding:16px;z-index:99999">[tango] No session. Are you logged into tango.me?</div>`);
-            throw new Error("[tango] No session credentials (accountId or sessionId missing from storage).");
+            throw new Error("Not logged in");
         }
 
-        try {
-            const response = await new Promise<{ status: number }>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open("POST", "https://gateway.tango.me/session-service/public/v2/session/web/refresh");
-                xhr.withCredentials = true;
-                xhr.setRequestHeader("Content-Type", "application/json");
-                xhr.setRequestHeader("Accept", "application/json");
-                xhr.onload = () => resolve({ status: xhr.status });
-                xhr.onerror = () => reject(new Error("XHR network error"));
-                xhr.send(JSON.stringify({ accountId, sessionId }));
-            });
+        const response = await xhrFetch("https://gateway.tango.me/session-service/public/v2/session/web/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ accountId, sessionId }),
+        });
 
-            if (response.status !== 200) {
-                console.warn(`[tango] Session refresh returned ${response.status}`);
-            }
-        } catch (error) {
-            console.error("[tango] Failed to refresh session:", error);
+        if (response.status !== 200) {
+            throw new Error(`Session refresh returned ${response.status}`);
         }
     }
 

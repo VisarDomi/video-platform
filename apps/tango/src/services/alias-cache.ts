@@ -14,16 +14,11 @@ export function createAliasCache(setTimeoutFn: typeof window.setTimeout): IAlias
     let isSaving = false;
     let isDirty = false;
 
-    // Load from localStorage
-    try {
-        const stored = localStorage.getItem(CACHE_KEY);
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            aliases = parsed.aliases || {};
-            names = parsed.names || {};
-        }
-    } catch (e) {
-        console.error("AliasCache: Failed to load from localStorage", e);
+    const stored = localStorage.getItem(CACHE_KEY);
+    if (stored) {
+        const parsed = JSON.parse(stored);
+        aliases = parsed.aliases || {};
+        names = parsed.names || {};
     }
 
     async function processSaveQueue() {
@@ -32,17 +27,12 @@ export function createAliasCache(setTimeoutFn: typeof window.setTimeout): IAlias
 
         while (isDirty) {
             isDirty = false;
-            try {
-                await new Promise<void>((resolve) =>
-                    setTimeoutFn(() => {
-                        localStorage.setItem(CACHE_KEY, JSON.stringify({ aliases, names }));
-                        resolve();
-                    }, 0)
-                );
-            } catch (e) {
-                console.error("AliasCache: Failed to save to localStorage", e);
-                break;
-            }
+            await new Promise<void>((resolve) =>
+                setTimeoutFn(() => {
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({aliases, names}));
+                    resolve();
+                }, 0)
+            );
         }
         isSaving = false;
     }
@@ -50,7 +40,7 @@ export function createAliasCache(setTimeoutFn: typeof window.setTimeout): IAlias
     function update(target: Record<string, string>, key: string, value: string) {
         target[key] = value;
         isDirty = true;
-        processSaveQueue();
+        void processSaveQueue();
     }
 
     return {

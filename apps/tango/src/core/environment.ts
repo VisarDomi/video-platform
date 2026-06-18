@@ -65,7 +65,6 @@ export function preparePageEnvironment(): OriginalFunctions {
 }
 
 export function startDOMSanitizer(originalSetInterval: typeof window.setInterval) {
-    // Inject viewport meta tag for iOS transparency/safe-area
     const metaId = `${CONSTANTS.DOM.SCRIPT_ELEMENT_ID_PREFIX}_viewport`;
     if (!document.getElementById(metaId)) {
         const meta = document.createElement('meta');

@@ -44,9 +44,6 @@ export class AppController {
     }
 
     public initialPrefetch() {
-        // FORCE UPDATE = TRUE
-        // This ensures that on app start, we fetch fresh aliases/names for the initial list,
-        // refreshing the cache even if data exists.
         this.streamLoaderService.prefetchAliases(this.store.getState().streamers, true);
     }
 
@@ -57,31 +54,21 @@ export class AppController {
     private follow = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const { streamerId, isFollowing: originalStatus } = streamer;
+        const { streamerId } = streamer;
 
         this.store.updateFollowingStatus(streamerId, true);
 
-        try {
-            await this.actionService.follow(streamerId);
-        } catch (error) {
-            console.error("Failed to follow streamer:", error);
-            this.store.updateFollowingStatus(streamerId, originalStatus);
-        }
+        await this.actionService.follow(streamerId);
     };
 
     private unfollow = async () => {
         const streamer = this.store.getCurrentStreamer();
         if (!streamer) return;
-        const { streamerId, isFollowing: originalStatus } = streamer;
+        const { streamerId } = streamer;
 
         this.store.updateFollowingStatus(streamerId, false);
 
-        try {
-            await this.actionService.unfollow(streamerId);
-        } catch (error) {
-            console.error("Failed to unfollow streamer:", error);
-            this.store.updateFollowingStatus(streamerId, originalStatus);
-        }
+        await this.actionService.unfollow(streamerId);
     };
 
     private block = async () => {
@@ -89,7 +76,6 @@ export class AppController {
         if (!streamer) return;
         const { streamerId, isFollowing } = streamer;
 
-        try {
             if (isFollowing) {
                 await this.actionService.unfollow(streamerId);
             }
@@ -97,9 +83,6 @@ export class AppController {
             if (response.ok) {
                 this.store.removeStreamer(streamerId);
             }
-        } catch (error) {
-            console.error("Failed to block streamer:", error);
-        }
     };
 
     private next = () => {

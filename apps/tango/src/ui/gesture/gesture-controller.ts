@@ -49,7 +49,7 @@ export class GestureController {
         this._attachListeners(container, originalAddEventListener);
     }
 
-    private _attachListeners(container: HTMLElement, listen: typeof EventTarget.prototype.addEventListener) {
+    private _attachListeners(container: HTMLElement, listen: Function) {
         listen.call(container, 'touchstart', (e: TouchEvent) => {
             if (e.touches.length > 1) return;
             if (this.swipeAnimating) return;
@@ -88,7 +88,6 @@ export class GestureController {
                 }
             }
 
-            // Only prevent default after axis is determined and it's a gesture we own
             if (this.swipeType !== 'none') {
                 e.preventDefault();
             }

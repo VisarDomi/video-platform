@@ -40,18 +40,12 @@ export class AliasService {
         return streamerId;
     }
 
-    /**
-     * Batched fetch for aliases.
-     * @param streamerIds List of streamer IDs to check.
-     * @param forceUpdate If true, fetches from API even if cached data exists (used for refreshing stale data).
-     */
     public async getAliasesFor(streamerIds: string[], forceUpdate: boolean = false): Promise<void> {
         const idsToFetch: string[] = [];
 
         for (const streamerId of streamerIds) {
             const cachedAlias = this.cache.getAlias(streamerId);
 
-            // Decide whether to fetch
             if (forceUpdate || !cachedAlias) {
                 idsToFetch.push(streamerId);
             }

@@ -39,7 +39,7 @@ export class HlsPlayer implements IPlayerStrategy {
         this.hls.loadSource(url);
 
         this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            this.videoElement.play().catch((e) => console.error("Autoplay failed", e));
+            this.videoElement.play();
             this.callbacks.onReady();
         });
 
@@ -58,7 +58,7 @@ export class HlsPlayer implements IPlayerStrategy {
 
     public resume(): void {
         this.hls.startLoad();
-        this.videoElement.play().catch(() => {});
+        this.videoElement.play();
     }
 
     public destroy(): void {

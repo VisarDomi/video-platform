@@ -4,7 +4,7 @@ import { Events } from "./events";
 
 
 export class AppState {
-    private _streamers: Streamer[];
+    private readonly _streamers: Streamer[];
     private _currentIndex: number = 0;
     private _viewMode: ViewMode = 'list';
     private _scrollAnchorY: number = 0;
@@ -129,14 +129,6 @@ export class AppState {
         }
         this._viewMode = mode;
         this.emitStateChange();
-    }
-
-    public setIndexToStreamer(streamerId: string): void {
-        const index = this._streamers.findIndex(s => s.streamerId === streamerId);
-        if (index !== -1) {
-            this._currentIndex = index;
-            this.emitStateChange();
-        }
     }
 
     public playStreamer(streamerId: string): void {

@@ -149,4 +149,56 @@ delimiter (e.g. the method's `}` vs the `if`'s `}`).
 
 **Fix:** After ANY auto-repair warning (F3 or F4), immediately re-read the edited area to verify all
 structural delimiters are intact. Do not proceed to another edit or build from that snapshot.
-A `read path:40-70` catches the missing brace before the build errors on an unrelated line.
+
+### F7. SWAP lands on wrong method (same line numbers, different context)
+
+Example: `SWAP 198.=200:` meant to replace `_fetchRecommendator`'s catch block but hit
+`fetchMultiBroadcastStreamers`'s if-block instead. Both had code at lines 198-200 — different
+methods, different blocks, identical line numbers. No error from the tool — just silent corruption.
+
+**Cause:** The read snapshot shows `LINE:TEXT` for each line. The edit anchors on line numbers
+without verifying the text matches. If a prior edit shifted lines, or two methods happen to have
+similar structure at the same line numbers, the edit corrupts the wrong method.
+
+**Fix:** Before issuing, verify at least the first and last lines of your SWAP range by reading
+their `LINE:TEXT` output. Does line 198 actually say `} catch (error) {`? If not, your snapshot
+is stale or you're targeting the wrong method.
+
+### F8. SWAP range starts after old content — creates duplicate
+
+Example: `SWAP 109.=115:` replaced `next()` in `app.controller.ts`, but the old `next()` was on
+lines 105-108. The SWAP started at 109, leaving the old copy intact and inserting a new one below.
+Result: two `private next` methods, duplicate declaration.
+
+**Cause:** The read showed a structural summary with `..` elisions. Line 105 was hidden inside
+a collapsed block. The edit targeted what was visible (109) without realizing the method started
+earlier.
+
+**Fix:** Always ranged-read the full construct you're replacing — from its opening line
+(`private next = () => {`) to its closing `};`. Then SWAP from the opening line number,
+not from the interior.
+
+### F9. Multi-hunk edits interact unexpectedly with DEL
+
+Example: `DEL 105.=108` and `SWAP 109.=115` issued in the same call. The DEL removes lines, shifting
+everything below. The SWAP also uses original-for-this-snapshot line numbers. The result depends on
+apply order — the tool may resolve both against the original state, or one after the other.
+
+**Cause:** Multiple hunks in one call all anchor on the SAME original line numbers from the
+snapshot. The tool's resolution order is deterministic but unintuitive — each hunk applies
+independently to the snapshot state, not sequentially.
+
+**Fix:** Use separate edit calls for non-independent changes (especially DEL + SWAP on adjacent
+
+### F10. File changed between read and edit (hash mismatch)
+
+```
+Edit rejected for src/foo.ts: file changed between read and edit.
+Section is bound to #AAAA, but the current file hashes to #BBBB.
+```
+
+**Cause:** A prior edit in the same session modified this file. The snapshot tag (#AAAA) from
+the read is now stale — the file has a new hash (#BBBB).
+
+**Fix:** Re-read the file with `read` to mint a fresh tag, then re-issue the edit. Never reuse
+a tag from a prior edit's response — always use a fresh `read`.

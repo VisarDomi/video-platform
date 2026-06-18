@@ -1,12 +1,12 @@
-import { Emitter } from "../../core/emitter";
-import { Events } from "../../core/events";
-import { AliasService } from "../../services/alias.service";
-import { DownloadListService } from "../../services/api/download-list.service";
-import { LiveUrlService } from "../../video/live-url.service";
-import { HlsPlayer } from "../../video/player/hls.player";
-import { EventPayloads, IPlayerStrategy, Streamer, UIUpdateState } from "../../types";
-import { STREAM_UNIT_TEMPLATE } from "./stream-unit.dom";
-import { GestureController, GestureElements, PeekCallbacks } from "../gesture/gesture-controller";
+import {Emitter} from "../../core/emitter";
+import {Events} from "../../core/events";
+import {AliasService} from "../../services/alias.service";
+import {DownloadListService} from "../../services/api/download-list.service";
+import {LiveUrlService} from "../../video/live-url.service";
+import {HlsPlayer} from "../../video/player/hls.player";
+import {EventPayloads, IPlayerStrategy, Streamer, UIUpdateState} from "../../types";
+import {STREAM_UNIT_TEMPLATE} from "./stream-unit.dom";
+import {GestureController, GestureElements, PeekCallbacks} from "../gesture/gesture-controller";
 
 export class StreamUnit {
     public element: HTMLElement;
@@ -20,7 +20,6 @@ export class StreamUnit {
     private liveUrlService: LiveUrlService;
     private downloadListService: DownloadListService;
 
-    // UI Elements
     private nameEl!: HTMLElement;
     private topBarEl!: HTMLElement;
     private muteBtn!: HTMLButtonElement;
@@ -32,8 +31,6 @@ export class StreamUnit {
     private audioOnly: boolean = false;
     private peekCallbacks?: PeekCallbacks;
 
-    // Ownership token: each update() call increments this.
-    // Async continuations only mutate if they still own the current generation.
     private updateGeneration: number = 0;
 
     constructor(
@@ -66,8 +63,6 @@ export class StreamUnit {
     }
 
     public async update(streamer: Streamer | undefined) {
-        // Acquire ownership: increment generation and capture token.
-        // All async continuations must check owns() — stale generations are no-ops.
         const gen = ++this.updateGeneration;
         const owns = () => this.updateGeneration === gen;
 
@@ -96,55 +91,37 @@ export class StreamUnit {
 
         const targetStreamerId = streamer.streamerId;
 
-        // Immediate UI Update (Uses whatever is currently in memory/cache)
         this._updateNameText(streamer);
         this.updateFollowButton(streamer.isFollowing);
         this.updateDownloadListButton(streamer.streamerId);
 
-        // Async: Fetch Alias & Name.
-        // We use .then() to trigger a re-render of the text without blocking video loading.
         this.aliasService.getAliasFor(streamer.streamerId).then(() => {
             if (!owns()) return;
             this._updateNameText(this.currentStreamer!);
             this.updateDownloadListButton(targetStreamerId);
         });
 
-        // Async: Video
-        try {
-            const cachedAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
-            const liveUrl = await this.liveUrlService.fetchAndParseLiveUrl(streamer, cachedAlias);
+        const liveUrl = await this.liveUrlService.fetchAndParseLiveUrl(streamer);
 
-            if (!owns()) return;
+        if (!owns()) return;
 
-            if (liveUrl) {
-                const finalAlias = this.aliasService.getCachedAlias(targetStreamerId) || targetStreamerId;
-                this.player = new HlsPlayer(this.videoElement, {
-                    onReady: () => {
-                        this.emitter.emit(Events.DEBUG.LOG, {
-                            message: `${finalAlias} -> Live: OK`,
-                            type: 'success'
-                        });
-                    },
-                    onFatalError: (type) => {
-                        if (!owns()) return;
-                        this.emitter.emit(Events.DEBUG.LOG, {
-                            message: `${finalAlias} -> Live: ERROR (${type})`,
-                            type: 'error'
-                        });
-                        if (type === 'network') {
-                            this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
-                        }
-                    },
-                });
-                this.player.loadSource(liveUrl);
-                this._detectAudioOnly(gen);
-            } else {
-                this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
-            }
-
-        } catch (e) {
-            console.error("StreamUnit update failed", e);
+        if (liveUrl) {
+            this.player = new HlsPlayer(this.videoElement, {
+                onReady: () => {
+                },
+                onFatalError: (type) => {
+                    if (!owns()) return;
+                    if (type === 'network') {
+                        this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
+                    }
+                },
+            });
+            this.player.loadSource(liveUrl);
+            this._detectAudioOnly(gen);
+        } else {
+            this.emitter.emit(Events.APP.REMOVE_STREAMER, streamer.streamerId);
         }
+
     }
 
     private _detectAudioOnly(ownerGen: number) {
@@ -160,11 +137,9 @@ export class StreamUnit {
     }
 
     private _updateNameText(streamer: Streamer) {
-        // 1. Get cached alias or fallback to ID
         const cachedAlias = this.aliasService.getCachedAlias(streamer.streamerId);
         const displayAlias = cachedAlias || streamer.streamerId;
 
-        // 2. Get name. Prioritize cached name (in case streamer object is stale), then streamer.firstName
         const cachedName = this.aliasService.getCachedName(streamer.streamerId);
         const displayName = cachedName || streamer.firstName;
 
@@ -190,13 +165,7 @@ export class StreamUnit {
     }
 
     public play() {
-        this.videoElement.play().catch(e => console.error("Autoplay failed", e));
-    }
-
-    public resume() {
-        if (this.player) {
-            this.player.resume();
-        }
+        void this.videoElement.play();
     }
 
     private _createDOM(): HTMLElement {

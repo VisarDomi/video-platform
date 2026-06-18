@@ -3,7 +3,6 @@ import { Events } from "../core/events";
 import { EventPayloads, IApplicationState, Streamer } from "../types";
 import { LiveUrlService } from "./live-url.service";
 import { StreamerService } from "../services/api/streamer.service";
-import { AuthService } from "../services/api/auth.service";
 import { AliasService } from "../services/alias.service";
 import { DownloadListService } from "../services/api/download-list.service";
 import { StreamUnit } from "../ui/stream-unit/stream-unit";
@@ -17,7 +16,6 @@ interface VideoManagerDependencies {
     streamerService: StreamerService;
     aliasService: AliasService;
     downloadListService: DownloadListService;
-    authService: AuthService;
     originalSetTimeout: typeof window.setTimeout;
     originalAddEventListener: typeof EventTarget.prototype.addEventListener;
 }
@@ -27,7 +25,6 @@ export class VideoManager {
     private emitter: Emitter<EventPayloads>;
     private liveUrlService: LiveUrlService;
     private streamerService: StreamerService;
-    private authService: AuthService;
     private aliasService: AliasService;
     private downloadListService: DownloadListService;
     private gestureElements: GestureElements;
@@ -41,18 +38,10 @@ export class VideoManager {
     private activeUnit: StreamUnit | null = null;
     private uiVisible: boolean = true;
 
-    // Ownership token: only the current generation owns the right to mutate state.
-    // Each onStateChanged call increments this; stale generations become no-ops.
     private stateGeneration: number = 0;
 
-    // Peek swipe
     private readonly NAV_COMMIT_THRESHOLD = 0.2;
     private readonly NAV_ANIM_MS = 250;
-
-    // Reconnection / freeze recovery
-    private readonly RESUME_THRESHOLD_MS = 3000;
-    private backgroundedAt = 0;
-    private isVisible = true;
 
     constructor(dependencies: VideoManagerDependencies) {
         this.videosContainer = dependencies.videosContainer;
@@ -60,7 +49,6 @@ export class VideoManager {
         this.emitter = dependencies.emitter;
         this.liveUrlService = dependencies.liveUrlService;
         this.streamerService = dependencies.streamerService;
-        this.authService = dependencies.authService;
         this.aliasService = dependencies.aliasService;
         this.downloadListService = dependencies.downloadListService;
         this.originalSetTimeout = dependencies.originalSetTimeout;
@@ -71,59 +59,6 @@ export class VideoManager {
         this.emitter.on(Events.APP.STATE_CHANGED, this.onStateChanged);
         this.emitter.on(Events.UI.TOGGLE_MUTE, this.onToggleMute);
         this.emitter.on(Events.UI.SET_UI_VISIBLE, this.onSetUiVisible);
-        this._setupConnectionMonitor();
-    }
-
-    // --- Reconnection / freeze recovery ---
-
-    private _setupConnectionMonitor() {
-        const listen = this.originalAddEventListener;
-
-        listen.call(window, 'online', () => {
-            console.log('[VideoManager] Back online → resuming');
-            this._resumeActiveUnit();
-        });
-
-        listen.call(document, 'visibilitychange', () => {
-            const visible = document.visibilityState === 'visible';
-            this.isVisible = visible;
-            this._handleVisibilityChange(visible);
-        });
-
-        // iOS PWA fallbacks
-        listen.call(window, 'pageshow', () => {
-            if (document.visibilityState === 'visible' && !this.isVisible) {
-                this.isVisible = true;
-                this._handleVisibilityChange(true);
-            }
-        });
-
-        listen.call(window, 'focus', () => {
-            if (!this.isVisible) {
-                this.isVisible = true;
-                this._handleVisibilityChange(true);
-            }
-        });
-    }
-
-    private _handleVisibilityChange(visible: boolean) {
-        if (!visible) {
-            this.backgroundedAt = Date.now();
-        } else {
-            const elapsed = this.backgroundedAt > 0 ? Date.now() - this.backgroundedAt : 0;
-            this.backgroundedAt = 0;
-            if (elapsed > this.RESUME_THRESHOLD_MS) {
-                console.log(`[VideoManager] Resuming after ${Math.round(elapsed / 1000)}s`);
-                this._resumeActiveUnit();
-            }
-        }
-    }
-
-    private async _resumeActiveUnit() {
-        await this.authService.ensureTokens();
-        if (this.activeUnit) {
-            this.activeUnit.resume();
-        }
     }
 
     public async initialize(state: IApplicationState) {
@@ -152,7 +87,7 @@ export class VideoManager {
 
         await this._checkForMultiBroadcast(state.currentStreamer);
 
-        this._primeLiveUrlCache(state.streamers);
+        void this._primeLiveUrlCache(state.streamers);
     }
 
     private onToggleMute = () => {
@@ -169,8 +104,6 @@ export class VideoManager {
     };
 
     private onStateChanged = async (state: IApplicationState) => {
-        // Acquire ownership: increment generation and capture token.
-        // Any async continuation must check owns() before mutating.
         const gen = ++this.stateGeneration;
         const owns = () => this.stateGeneration === gen;
 
@@ -252,7 +185,6 @@ export class VideoManager {
         }
 
         if (streamsAdded) {
-            // The state change from insert will trigger onStateChanged which updates neighbors
             this.emitter.emit(Events.VIDEO.MULTI_BROADCAST_FETCH_END);
         } else {
             this.emitter.emit(Events.VIDEO.MULTI_BROADCAST_FETCH_END);
@@ -304,18 +236,14 @@ export class VideoManager {
     }
 
     private async _primeLiveUrlCache(streamers: Streamer[]) {
-        console.log("Starting background cache priming...");
         const streamersCopy = streamers.map(s => ({ ...s }));
 
         for (const streamer of streamersCopy) {
-            const displayName = await this.aliasService.getAliasFor(streamer.streamerId);
-            await this.liveUrlService.fetchAndParseLiveUrl(streamer, displayName);
+            await this.liveUrlService.fetchAndParseLiveUrl(streamer);
             await new Promise<void>((resolve) => this.originalSetTimeout(resolve, 500));
         }
-        console.log("Background cache priming finished.");
     }
 
-    // --- Peek swipe ---
 
     public navPeekUpdate(dy: number): void {
         const vh = window.innerHeight;
@@ -348,7 +276,6 @@ export class VideoManager {
         peekUnit.element.style.transition = transition;
 
         if (commit) {
-            // Animate active off-screen, peek to center
             active.element.style.transform = dy < 0 ? `translateY(${-vh}px)` : `translateY(${vh}px)`;
             peekUnit.element.style.transform = 'translateY(0)';
 
@@ -364,7 +291,6 @@ export class VideoManager {
             };
             active.element.addEventListener('transitionend', onEnd, { once: true });
         } else {
-            // Cancel: animate back
             active.element.style.transform = 'translateY(0)';
             if (dy < 0) {
                 peekUnit.element.style.transform = `translateY(${vh}px)`;

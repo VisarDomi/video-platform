@@ -64,7 +64,6 @@ export const STREAM_UNIT_STYLES = `
         left: 0;
         width: 100%;
         
-        /* Updated padding for safe area */
         padding-top: max(15px, env(safe-area-inset-top));
         padding-left: max(15px, env(safe-area-inset-left));
         padding-right: max(15px, env(safe-area-inset-right));

@@ -11,7 +11,6 @@ import { AppState } from "./app.state";
 import { ServiceKeys } from "./service.keys";
 import { CONSTANTS } from "./constants";
 import { UI_STYLES } from "../ui/ui.resources";
-import { DebugManager } from "../ui/debug/debug.manager";
 import { DownloadListService } from "../services/api/download-list.service";
 import { StreamLoaderService } from "../services/stream-loader.service";
 
@@ -23,7 +22,6 @@ export class ApplicationBuilder {
     private originalSetInterval!: typeof window.setInterval;
     private originalSetTimeout!: typeof window.setTimeout;
     private originalAddEventListener!: typeof EventTarget.prototype.addEventListener;
-    private defaultInit!: RequestInit;
     private streamers!: Streamer[];
 
     public withEnvironment(): this {
@@ -35,20 +33,11 @@ export class ApplicationBuilder {
         return this;
     }
 
-    public withApiConfig(init: RequestInit): this {
-        this.defaultInit = init;
-        return this;
-    }
-
     public async withInitialData(): Promise<this> {
-        if (!this.defaultInit) {
-            throw new Error("API config must be set before fetching initial data.");
-        }
-        // Ensure tokens are fresh before any API calls
-        const authService = new AuthService(this.defaultInit);
+        const authService = new AuthService();
         await authService.ensureTokens();
 
-        const streamerService = new StreamerService(this.defaultInit);
+        const streamerService = new StreamerService();
         this.streamers = await streamerService.fetchStreamers();
         return this;
     }
@@ -78,7 +67,6 @@ export class ApplicationBuilder {
         const container = ServiceContainer.create({
             originalSetTimeout: this.originalSetTimeout,
             originalAddEventListener: this.originalAddEventListener,
-            defaultInit: this.defaultInit,
             streamers: this.streamers,
         });
 
@@ -93,18 +81,12 @@ export class ApplicationBuilder {
         const run = async () => {
             this.injectStyles();
             authService.startTokenRefresh(this.originalSetInterval);
-            downloadListService.fetchList();
+            void downloadListService.fetchList();
             appController.registerListeners();
             videoManager.registerListeners();
             uiManager.registerListeners();
             listManager.registerListeners();
 
-            if (CONSTANTS.DEBUG.ENABLED) {
-                const debugManager = container.resolve<DebugManager>(ServiceKeys.DEBUG_MANAGER);
-                debugManager.registerListeners();
-            }
-
-            // Initialize List View content
             const appState = container.resolve<AppState>(ServiceKeys.APP_STATE);
             listManager.initialize(appState.getState());
 

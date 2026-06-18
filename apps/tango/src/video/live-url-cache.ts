@@ -11,14 +11,9 @@ export function createLiveUrlCache(setTimeoutFn: typeof window.setTimeout): ILiv
     let isSaving = false;
     let isDirty = false;
 
-    // Load from localStorage
-    try {
-        const stored = localStorage.getItem(CACHE_KEY);
-        if (stored) {
-            cache = JSON.parse(stored);
-        }
-    } catch (e) {
-        console.error("LiveUrlCache: Failed to load from localStorage", e);
+    const stored = localStorage.getItem(CACHE_KEY);
+    if (stored) {
+        cache = JSON.parse(stored);
     }
 
     async function processSaveQueue() {
@@ -27,17 +22,12 @@ export function createLiveUrlCache(setTimeoutFn: typeof window.setTimeout): ILiv
 
         while (isDirty) {
             isDirty = false;
-            try {
-                await new Promise<void>((resolve) =>
-                    setTimeoutFn(() => {
-                        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-                        resolve();
-                    }, 0)
-                );
-            } catch (e) {
-                console.error("LiveUrlCache: Failed to save to localStorage", e);
-                break;
-            }
+            await new Promise<void>((resolve) =>
+                setTimeoutFn(() => {
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+                    resolve();
+                }, 0)
+            );
         }
         isSaving = false;
     }
@@ -47,7 +37,7 @@ export function createLiveUrlCache(setTimeoutFn: typeof window.setTimeout): ILiv
         set: (streamerId: string, url: string) => {
             cache[streamerId] = url;
             isDirty = true;
-            processSaveQueue();
+            void processSaveQueue();
         },
         clear: () => {
             cache = {};

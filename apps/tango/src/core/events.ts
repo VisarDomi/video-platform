@@ -23,7 +23,4 @@ export const Events = {
         REMOVE_STREAMER: "app:removeStreamer",
         INSERT_STREAMERS_AFTER_CURRENT: "app:insertStreamersAfterCurrent",
     },
-    DEBUG: {
-        LOG: "debug:log",
-    },
 } as const;
