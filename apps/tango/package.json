@@ -1,6 +1,6 @@
 {
   "name": "tango-explorer",
-  "version": "227",
+  "version": "228",
   "description": "A lightweight userscript that makes exploring Tango streams easy",
   "type": "module",
   "scripts": {

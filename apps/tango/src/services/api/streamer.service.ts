@@ -86,7 +86,7 @@ export class StreamerService {
         return [...this.followingIdsCache];
     }
 
-    private recommendatorRecordToStreamer(record: any, blockList: string[]): Streamer | null {
+    private recommendatorRecordToStreamer(record: any, blockList: string[], isFollowing: boolean): Streamer | null {
         const streamerId = record.anchor?.encryptedAccountId || record.stream?.encryptedAccountId;
         const streamId = record.stream?.id;
         const masterListUrl = record.stream?.masterListUrl;
@@ -102,12 +102,12 @@ export class StreamerService {
             streamId,
             masterListUrl,
             firstName: record.anchor?.firstName,
-            isFollowing: true,
+            isFollowing,
         };
     }
 
 
-    private async _fetchRecommendator(url: string, blockList: string[]): Promise<Streamer[]> {
+    private async _fetchRecommendator(url: string, blockList: string[], isFollowing: boolean): Promise<Streamer[]> {
         const response = await xhrFetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -116,7 +116,7 @@ export class StreamerService {
         const body = await response.json();
         const records = body?.records;
         return records
-            .map((r: any) => this.recommendatorRecordToStreamer(r, blockList))
+            .map((r: any) => this.recommendatorRecordToStreamer(r, blockList, isFollowing))
             .filter((s: Streamer | null): s is Streamer => s !== null);
     }
 
@@ -136,9 +136,15 @@ export class StreamerService {
     public async fetchStreamers(): Promise<Streamer[]> {
         const blockList = await this._fetchBlockList();
         const [followed, recommended] = await Promise.all([
-            this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_FOLLOWING, blockList),
-            this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_RECOMMENDATIONS, blockList),
+            this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_FOLLOWING, blockList, true),
+            this._fetchRecommendator(CONSTANTS.API.RECOMMENDATOR_RECOMMENDATIONS, blockList, false),
         ]);
+
+        const followedIds = new Set(followed.map(s => s.streamerId));
+        for (const s of recommended) {
+            if (followedIds.has(s.streamerId)) s.isFollowing = true;
+        }
+
         return this.dedupeStreamers([...followed, ...recommended]);
     }
 
