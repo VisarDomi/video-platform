@@ -36,7 +36,7 @@ export class StreamDiscoveryService {
 
         while (true) {
             const targets = this.targetManager.getTargets();
-            const liveStreams = await this.apiClient.getLiveStreamsByAccountIds(targets.map(target => target.accountId));
+            const result = await this.apiClient.getLiveStreamsByAccountIds(targets.map(target => target.accountId));
 
             const currentTotal = this.downloadsManager.size;
             if (currentTotal !== lastKnownTotal) {
@@ -44,8 +44,8 @@ export class StreamDiscoveryService {
                 lastKnownTotal = currentTotal;
             }
 
-            if (liveStreams) {
-                const lookupSummary = `configuredTargets=${targets.length} livePublicTargets=${liveStreams.size}`;
+            if (result) {
+                const lookupSummary = `configuredTargets=${targets.length} livePublicTargets=${result.live.size}`;
                 if (this.lastLookupSummary !== lookupSummary) {
                     logger.info(`[Tango] Account lookup summary: ${lookupSummary}`);
                     this.lastLookupSummary = lookupSummary;
@@ -54,10 +54,15 @@ export class StreamDiscoveryService {
                 for (const target of targets) {
                     const streamerId = target.accountId;
                     const alias = target.alias;
-                    const stream = liveStreams.get(streamerId);
+                    const stream = result.live.get(streamerId);
 
                     if (!stream) {
-                        this.logDecision(streamerId, alias, "not live/public in account lookup");
+                        const rejection = result.rejected.get(streamerId);
+                        if (rejection) {
+                            this.logDecision(streamerId, alias, `not live/public (${rejection.kind}, ${rejection.status})`);
+                        } else {
+                            this.logDecision(streamerId, alias, "not live/public (offline)");
+                        }
                         continue;
                     }
 
