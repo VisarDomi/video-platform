@@ -10,3 +10,4 @@ live-status.json
 temp.*
 repomix/
 .idea/
+.ios-debug/

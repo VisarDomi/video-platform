@@ -4,7 +4,11 @@
   "description": "A lightweight userscript that makes exploring Tango streams easy",
   "type": "module",
   "scripts": {
-    "build": "node increase.js && vite build"
+    "build": "node increase.js && vite build",
+    "tests": "node tests/ios/run.mjs",
+    "tests:smoke": "node tests/ios/run.mjs --smoke",
+    "tests:server": "python3 tests/ios/bridge_server.py",
+    "tests:setup": "python3 tests/ios/bridge_server.py --setup"
   },
   "devDependencies": {
     "@types/tampermonkey": "^5.0.4",
