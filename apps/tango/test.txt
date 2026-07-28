@@ -1,0 +1,55 @@
+Features:
+
+1. Home
+- Opening Home displays a scrollable list of live streamers.
+- Refreshing Home fetches a fresh list.
+- Selecting a streamer navigates to that streamer's own URL.
+
+2. Stream
+- A stream URL displays its stream together with the custom stream UI.
+- The current stream and its adjacent streams are loaded for vertical
+  navigation.
+- Refreshing a stream URL fetches a fresh list and finds the current streamer
+  within it.
+- If the current streamer is no longer available, the first streamer in the
+  fresh list becomes current.
+
+3. Stream navigation
+- Dragging vertically reveals the adjacent stream in the direction of travel.
+- Releasing after a sufficient drag completes the move to the adjacent stream.
+- Releasing a short drag returns to the current stream.
+- The correct previous and next streams are loaded around the current stream.
+- Moving to another stream changes the URL without adding another Back step.
+- Discovered costreamers enter the stream order at the appropriate position
+  and may become the next or previous stream.
+
+4. Back to Home
+- Safari's left-edge Back gesture returns from a stream to Home.
+- Home returns with the list updated by what was discovered while viewing
+  streams.
+- The last viewed streamer is highlighted.
+- The list is scrolled so the last viewed streamer appears where the original
+  selected streamer appeared.
+
+5. Stream UI
+- A newly selected stream starts muted.
+- The mute control toggles audio for the current stream and reflects its state.
+- Horizontal gestures show and hide the stream controls.
+- The current stream displays the best available streamer name.
+- Audio-only streams remain playable and are identified as audio-only.
+
+6. Stream actions
+- Follow and unfollow update the current stream's visible following state.
+- Blocking requires confirmation.
+- Blocking a followed streamer also unfollows it.
+- A successfully blocked streamer is removed from the available streams.
+- The download-list control adds or removes the current streamer and reflects
+  the resulting membership.
+- A stream that becomes unavailable is removed from navigation.
+
+Test entry URLs:
+
+Tango Home:
+https://www.tango.me/
+
+Stream URLs are selected from the live streamer list during testing.
