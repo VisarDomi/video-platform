@@ -4,19 +4,19 @@ export interface GestureCallbacks {
     controls(visible: boolean): void;
 }
 
-export function attachGestures(element: HTMLElement, callbacks: GestureCallbacks): void {
+export function attachGestures(_element: HTMLElement, callbacks: GestureCallbacks): void {
     let startX = 0;
     let startY = 0;
     let axis: "none" | "x" | "y" = "none";
 
-    element.addEventListener("touchstart", event => {
+    window.addEventListener("touchstart", event => {
         if (event.touches.length !== 1) return;
         startX = event.touches[0].clientX;
         startY = event.touches[0].clientY;
         axis = "none";
-    }, { passive: true });
+    }, { passive: true, capture: true });
 
-    element.addEventListener("touchmove", event => {
+    window.addEventListener("touchmove", event => {
         if (event.touches.length !== 1) return;
         const dx = event.touches[0].clientX - startX;
         const dy = event.touches[0].clientY - startY;
@@ -27,13 +27,18 @@ export function attachGestures(element: HTMLElement, callbacks: GestureCallbacks
             event.preventDefault();
             callbacks.move(dy);
         }
-    }, { passive: false });
+    }, { passive: false, capture: true });
 
-    element.addEventListener("touchend", event => {
+    window.addEventListener("touchend", event => {
         const dx = event.changedTouches[0].clientX - startX;
         const dy = event.changedTouches[0].clientY - startY;
         if (axis === "y") callbacks.release(dy);
         else if (axis === "x" && Math.abs(dx) > 80) callbacks.controls(dx > 0);
         axis = "none";
-    });
+    }, { capture: true });
+
+    window.addEventListener("touchcancel", () => {
+        if (axis === "y") callbacks.release(0);
+        axis = "none";
+    }, { capture: true });
 }

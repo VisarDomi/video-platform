@@ -44,6 +44,7 @@ body {
 
 .stream-page {
     overflow: hidden;
+    overscroll-behavior: none;
 }
 
 .stream-stage,
@@ -52,6 +53,10 @@ body {
     inset: 0;
     overflow: hidden;
     background: #000;
+}
+
+.stream-stage {
+    touch-action: none;
 }
 
 .stream-slot video {

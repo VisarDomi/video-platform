@@ -23,7 +23,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     stage.className = "stream-stage";
     document.body.append(stage);
 
-    const slots = [-1, 0, 1].map(offset => createSlot(offset));
+    let slots = [-1, 0, 1].map(offset => createSlot(offset));
     stage.append(...slots.map(slot => slot.element));
     let controlsVisible = true;
     let moving = false;
@@ -199,7 +199,16 @@ export async function openStream(provider: Provider, requestedStreamId: string):
                 const destination = commit ? (position - 1 - direction) * 100 : (position - 1) * 100;
                 slot.element.style.transform = `translateY(${destination}%)`;
             });
-            setTimeout(() => void (commit ? select(target) : Promise.resolve(resetTransforms())), 230);
+            setTimeout(() => {
+                if (!commit) {
+                    resetTransforms();
+                    return;
+                }
+                slots = direction === 1
+                    ? [slots[1], slots[2], slots[0]]
+                    : [slots[2], slots[0], slots[1]];
+                void select(target);
+            }, 230);
         },
         controls(visible) {
             controlsVisible = visible;
