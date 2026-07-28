@@ -2,6 +2,7 @@ Features:
 
 1. Home
 - Opening Home displays a scrollable list of live streamers.
+- The list is followed + recommended.
 - Refreshing Home fetches a fresh list.
 - Selecting a streamer navigates to that streamer's own URL.
 

@@ -1,5 +1,5 @@
 Flows:
-1. open home - see a list - can scroll through it - refresh the page to get a fresher list
+1. open home - see a list of followed and recommended - can scroll through it - refresh the page to get a fresher list
 2. click a stream from this list - navigate natively to the stream url
 3. on stream url a stream is shown along with the custom ui and custom swipe gestures like tiktok.
 4. swipe up/down to get to the next (preloaded) stream and change the URL without adding another Back step
