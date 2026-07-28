@@ -18,8 +18,9 @@ step.
 
 Deterministic edge cases run on the same phone against a test-only provider and
 controlled media events. They exercise delayed enrichment, costreamer order,
-both refresh fallback branches, audio-only removal, and unavailable-media
-removal without mutating Tango.
+fallback to the first fresh stream without querying stale costreamers,
+highlight restoration without forced scrolling, audio-only removal, and
+unavailable-media removal without mutating Tango.
 
 One-time setup on a new development machine:
 
