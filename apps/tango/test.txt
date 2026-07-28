@@ -18,10 +18,8 @@ Features:
   navigation.
 - Refreshing a stream URL fetches a fresh list and finds the current streamer
   within it.
-- If the current streamer is no longer available, an available costreamer
-  becomes current.
-- If no costreamer is available, the first streamer in the fresh list becomes
-  current.
+- If the current streamer is no longer available, the first streamer in the
+  fresh list becomes current.
 
 3. Stream navigation
 - Dragging vertically reveals the adjacent stream in the direction of travel.
@@ -37,8 +35,6 @@ Features:
 - Home returns with the list updated by what was discovered while viewing
   streams.
 - The last viewed streamer is highlighted.
-- The list is scrolled so the last viewed streamer appears where the original
-  selected streamer appeared.
 
 5. Stream UI
 - A newly selected stream starts muted.
