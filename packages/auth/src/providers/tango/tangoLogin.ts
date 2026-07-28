@@ -12,30 +12,12 @@ const BROWSER_LOGIN_FLOW_TIMEOUT_MS = 30_000;
 const BROWSER_RESPONSE_TIMEOUT_MS = 60_000;
 
 async function findAndClickLoginButton(page: Page, account: Account): Promise<void> {
-    const loginButtonSelectors = [
-        { testId: "join-now" },
-        { testId: "home-page-login-register-button" },
-        { xpath: '//button[.//span[contains(., "Log in / Sign up")]]' },
-        { xpath: '//button[.//span[contains(., "Sign in")]]' },
-    ];
+    const signInButton = page.getByTestId("join-now");
+    await signInButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
 
-    for (const selector of loginButtonSelectors) {
-        try {
-            if (selector.testId) {
-                await page.getByTestId(selector.testId).click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
-            } else if (selector.xpath) {
-                await page.locator(selector.xpath).click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
-            }
-            await page.getByTestId("GOOGLE").click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
-            logger.info(`Successfully initiated Google login for ${account.email}`);
-            return;
-        } catch (error) {
-            const selectorIdentifier = selector.testId ? `TestId(${selector.testId})` : `XPath(${selector.xpath})`;
-            logger.warn(`Selector ${selectorIdentifier} failed for ${account.email}, trying next...`);
-        }
-    }
-
-    throw new Error(`All known login button selectors failed for ${account.email}.`);
+    const googleButton = page.getByTestId("GOOGLE");
+    await googleButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
+    logger.info(`Successfully initiated Google login for ${account.email}`);
 }
 
 async function handleGoogleLogin(popup: Page, account: Account): Promise<void> {
