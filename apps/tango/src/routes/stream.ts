@@ -80,11 +80,18 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         controls.querySelector<HTMLElement>(".stream-name")!.textContent =
             `${stream.alias || stream.streamerId} ${stream.firstName}`.trim();
         const mute = controls.querySelector<HTMLButtonElement>(".mute")!;
-        mute.textContent = slots[1].video.muted ? "Muted" : "Sound";
+        mute.textContent = slots[1].video.muted ? "🔇" : "🔊";
         const follow = controls.querySelector<HTMLButtonElement>(".follow")!;
-        follow.textContent = stream.isFollowing ? "Following" : "Follow";
+        follow.textContent = stream.isFollowing ? "❤️" : "🤍";
+        follow.classList.toggle("remove", stream.isFollowing);
+        const block = controls.querySelector<HTMLButtonElement>(".block")!;
+        block.dataset.confirm = "false";
+        block.textContent = "🚫";
         const download = controls.querySelector<HTMLButtonElement>(".download")!;
-        download.textContent = downloads.has(stream.streamerId) ? "Remove" : "Download";
+        const downloaded = downloads.has(stream.streamerId);
+        download.textContent = downloaded ? "➖" : "➕";
+        download.classList.toggle("add", !downloaded);
+        download.classList.toggle("remove", downloaded);
     }
 
     async function discover(stream: Stream): Promise<void> {
@@ -215,7 +222,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         } else if (button.classList.contains("block")) {
             if (button.dataset.confirm !== "true") {
                 button.dataset.confirm = "true";
-                button.textContent = "Confirm block";
+                button.textContent = "❓";
                 return;
             }
             if (stream.isFollowing) await provider.unfollow(stream.streamerId);
@@ -300,11 +307,12 @@ function createSlot(position: number): Slot {
     controls.className = "stream-controls";
     controls.innerHTML = `
         <p class="stream-name"></p>
-        <div>
-            <button class="mute">Muted</button>
-            <button class="follow">Follow</button>
-            <button class="block">Block</button>
-            <button class="download">Download</button>
+        <div class="stream-progress"></div>
+        <div class="stream-buttons">
+            <button class="mute" title="Mute">🔇</button>
+            <button class="follow" title="Follow or unfollow">🤍</button>
+            <button class="block" title="Block">🚫</button>
+            <button class="download" title="Download list">➕</button>
         </div>
     `;
     element.append(video, controls);
