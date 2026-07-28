@@ -42,7 +42,7 @@
 		cursor: pointer;
 		display: flex;
 		flex-direction: column;
-		justify-content: center;
+		position: relative;
 		height: 52px;
 		box-sizing: border-box;
 		overflow: hidden;
@@ -92,10 +92,13 @@
 	}
 
 	.meta {
+		position: absolute;
+		right: 15px;
+		bottom: 4px;
+		left: 15px;
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-top: 2px;
 		line-height: 1.2;
 		gap: 8px;
 	}
