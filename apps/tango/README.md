@@ -1,8 +1,8 @@
-# tango-explorer
+# stream-viewer
 
-A lightweight userscript that makes exploring Tango streams easy
+A lightweight userscript that makes exploring live streams easy.
 
-## supported site
+## Supported providers
 
 ```
 tango.me

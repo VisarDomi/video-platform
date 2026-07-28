@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         tango-explorer-debug 1
+// @name         stream-viewer-debug 1
 // @namespace    https://github.com/VisarDomi/debug
 // @version      1
 // @description  Remote Safari debugger controlled by this PC.

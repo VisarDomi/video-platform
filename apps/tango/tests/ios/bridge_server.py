@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent.parent
 STATE_DIR = REPO_ROOT / ".ios-debug"
-DEBUG_USERSCRIPT = ROOT / "tango-explorer-debug.user.js"
+DEBUG_USERSCRIPT = ROOT / "stream-viewer-debug.user.js"
 MAX_BODY = 128 * 1024
 MAX_ITEMS = 500
 
@@ -68,7 +68,7 @@ def setup(port: int) -> None:
     shutil.copyfile(Path(caroot) / "rootCA.pem", root_ca_path())
     print(f"Certificate: {cert}")
     print(f"iPhone CA profile: https://{host}:{port}/api/cert")
-    print(f"iPhone debugger:   https://{host}:{port}/tango-explorer-debug.user.js")
+    print(f"iPhone debugger:   https://{host}:{port}/stream-viewer-debug.user.js")
     print("Start the bridge with `npm run tests:server`, then open those URLs on the iPhone.")
 
 
@@ -105,7 +105,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
 
-        if parsed.path == "/tango-explorer-debug.user.js":
+        if parsed.path == "/stream-viewer-debug.user.js":
             source = DEBUG_USERSCRIPT.read_text()
             encoded = source.encode()
             self.send_response(200)
@@ -124,7 +124,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({
                 "host": host,
                 "port": port,
-                "debuggerUrl": f"https://{host}:{port}/tango-explorer-debug.user.js",
+                "debuggerUrl": f"https://{host}:{port}/stream-viewer-debug.user.js",
                 "certificateUrl": f"https://{host}:{port}/api/cert",
             })
             return

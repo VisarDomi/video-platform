@@ -256,7 +256,7 @@ async function main() {
     await waitForDebugger();
     local("npx", ["tsc", "--noEmit"]);
     local("npx", ["vite", "build"]);
-    const bundle = await readFile(resolve(root, "dist/tango-explorer.user.js"), "utf8");
+    const bundle = await readFile(resolve(root, "dist/stream-viewer.user.js"), "utf8");
 
     try {
         await navigate("https://www.tango.me/");

@@ -1,7 +1,7 @@
 {
-  "name": "tango-explorer",
-  "version": "235",
-  "description": "A lightweight userscript that makes exploring Tango streams easy",
+  "name": "stream-viewer",
+  "version": "237",
+  "description": "A lightweight userscript that makes exploring live streams easy",
   "type": "module",
   "scripts": {
     "build": "node increase.js && vite build",
