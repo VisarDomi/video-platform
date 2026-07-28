@@ -21,7 +21,7 @@ function updateRow(stream: Stream): void {
     if (name) name.textContent = `${stream.alias || stream.streamerId} ${stream.firstName}`.trim();
 }
 
-function render(provider: Provider, streams: Stream[]): void {
+function render(provider: Provider, streams: Stream[]): () => void {
     const previous = loadState();
     document.title = "Streams";
     document.body.replaceChildren();
@@ -39,21 +39,26 @@ function render(provider: Provider, streams: Stream[]): void {
         });
     };
 
-    if (previous?.currentStreamerId) {
+    const alignCurrent = (): void => {
+        if (!previous?.currentStreamerId) return;
         const current = document.querySelector<HTMLElement>(`[data-streamer-id="${CSS.escape(previous.currentStreamerId)}"]`);
         if (current) {
             current.classList.add("current");
             window.scrollBy(0, current.getBoundingClientRect().top - previous.selectedTop);
         }
-    }
+    };
+    alignCurrent();
+    requestAnimationFrame(alignCurrent);
+    return alignCurrent;
 }
 
 export async function openHome(provider: Provider): Promise<void> {
     let streams = await provider.fetchStreams();
-    render(provider, streams);
+    const alignCurrent = render(provider, streams);
     void provider.enrichAll(streams).then(enriched => {
         streams = enriched;
         for (const stream of streams) updateRow(stream);
+        requestAnimationFrame(alignCurrent);
     });
 
     addEventListener("pageshow", event => {
@@ -61,10 +66,11 @@ export async function openHome(provider: Provider): Promise<void> {
         const shared = loadState();
         if (!shared) return;
         streams = shared.streams;
-        render(provider, streams);
+        const alignRestored = render(provider, streams);
         void provider.enrichAll(streams).then(enriched => {
             streams = enriched;
             for (const stream of streams) updateRow(stream);
+            requestAnimationFrame(alignRestored);
         });
     });
 }
