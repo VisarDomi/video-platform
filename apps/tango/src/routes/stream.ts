@@ -29,6 +29,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     let moving = false;
     const removing = new Set<string>();
     const removed = new Set<string>();
+    const processedForCostreamers = new Set<string>();
     let downloads = new Set<string>();
     void provider.fetchDownloadList().then(result => {
         downloads = result;
@@ -95,6 +96,8 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     }
 
     async function discover(stream: Stream): Promise<void> {
+        if (stream.parentStreamerId || processedForCostreamers.has(stream.streamerId)) return;
+        processedForCostreamers.add(stream.streamerId);
         const additions = await provider.fetchCostreamers(stream).catch(() => []);
         const available = additions.filter(item => !removed.has(item.streamerId));
         if (!available.length) return;
