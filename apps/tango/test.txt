@@ -3,17 +3,25 @@ Features:
 1. Home
 - Opening Home displays a scrollable list of live streamers.
 - The list is followed + recommended.
+- The list appears as soon as the streams are available.
+- Streamer names and other details may improve afterward without delaying the
+  list.
 - Refreshing Home fetches a fresh list.
 - Selecting a streamer navigates to that streamer's own URL.
 
 2. Stream
 - A stream URL displays its stream together with the custom stream UI.
+- Stream playback starts as soon as its media is available.
+- Streamer names and other details may improve afterward without delaying
+  playback.
 - The current stream and its adjacent streams are loaded for vertical
   navigation.
 - Refreshing a stream URL fetches a fresh list and finds the current streamer
   within it.
-- If the current streamer is no longer available, the first streamer in the
-  fresh list becomes current.
+- If the current streamer is no longer available, an available costreamer
+  becomes current.
+- If no costreamer is available, the first streamer in the fresh list becomes
+  current.
 
 3. Stream navigation
 - Dragging vertically reveals the adjacent stream in the direction of travel.
@@ -37,7 +45,7 @@ Features:
 - The mute control toggles audio for the current stream and reflects its state.
 - Horizontal gestures show and hide the stream controls.
 - The current stream displays the best available streamer name.
-- Audio-only streams remain playable and are identified as audio-only.
+- Audio-only streams are removed from the available streams.
 
 6. Stream actions
 - Follow and unfollow update the current stream's visible following state.
