@@ -1,0 +1,87 @@
+:root {
+    color-scheme: dark;
+    font-family: system-ui, sans-serif;
+    background: #000;
+    color: #fff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #000;
+}
+
+.stream-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 15px 16px;
+    border-top: 1px solid #242424;
+    color: inherit;
+    text-decoration: none;
+}
+
+.stream-row.following {
+    color: #39d353;
+}
+
+.stream-row.current {
+    background: #242424;
+}
+
+.status {
+    margin: 30vh 20px 0;
+    text-align: center;
+    color: #aaa;
+}
+
+.status-error {
+    color: #ff8a8a;
+}
+
+.stream-page {
+    overflow: hidden;
+}
+
+.stream-stage,
+.stream-slot {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: #000;
+}
+
+.stream-slot video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.stream-controls {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 18px;
+    transition: opacity 140ms;
+}
+
+.stream-controls.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.stream-name {
+    margin: 0 0 10px;
+    text-shadow: 0 1px 3px #000;
+}
+
+.stream-controls button {
+    padding: 9px 11px;
+    border: 0;
+    border-radius: 8px;
+    background: rgb(20 20 20 / 75%);
+    color: #fff;
+}
