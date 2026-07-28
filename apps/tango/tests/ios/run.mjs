@@ -321,14 +321,17 @@ function fixtureStream(id, { following = false, parentStreamerId, name = id } = 
     };
 }
 
-async function fixtureState(expectedCurrentId = null) {
+async function fixtureState(expectedCurrentId = null, { afterRefreshFrom = null } = {}) {
     return command(`
         const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
         for(let attempt=0;attempt<100;attempt++){
             const shared=JSON.parse(sessionStorage.getItem("stream-viewer-state")??"null");
-            if(shared?.streams?.length&&(${JSON.stringify(expectedCurrentId)}===null||shared.currentStreamerId===${JSON.stringify(expectedCurrentId)})){
+            const fixture=JSON.parse(sessionStorage.getItem("stream-viewer-fixture")??"null");
+            const expected=${JSON.stringify(expectedCurrentId)};
+            const previous=${JSON.stringify(afterRefreshFrom)};
+            const refreshed=previous===null||(fixture?.fetchCount>0&&shared?.currentStreamerId!==previous);
+            if(shared?.streams?.length&&refreshed&&(expected===null||shared.currentStreamerId===expected)){
                 await wait(100);
-                const fixture=JSON.parse(sessionStorage.getItem("stream-viewer-fixture")??"null");
                 const domSlots=[...document.querySelectorAll(".stream-slot")];
                 const logical=["translateY(-100%)","translateY(0%)","translateY(100%)"]
                     .map(transform=>domSlots.find(slot=>slot.style.transform===transform));
@@ -610,7 +613,7 @@ async function main() {
                 });
             }
 
-            await check(["B1", "B2", "B3"], "Back restores the updated Home list, highlight, and row position", async () => {
+            await check(["B1", "B2"], "Back restores the updated Home list and highlight", async () => {
                 const beforeBack = await streamSnapshot();
                 await command("history.back(); return true;", false);
                 client = await activeClient(candidate => {
@@ -643,11 +646,6 @@ async function main() {
                 assert(alignment.streamerId === beforeBack.currentId, "Back highlighted the wrong streamer", {
                     expected: beforeBack.currentId,
                     actual: alignment.streamerId,
-                });
-                assert(Math.abs(alignment.top - selected.top) <= 2, "Back did not restore the selected row position", {
-                    restoration,
-                    selected,
-                    alignment,
                 });
                 return { restoration, restoredCount: restored.rowCount, discoveredCount: discoveredIds.length, alignment };
             }, { continueOnFailure: true });
@@ -689,6 +687,28 @@ async function main() {
                 `);
                 assert(refreshed.includes("account-home-c") && !refreshed.includes("account-home-a"), "Home refresh did not use a fresh provider list", refreshed);
                 return { early, enriched, refreshed };
+            }, { continueOnFailure: true });
+
+            await check(["B2"], "Fixture Home highlights the last viewed streamer without forcing a scroll", async () => {
+                const first = fixtureStream("highlight-first");
+                const viewed = fixtureStream("highlight-viewed");
+                const scenario = { fetches: [[first, viewed]] };
+                const shared = { streams: [first, viewed], currentStreamerId: viewed.streamerId, selectedTop: 200 };
+                await injectFixture(fixtureBundle, scenario, "/fixture/home", shared);
+                const outcome = await command(`
+                    const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+                    for(let i=0;i<40&&!document.querySelector(".stream-row.current");i++) await wait(25);
+                    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+                    const current=document.querySelector(".stream-row.current");
+                    const fixture=JSON.parse(sessionStorage.getItem("stream-viewer-fixture")??"null");
+                    return {
+                        currentId:current?.dataset.streamerId??null,
+                        scrollRequests:fixture?.scrollRequests??[],
+                    };
+                `);
+                assert(outcome.currentId === viewed.streamerId, "Home did not highlight the last viewed streamer", outcome);
+                assert(outcome.scrollRequests.length === 0, "Home forced a scroll while restoring the highlight", outcome);
+                return outcome;
             }, { continueOnFailure: true });
 
             await check(["S3", "N5"], "Fixture stream starts before delayed enrichment and inserts costreamers in order", async () => {
@@ -737,21 +757,24 @@ async function main() {
                 return { earlyName: early.visibleName, settled };
             }, { continueOnFailure: true });
 
-            await check(["S6"], "Fixture refresh falls back to an available costreamer", async () => {
+            await check(["S6"], "Fixture refresh ignores stale costreamers and falls back to the first fresh stream", async () => {
                 const missing = fixtureStream("missing");
                 const oldNext = fixtureStream("old-next");
-                const fallback = fixtureStream("fallback", { parentStreamerId: missing.streamerId });
-                const fresh = fixtureStream("fresh");
+                const staleCostreamer = fixtureStream("stale-costreamer", { parentStreamerId: missing.streamerId });
+                const freshFirst = fixtureStream("fresh-first-with-stale-co");
+                const freshSecond = fixtureStream("fresh-second-with-stale-co");
                 const scenario = {
-                    fetches: [[fresh]],
+                    fetches: [[freshFirst, freshSecond]],
                     fetchDelay: 250,
-                    costreamers: { [missing.streamerId]: [fallback] },
+                    costreamers: { [missing.streamerId]: [staleCostreamer] },
                 };
                 const shared = { streams: [missing, oldNext], currentStreamerId: missing.streamerId, selectedTop: 200 };
                 await injectFixture(fixtureBundle, scenario, `/fixture/stream/${missing.streamId}`, shared);
-                const settled = await fixtureState(fallback.streamerId);
+                const settled = await fixtureState(null, { afterRefreshFrom: missing.streamerId });
                 assert(!settled.error, settled.error, settled);
-                assert(settled.currentId === fallback.streamerId, "Missing current stream did not fall back to its costreamer", settled);
+                assert(settled.currentId === freshFirst.streamerId, "Missing current stream did not fall back to the first fresh stream", settled);
+                assert(!settled.ids.includes(staleCostreamer.streamerId), "A stale costreamer was inserted for the unavailable stream", settled);
+                assert(!(settled.fixture.costreamerRequests ?? []).includes(missing.streamerId), "Unavailable stream was queried for stale costreamers", settled);
                 return settled;
             }, { continueOnFailure: true });
 

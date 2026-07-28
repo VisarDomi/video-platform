@@ -289,19 +289,11 @@ export async function openStream(provider: Provider, requestedStreamId: string):
                     const freshIds = new Set(fresh.map(stream => stream.streamerId));
                     fresh.splice(parentIndex + 1, 0, ...discovered.filter(stream => !freshIds.has(stream.streamerId)));
                 }
-            } else if (cachedCurrent && !fresh.some(stream => stream.streamerId === cachedCurrent.streamerId)) {
-                discovered = (await provider.fetchCostreamers(cachedCurrent).catch(() => []))
-                    .filter(stream => !removed.has(stream.streamerId));
-                const freshIds = new Set(fresh.map(stream => stream.streamerId));
-                fresh.unshift(...discovered.filter(stream => !freshIds.has(stream.streamerId)));
             }
             const currentId = cachedCurrent?.streamerId;
             streams.splice(0, streams.length, ...fresh);
             const freshIndex = streams.findIndex(stream => stream.streamerId === currentId);
-            const costreamerIndex = discovered
-                .map(stream => streams.findIndex(candidate => candidate.streamerId === stream.streamerId))
-                .find(candidateIndex => candidateIndex >= 0);
-            index = freshIndex >= 0 ? freshIndex : costreamerIndex ?? 0;
+            index = freshIndex >= 0 ? freshIndex : 0;
             if (streams[index]) await select(index);
         });
     }

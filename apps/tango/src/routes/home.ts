@@ -44,7 +44,6 @@ function render(provider: Provider, streams: Stream[]): () => void {
         const current = document.querySelector<HTMLElement>(`[data-streamer-id="${CSS.escape(previous.currentStreamerId)}"]`);
         if (current) {
             current.classList.add("current");
-            window.scrollBy(0, current.getBoundingClientRect().top - previous.selectedTop);
         }
     };
     alignCurrent();

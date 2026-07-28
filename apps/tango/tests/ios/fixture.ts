@@ -10,10 +10,12 @@ interface FixtureState {
     fetchCount?: number;
     fetchDelay?: number;
     costreamers?: Record<string, Stream[]>;
+    costreamerRequests?: string[];
     enrichDelay?: number;
     enriched?: Record<string, Partial<Stream>>;
     downloads?: string[];
     actions?: { action: string; streamerId: string }[];
+    scrollRequests?: { x: number; y: number }[];
 }
 
 function load(): FixtureState {
@@ -40,6 +42,15 @@ function record(action: string, streamerId: string): void {
 function enrich(stream: Stream, state: FixtureState): Stream {
     return { ...stream, ...state.enriched?.[stream.streamerId] };
 }
+
+window.scrollBy = ((optionsOrX?: ScrollToOptions | number, y?: number): void => {
+    const state = load();
+    state.scrollRequests ??= [];
+    state.scrollRequests.push(typeof optionsOrX === "number"
+        ? { x: optionsOrX, y: y ?? 0 }
+        : { x: optionsOrX?.left ?? 0, y: optionsOrX?.top ?? 0 });
+    save(state);
+}) as typeof window.scrollBy;
 
 Object.defineProperties(HTMLMediaElement.prototype, {
     readyState: { configurable: true, get: () => HTMLMediaElement.HAVE_ENOUGH_DATA },
@@ -112,7 +123,11 @@ const provider: Provider = {
     },
 
     async fetchCostreamers(stream) {
-        return structuredClone(load().costreamers?.[stream.streamerId] ?? []);
+        const state = load();
+        state.costreamerRequests ??= [];
+        state.costreamerRequests.push(stream.streamerId);
+        save(state);
+        return structuredClone(state.costreamers?.[stream.streamerId] ?? []);
     },
 
     async enrichAll(streams) {
