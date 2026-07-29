@@ -109,7 +109,6 @@ export class OverlayView {
 
 	setInteractive(interactive: boolean): void {
 		this.interactive = interactive;
-		this.element.classList.toggle('overlay-unsettled', !interactive);
 		this.renderButtons();
 	}
 
@@ -139,7 +138,6 @@ export class OverlayView {
 	private renderVisibility(): void {
 		const visible = this.uiVisible && this.active && this.video !== null;
 		this.element.hidden = !visible;
-		this.element.classList.toggle('ui-visible', visible);
 	}
 
 	private renderTimeline(): void {
