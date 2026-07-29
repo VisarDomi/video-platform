@@ -1,24 +1,37 @@
 # App Decisions
 
-## iOS PWA: visibilitychange doesn't fire on screen unlock
+## Pure TypeScript and native Safari navigation (2026-07-29)
 
-Safari in PWA standalone mode often skips `visibilitychange` when the phone is unlocked. ConnectionMonitor uses `pageshow` and `focus` as fallbacks. WatchdogService detects event loop freezes (tab backgrounded, phone locked) by measuring interval drift — if actual tick exceeds expected by > 2.5s, the app was frozen.
+The frontend is a pure TypeScript/Vite application. The old Svelte implementation
+is retained under `src_old` as reference and is not part of the build.
 
-## iOS PWA: auto-zoom on rotation
+Provider lists and viewers are separate native documents. List rows are anchors.
+Safari owns tabs, history, scrolling, scroll restoration, and edge-back. Vertical
+video navigation rotates three complete player units and uses
+`history.replaceState()`, so Back always returns to the list entry.
 
-iOS standalone PWA auto-zooms on rotation. Three mitigations: force viewport recalculation on resize, prevent Safari pinch-zoom gestures via touch-action CSS, and fix the standalone viewport meta.
+The list renders every row without virtualization or filtering. On `pagehide` it
+stops and aborts polling. On bfcache `pageshow` it immediately refetches the full
+list, reconciles the restored DOM without scrolling, then starts exactly one
+poller. Polling only discovers new videos while the list remains open.
 
-## Swipe gesture constants
+PWA support, watchdog/sentinel timers, and the frontend `/api/log` pipeline were
+removed. Viewer recovery responds directly to browser lifecycle and connectivity
+events.
 
-`SWIPE_THRESHOLD = 0.15` (15% of screen width to commit), `DEADZONE_RATIO = 0.013`, `EDGE_ZONE_RATIO = 0.077`. `NAV_COMMIT_THRESHOLD = 0.2` (20% of viewport height for vertical nav peek).
+## Viewer gesture constants
+
+`DEADZONE_RATIO = 0.013`. `NAV_COMMIT_THRESHOLD = 0.2` (20% of viewport height
+for vertical video navigation). The leading `28px` edge is left to Safari.
 
 ## preventDefault AFTER axis lock
 
 Swipe gesture handler calls `preventDefault` only after axis lock is determined, not before. Otherwise it blocks vertical scroll before we know the gesture is horizontal.
 
-## Zoom reset on nav
+## Zoom reset on video navigation
 
-When starting a navigation gesture, zoom is reset to 1x because nav transforms (translateX) conflict with zoom transforms (scale + translate). Can't compose both.
+When starting a navigation gesture, zoom is reset to 1x because unit translation
+conflicts with zoom transforms.
 
 ## localStorage debounce: 3s
 
@@ -28,22 +41,25 @@ Video playback position saves to localStorage every 3s instead of on every timeu
 
 HLS.js: `startLoad()` from current position. Native HLS (iOS Safari): must reload the source entirely — there's no equivalent of startLoad.
 
-## videoList epoch counter
+## List request generations
 
-`initialize()` bumps an epoch counter. Async operations capture the epoch and bail if it changed (means another initialize() ran). Prevents stale async results from writing provider-scoped state.
+List refreshes use an `AbortController` and request generation so stale
+responses cannot overwrite a newer reconciliation.
 
-## videoList: sole writer pattern
+## List reconciliation is the sole DOM writer
 
-`initialize()` is the sole writer for all provider-scoped state. Atomic transition — all state is set in one synchronous block after async data arrives, gated by epoch check.
+Initial load, polling, and bfcache refresh all pass through one reconciliation
+function. On `pagehide`, polling stops and the in-flight request is aborted. On
+bfcache `pageshow`, a full refresh completes before exactly one poller resumes.
 
 ## No frontend playlist cache
 
 `fetchAndParsePlaylist` reads from the server on every call. No Map cache.
 
-**Why:** Frontend logging showed playlist fetches take 13-45ms on localhost HTTPS (median 18ms). Cache hit rate was 10%. The cache saved 18ms on revisits but froze `isLive` state, causing live streams to appear as VOD.
+**Why:** A cache can freeze `isLive` state and make a live stream appear as VOD.
 
-## Frontend passthrough logging
+## No frontend passthrough logging
 
-`POST /api/log` accepts `{ event, data }` from the frontend, writes to the server journal with `[Frontend]` tag. Fire-and-forget, no batching.
-
-**Why:** The frontend is a client-side SPA with no logging. Performance claims (cache saves Xms) couldn't be verified without data.
+The frontend does not post diagnostic events to the server. The old
+`POST /api/log` route, logging helpers, watchdog, and timer-drift sentinel are
+removed.

@@ -12,7 +12,6 @@ import ladderRouter from "./api/providers/ladder.routes.js";
 import scRouter from "./api/providers/fmp4.routes.js";
 import tsliveRouter from "./api/providers/tslive.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
-import frontendLogRouter from "./api/frontend-log.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startOrphanStreamFinalizer } from "./services/orphanStreamFinalizer.js";
@@ -52,7 +51,6 @@ async function startServer() {
   startOrphanStreamFinalizer();
   startDiskSpaceMonitor();
 
-  app.use("/", frontendLogRouter);
   app.use("/", ladderRouter);
   app.use("/", scRouter);
   app.use("/", tsliveRouter);
