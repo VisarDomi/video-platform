@@ -81,6 +81,12 @@ async function recommendator(path: string, isFollowing: boolean): Promise<Stream
         .filter((stream): stream is Stream => stream !== null);
 }
 
+async function fetchBlocked(): Promise<Set<string>> {
+    const response = await ok(`${GATEWAY}/abregistrar/connection/v1/blocklist`);
+    const body = JSON.parse(response.text) as string[] | { users?: string[] };
+    return new Set(Array.isArray(body) ? body : body.users ?? []);
+}
+
 function dedupe(streams: Stream[]): Stream[] {
     const result = new Map<string, Stream>();
     for (const stream of streams) {
@@ -155,21 +161,22 @@ export const tango: Provider = {
     },
 
     async fetchStreams(): Promise<Stream[]> {
-        const [blockedResponse, followed, recommended] = await Promise.all([
-            ok(`${GATEWAY}/abregistrar/connection/v1/blocklist`),
+        const [blocked, followed, recommended] = await Promise.all([
+            fetchBlocked(),
             recommendator("/recommendator/social/v2/list/following?includeAlias=true", true),
             recommendator("/recommendator/social/v2/list/following_recommendations", false),
         ]);
-        const blockedBody = JSON.parse(blockedResponse.text) as string[] | { users?: string[] };
-        const blocked = new Set(Array.isArray(blockedBody) ? blockedBody : blockedBody.users ?? []);
         return dedupe([...followed, ...recommended]).filter(stream => !blocked.has(stream.streamerId));
     },
 
     async fetchCostreamers(stream: Stream): Promise<Stream[]> {
-        const response = await ok(`${PUBLIC}/live/stream/v2/watch?requestId=${crypto.randomUUID()}`, {
-            method: "POST",
-            body: stream.streamId,
-        });
+        const [response, blocked] = await Promise.all([
+            ok(`${PUBLIC}/live/stream/v2/watch?requestId=${crypto.randomUUID()}`, {
+                method: "POST",
+                body: stream.streamId,
+            }),
+            fetchBlocked(),
+        ]);
         const body = JSON.parse(response.text);
         const items: any[] = body.multiBroadcast?.streams ?? [];
         const streams: Stream[] = [];
@@ -177,6 +184,7 @@ export const tango: Provider = {
             const descriptor = item.stream?.mbDescriptor;
             if (!descriptor?.accountId || !descriptor.streamId || !item.stream?.streamURL) continue;
             if (descriptor.accountId === stream.streamerId) continue;
+            if (blocked.has(descriptor.accountId)) continue;
             streams.push({
                 streamerId: descriptor.accountId,
                 streamId: descriptor.streamId,
