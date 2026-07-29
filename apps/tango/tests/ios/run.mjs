@@ -1,154 +1,65 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import https from "node:https";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import {
+    createController,
+    createReporter,
+    createSession,
+    parseSelection,
+    runBuildSteps,
+    sleep,
+} from "userscript-ios-test/controller";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "../..");
-const origin = process.env.IOS_DEBUG_ORIGIN ?? "https://127.0.0.1:36666";
+const root = resolve(import.meta.dirname, "../..");
+const iosConfig = JSON.parse(
+    await readFile(resolve(root, "tests/ios/config.json"), "utf8"),
+);
 const entryUrl = process.env.IOS_TEST_HOME_URL ?? "https://www.tango.me/";
-const commandTimeout = Number(process.env.IOS_TEST_COMMAND_TIMEOUT_MS ?? 90_000);
-const connectionTimeout = Number(process.env.IOS_TEST_CONNECTION_TIMEOUT_MS ?? 120_000);
-const smoke = process.argv.includes("--smoke");
-const actions = process.argv.includes("--actions");
-const agent = new https.Agent({ rejectUnauthorized: false });
-const results = [];
-let server = null;
+const legacyTest = process.argv.includes("--actions")
+    ? "actions"
+    : process.argv.includes("--smoke") ? "smoke" : "full";
+const selection = parseSelection(process.argv.slice(2), { defaultTest: legacyTest });
+const smoke = selection.test === "smoke";
+const actions = selection.test === "actions";
+const controller = createController({
+    root,
+    name: iosConfig.name,
+    debuggerName: iosConfig.debuggerName,
+    port: iosConfig.port,
+    commandTimeoutMs: Number(process.env.IOS_TEST_COMMAND_TIMEOUT_MS ?? 90000),
+    connectionTimeoutMs: Number(process.env.IOS_TEST_CONNECTION_TIMEOUT_MS ?? 120000),
+});
+const session = createSession({
+    controller,
+    sourceLabel: "stream-viewer.test.user.js",
+});
+const reporter = createReporter();
+const { results, check, skip } = reporter;
 let client = null;
 
-const sleep = milliseconds => new Promise(resolveSleep => setTimeout(resolveSleep, milliseconds));
-
-function request(path, { method = "GET", body } = {}) {
-    return new Promise((resolveRequest, rejectRequest) => {
-        const payload = body === undefined ? null : JSON.stringify(body);
-        const req = https.request(new URL(path, origin), {
-            method,
-            agent,
-            headers: payload ? {
-                "content-type": "application/json",
-                "content-length": Buffer.byteLength(payload),
-            } : undefined,
-        }, response => {
-            const chunks = [];
-            response.on("data", chunk => chunks.push(chunk));
-            response.on("end", () => {
-                const text = Buffer.concat(chunks).toString();
-                if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
-                    rejectRequest(new Error(`${method} ${path}: HTTP ${response.statusCode}: ${text}`));
-                    return;
-                }
-                resolveRequest(text ? JSON.parse(text) : null);
-            });
-        });
-        req.on("error", rejectRequest);
-        if (payload) req.write(payload);
-        req.end();
-    });
-}
-
-async function ensureServer() {
-    try {
-        await request("/__debug_state");
-        return;
-    } catch {
-        server = spawn("python3", [resolve(here, "bridge_server.py")], {
-            cwd: root,
-            stdio: ["ignore", "ignore", "inherit"],
-        });
-    }
-    for (let attempt = 0; attempt < 40; attempt++) {
-        if (server.exitCode !== null) throw new Error("iOS bridge failed to start");
-        try {
-            await request("/__debug_state");
-            return;
-        } catch {
-            await sleep(250);
-        }
-    }
-    throw new Error("Timed out starting iOS bridge");
-}
-
-async function state() {
-    return request("/__debug_state");
-}
-
-async function postCommand(target, code) {
-    return (await request("/__debug_command", {
-        method: "POST",
-        body: { target, code },
-    })).id;
-}
-
-async function commandResult(commandId) {
-    const deadline = Date.now() + commandTimeout;
-    while (Date.now() < deadline) {
-        const snapshot = await state();
-        const found = [...snapshot.results].reverse().find(item => item.commandId === commandId);
-        if (found) {
-            if (!found.ok) throw new Error(found.error?.message ?? JSON.stringify(found.error));
-            return found.result;
-        }
-        await sleep(200);
-    }
-    throw new Error(`Remote command ${commandId} timed out`);
-}
-
 async function command(code, expectResult = true) {
-    const id = await postCommand(client.client, code);
-    return expectResult ? commandResult(id) : id;
+    return session.command(code, { expectResult });
 }
 
 async function activeClient(predicate) {
-    const deadline = Date.now() + connectionTimeout;
-    while (Date.now() < deadline) {
-        const snapshot = await state();
-        const now = Date.now() / 1000;
-        const match = [...snapshot.clients]
-            .filter(candidate => now - candidate.lastSeen < 3 && predicate(candidate))
-            .sort((left, right) => right.lastSeen - left.lastSeen)[0];
-        if (match) return match;
-        await sleep(250);
-    }
-    throw new Error("Expected Safari page did not become active");
-}
-
-async function foreground() {
-    const snapshot = await state();
-    const now = Date.now() / 1000;
-    const active = snapshot.clients.filter(candidate => now - candidate.lastSeen < 3);
-    if (!active.length) throw new Error("No active iPhone debugger");
-    const id = await postCommand("*", "return {visible:document.visibilityState==='visible',focused:document.hasFocus()};");
-    for (let attempt = 0; attempt < 30; attempt++) {
-        const current = await state();
-        const replies = current.results.filter(item => item.commandId === id && item.ok);
-        const chosen = replies.find(item => item.result?.visible && item.result?.focused)
-            ?? replies.find(item => item.result?.visible);
-        const match = active.find(candidate => candidate.client === chosen?.client);
-        if (match) return match;
-        await sleep(100);
-    }
-    if (active.length === 1) return active[0];
-    throw new Error("Could not identify the foreground Safari tab");
+    return session.waitForNavigation(predicate, "the expected Safari page");
 }
 
 async function navigate(url) {
-    const previousClientId = client.client;
-    await command(`location.href=${JSON.stringify(url)}; return "navigating";`, false);
-    const expected = new URL(url);
-    client = await activeClient(candidate => {
-        const actual = new URL(candidate.href);
-        return candidate.client !== previousClientId
-            && actual.hostname === expected.hostname
-            && actual.pathname === expected.pathname
-            && actual.search === expected.search;
+    client = await session.navigate(url, {
+        matches: (candidate, expectedUrl) => {
+            const actual = new URL(candidate.href);
+            const expected = new URL(expectedUrl);
+            return actual.hostname === expected.hostname
+                && actual.pathname === expected.pathname
+                && actual.search === expected.search;
+        },
     });
 }
 
 async function inject(bundle) {
-    const id = await postCommand(client.client, `
+    await session.command(`
         window.__streamViewerTest={startedAt:performance.now(),firstRowsAt:null,mutationCount:0};
         const source=${JSON.stringify(bundle)};
         new Function(source+"\\n//# sourceURL=stream-viewer.test.user.js")();
@@ -159,7 +70,6 @@ async function inject(bundle) {
         }).observe(document.documentElement,{subtree:true,childList:true,characterData:true});
         return source.length;
     `);
-    await commandResult(id);
 }
 
 async function injectFixture(bundle, scenario, path, shared = null) {
@@ -175,12 +85,6 @@ async function injectFixture(bundle, scenario, path, shared = null) {
     `);
 }
 
-function local(commandName, args) {
-    const completed = spawnSync(commandName, args, { cwd: root, stdio: "inherit" });
-    if (completed.error) throw completed.error;
-    if (completed.status !== 0) throw new Error(`${commandName} failed`);
-}
-
 function assert(condition, message, details) {
     if (!condition) {
         const suffix = details === undefined ? "" : `\n${JSON.stringify(details, null, 2)}`;
@@ -188,35 +92,16 @@ function assert(condition, message, details) {
     }
 }
 
-async function check(ids, name, body, { continueOnFailure = false } = {}) {
-    const startedAt = Date.now();
-    try {
-        const details = await body();
-        results.push({ ids, name, status: "PASS", milliseconds: Date.now() - startedAt, details });
-        console.log(`PASS ${ids.join(", ")} — ${name}`);
-        return details;
-    } catch (error) {
-        results.push({ ids, name, status: "FAIL", milliseconds: Date.now() - startedAt, error: error.message });
-        console.error(`FAIL ${ids.join(", ")} — ${name}: ${error.message}`);
-        if (continueOnFailure) return null;
-        throw error;
-    }
-}
-
-function skip(ids, name, reason) {
-    results.push({ ids, name, status: "SKIP", reason });
-    console.log(`SKIP ${ids.join(", ")} — ${name}: ${reason}`);
-}
-
 async function waitForDebugger() {
-    const info = await request("/__debug_info");
-    console.log(`Waiting for the iPhone debugger on ${origin}`);
-    console.log(`Installer URL: ${info.debuggerUrl}`);
-    client = await activeClient(() => true);
-    client = await foreground();
-    if (new URL(client.href).hostname !== "example.com") {
-        throw new Error(`Foreground tab must start at https://example.com/ (found ${client.href})`);
-    }
+    client = await session.connect({
+        allowedHosts: ["example.com", new URL(entryUrl).hostname],
+        controlledCode: `
+            return Boolean(
+                globalThis.__streamViewerTest ||
+                document.querySelector(".stream-list, .stream-stage")
+            );
+        `,
+    });
 }
 
 async function homeSnapshot() {
@@ -398,16 +283,26 @@ async function runLiveActions() {
 }
 
 async function main() {
-    await ensureServer();
+    if (selection.args.some(argument => !["--smoke", "--actions"].includes(argument))) {
+        throw new Error(`Unknown test arguments: ${selection.args.join(" ")}`);
+    }
+    if (!["full", "smoke", "actions"].includes(selection.test)) {
+        throw new Error(`Unknown test "${selection.test}". Expected full, smoke, or actions.`);
+    }
+    if (selection.site && selection.site !== "tango") {
+        throw new Error(`Unknown site "${selection.site}". Expected tango.`);
+    }
+
     await waitForDebugger();
-    local("npx", ["tsc", "--noEmit"]);
-    local("npx", ["vite", "build"]);
-    local("npx", ["vite", "build", "--config", "vite.fixture.config.ts"]);
+    runBuildSteps(controller, [
+        ["npx", ["tsc", "--noEmit"]],
+        ["npx", ["vite", "build"]],
+        ["npx", ["vite", "build", "--config", "vite.fixture.config.ts"]],
+    ]);
     const bundle = await readFile(resolve(root, "dist/stream-viewer.user.js"), "utf8");
     const fixtureBundle = await readFile(resolve(root, "dist/stream-viewer-fixture.js"), "utf8");
 
-    try {
-        await navigate(entryUrl);
+    await navigate(entryUrl);
         await inject(bundle);
         const homeClientId = client.client;
 
@@ -836,17 +731,9 @@ async function main() {
             }, { continueOnFailure: true });
         }
 
-        if (!actions) {
-            skip(["A1", "A5"], "Reversible follow and download-list actions", "pass --actions to permit external account mutations");
-            skip(["A3", "A4"], "Successful block unfollows and removes the streamer", "pass --actions to permit a destructive real-account block");
-        }
-    } finally {
-        try {
-            if (client && new URL(client.href).hostname !== "example.com") await navigate("https://example.com/");
-        } catch (error) {
-            console.error(`Could not return to example.com: ${error.message}`);
-        }
-        if (server) server.kill();
+    if (!actions) {
+        skip(["A1", "A5"], "Reversible follow and download-list actions", "pass --actions to permit external account mutations");
+        skip(["A3", "A4"], "Successful block unfollows and removes the streamer", "pass --actions to permit a destructive real-account block");
     }
 
     const failed = results.filter(result => result.status === "FAIL");
@@ -856,8 +743,12 @@ async function main() {
     if (failed.length) process.exitCode = 1;
 }
 
-main().catch(error => {
-    console.error(error);
-    if (server) server.kill();
+try {
+    await main();
+} catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
-});
+} finally {
+    await session.cleanup();
+    session.close();
+}
