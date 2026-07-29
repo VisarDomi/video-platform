@@ -10,11 +10,14 @@ Every piece of state about a video belongs to the video itself. The `Video` type
 
 **Why:** The old `findVideoPath()` searched all providers. A tango video could match an fc2 path. The frontend threaded `videoListStore.selectedProvider` through 5 layers of function calls — fragile and easy to desync.
 
-## Ownership: Per-unit UI overlay via Svelte 5 mount() (2026-04-05)
+## Ownership: Per-unit UI overlay (2026-04-05, updated 2026-07-29)
 
-Each of the 3 carousel player slots is a self-contained unit: a wrapper div containing a `<video>` element and a `PlayerOverlay.svelte` instance mounted via Svelte 5's `mount()` API. The overlay (name, progress bar, controls) is a child of the unit's DOM — it moves with the video during peek swipe.
+Each of the 3 carousel player slots is a self-contained `PlayerUnit`: a wrapper
+containing its `<video>` and imperative `OverlayView`. The overlay is a child of
+the unit's DOM, so the video and its UI move together during vertical navigation.
 
-**Pattern:** `PlayerOverlayState.svelte.ts` is a `$state` class. The engine writes to each unit's state (currentTime, duration, video, isMuted, isActive). The mounted Svelte component reads reactively.
+The original Svelte-specific implementation of this ownership rule is retained
+in `packages/app/src_old` as migration reference only.
 
 **Why:** The old architecture had one shared overlay separate from the video elements. During peek swipe, the overlay required manual transform sync, hide/show coordination, and caused UI jank (stale data flash on navigation commit). The tango userscript's `StreamUnit` pattern proved that each slot should own its complete UI.
 
@@ -32,11 +35,13 @@ The active-only gate remains for: localStorage progress save (global), engine's 
 
 **Why:** The old `currentFilename` shadow field diverged from reality after carousel rotation. Going back to list and re-opening the same video showed a different video because `currentFilename` matched but the slot had rotated to different content.
 
-## Typed frontend logging: LogService (2026-04-05)
+## Frontend diagnostic logging removed (2026-07-29)
 
-Discriminated union `LogEvent` type with `LogEmit` type-safe emit function, matching the pattern from manga-reader and gallery-reader. Events cover unit lifecycle (`unit-load`, `unit-activate`), peek gestures (`peek-commit`, `peek-cancel`), playback (`live-status-changed`, `video-removed`), edit actions, and resume/recovery. Sent to server via `POST /api/log`.
-
-**Why:** The old `logEvent(string, data)` had 7 ad-hoc calls and zero coverage of navigation, peek, or player state. Debugging UI issues required asking the user to describe what happened instead of reading logs.
+The frontend `LogService`, watchdog/sentinel events, and server `/api/log`
+passthrough are removed. Recovery now responds directly to `pagehide`,
+`pageshow`, visibility, and connectivity events. Browser console errors remain
+available for development without maintaining a persistent application logging
+subsystem.
 
 ## HLS routes include provider (2026-04-05)
 
@@ -55,27 +60,31 @@ Single writer per resource, no cross-process write contention.
 | `live-status.json` | downloader (DownloadsManager) | server (orphan finalizer) |
 | session tokens on disk | auth daemon | server + downloader (shared readTokens()) |
 
-## Frontend gesture model uses full touch ownership (2026-04-14)
+## Frontend gestures preserve Safari navigation ownership (2026-07-29)
 
-The video player frontend owns touch handling completely on the active video surface.
+Safari owns leading-edge Back and tab/history navigation. The viewer owns only
+gestures that begin outside the browser edge zone and have been classified as
+vertical video navigation, horizontal seek, controls, or zoom.
 
-- Use `touch-action: none` on the video view.
-- Classify gestures once after a deadzone into `edge-back`, `seek`, `nav`, or `ui`.
+- Do not call `preventDefault()` for a touch beginning in the leading-edge zone.
+- Call `preventDefault()` only after an application-owned axis is known.
 - Keep `touchcancel` handling and animation locks so gesture state cannot get stuck.
-- Use the 3-player carousel so swipe navigation feels instant.
+- Rotate three complete player units for vertical video navigation.
+- Commit viewer-to-viewer navigation with `history.replaceState()`, preserving
+  the list as the previous history entry.
 
-**Why:** Native browser gesture handling conflicted with custom swipe navigation and seek behavior. The fully-owned gesture model was the only reliable way to get native-feel behavior in the PWA.
+**Why:** Browser navigation and bfcache restoration now replace the old custom
+edge-back and SPA view-state machinery.
 
-## Video list virtualization uses native window scroll (2026-04-14)
+## Video lists use the full native document (2026-07-29)
 
-Large provider lists should virtualize on top of native `window` scrolling instead of a custom fixed/overflow scroll container.
+Render every provider-list row as an ordinary anchor in normal document flow.
+There is no virtualizer, spacer, fixed row-height calculation, filter, or scroll
+correction. Safari owns scrolling and bfcache scroll restoration.
 
-- Fixed row height: `52px`
-- Buffer: `SCROLL_BUFFER = 10`
-- Spacer div provides total height
-- Visible rows are positioned with `translateY`
-
-**Why:** iOS Safari/PWA behavior around fixed custom scroll containers caused viewport, bounce, and momentum problems. Native window scroll plus simple virtualization preserves iOS feel and keeps the DOM small.
+On a bfcache `pageshow`, immediately refetch and reconcile the list without
+moving the viewport, then resume exactly one poller. Highlight the last-viewed
+filename but do not scroll to it.
 
 ## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
 

@@ -12,7 +12,6 @@ import fc2Router from "./api/providers/fc2.routes.js";
 import scRouter from "./api/providers/sc.routes.js";
 import tangoRouter from "./api/providers/tango.routes.js";
 import mp4StreamingRouter from "./api/mp4-streaming.routes.js";
-import frontendLogRouter from "./api/frontend-log.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startOrphanStreamFinalizer } from "./services/orphanStreamFinalizer.js";
@@ -52,7 +51,6 @@ async function startServer() {
   startOrphanStreamFinalizer();
   startDiskSpaceMonitor();
 
-  app.use("/", frontendLogRouter);
   app.use("/", fc2Router);
   app.use("/", scRouter);
   app.use("/", tangoRouter);

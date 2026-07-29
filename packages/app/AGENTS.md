@@ -1,18 +1,18 @@
 # Video Platform App
 
-Svelte 5 SPA for video editing across multiple streaming providers (`tango`, `fc2`, `sc`).
+Pure TypeScript frontend for video editing across multiple streaming providers
+(`tango`, `fc2`, `sc`). The current implementation is in `src`; the previous
+Svelte implementation is retained in `src_old` as migration reference only.
 
 ## Read on demand
 
-- Frontend guide:
-  `~/Documents/memory/svelte5-pitfalls.md`
 - Overflow rule:
   `~/Documents/memory/overflow.md`
-- Headless UI:
-  `~/Documents/memory/headless-ui.md`
-- iPhone PWA:
-  `~/Documents/memory/iphone-pwa.md`
 
 ## Rules
 
 - Verify frontend changes against the running app, not only static code.
+- Preserve native Safari list/viewer navigation, bfcache restoration, and edge-back
+  ownership.
+- A player unit owns its video, overlay, timeline, and media lifecycle as one
+  indivisible item.
