@@ -47,7 +47,6 @@ export class OverlayView {
 	private segments: readonly number[] = [];
 	private membershipState: MembershipState = { state: 'loading' };
 	private muted = true;
-	private active = false;
 	private uiVisible = true;
 	private interactive = true;
 	private scrubRect: DOMRect | null = null;
@@ -97,11 +96,6 @@ export class OverlayView {
 		this.renderButtons();
 	}
 
-	setActive(active: boolean): void {
-		this.active = active;
-		this.render();
-	}
-
 	setUiVisible(visible: boolean): void {
 		this.uiVisible = visible;
 		this.renderVisibility();
@@ -123,11 +117,6 @@ export class OverlayView {
 		this.renderButtons();
 	}
 
-	destroy(): void {
-		this.stopScrubbing();
-		this.progress.removeEventListener('pointerdown', this.handlePointerDown);
-	}
-
 	private render(): void {
 		this.name.textContent = this.video?.filename ?? '';
 		this.renderVisibility();
@@ -136,7 +125,7 @@ export class OverlayView {
 	}
 
 	private renderVisibility(): void {
-		const visible = this.uiVisible && this.active && this.video !== null;
+		const visible = this.uiVisible && this.video !== null;
 		this.element.hidden = !visible;
 	}
 
@@ -152,7 +141,7 @@ export class OverlayView {
 		this.progress.setAttribute('aria-valuemax', String(duration));
 		this.markerLayer.replaceChildren();
 		this.segmentText.replaceChildren();
-		if (!this.active || duration <= 0) return;
+		if (duration <= 0) return;
 
 		for (const point of this.segments) {
 			const marker = element('div', 'segment-marker');
@@ -233,7 +222,7 @@ export class OverlayView {
 	}
 
 	private readonly handlePointerDown = (event: PointerEvent): void => {
-		if (!this.active || !this.interactive) return;
+		if (!this.interactive) return;
 		event.stopPropagation();
 		this.scrubRect = this.progress.getBoundingClientRect();
 		this.actions.onSeek(this.timeFromX(event.clientX));

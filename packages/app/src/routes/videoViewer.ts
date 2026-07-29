@@ -52,7 +52,6 @@ export class VideoViewerPage {
 		document.body.replaceChildren(this.stage, this.overlay.element);
 
 		const provisional = this.provisionalVideo();
-		this.overlay.setActive(true);
 		this.overlay.setUiVisible(this.controlsVisible);
 		this.overlay.setVideo(provisional);
 		this.activeUnit().setActive(true);
@@ -167,10 +166,6 @@ export class VideoViewerPage {
 			},
 			onMutedChanged: (unit: PlayerUnit, muted: boolean) => {
 				if (unit === this.activeUnit()) this.overlay.setMuted(muted);
-			},
-			onGeometryChanged: (_unit: PlayerUnit) => {
-				// Intrinsic media geometry owns layout. Scope alignment keeps neighbor
-				// changes pointed away from the selected video.
 			}
 		};
 	}
@@ -220,7 +215,6 @@ export class VideoViewerPage {
 		this.overlay.setMuted(active.video.muted);
 		this.overlay.setSegments(this.segments);
 		this.overlay.setMembership(this.membership);
-		this.overlay.setActive(true);
 		this.overlay.setUiVisible(this.controlsVisible);
 		this.overlay.setInteractive(!this.unsettled);
 		document.title = `${video.filename} - ${this.provider} - Video Editor`;
