@@ -56,6 +56,16 @@ Video playback position saves to localStorage every 3s instead of on every timeu
 
 HLS.js: `startLoad()` from current position. Native HLS (iOS Safari): must reload the source entirely — there's no equivalent of startLoad.
 
+## Native live finalization reconciliation
+
+Native Safari can change a playing stream from an infinite live duration to a
+finite duration before the server playlist request observes `#EXT-X-ENDLIST`.
+When native duration is finite but parsed playlist truth is still live, the
+owning player unit refetches playlist authority once per second. It stops as
+soon as the playlist becomes VOD or the unit loads different media. This retry
+is scoped to an observed authority disagreement; it is not general playlist
+polling.
+
 ## List request generations
 
 List refreshes use an `AbortController` and request generation so stale
