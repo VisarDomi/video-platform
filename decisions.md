@@ -10,24 +10,29 @@ Every piece of state about a video belongs to the video itself. The `Video` type
 
 **Why:** The old `findVideoPath()` searched all providers. A tango video could match an fc2 path. The frontend threaded `videoListStore.selectedProvider` through 5 layers of function calls — fragile and easy to desync.
 
-## Ownership: Per-unit UI overlay (2026-04-05, updated 2026-07-29)
+## Ownership: Shared settled-selection overlay (updated 2026-07-29)
 
-Each of the 3 carousel player slots is a self-contained `PlayerUnit`: a wrapper
-containing its `<video>` and imperative `OverlayView`. The overlay is a child of
-the unit's DOM, so the video and its UI move together during vertical navigation.
+Each of the three `PlayerUnit`s owns its video, playback timeline, and media
+lifecycle. A single imperative `OverlayView` belongs to the settled viewer
+selection and remains stationary while the native document scrolls.
 
-The original Svelte-specific implementation of this ownership rule is retained
-in `packages/app/src_old` as migration reference only.
+The overlay remains latched to the old selection during movement, disables
+mutations while unsettled, and switches atomically after `scrollend + 100ms`.
+Its fixed box is inset from both vertical Safari boundaries.
 
-**Why:** The old architecture had one shared overlay separate from the video elements. During peek swipe, the overlay required manual transform sync, hide/show coordination, and caused UI jank (stale data flash on navigation commit). The tango userscript's `StreamUnit` pattern proved that each slot should own its complete UI.
+**Why:** Moving per-unit overlays require viewport-bound fixed/transformed player
+geometry, which makes Safari's top and bottom chrome opaque. Native scrolling
+keeps videos edge-to-edge while one stationary UI gives editing controls stable
+geometry.
 
-## Ownership: Each unit feeds its own state (2026-04-05)
+## Ownership: Only settled media feeds shared UI (updated 2026-07-29)
 
-Each unit's `timeupdate` handler writes to its own `PlayerOverlayState` at 4Hz, regardless of active/inactive status. Preloaded units show real time/duration data during peek.
+Each unit maintains its own playback timeline. Only the settled current unit
+feeds the shared overlay and progress persistence. Adjacent videos remain
+playing muted but do not replace visible UI state before settlement.
 
-The active-only gate remains for: localStorage progress save (global), engine's gesture-facing fields (`_currentTime`, `_duration`, `_seekableEnd`).
-
-**Why:** The old active-only gate was from the shared-overlay era where only one set of time values existed. With per-unit state, each unit should feed its own data.
+**Why:** The stationary overlay must continue to describe the last committed
+selection while videos move underneath it.
 
 ## Ownership: No shadow state — derive from the slot (2026-04-05)
 
@@ -62,14 +67,13 @@ Single writer per resource, no cross-process write contention.
 
 ## Frontend gestures preserve Safari navigation ownership (2026-07-29)
 
-Safari owns leading-edge Back and tab/history navigation. The viewer owns only
-gestures that begin outside the browser edge zone and have been classified as
-vertical video navigation, horizontal seek, controls, or zoom.
+Safari owns leading-edge Back, tab/history navigation, and vertical viewer
+scrolling. The viewer owns horizontal seek, controls, and zoom.
 
 - Do not call `preventDefault()` for a touch beginning in the leading-edge zone.
 - Call `preventDefault()` only after an application-owned axis is known.
-- Keep `touchcancel` handling and animation locks so gesture state cannot get stuck.
-- Rotate three complete player units for vertical video navigation.
+- Do not prevent native vertical touch movement.
+- Rotate 10k/natural/10k scope roles after `scrollend + 100ms`.
 - Commit viewer-to-viewer navigation with `history.replaceState()`, preserving
   the list as the previous history entry.
 

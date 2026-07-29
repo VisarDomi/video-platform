@@ -8,24 +8,28 @@ import {
 } from '../services/downloadList.js';
 import { calculateSegmentsToKeep, fetchPlaylist } from '../services/hls.js';
 import { GestureController } from '../player/GestureController.js';
-import type { OverlayActions } from '../player/OverlayView.js';
+import { OverlayView, type OverlayActions, type OverlayTimeline } from '../player/OverlayView.js';
 import { PlayerUnit } from '../player/PlayerUnit.js';
 import type { TimelineSnapshot } from '../player/PlaybackTimeline.js';
 import type { Video, VideoType } from '../types.js';
 
-const NAV_THRESHOLD = 0.2;
-const NAV_MS = 220;
+const SETTLEMENT_DELAY_MS = 100;
+const GEOMETRY_WAIT_MS = 8000;
 const PROGRESS_SAVE_MS = 3000;
 
 export class VideoViewerPage {
 	private readonly stage = document.createElement('main');
+	private readonly overlay: OverlayView;
 	private units: PlayerUnit[] = [];
 	private videos: Video[] = [];
-	private currentIndex = 0;
+	private currentIndex = -1;
 	private gesture!: GestureController;
 	private segments: number[] = [];
 	private controlsVisible = true;
-	private moving = false;
+	private unsettled = false;
+	private settlementTimer: number | null = null;
+	private ignoreNextScrollEnd = false;
+	private programmaticScroll = false;
 	private lastProgressSave = 0;
 	private membership: MembershipState = { state: 'loading' };
 	private membershipToken = 0;
@@ -35,41 +39,98 @@ export class VideoViewerPage {
 		private readonly requestedFilename: string,
 		private readonly requestedType: VideoType | null
 	) {
-		this.stage.className = 'video-stage';
+		this.stage.className = 'video-stage viewer-loading';
+		this.overlay = new OverlayView(this.actions());
 	}
 
 	async open(): Promise<void> {
 		document.body.className = 'viewer-page';
-		document.body.replaceChildren(status('Loading…'));
-		this.videos = await fetchVideos(this.provider);
-		this.currentIndex = this.findRequestedIndex();
-		if (this.currentIndex < 0) throw new Error('Video not found.');
+		history.scrollRestoration = 'manual';
 
-		this.units = [-1, 0, 1].map(() => new PlayerUnit(this.actions(), this.unitCallbacks()));
-		this.stage.append(...this.units.map((unit) => unit.wrapper));
-		document.body.replaceChildren(this.stage);
-		this.resetUnitPositions();
-		await this.updateUnits();
-		this.activateCurrent();
-		this.gesture = new GestureController(this.stage, this.gestureCallbacks());
+		this.units = [0, 1, 2].map(() => new PlayerUnit(this.unitCallbacks()));
+		this.applyScopeRoles();
+		document.body.replaceChildren(this.stage, this.overlay.element);
+
+		const provisional = this.provisionalVideo();
+		this.overlay.setActive(true);
+		this.overlay.setUiVisible(this.controlsVisible);
+		this.overlay.setVideo(provisional);
+		this.activeUnit().setActive(true);
+
+		// The URL-selected media gets the network first. Everything else is auxiliary.
+		void this.activeUnit().load(provisional, savedTime(provisional), true);
 		void this.requestWakeLock();
 
+		const revealTask = this.revealWhenCurrentGeometryIsReady();
+		const listTask = this.loadCanonicalListAndNeighbors();
+		await Promise.all([revealTask, listTask]);
+
+		this.ignoreNextScrollEnd = false;
+		this.gesture = new GestureController(this.stage, this.gestureCallbacks());
+		addEventListener('scroll', this.handleScroll, { passive: true });
+		addEventListener('scrollend', this.handleScrollEnd);
 		addEventListener('pagehide', this.handlePageHide);
 		addEventListener('pageshow', this.handlePageShow);
 		document.addEventListener('visibilitychange', this.handleVisibility);
 		addEventListener('online', this.handleOnline);
 	}
 
-	private findRequestedIndex(): number {
-		return this.videos.findIndex(
+	private provisionalVideo(): Video {
+		return {
+			filename: this.requestedFilename,
+			type: this.requestedType ?? VIDEO_TYPE.ORIGINAL,
+			duration: 0,
+			size: 0,
+			isLive: false,
+			provider: this.provider
+		};
+	}
+
+	private async loadCanonicalListAndNeighbors(): Promise<void> {
+		const videos = await fetchVideos(this.provider);
+		const index = videos.findIndex(
 			(video) =>
 				video.filename === this.requestedFilename &&
 				(this.requestedType === null || video.type === this.requestedType)
 		);
+		if (index < 0) throw new Error('Video not found.');
+
+		this.videos = videos;
+		this.currentIndex = index;
+		this.activeUnit().updateVideo(this.current());
+		this.loadEdgeUnits();
+		this.activateCurrent();
+	}
+
+	private async revealWhenCurrentGeometryIsReady(): Promise<void> {
+		const video = this.activeUnit().video;
+		if (video.videoWidth === 0 || video.videoHeight === 0) {
+			await new Promise<void>((resolve) => {
+				let timeout = 0;
+				const finish = () => {
+					clearTimeout(timeout);
+					video.removeEventListener('resize', ready);
+					video.removeEventListener('loadedmetadata', ready);
+					video.removeEventListener('error', finish);
+					resolve();
+				};
+				const ready = () => {
+					if (video.videoWidth > 0 && video.videoHeight > 0) finish();
+				};
+				video.addEventListener('resize', ready);
+				video.addEventListener('loadedmetadata', ready);
+				video.addEventListener('error', finish, { once: true });
+				timeout = window.setTimeout(finish, GEOMETRY_WAIT_MS);
+			});
+		}
+		this.centerVideo(this.activeUnit().video);
+		this.stage.classList.remove('viewer-loading');
 	}
 
 	private current(): Video {
-		return this.videos[this.currentIndex];
+		const video = this.videos[this.currentIndex] ?? this.activeUnit().currentVideo;
+		if (!video) throw new Error('No current video.');
+		return video;
 	}
 
 	private actions(): OverlayActions {
@@ -88,6 +149,7 @@ export class VideoViewerPage {
 		return {
 			onTime: (unit: PlayerUnit, snapshot: TimelineSnapshot) => {
 				if (unit !== this.activeUnit()) return;
+				this.overlay.setTimeline(overlayTimeline(snapshot));
 				const now = Date.now();
 				if (now - this.lastProgressSave >= PROGRESS_SAVE_MS) {
 					this.lastProgressSave = now;
@@ -101,6 +163,14 @@ export class VideoViewerPage {
 				const index = this.videos.findIndex((item) => sameVideo(item, video));
 				if (index >= 0) this.videos[index] = updated;
 				unit.updateVideo(updated);
+				if (unit === this.activeUnit()) this.overlay.setVideo(updated);
+			},
+			onMutedChanged: (unit: PlayerUnit, muted: boolean) => {
+				if (unit === this.activeUnit()) this.overlay.setMuted(muted);
+			},
+			onGeometryChanged: (_unit: PlayerUnit) => {
+				// Intrinsic media geometry owns layout. Scope alignment keeps neighbor
+				// changes pointed away from the selected video.
 			}
 		};
 	}
@@ -111,106 +181,152 @@ export class VideoViewerPage {
 			getSeekMax: () => this.activeUnit().getSnapshot().seekMax,
 			seekDirect: (time: number) => this.activeUnit().seek(time, false),
 			finishSeek: () => void this.activeUnit().play(),
-			moveVertical: (delta: number) => this.moveVertical(delta),
-			releaseVertical: (delta: number) => this.releaseVertical(delta),
-			cancelVertical: () => this.cancelVertical(),
+			onVerticalStart: () => this.beginUnsettled(),
 			setControlsVisible: (visible: boolean) => this.setControlsVisible(visible),
 			applyZoom: (scale: number, x: number, y: number) => this.activeUnit().applyZoom(scale, x, y),
 			resetZoom: () => this.activeUnit().resetZoom()
 		};
 	}
 
-	private async updateUnits(): Promise<void> {
+	private loadEdgeUnits(): void {
 		const targets = [
 			this.videos[this.currentIndex - 1],
 			this.videos[this.currentIndex],
 			this.videos[this.currentIndex + 1]
 		];
-		await Promise.all(
-			this.units.map(async (unit, position) => {
-				const video = targets[position];
-				if (!video) {
-					unit.clear();
-					return;
-				}
-				const shouldPlay = position !== 0;
-				await unit.load(video, savedTime(video), shouldPlay);
-				if (position === 0) unit.video.pause();
-			})
-		);
+		for (const [position, unit] of this.units.entries()) {
+			const video = targets[position];
+			if (!video) {
+				unit.clear();
+				continue;
+			}
+			if (unit.currentVideo && sameVideo(unit.currentVideo, video)) {
+				unit.updateVideo(video);
+				continue;
+			}
+			void unit.load(video, savedTime(video), true);
+		}
 	}
 
 	private activateCurrent(): void {
 		for (const [position, unit] of this.units.entries()) {
 			unit.setActive(position === 1);
-			unit.setUiVisible(this.controlsVisible);
-			unit.setSegments(position === 1 ? this.segments : []);
+			void unit.play();
 		}
 		const video = this.current();
+		const active = this.activeUnit();
+		this.overlay.setVideo(video);
+		this.overlay.setTimeline(overlayTimeline(active.getSnapshot()));
+		this.overlay.setMuted(active.video.muted);
+		this.overlay.setSegments(this.segments);
+		this.overlay.setMembership(this.membership);
+		this.overlay.setActive(true);
+		this.overlay.setUiVisible(this.controlsVisible);
+		this.overlay.setInteractive(!this.unsettled);
 		document.title = `${video.filename} - ${this.provider} - Video Editor`;
 		history.replaceState(null, '', videoUrl(video));
 		sessionStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
-		void this.activeUnit().play();
 		void this.loadMembership();
 	}
 
-	private moveVertical(delta: number): void {
-		if (this.moving) return;
-		for (const [position, unit] of this.units.entries()) {
-			unit.wrapper.style.transition = 'none';
-			unit.wrapper.style.transform = `translateY(calc(${(position - 1) * 100}% + ${delta}px))`;
-		}
+	private readonly handleScroll = (): void => {
+		if (this.programmaticScroll) return;
+		this.beginUnsettled();
+	};
+
+	private beginUnsettled(): void {
+		if (this.unsettled) return;
+		this.unsettled = true;
+		this.activeUnit().resetZoom();
+		this.overlay.setInteractive(false);
 	}
 
-	private releaseVertical(delta: number): void {
-		if (this.moving) return;
-		const direction = delta < 0 ? 1 : -1;
-		const target = this.currentIndex + direction;
-		const commit = Math.abs(delta) > innerHeight * NAV_THRESHOLD && Boolean(this.videos[target]);
-		this.moving = true;
-		for (const [position, unit] of this.units.entries()) {
-			unit.wrapper.style.transition = `transform ${NAV_MS}ms ease-out`;
-			const destination = commit ? position - 1 - direction : position - 1;
-			unit.wrapper.style.transform = `translateY(${destination * 100}%)`;
+	private readonly handleScrollEnd = (): void => {
+		if (this.ignoreNextScrollEnd) {
+			this.ignoreNextScrollEnd = false;
+			return;
 		}
-		window.setTimeout(() => {
-			if (!commit) {
-				this.resetUnitPositions();
+		if (this.settlementTimer !== null) clearTimeout(this.settlementTimer);
+		this.settlementTimer = window.setTimeout(() => {
+			this.settlementTimer = null;
+			this.settleFocusedVideo();
+		}, SETTLEMENT_DELAY_MS);
+	};
+
+	private settleFocusedVideo(): void {
+		const scores = this.units.map((unit) => visibleFraction(unit.video));
+		const currentScore = scores[1];
+		const bestScore = Math.max(...scores);
+		const winners = scores.filter((score) => Math.abs(score - bestScore) < 0.000001);
+		const winner = scores.findIndex((score) => Math.abs(score - bestScore) < 0.000001);
+
+		if (winners.length === 1 && winner !== 1 && bestScore > currentScore) {
+			const direction = winner === 0 ? -1 : 1;
+			const target = this.currentIndex + direction;
+			if (target >= 0 && target < this.videos.length) {
+				this.commitScope(direction, target);
 				return;
 			}
-			this.saveProgress(this.activeUnit().getSnapshot().currentTime);
-			this.units =
-				direction === 1
-					? [this.units[1], this.units[2], this.units[0]]
-					: [this.units[2], this.units[0], this.units[1]];
-			this.currentIndex = target;
-			this.segments = [];
-			this.resetUnitPositions();
-			void this.updateUnits().then(() => this.activateCurrent());
-		}, NAV_MS);
+		}
+		this.unsettled = false;
+		this.overlay.setInteractive(true);
 	}
 
-	private cancelVertical(): void {
-		if (this.moving) return;
-		this.moving = true;
-		for (const [position, unit] of this.units.entries()) {
-			unit.wrapper.style.transition = `transform ${NAV_MS}ms ease-out`;
-			unit.wrapper.style.transform = `translateY(${(position - 1) * 100}%)`;
-		}
-		window.setTimeout(() => this.resetUnitPositions(), NAV_MS);
+	private commitScope(direction: -1 | 1, targetIndex: number): void {
+		const oldActive = this.activeUnit();
+		this.saveProgress(oldActive.getSnapshot().currentTime);
+		const selected = direction === 1 ? this.units[2] : this.units[0];
+		const beforeTop = selected.video.getBoundingClientRect().top;
+
+		this.units =
+			direction === 1
+				? [this.units[1], this.units[2], this.units[0]]
+				: [this.units[2], this.units[0], this.units[1]];
+		this.currentIndex = targetIndex;
+		this.segments = [];
+		this.applyScopeRoles();
+
+		const afterTop = this.activeUnit().video.getBoundingClientRect().top;
+		this.correctScroll(afterTop - beforeTop);
+		this.loadEdgeUnits();
+		this.unsettled = false;
+		this.activateCurrent();
 	}
 
-	private resetUnitPositions(): void {
-		this.moving = false;
+	private applyScopeRoles(): void {
 		for (const [position, unit] of this.units.entries()) {
-			unit.wrapper.style.transition = '';
-			unit.wrapper.style.transform = `translateY(${(position - 1) * 100}%)`;
+			unit.wrapper.classList.remove('previous-scope', 'current-scope', 'next-scope');
+			unit.wrapper.classList.add(
+				position === 0 ? 'previous-scope' : position === 1 ? 'current-scope' : 'next-scope'
+			);
+			this.stage.append(unit.wrapper);
 		}
+	}
+
+	private correctScroll(delta: number): void {
+		if (Math.abs(delta) < 0.5) return;
+		this.ignoreNextScrollEnd = true;
+		this.programmaticScroll = true;
+		window.scrollBy(0, delta);
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				this.programmaticScroll = false;
+			});
+		});
+	}
+
+	private centerVideo(video: HTMLVideoElement): void {
+		const viewport = visualViewport;
+		const viewportCenter = viewport
+			? viewport.offsetTop + viewport.height / 2
+			: window.innerHeight / 2;
+		const rect = video.getBoundingClientRect();
+		window.scrollBy(0, rect.top + rect.height / 2 - viewportCenter);
 	}
 
 	private setControlsVisible(visible: boolean): void {
 		this.controlsVisible = visible;
-		for (const unit of this.units) unit.setUiVisible(visible);
+		this.overlay.setUiVisible(visible);
 	}
 
 	private activeUnit(): PlayerUnit {
@@ -236,9 +352,7 @@ export class VideoViewerPage {
 	}
 
 	private syncSegments(): void {
-		for (const [position, unit] of this.units.entries()) {
-			unit.setSegments(position === 1 ? this.segments : []);
-		}
+		this.overlay.setSegments(this.segments);
 	}
 
 	private async saveOrCut(playbackDuration: number): Promise<void> {
@@ -276,6 +390,7 @@ export class VideoViewerPage {
 		this.syncSegments();
 		history.replaceState(null, '', videoUrl(video));
 		await this.activeUnit().load(video, 0, true);
+		this.activateCurrent();
 	}
 
 	private handleMutationError(error: unknown): void {
@@ -287,8 +402,8 @@ export class VideoViewerPage {
 				return;
 			}
 			this.currentIndex = Math.min(this.currentIndex, this.videos.length - 1);
-			this.resetUnitPositions();
-			void this.updateUnits().then(() => this.activateCurrent());
+			this.loadEdgeUnits();
+			this.activateCurrent();
 		}
 	}
 
@@ -346,12 +461,12 @@ export class VideoViewerPage {
 
 	private setMembership(state: MembershipState): void {
 		this.membership = state;
-		this.activeUnit().setMembership(state);
+		this.overlay.setMembership(state);
 	}
 
 	private saveProgress(time: number): void {
 		const video = this.current();
-		if (!video || !Number.isFinite(time)) return;
+		if (!Number.isFinite(time)) return;
 		localStorage.setItem(STORAGE_KEYS.PROGRESS_PREFIX + video.filename, String(time));
 	}
 
@@ -362,7 +477,7 @@ export class VideoViewerPage {
 
 	private readonly handlePageShow = (event: PageTransitionEvent): void => {
 		if (!event.persisted) return;
-		this.activeUnit().resume();
+		this.resumeAll();
 		void this.requestWakeLock();
 	};
 
@@ -370,14 +485,18 @@ export class VideoViewerPage {
 		if (document.visibilityState === 'hidden') {
 			this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		} else {
-			this.activeUnit().resume();
+			this.resumeAll();
 			void this.requestWakeLock();
 		}
 	};
 
 	private readonly handleOnline = (): void => {
-		this.activeUnit().resume();
+		this.resumeAll();
 	};
+
+	private resumeAll(): void {
+		for (const unit of this.units) unit.resume();
+	}
 
 	private wakeLock: WakeLockSentinel | null = null;
 
@@ -410,9 +529,26 @@ function videoUrl(video: Video): string {
 	return `/videos/${video.provider}/${encodeURIComponent(video.filename)}?type=${video.type}`;
 }
 
-function status(text: string): HTMLParagraphElement {
-	const message = document.createElement('p');
-	message.className = 'status';
-	message.textContent = text;
-	return message;
+function overlayTimeline(snapshot: TimelineSnapshot): OverlayTimeline {
+	return {
+		currentTime: snapshot.currentTime,
+		duration: snapshot.duration,
+		seekableEnd: snapshot.seekableEnd ?? 0,
+		currentSegmentName: snapshot.currentSegmentName,
+		isLive: snapshot.isLive
+	};
+}
+
+function visibleFraction(video: HTMLVideoElement): number {
+	if (video.hidden || video.getClientRects().length === 0) return -1;
+	const rect = video.getBoundingClientRect();
+	if (rect.width <= 0 || rect.height <= 0) return -1;
+	const viewport = visualViewport;
+	const top = viewport?.offsetTop ?? 0;
+	const left = viewport?.offsetLeft ?? 0;
+	const right = left + (viewport?.width ?? innerWidth);
+	const bottom = top + (viewport?.height ?? innerHeight);
+	const visibleWidth = Math.max(0, Math.min(rect.right, right) - Math.max(rect.left, left));
+	const visibleHeight = Math.max(0, Math.min(rect.bottom, bottom) - Math.max(rect.top, top));
+	return (visibleWidth * visibleHeight) / (rect.width * rect.height);
 }

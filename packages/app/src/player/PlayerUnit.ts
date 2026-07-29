@@ -2,19 +2,18 @@ import Hls from 'hls.js';
 import { API, USE_NATIVE_HLS } from '../constants.js';
 import { fetchPlaylist } from '../services/hls.js';
 import type { Video } from '../types.js';
-import { OverlayView, type OverlayActions, type OverlayTimeline } from './OverlayView.js';
 import { PlaybackTimeline, type TimelineSnapshot } from './PlaybackTimeline.js';
-import type { MembershipState } from '../services/downloadList.js';
 
 export interface PlayerUnitCallbacks {
 	onTime(unit: PlayerUnit, snapshot: TimelineSnapshot): void;
 	onLiveChanged(unit: PlayerUnit, isLive: boolean): void;
+	onMutedChanged(unit: PlayerUnit, muted: boolean): void;
+	onGeometryChanged(unit: PlayerUnit): void;
 }
 
 export class PlayerUnit {
 	readonly wrapper = document.createElement('section');
 	readonly video = document.createElement('video');
-	readonly overlay: OverlayView;
 	readonly timeline = new PlaybackTimeline();
 	currentVideo: Video | null = null;
 
@@ -23,16 +22,12 @@ export class PlayerUnit {
 	private loadToken = 0;
 	private lastOverlayUpdate = 0;
 
-	constructor(
-		actions: OverlayActions,
-		private readonly callbacks: PlayerUnitCallbacks
-	) {
-		this.wrapper.className = 'player-unit background-unit';
+	constructor(private readonly callbacks: PlayerUnitCallbacks) {
+		this.wrapper.className = 'player-scope background-unit';
 		this.video.playsInline = true;
 		this.video.preload = 'auto';
 		this.video.muted = true;
-		this.overlay = new OverlayView(actions);
-		this.wrapper.append(this.video, this.overlay.element);
+		this.wrapper.append(this.video);
 	}
 
 	async load(video: Video, startTime: number, shouldPlay: boolean): Promise<void> {
@@ -49,9 +44,24 @@ export class PlayerUnit {
 		const token = ++this.loadToken;
 		this.clearMedia();
 		this.currentVideo = video;
-		this.overlay.setVideo(video);
 		this.timeline.clear();
-		this.updateOverlay();
+
+		const events = new AbortController();
+		this.mediaEvents = events;
+		const signal = events.signal;
+		this.video.addEventListener('timeupdate', this.handleTimeUpdate, { signal });
+		this.video.addEventListener('durationchange', this.handleMediaChange, { signal });
+		this.video.addEventListener('volumechange', this.handleVolumeChange, { signal });
+		this.video.addEventListener('resize', this.handleGeometryChange, { signal });
+		this.video.addEventListener('ended', this.handleEnded, { signal });
+		this.video.addEventListener('error', this.handleError, { signal });
+		this.video.hidden = false;
+
+		if (!USE_NATIVE_HLS && Hls.isSupported()) {
+			this.loadWithHlsJs(video, startTime, shouldPlay, token);
+		} else {
+			this.loadNative(video, startTime, shouldPlay, token);
+		}
 
 		void fetchPlaylist(video)
 			.then((playlist) => {
@@ -65,27 +75,12 @@ export class PlayerUnit {
 					isLive: playlist.isLive,
 					segments: playlist.segments
 				});
-				this.updateOverlay();
+				this.emitTime();
 				if (video.isLive !== playlist.isLive) {
 					this.callbacks.onLiveChanged(this, playlist.isLive);
 				}
 			})
 			.catch((error) => console.error('Playlist authority fetch failed', error));
-
-		const events = new AbortController();
-		this.mediaEvents = events;
-		const signal = events.signal;
-		this.video.addEventListener('timeupdate', this.handleTimeUpdate, { signal });
-		this.video.addEventListener('durationchange', this.handleMediaChange, { signal });
-		this.video.addEventListener('volumechange', this.handleVolumeChange, { signal });
-		this.video.addEventListener('ended', this.handleEnded, { signal });
-		this.video.addEventListener('error', this.handleError, { signal });
-
-		if (!USE_NATIVE_HLS && Hls.isSupported()) {
-			this.loadWithHlsJs(video, startTime, shouldPlay, token);
-		} else {
-			this.loadNative(video, startTime, shouldPlay, token);
-		}
 	}
 
 	clear(): void {
@@ -93,34 +88,17 @@ export class PlayerUnit {
 		this.clearMedia();
 		this.currentVideo = null;
 		this.timeline.clear();
-		this.overlay.setVideo(null);
-		this.updateOverlay();
-		this.wrapper.hidden = true;
+		this.video.hidden = true;
 	}
 
 	setActive(active: boolean): void {
 		this.wrapper.classList.toggle('active-unit', active);
 		this.wrapper.classList.toggle('background-unit', !active);
-		this.overlay.setActive(active);
 		if (!active) this.video.muted = true;
-		this.overlay.setMuted(this.video.muted);
-	}
-
-	setSegments(segments: readonly number[]): void {
-		this.overlay.setSegments(segments);
-	}
-
-	setMembership(state: MembershipState): void {
-		this.overlay.setMembership(state);
 	}
 
 	updateVideo(video: Video): void {
 		this.currentVideo = video;
-		this.overlay.setVideo(video);
-	}
-
-	setUiVisible(visible: boolean): void {
-		this.overlay.setUiVisible(visible);
 	}
 
 	seek(time: number, resume: boolean): void {
@@ -135,7 +113,7 @@ export class PlayerUnit {
 		if (!shouldResume && target >= terminal - 0.1) target = Math.max(0, terminal - 0.1);
 		if (resume) this.video.pause();
 		this.video.currentTime = target;
-		this.updateOverlay();
+		this.emitTime();
 		if (shouldResume && resume) {
 			this.video.addEventListener('seeked', () => void this.play(), { once: true });
 		}
@@ -187,7 +165,6 @@ export class PlayerUnit {
 
 	destroy(): void {
 		this.clear();
-		this.overlay.destroy();
 		this.wrapper.remove();
 	}
 
@@ -200,7 +177,7 @@ export class PlayerUnit {
 				if (startTime > 0 && !this.timeline.snapshot().isLive) {
 					this.video.currentTime = this.timeline.clampSeekTarget(startTime);
 				}
-				this.updateOverlay();
+				this.emitTime();
 				if (shouldPlay) void this.play();
 				else this.video.pause();
 			},
@@ -208,6 +185,7 @@ export class PlayerUnit {
 		);
 		this.video.src = API.HLS_PLAYLIST(video.provider, video.filename);
 		this.video.load();
+		if (shouldPlay) void this.play();
 	}
 
 	private loadWithHlsJs(video: Video, startTime: number, shouldPlay: boolean, token: number): void {
@@ -225,7 +203,7 @@ export class PlayerUnit {
 			const isLive = data.details.live;
 			const duration = data.details.totalduration;
 			this.timeline.setPlaylistTruth({ totalDuration: duration, isLive });
-			this.updateOverlay();
+			this.emitTime();
 			if (video.isLive !== isLive) this.callbacks.onLiveChanged(this, isLive);
 		});
 		hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -240,17 +218,20 @@ export class PlayerUnit {
 		const now = performance.now();
 		if (now - this.lastOverlayUpdate >= 250) {
 			this.lastOverlayUpdate = now;
-			this.updateOverlay(snapshot);
+			this.callbacks.onTime(this, snapshot);
 		}
-		this.callbacks.onTime(this, snapshot);
 	};
 
 	private readonly handleMediaChange = (): void => {
-		this.updateOverlay(this.observe());
+		this.emitTime();
 	};
 
 	private readonly handleVolumeChange = (): void => {
-		this.overlay.setMuted(this.video.muted);
+		this.callbacks.onMutedChanged(this, this.video.muted);
+	};
+
+	private readonly handleGeometryChange = (): void => {
+		this.callbacks.onGeometryChanged(this);
 	};
 
 	private readonly handleEnded = (): void => {
@@ -269,15 +250,8 @@ export class PlayerUnit {
 		return this.timeline.snapshot();
 	}
 
-	private updateOverlay(snapshot = this.observe()): void {
-		const timeline: OverlayTimeline = {
-			currentTime: snapshot.currentTime,
-			duration: snapshot.duration,
-			seekableEnd: snapshot.seekableEnd ?? 0,
-			currentSegmentName: snapshot.currentSegmentName,
-			isLive: snapshot.isLive
-		};
-		this.overlay.setTimeline(timeline);
+	private emitTime(): void {
+		this.callbacks.onTime(this, this.observe());
 	}
 
 	private clearMedia(): void {
@@ -288,6 +262,5 @@ export class PlayerUnit {
 		this.video.pause();
 		this.video.removeAttribute('src');
 		this.video.load();
-		this.wrapper.hidden = false;
 	}
 }
