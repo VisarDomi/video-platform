@@ -1,4 +1,3 @@
-import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import fs from 'fs';
 import path from 'path';
@@ -22,8 +21,10 @@ function getHttpsConfig() {
 }
 
 export default defineConfig({
-	plugins: [sveltekit()],
 	clearScreen: false,
+	build: {
+		outDir: 'build'
+	},
 	server: {
 		host: '0.0.0.0',
 		port: 43210,
