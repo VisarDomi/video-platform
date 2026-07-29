@@ -3,11 +3,11 @@
 ## Pure TypeScript and native Safari navigation (2026-07-29)
 
 The frontend is a pure TypeScript/Vite application. The old Svelte implementation
-is retained under `src_old` as reference and is not part of the build.
+remains available in Git history and is not part of the build.
 
 Provider lists and viewers are separate native documents. List rows are anchors.
-Safari owns tabs, history, scrolling, scroll restoration, and edge-back. Vertical
-video navigation rotates three complete player units and uses
+Safari owns tabs, history, scrolling, scroll restoration, edge-back, and viewer
+vertical movement. Viewer settlement rotates three media scopes and uses
 `history.replaceState()`, so Back always returns to the list entry.
 
 The list renders every row without virtualization or filtering. On `pagehide` it
@@ -19,19 +19,32 @@ PWA support, watchdog/sentinel timers, and the frontend `/api/log` pipeline were
 removed. Viewer recovery responds directly to browser lifecycle and connectivity
 events.
 
-## Viewer gesture constants
+## Intrinsic three-scope viewer (2026-07-29)
 
-`DEADZONE_RATIO = 0.013`. `NAV_COMMIT_THRESHOLD = 0.2` (20% of viewport height
-for vertical video navigation). The leading `28px` edge is left to Safari.
+The viewer document always contains three media scopes: a 10,000px previous
+scope whose video is bottom-aligned, a natural-height current scope, and a
+10,000px next scope whose video is top-aligned. The videos touch directly.
 
-## preventDefault AFTER axis lock
+Videos use `width:100%; height:auto`; decoded media geometry is the layout
+authority. No stage or scope clips video overflow. All three videos play muted.
 
-Swipe gesture handler calls `preventDefault` only after axis lock is determined, not before. Otherwise it blocks vertical scroll before we know the gesture is horizontal.
+After `scrollend + 100ms`, a neighboring video becomes current only when it has
+a strictly greater visible fraction than both others. Ties retain current.
+Scope roles rotate with measured scroll correction, and only the remote edge
+unit is recycled.
 
-## Zoom reset on video navigation
+The URL-selected HLS source is assigned before the full provider list or
+auxiliary requests. Current playback never waits for neighbor discovery.
 
-When starting a navigation gesture, zoom is reset to 1x because unit translation
-conflicts with zoom transforms.
+One shared overlay remains stationary and latches to the settled current video.
+It is fixed at least 1px away from both vertical Safari boundaries; sticky and
+edge-touching fixed geometry are not used.
+
+## preventDefault only for application-owned gestures
+
+Safari owns vertical panning and leading-edge Back. The gesture handler calls
+`preventDefault` only for horizontal seek/control gestures or application zoom.
+Starting vertical movement resets zoom.
 
 ## localStorage debounce: 3s
 

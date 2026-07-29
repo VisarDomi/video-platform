@@ -49,6 +49,7 @@ export class OverlayView {
 	private muted = true;
 	private active = false;
 	private uiVisible = true;
+	private interactive = true;
 	private scrubRect: DOMRect | null = null;
 	private scrubRaf = 0;
 	private pendingScrubX = 0;
@@ -106,6 +107,12 @@ export class OverlayView {
 		this.renderVisibility();
 	}
 
+	setInteractive(interactive: boolean): void {
+		this.interactive = interactive;
+		this.element.classList.toggle('overlay-unsettled', !interactive);
+		this.renderButtons();
+	}
+
 	setSegments(segments: readonly number[]): void {
 		this.segments = segments;
 		this.renderTimeline();
@@ -130,10 +137,9 @@ export class OverlayView {
 	}
 
 	private renderVisibility(): void {
-		this.element.classList.toggle(
-			'ui-visible',
-			this.uiVisible && this.active && this.video !== null
-		);
+		const visible = this.uiVisible && this.active && this.video !== null;
+		this.element.hidden = !visible;
+		this.element.classList.toggle('ui-visible', visible);
 	}
 
 	private renderTimeline(): void {
@@ -173,6 +179,9 @@ export class OverlayView {
 		const isOriginal = this.video?.type === VIDEO_TYPE.ORIGINAL && this.timeline.isLive === false;
 		const isEdited = this.video?.type === VIDEO_TYPE.EDITED;
 		const hasSegments = isOriginal && this.segments.length > 0;
+		this.muteUndo.disabled = false;
+		this.returnOriginal.disabled = false;
+		this.addMarker.disabled = false;
 		this.muteUndo.textContent = hasSegments ? '↪️' : this.muted ? '🔇' : '🔊';
 		this.returnOriginal.hidden = !isEdited;
 		this.saveCut.hidden = !isOriginal;
@@ -199,6 +208,17 @@ export class OverlayView {
 				this.membership.title = this.membershipState.message;
 				break;
 		}
+		if (!this.interactive) {
+			for (const control of [
+				this.muteUndo,
+				this.membership,
+				this.returnOriginal,
+				this.saveCut,
+				this.addMarker
+			]) {
+				control.disabled = true;
+			}
+		}
 	}
 
 	private renderConfirmedMembership(isMember: boolean): void {
@@ -215,7 +235,7 @@ export class OverlayView {
 	}
 
 	private readonly handlePointerDown = (event: PointerEvent): void => {
-		if (!this.active) return;
+		if (!this.active || !this.interactive) return;
 		event.stopPropagation();
 		this.scrubRect = this.progress.getBoundingClientRect();
 		this.actions.onSeek(this.timeFromX(event.clientX));
