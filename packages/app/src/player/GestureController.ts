@@ -3,9 +3,7 @@ export interface GestureCallbacks {
 	getSeekMax(): number;
 	seekDirect(time: number): void;
 	finishSeek(): void;
-	moveVertical(delta: number): void;
-	releaseVertical(delta: number): void;
-	cancelVertical(): void;
+	onVerticalStart(): void;
 	setControlsVisible(visible: boolean): void;
 	applyZoom(scale: number, x: number, y: number): void;
 	resetZoom(): void;
@@ -73,13 +71,13 @@ export class GestureController {
 		if (this.axis === 'none') {
 			if (Math.max(Math.abs(dx), Math.abs(dy)) <= 8) return;
 			this.axis = Math.abs(dy) > Math.abs(dx) ? 'y' : 'x';
-			if (this.axis === 'y' && this.zoomScale > 1) this.resetZoom();
+			if (this.axis === 'y') {
+				if (this.zoomScale > 1) this.resetZoom();
+				this.callbacks.onVerticalStart();
+			}
 		}
 
-		if (this.axis === 'y') {
-			event.preventDefault();
-			this.callbacks.moveVertical(dy);
-		} else if (this.startY < innerHeight / 2) {
+		if (this.axis === 'x' && this.startY < innerHeight / 2) {
 			event.preventDefault();
 			const max = this.callbacks.getSeekMax();
 			if (max > 0) {
@@ -101,9 +99,7 @@ export class GestureController {
 		}
 		const touch = event.changedTouches[0];
 		const dx = touch.clientX - this.startX;
-		const dy = touch.clientY - this.startY;
-		if (this.axis === 'y') this.callbacks.releaseVertical(dy);
-		else if (this.axis === 'x' && this.startY < innerHeight / 2) this.callbacks.finishSeek();
+		if (this.axis === 'x' && this.startY < innerHeight / 2) this.callbacks.finishSeek();
 		else if (this.axis === 'x' && Math.abs(dx) > 80) {
 			this.callbacks.setControlsVisible(dx > 0);
 		}
@@ -111,7 +107,6 @@ export class GestureController {
 	};
 
 	private readonly handleCancel = (): void => {
-		if (this.axis === 'y') this.callbacks.cancelVertical();
 		this.axis = 'none';
 	};
 
