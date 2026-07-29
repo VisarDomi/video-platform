@@ -18,7 +18,9 @@ selection and remains stationary while the native document scrolls.
 
 The overlay remains latched to the old selection during movement, disables
 mutations while unsettled, and switches atomically after `scrollend + 100ms`.
-Its fixed box is inset from both vertical Safari boundaries.
+Its fixed box is transparent and may touch the viewport boundaries. Only the
+controls paint pixels; a full-box background or backdrop makes Safari's browser
+chrome opaque.
 
 **Why:** Moving per-unit overlays require viewport-bound fixed/transformed player
 geometry, which makes Safari's top and bottom chrome opaque. Native scrolling

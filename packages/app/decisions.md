@@ -37,8 +37,10 @@ The URL-selected HLS source is assigned before the full provider list or
 auxiliary requests. Current playback never waits for neighbor discovery.
 
 One shared overlay remains stationary and latches to the settled current video.
-It is fixed at least 1px away from both vertical Safari boundaries; sticky and
-edge-touching fixed geometry are not used.
+It is a transparent fixed shell at the viewport edges. Only its controls paint
+pixels and receive pointer events. Do not add a full-shell background, gradient,
+backdrop filter, or blur: a painted fixed backdrop makes Safari's browser chrome
+opaque.
 
 ## preventDefault only for application-owned gestures
 
