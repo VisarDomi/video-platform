@@ -8,7 +8,6 @@ export interface PlayerUnitCallbacks {
 	onTime(unit: PlayerUnit, snapshot: TimelineSnapshot): void;
 	onLiveChanged(unit: PlayerUnit, isLive: boolean): void;
 	onMutedChanged(unit: PlayerUnit, muted: boolean): void;
-	onGeometryChanged(unit: PlayerUnit): void;
 }
 
 export class PlayerUnit {
@@ -21,6 +20,8 @@ export class PlayerUnit {
 	private mediaEvents: AbortController | null = null;
 	private loadToken = 0;
 	private lastOverlayUpdate = 0;
+	private playlistFetchPending = false;
+	private playlistRefreshTimer: number | null = null;
 
 	constructor(private readonly callbacks: PlayerUnitCallbacks) {
 		this.wrapper.className = 'player-scope background-unit';
@@ -52,7 +53,6 @@ export class PlayerUnit {
 		this.video.addEventListener('timeupdate', this.handleTimeUpdate, { signal });
 		this.video.addEventListener('durationchange', this.handleMediaChange, { signal });
 		this.video.addEventListener('volumechange', this.handleVolumeChange, { signal });
-		this.video.addEventListener('resize', this.handleGeometryChange, { signal });
 		this.video.addEventListener('ended', this.handleEnded, { signal });
 		this.video.addEventListener('error', this.handleError, { signal });
 		this.video.hidden = false;
@@ -63,24 +63,7 @@ export class PlayerUnit {
 			this.loadNative(video, startTime, shouldPlay, token);
 		}
 
-		void fetchPlaylist(video)
-			.then((playlist) => {
-				if (token !== this.loadToken) return;
-				const totalDuration = playlist.segments.reduce(
-					(total, segment) => Math.max(total, segment.end),
-					0
-				);
-				this.timeline.setPlaylistTruth({
-					totalDuration,
-					isLive: playlist.isLive,
-					segments: playlist.segments
-				});
-				this.emitTime();
-				if (video.isLive !== playlist.isLive) {
-					this.callbacks.onLiveChanged(this, playlist.isLive);
-				}
-			})
-			.catch((error) => console.error('Playlist authority fetch failed', error));
+		void this.refreshPlaylistTruth(video, token);
 	}
 
 	clear(): void {
@@ -163,11 +146,6 @@ export class PlayerUnit {
 		this.video.style.transform = '';
 	}
 
-	destroy(): void {
-		this.clear();
-		this.wrapper.remove();
-	}
-
 	private loadNative(video: Video, startTime: number, shouldPlay: boolean, token: number): void {
 		this.video.addEventListener(
 			'loadedmetadata',
@@ -224,18 +202,16 @@ export class PlayerUnit {
 
 	private readonly handleMediaChange = (): void => {
 		this.emitTime();
+		this.reconcileNativeFinalization();
 	};
 
 	private readonly handleVolumeChange = (): void => {
 		this.callbacks.onMutedChanged(this, this.video.muted);
 	};
 
-	private readonly handleGeometryChange = (): void => {
-		this.callbacks.onGeometryChanged(this);
-	};
-
 	private readonly handleEnded = (): void => {
-		this.timeline.observe(this.video);
+		this.emitTime();
+		this.reconcileNativeFinalization();
 		if (this.timeline.hasRemainingMedia()) {
 			console.warn('Native ended before the authoritative playlist timeline was exhausted');
 		}
@@ -254,7 +230,62 @@ export class PlayerUnit {
 		this.callbacks.onTime(this, this.observe());
 	}
 
+	private reconcileNativeFinalization(): void {
+		if (!this.currentVideo || !Number.isFinite(this.video.duration)) return;
+		if (!this.timeline.snapshot().isLive) return;
+		void this.refreshPlaylistTruth(this.currentVideo, this.loadToken);
+	}
+
+	private async refreshPlaylistTruth(video: Video, token: number): Promise<void> {
+		if (this.playlistFetchPending) return;
+		this.playlistFetchPending = true;
+		if (this.playlistRefreshTimer !== null) clearTimeout(this.playlistRefreshTimer);
+		this.playlistRefreshTimer = null;
+		try {
+			const playlist = await fetchPlaylist(video);
+			if (token !== this.loadToken) return;
+			const totalDuration = playlist.segments.reduce(
+				(total, segment) => Math.max(total, segment.end),
+				0
+			);
+			this.timeline.setPlaylistTruth({
+				totalDuration,
+				isLive: playlist.isLive,
+				segments: playlist.segments
+			});
+			this.emitTime();
+			if (video.isLive !== playlist.isLive) {
+				this.callbacks.onLiveChanged(this, playlist.isLive);
+			}
+			if (playlist.isLive && Number.isFinite(this.video.duration)) {
+				this.schedulePlaylistRefresh(video, token);
+			}
+		} catch (error) {
+			console.error('Playlist authority fetch failed', error);
+			if (
+				token === this.loadToken &&
+				Number.isFinite(this.video.duration) &&
+				this.timeline.snapshot().isLive
+			) {
+				this.schedulePlaylistRefresh(video, token);
+			}
+		} finally {
+			if (token === this.loadToken) this.playlistFetchPending = false;
+		}
+	}
+
+	private schedulePlaylistRefresh(video: Video, token: number): void {
+		if (this.playlistRefreshTimer !== null) clearTimeout(this.playlistRefreshTimer);
+		this.playlistRefreshTimer = window.setTimeout(
+			() => void this.refreshPlaylistTruth(video, token),
+			1000
+		);
+	}
+
 	private clearMedia(): void {
+		if (this.playlistRefreshTimer !== null) clearTimeout(this.playlistRefreshTimer);
+		this.playlistRefreshTimer = null;
+		this.playlistFetchPending = false;
 		this.mediaEvents?.abort();
 		this.mediaEvents = null;
 		this.hls?.destroy();

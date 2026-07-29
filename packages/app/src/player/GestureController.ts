@@ -37,13 +37,6 @@ export class GestureController {
 		target.addEventListener('touchcancel', this.handleCancel, { capture: true });
 	}
 
-	destroy(): void {
-		this.target.removeEventListener('touchstart', this.handleStart, true);
-		this.target.removeEventListener('touchmove', this.handleMove, true);
-		this.target.removeEventListener('touchend', this.handleEnd, true);
-		this.target.removeEventListener('touchcancel', this.handleCancel, true);
-	}
-
 	private readonly handleStart = (event: TouchEvent): void => {
 		if (event.touches.length === 2) {
 			this.startPinch(event.touches[0], event.touches[1]);
