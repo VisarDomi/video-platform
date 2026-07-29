@@ -66,6 +66,17 @@ The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generat
 
 **Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
 
+## MPEG-TS duration includes the longest media stream
+
+Tango and FC2 segment validation uses `max(video duration, audio duration)` for
+playlist `#EXTINF`. Container duration is used only when neither media stream
+has a positive duration.
+
+**Why:** Some botched segments contain almost no advancing video while audio
+continues. Safari presents that interval as frozen video with continuing audio.
+Using only video duration made the playlist timeline shorter than the media
+Safari actually presented and made time-based editing inaccurate.
+
 ## SC bulk status uses `isLive`, not `isOnline`
 
 The bulk API returns both. `isOnline` returns `false` for some actively broadcasting streamers. `isLive` is the correct field.

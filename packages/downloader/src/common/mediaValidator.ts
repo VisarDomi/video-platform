@@ -41,8 +41,11 @@ export class MediaValidator {
                 }
             }
 
-            const duration = [videoDuration, audioDuration, formatDuration]
-                .find((value) => !isNaN(value) && value > 0) ?? 0;
+            const mediaDurations = [videoDuration, audioDuration]
+                .filter((value) => !isNaN(value) && value > 0);
+            const duration = mediaDurations.length > 0
+                ? Math.max(...mediaDurations)
+                : (!isNaN(formatDuration) && formatDuration > 0 ? formatDuration : 0);
 
             return {
                 duration,

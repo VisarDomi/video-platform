@@ -35,7 +35,8 @@
         "status:all": "systemctl --user status video-auth.service video-downloader.service video-server.service --no-pager",
         "status:auth": "systemctl --user status video-auth.service --no-pager",
         "status:downloader": "systemctl --user status video-downloader.service --no-pager",
-        "status:server": "systemctl --user status video-server.service --no-pager"
+        "status:server": "systemctl --user status video-server.service --no-pager",
+        "fix-playlists": "node --no-warnings scripts/fix-historical-playlists.mjs"
     },
     "workspaces": [
         "packages/shared",
