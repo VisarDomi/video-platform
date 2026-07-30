@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const DOWNLOADS_ROOT = "/home/visar/Videos/downloads";
+const DEFAULT_DOWNLOADS_ROOT = "/home/visar/Videos/downloads";
 const LIVE_STATUS_PATH = "/home/visar/.local/share/video-services/live-status.json";
 const DEFAULT_CHECKPOINT_PATH = "/home/visar/.local/share/video-services/fix-playlists.sqlite";
 const PROVIDERS = ["tango", "fc2"];
@@ -24,6 +24,7 @@ Options:
   --offset N                Skip the first N discovered playlists (default: 0)
   --concurrency N           Concurrent ffprobe processes (default: 1)
   --max-cpu N               Pause new probes above N% system CPU (default: 80)
+  --downloads-root PATH     Override the downloads root (testing only)
   --checkpoint PATH         SQLite checkpoint path
                             (default: ${DEFAULT_CHECKPOINT_PATH})
   --no-resume               Ignore prior checkpoints for this run
@@ -50,6 +51,7 @@ function parseArgs(argv) {
         offset: 0,
         concurrency: 1,
         maxCpu: 80,
+        downloadsRoot: DEFAULT_DOWNLOADS_ROOT,
         checkpointPath: DEFAULT_CHECKPOINT_PATH,
         resume: true,
         apply: false,
@@ -77,6 +79,8 @@ function parseArgs(argv) {
             if (!(options.maxCpu > 0 && options.maxCpu <= 100)) {
                 throw new Error("--max-cpu must be greater than 0 and at most 100");
             }
+        } else if (arg === "--downloads-root") {
+            options.downloadsRoot = path.resolve(argv[++index]);
         } else if (arg === "--checkpoint") {
             options.checkpointPath = path.resolve(argv[++index]);
         } else if (arg === "--no-resume") {
@@ -160,11 +164,11 @@ async function playlistFingerprint(playlistPath) {
     };
 }
 
-async function discoverPlaylists(provider) {
+async function discoverPlaylists(provider, downloadsRoot) {
     const providers = provider === "all" ? PROVIDERS : [provider];
     const playlists = [];
     for (const currentProvider of providers) {
-        const root = path.join(DOWNLOADS_ROOT, currentProvider, "downloader");
+        const root = path.join(downloadsRoot, currentProvider, "downloader");
         let entries;
         try {
             entries = await fs.readdir(root, { withFileTypes: true });
@@ -328,8 +332,25 @@ async function mapBounded(items, concurrency, operation) {
 
 async function atomicWrite(filePath, content) {
     const temporaryPath = `${filePath}.maxav-${process.pid}.tmp`;
-    await fs.writeFile(temporaryPath, content);
-    await fs.rename(temporaryPath, filePath);
+    let handle;
+    try {
+        handle = await fs.open(temporaryPath, "wx");
+        await handle.writeFile(content);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        await fs.rename(temporaryPath, filePath);
+        const directoryHandle = await fs.open(path.dirname(filePath), "r");
+        try {
+            await directoryHandle.sync();
+        } finally {
+            await directoryHandle.close();
+        }
+    } catch (error) {
+        if (handle) await handle.close().catch(() => {});
+        await fs.unlink(temporaryPath).catch(() => {});
+        throw error;
+    }
 }
 
 async function repairPlaylist(target, options, cpuGuard) {
@@ -413,7 +434,7 @@ async function main() {
     await fs.mkdir(path.dirname(options.checkpointPath), { recursive: true });
     const mode = options.apply ? "apply" : "dry-run";
     const checkpoints = new CheckpointStore(options.checkpointPath, mode);
-    const discovered = await discoverPlaylists(options.provider);
+    const discovered = await discoverPlaylists(options.provider, options.downloadsRoot);
     const selected = discovered.slice(options.offset, options.offset + options.limit);
     const cpuGuard = createCpuGuard(options.maxCpu);
     const startedAt = Date.now();
@@ -441,6 +462,7 @@ async function main() {
         maxCpu: options.maxCpu,
         resume: options.resume,
         checkpointPath: options.checkpointPath,
+        downloadsRoot: options.downloadsRoot,
     }));
 
     for (let index = 0; index < selected.length; index += 1) {
