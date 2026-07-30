@@ -59,7 +59,6 @@ class VideoListPage {
 		this.readHighlight();
 		try {
 			await this.refresh();
-			this.scrollToHighlight();
 		} catch (error) {
 			console.error('Unable to refresh restored video list', error);
 		} finally {

@@ -89,10 +89,10 @@ Render every provider-list row as an ordinary anchor in normal document flow.
 There is no virtualizer, spacer, fixed row-height calculation, filter, or scroll
 correction. Safari owns scrolling and bfcache scroll restoration.
 
-On a bfcache `pageshow`, immediately refetch and reconcile the list, center the
-last-viewed highlighted filename in the visual viewport, then resume exactly
-one poller. A normal list load also centers an existing highlight. Polling does
-not move the viewport.
+On a bfcache `pageshow`, immediately refetch and reconcile the list without
+moving Safari's restored viewport, then resume exactly one poller. A normal
+list load or page refresh centers an existing highlight in the visual viewport.
+Polling does not move the viewport.
 
 ## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
 
