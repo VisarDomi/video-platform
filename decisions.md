@@ -69,10 +69,11 @@ Single writer per resource, no cross-process write contention.
 
 ## Frontend gestures preserve Safari navigation ownership (2026-07-29)
 
-Safari owns leading-edge Back, tab/history navigation, and vertical viewer
-scrolling. The viewer owns horizontal seek, controls, and zoom.
+Safari owns leading-edge Back, tab/history navigation, vertical viewer
+scrolling, and pinch zoom. The viewer owns horizontal seek and controls.
 
 - Do not call `preventDefault()` for a touch beginning in the leading-edge zone.
+- Do not call `preventDefault()` or apply transforms for multi-touch sequences.
 - Call `preventDefault()` only after an application-owned axis is known.
 - Do not prevent native vertical touch movement.
 - Rotate 10k/natural/10k scope roles after `scrollend + 100ms`.
@@ -88,9 +89,10 @@ Render every provider-list row as an ordinary anchor in normal document flow.
 There is no virtualizer, spacer, fixed row-height calculation, filter, or scroll
 correction. Safari owns scrolling and bfcache scroll restoration.
 
-On a bfcache `pageshow`, immediately refetch and reconcile the list without
-moving the viewport, then resume exactly one poller. Highlight the last-viewed
-filename but do not scroll to it.
+On a bfcache `pageshow`, immediately refetch and reconcile the list, center the
+last-viewed highlighted filename in the visual viewport, then resume exactly
+one poller. A normal list load also centers an existing highlight. Polling does
+not move the viewport.
 
 ## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
 

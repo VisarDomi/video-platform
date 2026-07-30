@@ -33,6 +33,7 @@ class VideoListPage {
 		this.readHighlight();
 		await this.refresh();
 		document.body.replaceChildren(this.list);
+		this.scrollToHighlight();
 		this.startPolling();
 		addEventListener('pagehide', this.handlePageHide);
 		addEventListener('pageshow', this.handlePageShow);
@@ -58,6 +59,7 @@ class VideoListPage {
 		this.readHighlight();
 		try {
 			await this.refresh();
+			this.scrollToHighlight();
 		} catch (error) {
 			console.error('Unable to refresh restored video list', error);
 		} finally {
@@ -71,6 +73,12 @@ class VideoListPage {
 		if (token !== this.refreshToken) return;
 		this.videos = videos;
 		this.reconcile(videos);
+	}
+
+	private scrollToHighlight(): void {
+		if (!this.highlightedFilename) return;
+		const highlighted = this.list.querySelector<HTMLElement>('.video-row.current-video');
+		highlighted?.scrollIntoView({ block: 'center' });
 	}
 
 	private reconcile(videos: Video[]): void {

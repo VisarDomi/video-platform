@@ -177,9 +177,7 @@ export class VideoViewerPage {
 			seekDirect: (time: number) => this.activeUnit().seek(time, false),
 			finishSeek: () => void this.activeUnit().play(),
 			onVerticalStart: () => this.beginUnsettled(),
-			setControlsVisible: (visible: boolean) => this.setControlsVisible(visible),
-			applyZoom: (scale: number, x: number, y: number) => this.activeUnit().applyZoom(scale, x, y),
-			resetZoom: () => this.activeUnit().resetZoom()
+			setControlsVisible: (visible: boolean) => this.setControlsVisible(visible)
 		};
 	}
 
@@ -231,7 +229,6 @@ export class VideoViewerPage {
 	private beginUnsettled(): void {
 		if (this.unsettled) return;
 		this.unsettled = true;
-		this.activeUnit().resetZoom();
 		this.overlay.setInteractive(false);
 	}
 

@@ -138,14 +138,6 @@ export class PlayerUnit {
 		);
 	}
 
-	applyZoom(scale: number, x: number, y: number): void {
-		this.video.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-	}
-
-	resetZoom(): void {
-		this.video.style.transform = '';
-	}
-
 	private loadNative(video: Video, startTime: number, shouldPlay: boolean, token: number): void {
 		this.video.addEventListener(
 			'loadedmetadata',
