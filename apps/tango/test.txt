@@ -22,13 +22,19 @@ Features:
   fresh list becomes current.
 
 3. Stream navigation
-- Dragging vertically reveals the adjacent stream in the direction of travel.
-- Releasing after a sufficient drag completes the move to the adjacent stream.
+- At rest, only the current stream is visible; adjacent streams remain loaded
+  in parked 10k scopes.
+- Recognized vertical intent brings both adjacent streams beside the current
+  stream while Safari owns the native document scroll.
+- The stream containing the exact visual-viewport midpoint becomes current
+  immediately.
+- After scrollend + 100ms, adjacent streams are parked again.
 - Releasing a short drag returns to the current stream.
 - The correct previous and next streams are loaded around the current stream.
 - Moving to another stream changes the URL without adding another Back step.
 - Discovered costreamers enter the stream order at the appropriate position
   and may become the next or previous stream.
+- Pinch zoom and Safari's leading-edge Back gesture remain browser-owned.
 
 4. Back to Home
 - Safari's left-edge Back gesture returns from a stream to Home.

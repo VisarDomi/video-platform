@@ -43,40 +43,87 @@ body {
 }
 
 .stream-page {
-    overflow: hidden;
-    overscroll-behavior: none;
-}
-
-.stream-stage,
-.stream-slot {
-    position: fixed;
-    inset: 0;
-    overflow: hidden;
-    background: #000;
+    min-height: 100%;
+    overflow: visible;
 }
 
 .stream-stage {
-    touch-action: none;
+    position: relative;
+    width: 100%;
+    overflow: visible;
+    background: #000;
+    overflow-anchor: none;
+    touch-action: pan-y pinch-zoom;
+    transition: opacity 120ms ease;
+}
+
+.stream-stage.viewer-loading {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.stream-slot {
+    position: relative;
+    display: flex;
+    width: 100%;
+    overflow: visible;
+    flex-direction: column;
+    background: #000;
+    overflow-anchor: none;
+}
+
+.stream-slot.previous-scope,
+.stream-slot.next-scope {
+    height: 10000px;
+}
+
+.stream-slot.previous-scope {
+    justify-content: flex-start;
+}
+
+.stream-slot.next-scope {
+    justify-content: flex-end;
+}
+
+.stream-slot.current-scope,
+.stream-stage.viewer-navigating .stream-slot.next-scope {
+    justify-content: flex-start;
+}
+
+.stream-stage.viewer-navigating .stream-slot.previous-scope {
+    justify-content: flex-end;
 }
 
 .stream-slot video {
+    position: relative;
+    display: block;
+    flex: none;
     width: 100%;
-    height: 100%;
-    object-fit: contain;
+    height: auto;
+    border: 0;
+    background: #000;
+    transform-origin: center;
 }
 
 .stream-controls {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
+    position: fixed;
+    z-index: 20;
+    inset: 0;
     padding:
         calc(env(safe-area-inset-top, 0px) + 15px)
         max(15px, env(safe-area-inset-right))
         15px
         max(15px, env(safe-area-inset-left));
-    background: linear-gradient(to bottom, rgb(0 0 0 / 70%), transparent);
+    pointer-events: none;
     transition: opacity 300ms ease;
+}
+
+.stream-controls button {
+    pointer-events: auto;
+}
+
+.stream-controls.unsettled button {
+    pointer-events: none;
 }
 
 .stream-controls.hidden {

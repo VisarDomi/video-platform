@@ -138,16 +138,15 @@ async function streamSnapshot() {
         for(let i=0;i<80;i++){
             const shared=JSON.parse(sessionStorage.getItem("stream-viewer-state")??"null");
             const index=shared?.streams?.findIndex(stream=>stream.streamerId===shared.currentStreamerId)??-1;
-            const domSlots=[...document.querySelectorAll(".stream-slot")];
-            const logical=["translateY(-100%)","translateY(0%)","translateY(100%)"]
-                .map(transform=>domSlots.find(slot=>slot.style.transform===transform));
+            const logical=["previous","current","next"]
+                .map(role=>document.querySelector(".stream-slot."+role+"-scope"));
             const expected=shared&&index>=0?[-1,0,1].map(offset=>shared.streams[index+offset]?.masterListUrl??""):[];
             if(expected.length===3&&logical.every((slot,position)=>(slot?.querySelector("video")?.getAttribute("src")??"")===expected[position])) break;
             await wait(100);
         }
         const domSlots=[...document.querySelectorAll(".stream-slot")];
-        const slots=["translateY(-100%)","translateY(0%)","translateY(100%)"]
-            .map(transform=>domSlots.find(slot=>slot.style.transform===transform));
+        const slots=["previous","current","next"]
+            .map(role=>document.querySelector(".stream-slot."+role+"-scope"));
         const current=slots[1];
         const video=current?.querySelector("video");
         const shared=JSON.parse(sessionStorage.getItem("stream-viewer-state")??"null");
@@ -158,7 +157,7 @@ async function streamSnapshot() {
             status:document.querySelector(".status")?.textContent??null,
             slotCount:domSlots.length,
             slots:slots.map(slot=>({
-                hidden:slot?.hidden??true,
+                hidden:slot?.querySelector("video")?.hidden??true,
                 src:slot?.querySelector("video")?.getAttribute("src")??"",
                 readyState:slot?.querySelector("video")?.readyState??0,
             })),
@@ -166,11 +165,11 @@ async function streamSnapshot() {
             expected:shared&&index>=0?[-1,0,1].map(offset=>shared.streams[index+offset]?.masterListUrl??null):[],
             streamCount:shared?.streams?.length??0,
             streamIds:shared?.streams?.map(stream=>stream.streamerId)??[],
-            name:current?.querySelector(".stream-name")?.textContent?.trim()??"",
+            name:document.querySelector(".stream-controls .stream-name")?.textContent?.trim()??"",
             muted:video?.muted??null,
-            muteText:current?.querySelector(".mute")?.textContent??"",
-            followText:current?.querySelector(".follow")?.textContent??"",
-            downloadText:current?.querySelector(".download")?.textContent??"",
+            muteText:document.querySelector(".stream-controls .mute")?.textContent??"",
+            followText:document.querySelector(".stream-controls .follow")?.textContent??"",
+            downloadText:document.querySelector(".stream-controls .download")?.textContent??"",
             readyState:video?.readyState??0,
             historyLength:history.length,
         };
@@ -184,13 +183,16 @@ async function drag({ fromX, fromY, toX, toY, identifier }) {
         const touch=(x,y)=>new Touch({identifier:${identifier},target,clientX:x,clientY:y});
         target.dispatchEvent(new TouchEvent("touchstart",{touches:[touch(${fromX},${fromY})],changedTouches:[touch(${fromX},${fromY})],bubbles:true,cancelable:true}));
         target.dispatchEvent(new TouchEvent("touchmove",{touches:[touch(${toX},${toY})],changedTouches:[touch(${toX},${toY})],bubbles:true,cancelable:true}));
+        if(Math.abs(${toY}-${fromY})>Math.abs(${toX}-${fromX})) window.scrollBy(0,${fromY}-${toY});
         target.dispatchEvent(new TouchEvent("touchend",{touches:[],changedTouches:[touch(${toX},${toY})],bubbles:true,cancelable:true}));
         await wait(400);
         return {
             href:location.href,
             historyLength:history.length,
-            controlsHidden:document.querySelectorAll(".stream-controls")[1]?.classList.contains("hidden")??null,
-            transforms:[...document.querySelectorAll(".stream-slot")].map(slot=>slot.style.transform),
+            controlsHidden:document.querySelector(".stream-controls")?.classList.contains("hidden")??null,
+            navigating:document.querySelector(".stream-stage")?.classList.contains("viewer-navigating")??false,
+            roles:[...document.querySelectorAll(".stream-slot")].map(slot=>
+                ["previous","current","next"].find(role=>slot.classList.contains(role+"-scope"))??null),
         };
     `);
 }
@@ -217,9 +219,8 @@ async function fixtureState(expectedCurrentId = null, { afterRefreshFrom = null 
             const refreshed=previous===null||(fixture?.fetchCount>0&&shared?.currentStreamerId!==previous);
             if(shared?.streams?.length&&refreshed&&(expected===null||shared.currentStreamerId===expected)){
                 await wait(100);
-                const domSlots=[...document.querySelectorAll(".stream-slot")];
-                const logical=["translateY(-100%)","translateY(0%)","translateY(100%)"]
-                    .map(transform=>domSlots.find(slot=>slot.style.transform===transform));
+                const logical=["previous","current","next"]
+                    .map(role=>document.querySelector(".stream-slot."+role+"-scope"));
                 return {
                     href:location.href,
                     currentId:shared.currentStreamerId,
@@ -227,7 +228,7 @@ async function fixtureState(expectedCurrentId = null, { afterRefreshFrom = null 
                     ids:shared.streams.map(stream=>stream.streamerId),
                     names:shared.streams.map(stream=>stream.alias||stream.firstName),
                     slots:logical.map(slot=>slot?.querySelector("video")?.getAttribute("src")??""),
-                    visibleName:logical[1]?.querySelector(".stream-name")?.textContent?.trim()??"",
+                    visibleName:document.querySelector(".stream-controls .stream-name")?.textContent?.trim()??"",
                     fixture,
                     error:document.querySelector(".status-error")?.textContent??null,
                 };
@@ -245,9 +246,7 @@ async function runLiveActions() {
     await check(["A1"], "Follow control changes visible state and restores it before destructive checks", async () => {
         const outcome = await command(`
             const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-            const current=[...document.querySelectorAll(".stream-slot")]
-                .find(slot=>slot.style.transform==="translateY(0%)");
-            const button=current.querySelector(".follow");
+            const button=document.querySelector(".stream-controls .follow");
             const before=button.textContent;
             button.click();
             for(let i=0;i<80&&button.textContent===before;i++) await wait(100);
@@ -264,9 +263,7 @@ async function runLiveActions() {
     await check(["A5"], "Download-list control changes visible membership and restores it", async () => {
         const outcome = await command(`
             const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-            const current=[...document.querySelectorAll(".stream-slot")]
-                .find(slot=>slot.style.transform==="translateY(0%)");
-            const button=current.querySelector(".download");
+            const button=document.querySelector(".stream-controls .download");
             await wait(500);
             const before=button.textContent;
             button.click();
@@ -373,9 +370,9 @@ async function main() {
         await check(["U2"], "Mute control changes playback audio and visible state", async () => {
             const outcome = await command(`
                 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-                const current=document.querySelectorAll(".stream-slot")[1];
+                const current=document.querySelector(".stream-slot.current-scope");
                 const video=current.querySelector("video");
-                const button=current.querySelector(".mute");
+                const button=document.querySelector(".stream-controls .mute");
                 const before={muted:video.muted,text:button.textContent};
                 button.click(); await wait(150);
                 const changed={muted:video.muted,text:button.textContent};
@@ -390,7 +387,7 @@ async function main() {
 
         await check(["A2"], "Block requires a second confirmation", async () => {
             const outcome = await command(`
-                const button=document.querySelectorAll(".stream-slot")[1].querySelector(".block");
+                const button=document.querySelector(".stream-controls .block");
                 const before={confirm:button.dataset.confirm,text:button.textContent};
                 button.click();
                 return {before,after:{confirm:button.dataset.confirm,text:button.textContent}};
@@ -410,7 +407,8 @@ async function main() {
                 const before = await streamSnapshot();
                 const after = await drag({ fromX: 200, fromY: 500, toX: 200, toY: 450, identifier: 1 });
                 assert(after.href === before.href, "Short drag changed the stream URL", { before, after });
-                assert(after.transforms.join("|") === "translateY(-100%)|translateY(0%)|translateY(100%)", "Slots did not return to rest", after);
+                assert(after.navigating === false, "Viewer did not return to its resting state", after);
+                assert(after.roles.join("|") === "previous|current|next", "Logical slot roles changed after a short drag", after);
                 return { before: before.href, after };
             });
 
@@ -420,14 +418,26 @@ async function main() {
                     const touch=(y)=>new Touch({identifier:10,target,clientX:200,clientY:y});
                     target.dispatchEvent(new TouchEvent("touchstart",{touches:[touch(600)],changedTouches:[touch(600)],bubbles:true,cancelable:true}));
                     target.dispatchEvent(new TouchEvent("touchmove",{touches:[touch(350)],changedTouches:[touch(350)],bubbles:true,cancelable:true}));
-                    const during=[...document.querySelectorAll(".stream-slot")].map(slot=>slot.style.transform);
+                    const stage=document.querySelector(".stream-stage");
+                    const previous=document.querySelector(".stream-slot.previous-scope");
+                    const next=document.querySelector(".stream-slot.next-scope");
+                    const during={
+                        navigating:stage.classList.contains("viewer-navigating"),
+                        previous:getComputedStyle(previous).justifyContent,
+                        next:getComputedStyle(next).justifyContent,
+                    };
                     target.dispatchEvent(new TouchEvent("touchcancel",{touches:[],changedTouches:[touch(350)],bubbles:true,cancelable:true}));
+                    window.dispatchEvent(new Event("scrollend"));
                     await new Promise(resolve=>setTimeout(resolve,300));
-                    const after=[...document.querySelectorAll(".stream-slot")].map(slot=>slot.style.transform);
+                    const after={
+                        navigating:stage.classList.contains("viewer-navigating"),
+                        previous:getComputedStyle(previous).justifyContent,
+                        next:getComputedStyle(next).justifyContent,
+                    };
                     return {during,after};
                 `);
-                assert(outcome.during.some(transform => transform.includes("calc(") && transform.includes("250px")), "Drag did not move stream slots with the finger", outcome);
-                assert(outcome.after.every(transform => !transform.includes("px")), "Cancelled drag did not restore stream slots", outcome);
+                assert(outcome.during.navigating && outcome.during.previous === "flex-end" && outcome.during.next === "flex-start", "Vertical intent did not bring adjacent streams beside the current stream", outcome);
+                assert(!outcome.after.navigating && outcome.after.previous === "flex-start" && outcome.after.next === "flex-end", "Settled viewer did not park adjacent streams", outcome);
                 return outcome;
             });
 
@@ -477,14 +487,12 @@ async function main() {
                     const before = await streamSnapshot();
                     const outcome = await command(`
                         const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-                        const current=[...document.querySelectorAll(".stream-slot")]
-                            .find(slot=>slot.style.transform==="translateY(0%)");
-                        const follow=current.querySelector(".follow");
+                        const follow=document.querySelector(".stream-controls .follow");
                         if(follow.textContent!=="❤️"){
                             follow.click();
                             for(let i=0;i<80&&follow.textContent!=="❤️";i++) await wait(100);
                         }
-                        const block=current.querySelector(".block");
+                        const block=document.querySelector(".stream-controls .block");
                         block.click();
                         const armed=block.dataset.confirm==="true";
                         block.click();
@@ -622,15 +630,14 @@ async function main() {
                 const early = await command(`
                     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
                     for(let i=0;i<40&&!document.querySelector(".stream-stage");i++) await wait(25);
-                    const current=[...document.querySelectorAll(".stream-slot")]
-                        .find(slot=>slot.style.transform==="translateY(0%)");
+                    const current=document.querySelector(".stream-slot.current-scope");
                     return {
-                        visibleName:current?.querySelector(".stream-name")?.textContent?.trim()??"",
+                        visibleName:document.querySelector(".stream-controls .stream-name")?.textContent?.trim()??"",
                         src:current?.querySelector("video")?.getAttribute("src")??"",
                         status:document.querySelector(".status")?.textContent??null,
                         slots:[...document.querySelectorAll(".stream-slot")].map(slot=>({
-                            transform:slot.style.transform,
-                            hidden:slot.hidden,
+                            role:["previous","current","next"].find(role=>slot.classList.contains(role+"-scope"))??null,
+                            hidden:slot.querySelector("video")?.hidden??true,
                             src:slot.querySelector("video")?.getAttribute("src")??"",
                         })),
                         fixture:JSON.parse(sessionStorage.getItem("stream-viewer-fixture")??"null"),
@@ -693,8 +700,7 @@ async function main() {
                 await injectFixture(fixtureBundle, { fetches: [[before, audio, after]] }, `/fixture/stream/${audio.streamId}`);
                 await fixtureState(audio.streamerId);
                 const outcome = await command(`
-                    const current=[...document.querySelectorAll(".stream-slot")]
-                        .find(slot=>slot.style.transform==="translateY(0%)");
+                    const current=document.querySelector(".stream-slot.current-scope");
                     const video=current.querySelector("video");
                     Object.defineProperties(video,{
                         videoWidth:{configurable:true,get:()=>0},
@@ -718,8 +724,7 @@ async function main() {
                 await injectFixture(fixtureBundle, { fetches: [[before, unavailable, after]] }, `/fixture/stream/${unavailable.streamId}`);
                 await fixtureState(unavailable.streamerId);
                 await command(`
-                    const current=[...document.querySelectorAll(".stream-slot")]
-                        .find(slot=>slot.style.transform==="translateY(0%)");
+                    const current=document.querySelector(".stream-slot.current-scope");
                     const event=new Event("error");
                     event.fixtureTriggered=true;
                     current.querySelector("video").dispatchEvent(event);
@@ -749,6 +754,20 @@ try {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
 } finally {
-    await session.cleanup();
+    try {
+        if (session.client && new URL(session.client.href).hostname === "example.com") {
+            await session.reload("https://example.com/", {
+                before: `
+                    sessionStorage.removeItem("stream-viewer-fixture");
+                    sessionStorage.removeItem("stream-viewer-state");
+                `,
+            });
+        } else {
+            await session.cleanup();
+        }
+    } catch (error) {
+        console.error("Example.com cleanup failed:", error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+    }
     session.close();
 }

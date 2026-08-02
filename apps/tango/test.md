@@ -3,8 +3,9 @@
 The frozen behavior and target URL are defined in [`test.txt`](test.txt). The
 automated suite exercises Tango Home and stream routes, including live-list
 rendering, followed/recommended ordering, stream playback, adjacent preloading,
-mute and block-confirmation controls, vertical and horizontal gestures, stream
-refresh, URL history behavior, and Back restoration.
+native-scroll scope presentation, midpoint selection, mute and block-confirmation
+controls, vertical and horizontal gestures, stream refresh, URL history behavior,
+and Back restoration.
 
 The suite uses the tester's signed-in Tango account and the current live stream
 list. The default commands treat provider data as read-only. Provider data can

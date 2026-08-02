@@ -8,6 +8,9 @@ interface Slot {
     stream?: Stream;
 }
 
+const SETTLEMENT_DELAY_MS = 100;
+const GEOMETRY_WAIT_MS = 8000;
+
 export async function openStream(provider: Provider, requestedStreamId: string): Promise<void> {
     const shared = loadState();
     const freshStreams = provider.fetchStreams();
@@ -19,14 +22,18 @@ export async function openStream(provider: Provider, requestedStreamId: string):
 
     document.body.replaceChildren();
     document.body.className = "stream-page";
+    history.scrollRestoration = "manual";
     const stage = document.createElement("main");
-    stage.className = "stream-stage";
-    document.body.append(stage);
+    stage.className = "stream-stage viewer-loading";
+    const controls = createControls();
+    document.body.append(stage, controls);
 
-    let slots = [-1, 0, 1].map(offset => createSlot(offset));
-    stage.append(...slots.map(slot => slot.element));
+    let slots = [-1, 0, 1].map(() => createSlot());
+    applyScopeRoles();
     let controlsVisible = true;
-    let moving = false;
+    let navigating = false;
+    let settlementTimer: number | null = null;
+    let programmaticScroll = false;
     const removing = new Set<string>();
     const removed = new Set<string>();
     const processedForCostreamers = new Set<string>();
@@ -47,11 +54,11 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         slot.video.removeAttribute("src");
         slot.video.load();
         if (!stream) {
-            slot.element.hidden = true;
+            slot.video.hidden = true;
             return;
         }
         slot.stream = stream;
-        slot.element.hidden = false;
+        slot.video.hidden = false;
         slot.video.src = stream.masterListUrl;
         slot.video.muted = true;
         slot.video.load();
@@ -75,8 +82,6 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         const stream = streams[index];
         if (!stream) return;
         document.title = stream.alias || stream.firstName;
-        const controls = slots[1].element.querySelector<HTMLElement>(".stream-controls");
-        if (!controls) return;
         controls.classList.toggle("hidden", !controlsVisible);
         controls.querySelector<HTMLElement>(".stream-name")!.textContent =
             `${stream.alias || stream.streamerId} ${stream.firstName}`.trim();
@@ -129,13 +134,15 @@ export async function openStream(provider: Provider, requestedStreamId: string):
 
     async function select(nextIndex: number): Promise<void> {
         if (!streams[nextIndex]) {
-            resetTransforms();
             return;
         }
         index = nextIndex;
-        resetTransforms();
         updateSlots();
+        history.replaceState(null, "", provider.streamUrl(streams[index].streamId));
+        persist();
+        updateControls();
         const current = await provider.enrich(streams[index]);
+        if (streams[index]?.streamerId !== current.streamerId) return;
         streams[index] = current;
         history.replaceState(null, "", provider.streamUrl(current.streamId));
         persist();
@@ -175,43 +182,77 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         removing.delete(streamerId);
     }
 
-    function resetTransforms(): void {
-        moving = false;
+    function applyScopeRoles(): void {
         slots.forEach((slot, position) => {
-            slot.element.style.transition = "";
-            slot.element.style.transform = `translateY(${(position - 1) * 100}%)`;
+            slot.element.classList.remove("previous-scope", "current-scope", "next-scope");
+            slot.element.classList.add(
+                position === 0 ? "previous-scope" : position === 1 ? "current-scope" : "next-scope",
+            );
+            stage.append(slot.element);
+        });
+    }
+
+    function beginNavigating(): void {
+        if (settlementTimer !== null) {
+            clearTimeout(settlementTimer);
+            settlementTimer = null;
+        }
+        if (navigating) return;
+        navigating = true;
+        stage.classList.add("viewer-navigating");
+        controls.classList.add("unsettled");
+    }
+
+    function endNavigating(): void {
+        navigating = false;
+        stage.classList.remove("viewer-navigating");
+        controls.classList.remove("unsettled");
+    }
+
+    function commitMidpointStream(): void {
+        if (!navigating) return;
+        const midpoint = visualViewport
+            ? visualViewport.offsetTop + visualViewport.height / 2
+            : innerHeight / 2;
+        const winner = slots.findIndex(slot => {
+            const rect = slot.video.getBoundingClientRect();
+            return rect.top <= midpoint && midpoint < rect.bottom;
+        });
+        if (winner === -1 || winner === 1) return;
+
+        const direction = winner === 0 ? -1 : 1;
+        const target = index + direction;
+        if (!streams[target]) return;
+        commitScope(direction, target);
+    }
+
+    function commitScope(direction: -1 | 1, target: number): void {
+        const selected = direction === 1 ? slots[2] : slots[0];
+        const beforeTop = selected.video.getBoundingClientRect().top;
+        slots = direction === 1
+            ? [slots[1], slots[2], slots[0]]
+            : [slots[2], slots[0], slots[1]];
+        index = target;
+        applyScopeRoles();
+        const afterTop = slots[1].video.getBoundingClientRect().top;
+        correctScroll(afterTop - beforeTop);
+        void select(target);
+    }
+
+    function correctScroll(delta: number): void {
+        if (Math.abs(delta) < 0.5) return;
+        programmaticScroll = true;
+        window.scrollBy(0, delta);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                programmaticScroll = false;
+            });
         });
     }
 
     attachGestures(stage, {
-        move(delta) {
-            if (moving) return;
-            slots.forEach((slot, position) => {
-                slot.element.style.transition = "none";
-                slot.element.style.transform = `translateY(calc(${(position - 1) * 100}% + ${delta}px))`;
-            });
-        },
-        release(delta) {
-            if (moving) return;
-            const direction = delta < 0 ? 1 : -1;
-            const target = index + direction;
-            const commit = Math.abs(delta) > innerHeight * 0.2 && Boolean(streams[target]);
-            moving = true;
-            slots.forEach((slot, position) => {
-                slot.element.style.transition = "transform 220ms ease-out";
-                const destination = commit ? (position - 1 - direction) * 100 : (position - 1) * 100;
-                slot.element.style.transform = `translateY(${destination}%)`;
-            });
-            setTimeout(() => {
-                if (!commit) {
-                    resetTransforms();
-                    return;
-                }
-                slots = direction === 1
-                    ? [slots[1], slots[2], slots[0]]
-                    : [slots[2], slots[0], slots[1]];
-                void select(target);
-            }, 230);
+        verticalStart() {
+            beginNavigating();
         },
         controls(visible) {
             controlsVisible = visible;
@@ -219,7 +260,19 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         },
     });
 
-    stage.addEventListener("click", async event => {
+    window.addEventListener("scroll", () => {
+        if (!programmaticScroll) commitMidpointStream();
+    }, { passive: true });
+    window.addEventListener("scrollend", () => {
+        if (settlementTimer !== null) clearTimeout(settlementTimer);
+        settlementTimer = window.setTimeout(() => {
+            settlementTimer = null;
+            commitMidpointStream();
+            endNavigating();
+        }, SETTLEMENT_DELAY_MS);
+    });
+
+    controls.addEventListener("click", async event => {
         const button = (event.target as Element).closest<HTMLButtonElement>("button");
         if (!button) return;
         const stream = streams[index];
@@ -252,13 +305,13 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         updateControls();
     });
 
-    for (const [slotIndex, slot] of slots.entries()) {
+    for (const slot of slots) {
         slot.video.addEventListener("error", () => {
-            if (slotIndex === 1 && slot.stream) void remove(slot.stream.streamerId);
+            if (slot === slots[1] && slot.stream) void remove(slot.stream.streamerId);
         });
         slot.video.addEventListener("playing", () => {
             if (
-                slotIndex === 1
+                slot === slots[1]
                 && slot.stream
                 && slot.video.videoWidth === 0
                 && slot.video.videoHeight === 0
@@ -275,6 +328,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     persist();
     updateControls();
     void discover(current);
+    await revealWhenCurrentGeometryIsReady(slots[1].video, stage);
 
     if (handedOff) {
         void freshStreams.then(async fresh => {
@@ -299,14 +353,17 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     }
 }
 
-function createSlot(position: number): Slot {
+function createSlot(): Slot {
     const element = document.createElement("section");
     element.className = "stream-slot";
-    element.style.transform = `translateY(${position * 100}%)`;
     const video = document.createElement("video");
-    video.autoplay = position === 0;
     video.playsInline = true;
     video.muted = true;
+    element.append(video);
+    return { element, video };
+}
+
+function createControls(): HTMLDivElement {
     const controls = document.createElement("div");
     controls.className = "stream-controls";
     controls.innerHTML = `
@@ -319,6 +376,36 @@ function createSlot(position: number): Slot {
             <button class="download" title="Download list">➕</button>
         </div>
     `;
-    element.append(video, controls);
-    return { element, video };
+    return controls;
+}
+
+async function revealWhenCurrentGeometryIsReady(
+    video: HTMLVideoElement,
+    stage: HTMLElement,
+): Promise<void> {
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+        await new Promise<void>(resolve => {
+            let timeout = 0;
+            const finish = () => {
+                clearTimeout(timeout);
+                video.removeEventListener("resize", ready);
+                video.removeEventListener("loadedmetadata", ready);
+                video.removeEventListener("error", finish);
+                resolve();
+            };
+            const ready = () => {
+                if (video.videoWidth > 0 && video.videoHeight > 0) finish();
+            };
+            video.addEventListener("resize", ready);
+            video.addEventListener("loadedmetadata", ready);
+            video.addEventListener("error", finish, { once: true });
+            timeout = window.setTimeout(finish, GEOMETRY_WAIT_MS);
+        });
+    }
+    const viewportCenter = visualViewport
+        ? visualViewport.offsetTop + visualViewport.height / 2
+        : innerHeight / 2;
+    const rect = video.getBoundingClientRect();
+    window.scrollBy(0, rect.top + rect.height / 2 - viewportCenter);
+    stage.classList.remove("viewer-loading");
 }

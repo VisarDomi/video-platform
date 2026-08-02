@@ -1,6 +1,6 @@
 {
   "name": "stream-viewer",
-  "version": "240",
+  "version": "241",
   "description": "A lightweight userscript that makes exploring live streams easy",
   "type": "module",
   "scripts": {
