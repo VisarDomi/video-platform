@@ -133,12 +133,20 @@ textarea {
 }
 
 .player-scope.previous-scope {
+	justify-content: flex-start;
+}
+
+.player-scope.next-scope {
 	justify-content: flex-end;
 }
 
 .player-scope.current-scope,
-.player-scope.next-scope {
+.video-stage.viewer-navigating .player-scope.next-scope {
 	justify-content: flex-start;
+}
+
+.video-stage.viewer-navigating .player-scope.previous-scope {
+	justify-content: flex-end;
 }
 
 .player-scope.background-unit {

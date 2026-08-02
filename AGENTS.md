@@ -28,3 +28,9 @@ Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-
   `~/Documents/work/video/video-platform/packages/server/`
 - Downloader details:
   `~/Documents/work/video/video-platform/packages/downloader/`
+
+## Frontend - no restarting
+npm run build:app
+
+## others - depends
+check package.json
