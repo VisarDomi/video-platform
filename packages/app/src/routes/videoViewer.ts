@@ -28,7 +28,6 @@ export class VideoViewerPage {
 	private controlsVisible = true;
 	private unsettled = false;
 	private settlementTimer: number | null = null;
-	private ignoreNextScrollEnd = false;
 	private programmaticScroll = false;
 	private lastProgressSave = 0;
 	private membership: MembershipState = { state: 'loading' };
@@ -64,7 +63,6 @@ export class VideoViewerPage {
 		const listTask = this.loadCanonicalListAndNeighbors();
 		await Promise.all([revealTask, listTask]);
 
-		this.ignoreNextScrollEnd = false;
 		this.gesture = new GestureController(this.stage, this.gestureCallbacks());
 		addEventListener('scroll', this.handleScroll, { passive: true });
 		addEventListener('scrollend', this.handleScrollEnd);
@@ -217,50 +215,55 @@ export class VideoViewerPage {
 		this.overlay.setInteractive(!this.unsettled);
 		document.title = `${video.filename} - ${this.provider} - Video Editor`;
 		history.replaceState(null, '', videoUrl(video));
-		sessionStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
+		localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
 		void this.loadMembership();
 	}
 
 	private readonly handleScroll = (): void => {
 		if (this.programmaticScroll) return;
-		this.beginUnsettled();
+		this.commitMidpointVideo();
 	};
 
 	private beginUnsettled(): void {
+		if (this.settlementTimer !== null) {
+			clearTimeout(this.settlementTimer);
+			this.settlementTimer = null;
+		}
 		if (this.unsettled) return;
 		this.unsettled = true;
+		this.stage.classList.add('viewer-navigating');
 		this.overlay.setInteractive(false);
 	}
 
 	private readonly handleScrollEnd = (): void => {
-		if (this.ignoreNextScrollEnd) {
-			this.ignoreNextScrollEnd = false;
-			return;
-		}
 		if (this.settlementTimer !== null) clearTimeout(this.settlementTimer);
 		this.settlementTimer = window.setTimeout(() => {
 			this.settlementTimer = null;
-			this.settleFocusedVideo();
+			this.commitMidpointVideo();
+			this.endUnsettled();
 		}, SETTLEMENT_DELAY_MS);
 	};
 
-	private settleFocusedVideo(): void {
-		const scores = this.units.map((unit) => visibleFraction(unit.video));
-		const currentScore = scores[1];
-		const bestScore = Math.max(...scores);
-		const winners = scores.filter((score) => Math.abs(score - bestScore) < 0.000001);
-		const winner = scores.findIndex((score) => Math.abs(score - bestScore) < 0.000001);
-
-		if (winners.length === 1 && winner !== 1 && bestScore > currentScore) {
-			const direction = winner === 0 ? -1 : 1;
-			const target = this.currentIndex + direction;
-			if (target >= 0 && target < this.videos.length) {
-				this.commitScope(direction, target);
-				return;
-			}
-		}
+	private endUnsettled(): void {
 		this.unsettled = false;
+		this.stage.classList.remove('viewer-navigating');
 		this.overlay.setInteractive(true);
+	}
+
+	private commitMidpointVideo(): void {
+		if (!this.unsettled) return;
+		const midpoint = visualViewport
+			? visualViewport.offsetTop + visualViewport.height / 2
+			: window.innerHeight / 2;
+		const winner = this.units.findIndex((unit) => {
+			const rect = unit.video.getBoundingClientRect();
+			return rect.top <= midpoint && midpoint < rect.bottom;
+		});
+		if (winner === -1 || winner === 1) return;
+
+		const direction = winner === 0 ? -1 : 1;
+		const target = this.currentIndex + direction;
+		if (target >= 0 && target < this.videos.length) this.commitScope(direction, target);
 	}
 
 	private commitScope(direction: -1 | 1, targetIndex: number): void {
@@ -280,7 +283,6 @@ export class VideoViewerPage {
 		const afterTop = this.activeUnit().video.getBoundingClientRect().top;
 		this.correctScroll(afterTop - beforeTop);
 		this.loadEdgeUnits();
-		this.unsettled = false;
 		this.activateCurrent();
 	}
 
@@ -296,7 +298,6 @@ export class VideoViewerPage {
 
 	private correctScroll(delta: number): void {
 		if (Math.abs(delta) < 0.5) return;
-		this.ignoreNextScrollEnd = true;
 		this.programmaticScroll = true;
 		window.scrollBy(0, delta);
 		requestAnimationFrame(() => {
@@ -528,18 +529,4 @@ function overlayTimeline(snapshot: TimelineSnapshot): OverlayTimeline {
 		currentSegmentName: snapshot.currentSegmentName,
 		isLive: snapshot.isLive
 	};
-}
-
-function visibleFraction(video: HTMLVideoElement): number {
-	if (video.hidden || video.getClientRects().length === 0) return -1;
-	const rect = video.getBoundingClientRect();
-	if (rect.width <= 0 || rect.height <= 0) return -1;
-	const viewport = visualViewport;
-	const top = viewport?.offsetTop ?? 0;
-	const left = viewport?.offsetLeft ?? 0;
-	const right = left + (viewport?.width ?? innerWidth);
-	const bottom = top + (viewport?.height ?? innerHeight);
-	const visibleWidth = Math.max(0, Math.min(rect.right, right) - Math.max(rect.left, left));
-	const visibleHeight = Math.max(0, Math.min(rect.bottom, bottom) - Math.max(rect.top, top));
-	return (visibleWidth * visibleHeight) / (rect.width * rect.height);
 }

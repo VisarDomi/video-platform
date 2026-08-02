@@ -40,7 +40,7 @@ class VideoListPage {
 	}
 
 	private readHighlight(): void {
-		this.highlightedFilename = sessionStorage.getItem(
+		this.highlightedFilename = localStorage.getItem(
 			STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider
 		);
 	}

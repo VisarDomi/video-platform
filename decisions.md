@@ -16,8 +16,9 @@ Each of the three `PlayerUnit`s owns its video, playback timeline, and media
 lifecycle. A single imperative `OverlayView` belongs to the settled viewer
 selection and remains stationary while the native document scrolls.
 
-The overlay remains latched to the old selection during movement, disables
-mutations while unsettled, and switches atomically after `scrollend + 100ms`.
+The overlay disables mutations while unsettled and switches atomically when an
+adjacent video contains the visual viewport's exact midpoint pixel. After
+`scrollend + 100ms`, the viewer returns to its resting presentation.
 Its fixed box is transparent and may touch the viewport boundaries. Only the
 controls paint pixels; a full-box background or backdrop makes Safari's browser
 chrome opaque.
@@ -29,9 +30,9 @@ geometry.
 
 ## Ownership: Only settled media feeds shared UI (updated 2026-07-29)
 
-Each unit maintains its own playback timeline. Only the settled current unit
-feeds the shared overlay and progress persistence. Adjacent videos remain
-playing muted but do not replace visible UI state before settlement.
+Each unit maintains its own playback timeline. Only the current unit feeds the
+shared overlay and progress persistence. Adjacent videos remain playing muted
+and become current only when they contain the visual viewport midpoint.
 
 **Why:** The stationary overlay must continue to describe the last committed
 selection while videos move underneath it.
@@ -76,7 +77,11 @@ scrolling, and pinch zoom. The viewer owns horizontal seek and controls.
 - Do not call `preventDefault()` or apply transforms for multi-touch sequences.
 - Call `preventDefault()` only after an application-owned axis is known.
 - Do not prevent native vertical touch movement.
-- Rotate 10k/natural/10k scope roles after `scrollend + 100ms`.
+- At rest, park the previous video at the top of its 10k scope and the next
+  video at the bottom of its 10k scope so only the current video is visible.
+- On recognized vertical intent, bring both adjacent videos next to the current
+  scope and rotate roles immediately when one contains the viewport midpoint.
+- Park the adjacent videos again after `scrollend + 100ms`.
 - Commit viewer-to-viewer navigation with `history.replaceState()`, preserving
   the list as the previous history entry.
 
@@ -93,6 +98,9 @@ On a bfcache `pageshow`, immediately refetch and reconcile the list without
 moving Safari's restored viewport, then resume exactly one poller. A normal
 list load or page refresh centers an existing highlight in the visual viewport.
 Polling does not move the viewport.
+
+The last current filename is stored in `localStorage` per provider. It persists
+across tabs and Safari sessions, and every viewer selection updates it.
 
 ## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
 
