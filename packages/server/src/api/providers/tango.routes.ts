@@ -1,6 +1,13 @@
 import { promises as fs } from "fs";
 import { TANGO_FILE_PATH } from "../../core/config.js";
-import { resolveAlias, fetchAliasesInBatch } from "../../services/tango/apiClient.js";
+import {
+    resolveAlias,
+    fetchAliasesInBatch,
+    followAccount,
+    fetchFollowingAccountIds,
+} from "../../services/tango/apiClient.js";
+import type { ProfileData } from "../../services/tango/apiClient.js";
+import type { AliasSnapshot } from "../../services/aliasRegistry.js";
 import { registry } from "../../services/aliasRefreshService.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 
@@ -16,69 +23,119 @@ function parseAccountId(identifier: string): string | null {
     return null;
 }
 
-const adapter: ListProviderAdapter = {
-    name: "tango",
-    filePath: TANGO_FILE_PATH,
+interface TangoAliasLookup {
+    resolve(streamerId: string): string | undefined;
+    getAllWithHistory(): Record<string, string[]>;
+    getReverse(): Record<string, string>;
+    mergeAliasSnapshot(streamerId: string, aliases: AliasSnapshot): Promise<boolean>;
+}
 
-    parseLine(line: string) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(PREFIX)) return null;
-        const rest = trimmed.slice(PREFIX.length);
-        const spaceIdx = rest.indexOf(" ");
-        if (spaceIdx === -1) return null;
-        return { id: rest.slice(0, spaceIdx), label: rest.slice(spaceIdx + 1) };
-    },
+interface TangoApi {
+    resolveAlias(alias: string): Promise<{ accountId: string; firstName: string } | null>;
+    fetchAliasesInBatch(streamerIds: string[]): Promise<Record<string, ProfileData> | null>;
+    fetchFollowingAccountIds(): Promise<string[] | null>;
+    followAccount(streamerId: string): Promise<void>;
+}
 
-    isResolved(line: string) {
-        return this.parseLine(line) !== null;
-    },
-
-    async resolveIdentifier(input: string) {
-        const resolved = await resolveAlias(input);
-        if (!resolved) return null;
-        const profiles = await fetchAliasesInBatch([resolved.accountId]);
-        const latestAlias = profiles?.[resolved.accountId]?.alias || input;
-        return { id: resolved.accountId, label: latestAlias };
-    },
-
-    formatEntry(entry) {
-        return `${PREFIX}${entry.id} ${entry.label}`;
-    },
-
-    enrichList(parsed) {
-        const allAliases = registry.getAllWithHistory();
-        const identifiers = new Set<string>();
-        for (const { id, label } of parsed) {
-            identifiers.add(id);
-            identifiers.add(label);
-            const cached = allAliases[id];
-            if (cached) {
-                for (const a of cached) identifiers.add(a);
-            }
-        }
-        return [...identifiers];
-    },
-
-    async resolveForRemove(identifier: string) {
-        const accountId = parseAccountId(identifier);
-        if (accountId) return accountId;
-
-        const reverse = registry.getReverse();
-        if (reverse[identifier]) return reverse[identifier];
-
-        try {
-            const content = await fs.readFile(TANGO_FILE_PATH, "utf-8");
-            for (const line of content.split("\n")) {
-                const parsed = adapter.parseLine(line);
-                if (parsed?.label === identifier) {
-                    return parsed.id;
-                }
-            }
-        } catch {
-        }
-
-        return identifier;
-    },
+const tangoApi: TangoApi = {
+    resolveAlias,
+    fetchAliasesInBatch,
+    fetchFollowingAccountIds,
+    followAccount,
 };
 
+export function createTangoAdapter(
+    filePath: string = TANGO_FILE_PATH,
+    aliasLookup: TangoAliasLookup = registry,
+    api: TangoApi = tangoApi,
+): ListProviderAdapter {
+    const adapter: ListProviderAdapter = {
+        name: "tango",
+        filePath,
+
+        parseLine(line: string) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(PREFIX)) return null;
+            const rest = trimmed.slice(PREFIX.length);
+            const spaceIdx = rest.indexOf(" ");
+            if (spaceIdx === -1) return null;
+            return { id: rest.slice(0, spaceIdx), label: rest.slice(spaceIdx + 1) };
+        },
+
+        isResolved(line: string) {
+            return this.parseLine(line) !== null;
+        },
+
+        async resolveIdentifier(input: string) {
+            const trimmed = input.trim();
+            const reverse = aliasLookup.getReverse();
+            let accountId = parseAccountId(trimmed)
+                ?? reverse[trimmed]
+                ?? (aliasLookup.resolve(trimmed) ? trimmed : null);
+
+            if (!accountId) {
+                const resolved = await api.resolveAlias(trimmed);
+                if (!resolved) return null;
+                accountId = resolved.accountId;
+            }
+
+            const profiles = await api.fetchAliasesInBatch([accountId]);
+            const profile = profiles?.[accountId];
+            if (!profile?.alias || !profile.aliases) return null;
+            await aliasLookup.mergeAliasSnapshot(accountId, profile.aliases);
+            return { id: accountId, label: profile.alias };
+        },
+
+        async beforeAdd(entry) {
+            const followingIds = await api.fetchFollowingAccountIds();
+            if (!followingIds) throw new Error("Could not verify Tango follow state");
+            if (!followingIds.includes(entry.id)) {
+                await api.followAccount(entry.id);
+            }
+        },
+
+        formatEntry(entry) {
+            return `${PREFIX}${entry.id} ${entry.label}`;
+        },
+
+        enrichList(parsed) {
+            const allAliases = aliasLookup.getAllWithHistory();
+            const identifiers = new Set<string>();
+            for (const { id, label } of parsed) {
+                identifiers.add(id);
+                identifiers.add(label);
+                const cached = allAliases[id];
+                if (cached) {
+                    for (const a of cached) identifiers.add(a);
+                }
+            }
+            return [...identifiers];
+        },
+
+        async resolveForRemove(identifier: string) {
+            const accountId = parseAccountId(identifier);
+            if (accountId) return accountId;
+
+            const reverse = aliasLookup.getReverse();
+            if (reverse[identifier]) return reverse[identifier];
+
+            try {
+                const content = await fs.readFile(filePath, "utf-8");
+                for (const line of content.split("\n")) {
+                    const parsed = adapter.parseLine(line);
+                    if (parsed?.label === identifier) {
+                        return parsed.id;
+                    }
+                }
+            } catch {
+            }
+
+            return identifier;
+        },
+    };
+
+    return adapter;
+}
+
+const adapter = createTangoAdapter();
 export default createListRoutes(adapter);

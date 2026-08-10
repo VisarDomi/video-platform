@@ -68,6 +68,14 @@ Single writer per resource, no cross-process write contention.
 | `live-status.json` | downloader (DownloadsManager) | server (orphan finalizer) |
 | session tokens on disk | auth daemon | server + downloader (shared readTokens()) |
 
+Tango alias reconciliation belongs to the server. Its hourly refresh covers
+the union of followed account IDs and account IDs in `tango.txt`, merges the
+complete Tango alias snapshot into `aliases.json`, and rewrites stale labels in
+`tango.txt`. Adding a Tango download target checks the follow list and follows
+the resolved account only when needed, before the server writes the target. The
+downloader watches and consumes `tango.txt`; it never rewrites aliases or
+mutates the Tango follow list.
+
 ## Frontend gestures preserve Safari navigation ownership (2026-07-29)
 
 Safari owns leading-edge Back, tab/history navigation, vertical viewer
