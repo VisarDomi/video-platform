@@ -14,6 +14,7 @@ export interface ListProviderAdapter {
     parseLine(line: string): ParsedEntry | null;
     isResolved(line: string): boolean;
     resolveIdentifier(input: string): Promise<ParsedEntry | null>;
+    beforeAdd?(entry: ParsedEntry): Promise<void> | void;
     formatEntry(entry: ParsedEntry): string;
     enrichList?(parsed: ParsedEntry[]): string[];
     resolveForRemove?(identifier: string): Promise<string> | string;
@@ -61,6 +62,7 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
             if (!resolved) {
                 return res.status(404).json({ error: `Could not resolve: ${identifier}` });
             }
+            if (adapter.beforeAdd) await adapter.beforeAdd(resolved);
 
             let content = "";
             try { content = await fs.readFile(adapter.filePath, "utf-8"); } catch {}
@@ -139,6 +141,7 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
                     logger.warn(`${adapter.name} save: could not resolve "${trimmed}", skipping`);
                     continue;
                 }
+                if (adapter.beforeAdd) await adapter.beforeAdd(result);
                 const entry = adapter.formatEntry(result);
                 resolved.push(entry);
                 logger.info(`${adapter.name} save: resolved "${trimmed}" -> ${entry}`);

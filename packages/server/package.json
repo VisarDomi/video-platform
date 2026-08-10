@@ -7,6 +7,7 @@
     "scripts": {
         "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
         "build": "npm run compile-go && rm -rf dist && tsc",
+        "test": "npm run build && node --test test/*.test.mjs",
         "start": "npm run build && systemctl --user start video-server",
         "restart": "npm run build && systemctl --user restart video-server",
         "stop": "systemctl --user stop video-server",
