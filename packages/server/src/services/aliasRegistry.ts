@@ -13,7 +13,12 @@ interface AliasEntry {
     lastVerifiedAt: number;
 }
 
-export type AliasFetcher = (streamerIds: string[]) => Promise<Record<string, string>>;
+export interface AliasSnapshot {
+    current: string;
+    history: string[];
+}
+
+export type AliasFetcher = (streamerIds: string[]) => Promise<Record<string, AliasSnapshot>>;
 
 export class AliasRegistry {
     private readonly filePath: string;
@@ -68,15 +73,19 @@ export class AliasRegistry {
         const aliasMap = await fetcher(streamerIds);
         let updated = 0;
 
-        for (const [streamerId, alias] of Object.entries(aliasMap)) {
-            if (alias) {
-                const changed = this.recordAlias(streamerId, alias);
-                if (changed) updated++;
-            }
+        for (const [streamerId, aliases] of Object.entries(aliasMap)) {
+            const changed = this.recordAliases(streamerId, aliases);
+            if (changed) updated++;
         }
 
         await this.persistToDisk();
         logger.info(`Refresh complete: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved, ${updated} updated`);
+    }
+
+    async mergeAliasSnapshot(streamerId: string, aliases: AliasSnapshot): Promise<boolean> {
+        const changed = this.recordAliases(streamerId, aliases);
+        await this.persistToDisk();
+        return changed;
     }
 
     startPeriodicRefresh(
@@ -137,23 +146,24 @@ export class AliasRegistry {
         }
     }
 
-    private recordAlias(streamerId: string, alias: string): boolean {
+    private recordAliases(streamerId: string, aliases: AliasSnapshot): boolean {
         const existing = this.state.get(streamerId);
         const now = Date.now();
+        const current = aliases.current.trim();
+        if (!current) return false;
 
-        if (existing) {
-            if (existing.current === alias) {
-                existing.lastVerifiedAt = now;
-                return false;
-            }
-            existing.history.push(existing.current);
-            existing.current = alias;
-            existing.lastVerifiedAt = now;
-            return true;
-        }
+        const history = uniqueAliases([
+            ...(existing?.history ?? []),
+            ...(existing ? [existing.current] : []),
+            ...aliases.history,
+        ]).filter(alias => alias !== current);
 
-        this.state.set(streamerId, { current: alias, history: [], lastVerifiedAt: now });
-        return true;
+        const changed = !existing
+            || existing.current !== current
+            || !sameAliases(existing.history, history);
+
+        this.state.set(streamerId, { current, history, lastVerifiedAt: now });
+        return changed;
     }
 
     private async readDisk(): Promise<Map<string, AliasEntry>> {
@@ -165,10 +175,14 @@ export class AliasRegistry {
 
             for (const [id, value] of Object.entries(json)) {
                 if (typeof value === "string") {
-                    result.set(id, { current: value, history: [], lastVerifiedAt: now });
+                    const current = value.trim();
+                    if (current) result.set(id, { current, history: [], lastVerifiedAt: now });
                 } else if (Array.isArray(value) && value.length > 0) {
-                    const current = value[value.length - 1];
-                    const history = value.slice(0, -1);
+                    const storedAliases = value.map(alias => alias.trim()).filter(Boolean);
+                    const current = storedAliases.at(-1);
+                    if (!current) continue;
+                    const history = uniqueAliases(storedAliases.slice(0, -1))
+                        .filter(alias => alias !== current);
                     result.set(id, { current, history, lastVerifiedAt: now });
                 }
             }
@@ -195,4 +209,22 @@ export class AliasRegistry {
             await release();
         }
     }
+}
+
+function uniqueAliases(aliases: string[]): string[] {
+    const result: string[] = [];
+    const seen = new Set<string>();
+
+    for (const rawAlias of aliases) {
+        const alias = rawAlias.trim();
+        if (!alias || seen.has(alias)) continue;
+        seen.add(alias);
+        result.push(alias);
+    }
+
+    return result;
+}
+
+function sameAliases(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((alias, index) => alias === right[index]);
 }
