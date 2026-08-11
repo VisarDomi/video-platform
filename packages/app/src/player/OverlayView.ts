@@ -189,6 +189,12 @@ export class OverlayView {
 			case 'ready':
 				this.renderConfirmedMembership(this.membershipState.isMember);
 				break;
+			case 'unavailable':
+				this.membership.textContent = '⚠️';
+				this.membership.disabled = true;
+				this.membership.classList.add('list-error');
+				this.membership.title = this.membershipState.message;
+				break;
 			case 'error':
 				this.renderConfirmedMembership(this.membershipState.confirmedMember);
 				this.membership.classList.add('list-error');

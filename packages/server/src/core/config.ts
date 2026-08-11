@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as utils from "./utils.js";
-import logger from "./logger.js";
 import * as constants from "./constants.js";
 
 const projectRoot = utils.findProjectRoot();
@@ -23,7 +22,7 @@ interface IConfig {
     tangoFilePath: string;
 }
 
-const DEFAULT_PROVIDERS = ["tango", "fc2", "sc", "mp4"];
+const DEFAULT_PROVIDERS = ["tango", "fc2", "sc"];
 
 function generateDefaultPaths(providerName: string): PathConfig {
     return {
@@ -74,20 +73,6 @@ const config: IConfig = {
     scFilePath: path.join(projectRoot, "..", "downloader", "sc.txt"),
     tangoFilePath: path.join(projectRoot, "..", "downloader", "tango.txt"),
 };
-
-Object.entries(config.providers).map(([, paths]) => paths).forEach(paths => {
-    [paths.downloader, paths.edited, paths.converted, paths.trash].forEach((dir) => {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        try {
-            fs.accessSync(dir, fs.constants.R_OK);
-        } catch (err) {
-            logger.error(`The configured directory is not readable or does not exist: ${dir}`);
-            process.exit(1);
-        }
-    });
-});
 
 if (!fs.existsSync(config.frontendDistPath)) {
     fs.mkdirSync(config.frontendDistPath, { recursive: true });

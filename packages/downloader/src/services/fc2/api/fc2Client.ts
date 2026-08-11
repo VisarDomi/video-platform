@@ -1,8 +1,7 @@
-import * as path from "path";
+import { promises as fs } from "fs";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { resolveSegmentUrl } from "../../core/downloadUtils.js";
-import { MediaValidator } from "../../../common/mediaValidator.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 import { FC2_SESSION_CLEANUP_INTERVAL_MS, FC2_SESSION_STALE_MS, FC2_WS_HANDSHAKE_TIMEOUT_MS, FC2_WS_HEARTBEAT_INTERVAL_MS } from "../../../common/timing.js";
@@ -325,34 +324,12 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
-        const name = path.basename(filePath);
-        const info = await MediaValidator.getMediaInfo(filePath);
-        if (!info) {
-            logger.warn(`[FC2] validateSegment: ffprobe failed for ${name}`);
+        try {
+            const stats = await fs.stat(filePath);
+            return { valid: stats.size > 0 };
+        } catch {
             return { valid: false };
         }
-
-        if (isNaN(info.bitRate) || info.bitRate < 1000) {
-            logger.warn(`[FC2] validateSegment: bad bitrate ${info.bitRate} for ${name}`);
-            return { valid: false };
-        }
-        if (!isNaN(info.duration) && info.duration > 3600) {
-            logger.warn(`[FC2] validateSegment: duration ${info.duration}s too long for ${name}`);
-            return { valid: false };
-        }
-
-        if (info.videoDuration <= 0 && info.audioDuration <= 0 && info.formatDuration > 0) {
-            logger.warn(`[FC2] validateSegment: using format duration fallback for ${name}`);
-        } else if (info.videoDuration > 0 && info.formatDuration > 0 && Math.abs(info.formatDuration - info.videoDuration) > 0.01) {
-            logger.debug(`[FC2] validateSegment: media duration differs from format duration for ${name}`, {
-                videoDuration: info.videoDuration,
-                audioDuration: info.audioDuration,
-                formatDuration: info.formatDuration,
-                selectedDuration: info.duration,
-            });
-        }
-
-        return { valid: true, duration: info.duration };
     }
 
     public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {

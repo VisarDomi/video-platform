@@ -1,0 +1,34 @@
+{#
+  Minimal Gemma 4 template for deterministic descriptor output.
+
+  The selected abliterated GGUF embeds an older thinking/tool template. Its
+  reasoning channel can remain open, which prevents llama.cpp's JSON response
+  grammar from taking effect. Descriptor jobs do not need reasoning or tools,
+  so keep the canonical turn markers and render only message content.
+#}
+{%- for message in messages -%}
+    {%- if message['role'] == 'assistant' -%}
+        {{- '<|turn>model\n' -}}
+    {%- else -%}
+        {{- '<|turn>user\n' -}}
+    {%- endif -%}
+    {%- if message.get('content') is string -%}
+        {{- message['content'] | trim -}}
+    {%- elif message.get('content') is sequence -%}
+        {%- for item in message['content'] -%}
+            {%- if item.get('type') == 'text' -%}
+                {{- item['text'] | trim -}}
+            {%- elif item.get('type') in ['image', 'image_url'] -%}
+                {{- '<|image|>' -}}
+            {%- elif item.get('type') in ['audio', 'input_audio'] -%}
+                {{- '<|audio|>' -}}
+            {%- elif item.get('type') == 'video' -%}
+                {{- '<|video|>' -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+    {{- '<turn|>\n' -}}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- '<|turn>model\n' -}}
+{%- endif -%}

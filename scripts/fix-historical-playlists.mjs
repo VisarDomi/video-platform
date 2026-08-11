@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 
-import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { promisify } from "node:util";
+import { repairPlaylistDurations } from "../packages/server/dist/services/hls/playlistAuthority.js";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_DOWNLOADS_ROOT = "/home/visar/Videos/downloads";
 const LIVE_STATUS_PATH = "/home/visar/.local/share/video-services/live-status.json";
 const DEFAULT_CHECKPOINT_PATH = "/home/visar/.local/share/video-services/fix-playlists.sqlite";
 const PROVIDERS = ["tango", "fc2"];
-const RULE_VERSION = "max-av-v1";
+const SCOPES = ["downloads", "edited"];
+const RULE_VERSION = "media-timeline-v2";
 
 function usage() {
     console.log(`Usage:
@@ -20,9 +19,11 @@ function usage() {
 
 Options:
   --provider tango|fc2|all  Provider to scan (default: all)
+  --scope downloads|edited|all
+                            Storage scope to scan (default: downloads)
   --limit N                 Process at most N playlists
   --offset N                Skip the first N discovered playlists (default: 0)
-  --concurrency N           Concurrent ffprobe processes (default: 1)
+  --concurrency N           Concurrent segment byte/media probes (default: 1)
   --max-cpu N               Pause new probes above N% system CPU (default: 80)
   --downloads-root PATH     Override the downloads root (testing only)
   --checkpoint PATH         SQLite checkpoint path
@@ -32,8 +33,10 @@ Options:
   --dry-run                 Report changes without writing (default)
   --help                    Show this help
 
-The script skips exact folders currently present in live-status.json. It is
-idempotent: an already-correct playlist reports unchanged.`);
+The script skips exact folders currently present in live-status.json. It uses
+the server's canonical MPEG-TS PTS timeline repair, falls back to the longest
+audio/video stream only at boundaries that need it, and skips fMP4 playlists.
+It is idempotent: an already-correct playlist reports unchanged.`);
 }
 
 function parsePositiveInteger(value, name, minimum = 1) {
@@ -47,6 +50,7 @@ function parsePositiveInteger(value, name, minimum = 1) {
 function parseArgs(argv) {
     const options = {
         provider: "all",
+        scope: "downloads",
         limit: Number.POSITIVE_INFINITY,
         offset: 0,
         concurrency: 1,
@@ -68,6 +72,8 @@ function parseArgs(argv) {
             options.apply = false;
         } else if (arg === "--provider") {
             options.provider = argv[++index];
+        } else if (arg === "--scope") {
+            options.scope = argv[++index];
         } else if (arg === "--limit") {
             options.limit = parsePositiveInteger(argv[++index], "--limit");
         } else if (arg === "--offset") {
@@ -92,6 +98,9 @@ function parseArgs(argv) {
 
     if (![...PROVIDERS, "all"].includes(options.provider)) {
         throw new Error("--provider must be tango, fc2, or all");
+    }
+    if (![...SCOPES, "all"].includes(options.scope)) {
+        throw new Error("--scope must be downloads, edited, or all");
     }
     return options;
 }
@@ -164,26 +173,31 @@ async function playlistFingerprint(playlistPath) {
     };
 }
 
-async function discoverPlaylists(provider, downloadsRoot) {
+async function discoverPlaylists(provider, scope, downloadsRoot) {
     const providers = provider === "all" ? PROVIDERS : [provider];
+    const scopes = scope === "all" ? SCOPES : [scope];
     const playlists = [];
     for (const currentProvider of providers) {
-        const root = path.join(downloadsRoot, currentProvider, "downloader");
-        let entries;
-        try {
-            entries = await fs.readdir(root, { withFileTypes: true });
-        } catch (error) {
-            if (error.code === "ENOENT") continue;
-            throw error;
-        }
-        for (const entry of entries) {
-            if (!entry.isDirectory()) continue;
-            const playlistPath = path.join(root, entry.name, "playlist.m3u8");
+        for (const currentScope of scopes) {
+            const root = currentScope === "downloads"
+                ? path.join(downloadsRoot, currentProvider, "downloader")
+                : path.join(downloadsRoot, currentProvider, "editor", "edited");
+            let entries;
             try {
-                await fs.access(playlistPath);
-                playlists.push({ provider: currentProvider, playlistPath });
-            } catch {
-                // A folder without a playlist is not a migration target.
+                entries = await fs.readdir(root, { withFileTypes: true });
+            } catch (error) {
+                if (error.code === "ENOENT") continue;
+                throw error;
+            }
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const playlistPath = path.join(root, entry.name, "playlist.m3u8");
+                try {
+                    await fs.access(playlistPath);
+                    playlists.push({ provider: currentProvider, scope: currentScope, playlistPath });
+                } catch {
+                    // A folder without a playlist is not a migration target.
+                }
             }
         }
     }
@@ -204,64 +218,6 @@ async function readActiveDirectories() {
     } catch (error) {
         throw new Error(`Cannot safely read ${LIVE_STATUS_PATH}: ${error.message}`);
     }
-}
-
-function parsePlaylist(content) {
-    const lines = content.split(/\r?\n/);
-    const segments = [];
-    let pendingExtinfIndex = null;
-
-    for (let index = 0; index < lines.length; index += 1) {
-        const trimmed = lines[index].trim();
-        if (trimmed.startsWith("#EXTINF:")) {
-            pendingExtinfIndex = index;
-            continue;
-        }
-        if (trimmed && !trimmed.startsWith("#") && pendingExtinfIndex !== null) {
-            const durationText = lines[pendingExtinfIndex]
-                .trim()
-                .slice("#EXTINF:".length)
-                .split(",")[0];
-            const duration = Number.parseFloat(durationText);
-            segments.push({
-                duration: Number.isFinite(duration) ? duration : null,
-                extinfIndex: pendingExtinfIndex,
-                uri: trimmed,
-            });
-            pendingExtinfIndex = null;
-        }
-    }
-    return { lines, segments };
-}
-
-async function probeDuration(filePath) {
-    const { stdout } = await execFileAsync(
-        "nice",
-        [
-            "-n", "10",
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration:stream=codec_type,duration",
-            "-of", "json",
-            filePath,
-        ],
-        { maxBuffer: 1024 * 1024 },
-    );
-    const data = JSON.parse(stdout);
-    const streams = Array.isArray(data.streams) ? data.streams : [];
-    const videoDuration = Number.parseFloat(
-        streams.find((stream) => stream.codec_type === "video")?.duration,
-    );
-    const audioDuration = Number.parseFloat(
-        streams.find((stream) => stream.codec_type === "audio")?.duration,
-    );
-    const mediaDurations = [videoDuration, audioDuration]
-        .filter((duration) => Number.isFinite(duration) && duration > 0);
-    if (mediaDurations.length > 0) return Math.max(...mediaDurations);
-
-    const formatDuration = Number.parseFloat(data.format?.duration);
-    if (Number.isFinite(formatDuration) && formatDuration > 0) return formatDuration;
-    throw new Error("ffprobe returned no positive media or format duration");
 }
 
 function readCpuCounters() {
@@ -316,43 +272,6 @@ function createCpuGuard(maxCpu) {
     };
 }
 
-async function mapBounded(items, concurrency, operation) {
-    const results = new Array(items.length);
-    let nextIndex = 0;
-    async function worker() {
-        while (true) {
-            const index = nextIndex++;
-            if (index >= items.length) return;
-            results[index] = await operation(items[index], index);
-        }
-    }
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-    return results;
-}
-
-async function atomicWrite(filePath, content) {
-    const temporaryPath = `${filePath}.maxav-${process.pid}.tmp`;
-    let handle;
-    try {
-        handle = await fs.open(temporaryPath, "wx");
-        await handle.writeFile(content);
-        await handle.sync();
-        await handle.close();
-        handle = null;
-        await fs.rename(temporaryPath, filePath);
-        const directoryHandle = await fs.open(path.dirname(filePath), "r");
-        try {
-            await directoryHandle.sync();
-        } finally {
-            await directoryHandle.close();
-        }
-    } catch (error) {
-        if (handle) await handle.close().catch(() => {});
-        await fs.unlink(temporaryPath).catch(() => {});
-        throw error;
-    }
-}
-
 async function repairPlaylist(target, options, cpuGuard) {
     const directory = path.dirname(target.playlistPath);
     const activeDirectories = await readActiveDirectories();
@@ -360,72 +279,36 @@ async function repairPlaylist(target, options, cpuGuard) {
         return { status: "live", segmentCount: 0 };
     }
 
-    const original = await fs.readFile(target.playlistPath, "utf8");
-    const parsed = parsePlaylist(original);
-    if (parsed.segments.length === 0) {
-        return { status: "empty", segmentCount: 0 };
-    }
-
-    const durations = await mapBounded(
-        parsed.segments,
-        options.concurrency,
-        async (segment) => {
-            await cpuGuard.waitForCapacity();
-            const segmentPath = path.resolve(directory, segment.uri);
-            if (path.dirname(segmentPath) !== path.resolve(directory)) {
-                throw new Error(`Segment URI escapes playlist directory: ${segment.uri}`);
-            }
-            return probeDuration(segmentPath);
+    const summary = await repairPlaylistDurations(directory, {
+        apply: options.apply,
+        probeConcurrency: options.concurrency,
+        beforeProbe: () => cpuGuard.waitForCapacity(),
+        beforeWrite: async () => {
+            const activeBeforeWrite = await readActiveDirectories();
+            return !activeBeforeWrite.has(path.resolve(directory));
         },
-    );
+    });
 
-    let changedDurationCount = 0;
-    let totalBefore = 0;
-    let totalAfter = 0;
-    let maximumDuration = 0;
-    for (let index = 0; index < parsed.segments.length; index += 1) {
-        const segment = parsed.segments[index];
-        const roundedDuration = Number(durations[index].toFixed(3));
-        maximumDuration = Math.max(maximumDuration, roundedDuration);
-        totalBefore += segment.duration ?? 0;
-        totalAfter += roundedDuration;
-        if (segment.duration === null || Math.abs(segment.duration - roundedDuration) >= 0.0005) {
-            changedDurationCount += 1;
-        }
-        parsed.lines[segment.extinfIndex] = `#EXTINF:${roundedDuration.toFixed(3)},`;
-    }
-
-    const desiredTargetDuration = Math.max(1, Math.ceil(maximumDuration));
-    const targetIndex = parsed.lines.findIndex((line) => line.trim().startsWith("#EXT-X-TARGETDURATION:"));
-    const existingTargetDuration = targetIndex >= 0
-        ? Number.parseInt(parsed.lines[targetIndex].trim().slice("#EXT-X-TARGETDURATION:".length), 10)
-        : null;
-    if (targetIndex >= 0) {
-        parsed.lines[targetIndex] = `#EXT-X-TARGETDURATION:${desiredTargetDuration}`;
-    } else {
-        const headerIndex = parsed.lines.findIndex((line) => line.trim() === "#EXTM3U");
-        parsed.lines.splice(headerIndex >= 0 ? headerIndex + 1 : 0, 0, `#EXT-X-TARGETDURATION:${desiredTargetDuration}`);
-    }
-
-    const targetChanged = existingTargetDuration !== desiredTargetDuration;
-    const changed = changedDurationCount > 0 || targetChanged;
-    if (changed && options.apply) {
-        const activeBeforeWrite = await readActiveDirectories();
-        if (activeBeforeWrite.has(path.resolve(directory))) {
-            return { status: "live", segmentCount: parsed.segments.length };
-        }
-        const trailingNewline = original.endsWith("\n") ? "\n" : "";
-        await atomicWrite(target.playlistPath, `${parsed.lines.join("\n").replace(/\n+$/, "")}${trailingNewline}`);
+    if (summary.writeSkippedReason === "write-guard") {
+        return { status: "live", segmentCount: summary.segmentCount };
     }
 
     return {
-        status: changed ? (options.apply ? "written" : "would-change") : "unchanged",
-        segmentCount: parsed.segments.length,
-        changedDurationCount,
-        targetChanged,
-        totalBefore,
-        totalAfter,
-        delta: totalAfter - totalBefore,
+        status: summary.skipped
+            ? "skipped"
+            : summary.playlistChanged
+                ? (summary.wrotePlaylist ? "written" : "would-change")
+                : "unchanged",
+        segmentCount: summary.segmentCount,
+        changedDurationCount: summary.changedDurationCount,
+        targetChanged: summary.targetDurationBefore !== summary.targetDurationAfter,
+        totalBefore: summary.totalDurationBefore,
+        totalAfter: summary.totalDurationAfter,
+        delta: summary.totalDurationDelta,
+        byteProbeCount: summary.byteProbeCount,
+        ffprobeProbeCount: summary.ffprobeProbeCount,
+        failedProbeCount: summary.failedProbeCount,
+        skipReason: summary.skipReason,
     };
 }
 
@@ -434,7 +317,7 @@ async function main() {
     await fs.mkdir(path.dirname(options.checkpointPath), { recursive: true });
     const mode = options.apply ? "apply" : "dry-run";
     const checkpoints = new CheckpointStore(options.checkpointPath, mode);
-    const discovered = await discoverPlaylists(options.provider, options.downloadsRoot);
+    const discovered = await discoverPlaylists(options.provider, options.scope, options.downloadsRoot);
     const selected = discovered.slice(options.offset, options.offset + options.limit);
     const cpuGuard = createCpuGuard(options.maxCpu);
     const startedAt = Date.now();
@@ -455,6 +338,7 @@ async function main() {
         mode,
         ruleVersion: RULE_VERSION,
         provider: options.provider,
+        scope: options.scope,
         discovered: discovered.length,
         selected: selected.length,
         offset: options.offset,

@@ -1,5 +1,21 @@
 # Downloader Decisions
 
+## ENDLIST transfers finalized-media ownership to the server
+
+The downloader owns transport and active playlist append only. Tango/FC2 write
+the received bytes, reject only an empty/unreadable file, and do not spawn
+ffprobe per media segment. Upstream EXTINF remains provisional while the stream
+is live.
+
+`PlaylistManager.finalizePlaylist()` writes `#EXT-X-ENDLIST` before the folder
+is removed from `live-status.json`. That ordering is the durable handoff to the
+server's media-integrity finalizer. The server owns strict decoding, quarantine,
+discontinuity insertion, and authoritative duration repair after capture.
+
+**Why:** Transport success and media decodability are separate concerns.
+Metadata-only per-segment probing did not detect the corrupt packets that froze
+playback, and full decoding belongs after the stream is complete.
+
 ## StreamSession owns the recording lifecycle
 
 One session = one folder. StreamSession owns DiskSession, PlaylistManager, InitTracker, and the retry loop. StreamDownloader is a single download attempt that receives these as inputs — it doesn't create, finalize, or remove anything.
@@ -60,17 +76,19 @@ On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions a
 
 **Why:** The old `process.exit(0)` killed downloads mid-write, leaving playlists without `#EXT-X-ENDLIST`. The orphan finalizer was the only recovery, running hours later.
 
-## Server serves, not heals
+## Server serves active playlists; it finalizes completed playlists
 
-The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns playlist correctness; the orphan finalizer (in server) owns crash recovery.
+The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns active append correctness. Once ENDLIST is written, the server owns media-integrity validation and canonical playlist repair; the orphan finalizer owns crash recovery.
 
 **Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
 
-## MPEG-TS duration includes the longest media stream
+## Finalized MPEG-TS duration includes the longest media stream
 
-Tango and FC2 segment validation uses `max(video duration, audio duration)` for
-playlist `#EXTINF`. Container duration is used only when neither media stream
-has a positive duration.
+The server's finalized-playlist repair uses `max(video duration, audio
+duration)` for playlist `#EXTINF` when adjacent video PTS cannot provide the
+timeline. Container duration is used only when neither media stream has a
+positive duration. During capture, Tango and FC2 retain upstream EXTINF without
+probing every segment.
 
 **Why:** Some botched segments contain almost no advancing video while audio
 continues. Safari presents that interval as frozen video with continuing audio.

@@ -1,5 +1,201 @@
 # Monorepo Decisions
 
+## Ownership: ENDLIST hands media integrity to the server (2026-08-11)
+
+The downloader owns an MPEG-TS recording while its playlist is live. Writing
+`#EXT-X-ENDLIST` is the durable live-to-finalized handoff: after that line is
+present and the folder leaves `live-status.json`, the server owns media
+integrity and canonical playlist repair.
+
+Tango and FC2 no longer launch ffprobe for every downloaded segment. Their live
+loop performs only the transport-level nonempty-file check and preserves the
+upstream EXTINF while capture is active. The server observes completed folders,
+runs one strict whole-playlist ffmpeg decode, and performs the expensive
+per-segment decode only when that recording-level check fails. This automatic
+scan is strictly nondestructive: it writes only `.media-integrity.json`; it does
+not move, copy, delete, or rewrite media segments or playlists. Failed MPEG-TS
+playlists report the exact invalid segments for manual action. Failed fMP4
+playlists remain failed without per-fragment attribution because individual
+fragments require initialization/context.
+
+Completed recordings enter one deduplicating FIFO queue with a worker count of
+half the host's logical CPUs. Each worker runs one single-threaded ffmpeg at nice
+priority 10 and waits 15 seconds between recordings, providing about 50% of
+aggregate CPU capacity while yielding to interactive work. The systemd service
+also has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
+`MemoryMax=80%`, and `MemorySwapMax=0`. Segment scans checkpoint every 25
+segments, so service restarts resume from the last checkpoint. Harmless
+null-muxer DTS diagnostics are filtered before bounded stderr capture,
+preventing truncation from turning them into false corruption.
+
+PlaylistAuthority prefers adjacent MPEG-TS video PTS and invokes ffprobe only
+for boundaries those timestamps cannot define, such as discontinuities and the
+final tail. Automatic integrity validation does not call PlaylistAuthority or
+rewrite durations; repair remains a separate explicit operation.
+
+**Why:** Metadata-only ffprobe accepted the corrupt MPEG-TS segments that later
+froze video during playback. Fully decoding every segment in the live loop
+wastes power and gives the downloader destructive semantic authority. A single
+post-ENDLIST validation is cheap for clean streams, while corrupt streams can
+be inspected precisely with the whole recording available. The earlier
+quarantine implementation moved source segments to `/tmp`; a reboot cleared
+those bytes, proving that even recoverable-looking automatic mutation violates
+the recording ownership boundary.
+
+## Upload packaging is one recording per artifact and non-destructive (2026-08-11)
+
+The server owns upload eligibility and final-artifact validation. Provider facts
+live in `packages/server/src/services/upload/uploadPolicy.ts`; the shared policy
+is derived from them instead of copying limits into descriptor, converter, and
+uploader workers.
+
+XVideos private uploads are the only active destination. It contributes a
+7,200-second duration maximum and a 50,000,000,000-byte file maximum. Bunkr is
+recorded as unavailable because registrations are closed until further notice;
+it is not part of the active/shared policy and its 2 GB limit must not constrain
+XVideos artifacts. XVideos' minimum duration, accepted container/codecs, and
+metadata limits remain explicitly unresolved until manual authenticated tests.
+The upload page is not publicly indexed, so those authenticated observations
+cannot be independently confirmed by a public search.
+
+Every recording is planned independently. No minimum-duration skip is active
+while the XVideos minimum is unknown. Once manually verified, changing that one
+provider value derives the shared minimum; recordings below it will be marked
+`skipped_too_short` with a manual-action notification. Recordings over two hours
+are marked `blocked_too_long`, and oversized final artifacts are marked
+`blocked_too_large`. No decision moves, deletes, edits, or concatenates source
+files. Concatenation is intentionally not part of the fresh pipeline and must be
+a separate future decision if ever added.
+
+**Why:** The old uploader's 15-minute concatenation rule destroyed the
+one-recording boundary and moved source files after grouping. Most recordings
+can be described, converted, and uploaded without taking that risk; exceptional
+short or oversized recordings should remain visible for manual handling.
+
+## Backlog pipeline is quota-led and uses one heavy worker (2026-08-11)
+
+The eligible downloader + edited library measures 1,230,560,053,106 bytes in
+3,372 recordings and 3,875,924 seconds (44.86 days) of playlist time. Trash is
+not eligible. At the observed 2.54 Mbps average media bitrate, the operator's
+rough 1.1 TB / 2,222 kbps estimate is about 46 days, not five days: stored bytes
+must be multiplied by eight before dividing by bits per second.
+
+The working monthly ledger is 1.0 TB download, 0.6 TB upload, and 0.4 TB held
+in reserve. New media is approximately 0.2 TB/month. With one XVideos upload per
+artifact, using the full allowance drains the measured 1.23 TB backlog at about
+0.4 TB/month, or roughly 3.1 months. The selected six-month pace processes the
+existing backlog plus approximately 1.2 TB of new media at about 0.405 TB/month
+(13.5 GB/day), leaving about 0.195 TB/month of upload headroom.
+
+The uploader must account actual transmitted bytes, including failed/retried
+transfers, and stop admitting jobs when the calendar-month upload ledger reaches
+600,000,000,000 bytes. Evenly spending the full allowance averages about 1.85
+Mbps; the six-month target averages about 1.25 Mbps. The hard byte ledger, not
+the rolling rate, remains authority.
+
+The durable per-recording state machine is:
+
+`discovered -> playlist_repaired -> integrity_ready -> remuxed -> artifact_valid -> described -> xvideos_admitted -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
+
+Blocked/failed states retain the source and the diagnostic. A stream-copy MP4
+remux is the default final artifact; transcode is destination-specific and only
+used when codecs or an active destination's size limit require it. Of the
+measured library, no folder exceeds XVideos' 50 GB limit. After manual trimming,
+none exceeds XVideos' two-hour limit; the current longest playlist is 6,983.065
+seconds (1:56:23). Descriptor runs on the exact validated artifact that will be
+uploaded. Future items over two hours are blocked and surfaced for manual
+trimming; the pipeline does not split or transcode them merely to satisfy
+duration policy.
+
+Local cleanup is per recording, never an end-of-migration sweep. With XVideos
+as the sole remote copy, source deletion is a separate risk decision and remains
+disabled until explicitly enabled. If enabled, eligibility requires completed
+XVideos processing/playback verification, persisted remote ID/URL, a stored
+local artifact hash, and a seven-day grace period. Cleanup must target exact
+manifest-owned source/artifact paths; no broad directory deletion is allowed.
+Without source cleanup the pipeline limits temporary staging to one artifact,
+but uploading alone does not reduce the existing local library.
+
+One orchestrator and one durable SQLite job/byte ledger own all providers. It
+uses one global artifact staging root, created only when the pipeline is
+enabled; provider config must not invent converter/uploader directory trees.
+There is one GPU descriptor request at a time and no concurrent CPU-heavy
+transcode. Light remux/upload work may overlap. The scheduler pauses new heavy
+work above the host CPU threshold and the eventual systemd processing slice
+must cap aggregate memory at 80% with swap denied. Resource utilization controls
+job admission and concurrency, not descriptor evidence quality.
+
+The descriptor uses duration-tiered quality ceilings: 4 FPS below seven
+minutes, 2 FPS from seven to below fifteen minutes, and 1 FPS thereafter. The
+115,000-token video budget may lower FPS inside any tier and remains
+authoritative. A live scan of 3,382 eligible finished recordings measured 44.79
+media-days. Using the successful near-two-hour benchmark as a conservative
+per-frame cost, the current library plus six months of projected new media is
+about 88.47 media-days and 45.42 full-speed descriptor-days: 25.2% duty across
+the 180-day schedule. At 50% duty the descriptor can process approximately
+0.803 TB/month, above the 0.6 TB/month upload ceiling, so description is not the
+pipeline bottleneck.
+
+At a 1:1 stream-copy artifact ratio, the six-month plan transfers 2.43056 TB,
+or 405.09 GB/month (1.25 Mbps average), leaving 194.91 GB/month below the upload
+cap. The byte ledger can absorb an aggregate 1.481x size/retry multiplier; with
+10% reserved for retries, final artifacts may average at most 1.346x source
+size. Stream-copy remux is therefore comfortably inside both compute and byte
+limits. If XVideos forces a full transcode, descriptor and transcode remain
+serialized heavy jobs: a converter only needs 0.657x real-time throughput to
+finish within six months at unrestricted duty, but approximately 1.984x
+real-time to keep their combined heavy-worker duty at 50%. A 1x real-time
+converter would finish but raise combined duty to about 74.4%.
+
+## Provider paths are declarative, not startup side effects (2026-08-11)
+
+Importing server config must not create provider storage trees.
+`getProviderPaths()` describes paths only. Write operations create their
+specific destination on demand. The unsupported flat-file `mp4` provider and
+its routes/services were removed; this does not affect fMP4 HLS playlists,
+`#EXT-X-MAP`, or `init.mp4` fragment serving. Converter and other undecided
+pipeline folders are not created merely because a provider is listed in
+configuration. Existing empty/legacy folders are left untouched.
+
+## Historical playlist CLI uses PlaylistAuthority (2026-08-11)
+
+`npm run fix-playlists` builds and calls the same canonical PlaylistAuthority
+used by the server instead of maintaining a second per-segment-duration rule.
+For MPEG-TS it reads adjacent video PTS from bytes and uses the longest positive
+audio/video stream duration only at discontinuities, tails, or failed byte
+probes; fMP4 is skipped. The CLI retains SQLite checkpoints, live-folder guards,
+CPU admission, dry-run, and power-loss-safe atomic writes. Rule version
+`media-timeline-v2` deliberately invalidates checkpoints made by the obsolete
+`max-av-v1` implementation.
+
+## Descriptor uses duration-tiered FPS ceilings with token-budget adaptation (2026-08-12)
+
+Native-video description requests use up to 4 FPS below seven minutes, up to 2
+FPS from seven to below fifteen minutes, and up to 1 FPS thereafter. For any
+recording that would exceed the 115,000-token video budget, the descriptor
+lowers FPS as `budget / measuredTokensPerFrame / duration`. Full 4 FPS fits
+through 407.8 seconds (6:48), full 2 FPS through 815.6 seconds (13:36), and full
+1 FPS through 1,631.2 seconds (27:11). Longer videos receive approximately
+1,631 sampled frames regardless of duration: about 0.453 FPS at one hour and
+0.2266 FPS at two hours. A two-hour video therefore samples one frame every
+4.41 seconds while preserving room for instructions and output.
+
+Fixed 0.5/1/4 FPS comparisons on 12.35-second and 176.27-second recordings found
+that 1 FPS retained useful setting, clothing, and action specificity with about
+one quarter of the 4 FPS prompt tokens. Sampling at 0.5 FPS remained useful but
+lost some clothing/action specificity on the longer recording. Four FPS did not
+produce a consistent quality improvement. Invalid sampling inputs fail before
+a model request is sent.
+
+The spare descriptor capacity is deliberately spent on denser evidence for
+short recordings. The token budget safely tapers FPS near each tier boundary,
+so this quality increase cannot overflow the model context.
+
+**Why:** Frame rate is an evidence-quality and context-cost choice, not a model
+memory workaround. One FPS is the measured normal-quality point; duration-based
+reduction preserves support for long recordings without making short videos
+needlessly sparse.
+
 ## Ownership: Video is a self-contained unit (2026-04-05)
 
 Every piece of state about a video belongs to the video itself. The `Video` type carries `provider` alongside `filename`, `type`, `duration`, `size`, `isLive`. Operations derive context from the video object — no threading `provider` through function args from external stores.
@@ -157,7 +353,15 @@ Safari/iOS mismatch evidence from `2026-05-10 235819 milkyway999` showed the old
 
 The correct duration source is the media timeline Safari plays, not the MPEG-TS container span. `PlaylistAuthority` repairs historical playlists by probing segments and writing `#EXTINF` from video PTS advancement within each continuity section, falling back to stream duration at discontinuities/tails. It recomputes `#EXT-X-TARGETDURATION` and publishes via temp file + rename.
 
-Future downloader writes must use media stream duration for `accurateDuration`. Tango/FC2 segment validation must pass the longest positive media-stream duration, `max(video duration, audio duration)`, to `PlaylistManager`; `format.duration` is only a fallback when neither media stream has a usable duration. This preserves audible presentation time when video ends early or freezes instead of collapsing that time out of the playlist. Edit playlists inherit canonical `#EXTINF` from the source playlist, so historical source playlists should be repaired before editing old recordings.
+For finalized recordings, Tango/FC2 duration repair must use the longest positive
+media-stream duration, `max(video duration, audio duration)`, when adjacent video
+PTS cannot provide the timeline; `format.duration` is only a fallback when
+neither media stream has a usable duration. The downloader no longer probes each
+live segment and therefore leaves upstream EXTINF provisional until ENDLIST
+hands the playlist to the server. This preserves audible presentation time when
+video ends early or freezes without paying the probe cost throughout capture.
+Edit playlists inherit canonical `#EXTINF` from the source playlist, so
+historical source playlists should be repaired before editing old recordings.
 
 For `.ts` historical repair, `PlaylistAuthority` should parse MPEG-TS bytes before spawning ffprobe. The common-case duration is `firstVideoPts(next segment) - firstVideoPts(current segment)`, read from PES PTS timestamps. This matched the ffprobe-derived good playlist for `2026-05-10 235819 milkyway999` exactly across `2126` adjacent segment boundaries and reduced that repair from thousands of ffprobe calls to byte probes plus two ffprobe fallbacks. ffprobe remains the fallback for boundaries that TS bytes cannot define alone, such as the segment before a discontinuity and the final tail segment.
 
@@ -177,8 +381,8 @@ Operational behavior:
 
 Ownership boundary:
 
-- Downloader owns active playlist append for new live captures and writes media-duration `#EXTINF` when each segment is accepted.
-- Server `PlaylistAuthority` owns historical/batch repair and any operational rewrite of finalized playlists.
+- Downloader owns active playlist append for new live captures and retains upstream `#EXTINF` until completion.
+- ENDLIST transfers ownership to the server; MediaIntegrityFinalizer validates nondestructively and `PlaylistAuthority` owns explicit canonical duration repair plus historical/batch repair.
 - HLS routes serve playlists read-only and must not silently heal on GET.
 - Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.
 

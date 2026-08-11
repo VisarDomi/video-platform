@@ -1,9 +1,8 @@
-import * as path from "path";
+import { promises as fs } from "fs";
 import { readTokens } from "shared";
 import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
-import { MediaValidator } from "../../../common/mediaValidator.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 
 export interface TangoLiveStream {
@@ -212,27 +211,12 @@ export class ApiClient implements IStreamProvider {
     }
 
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
-        const info = await MediaValidator.getMediaInfo(filePath);
-        if (!info) return { valid: false };
-
-        if (isNaN(info.bitRate) || info.bitRate < 1000) return { valid: false };
-
-        if (!isNaN(info.duration) && info.duration > 3600) return { valid: false };
-
-        if (info.width === 360 && info.height === 640) return { valid: false };
-
-        if (info.videoDuration <= 0 && info.audioDuration <= 0 && info.formatDuration > 0) {
-            logger.warn(`[Tango] validateSegment: using format duration fallback for ${path.basename(filePath)}`);
-        } else if (info.videoDuration > 0 && info.formatDuration > 0 && Math.abs(info.formatDuration - info.videoDuration) > 0.01) {
-            logger.debug(`[Tango] validateSegment: media duration differs from format duration for ${path.basename(filePath)}`, {
-                videoDuration: info.videoDuration,
-                audioDuration: info.audioDuration,
-                formatDuration: info.formatDuration,
-                selectedDuration: info.duration,
-            });
+        try {
+            const stats = await fs.stat(filePath);
+            return { valid: stats.size > 0 };
+        } catch {
+            return { valid: false };
         }
-
-        return { valid: true, duration: info.duration };
     }
 
     public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {

@@ -5,13 +5,17 @@ export type MembershipState =
 	| { state: 'ready'; isMember: boolean }
 	| { state: 'adding'; confirmedMember: false }
 	| { state: 'removing'; confirmedMember: true }
+	| { state: 'unavailable'; message: string }
 	| { state: 'error'; confirmedMember: boolean; message: string };
 
 export async function fetchMembership(provider: Provider): Promise<Set<string>> {
 	const response = await fetch(LIST_API[provider].list);
 	if (!response.ok) throw new Error(`Download-list fetch failed: ${response.status}`);
 	const identifiers = (await response.json()) as unknown;
-	return new Set(Array.isArray(identifiers) ? identifiers.filter(isString) : []);
+	if (!Array.isArray(identifiers) || !identifiers.every(isString)) {
+		throw new Error('Download-list response is not a string array');
+	}
+	return new Set(identifiers);
 }
 
 export async function changeMembership(
