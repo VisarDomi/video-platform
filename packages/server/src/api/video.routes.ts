@@ -5,7 +5,6 @@ import os from "os";
 import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
-import * as mp4EditService from "../services/video/mp4-edit.service.js";
 import * as playlistAuthority from "../services/hls/playlistAuthority.js";
 import * as utils from "../core/utils.js";
 import { getProviderPaths, LIVE_STATUS_PATH } from "../core/config.js";
@@ -54,16 +53,6 @@ router.post("/edit", async (req, res) => {
     logger.info(`[api/edit] request: filename=${filename} segments=${segments.length} provider=${targetProvider}`);
 
     try {
-        if (targetProvider === "mp4") {
-            const timeSegments = segments.map((s: string) => {
-                const [start, end] = s.split(":").map(Number);
-                return { start, end };
-            });
-            mp4EditService.editMp4Video(filename, timeSegments, targetProvider);
-            res.json({ success: true });
-            return;
-        }
-
         const ref = await utils.resolveVideo(filename, targetProvider);
         await editService.editVideo(ref, segments);
         res.json({ success: true });

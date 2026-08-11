@@ -1,0 +1,21 @@
+{
+    "name": "descriptor",
+    "type": "module",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Video description worker and local model smoke tests",
+    "main": "dist/smoke.js",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "test": "npm run build && node --test test/*.test.mjs",
+        "smoke": "npm run build && node dist/smoke.js",
+        "smoke:bounded": "npm run build && node scripts/run-bounded-smoke.mjs",
+        "runtime:install": "node scripts/install-runtime.mjs",
+        "runtime:activate": "node scripts/activate-runtime.mjs"
+    },
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "20.8.10",
+        "typescript": "5.2.2"
+    }
+}

@@ -89,7 +89,6 @@ export const LOGS = {
 
 export const ERROR_NAMES = {
     FILE_NOT_FOUND: "FileNotFoundError",
-    FFMPEG: "FfmpegError",
     MOVE: "MoveError",
     SEGMENT: "SegmentError",
 } as const;

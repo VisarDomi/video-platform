@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import pLimit from "p-limit";
+import { selectLongestMediaDuration } from "shared";
 import logger from "../../core/logger.js";
 import { FILE_NAMES, HLS, MISC } from "../../core/constants.js";
 
@@ -25,7 +26,16 @@ export interface PlaylistRepairSummary {
     maxSegmentDelta: number;
     targetDurationBefore: number | null;
     targetDurationAfter: number;
+    playlistChanged: boolean;
     wrotePlaylist: boolean;
+    writeSkippedReason: "dry-run" | "write-guard" | null;
+}
+
+export interface PlaylistRepairOptions {
+    apply?: boolean;
+    probeConcurrency?: number;
+    beforeProbe?: () => Promise<void>;
+    beforeWrite?: () => Promise<boolean>;
 }
 
 export interface PlaylistRepairBatchSummary {
@@ -210,13 +220,19 @@ function hasDiscontinuityBefore(segment: PlaylistSegment): boolean {
 
 function chooseStreamDuration(probe: SegmentProbe | null): number | null {
     if (!probe) return null;
-    return probe.videoDuration ?? probe.audioDuration ?? probe.formatDuration;
+    return selectLongestMediaDuration(
+        probe.videoDuration,
+        probe.audioDuration,
+        probe.formatDuration,
+    );
 }
 
 function chooseTimelineDuration(segment: PlaylistSegment, next: PlaylistSegment | null): {
     duration: number | null;
     source: "video-timeline" | "stream-duration" | "missing";
 } {
+    const streamDuration = chooseStreamDuration(segment.probe);
+
     if (
         segment.probe?.videoStart !== null &&
         segment.probe?.videoStart !== undefined &&
@@ -230,10 +246,9 @@ function chooseTimelineDuration(segment: PlaylistSegment, next: PlaylistSegment 
         }
     }
 
-    const duration = chooseStreamDuration(segment.probe);
-    return duration === null
+    return streamDuration === null
         ? { duration: null, source: "missing" }
-        : { duration, source: "stream-duration" };
+        : { duration: streamDuration, source: "stream-duration" };
 }
 
 function probeSegment(segmentPath: string): Promise<SegmentProbe | null> {
@@ -364,13 +379,41 @@ async function probeSegmentBytes(segmentPath: string): Promise<SegmentProbe | nu
     return probeTsSegment(buffer);
 }
 
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-    const tmpPath = `${filePath}.tmp`;
-    await fs.writeFile(tmpPath, content, MISC.ENCODING_UTF8);
-    await fs.rename(tmpPath, filePath);
+export function requiresFfprobeFallback(
+    duration: number | null,
+    source: "video-timeline" | "stream-duration" | "missing",
+    needsFfprobeFallback: boolean,
+): boolean {
+    return duration === null || (source === "stream-duration" && needsFfprobeFallback);
 }
 
-export async function repairPlaylistDurations(videoPath: string): Promise<PlaylistRepairSummary> {
+async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    let handle;
+    try {
+        handle = await fs.open(tmpPath, "wx");
+        await handle.writeFile(content, MISC.ENCODING_UTF8);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        await fs.rename(tmpPath, filePath);
+        const directoryHandle = await fs.open(path.dirname(filePath), "r");
+        try {
+            await directoryHandle.sync();
+        } finally {
+            await directoryHandle.close();
+        }
+    } catch (error) {
+        if (handle) await handle.close().catch(() => {});
+        await fs.unlink(tmpPath).catch(() => {});
+        throw error;
+    }
+}
+
+export async function repairPlaylistDurations(
+    videoPath: string,
+    options: PlaylistRepairOptions = {},
+): Promise<PlaylistRepairSummary> {
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
     const originalContent = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
     const parsed = parsePlaylist(originalContent);
@@ -396,13 +439,19 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
             maxSegmentDelta: 0,
             targetDurationBefore: parsed.targetDuration,
             targetDurationAfter: parsed.targetDuration ?? 0,
+            playlistChanged: false,
             wrotePlaylist: false,
+            writeSkippedReason: null,
         };
         logger.info("[PlaylistAuthority] playlist-media-timeline-repair-skipped", summary);
         return summary;
     }
 
-    const limit = pLimit(PROBE_CONCURRENCY);
+    const probeConcurrency = options.probeConcurrency ?? PROBE_CONCURRENCY;
+    if (!Number.isInteger(probeConcurrency) || probeConcurrency < 1) {
+        throw new Error("probeConcurrency must be a positive integer");
+    }
+    const limit = pLimit(probeConcurrency);
 
     let probedCount = 0;
     let byteProbeCount = 0;
@@ -432,6 +481,7 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
             return;
         }
 
+        await options.beforeProbe?.();
         const probe = await probeSegmentBytes(segmentPath);
         if (probe === null) {
             const ffprobe = await probeSegment(segmentPath);
@@ -457,7 +507,11 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
         const nextSegment = parsed.segments[index + 1] ?? null;
         let { duration, source } = chooseTimelineDuration(segment, nextSegment);
 
-        if ((duration === null || (source === "stream-duration" && segment.probe?.needsFfprobeFallback)) && !segment.probeFailed) {
+        if (
+            requiresFfprobeFallback(duration, source, segment.probe?.needsFfprobeFallback ?? false) &&
+            !segment.probeFailed
+        ) {
+            await options.beforeProbe?.();
             const fallbackProbe = await probeSegment(path.join(videoPath, segment.name));
             if (fallbackProbe !== null) {
                 ffprobeProbeCount++;
@@ -503,10 +557,19 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
     }, 0);
     const targetDurationAfter = Math.max(1, Math.ceil(maxDuration));
     const repairedContent = serializePlaylist(parsed, targetDurationAfter);
-    const wrotePlaylist = repairedContent !== originalContent;
+    const playlistChanged = repairedContent !== originalContent;
+    let wrotePlaylist = false;
+    let writeSkippedReason: PlaylistRepairSummary["writeSkippedReason"] = null;
 
-    if (wrotePlaylist) {
-        await writeFileAtomic(playlistPath, repairedContent);
+    if (playlistChanged) {
+        if (options.apply === false) {
+            writeSkippedReason = "dry-run";
+        } else if (options.beforeWrite && !await options.beforeWrite()) {
+            writeSkippedReason = "write-guard";
+        } else {
+            await writeFileAtomic(playlistPath, repairedContent);
+            wrotePlaylist = true;
+        }
     }
 
     const summary: PlaylistRepairSummary = {
@@ -529,7 +592,9 @@ export async function repairPlaylistDurations(videoPath: string): Promise<Playli
         maxSegmentDelta: Number(maxSegmentDelta.toFixed(6)),
         targetDurationBefore: parsed.targetDuration,
         targetDurationAfter,
+        playlistChanged,
         wrotePlaylist,
+        writeSkippedReason,
     };
 
     logger.info("[PlaylistAuthority] playlist-media-timeline-repair", summary);
