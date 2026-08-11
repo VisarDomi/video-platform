@@ -7,16 +7,6 @@ export class FileNotFoundError extends Error {
     }
 }
 
-export class FfmpegError extends Error {
-    public stderr: string;
-
-    constructor(message: string, stderr: string = MISC.EMPTY_STRING) {
-        super(message);
-        this.name = ERROR_NAMES.FFMPEG;
-        this.stderr = stderr;
-    }
-}
-
 export class MoveError extends Error {
     public stderr: string;
 

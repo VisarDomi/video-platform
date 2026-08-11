@@ -413,8 +413,7 @@ export class VideoViewerPage {
 		} catch (error) {
 			if (token !== this.membershipToken) return;
 			this.setMembership({
-				state: 'error',
-				confirmedMember: false,
+				state: 'unavailable',
 				message: error instanceof Error ? error.message : 'Membership fetch failed'
 			});
 		}

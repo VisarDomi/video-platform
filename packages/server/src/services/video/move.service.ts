@@ -23,6 +23,7 @@ export async function moveVideo(ref: types.VideoRef, destination: types.Destinat
     const videoPath = ref.dirPath;
 
     if (!videoPath.startsWith(newPath)) {
+        await fsPromises.mkdir(newPath, { recursive: true });
         let destinationFilename = ref.filename;
         let destinationPath = path.join(newPath, destinationFilename);
         let counter = 1;
