@@ -172,6 +172,15 @@ body {
     border-color: #ff5e3a;
 }
 
+.stream-controls button.error {
+    box-shadow: 0 0 0 2px #ffd166;
+}
+
+.stream-controls button:disabled {
+    color: #888;
+    opacity: 0.6;
+}
+
 .stream-controls button:active {
     border-color: #ff5e3a;
     background: #ff5e3a;

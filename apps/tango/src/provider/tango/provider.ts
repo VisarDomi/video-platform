@@ -32,22 +32,70 @@ async function ok(url: string, init?: Parameters<typeof request>[1]): Promise<Xh
     return response;
 }
 
+function requiredObject(value: unknown, label: string): Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error(`${label} is not an object`);
+    }
+    return value as Record<string, unknown>;
+}
+
+function requiredStringArray(value: unknown, label: string): string[] {
+    if (!Array.isArray(value) || !value.every(item => typeof item === "string")) {
+        throw new Error(`${label} is not a string array`);
+    }
+    return value;
+}
+
+async function bestEffort<T>(label: string, fallback: T, operation: () => Promise<T>): Promise<T> {
+    try {
+        return await operation();
+    } catch (error) {
+        console.warn(`${label} failed`, error);
+        return fallback;
+    }
+}
+
+async function requireDownloadUpdate(response: Response, action: string): Promise<void> {
+    if (!response.ok) throw new Error(`Download-list ${action} failed: ${response.status}`);
+    const body = requiredObject(await response.json() as unknown, `Download-list ${action} response`);
+    if (body.success !== true) throw new Error(`Download-list ${action} was not confirmed`);
+}
+
 function nativeSession(): { accountId: string; sessionId: string } {
     let accountId = localStorage.getItem("latest_account_id") ?? "";
     let sessionId = sessionStorage.getItem("username") ?? "";
 
     if (!accountId) {
-        try {
-            const persisted = JSON.parse(localStorage.getItem("persist:production:user") ?? "{}") as { accountId?: string };
-            accountId = persisted.accountId ? JSON.parse(persisted.accountId) as string : "";
-        } catch { /* Tango changed its persisted state. */ }
+        const raw = localStorage.getItem("persist:production:user");
+        if (raw !== null) {
+            const value = JSON.parse(raw) as unknown;
+            if (typeof value !== "object" || value === null) throw new Error("Tango's stored user is not an object");
+            const persisted = value as { accountId?: unknown };
+            if (persisted.accountId !== undefined) {
+                if (typeof persisted.accountId !== "string") throw new Error("Tango's stored account ID is invalid");
+                const parsed = JSON.parse(persisted.accountId) as unknown;
+                if (typeof parsed !== "string") throw new Error("Tango's stored account ID is invalid");
+                accountId = parsed;
+            }
+        }
     }
     if (!sessionId) {
-        try {
-            const persisted = JSON.parse(localStorage.getItem("persist:production:sessionDetails") ?? "{}") as { data?: string };
-            const details = JSON.parse(persisted.data ?? "{}") as { sessionId?: string };
-            sessionId = details.sessionId ?? "";
-        } catch { /* Tango changed its persisted state. */ }
+        const raw = localStorage.getItem("persist:production:sessionDetails");
+        if (raw !== null) {
+            const value = JSON.parse(raw) as unknown;
+            if (typeof value !== "object" || value === null) throw new Error("Tango's stored session is not an object");
+            const persisted = value as { data?: unknown };
+            if (persisted.data !== undefined) {
+                if (typeof persisted.data !== "string") throw new Error("Tango's stored session details are invalid");
+                const details = JSON.parse(persisted.data) as unknown;
+                if (typeof details !== "object" || details === null) throw new Error("Tango's stored session details are invalid");
+                const candidate = (details as { sessionId?: unknown }).sessionId;
+                if (candidate !== undefined && typeof candidate !== "string") {
+                    throw new Error("Tango's stored session ID is invalid");
+                }
+                sessionId = candidate ?? "";
+            }
+        }
     }
     if (!accountId || !sessionId) throw new Error("Log in to Tango, then refresh this page.");
     return { accountId, sessionId };
@@ -75,16 +123,19 @@ async function recommendator(path: string, isFollowing: boolean): Promise<Stream
         headers: { "Content-Type": "application/json" },
         body: "{}",
     });
-    const body = JSON.parse(response.text) as { records?: any[] };
-    return (body.records ?? [])
+    const body = requiredObject(JSON.parse(response.text) as unknown, "Tango recommendation response");
+    if (!Array.isArray(body.records)) throw new Error("Tango recommendation records are not an array");
+    return body.records
         .map(record => recordToStream(record, isFollowing))
         .filter((stream): stream is Stream => stream !== null);
 }
 
 async function fetchBlocked(): Promise<Set<string>> {
     const response = await ok(`${GATEWAY}/abregistrar/connection/v1/blocklist`);
-    const body = JSON.parse(response.text) as string[] | { users?: string[] };
-    return new Set(Array.isArray(body) ? body : body.users ?? []);
+    const body = JSON.parse(response.text) as unknown;
+    if (Array.isArray(body)) return new Set(requiredStringArray(body, "Tango blocklist"));
+    const object = requiredObject(body, "Tango blocklist response");
+    return new Set(requiredStringArray(object.users, "Tango blocklist users"));
 }
 
 function dedupe(streams: Stream[]): Stream[] {
@@ -98,7 +149,7 @@ function dedupe(streams: Stream[]): Stream[] {
 
 async function enrichAll(streams: Stream[]): Promise<Stream[]> {
     if (!streams.length) return streams;
-    try {
+    return bestEffort("Tango batch profile enrichment", streams, async () => {
         const response = await ok(`${GATEWAY}/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -113,9 +164,7 @@ async function enrichAll(streams: Stream[]): Promise<Stream[]> {
                 firstName: profile?.firstName ?? stream.firstName,
             };
         });
-    } catch {
-        return streams;
-    }
+    });
 }
 
 async function refreshSession(): Promise<void> {
@@ -177,8 +226,14 @@ export const tango: Provider = {
             }),
             fetchBlocked(),
         ]);
-        const body = JSON.parse(response.text);
-        const items: any[] = body.multiBroadcast?.streams ?? [];
+        const body = requiredObject(JSON.parse(response.text) as unknown, "Tango watch response");
+        const multiBroadcast = body.multiBroadcast;
+        if (multiBroadcast === undefined || multiBroadcast === null) return [];
+        const multiBroadcastObject = requiredObject(multiBroadcast, "Tango multi-broadcast data");
+        if (!Array.isArray(multiBroadcastObject.streams)) {
+            throw new Error("Tango multi-broadcast streams are not an array");
+        }
+        const items = multiBroadcastObject.streams as any[];
         const streams: Stream[] = [];
         for (const item of items) {
             const descriptor = item.stream?.mbDescriptor;
@@ -200,7 +255,7 @@ export const tango: Provider = {
     enrichAll,
 
     async enrich(stream: Stream): Promise<Stream> {
-        try {
+        return bestEffort("Tango profile enrichment", stream, async () => {
             const response = await ok(`${GATEWAY}/proxycador/api/profiles/v2/single?id=${encodeURIComponent(stream.streamerId)}&basicProfile=true&liveStats=false&followStats=false`);
             const profile = JSON.parse(response.text).basicProfile;
             return {
@@ -208,9 +263,7 @@ export const tango: Provider = {
                 alias: profile?.aliases?.[0]?.alias ?? stream.alias,
                 firstName: profile?.firstName ?? stream.firstName,
             };
-        } catch {
-            return stream;
-        }
+        });
     },
 
     async follow(streamerId: string): Promise<void> {
@@ -233,23 +286,26 @@ export const tango: Provider = {
 
     async fetchDownloadList(): Promise<Set<string>> {
         const response = await fetch(`${DOWNLOADS}/list`);
+        if (!response.ok) throw new Error(`Download-list request failed: ${response.status}`);
         const body = await response.json() as unknown;
-        return new Set(Array.isArray(body) ? body.filter((id): id is string => typeof id === "string") : []);
+        return new Set(requiredStringArray(body, "Download-list response"));
     },
 
     async addToDownloadList(streamerId: string): Promise<void> {
-        await fetch(`${DOWNLOADS}/add`, {
+        const response = await fetch(`${DOWNLOADS}/add`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier: streamerId }),
         });
+        await requireDownloadUpdate(response, "add");
     },
 
     async removeFromDownloadList(streamerId: string): Promise<void> {
-        await fetch(`${DOWNLOADS}/remove`, {
+        const response = await fetch(`${DOWNLOADS}/remove`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier: streamerId }),
         });
+        await requireDownloadUpdate(response, "remove");
     },
 };

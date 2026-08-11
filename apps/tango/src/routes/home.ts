@@ -35,7 +35,6 @@ function render(provider: Provider, streams: Stream[]): () => void {
         saveState({
             streams,
             currentStreamerId: selected.streamerId,
-            selectedTop: link.getBoundingClientRect().top,
         });
     };
 

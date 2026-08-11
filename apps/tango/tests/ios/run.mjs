@@ -596,7 +596,7 @@ async function main() {
                 const first = fixtureStream("highlight-first");
                 const viewed = fixtureStream("highlight-viewed");
                 const scenario = { fetches: [[first, viewed]] };
-                const shared = { streams: [first, viewed], currentStreamerId: viewed.streamerId, selectedTop: 200 };
+                const shared = { streams: [first, viewed], currentStreamerId: viewed.streamerId };
                 await injectFixture(fixtureBundle, scenario, "/fixture/home", shared);
                 const outcome = await command(`
                     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -670,7 +670,7 @@ async function main() {
                     fetchDelay: 250,
                     costreamers: { [missing.streamerId]: [staleCostreamer] },
                 };
-                const shared = { streams: [missing, oldNext], currentStreamerId: missing.streamerId, selectedTop: 200 };
+                const shared = { streams: [missing, oldNext], currentStreamerId: missing.streamerId };
                 await injectFixture(fixtureBundle, scenario, `/fixture/stream/${missing.streamId}`, shared);
                 const settled = await fixtureState(null, { afterRefreshFrom: missing.streamerId });
                 assert(!settled.error, settled.error, settled);
@@ -685,7 +685,7 @@ async function main() {
                 const freshFirst = fixtureStream("fresh-first");
                 const freshSecond = fixtureStream("fresh-second");
                 const scenario = { fetches: [[freshFirst, freshSecond]], fetchDelay: 250, costreamers: {} };
-                const shared = { streams: [missing], currentStreamerId: missing.streamerId, selectedTop: 200 };
+                const shared = { streams: [missing], currentStreamerId: missing.streamerId };
                 await injectFixture(fixtureBundle, scenario, `/fixture/stream/${missing.streamId}`, shared);
                 const settled = await fixtureState(freshFirst.streamerId);
                 assert(!settled.error, settled.error, settled);

@@ -11,6 +11,15 @@ interface Slot {
 const SETTLEMENT_DELAY_MS = 100;
 const GEOMETRY_WAIT_MS = 8000;
 
+async function bestEffortCostreamers(provider: Provider, stream: Stream): Promise<Stream[]> {
+    try {
+        return await provider.fetchCostreamers(stream);
+    } catch (error) {
+        console.warn(`Could not refresh co-streamers for ${stream.streamerId}`, error);
+        return [];
+    }
+}
+
 export async function openStream(provider: Provider, requestedStreamId: string): Promise<void> {
     const shared = loadState();
     const freshStreams = provider.fetchStreams();
@@ -37,11 +46,19 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     const removing = new Set<string>();
     const removed = new Set<string>();
     const processedForCostreamers = new Set<string>();
-    let downloads = new Set<string>();
+    let downloads: Set<string> | null = null;
+    let downloadStatus: "loading" | "ready" | "error" = "loading";
+    let downloadPending = false;
+    let downloadError = "";
     void provider.fetchDownloadList().then(result => {
         downloads = result;
+        downloadStatus = "ready";
         updateControls();
-    }).catch(() => {});
+    }).catch(error => {
+        downloadStatus = "error";
+        downloadError = error instanceof Error ? error.message : String(error);
+        updateControls();
+    });
 
     function adjacent(offset: number): Stream | undefined {
         return streams[index + offset];
@@ -74,8 +91,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     }
 
     function persist(): void {
-        const selectedTop = shared?.selectedTop ?? 0;
-        saveState({ streams, currentStreamerId: streams[index].streamerId, selectedTop });
+        saveState({ streams, currentStreamerId: streams[index].streamerId });
     }
 
     function updateControls(): void {
@@ -94,16 +110,38 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         block.dataset.confirm = "false";
         block.textContent = "🚫";
         const download = controls.querySelector<HTMLButtonElement>(".download")!;
-        const downloaded = downloads.has(stream.streamerId);
-        download.textContent = downloaded ? "➖" : "➕";
-        download.classList.toggle("add", !downloaded);
-        download.classList.toggle("remove", downloaded);
+        download.classList.remove("add", "remove", "error");
+        download.title = "Download list";
+        if (downloadPending || downloadStatus === "loading") {
+            download.textContent = "⏳";
+            download.disabled = true;
+        } else if (downloadStatus === "error" || downloads === null) {
+            download.textContent = "⚠️";
+            download.disabled = true;
+            download.classList.add("error");
+            download.title = downloadError;
+        } else {
+            const downloaded = downloads.has(stream.streamerId);
+            download.textContent = downloaded ? "➖" : "➕";
+            download.disabled = false;
+            download.classList.add(downloaded ? "remove" : "add");
+            if (downloadError) {
+                download.classList.add("error");
+                download.title = downloadError;
+            }
+        }
     }
 
     async function discover(stream: Stream): Promise<void> {
         if (stream.parentStreamerId || processedForCostreamers.has(stream.streamerId)) return;
+        let additions: Stream[];
+        try {
+            additions = await provider.fetchCostreamers(stream);
+        } catch (error) {
+            console.warn(`Could not discover co-streamers for ${stream.streamerId}`, error);
+            return;
+        }
         processedForCostreamers.add(stream.streamerId);
-        const additions = await provider.fetchCostreamers(stream).catch(() => []);
         const available = additions.filter(item => !removed.has(item.streamerId));
         if (!available.length) return;
         const discovered = available.map(addition => {
@@ -294,12 +332,23 @@ export async function openStream(provider: Provider, requestedStreamId: string):
             await provider.block(stream.streamerId);
             await remove(stream.streamerId);
         } else if (button.classList.contains("download")) {
-            if (downloads.has(stream.streamerId)) {
-                await provider.removeFromDownloadList(stream.streamerId);
-                downloads.delete(stream.streamerId);
-            } else {
-                await provider.addToDownloadList(stream.streamerId);
-                downloads.add(stream.streamerId);
+            if (downloadStatus !== "ready" || downloads === null || downloadPending) return;
+            const downloaded = downloads.has(stream.streamerId);
+            downloadPending = true;
+            downloadError = "";
+            updateControls();
+            try {
+                if (downloaded) {
+                    await provider.removeFromDownloadList(stream.streamerId);
+                    downloads.delete(stream.streamerId);
+                } else {
+                    await provider.addToDownloadList(stream.streamerId);
+                    downloads.add(stream.streamerId);
+                }
+            } catch (error) {
+                downloadError = error instanceof Error ? error.message : String(error);
+            } finally {
+                downloadPending = false;
             }
         }
         updateControls();
@@ -338,7 +387,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
             if (cachedCurrent?.parentStreamerId) {
                 const parentIndex = fresh.findIndex(stream => stream.streamerId === cachedCurrent.parentStreamerId);
                 if (parentIndex >= 0) {
-                    const costreamers = await provider.fetchCostreamers(fresh[parentIndex]).catch(() => []);
+                    const costreamers = await bestEffortCostreamers(provider, fresh[parentIndex]);
                     discovered = costreamers.filter(stream => !removed.has(stream.streamerId));
                     const freshIds = new Set(fresh.map(stream => stream.streamerId));
                     fresh.splice(parentIndex + 1, 0, ...discovered.filter(stream => !freshIds.has(stream.streamerId)));
