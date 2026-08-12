@@ -8,6 +8,10 @@ import {
     moveUnreferencedTransportSegmentsToTrash,
     processFinalizedRecording,
 } from "../dist/services/hls/finalizedRecordingProcessor.js";
+import {
+    FinalizationCheckpointStore,
+    playlistFingerprint,
+} from "../dist/services/hls/finalizationCheckpointStore.js";
 
 const readyReport = {
     version: 2,
@@ -51,6 +55,50 @@ test("attributable MPEG-TS failure enters the idempotent repair path", async () 
     assert.equal(result.report.status, "ready");
 });
 
+test("an unchanged ready checkpoint skips cleanup, duration repair, and decode", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "finalized-ready-checkpoint-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const recording = path.join(root, "recording");
+    await mkdir(recording);
+    const playlist = [
+        "#EXTM3U",
+        "#EXTINF:1,",
+        "0.ts",
+        "#EXT-X-ENDLIST",
+        "",
+    ].join("\n");
+    await writeFile(path.join(recording, "playlist.m3u8"), playlist);
+    const checkpointStore = new FinalizationCheckpointStore(path.join(root, "finalization.sqlite"));
+    t.after(() => checkpointStore.close());
+    checkpointStore.write(recording, playlistFingerprint(playlist), {
+        ...readyReport,
+        startedAt: "2026-08-12T00:00:00.000Z",
+        completedAt: "2026-08-12T00:00:01.000Z",
+        playlistPath: path.join(recording, "playlist.m3u8"),
+        segmentCount: 1,
+        initialPlaylistValid: true,
+        initialValidationError: null,
+        deepScannedSegmentCount: 0,
+        error: null,
+    });
+
+    const unexpected = async () => {
+        throw new Error("completed recording work should have been skipped");
+    };
+    const result = await processFinalizedRecording(recording, {
+        checkpointStore,
+        retryFailed: true,
+    }, {
+        cleanup: unexpected,
+        repairPlaylist: unexpected,
+        validate: unexpected,
+        repairFailed: unexpected,
+    });
+
+    assert.equal(result.kind, "already-processed");
+    assert.equal(result.report.status, "ready");
+});
+
 test("cleanup keeps playlist media and maps while trashing only unreferenced owned artifacts", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "finalized-cleanup-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
@@ -65,7 +113,7 @@ test("cleanup keeps playlist media and maps while trashing only unreferenced own
         "#EXT-X-ENDLIST",
         "",
     ].join("\n"));
-    for (const name of ["init.mp4", "init_1.mp4", "0_stream_1.ts", "1_stream_2.ts", ".media-integrity.json", "notes.mp4"]) {
+    for (const name of ["init.mp4", "init_1.mp4", "0_stream_1.ts", "1_stream_2.ts", "notes.mp4"]) {
         await writeFile(path.join(recording, name), name);
     }
 
@@ -74,7 +122,6 @@ test("cleanup keeps playlist media and maps while trashing only unreferenced own
     });
 
     assert.deepEqual((await readdir(recording)).sort(), [
-        ".media-integrity.json",
         "0_stream_1.ts",
         "init.mp4",
         "notes.mp4",

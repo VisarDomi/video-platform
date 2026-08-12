@@ -8,6 +8,7 @@
         "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
         "build": "npm run compile-go && rm -rf dist && tsc",
         "test": "npm run build && node --test test/*.test.mjs",
+        "finalize-library": "npm run build && node scripts/run-bounded-finalize-library.mjs",
         "start": "npm run build && systemctl --user start video-server",
         "restart": "npm run build && systemctl --user restart video-server",
         "stop": "systemctl --user stop video-server",
@@ -18,7 +19,7 @@
     "devDependencies": {
         "@types/cors": "^2.8.17",
         "@types/express": "^5.0.3",
-        "@types/node": "^20.12.7",
+        "@types/node": "^22.19.0",
         "typescript": "^5.4.5"
     },
     "dependencies": {

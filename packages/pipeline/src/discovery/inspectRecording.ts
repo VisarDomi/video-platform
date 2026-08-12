@@ -3,13 +3,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { RecordingInput, SourceKind } from "../domain/types.js";
 
-interface IntegrityReport {
-    version?: unknown;
-    status?: unknown;
-    segmentCount?: unknown;
-    invalidSegments?: unknown;
-}
-
 export interface DiscoveryRoot {
     readonly provider: string;
     readonly sourceKind: SourceKind;
@@ -103,24 +96,6 @@ export async function inspectRecording(
 ): Promise<InspectionResult> {
     const finalized = await inspectFinalizedRecording(sourcePath, provider, sourceKind);
     if (finalized.status === "excluded") return finalized;
-    const resolvedSource = finalized.recording.sourcePath;
-    let report: IntegrityReport;
-    try {
-        report = JSON.parse(await fs.readFile(path.join(resolvedSource, ".media-integrity.json"), "utf8")) as IntegrityReport;
-    } catch {
-        return { status: "excluded", sourcePath: resolvedSource, reason: "integrity_missing" };
-    }
-    if (report.version !== 2) {
-        return { status: "excluded", sourcePath: resolvedSource, reason: "integrity_version_unsupported" };
-    }
-    if (report.status !== "ready") {
-        return { status: "excluded", sourcePath: resolvedSource, reason: `integrity_${String(report.status ?? "invalid")}` };
-    }
-    const playlistContent = await fs.readFile(finalized.recording.playlistPath, "utf8");
-    const segments = segmentNames(playlistContent);
-    if (report.segmentCount !== segments.length || !Array.isArray(report.invalidSegments) || report.invalidSegments.length !== 0) {
-        return { status: "excluded", sourcePath: resolvedSource, reason: "integrity_evidence_mismatch" };
-    }
     return { status: "eligible", recording: finalized.recording };
 }
 
