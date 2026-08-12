@@ -7,7 +7,9 @@ import { RetryCooldown } from "./retryCooldown.js";
 export interface StreamStartCandidate {
     streamerId: string;
     alias: string;
+    recordingId: string;
     masterPlaylistUrl: string;
+    existingDirPath?: string;
 }
 
 export function startStreamSession(
@@ -20,6 +22,7 @@ export function startStreamSession(
     const handle = downloadsManager.add(candidate.masterPlaylistUrl, {
         streamerId: candidate.streamerId,
         alias: candidate.alias,
+        recordingId: candidate.recordingId,
     });
 
     if (!handle) {
@@ -27,9 +30,18 @@ export function startStreamSession(
     }
 
     logger.info(`[${providerLabel}] Initiating session for ${candidate.alias}...`);
-    const session = new StreamSession(candidate.streamerId, candidate.alias, handle, provider);
+    const session = new StreamSession(
+        candidate.streamerId,
+        candidate.alias,
+        handle,
+        provider,
+        candidate.recordingId,
+        candidate.existingDirPath,
+    );
     const completion = session.run(candidate.masterPlaylistUrl).then((result: SessionResult) => {
-        if (!result.aborted && result.totalSegments === 0) {
+        if (result.aborted) {
+            logger.info(`[${providerLabel}] ${candidate.alias}: session paused for shutdown (${result.totalSegments} new segments)`);
+        } else if (result.totalSegments === 0) {
             logger.warn(`[${providerLabel}] ${candidate.alias}: session ended with 0 segments — cooldown`);
             cooldown.recordFailure(candidate.streamerId);
         } else if (result.totalSegments > 0) {
@@ -42,6 +54,12 @@ export function startStreamSession(
         cooldown.recordFailure(candidate.streamerId);
     });
 
-    downloadsManager.registerDownloader(candidate.masterPlaylistUrl, () => session.abort(), completion);
+    downloadsManager.registerDownloader(
+        candidate.masterPlaylistUrl,
+        candidate.streamerId,
+        () => session.abort(),
+        () => session.finalize(),
+        completion,
+    );
     return true;
 }

@@ -129,6 +129,16 @@ test("finalized clean playlist uses whole-playlist validation without scanning e
     assert.equal(result.report.deepScannedSegmentCount, 0);
     assert.deepEqual(result.report.invalidSegments, []);
     assert.deepEqual(validated, ["playlist.m3u8"]);
+
+    const revalidated = await finalizeMediaIntegrity(streamPath, {
+        revalidate: true,
+        validateMedia: async inputPath => {
+            validated.push(path.basename(inputPath));
+            return { valid: true, exitCode: 0, stderr: "" };
+        },
+    });
+    assert.equal(revalidated.kind, "processed");
+    assert.deepEqual(validated, ["playlist.m3u8", "playlist.m3u8"]);
 });
 
 test("failed whole-playlist validation reports exact bad segments without changing media", async (t) => {

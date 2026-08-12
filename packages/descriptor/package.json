@@ -4,7 +4,14 @@
     "version": "1.0.0",
     "private": true,
     "description": "Video description worker and local model smoke tests",
-    "main": "dist/smoke.js",
+    "main": "dist/index.js",
+    "types": "src/index.ts",
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "default": "./dist/index.js"
+        }
+    },
     "scripts": {
         "build": "rm -rf dist && tsc",
         "test": "npm run build && node --test test/*.test.mjs",

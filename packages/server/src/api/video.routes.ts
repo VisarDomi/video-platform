@@ -6,13 +6,36 @@ import * as retrieveService from "../services/video/retrieve.service.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as playlistAuthority from "../services/hls/playlistAuthority.js";
+import { requestMediaIntegrity } from "../services/hls/mediaIntegrityFinalizer.js";
+import { repairFailedMediaIntegrity } from "../services/hls/failedIntegrityRepair.js";
 import * as utils from "../core/utils.js";
-import { getProviderPaths, LIVE_STATUS_PATH } from "../core/config.js";
+import { getProviderPaths } from "../core/config.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
 
 const router = Router();
+
+async function resolvePipelineRecording(
+    provider: string,
+    sourceKind: string,
+    filename: string,
+): Promise<string> {
+    if (path.basename(filename) !== filename || filename === "") {
+        throw new Error("Invalid recording filename");
+    }
+    const providerPaths = getProviderPaths(provider);
+    const root = sourceKind === "downloader"
+        ? providerPaths.downloader
+        : sourceKind === "edited" ? providerPaths.edited : null;
+    if (!root) throw new Error("sourceKind must be downloader or edited");
+    const recordingPath = path.join(root, filename);
+    const stats = await fs.promises.lstat(recordingPath);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+        throw new Error("Pipeline recording must be a directly owned directory");
+    }
+    return recordingPath;
+}
 
 router.get("/cert", (_req, res) => {
     try {
@@ -89,7 +112,7 @@ router.post("/videos/repair-playlists", async (req, res) => {
 
     try {
         const paths = getProviderPaths(provider);
-        const activeDownloadFolders = await getActiveDownloadFolders();
+        const activeDownloadFolders = new Set([path.join(paths.downloader, ".active")]);
         const roots = [
             ...(scope === "all" || scope === "downloads" ? [{ scope: "downloads", path: paths.downloader }] : []),
             ...(scope === "all" || scope === "edited" ? [{ scope: "edited", path: paths.edited }] : []),
@@ -112,22 +135,61 @@ router.post("/videos/repair-playlists", async (req, res) => {
     }
 });
 
-async function getActiveDownloadFolders(): Promise<Set<string>> {
+router.post("/pipeline/recordings/:provider/:sourceKind/:filename/repair-playlist", async (req, res) => {
+    const { provider, sourceKind, filename } = req.params as {
+        provider: string;
+        sourceKind: string;
+        filename: string;
+    };
     try {
-        const content = await fs.promises.readFile(LIVE_STATUS_PATH, "utf-8");
-        const liveStatus = JSON.parse(content);
-        if (!Array.isArray(liveStatus.downloads)) {
-            return new Set();
-        }
-        return new Set(
-            liveStatus.downloads
-                .map((download: any) => download?.segmentsDirPath)
-                .filter((value: unknown): value is string => typeof value === "string")
-        );
-    } catch {
-        return new Set();
+        const recordingPath = await resolvePipelineRecording(provider, sourceKind, filename);
+        const result = await playlistAuthority.repairPlaylistDurations(recordingPath, { apply: true });
+        res.json({ success: true, result });
+    } catch (error: any) {
+        logger.error("[api/pipeline/repair-playlist] failed", { provider, sourceKind, filename, message: error.message });
+        res.status(400).json({ success: false, error: error.message });
     }
-}
+});
+
+router.post("/pipeline/recordings/:provider/:sourceKind/:filename/integrity", async (req, res) => {
+    const { provider, sourceKind, filename } = req.params as {
+        provider: string;
+        sourceKind: string;
+        filename: string;
+    };
+    try {
+        const recordingPath = await resolvePipelineRecording(provider, sourceKind, filename);
+        const report = await requestMediaIntegrity(recordingPath, { revalidate: true });
+        res.json({ success: true, report });
+    } catch (error: any) {
+        logger.error("[api/pipeline/integrity] failed", { provider, sourceKind, filename, message: error.message });
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+router.post("/pipeline/recordings/:provider/:sourceKind/:filename/repair-failed-integrity", async (req, res) => {
+    const { provider, sourceKind, filename } = req.params as {
+        provider: string;
+        sourceKind: string;
+        filename: string;
+    };
+    try {
+        const recordingPath = await resolvePipelineRecording(provider, sourceKind, filename);
+        const result = await repairFailedMediaIntegrity(recordingPath, {
+            revalidate: async (target) => {
+                const report = await requestMediaIntegrity(target, { revalidate: true, retryFailed: true });
+                if (report.version !== 2) throw new Error("Revalidation returned a legacy integrity report");
+                return { kind: "processed", report };
+            },
+        });
+        res.json({ success: true, result });
+    } catch (error: any) {
+        logger.error("[api/pipeline/repair-failed-integrity] failed", {
+            provider, sourceKind, filename, message: error.message,
+        });
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
 
 router.post("/videos/:filename/:destination", async (req, res) => {
     const { filename, destination } = req.params as { filename: string; destination: types.Destination };

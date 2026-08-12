@@ -12,7 +12,7 @@ import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
 import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS } from "../../common/timing.js";
 
-export type ExitReason = "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
+export type ExitReason = "aborted" | "remote-endlist" | "segment-failed" | "stale-timeout" | "fetch-failed";
 
 export interface DownloadResult {
     segmentCount: number;
@@ -96,6 +96,7 @@ export class StreamDownloader {
         let session = initialSession;
         let lastDownload = Date.now();
         let segmentFailed = false;
+        let remoteEndlist = false;
         let health: 'ok' | 'stale' = 'ok';
         let lastQualityCheck = Date.now();
         const staleTimeout = STALE_STREAM_TIMEOUT_MS;
@@ -158,6 +159,7 @@ export class StreamDownloader {
                     const result = await initTracker.commitInit(
                         mapUri,
                         () => session.fetchSegment(initUrl),
+                        playlistManager.nextSegmentNumber,
                     );
 
                     if (!result) {
@@ -188,15 +190,10 @@ export class StreamDownloader {
 
                 const fetchResult = await session.fetchSegment(segment.remoteUrl);
 
-                const baseName = segment.localName.replace(/\.\w+$/, "");
-                if (!/^\d+$/.test(baseName)) {
-                    segment.localName = `${playlistManager.startSequence + initTracker.count}.ts`;
-                }
-
                 if (!fetchResult.data) {
                     if (fetchResult.retryable) {
                         logger.warn(`[StreamDownloader] ${alias} segment skipped segment=${segment.localName}`);
-                        playlistManager.addIgnoredSegment(segment.localName);
+                        playlistManager.addIgnoredSegment(segment.identityKey);
                         continue;
                     }
                     logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
@@ -212,7 +209,7 @@ export class StreamDownloader {
                 }
 
                 const segmentPath = path.join(disk.dirPath, segment.localName);
-                const writeSuccess = await FileSystemManager.writeFile(segmentPath, tsBuffer as unknown as Uint8Array);
+                const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
                 if (!writeSuccess) {
                     logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
                     segmentFailed = true;
@@ -222,7 +219,7 @@ export class StreamDownloader {
                 const result = await this.provider.validateSegment(segmentPath);
                 if (!result.valid) {
                     await fs.unlink(segmentPath).catch(() => {});
-                    playlistManager.addIgnoredSegment(segment.localName);
+                    playlistManager.addIgnoredSegment(segment.identityKey);
                     this.rejectedCount++;
                 } else {
                     if (result.duration !== undefined) {
@@ -243,6 +240,12 @@ export class StreamDownloader {
 
             if (segmentFailed) break;
 
+            if (content.split(/\r?\n/).some((line) => line.trim() === "#EXT-X-ENDLIST")) {
+                remoteEndlist = true;
+                logger.info(`[StreamDownloader] ${alias}: upstream playlist supplied ENDLIST`);
+                break;
+            }
+
             if (!downloadedThisIteration) {
                 await timersPromises.setTimeout(NO_NEW_SEGMENTS_SLEEP_MS);
             }
@@ -253,6 +256,8 @@ export class StreamDownloader {
         let exitReason: ExitReason;
         if (this._aborted) {
             exitReason = "aborted";
+        } else if (remoteEndlist) {
+            exitReason = "remote-endlist";
         } else if (segmentFailed) {
             exitReason = "segment-failed";
         } else if (staleTimedOut) {
@@ -260,10 +265,12 @@ export class StreamDownloader {
         } else {
             exitReason = "fetch-failed";
         }
-        const tl = playlistManager.timeline;
-        const tlStr = tl.edge ? ` edge=${tl.edge} seq=${tl.mediaSequence} firstPDT=${tl.firstProgramDateTime ?? "none"} lastPDT=${tl.lastProgramDateTime ?? "none"}` : "";
+        const timeline = playlistManager.timeline;
+        const timelineDetails = timeline.edge
+            ? ` edge=${timeline.edge} seq=${timeline.mediaSequence} firstPDT=${timeline.firstProgramDateTime ?? "none"} lastPDT=${timeline.lastProgramDateTime ?? "none"}`
+            : "";
         const rejStr = this.rejectedCount > 0 ? ` rejected=${this.rejectedCount}` : "";
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${rejStr}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${tlStr}`);
+        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${rejStr}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${timelineDetails}`);
 
         return { segmentCount: initTracker.count, aborted: this._aborted, exitReason, lastLiveUrl: liveUrl };
     }
