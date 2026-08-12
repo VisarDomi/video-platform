@@ -10,7 +10,6 @@ interface PathConfig {
     downloader: string;
     edited: string;
     trash: string;
-    converted: string;
 }
 
 interface IConfig {
@@ -48,14 +47,6 @@ function generateDefaultPaths(providerName: string): PathConfig {
             providerName,
             constants.DEFAULT_PATHS.EDITOR,
             constants.DEFAULT_PATHS.TRASH
-        ),
-        converted: path.join(
-            os.homedir(),
-            constants.DEFAULT_PATHS.HOME_VIDEOS,
-            constants.DEFAULT_PATHS.DOWNLOADS,
-            providerName,
-            constants.DEFAULT_PATHS.CONVERTER,
-            constants.DEFAULT_PATHS.CONVERTED
         ),
     };
 }

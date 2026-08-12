@@ -1,20 +1,23 @@
 # Server Decisions
 
-## ENDLIST triggers finalized media-integrity ownership
+## Atomic promotion triggers finalized recording processing
 
-For Tango/FC2, `#EXT-X-ENDLIST` plus removal from `live-status.json` transfers a
-recording from the downloader to the server. The server watches that state
-transition and catches up completed folders whose directory changed after the
-integrity feature was enabled, covering streams that finish while the server is
-offline without enrolling the historical library.
+For Tango, FC2, and SC, the downloader atomically publishes
+`#EXT-X-ENDLIST` and promotes the recording directory from `.active` into the
+provider downloader root. That directory rename transfers ownership to the
+server. One Linux-backed Node filesystem watch per provider normally sees the
+promotion immediately. Watch-before-scan startup reconciliation and an hourly
+non-recursive safety reconciliation cover server downtime and missed/coalesced
+events without inspecting segment inventories or enrolling the historical
+library.
 
 The first integrity check is one strict, single-threaded whole-playlist ffmpeg
 decode. Clean streams do not spawn a validator for every segment. If that pass
 fails, the server decodes each MPEG-TS segment sequentially to attribute the
-failure. The automatic operation writes only `.media-integrity.json`; it never
-moves, copies, deletes, or rewrites a segment or playlist. Failed fMP4 playlists
-are reported without fragment attribution. Repair and deletion require a
-separate explicit user action.
+failure. Attributable corrupt MPEG-TS entries are removed from the playlist,
+the playlist is canonically repaired, the unreferenced files are moved to
+desktop Trash, and strict validation runs again. Failed fMP4 playlists are
+reported without fragment attribution and remain nondestructively blocked.
 
 Completed recordings enter one deduplicating FIFO queue with half as many
 workers as the host has logical CPUs. Each worker runs one single-threaded
@@ -31,10 +34,10 @@ same finalized folder under that provider's other managed roots and resumes
 from the moved checkpoint. A rename must not turn a media result into an
 `ENOENT` failure or let a completed stream escape validation.
 
-Playlist duration repair is not part of automatic integrity validation. When
-called explicitly, PlaylistAuthority uses adjacent MPEG-TS PTS for ordinary
-boundaries and reserves ffprobe for discontinuities, tails, or missing byte
-probes instead of spawning ffprobe for every segment.
+PlaylistAuthority is part of the unified finalized-recording processor. It uses
+adjacent MPEG-TS PTS for ordinary boundaries and reserves ffprobe for
+discontinuities, tails, or missing byte probes instead of spawning ffprobe for
+every segment.
 
 Validation maps video and audio optionally, so audio-only and video-only media
 are both valid inputs. Null-muxer "non-monotonically increasing DTS"
@@ -45,26 +48,29 @@ Historical folders created before this behavior was enabled are not
 automatically decoded. They remain an explicit batch/manual migration so a
 server restart cannot unexpectedly launch millions of segment decodes.
 
+Failed-integrity repair removes only version-2 report-attributed MPEG-TS entries, inserts an HLS
+discontinuity before the next good segment, publishes the playlist first, moves
+the exact corrupt files to desktop Trash, runs canonical duration repair, and
+strictly revalidates the result. Publishing the playlist first means an
+interruption can leave an unreferenced corrupt file but cannot leave a newly
+missing referenced segment. The same idempotent operation serves automatic and
+manual retry paths.
+
 ## Config paths do not create storage trees
 
-Provider paths are declarative. Server startup does not create
-downloader/editor/converter directories for every configured provider. Only the
-write operation that actually needs a destination creates it. Converter and
-uploader layouts remain uncreated until their pipeline ownership is enabled.
+Provider paths are declarative. Server startup does not create downloader or
+editor directories for every configured provider; only the write operation
+that needs a destination creates it. The unsupported old `converter/converted`
+provider path has been removed. The standalone pipeline owns any future artifact
+layout explicitly instead of exposing it as an HLS video provider.
 
-## TL live URL check uses GET, not HEAD
+## Pipeline requests exact recording authority
 
-`POST /tl/check-live-url` sends a GET request to tango.me HLS endpoints. HEAD requests are rejected by tango.me CDN. The response body is consumed and discarded to avoid leaking the connection.
-
-## tl provider uses /tmp paths
-
-tl (ephemeral live proxy) stores segments in `/tmp/Videos/downloads/tl/`. These are created on demand by the downloader's API server, not pre-validated at startup.
-
-## Orphan finalizer: structured parse for crash recovery
-
-The non-finalized playlist rebuild parses into header lines + sections (each with a MAP + entries), then serializes back. Handles both MPEG-TS (no MAP) and fMP4 (MAP per quality section). Missing headers are reconstructed. Reads live-status.json to avoid touching dirs with active downloads.
-
-**Why:** The old line-by-line rebuild with positional heuristics produced headerless playlists when the first MAP wasn't in the expected position (power loss during header write).
+The future standalone pipeline does not import server path configuration or
+write integrity reports. Its server calls identify provider, downloader/edited
+root, and basename; the server resolves that exact managed directory, rejects
+symlinks/path traversal, applies canonical playlist repair, and submits integrity
+work to the same bounded deduplicating queue used for completed downloads.
 
 ## Disk space monitor stops the downloader at 50GB
 

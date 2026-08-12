@@ -33,8 +33,6 @@ export const DEFAULT_PATHS = {
     EDITOR: "editor",
     EDITED: "edited",
     TRASH: "trash",
-    CONVERTER: "converter",
-    CONVERTED: "converted",
 } as const;
 
 export const FILE_EXTENSIONS = {

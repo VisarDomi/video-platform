@@ -1,5 +1,4 @@
 import { spawn } from "child_process";
-import { watch } from "fs";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -7,18 +6,18 @@ import path from "path";
 import { FILE_NAMES, HLS, MISC } from "../../core/constants.js";
 import { getProviderPaths, LIVE_STATUS_PATH } from "../../core/config.js";
 import logger from "../../core/logger.js";
-import type { LiveStatus } from "../../core/types.js";
+import { processFinalizedRecording } from "./finalizedRecordingProcessor.js";
+import { FinalizedDirectoryObserver } from "./finalizedDirectoryObserver.js";
 
 const REPORT_FILE_NAME = ".media-integrity.json";
-const ENABLED_AT_FILE_NAME = "media-integrity-enabled-at.json";
-const SAFETY_REFRESH_INTERVAL_MS = 60_000;
+const ENABLED_AT_FILE_NAME = "finalized-recording-watch-enabled-at-v1.json";
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
 const QUEUE_WORKER_COUNT = Math.max(1, Math.floor(os.cpus().length / 2));
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const FFMPEG_NICE_PRIORITY = 10;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
-const SUPPORTED_PROVIDERS = ["tango", "fc2"];
+const SUPPORTED_PROVIDERS = ["tango", "fc2", "sc"];
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
 
 interface PlaylistEntry {
@@ -71,6 +70,7 @@ export interface MediaIntegrityFinalizerOptions {
     validateMedia?: (inputPath: string) => Promise<MediaValidationResult>;
     now?: () => Date;
     retryFailed?: boolean;
+    revalidate?: boolean;
 }
 
 function parseMediaPlaylist(content: string): ParsedMediaPlaylist {
@@ -224,7 +224,7 @@ export async function finalizeMediaIntegrity(
 
     const existingReport = await readReport(reportPath);
     if (
-        existingReport?.status === "ready" ||
+        (existingReport?.status === "ready" && options.revalidate !== true) ||
         existingReport?.status === "ready_with_quarantined_segments" ||
         (existingReport?.status === "failed" && options.retryFailed !== true)
     ) {
@@ -336,26 +336,6 @@ export async function finalizeMediaIntegrity(
     }
 }
 
-async function readActiveStreamPaths(): Promise<Set<string> | null> {
-    try {
-        const content = await fs.readFile(LIVE_STATUS_PATH, MISC.ENCODING_UTF8);
-        const status = JSON.parse(content) as LiveStatus;
-        if (!Array.isArray(status.downloads)) return null;
-        return new Set(
-            status.downloads
-                .map((download) => download.segmentsDirPath)
-                .filter((value): value is string => typeof value === "string" && value !== ""),
-        );
-    } catch (error: any) {
-        if (error?.code !== MISC.ERROR_CODE.ENOENT) {
-            logger.warn("[MediaIntegrity] could not read live status; retaining previous state", {
-                error: error?.message,
-            });
-        }
-        return null;
-    }
-}
-
 function isOwnedDownloaderPath(streamPath: string): boolean {
     const resolved = path.resolve(streamPath);
     return SUPPORTED_PROVIDERS.some((provider) =>
@@ -367,7 +347,7 @@ async function findRelocatedStreamPath(streamPath: string): Promise<string | nul
     const resolved = path.resolve(streamPath);
     const provider = SUPPORTED_PROVIDERS.find((name) => {
         const paths = getProviderPaths(name);
-        return [paths.downloader, paths.edited, paths.trash, paths.converted]
+        return [paths.downloader, paths.edited, paths.trash]
             .some((rootPath) => path.dirname(resolved) === path.resolve(rootPath));
     });
     if (!provider) return null;
@@ -375,7 +355,7 @@ async function findRelocatedStreamPath(streamPath: string): Promise<string | nul
     const originalPlaylistPath = path.join(resolved, FILE_NAMES.HLS_PLAYLIST);
     const originalName = path.basename(resolved);
     const paths = getProviderPaths(provider);
-    const roots = [paths.downloader, paths.edited, paths.trash, paths.converted];
+    const roots = [paths.downloader, paths.edited, paths.trash];
 
     for (const rootPath of roots) {
         const exactPath = path.join(rootPath, originalName);
@@ -495,17 +475,40 @@ export class MediaIntegrityQueue {
     }
 }
 
+let managedIntegrityQueue: MediaIntegrityQueue | null = null;
+const requestedRevalidationPaths = new Set<string>();
+const requestedFailedRetryPaths = new Set<string>();
+
+export async function requestMediaIntegrity(
+    streamPath: string,
+    options: { revalidate?: boolean; retryFailed?: boolean } = {},
+): Promise<StoredMediaIntegrityReport> {
+    if (!managedIntegrityQueue) throw new Error("Media-integrity queue has not started");
+    const resolvedPath = path.resolve(streamPath);
+    if (options.revalidate) requestedRevalidationPaths.add(resolvedPath);
+    if (options.retryFailed) requestedFailedRetryPaths.add(resolvedPath);
+    if (!managedIntegrityQueue.enqueue(resolvedPath)) {
+        requestedRevalidationPaths.delete(resolvedPath);
+        requestedFailedRetryPaths.delete(resolvedPath);
+    }
+    await managedIntegrityQueue.onIdle();
+    const report = await readReport(path.join(resolvedPath, REPORT_FILE_NAME));
+    if (!report) throw new Error(`Media-integrity processing produced no report for ${streamPath}`);
+    return report;
+}
+
 export function startMediaIntegrityFinalizer(): void {
-    let previousActivePaths: Set<string> | null = null;
-    let refreshRunning = false;
+    let catchUpRunning = false;
     const processingQueue = new MediaIntegrityQueue(async (streamPath) => {
         logger.info("[MediaIntegrity] queue started stream", {
             streamPath,
             queueDepth: processingQueue.depth,
         });
         try {
-            if (await needsIntegrityProcessing(streamPath)) {
-                await finalizeMediaIntegrity(streamPath);
+            const revalidate = requestedRevalidationPaths.delete(path.resolve(streamPath));
+            const retryFailed = requestedFailedRetryPaths.delete(path.resolve(streamPath));
+            if (revalidate || retryFailed || await needsIntegrityProcessing(streamPath)) {
+                await processFinalizedRecording(streamPath, { revalidate, retryFailed });
             }
         } catch (error: any) {
             if (error?.code === MISC.ERROR_CODE.ENOENT) {
@@ -522,6 +525,7 @@ export function startMediaIntegrityFinalizer(): void {
             throw error;
         }
     });
+    managedIntegrityQueue = processingQueue;
 
     const enqueue = (streamPath: string) => {
         if (!isOwnedDownloaderPath(streamPath)) return;
@@ -533,58 +537,51 @@ export function startMediaIntegrityFinalizer(): void {
         }
     };
 
-    const refreshActivePaths = async () => {
-        if (refreshRunning) return;
-        refreshRunning = true;
+    const catchUp = async (enabledAt: number) => {
+        if (catchUpRunning) return;
+        catchUpRunning = true;
         try {
-            const activePaths = await readActiveStreamPaths();
-            if (activePaths === null) return;
-            if (previousActivePaths !== null) {
-                for (const previousPath of previousActivePaths) {
-                    if (!activePaths.has(previousPath)) enqueue(previousPath);
+            for (const provider of SUPPORTED_PROVIDERS) {
+                const rootPath = getProviderPaths(provider).downloader;
+                let entries;
+                try {
+                    entries = await fs.readdir(rootPath, { withFileTypes: true });
+                } catch {
+                    continue;
+                }
+                for (const entry of entries) {
+                    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+                    const streamPath = path.join(rootPath, entry.name);
+                    try {
+                        const playlistStats = await fs.stat(path.join(streamPath, FILE_NAMES.HLS_PLAYLIST));
+                        if (playlistStats.mtimeMs < enabledAt) continue;
+                        if (await needsIntegrityProcessing(streamPath)) enqueue(streamPath);
+                    } catch {}
                 }
             }
-            previousActivePaths = activePaths;
         } finally {
-            refreshRunning = false;
-        }
-    };
-
-    const catchUp = async (enabledAt: number) => {
-        const activePaths = await readActiveStreamPaths();
-        if (activePaths === null) return;
-        for (const provider of SUPPORTED_PROVIDERS) {
-            const rootPath = getProviderPaths(provider).downloader;
-            let entries;
-            try {
-                entries = await fs.readdir(rootPath, { withFileTypes: true });
-            } catch {
-                continue;
-            }
-            for (const entry of entries) {
-                if (!entry.isDirectory()) continue;
-                const streamPath = path.join(rootPath, entry.name);
-                if (activePaths.has(streamPath)) continue;
-                try {
-                    const stats = await fs.stat(streamPath);
-                    if (stats.mtimeMs < enabledAt) continue;
-                    if (await needsIntegrityProcessing(streamPath)) enqueue(streamPath);
-                } catch {}
-            }
+            catchUpRunning = false;
         }
     };
 
     void (async () => {
         const enabledAt = await readOrCreateEnabledAt();
-        await refreshActivePaths();
-        await catchUp(enabledAt);
-
-        watch(path.dirname(LIVE_STATUS_PATH), (_eventType, fileName) => {
-            if (fileName === path.basename(LIVE_STATUS_PATH)) void refreshActivePaths();
-        });
-        setInterval(() => void refreshActivePaths(), SAFETY_REFRESH_INTERVAL_MS);
+        const observer = new FinalizedDirectoryObserver(
+            SUPPORTED_PROVIDERS.map((provider) => getProviderPaths(provider).downloader),
+            (streamPath) => {
+                void isFinalizedCandidate(streamPath).then((finalized) => {
+                    if (finalized) enqueue(streamPath);
+                }).catch(() => {});
+            },
+            () => catchUp(enabledAt),
+            (rootPath, error) => logger.error(
+                "[MediaIntegrity] provider-root watch failed; hourly reconciliation remains active",
+                { rootPath, error: error.message },
+            ),
+        );
+        await observer.start();
         setInterval(() => void catchUp(enabledAt), CATCH_UP_INTERVAL_MS);
-        logger.info("[MediaIntegrity] watching finalized Tango/FC2 streams", {
+        logger.info("[MediaIntegrity] watching atomically promoted finalized streams", {
             completionSignal: HLS.ENDLIST,
             enabledAt: new Date(enabledAt).toISOString(),
             workerCount: QUEUE_WORKER_COUNT,

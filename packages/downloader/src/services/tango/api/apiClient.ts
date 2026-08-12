@@ -33,6 +33,7 @@ function getStreamHeaders(tokens: Tokens): HeadersInit {
 
 export class ApiClient implements IStreamProvider {
     public readonly providerName = "tango";
+    private latestLiveStreams = new Map<string, TangoLiveStream>();
 
     public constructor() {
         logger.info("[Tango] ApiClient initialized.");
@@ -56,7 +57,11 @@ export class ApiClient implements IStreamProvider {
         body: any = null
     ): Promise<T | null> {
         try {
-            const options: RequestInit = { method, headers };
+            const options: RequestInit = {
+                method,
+                headers,
+                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
+            };
             if (body) {
                 options.body = JSON.stringify(body);
                 (headers as Record<string, string>)["Content-Type"] = "application/json";
@@ -153,13 +158,14 @@ export class ApiClient implements IStreamProvider {
 
                 live.set(accountId, {
                     accountId,
-                    streamId: stream.id ?? record?.viewInfo?.streamId ?? "",
+                    streamId: String(stream.id ?? record?.viewInfo?.streamId ?? ""),
                     masterPlaylistUrl,
                     status: typeof status === "string" ? status : "LIVING",
                     kind: typeof kind === "string" ? kind : "PUBLIC",
                 });
             }
 
+            this.latestLiveStreams = live;
             return { live, rejected };
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getLiveStreamsByAccountIds`, { error: (error as Error).message });
@@ -225,23 +231,11 @@ export class ApiClient implements IStreamProvider {
 
     public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
         if (context.exitReason === "aborted") return null;
-
-        if (context.exitReason === "fetch-failed") {
-            return context.lastMasterUrl;
-        }
-
-        const result = await this.getLiveStreamsByAccountIds([context.streamerId]);
-        if (!result) {
-            logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (stream lookup failed after ${context.exitReason})`);
-            return null;
-        }
-
-        const stream = result.live.get(context.streamerId);
-        if (stream) {
+        const stream = this.latestLiveStreams.get(context.streamerId);
+        if (stream?.streamId === context.recordingId) {
             return stream.masterPlaylistUrl;
         }
-        logger.info(`[Tango] ${context.streamerId}: shouldRetry=no (not live/public in account lookup after ${context.exitReason})`);
-        return null;
+        return context.lastMasterUrl;
     }
 }
 

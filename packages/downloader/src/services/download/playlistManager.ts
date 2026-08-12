@@ -1,12 +1,21 @@
 import * as path from "path";
+import { promises as fs } from "fs";
 import { fixTargetDuration } from "shared";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { DiskSession } from "./diskSession.js";
+import {
+    formatSegmentName,
+    parseCompoundSegmentName,
+    providerSegmentKey,
+    RECOVERY_DEDUP_TAIL_SIZE,
+} from "./segmentIdentity.js";
 
 export interface SegmentInfo {
     remoteUrl: string;
     localName: string;
+    providerSequence: number;
+    identityKey: string;
     metadata: string[];
     accurateDuration?: number;
     programDateTime?: string;
@@ -23,9 +32,12 @@ export interface PlaylistTimeline {
 
 export class PlaylistManager {
     private readonly disk: DiskSession;
-    private ignoredSegments: Set<string> = new Set();
-    private seenRemoteUrls: Set<string> = new Set();
-    private lastSegmentNumber: number = -1;
+    private lastProviderSequence: number | null = null;
+    private nextLocalNumber = 0;
+    private recentProviderKeys: string[] = [];
+    private recentProviderKeySet = new Set<string>();
+    private resumeDiscontinuityPending = false;
+    private readonly recordingId: string;
     public startSequence: number = 0;
     private pendingHeader: string[] | null = null;
     private pendingQualityChanges: string[] = [];
@@ -80,8 +92,99 @@ export class PlaylistManager {
         return path.join(this.disk.dirPath, "playlist.m3u8");
     }
 
-    constructor(disk: DiskSession) {
+    constructor(disk: DiskSession, recordingId: string) {
         this.disk = disk;
+        this.recordingId = recordingId;
+    }
+
+    public get nextSegmentNumber(): number {
+        return this.nextLocalNumber;
+    }
+
+    public async initializeFromExistingPlaylist(): Promise<void> {
+        if (!this.disk.materialized) return;
+        const content = await FileSystemManager.readFile(this.fullPlaylistPath);
+        const diskNames = await fs.readdir(this.disk.dirPath);
+        const diskIdentities = diskNames
+            .map((name) => parseCompoundSegmentName(name))
+            .filter((identity): identity is NonNullable<typeof identity> => identity !== null);
+        if (diskIdentities.some((identity) => identity.recordingId !== this.recordingId)) {
+            throw new Error(`Recording identity mismatch in media files at ${this.disk.dirPath}`);
+        }
+        if (!content) {
+            this.nextLocalNumber = diskIdentities.reduce(
+                (maximum, identity) => Math.max(maximum, identity.localNumber + 1),
+                0,
+            );
+            logger.warn(`[PlaylistManager] Resuming after a first-segment power loss recording=${this.recordingId} nextLocal=${this.nextLocalNumber} unreferencedMedia=${diskIdentities.length}`);
+            return;
+        }
+
+        const sanitizedContent = content.replaceAll("\0", "");
+        const lines = sanitizedContent.split(/\r?\n/);
+        let lastValidSegmentLine = -1;
+        let firstInvalidMediaLine = -1;
+        for (let index = 0; index < lines.length; index++) {
+            const line = lines[index].trim();
+            if (line === "" || line.startsWith("#")) continue;
+            const identity = parseCompoundSegmentName(line);
+            if (identity && identity.recordingId === this.recordingId) {
+                lastValidSegmentLine = index;
+            } else if (firstInvalidMediaLine === -1) {
+                firstInvalidMediaLine = index;
+            }
+        }
+        if (firstInvalidMediaLine !== -1 && firstInvalidMediaLine <= lastValidSegmentLine) {
+            throw new Error(`Cannot resume legacy, mixed-name, or internally corrupt playlist at ${this.fullPlaylistPath}`);
+        }
+
+        const recoveredContent = lastValidSegmentLine >= 0
+            ? lines.slice(0, lastValidSegmentLine + 1).join("\n") + "\n"
+            : sanitizedContent;
+        if (recoveredContent !== content) {
+            if (!await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, recoveredContent)) {
+                throw new Error(`Could not atomically recover active playlist tail at ${this.fullPlaylistPath}`);
+            }
+            logger.warn(`[PlaylistManager] Recovered incomplete playlist tail at ${this.fullPlaylistPath}`);
+        }
+
+        const segmentNames = recoveredContent.split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line !== "" && !line.startsWith("#"));
+        const parsed = segmentNames
+            .map((name) => parseCompoundSegmentName(name))
+            .filter((identity): identity is NonNullable<typeof identity> => identity !== null);
+
+        if (segmentNames.length > 0 && parsed.length !== segmentNames.length) {
+            throw new Error(`Cannot resume legacy or mixed-name playlist at ${this.fullPlaylistPath}`);
+        }
+        if (parsed.some((identity) => identity.recordingId !== this.recordingId)) {
+            throw new Error(`Recording identity mismatch in ${this.fullPlaylistPath}`);
+        }
+
+        this.nextLocalNumber = diskIdentities.reduce(
+            (maximum, identity) => Math.max(maximum, identity.localNumber + 1),
+            parsed.reduce((maximum, identity) => Math.max(maximum, identity.localNumber + 1), 0),
+        );
+        const tail = parsed.slice(-RECOVERY_DEDUP_TAIL_SIZE);
+        for (const identity of tail) this.rememberProviderKey(providerSegmentKey(identity));
+        this.lastProviderSequence = tail.at(-1)?.providerSequence ?? null;
+        this.resumeDiscontinuityPending = parsed.length > 0;
+        this.pendingHeader = null;
+
+        const targetDuration = recoveredContent.match(/^#EXT-X-TARGETDURATION:(\d+)$/m);
+        this.currentTargetDuration = targetDuration ? Number.parseInt(targetDuration[1], 10) : 0;
+        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} dedupTail=${tail.length} unreferencedMedia=${Math.max(0, diskIdentities.length - parsed.length)}`);
+    }
+
+    private rememberProviderKey(key: string): void {
+        if (this.recentProviderKeySet.has(key)) return;
+        this.recentProviderKeys.push(key);
+        this.recentProviderKeySet.add(key);
+        while (this.recentProviderKeys.length > RECOVERY_DEDUP_TAIL_SIZE) {
+            const removed = this.recentProviderKeys.shift();
+            if (removed !== undefined) this.recentProviderKeySet.delete(removed);
+        }
     }
 
     private getExtinfDuration(metadata: string[]): number {
@@ -94,24 +197,7 @@ export class PlaylistManager {
     }
 
     public addIgnoredSegment(segmentName: string): void {
-        this.ignoredSegments.add(segmentName);
-    }
-
-    private async getExistingLocalSegments(): Promise<Set<string>> {
-        if (!this.disk.materialized) return new Set();
-        const content = await FileSystemManager.readFile(this.fullPlaylistPath);
-        if (!content) {
-            return new Set();
-        }
-        const lines = content.split("\n");
-        const segments = new Set<string>();
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed !== "" && !trimmed.startsWith("#")) {
-                segments.add(trimmed);
-            }
-        }
-        return segments;
+        this.rememberProviderKey(segmentName);
     }
 
     public setEdge(variantUrl: string): void {
@@ -124,6 +210,12 @@ export class PlaylistManager {
     public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
         const newSegments: SegmentInfo[] = [];
+
+        const sequenceLine = liveLines.find((line) => line.trim().startsWith("#EXT-X-MEDIA-SEQUENCE:"));
+        if (sequenceLine) {
+            const sequence = Number.parseInt(sequenceLine.split(":")[1], 10);
+            if (Number.isSafeInteger(sequence)) this._timeline.mediaSequence = sequence;
+        }
 
         for (const line of liveLines) {
             const trimmed = line.trim();
@@ -165,9 +257,8 @@ export class PlaylistManager {
             }
         }
 
-        const existingSegments = await this.getExistingLocalSegments();
-
         let currentPDT: string | null = null;
+        let segmentOffset = 0;
 
         for (let i = 0; i < liveLines.length; i++) {
             const line = liveLines[i].trim();
@@ -183,11 +274,11 @@ export class PlaylistManager {
             }
 
             const remoteTsUrl = urlResolver(line);
+            const providerSequence = this._timeline.mediaSequence + segmentOffset;
+            segmentOffset++;
+            const identityKey = providerSegmentKey({ recordingId: this.recordingId, providerSequence });
 
-            const tsNameWithQuery = remoteTsUrl.substring(remoteTsUrl.lastIndexOf("/") + 1);
-            const localName = tsNameWithQuery.split("?")[0];
-
-            if (!existingSegments.has(localName) && !this.ignoredSegments.has(localName) && !this.seenRemoteUrls.has(remoteTsUrl)) {
+            if (!this.recentProviderKeySet.has(identityKey)) {
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();
@@ -201,8 +292,14 @@ export class PlaylistManager {
                         break;
                     }
                 }
-                this.seenRemoteUrls.add(remoteTsUrl);
-                newSegments.push({ remoteUrl: remoteTsUrl, localName, metadata: segmentMetadata, programDateTime: currentPDT ?? undefined });
+                newSegments.push({
+                    remoteUrl: remoteTsUrl,
+                    localName: formatSegmentName(this.nextLocalNumber++, this.recordingId, providerSequence),
+                    providerSequence,
+                    identityKey,
+                    metadata: segmentMetadata,
+                    programDateTime: currentPDT ?? undefined,
+                });
             }
 
             currentPDT = null;
@@ -217,15 +314,16 @@ export class PlaylistManager {
     }
 
     public async appendSegmentToPlaylist(segment: SegmentInfo): Promise<void> {
-        const currentNumber = parseInt(segment.localName.replace(/\.ts$/, ""), 10);
-
-        if (!isNaN(currentNumber) && this.lastSegmentNumber !== -1 && currentNumber !== this.lastSegmentNumber + 1) {
-            await this.insertDiscontinuity();
+        const sequenceBreak = this.lastProviderSequence !== null
+            && segment.providerSequence !== this.lastProviderSequence + 1;
+        const boundaryAlreadyBuffered = this.pendingQualityChanges.length > 0;
+        if ((this.resumeDiscontinuityPending || sequenceBreak)
+            && !boundaryAlreadyBuffered
+            && !segment.metadata.includes("#EXT-X-DISCONTINUITY")) {
+            segment.metadata.unshift("#EXT-X-DISCONTINUITY");
         }
-
-        if (!isNaN(currentNumber)) {
-            this.lastSegmentNumber = currentNumber;
-        }
+        this.resumeDiscontinuityPending = false;
+        this.lastProviderSequence = segment.providerSequence;
 
         if (segment.accurateDuration !== undefined && segment.accurateDuration > 0) {
             const idx = segment.metadata.findIndex(l => l.startsWith("#EXTINF:"));
@@ -250,12 +348,16 @@ export class PlaylistManager {
             }
             this.pendingQualityChanges = [];
 
-            await FileSystemManager.writeFile(this.fullPlaylistPath, initialContent);
+            if (!await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, initialContent)) {
+                throw new Error(`Could not atomically create ${this.fullPlaylistPath}`);
+            }
             this.pendingHeader = null;
         } else if (this.pendingQualityChanges.length > 0) {
             for (const initName of this.pendingQualityChanges) {
                 const tag = `#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="${initName}"\n`;
-                await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
+                if (!await FileSystemManager.appendFile(this.fullPlaylistPath, tag)) {
+                    throw new Error(`Could not append init boundary to ${this.fullPlaylistPath}`);
+                }
             }
             this.pendingQualityChanges = [];
         }
@@ -267,33 +369,32 @@ export class PlaylistManager {
                     /^#EXT-X-TARGETDURATION:\d+$/m,
                     `#EXT-X-TARGETDURATION:${requiredTarget}`
                 );
-                await FileSystemManager.writeFile(this.fullPlaylistPath, updated);
+                if (!await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, updated)) {
+                    throw new Error(`Could not atomically update TARGETDURATION in ${this.fullPlaylistPath}`);
+                }
                 this.currentTargetDuration = requiredTarget;
             }
         }
 
         const entry = [...segment.metadata, segment.localName].join("\n") + "\n";
-        await FileSystemManager.appendFile(this.fullPlaylistPath, entry);
-    }
-
-    private async insertDiscontinuity(): Promise<void> {
-        const tag = "#EXT-X-DISCONTINUITY\n";
-        await FileSystemManager.appendFile(this.fullPlaylistPath, tag);
-        logger.debug(`[PlaylistManager] Inserted discontinuity tag.`);
+        if (!await FileSystemManager.appendFile(this.fullPlaylistPath, entry)) {
+            throw new Error(`Could not append segment to ${this.fullPlaylistPath}`);
+        }
+        this.rememberProviderKey(segment.identityKey);
     }
 
     public async finalizePlaylist(): Promise<void> {
         logger.info(`Finalizing playlist: ${this.fullPlaylistPath}`);
-        const endTag = "#EXT-X-ENDLIST\n";
-        await FileSystemManager.appendFile(this.fullPlaylistPath, endTag);
-
         const content = await FileSystemManager.readFile(this.fullPlaylistPath);
-        if (content) {
-            const { content: fixed, wasFixed } = fixTargetDuration(content);
-            if (wasFixed) {
-                await FileSystemManager.writeFile(this.fullPlaylistPath, fixed);
-                logger.info(`[PlaylistManager] Fixed TARGETDURATION in ${this.fullPlaylistPath}`);
-            }
-        }
+        if (!content) throw new Error(`Cannot finalize recording without playlist: ${this.fullPlaylistPath}`);
+        const withoutEndlist = content.split(/\r?\n/)
+            .filter((line) => line.trim() !== "#EXT-X-ENDLIST")
+            .join("\n")
+            .replace(/\n*$/, "\n");
+        const withEndlist = `${withoutEndlist}#EXT-X-ENDLIST\n`;
+        const { content: fixed, wasFixed } = fixTargetDuration(withEndlist);
+        const written = await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, fixed);
+        if (!written) throw new Error(`Could not atomically finalize ${this.fullPlaylistPath}`);
+        if (wasFixed) logger.info(`[PlaylistManager] Fixed TARGETDURATION in ${this.fullPlaylistPath}`);
     }
 }

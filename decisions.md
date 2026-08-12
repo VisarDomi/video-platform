@@ -1,22 +1,71 @@
 # Monorepo Decisions
 
+## Active recording folders are the durable downloader/server boundary (2026-08-12)
+
+The downloader owns only `<provider>/downloader/.active/<recording>/` folders.
+The server owns a recording only after the downloader has atomically published a
+playlist containing `#EXT-X-ENDLIST` and renamed the whole directory into the
+provider's `downloader/` root. The same-filesystem directory rename is the
+durable completion message. `live-status.json` remains informational and is not
+completion authority. No recording manifest or lifecycle database duplicates
+the state already expressed by the directory and playlist.
+
+New media filenames are
+`{monotonic-local-number}_{recording-identity}_{provider-sequence}.ts`. Recording
+identity is Tango `streamId`, FC2 `start_time`, and Stripchat
+`statusChangedAt`. On restart the downloader compares the current HLS window
+only with the last ten accepted `(recording identity, provider sequence)` pairs.
+This removes ordinary window overlap while allowing an FC2 sequence reset to be
+accepted with the next local number. Writes must never overwrite a media file.
+Historical numeric names remain valid and are never migrated.
+
+Folder timestamps use the operator's local clock. Provider-supplied UTC
+recording identities retain their `Z` standard but omit colon punctuation for
+safe visible filenames: `2026-08-12T09:08:47Z` becomes
+`2026-08-12T090847Z`, both when written and when compared during recovery. URI
+percent escapes must not be stored in disk filenames because HTTP clients and
+Express decode them at the request boundary.
+
+The provider snapshot loops, not HLS transport failures, decide lifecycle. An
+upstream ENDLIST or a different recording identity is immediately terminal. An
+absent/non-public result is terminal only after at least two successful
+observations span 60 seconds with no media progress. Provider/API unavailability
+does not start or advance terminal confirmation. FC2 uses exactly the adult
+channel-list endpoint and starts requests no more often than every 30 seconds.
+Shutdown and power loss leave `.active` recordings unfinished for restart
+reconciliation; they do not append ENDLIST.
+
+The server uses one Linux-backed Node filesystem watch per provider root for the
+normal atomic-promotion event. It registers watches before a non-recursive
+startup reconciliation and performs a rare safety reconciliation for missed or
+coalesced events. No one-second tree scan or Rust/Go watcher is needed. One
+idempotent post-ENDLIST processor will replace orphan finalization and the
+overlapping repair/finalization scripts while reusing PlaylistAuthority and the
+bounded media-integrity queue.
+
+**Why:** Active capture, finalized local media, and postprocessing need explicit
+single-writer ownership that survives either process losing power. Filesystem
+state and atomic rename provide that boundary without another service protocol,
+while provider recording identity prevents a reconnect from joining two
+broadcasts or overwriting a reused provider sequence.
+
 ## Ownership: ENDLIST hands media integrity to the server (2026-08-11)
 
-The downloader owns an MPEG-TS recording while its playlist is live. Writing
-`#EXT-X-ENDLIST` is the durable live-to-finalized handoff: after that line is
-present and the folder leaves `live-status.json`, the server owns media
-integrity and canonical playlist repair.
+The downloader owns a recording while its directory is under `.active`.
+Atomically publishing `#EXT-X-ENDLIST` and promoting that directory into the
+provider downloader root is the durable live-to-finalized handoff; the server
+then owns media integrity and canonical playlist repair.
 
 Tango and FC2 no longer launch ffprobe for every downloaded segment. Their live
 loop performs only the transport-level nonempty-file check and preserves the
 upstream EXTINF while capture is active. The server observes completed folders,
 runs one strict whole-playlist ffmpeg decode, and performs the expensive
-per-segment decode only when that recording-level check fails. This automatic
-scan is strictly nondestructive: it writes only `.media-integrity.json`; it does
-not move, copy, delete, or rewrite media segments or playlists. Failed MPEG-TS
-playlists report the exact invalid segments for manual action. Failed fMP4
-playlists remain failed without per-fragment attribution because individual
-fragments require initialization/context.
+per-segment decode only when that recording-level check fails. Failed MPEG-TS
+playlists with exact fragment attribution are repaired automatically: corrupt
+entries are removed, the playlist is made canonical, the files are moved to
+desktop Trash, and a strict decode must then pass. Failed fMP4 playlists remain
+blocked without destructive repair because individual fragments require
+initialization/context for attribution.
 
 Completed recordings enter one deduplicating FIFO queue with a worker count of
 half the host's logical CPUs. Each worker runs one single-threaded ffmpeg at nice
@@ -28,26 +77,36 @@ segments, so service restarts resume from the last checkpoint. Harmless
 null-muxer DTS diagnostics are filtered before bounded stderr capture,
 preventing truncation from turning them into false corruption.
 
+When an automatic or explicit failed-integrity repair is requested, attributable MPEG-TS
+segments are removed from the playlist, a discontinuity is inserted before the
+next good segment, canonical durations are recalculated, and the exact corrupt
+files are moved to desktop Trash. A fresh strict decode must pass before the
+recording becomes pipeline-eligible. Desktop Trash and the video library are on
+the same filesystem on this host, so the move is atomic and the operator can
+recover files until intentionally emptying Trash. fMP4 failures without exact
+fragment attribution remain blocked.
+
 PlaylistAuthority prefers adjacent MPEG-TS video PTS and invokes ffprobe only
 for boundaries those timestamps cannot define, such as discontinuities and the
-final tail. Automatic integrity validation does not call PlaylistAuthority or
-rewrite durations; repair remains a separate explicit operation.
+final tail. It runs as part of the unified post-ENDLIST processor before strict
+validation and again after any corrupt entries are removed.
 
 **Why:** Metadata-only ffprobe accepted the corrupt MPEG-TS segments that later
 froze video during playback. Fully decoding every segment in the live loop
 wastes power and gives the downloader destructive semantic authority. A single
 post-ENDLIST validation is cheap for clean streams, while corrupt streams can
-be inspected precisely with the whole recording available. The earlier
-quarantine implementation moved source segments to `/tmp`; a reboot cleared
-those bytes, proving that even recoverable-looking automatic mutation violates
-the recording ownership boundary.
+be inspected precisely with the whole recording available. Earlier explicit
+quarantine used `/tmp` as the intentional discard destination. Corrupt-media
+discard now uses desktop Trash instead because it provides a visible recovery
+and deliberate emptying workflow without a copy. Detection itself remains
+nondestructive; exact MPEG-TS attribution authorizes the idempotent repair step.
 
 ## Upload packaging is one recording per artifact and non-destructive (2026-08-11)
 
 The server owns upload eligibility and final-artifact validation. Provider facts
-live in `packages/server/src/services/upload/uploadPolicy.ts`; the shared policy
-is derived from them instead of copying limits into descriptor, converter, and
-uploader workers.
+live in `packages/shared/src/uploadPolicy.ts`; the server re-exports them and the
+pipeline consumes the same policy instead of copying limits into descriptor,
+converter, and uploader workers.
 
 XVideos private uploads are the only active destination. It contributes a
 7,200-second duration maximum and a 50,000,000,000-byte file maximum. Bunkr is
@@ -168,6 +227,13 @@ CPU admission, dry-run, and power-loss-safe atomic writes. Rule version
 `media-timeline-v2` deliberately invalidates checkpoints made by the obsolete
 `max-av-v1` implementation.
 
+The applied all-provider/all-scope migration completed on 2026-08-12 after
+11,565.628 seconds: 2,820 playlists processed, 1,940 written, 880 unchanged,
+2,318,421 segments inspected, and zero failures. This closes that historical
+batch only. New finalized recordings still receive per-recording canonical
+repair in the future pipeline, and playlist repair does not imply that strict
+media integrity passed.
+
 ## Descriptor uses duration-tiered FPS ceilings with token-budget adaptation (2026-08-12)
 
 Native-video description requests use up to 4 FPS below seven minutes, up to 2
@@ -195,6 +261,46 @@ so this quality increase cannot overflow the model context.
 memory workaround. One FPS is the measured normal-quality point; duration-based
 reduction preserves support for long recordings without making short videos
 needlessly sparse.
+
+## Durable pipeline foundation is separate and network-disabled (2026-08-12)
+
+Months-long processing does not run inside the Express server. The standalone
+`packages/pipeline` package owns an isolated SQLite WAL/FULL ledger containing
+recordings, append-only state events, expiring worker leases, remux outputs,
+validated artifact hashes, description evidence, upload reservations/attempts,
+actual transmitted-byte events, and remote verification evidence. It is not a
+systemd service and is not started by the monorepo start command.
+
+Read-only discovery considers only immediate entries in finalized downloader
+and edited roots, ignores hidden directories such as `.active`, and prefers a
+finalized edited copy over the same provider/filename in downloader. Discovery may enroll a finalized item
+whose integrity evidence is absent so the server can validate it later, but no
+item can advance to remux until a version-2 `.media-integrity.json` says `ready`,
+matches the segment count, and contains no invalid segments. Exact-recording
+repair and integrity requests go through the server so the pipeline never writes
+the server-owned sidecar concurrently.
+
+The local stages use non-overwriting stream-copy MP4 publication, then decode,
+probe, and SHA-256 the exact artifact before describing it. Descriptor is now a
+library entry point as well as a smoke command; it retains automatic duration and
+token-budget FPS selection and persists the prompt hash with every result.
+Artifact-hash/prompt-hash evidence paths allow a restarted worker to adopt a
+completed description rather than spend the model work twice. Stages commit one
+durable transition at a time, recover expired leases, and restore explicit
+manual retries to the exact failed stage.
+
+The 600,000,000,000-byte calendar-month ledger uses `Europe/Tirane` by default.
+Reservations include expected request overhead; actual bytes from failed and
+retried attempts are append-only. A lost response after sending a body enters
+`xvideos_uncertain` and requires reconciliation rather than a blind duplicate
+upload. Dry-run upload planning mutates neither quota nor state.
+
+There is deliberately no real XVideos transport. The only concrete adapter
+throws before network access; fake transports test success, failure, metering,
+and uncertain acceptance. Cleanup and network upload are hard-disabled. A
+service and real adapter wait for authenticated manual discovery of the form,
+CSRF/session flow, accepted media/metadata constraints, returned identity,
+processing states, and playback verification.
 
 ## Ownership: Video is a self-contained unit (2026-04-05)
 
@@ -261,7 +367,7 @@ Single writer per resource, no cross-process write contention.
 |---|---|---|
 | `aliases.json` | server (AliasRegistry.refresh, hourly) | server only (frontend via /api/tango/list) |
 | `tango.txt` | server (routes + AliasRegistry.syncTangoTxt) | downloader TangoTargetManager |
-| `live-status.json` | downloader (DownloadsManager) | server (orphan finalizer) |
+| `live-status.json` | downloader (DownloadsManager) | informational/debug consumers only |
 | session tokens on disk | auth daemon | server + downloader (shared readTokens()) |
 
 Tango alias reconciliation belongs to the server. Its hourly refresh covers
@@ -371,7 +477,8 @@ Historical batch results:
 
 - FC2 `scope=all` ran on 2026-05-11 from `11:43:28` to `11:51:24`; repaired `120` playlists, processed `337823` segments, failed `0`, and removed about `9087.536333s` from playlists.
 - Tango `scope=all` ran on 2026-05-11 from `11:53:50` to `13:11:52`; repaired `3014` playlists plus one already-correct long sample, processed `2101775` segments, failed `0`, and removed about `81544.660632s` from playlists.
-- Active downloader folders are skipped from downloader-scope batch repair via `live-status.json`.
+- Active downloader folders live one level below `.active`, while the historical
+  fixer scans only immediate non-hidden finalized folders.
 
 Operational behavior:
 
@@ -381,8 +488,8 @@ Operational behavior:
 
 Ownership boundary:
 
-- Downloader owns active playlist append for new live captures and retains upstream `#EXTINF` until completion.
-- ENDLIST transfers ownership to the server; MediaIntegrityFinalizer validates nondestructively and `PlaylistAuthority` owns explicit canonical duration repair plus historical/batch repair.
+- Downloader owns `.active` playlist append for new live captures and retains upstream `#EXTINF` until completion.
+- ENDLIST plus atomic directory promotion transfers ownership to the server; the unified finalized-recording processor validates, repairs attributable MPEG-TS corruption through Desktop Trash, and invokes `PlaylistAuthority` for canonical duration repair.
 - HLS routes serve playlists read-only and must not silently heal on GET.
 - Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.
 

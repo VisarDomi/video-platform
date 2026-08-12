@@ -7,7 +7,6 @@ import { DatabaseSync } from "node:sqlite";
 import { repairPlaylistDurations } from "../packages/server/dist/services/hls/playlistAuthority.js";
 
 const DEFAULT_DOWNLOADS_ROOT = "/home/visar/Videos/downloads";
-const LIVE_STATUS_PATH = "/home/visar/.local/share/video-services/live-status.json";
 const DEFAULT_CHECKPOINT_PATH = "/home/visar/.local/share/video-services/fix-playlists.sqlite";
 const PROVIDERS = ["tango", "fc2"];
 const SCOPES = ["downloads", "edited"];
@@ -33,10 +32,11 @@ Options:
   --dry-run                 Report changes without writing (default)
   --help                    Show this help
 
-The script skips exact folders currently present in live-status.json. It uses
-the server's canonical MPEG-TS PTS timeline repair, falls back to the longest
-audio/video stream only at boundaries that need it, and skips fMP4 playlists.
-It is idempotent: an already-correct playlist reports unchanged.`);
+The script scans only immediate finalized folders. Active captures are nested
+under downloader/.active and therefore cannot be selected. It uses the server's
+canonical MPEG-TS PTS timeline repair, falls back to the longest audio/video
+stream only at boundaries that need it, and skips fMP4 playlists. It is
+idempotent: an already-correct playlist reports unchanged.`);
 }
 
 function parsePositiveInteger(value, name, minimum = 1) {
@@ -190,7 +190,7 @@ async function discoverPlaylists(provider, scope, downloadsRoot) {
                 throw error;
             }
             for (const entry of entries) {
-                if (!entry.isDirectory()) continue;
+                if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
                 const playlistPath = path.join(root, entry.name, "playlist.m3u8");
                 try {
                     await fs.access(playlistPath);
@@ -202,22 +202,6 @@ async function discoverPlaylists(provider, scope, downloadsRoot) {
         }
     }
     return playlists.sort((left, right) => left.playlistPath.localeCompare(right.playlistPath));
-}
-
-async function readActiveDirectories() {
-    try {
-        const status = JSON.parse(await fs.readFile(LIVE_STATUS_PATH, "utf8"));
-        return new Set(
-            Array.isArray(status.downloads)
-                ? status.downloads
-                    .map((download) => download?.segmentsDirPath)
-                    .filter((value) => typeof value === "string")
-                    .map((value) => path.resolve(value))
-                : [],
-        );
-    } catch (error) {
-        throw new Error(`Cannot safely read ${LIVE_STATUS_PATH}: ${error.message}`);
-    }
 }
 
 function readCpuCounters() {
@@ -274,24 +258,11 @@ function createCpuGuard(maxCpu) {
 
 async function repairPlaylist(target, options, cpuGuard) {
     const directory = path.dirname(target.playlistPath);
-    const activeDirectories = await readActiveDirectories();
-    if (activeDirectories.has(path.resolve(directory))) {
-        return { status: "live", segmentCount: 0 };
-    }
-
     const summary = await repairPlaylistDurations(directory, {
         apply: options.apply,
         probeConcurrency: options.concurrency,
         beforeProbe: () => cpuGuard.waitForCapacity(),
-        beforeWrite: async () => {
-            const activeBeforeWrite = await readActiveDirectories();
-            return !activeBeforeWrite.has(path.resolve(directory));
-        },
     });
-
-    if (summary.writeSkippedReason === "write-guard") {
-        return { status: "live", segmentCount: summary.segmentCount };
-    }
 
     return {
         status: summary.skipped
@@ -375,8 +346,7 @@ async function main() {
                 totals.changed += 1;
                 totals.written += 1;
             }
-            if (result.status === "live") totals.live += 1;
-            if (result.status !== "live" && result.status !== "empty") {
+            if (result.status !== "empty") {
                 const fingerprintAfter = await playlistFingerprint(target.playlistPath);
                 checkpoints.markComplete(target.playlistPath, fingerprintAfter, result.status);
             }

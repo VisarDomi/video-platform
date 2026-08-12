@@ -7,13 +7,16 @@ import { STATUS_FILE_DEBOUNCE_MS } from "../../common/timing.js";
 
 interface Download {
     streamerId: string;
+    recordingId: string;
     alias: string;
     liveUrl: string | null;
     segmentsDirPath: string | null;
 }
 
 interface ActiveDownloader {
+    streamerId: string;
     abort: () => void;
+    finalize: () => void;
     completion: Promise<void>;
 }
 
@@ -86,11 +89,25 @@ export class DownloadsManager {
         return updated;
     }
 
-    public registerDownloader(masterPlaylistUrl: string, abort: () => void, completion: Promise<void>): void {
-        this.activeDownloaders.set(masterPlaylistUrl, { abort, completion });
+    public registerDownloader(
+        masterPlaylistUrl: string,
+        streamerId: string,
+        abort: () => void,
+        finalize: () => void,
+        completion: Promise<void>,
+    ): void {
+        this.activeDownloaders.set(masterPlaylistUrl, { streamerId, abort, finalize, completion });
         completion.finally(() => {
             this.activeDownloaders.delete(masterPlaylistUrl);
         });
+    }
+
+    public async finalizeStreamer(streamerId: string): Promise<boolean> {
+        const active = [...this.activeDownloaders.values()].find((download) => download.streamerId === streamerId);
+        if (!active) return false;
+        active.finalize();
+        await active.completion;
+        return true;
     }
 
     public remove(masterPlaylistUrl: string): void {
@@ -117,7 +134,7 @@ export class DownloadsManager {
             Array.from(this.activeDownloaders.values()).map(d => d.completion)
         );
 
-        logger.info(`[General] All downloads finalized.`);
+        logger.info(`[General] All active downloads stopped and left resumable.`);
     }
 
     public get(masterPlaylistUrl: string): Download | undefined {
@@ -134,6 +151,13 @@ export class DownloadsManager {
             }
         }
         return false;
+    }
+
+    public getRecordingId(streamerId: string): string | null {
+        for (const download of this.downloads.values()) {
+            if (download.streamerId === streamerId) return download.recordingId;
+        }
+        return null;
     }
 
     public get size(): number {

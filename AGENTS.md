@@ -1,11 +1,9 @@
 # Video Platform
 
-Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (HLS utils).
-
-Sibling repo: `~/Documents/work/video/video-descriptor/` (frame analysis + AI descriptions, port `7975`).
+Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), and `pipeline` (inactive durable processing foundation).
 
 Providers: `tango`, `fc2`, `sc`.
-Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-descriptor`.
+Systemd user services: `video-server`, `video-downloader`, `video-auth`. The old `video-descriptor` unit was removed; do not recreate or enable a pipeline service until the uploader and authenticated verification flow are complete.
 
 ## Read
 
@@ -28,6 +26,10 @@ Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-
   `~/Documents/work/video/video-platform/packages/server/`
 - Downloader details:
   `~/Documents/work/video/video-platform/packages/downloader/`
+- Descriptor details:
+  `~/Documents/work/video/video-platform/packages/descriptor/`
+- Pipeline details:
+  `~/Documents/work/video/video-platform/packages/pipeline/`
 
 ## Frontend - no restarting
 npm run build:app

@@ -4,6 +4,7 @@ import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
+import { normalizeRecordingId } from "../../download/segmentIdentity.js";
 
 function parseFmp4Duration(data: Buffer): number {
     let pos = 0;
@@ -47,6 +48,8 @@ const BULK_BATCH_SIZE = 100;
 
 export class ScClient implements IStreamProvider {
     public readonly providerName = "sc";
+    private latestStatuses = new Map<string, { status: string; isLive: boolean; statusChangedAt: string }>();
+    private latestRecordingIds = new Map<string, string>();
 
     constructor() {
         logger.info("[SC] ScClient initialized.");
@@ -109,7 +112,7 @@ export class ScClient implements IStreamProvider {
         return result;
     }
 
-    private async fetchCamData(username: string): Promise<{ roomId: string; username: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean } | null> {
+    private async fetchCamData(username: string): Promise<{ roomId: string; username: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean; statusChangedAt: string } | null> {
         const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
         const data = await this.fetchApi<any>(url);
         if (!data) return null;
@@ -126,8 +129,10 @@ export class ScClient implements IStreamProvider {
         const streamName = data.cam?.streamName || roomId;
         const isCamAvailable = data.cam?.isCamAvailable ?? false;
         const isCamActive = data.cam?.isCamActive ?? false;
+        const rawStatusChangedAt = String(data.user?.user?.statusChangedAt ?? data.cam?.statusChangedAt ?? "");
+        const statusChangedAt = rawStatusChangedAt === "" ? "" : normalizeRecordingId(rawStatusChangedAt);
 
-        return { roomId, username: currentUsername, streamName, isCamAvailable, isCamActive };
+        return { roomId, username: currentUsername, streamName, isCamAvailable, isCamActive, statusChangedAt };
     }
 
     public async refreshStreamName(username: string): Promise<string | null> {
@@ -142,19 +147,25 @@ export class ScClient implements IStreamProvider {
         return result.streamName;
     }
 
-    public async refreshTarget(username: string): Promise<{ roomId: string; username: string; streamName: string | null } | null> {
+    public async refreshTarget(username: string): Promise<{ roomId: string; username: string; streamName: string | null; statusChangedAt: string } | null> {
         const result = await this.fetchCamData(username);
         if (!result) return null;
 
+        if (result.statusChangedAt) this.latestRecordingIds.set(result.roomId, result.statusChangedAt);
         return {
             roomId: result.roomId,
             username: result.username,
             streamName: result.isCamAvailable && result.isCamActive ? result.streamName : null,
+            statusChangedAt: result.statusChangedAt,
         };
     }
 
-    public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isLive: boolean }>> {
-        const result = new Map<string, { status: string; isLive: boolean }>();
+    public getKnownRecordingId(roomId: string): string | null {
+        return this.latestRecordingIds.get(roomId) ?? null;
+    }
+
+    public async checkStatusBulk(roomIds: string[]): Promise<Map<string, { status: string; isLive: boolean; statusChangedAt: string }> | null> {
+        const result = new Map<string, { status: string; isLive: boolean; statusChangedAt: string }>();
 
         for (let i = 0; i < roomIds.length; i += BULK_BATCH_SIZE) {
             const batch = roomIds.slice(i, i + BULK_BATCH_SIZE);
@@ -165,9 +176,9 @@ export class ScClient implements IStreamProvider {
             if (!data?.models) {
                 this.bulkFailCount++;
                 if (this.bulkFailCount === 1) {
-                    logger.warn(`[SC] Bulk status check failed for batch of ${batch.length} streamers — all treated as offline`);
+                    logger.warn(`[SC] Bulk status check failed for batch of ${batch.length} streamers — provider state unavailable`);
                 }
-                continue;
+                return null;
             }
 
             if (this.bulkFailCount > 0) {
@@ -179,10 +190,14 @@ export class ScClient implements IStreamProvider {
                 result.set(String(model.id), {
                     status: model.status ?? "unknown",
                     isLive: model.isLive ?? false,
+                    statusChangedAt: model.statusChangedAt
+                        ? normalizeRecordingId(String(model.statusChangedAt))
+                        : "",
                 });
             }
         }
 
+        this.latestStatuses = result;
         return result;
     }
 
@@ -290,14 +305,17 @@ export class ScClient implements IStreamProvider {
     public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
         if (context.exitReason === "aborted") return null;
 
+        const latest = this.latestStatuses.get(context.streamerId);
+        if (!latest || latest.status !== "public" || !latest.isLive) {
+            return context.lastMasterUrl;
+        }
         const lookupAlias = context.lookupAlias ?? context.streamerId;
-        const streamName = await this.refreshStreamName(lookupAlias);
-        if (!streamName) {
-            logger.info(`[SC] ${context.streamerId}: shouldRetry=no (offline/unavailable after ${context.exitReason})`);
-            return null;
+        const refreshed = await this.refreshTarget(lookupAlias);
+        if (!refreshed?.streamName || refreshed.statusChangedAt !== context.recordingId) {
+            return context.lastMasterUrl;
         }
 
-        return this.buildMasterUrl(streamName);
+        return this.buildMasterUrl(refreshed.streamName);
     }
 
     public async recoverVariant(masterPlaylistUrl: string): Promise<string | null> {

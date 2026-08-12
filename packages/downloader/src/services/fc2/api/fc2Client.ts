@@ -14,12 +14,18 @@ interface Fc2Session {
     pendingRequests: Map<number, (data: any) => void>;
 }
 
+export interface Fc2Broadcast {
+    channelId: string;
+    startTime: string;
+    isPaid: boolean;
+}
+
 export class Fc2Client implements IStreamProvider {
     public readonly providerName = "fc2";
     private msgId = 0;
     private sessions: Map<string, Fc2Session> = new Map();
     private cleanupInterval: NodeJS.Timeout;
-    private paidChannels = new Set<string>();
+    private latestBroadcasts = new Map<string, Fc2Broadcast>();
 
     private readonly HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -60,59 +66,42 @@ export class Fc2Client implements IStreamProvider {
 
     private async _request(url: string, options: RequestInit = {}): Promise<Response> {
         const headers = { ...this.HEADERS, ...(options.headers || {}) };
-        return fetch(url, { ...options, headers });
+        return fetch(url, {
+            ...options,
+            headers,
+            signal: options.signal ?? AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
+        });
     }
 
-    public async isOnline(channelId: string): Promise<boolean> {
+    public async getAdultChannelList(): Promise<Map<string, Fc2Broadcast> | null> {
         try {
-            const url = "https://live.fc2.com/api/memberApi.php";
-            const body = { channel: 1, profile: 1, user: 1, streamid: channelId };
-
-            logger.debug(`[FC2] Checking status for ${channelId}...`);
-
-            const response = await this._request(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams(body as any),
-            });
-
+            const response = await this._request("https://live.fc2.com/adult/contents/allchannellist.php");
             if (!response.ok) {
-                logger.warn(`[FC2] memberApi returned ${response.status} for ${channelId}`);
-                return false;
+                logger.warn(`[FC2] Adult channel list returned ${response.status}`);
+                return null;
             }
-
             const json: any = await response.json();
+            const channels = Array.isArray(json?.channel)
+                ? json.channel
+                : Array.isArray(json) ? json : [];
+            if (!Array.isArray(channels)) return null;
 
-            logger.debug(`[FC2] memberApi response for ${channelId}: is_publish=${json?.data?.channel_data?.is_publish}`);
-
-            const channelData = json?.data?.channel_data;
-            const isPublish = channelData?.is_publish > 0;
-            const isPaid = channelData?.fee > 0;
-
-            if (!isPublish) {
-                logger.debug(`[FC2] ${channelId}: offline (is_publish=${channelData?.is_publish})`);
-                if (this.paidChannels.has(channelId)) {
-                    logger.info(`[FC2] ${channelId}: no longer live (was paid)`);
-                    this.paidChannels.delete(channelId);
-                }
-                return false;
+            const broadcasts = new Map<string, Fc2Broadcast>();
+            for (const channel of channels) {
+                const channelId = String(channel?.id ?? "");
+                const startTime = String(channel?.start_time ?? "");
+                if (!/^\d+$/.test(channelId) || startTime === "") continue;
+                broadcasts.set(channelId, {
+                    channelId,
+                    startTime,
+                    isPaid: Number(channel?.pay ?? 0) !== 0,
+                });
             }
-            if (isPaid) {
-                if (!this.paidChannels.has(channelId)) {
-                    logger.info(`[FC2] ${channelId}: live but paid (fee=${channelData?.fee}) — skipping`);
-                    this.paidChannels.add(channelId);
-                }
-                return false;
-            }
-
-            if (this.paidChannels.has(channelId)) {
-                logger.info(`[FC2] ${channelId}: transitioned from paid to free`);
-                this.paidChannels.delete(channelId);
-            }
-            return true;
+            this.latestBroadcasts = broadcasts;
+            return broadcasts;
         } catch (error: any) {
-            logger.error(`[FC2] Error checking isOnline for ${channelId}`, { error: error.message });
-            return false;
+            logger.error("[FC2] Adult channel list unavailable", { error: error.message });
+            return null;
         }
     }
 
@@ -339,15 +328,15 @@ export class Fc2Client implements IStreamProvider {
     public async shouldRetry(context: import("../../core/interfaces.js").DownloadExitContext): Promise<string | null> {
         if (context.exitReason === "aborted") return null;
 
-        const isLive = await this.isOnline(context.streamerId);
-        if (!isLive) {
-            logger.info(`[FC2] ${context.streamerId}: shouldRetry=no (offline or paid after ${context.exitReason})`);
-            return null;
+        const broadcast = this.latestBroadcasts.get(context.streamerId);
+        if (!broadcast || broadcast.isPaid || broadcast.startTime !== context.recordingId) {
+            return context.lastMasterUrl;
         }
 
         const url = await this.getHlsUrl(context.streamerId);
         if (!url) {
-            logger.warn(`[FC2] ${context.streamerId}: shouldRetry=no (getHlsUrl failed, stream is live)`);
+            logger.warn(`[FC2] ${context.streamerId}: HLS refresh failed; retaining previous URL`);
+            return context.lastMasterUrl;
         }
         return url;
     }

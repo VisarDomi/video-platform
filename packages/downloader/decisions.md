@@ -1,5 +1,33 @@
 # Downloader Decisions
 
+## `.active` plus recording identity owns restart recovery
+
+The downloader writes new recordings under
+`<provider>/downloader/.active/<timestamp alias>/`. Shutdown and transport/API
+failure leave the directory active without ENDLIST. Provider snapshots decide
+whether the recording resumes or ends: the same recording identity resumes,
+a different identity or upstream ENDLIST ends immediately, and successful
+absent/non-public observations must span 60 seconds with no media progress.
+Unavailable provider responses never finalize media.
+
+After ENDLIST is atomically published, the directory is atomically promoted to
+the provider downloader root for server ownership. `live-status.json` is only
+runtime display state. New segment names contain monotonic local number,
+provider recording identity, and provider media sequence. Restart deduplication
+uses only the last ten accepted identity/sequence pairs, allowing legitimate
+FC2 media-sequence resets. Legacy numeric filenames remain readable but are not
+guessed as resumable identities.
+
+FC2 discovery uses one adult all-channel-list request no more often than every
+30 seconds. Tango `streamId`, FC2 `start_time`, and Stripchat
+`statusChangedAt` are the respective recording identities.
+
+Folder names retain local timestamps chosen by the application. UTC identities
+supplied by a provider retain the provider's `Z` standard while omitting time
+colons: `2026-08-12T09:08:47Z` is stored visibly as
+`2026-08-12T090847Z`. Provider snapshots and parsed filenames use the same UTC
+canonicalizer. URI percent escapes are not stored in media filenames.
+
 ## ENDLIST transfers finalized-media ownership to the server
 
 The downloader owns transport and active playlist append only. Tango/FC2 write
@@ -7,10 +35,11 @@ the received bytes, reject only an empty/unreadable file, and do not spawn
 ffprobe per media segment. Upstream EXTINF remains provisional while the stream
 is live.
 
-`PlaylistManager.finalizePlaylist()` writes `#EXT-X-ENDLIST` before the folder
-is removed from `live-status.json`. That ordering is the durable handoff to the
-server's media-integrity finalizer. The server owns strict decoding, quarantine,
-discontinuity insertion, and authoritative duration repair after capture.
+`PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST` before
+the `.active` directory is promoted into the provider downloader root. That
+rename is the durable handoff to the server. The server owns strict decoding,
+failed-segment repair, desktop-Trash discard, discontinuity insertion, and
+authoritative duration repair after capture.
 
 **Why:** Transport success and media decodability are separate concerns.
 Metadata-only per-segment probing did not detect the corrupt packets that froze
@@ -20,11 +49,13 @@ playback, and full decoding belongs after the stream is complete.
 
 One session = one folder. StreamSession owns DiskSession, PlaylistManager, InitTracker, and the retry loop. StreamDownloader is a single download attempt that receives these as inputs — it doesn't create, finalize, or remove anything.
 
-After each download attempt exits, the session calls `provider.shouldRetry(context)` with the exit reason, last master URL, and last live URL. The provider owns the "is this stream still live?" decision because the source of truth differs per platform:
+After each download attempt exits, the session may use the latest successful
+provider snapshot to resolve a fresh URL, but it does not infer completion from
+transport failure. Shared snapshot reconciliation owns the recording lifecycle:
 
-- **SC:** cam API (isCamActive). On any exit, check the API. If still active, build fresh master URL.
-- **Tango:** account lookup by encrypted account id is the source of truth. Discovery reads `tango.txt`, asks `/stream/social/v2/list/byEncryptedAccountIds` for those ids, and starts only `LIVING` + public streams with a master playlist. On fetch-failed (401 token timing), retry same master URL. On stale-timeout or segment-failed, ask the same account lookup for a fresh master URL.
-- **FC2:** memberApi (is_publish). If still online, get fresh HLS URL.
+- **SC:** bulk public/live status plus `statusChangedAt` from the cam detail API.
+- **Tango:** bulk account lookup with `streamId`.
+- **FC2:** the adult all-channel list with `start_time`, requested no more than once per 30 seconds.
 
 **Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content.
 
@@ -54,7 +85,10 @@ Recovery from CDN failures is allowed, but every state change must be visible in
 
 ## Nothing on disk until first byte write
 
-DiskSession defers dir creation to the moment the first segment or init byte is ready to be written. DiskSession owns the DownloadHandle — when the dir is created, live-status.json is updated atomically.
+DiskSession defers dir creation to the moment the first segment or init byte is
+ready to be written. DiskSession owns the DownloadHandle; when the dir is
+created, the informational `live-status.json` view is updated. Lifecycle and
+completion never depend on that JSON file.
 
 **Why:** The old code created dirs eagerly. If the variant URL was broken, an empty dir existed with no playlist. The frontend showed it as a video, tried to load the playlist, got a 500.
 
@@ -70,15 +104,17 @@ Quality changes are buffered via `bufferQualityChange()`, flushed atomically wit
 
 **Why:** `insertQualityChange` used `appendFile` which created the playlist before the header existed. The header overwrite then destroyed the quality change entries.
 
-## Graceful shutdown: abort + await finalization
+## Graceful shutdown: abort without finalization
 
-On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions and awaits their completion promises. Each session finalizes its playlist before exiting.
+On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions
+and awaits their completion promises. The folders remain under `.active`
+without ENDLIST so the next process can compare recording identity and resume.
 
-**Why:** The old `process.exit(0)` killed downloads mid-write, leaving playlists without `#EXT-X-ENDLIST`. The orphan finalizer was the only recovery, running hours later.
+**Why:** Process shutdown is not evidence that the remote broadcast ended.
 
 ## Server serves active playlists; it finalizes completed playlists
 
-The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns active append correctness. Once ENDLIST is written, the server owns media-integrity validation and canonical playlist repair; the orphan finalizer owns crash recovery.
+The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns active append correctness. Once ENDLIST is written and the directory is promoted, the server's idempotent finalized-recording processor owns crash recovery, validation, corruption repair, and canonical playlist repair.
 
 **Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
 
@@ -125,8 +161,10 @@ TokenManager has no watcher, no cache. `getTokens()` reads the session file on e
 
 **Why:** Exponential backoff (30s-10min) meant a transient failure at 3am could escalate to 10-minute waits.
 
-## FC2 skip paid streams (fee>0)
+## FC2 skip paid streams from the adult channel list
 
-The memberApi returns `fee>0` for paid streams. Only download `fee=0`.
+The adult channel-list endpoint marks paid streams with `pay != 0`. Only
+download entries with `pay == 0`.
 
-**Why:** Paid streams pass the `is_publish` check but the WebSocket handshake for HLS URL retrieval fails without payment.
+**Why:** A paid broadcast can be live while its HLS WebSocket handshake remains
+unavailable without payment.

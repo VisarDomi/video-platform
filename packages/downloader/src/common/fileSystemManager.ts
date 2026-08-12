@@ -1,4 +1,5 @@
-import { promises as fs } from "fs";
+import { constants, promises as fs } from "fs";
+import * as path from "path";
 
 export class FileSystemManager {
     public static async readFile(filePath: string): Promise<string | null> {
@@ -18,6 +19,43 @@ export class FileSystemManager {
             return true;
         } catch (error: any) {
             console.error(`Failed to write file: ${filePath}`, error.message);
+            return false;
+        }
+    }
+
+    public static async writeFileExclusive(filePath: string, data: string | Uint8Array): Promise<boolean> {
+        try {
+            await fs.writeFile(filePath, data, { flag: "wx" });
+            return true;
+        } catch (error: any) {
+            if (error.code !== "EEXIST") {
+                console.error(`Failed to exclusively write file: ${filePath}`, error.message);
+            }
+            return false;
+        }
+    }
+
+    public static async writeFileAtomic(filePath: string, data: string | Uint8Array): Promise<boolean> {
+        const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+        let handle;
+        try {
+            handle = await fs.open(tempPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o644);
+            await handle.writeFile(data);
+            await handle.sync();
+            await handle.close();
+            handle = undefined;
+            await fs.rename(tempPath, filePath);
+            const directory = await fs.open(path.dirname(filePath), constants.O_RDONLY);
+            try {
+                await directory.sync();
+            } finally {
+                await directory.close();
+            }
+            return true;
+        } catch (error: any) {
+            console.error(`Failed to atomically write file: ${filePath}`, error.message);
+            await handle?.close().catch(() => {});
+            await fs.unlink(tempPath).catch(() => {});
             return false;
         }
     }
@@ -56,7 +94,7 @@ export class FileSystemManager {
 
     public static async writeJsonFile(filePath: string, data: object): Promise<boolean> {
         try {
-            return await this.writeFile(filePath, JSON.stringify(data, null, 2));
+            return await this.writeFileAtomic(filePath, JSON.stringify(data, null, 2));
         } catch (error: any) {
             console.error(`Failed to stringify JSON for file: ${filePath}`, error.message);
             return false;

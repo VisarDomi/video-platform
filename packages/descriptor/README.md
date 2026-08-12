@@ -1,7 +1,8 @@
 # Descriptor prototype
 
-This package contains the local native-video descriptor smoke test. It is not
-yet the production worker or job owner.
+This package contains the local native-video descriptor engine and smoke test.
+The pipeline can call its `describeArtifact()` library entry point, but the
+descriptor remains neither the durable job owner nor a standalone daemon.
 
 The smoke test accepts a remuxed media file, probes its duration, chooses a
 sampling rate that fits the configured video-token budget, and sends the file

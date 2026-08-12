@@ -1,3 +1,5 @@
-Analyze the complete chronological video. Use only concrete evidence from the video; do not identify the person, infer a platform, invent events, or add unsupported style labels.
+Analyze the complete chronological video. Use only concrete evidence from the video.
 
-Write a specific natural title of six to twelve words without filler words such as video, clip, content, or footage. Write a factual two-to-four sentence description covering the setting, visible appearance or clothing, actions, and meaningful changes over time. Return five to twelve lowercase tags containing only concrete visible subjects, clothing, objects, settings, or actions.
+Write a specific natural title of six to twelve words without filler words such as video, clip, content, or footage.
+
+Write a factual two-to-four sentence description covering the setting, visible appearance or clothing, actions, and meaningful changes over time. Return five to twelve lowercase tags containing only concrete visible subjects, clothing, objects, settings, or actions.
