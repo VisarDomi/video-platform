@@ -1,0 +1,24 @@
+{
+    "name": "pipeline",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "main": "dist/main.js",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "test": "npm run build && node --no-warnings --test test/*.test.mjs",
+        "status": "npm run build && node --no-warnings dist/main.js status",
+        "discover:plan": "npm run build && node --no-warnings dist/main.js discover-plan",
+        "discover": "npm run build && node --no-warnings dist/main.js discover --apply",
+        "retry": "npm run build && node --no-warnings dist/main.js retry",
+        "dry-run": "npm run build && node --no-warnings dist/main.js upload-plan"
+    },
+    "dependencies": {
+        "descriptor": "1.0.0",
+        "shared": "1.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.19.0",
+        "typescript": "^5.4.5"
+    }
+}

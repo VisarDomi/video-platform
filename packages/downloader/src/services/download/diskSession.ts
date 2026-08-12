@@ -13,10 +13,17 @@ export class DiskSession {
         alias: string,
         handle: DownloadHandle,
         setupDir: () => Promise<string | null>,
+        existingDirPath?: string,
     ) {
         this.alias = alias;
         this.handle = handle;
         this.setupDir = setupDir;
+        if (existingDirPath) {
+            this._dirPath = existingDirPath;
+            this._materialized = true;
+            this.handle.update({ segmentsDirPath: existingDirPath });
+            logger.info(`[DiskSession] ${this.alias}: resumed at ${path.basename(existingDirPath)}`);
+        }
     }
 
     public get materialized(): boolean {

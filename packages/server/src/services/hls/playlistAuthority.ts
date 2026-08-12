@@ -76,6 +76,13 @@ interface ParsedPlaylist {
     hasMap: boolean;
 }
 
+export interface DroppedPlaylistSegments {
+    readonly content: string;
+    readonly removedSegmentNames: readonly string[];
+    readonly missingSegmentNames: readonly string[];
+    readonly insertedDiscontinuityCount: number;
+}
+
 type PlaylistLine =
     | { kind: "line"; value: string }
     | { kind: "target-duration"; value: string }
@@ -196,6 +203,54 @@ function serializePlaylist(parsed: ParsedPlaylist, targetDuration: number): stri
     }
 
     return normalizeHeaderOrder(output).join(MISC.NEW_LINE) + MISC.NEW_LINE;
+}
+
+export function dropSegmentsFromPlaylist(
+    content: string,
+    requestedSegmentNames: ReadonlySet<string>,
+): DroppedPlaylistSegments {
+    const parsed = parsePlaylist(content);
+    if (parsed.hasMap) throw new Error("Dropping individual fMP4 fragments is not supported");
+
+    const presentNames = new Set(parsed.segments.map((segment) => segment.name));
+    const removedSegmentNames: string[] = [];
+    const missingSegmentNames = [...requestedSegmentNames].filter((name) => !presentNames.has(name));
+    const keptLines: PlaylistLine[] = [];
+    let gapBeforeNextSegment = false;
+    let insertedDiscontinuityCount = 0;
+
+    for (const line of parsed.lines) {
+        if (line.kind !== "segment") {
+            keptLines.push(line);
+            continue;
+        }
+        if (requestedSegmentNames.has(line.segment.name)) {
+            removedSegmentNames.push(line.segment.name);
+            gapBeforeNextSegment = true;
+            continue;
+        }
+        if (gapBeforeNextSegment) {
+            line.segment.metadata = [
+                HLS.DISCONTINUITY,
+                ...line.segment.metadata.filter((metadata) => metadata !== HLS.DISCONTINUITY),
+            ];
+            insertedDiscontinuityCount++;
+            gapBeforeNextSegment = false;
+        }
+        keptLines.push(line);
+    }
+
+    const targetDuration = parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION;
+    return {
+        content: serializePlaylist({
+            ...parsed,
+            lines: keptLines,
+            segments: parsed.segments.filter((segment) => !requestedSegmentNames.has(segment.name)),
+        }, targetDuration),
+        removedSegmentNames,
+        missingSegmentNames,
+        insertedDiscontinuityCount,
+    };
 }
 
 function parseProbeNumber(value: unknown): number | null {

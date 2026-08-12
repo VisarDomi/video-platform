@@ -1,9 +1,8 @@
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
-import { getProviderPaths, LIVE_STATUS_PATH } from "./config.js";
+import { getProviderPaths } from "./config.js";
 import { FileNotFoundError } from "./errors.js";
-import logger from "./logger.js";
 import * as types from "./types.js";
 import * as constants from "./constants.js";
 import url from "url";
@@ -28,9 +27,9 @@ export function findProjectRoot(): string {
 export async function resolveVideo(filename: string, provider: string): Promise<types.VideoRef> {
     const paths = getProviderPaths(provider);
     const searchPaths = [
+        { path: path.join(paths.downloader, ".active"), type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
         { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
         { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
-        { path: paths.converted, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
     ];
 
     for (const { path: basePath, type } of searchPaths) {
@@ -43,32 +42,3 @@ export async function resolveVideo(filename: string, provider: string): Promise<
 
     throw new FileNotFoundError(`Video not found: ${filename} (provider=${provider})`);
 }
-
-export async function getLiveFolders(): Promise<Set<string>> {
-    try {
-        const content = await fsPromises.readFile(LIVE_STATUS_PATH, constants.MISC.ENCODING_UTF8);
-        const liveData: types.LiveStatus = JSON.parse(content);
-
-        if (liveData && Array.isArray(liveData.downloads)) {
-            const liveFolderNames = liveData.downloads
-                .map((download) => {
-                    if (typeof download.segmentsDirPath === constants.MISC.JS_TYPES.STRING) {
-                        return path.basename(download.segmentsDirPath);
-                    }
-                    return null;
-                })
-                .filter((name): name is string => name !== null);
-
-            return new Set(liveFolderNames);
-        }
-
-        logger.warn(`${LIVE_STATUS_PATH} does not contain a valid 'downloads' array, ignoring.`);
-        return new Set();
-    } catch (error: any) {
-        if (error.code !== constants.MISC.ERROR_CODE.ENOENT) {
-            logger.error(`Failed to read or parse ${LIVE_STATUS_PATH}`, { error });
-        }
-        return new Set();
-    }
-}
-

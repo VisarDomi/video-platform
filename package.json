@@ -7,11 +7,12 @@
         "build:shared": "npm run build -w shared",
         "build:app": "npm run build -w app",
         "build:frontend": "npm run build:app",
-        "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor",
+        "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
         "build:auth": "npm run build:shared && npm run build -w auth",
         "build:downloader": "npm run build:shared && npm run build -w downloader",
         "build:server": "npm run build:shared && npm run build -w server && npm run build:app",
         "build:descriptor": "npm run build:shared && npm run build -w descriptor",
+        "build:pipeline": "npm run build:shared && npm run build -w pipeline",
         "start": "npm run start:auth && npm run start:downloader && npm run start:server",
         "start:auth": "npm run build:auth && systemctl --user start video-auth.service",
         "start:downloader": "npm run build:downloader && systemctl --user start video-downloader.service",
@@ -37,12 +38,14 @@
         "status:auth": "systemctl --user status video-auth.service --no-pager",
         "status:downloader": "systemctl --user status video-downloader.service --no-pager",
         "status:server": "systemctl --user status video-server.service --no-pager",
-        "fix-playlists": "npm run build:shared && npm run build -w server && node --no-warnings scripts/fix-historical-playlists.mjs"
+        "fix-playlists": "npm run build:shared && npm run build -w server && node --no-warnings scripts/fix-historical-playlists.mjs",
+        "repair-failed-integrity": "npm run build:shared && npm run build -w server && node --no-warnings scripts/repair-failed-integrity.mjs"
     },
     "workspaces": [
         "packages/shared",
         "packages/auth",
         "packages/descriptor",
+        "packages/pipeline",
         "packages/downloader",
         "packages/server",
         "packages/app"

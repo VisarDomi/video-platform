@@ -6,6 +6,7 @@
     "main": "main.ts",
     "scripts": {
         "build": "rm -rf dist && tsc",
+        "test": "npm run build && node --test test/*.test.mjs",
         "start": "npm run build && systemctl --user start video-downloader",
         "restart": "npm run build && systemctl --user restart video-downloader",
         "stop": "systemctl --user stop video-downloader",

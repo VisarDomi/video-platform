@@ -13,7 +13,6 @@ import scRouter from "./api/providers/fmp4.routes.js";
 import tsliveRouter from "./api/providers/tslive.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
-import { startOrphanStreamFinalizer } from "./services/orphanStreamFinalizer.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
@@ -48,7 +47,6 @@ async function startServer() {
 
   startAliasRefresh();
   startScAliasRefresh();
-  startOrphanStreamFinalizer();
   startMediaIntegrityFinalizer();
   startDiskSpaceMonitor();
 

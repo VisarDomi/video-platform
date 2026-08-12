@@ -21,8 +21,9 @@ export interface IStreamProvider {
 
 export interface DownloadExitContext {
     streamerId: string;
+    recordingId: string;
     lookupAlias?: string;
-    exitReason: "aborted" | "segment-failed" | "stale-timeout" | "fetch-failed";
+    exitReason: "aborted" | "remote-endlist" | "segment-failed" | "stale-timeout" | "fetch-failed";
     lastMasterUrl: string;
     lastLiveUrl: string | null;
 }

@@ -5,7 +5,7 @@ async function main() {
     const downloaderService = await DownloaderService.create();
 
     const shutdown = async (signal: string) => {
-        logger.info(`Received ${signal}. Finalizing active downloads...`);
+        logger.info(`Received ${signal}. Stopping active downloads without finalizing them...`);
         await downloaderService.shutdown();
         logger.info("Graceful shutdown complete.");
         process.exit(0);
