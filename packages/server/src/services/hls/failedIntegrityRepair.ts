@@ -9,8 +9,6 @@ import {
 } from "./mediaIntegrityFinalizer.js";
 import { dropSegmentsFromPlaylist, repairPlaylistDurations } from "./playlistAuthority.js";
 
-const REPORT_FILE_NAME = ".media-integrity.json";
-
 export interface FailedIntegrityRepairDependencies {
     readonly dropFile?: (filePath: string) => Promise<void>;
     readonly repairPlaylist?: (streamPath: string) => Promise<unknown>;
@@ -52,14 +50,13 @@ function safeInvalidSegmentNames(report: MediaIntegrityReport): string[] {
 
 export async function repairFailedMediaIntegrity(
     streamPath: string,
+    report: MediaIntegrityReport,
     dependencies: FailedIntegrityRepairDependencies = {},
 ): Promise<FailedIntegrityRepairResult> {
     const resolvedStreamPath = path.resolve(streamPath);
     const playlistPath = path.join(resolvedStreamPath, FILE_NAMES.HLS_PLAYLIST);
-    const reportPath = path.join(resolvedStreamPath, REPORT_FILE_NAME);
-    const report = JSON.parse(await fs.readFile(reportPath, MISC.ENCODING_UTF8)) as MediaIntegrityReport;
     if (report.version !== 2 || report.status !== "failed") {
-        throw new Error("Recording does not have a failed version-2 integrity report");
+        throw new Error("Repair requires a failed version-2 integrity result");
     }
     const invalidSegmentNames = safeInvalidSegmentNames(report);
     const originalPlaylist = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
@@ -98,10 +95,10 @@ export async function repairFailedMediaIntegrity(
     const revalidate = dependencies.revalidate
         ?? ((target: string) => finalizeMediaIntegrity(target, { retryFailed: true, revalidate: true }));
     const finalization = await revalidate(resolvedStreamPath);
-    if (finalization.kind === "not-finalized" || finalization.report.version !== 2) {
+    if (finalization.kind === "not-finalized") {
         throw new Error("Repaired recording did not produce a version-2 integrity report");
     }
-    const finalReport = finalization.report as MediaIntegrityReport;
+    const finalReport = finalization.report;
 
     return {
         streamPath: resolvedStreamPath,

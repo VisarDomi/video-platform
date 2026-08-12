@@ -1,15 +1,13 @@
 # Server Decisions
 
-## Atomic promotion triggers finalized recording processing
+## Server promotion defines finalized recording integrity
 
-For Tango, FC2, and SC, the downloader atomically publishes
-`#EXT-X-ENDLIST` and promotes the recording directory from `.active` into the
-provider downloader root. That directory rename transfers ownership to the
-server. One Linux-backed Node filesystem watch per provider normally sees the
-promotion immediately. Watch-before-scan startup reconciliation and an hourly
+For Tango, FC2, and SC, the downloader atomically writes `#EXT-X-ENDLIST` and
+hands the recording from `.active` to the hidden `.pending` sibling. The server
+watches `.pending`, processes the recording there, and alone promotes it into
+the visible downloader root after validation passes. Watch-before-scan startup reconciliation and an hourly
 non-recursive safety reconciliation cover server downtime and missed/coalesced
-events without inspecting segment inventories or enrolling the historical
-library.
+events without inspecting segment inventories.
 
 The first integrity check is one strict, single-threaded whole-playlist ffmpeg
 decode. Clean streams do not spawn a validator for every segment. If that pass
@@ -24,15 +22,16 @@ workers as the host has logical CPUs. Each worker runs one single-threaded
 ffmpeg at nice priority 10 and waits 15 seconds between recordings. On the
 current 12-CPU host, systemd additionally caps the whole service at 600% CPU,
 starts memory reclaim at 70% of physical RAM, hard-limits it at 80%, and denies
-swap. Deep scans checkpoint every 25 segments for restart-safe progress.
+swap. Deep scans checkpoint every 25 segments in the central
+`finalization.sqlite` ledger for restart-safe progress; recording directories
+receive no integrity sidecar.
 Null-muxer DTS messages are filtered while stderr is streamed, before its
 bounded capture buffer, so a truncated ignored diagnostic cannot become a
 false error.
 
-If a user moves a recording while its scan is active, the queue locates the
-same finalized folder under that provider's other managed roots and resumes
-from the moved checkpoint. A rename must not turn a media result into an
-`ENOENT` failure or let a completed stream escape validation.
+Pending recordings are hidden from video operations, so they cannot be moved
+while validation is active. The successful same-filesystem rename into the
+visible root is the completion record.
 
 PlaylistAuthority is part of the unified finalized-recording processor. It uses
 adjacent MPEG-TS PTS for ordinary boundaries and reserves ffprobe for
@@ -47,8 +46,15 @@ video-decoder, and audio-decoder errors remain fatal.
 Historical folders created before this behavior was enabled are not
 automatically decoded. They remain an explicit batch/manual migration so a
 server restart cannot unexpectedly launch millions of segment decodes.
+The bounded migration uses the stable `video-finalize-library.scope` unit, so a
+second invocation cannot run concurrently and the operator can stop it by a
+predictable name. Restarting reuses unchanged successful playlist checkpoints
+before cleanup or duration probing; failed MPEG-TS deep scans retain their
+25-segment checkpoint granularity. `--recording /exact/managed/folder` restricts
+the same processor to one visible immediate downloader/edited recording and is
+mutually exclusive with catalogue provider, scope, and limit filters.
 
-Failed-integrity repair removes only version-2 report-attributed MPEG-TS entries, inserts an HLS
+Failed-integrity repair removes only validator-attributed MPEG-TS entries, inserts an HLS
 discontinuity before the next good segment, publishes the playlist first, moves
 the exact corrupt files to desktop Trash, runs canonical duration repair, and
 strictly revalidates the result. Publishing the playlist first means an
@@ -64,13 +70,12 @@ that needs a destination creates it. The unsupported old `converter/converted`
 provider path has been removed. The standalone pipeline owns any future artifact
 layout explicitly instead of exposing it as an HLS video provider.
 
-## Pipeline requests exact recording authority
+## Pipeline trusts the server publication boundary
 
-The future standalone pipeline does not import server path configuration or
-write integrity reports. Its server calls identify provider, downloader/edited
-root, and basename; the server resolves that exact managed directory, rejects
-symlinks/path traversal, applies canonical playlist repair, and submits integrity
-work to the same bounded deduplicating queue used for completed downloads.
+The standalone pipeline reads only immediate visible downloader/edited entries.
+It ignores hidden `.active` and `.pending` roots and does not request redundant
+repair or integrity work: visible root membership means the server already
+completed both.
 
 ## Disk space monitor stops the downloader at 50GB
 

@@ -1,14 +1,14 @@
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 
-export interface FinalizedDirectoryObserverDependencies {
+export interface PendingDirectoryObserverDependencies {
     readonly watchDirectory?: (
         rootPath: string,
         listener: (eventType: string, fileName: string | Buffer | null) => void,
     ) => FSWatcher;
 }
 
-export class FinalizedDirectoryObserver {
+export class PendingDirectoryObserver {
     private readonly watchers: FSWatcher[] = [];
 
     constructor(
@@ -16,7 +16,7 @@ export class FinalizedDirectoryObserver {
         private readonly onCandidate: (recordingPath: string) => void,
         private readonly reconcile: () => void | Promise<void>,
         private readonly onWatchError: (rootPath: string, error: Error) => void,
-        private readonly dependencies: FinalizedDirectoryObserverDependencies = {},
+        private readonly dependencies: PendingDirectoryObserverDependencies = {},
     ) {}
 
     public async start(): Promise<void> {

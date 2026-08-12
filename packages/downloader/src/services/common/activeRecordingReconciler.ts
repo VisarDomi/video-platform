@@ -5,7 +5,7 @@ import { moveToDesktopTrash } from "shared";
 import { config } from "../../common/config.js";
 import logger from "../../common/logger.js";
 import { DownloadsManager } from "../state/downloadsManager.js";
-import { finalizeInactiveRecording, promoteActiveRecording } from "../download/activeRecording.js";
+import { finalizeInactiveRecording, handoffActiveRecording } from "../download/activeRecording.js";
 import { parseCompoundSegmentName } from "../download/segmentIdentity.js";
 import type { ProviderSnapshot } from "./providerSnapshot.js";
 
@@ -130,11 +130,11 @@ export class ActiveRecordingReconciler {
                 logger.info(`[${this.providerName}] Moving abandoned active folder without media to desktop Trash: ${entry.name}`);
                 await moveToDesktopTrash(recording.path);
             } else if (recording.kind === "legacy") {
-                logger.info(`[${this.providerName}] Finalizing legacy active recording without guessing an identity: ${entry.name}`);
+                logger.info(`[${this.providerName}] Handing legacy active recording to the server without guessing an identity: ${entry.name}`);
                 await finalizeInactiveRecording(recording.path);
             } else if (recording.kind === "resumable" && recording.hasEndlist) {
-                const finalizedPath = await promoteActiveRecording(recording.path);
-                logger.info(`[${this.providerName}] Completed interrupted active-to-finalized promotion: ${path.basename(finalizedPath)}`);
+                const pendingPath = await handoffActiveRecording(recording.path);
+                logger.info(`[${this.providerName}] Completed interrupted active-to-pending handoff: ${path.basename(pendingPath)}`);
             }
         }
     }
@@ -161,16 +161,16 @@ export class ActiveRecordingReconciler {
                     logger.info(`[${this.providerName}] Moving abandoned active folder without media to desktop Trash: ${entry.name}`);
                     await moveToDesktopTrash(recording.path);
                 } else {
-                    logger.info(`[${this.providerName}] Finalizing legacy active recording without guessing an identity: ${entry.name}`);
+                    logger.info(`[${this.providerName}] Handing legacy active recording to the server without guessing an identity: ${entry.name}`);
                     await finalizeInactiveRecording(recording.path);
                 }
                 continue;
             }
 
             if (recording.hasEndlist) {
-                const finalizedPath = await promoteActiveRecording(recording.path);
+                const pendingPath = await handoffActiveRecording(recording.path);
                 this.confirmations.delete(recording.path);
-                logger.info(`[${this.providerName}] Recovered completed active recording: ${path.basename(finalizedPath)}`);
+                logger.info(`[${this.providerName}] Recovered completed recording for server processing: ${path.basename(pendingPath)}`);
                 continue;
             }
 

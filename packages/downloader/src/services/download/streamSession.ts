@@ -10,7 +10,7 @@ import { StreamDownloader, DownloadResult } from "./streamDownloader.js";
 import { PlaylistManager } from "./playlistManager.js";
 import { InitTracker } from "./initTracker.js";
 import { DiskSession } from "./diskSession.js";
-import { promoteActiveRecording } from "./activeRecording.js";
+import { handoffActiveRecording } from "./activeRecording.js";
 
 export interface SessionResult {
     totalSegments: number;
@@ -107,9 +107,9 @@ export class StreamSession {
 
         if (disk.materialized && (endedByUpstream || this._finalizeRequested)) {
             await playlistManager.finalizePlaylist();
-            const finalizedPath = await promoteActiveRecording(disk.dirPath);
-            this.handle.update({ segmentsDirPath: finalizedPath });
-            logger.info(`[StreamSession] ${this.alias}: finalized dir=${path.basename(finalizedPath)} totalSegments=${initTracker.count}`);
+            const pendingPath = await handoffActiveRecording(disk.dirPath);
+            this.handle.update({ segmentsDirPath: pendingPath });
+            logger.info(`[StreamSession] ${this.alias}: handed off to server dir=${path.basename(pendingPath)} totalSegments=${initTracker.count}`);
         }
 
         this.handle.remove();

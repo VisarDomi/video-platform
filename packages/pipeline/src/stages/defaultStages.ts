@@ -1,16 +1,10 @@
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
 import { streamCopyRemux } from "./remux.js";
-import { ServerAuthorityClient } from "./serverAuthority.js";
 import { validateArtifact } from "./validateArtifact.js";
 
-export function createDefaultStages(
-    stagingRoot: string,
-    authority = new ServerAuthorityClient(),
-): PipelineStages {
+export function createDefaultStages(stagingRoot: string): PipelineStages {
     return {
-        repairPlaylist: (recording) => authority.repairPlaylist(recording),
-        confirmIntegrity: (recording) => authority.confirmIntegrity(recording),
         remux: (recording) => streamCopyRemux(recording.playlistPath, stagingRoot, recording.id),
         validateArtifact: async (_recording, artifactPath) => {
             const artifact = await validateArtifact(artifactPath);

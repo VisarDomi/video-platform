@@ -26,34 +26,15 @@ async function fixture(t, options = {}) {
     ].join("\n"));
     await writeFile(path.join(sourcePath, "00001.ts"), "one");
     await writeFile(path.join(sourcePath, "00002.ts"), "two");
-    if (options.integrity !== false) {
-        await writeFile(path.join(sourcePath, ".media-integrity.json"), JSON.stringify({
-            version: 2,
-            status: options.integrityStatus ?? "ready",
-            segmentCount: options.segmentCount ?? 2,
-            invalidSegments: options.invalidSegments ?? [],
-        }));
-    }
     return { root, sourcePath };
 }
 
-test("eligible discovery requires ENDLIST and matching ready integrity evidence", async (t) => {
+test("eligible discovery trusts a recording published in a finalized root", async (t) => {
     const { sourcePath } = await fixture(t);
     const result = await inspectRecording(sourcePath, "tango", "downloader");
     assert.equal(result.status, "eligible");
     assert.equal(result.recording.durationSeconds, 4);
     assert.match(result.recording.sourceFingerprint, /^[a-f0-9]{64}$/);
-});
-
-test("failed, missing, and mismatched integrity evidence fail closed", async (t) => {
-    const failed = await fixture(t, { integrityStatus: "failed", invalidSegments: [{ name: "00002.ts" }] });
-    assert.equal((await inspectRecording(failed.sourcePath, "tango", "downloader")).reason, "integrity_failed");
-
-    const missing = await fixture(t, { integrity: false });
-    assert.equal((await inspectRecording(missing.sourcePath, "tango", "downloader")).reason, "integrity_missing");
-
-    const mismatched = await fixture(t, { segmentCount: 1 });
-    assert.equal((await inspectRecording(mismatched.sourcePath, "tango", "downloader")).reason, "integrity_evidence_mismatch");
 });
 
 test("live recordings are excluded and root scans ignore nondirectories", async (t) => {
@@ -65,8 +46,8 @@ test("live recordings are excluded and root scans ignore nondirectories", async 
     assert.equal(results[0].status, "excluded");
 });
 
-test("finalized discovery can enroll missing integrity for the later integrity stage", async (t) => {
-    const { sourcePath } = await fixture(t, { integrity: false });
+test("finalized discovery needs no per-recording integrity sidecar", async (t) => {
+    const { sourcePath } = await fixture(t);
     const result = await inspectFinalizedRecording(sourcePath, "tango", "downloader");
     assert.equal(result.status, "finalized");
 });

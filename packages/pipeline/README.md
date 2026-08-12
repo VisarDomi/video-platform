@@ -9,10 +9,15 @@ Implemented foundations:
 - SQLite WAL/FULL durable recording state, append-only transition events, leases,
   artifact hashes, description evidence, upload reservations/attempts, and actual
   transmitted-byte accounting.
-- Fail-closed discovery inspection: ENDLIST plus a matching version-2
-  `.media-integrity.json` with `status: ready` and no invalid segments.
-- One-recording stream-copy remux argument/path planning with atomic temporary
-  output names.
+- Discovery trusts only immediate entries atomically published by the server
+  into finalized downloader and edited roots. Hidden `.active` and `.pending`
+  handoff directories are ignored; no per-recording integrity sidecar exists.
+- Discovery writes remain disabled until the server's bounded all-library
+  migration records the global historical-finalization contract in its central
+  SQLite ledger.
+- One-recording stream-copy remux with exact server-checkpoint authority,
+  atomic temporary output publication, full artifact decode, ffprobe metadata,
+  SHA-256 evidence, and durable pipeline state.
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane` by default.
 - A deterministic upload-plan command and an XVideos adapter that always refuses
@@ -21,9 +26,10 @@ Implemented foundations:
   failure, and uncertain acceptance without guessing the real HTTP protocol.
 - Cleanup hard-disabled.
 
-No command uploads, deletes, moves, remuxes, or describes real video. A read-only
+No command uploads, deletes, moves, or describes real video. A read-only
 discovery plan is available; applying it writes only candidate metadata to the
-new pipeline SQLite ledger. The authenticated XVideos request, processing-status polling, and
+new pipeline SQLite ledger. `remux-one` is the sole processing command and
+prepares one explicitly named server-verified recording. The authenticated XVideos request, processing-status polling, and
 playback verification must be learned manually before a real adapter can exist.
 
 Run isolated tests:
@@ -49,6 +55,17 @@ After reviewing that output, populate only the pipeline ledger:
 ```bash
 npm run discover -w pipeline
 ```
+
+Remux and fully validate one recording that either has an exact successful
+server checkpoint or belongs to a catalogue covered by the completed global
+contract:
+
+```bash
+npm run remux-one -w pipeline -- --recording "/absolute/managed/recording/folder"
+```
+
+The command never changes the source folder. It prints the durable MP4 path and
+hash for descriptor testing and resumes safely after interruption.
 
 Print a dry upload plan without reading credentials, reserving quota, or making
 network requests:

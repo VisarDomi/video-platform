@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { FinalizedDirectoryObserver } from "../dist/services/hls/finalizedDirectoryObserver.js";
+import { PendingDirectoryObserver } from "../dist/services/hls/pendingDirectoryObserver.js";
 
 test("provider watches are registered before startup reconciliation", async () => {
     const trace = [];
     const listeners = new Map();
-    const observer = new FinalizedDirectoryObserver(
+    const observer = new PendingDirectoryObserver(
         ["/library/tango", "/library/fc2", "/library/sc"],
         (candidate) => trace.push(`candidate:${candidate}`),
         () => trace.push("reconcile"),

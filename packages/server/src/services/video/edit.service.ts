@@ -1,4 +1,5 @@
 import { promises as fsPromises } from "fs";
+import { randomUUID } from "node:crypto";
 import path from "path";
 import { getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
@@ -18,6 +19,25 @@ interface SourcePlaylistEntry {
     readonly sourceIndex: number;
     readonly metadata: string[];
     readonly mapLine: string | null;
+}
+
+async function syncPath(targetPath: string): Promise<void> {
+    const handle = await fsPromises.open(targetPath, "r");
+    try {
+        await handle.sync();
+    } finally {
+        await handle.close();
+    }
+}
+
+async function writeFileDurably(filePath: string, content: string): Promise<void> {
+    const handle = await fsPromises.open(filePath, "wx");
+    try {
+        await handle.writeFile(content, "utf-8");
+        await handle.sync();
+    } finally {
+        await handle.close();
+    }
 }
 
 export function deriveEditedPlaylist(content: string, keepSet: Set<string>): DerivePlaylistResult {
@@ -115,39 +135,50 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
         return;
     }
 
-    const destinationPath = path.join(paths.edited, filename);
-    await fsPromises.mkdir(destinationPath, { recursive: true });
+    const pendingRoot = path.join(paths.edited, ".pending");
+    const pendingPath = path.join(pendingRoot, filename);
+    const finalizedPath = path.join(paths.edited, filename);
+    const buildingPath = path.join(pendingRoot, `.building-${randomUUID()}`);
+    await fsPromises.mkdir(pendingRoot, { recursive: true });
+    for (const destination of [pendingPath, finalizedPath]) {
+        try {
+            await fsPromises.lstat(destination);
+            throw new Error(`Edited recording destination already exists: ${destination}`);
+        } catch (error: any) {
+            if (error?.code !== "ENOENT") throw error;
+        }
+    }
+    await fsPromises.mkdir(buildingPath);
 
     const movePromises = validSegments.map((file) =>
-        fsPromises.rename(path.join(videoPath, file), path.join(destinationPath, file))
+        fsPromises.rename(path.join(videoPath, file), path.join(buildingPath, file))
     );
     await Promise.all(movePromises);
 
     if (initFiles.length > 0) {
         await Promise.all(initFiles.map(f =>
-            fsPromises.copyFile(path.join(videoPath, f), path.join(destinationPath, f))
+            fsPromises.copyFile(path.join(videoPath, f), path.join(buildingPath, f))
         ));
+        await Promise.all(initFiles.map((file) => syncPath(path.join(buildingPath, file))));
         logger.info(`[edit] ${filename}: copied ${initFiles.length} init files: ${initFiles.join(", ")}`);
     }
 
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
-    try {
-        const originalPlaylist = await fsPromises.readFile(playlistPath, "utf-8");
-        const playlistResult = deriveEditedPlaylist(originalPlaylist, segmentSet);
-        await fsPromises.writeFile(
-            path.join(destinationPath, FILE_NAMES.HLS_PLAYLIST),
-            playlistResult.content,
-            "utf-8"
-        );
-        logger.info(`[edit] ${filename}: playlist derived — keptSegments=${playlistResult.keptSegmentCount} isFmp4=${playlistResult.isFmp4} hasMapTag=${playlistResult.hasMapTag}`);
-        if (playlistResult.isFmp4 && !playlistResult.hasMapTag) {
-            logger.error(`[edit] ${filename}: fmp4 playlist lost #EXT-X-MAP tag — video will be unplayable`);
-        }
-    } catch (err) {
-        logger.error(`[edit] ${filename}: failed to read/write playlist`, { error: err });
+    const originalPlaylist = await fsPromises.readFile(playlistPath, "utf-8");
+    const playlistResult = deriveEditedPlaylist(originalPlaylist, segmentSet);
+    await writeFileDurably(
+        path.join(buildingPath, FILE_NAMES.HLS_PLAYLIST),
+        playlistResult.content,
+    );
+    logger.info(`[edit] ${filename}: playlist derived — keptSegments=${playlistResult.keptSegmentCount} isFmp4=${playlistResult.isFmp4} hasMapTag=${playlistResult.hasMapTag}`);
+    if (playlistResult.isFmp4 && !playlistResult.hasMapTag) {
+        throw new Error(`[edit] ${filename}: fmp4 playlist lost #EXT-X-MAP tag`);
     }
 
-    logger.info(`[edit] ${filename}: completed — ${validSegments.length} segments at ${destinationPath}`);
+    await syncPath(buildingPath);
+    await fsPromises.rename(buildingPath, pendingPath);
+    await syncPath(pendingRoot);
+    logger.info(`[edit] ${filename}: handed ${validSegments.length} edited segments to server validation at ${pendingPath}`);
 
     await moveService.moveVideo(ref, DESTINATIONS.TRASH);
     logger.info(`[edit] ${filename}: original moved to trash`);

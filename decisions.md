@@ -2,13 +2,19 @@
 
 ## Active recording folders are the durable downloader/server boundary (2026-08-12)
 
-The downloader owns only `<provider>/downloader/.active/<recording>/` folders.
-The server owns a recording only after the downloader has atomically published a
-playlist containing `#EXT-X-ENDLIST` and renamed the whole directory into the
-provider's `downloader/` root. The same-filesystem directory rename is the
-durable completion message. `live-status.json` remains informational and is not
-completion authority. No recording manifest or lifecycle database duplicates
-the state already expressed by the directory and playlist.
+The downloader owns mutable `<provider>/downloader/.active/<recording>/`
+folders. After writing `#EXT-X-ENDLIST`, it atomically renames the directory to
+the hidden `.pending/` sibling. That rename is a durable handoff, not
+publication. The server owns `.pending`, runs cleanup, canonical playlist
+repair, strict decode and attributable corrupt-segment repair there, and alone
+atomically renames a successful recording into the visible downloader root.
+Visible root membership therefore means server integrity passed.
+
+`live-status.json` remains informational and is not completion authority. No
+per-recording manifest or `.media-integrity.json` is required. Power-loss
+checkpoints and failed diagnostics live centrally in
+`~/.local/share/video-services/finalization.sqlite`; filesystem location remains
+the lifecycle authority.
 
 New media filenames are
 `{monotonic-local-number}_{recording-identity}_{provider-sequence}.ts`. Recording
@@ -35,13 +41,14 @@ channel-list endpoint and starts requests no more often than every 30 seconds.
 Shutdown and power loss leave `.active` recordings unfinished for restart
 reconciliation; they do not append ENDLIST.
 
-The server uses one Linux-backed Node filesystem watch per provider root for the
-normal atomic-promotion event. It registers watches before a non-recursive
+The server uses Linux-backed Node filesystem watches on the hidden downloader
+and edited `.pending` roots. It registers watches before a non-recursive
 startup reconciliation and performs a rare safety reconciliation for missed or
 coalesced events. No one-second tree scan or Rust/Go watcher is needed. One
-idempotent post-ENDLIST processor will replace orphan finalization and the
-overlapping repair/finalization scripts while reusing PlaylistAuthority and the
-bounded media-integrity queue.
+idempotent post-ENDLIST processor replaces orphan finalization and overlapping
+repair/finalization scripts while reusing PlaylistAuthority and the bounded
+media-integrity queue. Edited output is likewise built under a hidden path,
+handed to `.pending`, validated, and only then published into `editor/edited`.
 
 **Why:** Active capture, finalized local media, and postprocessing need explicit
 single-writer ownership that survives either process losing power. Filesystem
@@ -52,9 +59,9 @@ broadcasts or overwriting a reused provider sequence.
 ## Ownership: ENDLIST hands media integrity to the server (2026-08-11)
 
 The downloader owns a recording while its directory is under `.active`.
-Atomically publishing `#EXT-X-ENDLIST` and promoting that directory into the
-provider downloader root is the durable live-to-finalized handoff; the server
-then owns media integrity and canonical playlist repair.
+Atomically writing `#EXT-X-ENDLIST` and renaming into `.pending` hands it to the
+server. The server owns media integrity and canonical playlist repair and is the
+only component permitted to publish into a finalized root.
 
 Tango and FC2 no longer launch ffprobe for every downloaded segment. Their live
 loop performs only the transport-level nonempty-file check and preserves the
@@ -73,7 +80,7 @@ priority 10 and waits 15 seconds between recordings, providing about 50% of
 aggregate CPU capacity while yielding to interactive work. The systemd service
 also has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
 `MemoryMax=80%`, and `MemorySwapMax=0`. Segment scans checkpoint every 25
-segments, so service restarts resume from the last checkpoint. Harmless
+segments in the central SQLite ledger, so service restarts resume from the last checkpoint. Harmless
 null-muxer DTS diagnostics are filtered before bounded stderr capture,
 preventing truncation from turning them into false corruption.
 
@@ -154,7 +161,14 @@ the rolling rate, remains authority.
 
 The durable per-recording state machine is:
 
-`discovered -> playlist_repaired -> integrity_ready -> remuxed -> artifact_valid -> described -> xvideos_admitted -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
+`server_ready -> remuxed -> artifact_valid -> described -> xvideos_admitted -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
+
+Before the global historical-finalization contract is complete, an operator may
+prepare one explicitly selected historical recording only when the central
+server ledger has a matching successful checkpoint for its current playlist.
+`pipeline remux-one` stream-copies that source into the durable staging root,
+fully decodes the MP4, probes it, hashes it, and stops at `artifact_valid`; it
+does not invoke descriptor or upload. The source HLS folder is never modified.
 
 Blocked/failed states retain the source and the diagnostic. A stream-copy MP4
 remux is the default final artifact; transcode is destination-specific and only
@@ -216,10 +230,11 @@ its routes/services were removed; this does not affect fMP4 HLS playlists,
 pipeline folders are not created merely because a provider is listed in
 configuration. Existing empty/legacy folders are left untouched.
 
-## Historical playlist CLI uses PlaylistAuthority (2026-08-11)
+## Historical playlist repair was folded into finalization (2026-08-11, superseded 2026-08-12)
 
-`npm run fix-playlists` builds and calls the same canonical PlaylistAuthority
-used by the server instead of maintaining a second per-segment-duration rule.
+The retired `npm run fix-playlists` command called the same canonical
+PlaylistAuthority used by the server instead of maintaining a second
+per-segment-duration rule.
 For MPEG-TS it reads adjacent video PTS from bytes and uses the longest positive
 audio/video stream duration only at discontinuities, tails, or failed byte
 probes; fMP4 is skipped. The CLI retains SQLite checkpoints, live-folder guards,
@@ -227,12 +242,16 @@ CPU admission, dry-run, and power-loss-safe atomic writes. Rule version
 `media-timeline-v2` deliberately invalidates checkpoints made by the obsolete
 `max-av-v1` implementation.
 
-The applied all-provider/all-scope migration completed on 2026-08-12 after
+The applied playlist-only all-provider/all-scope migration completed on 2026-08-12 after
 11,565.628 seconds: 2,820 playlists processed, 1,940 written, 880 unchanged,
 2,318,421 segments inspected, and zero failures. This closes that historical
-batch only. New finalized recordings still receive per-recording canonical
-repair in the future pipeline, and playlist repair does not imply that strict
-media integrity passed.
+batch only. The standalone fixer and failed-integrity CLI were then removed so
+there is only one production finalization engine. The server now owns canonical
+repair and strict integrity before publication. A bounded
+`npm run finalize-library -w server` migration
+uses that exact production processor to establish the same invariant across the
+historical roots and removes obsolete per-recording integrity sidecars only
+after each recording passes.
 
 ## Descriptor uses duration-tiered FPS ceilings with token-budget adaptation (2026-08-12)
 
@@ -273,12 +292,12 @@ systemd service and is not started by the monorepo start command.
 
 Read-only discovery considers only immediate entries in finalized downloader
 and edited roots, ignores hidden directories such as `.active`, and prefers a
-finalized edited copy over the same provider/filename in downloader. Discovery may enroll a finalized item
-whose integrity evidence is absent so the server can validate it later, but no
-item can advance to remux until a version-2 `.media-integrity.json` says `ready`,
-matches the segment count, and contains no invalid segments. Exact-recording
-repair and integrity requests go through the server so the pipeline never writes
-the server-owned sidecar concurrently.
+finalized edited copy over the same provider/filename in downloader. Hidden
+`.pending` directories are never discoverable. The server is the sole publisher
+into those roots, so root membership is the integrity contract and discovery
+enters `server_ready` without a sidecar or a redundant server repair/decode
+request. A one-time bounded historical finalization pass must complete before
+the pipeline is enabled, establishing the same invariant for legacy entries.
 
 The local stages use non-overwriting stream-copy MP4 publication, then decode,
 probe, and SHA-256 the exact artifact before describing it. Descriptor is now a
@@ -489,7 +508,7 @@ Operational behavior:
 Ownership boundary:
 
 - Downloader owns `.active` playlist append for new live captures and retains upstream `#EXTINF` until completion.
-- ENDLIST plus atomic directory promotion transfers ownership to the server; the unified finalized-recording processor validates, repairs attributable MPEG-TS corruption through Desktop Trash, and invokes `PlaylistAuthority` for canonical duration repair.
+- ENDLIST plus `.active` to `.pending` handoff transfers ownership to the server; only the server may promote a validated recording into a visible finalized root.
 - HLS routes serve playlists read-only and must not silently heal on GET.
 - Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.
 

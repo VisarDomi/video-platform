@@ -4,13 +4,13 @@ import os from "os";
 import path from "path";
 
 import { FILE_NAMES, HLS, MISC } from "../../core/constants.js";
-import { getProviderPaths, LIVE_STATUS_PATH } from "../../core/config.js";
+import { FINALIZATION_DB_PATH, getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
+import { FinalizationCheckpointStore, playlistFingerprint } from "./finalizationCheckpointStore.js";
 import { processFinalizedRecording } from "./finalizedRecordingProcessor.js";
-import { FinalizedDirectoryObserver } from "./finalizedDirectoryObserver.js";
+import { PendingDirectoryObserver } from "./pendingDirectoryObserver.js";
+import { pendingRoot, publishPendingRecording } from "./pendingRecordingPublisher.js";
 
-const REPORT_FILE_NAME = ".media-integrity.json";
-const ENABLED_AT_FILE_NAME = "finalized-recording-watch-enabled-at-v1.json";
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
 const QUEUE_WORKER_COUNT = Math.max(1, Math.floor(os.cpus().length / 2));
@@ -54,16 +54,9 @@ export interface MediaIntegrityReport {
     error: string | null;
 }
 
-interface LegacyMediaIntegrityReport {
-    version: 1;
-    status: "processing" | "ready" | "ready_with_quarantined_segments" | "failed";
-}
-
-type StoredMediaIntegrityReport = MediaIntegrityReport | LegacyMediaIntegrityReport;
-
 export type MediaIntegrityFinalizationResult =
     | { kind: "not-finalized" }
-    | { kind: "already-processed"; report: StoredMediaIntegrityReport }
+    | { kind: "already-processed"; report: MediaIntegrityReport }
     | { kind: "processed"; report: MediaIntegrityReport };
 
 export interface MediaIntegrityFinalizerOptions {
@@ -71,6 +64,7 @@ export interface MediaIntegrityFinalizerOptions {
     now?: () => Date;
     retryFailed?: boolean;
     revalidate?: boolean;
+    checkpointStore?: FinalizationCheckpointStore;
 }
 
 function parseMediaPlaylist(content: string): ParsedMediaPlaylist {
@@ -186,24 +180,6 @@ function summarizeValidationFailure(result: MediaValidationResult): string {
     return `ffmpeg exited with code ${result.exitCode ?? "unknown"}`;
 }
 
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-    const temporaryPath = `${filePath}.tmp`;
-    await fs.writeFile(temporaryPath, content, MISC.ENCODING_UTF8);
-    await fs.rename(temporaryPath, filePath);
-}
-
-async function writeReport(reportPath: string, report: MediaIntegrityReport): Promise<void> {
-    await writeFileAtomic(reportPath, JSON.stringify(report, null, MISC.JSON_INDENT) + MISC.NEW_LINE);
-}
-
-async function readReport(reportPath: string): Promise<StoredMediaIntegrityReport | null> {
-    try {
-        return JSON.parse(await fs.readFile(reportPath, MISC.ENCODING_UTF8)) as StoredMediaIntegrityReport;
-    } catch {
-        return null;
-    }
-}
-
 function isSafeTsSegmentName(name: string): boolean {
     return path.basename(name) === name && name.endsWith(".ts");
 }
@@ -215,17 +191,16 @@ export async function finalizeMediaIntegrity(
     const validateMedia = options.validateMedia ?? validateMediaWithFfmpeg;
     const now = options.now ?? (() => new Date());
     const playlistPath = path.join(streamPath, FILE_NAMES.HLS_PLAYLIST);
-    const reportPath = path.join(streamPath, REPORT_FILE_NAME);
     const originalPlaylist = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
 
     if (!originalPlaylist.split(/\r?\n/).some((line) => line.trim() === HLS.ENDLIST)) {
         return { kind: "not-finalized" };
     }
 
-    const existingReport = await readReport(reportPath);
+    const fingerprint = playlistFingerprint(originalPlaylist);
+    const existingReport = options.checkpointStore?.read<MediaIntegrityReport>(streamPath, fingerprint) ?? null;
     if (
         (existingReport?.status === "ready" && options.revalidate !== true) ||
-        existingReport?.status === "ready_with_quarantined_segments" ||
         (existingReport?.status === "failed" && options.retryFailed !== true)
     ) {
         return { kind: "already-processed", report: existingReport };
@@ -248,7 +223,7 @@ export async function finalizeMediaIntegrity(
         invalidSegments: resumableReport?.invalidSegments ?? [],
         error: null,
     };
-    await writeReport(reportPath, processingReport);
+    options.checkpointStore?.write(streamPath, fingerprint, processingReport);
 
     try {
         const initialValidation = processingReport.initialPlaylistValid === null
@@ -267,7 +242,7 @@ export async function finalizeMediaIntegrity(
 
         processingReport.initialPlaylistValid = initialPlaylistValid;
         processingReport.initialValidationError = initialValidationError;
-        await writeReport(reportPath, processingReport);
+        options.checkpointStore?.write(streamPath, fingerprint, processingReport);
 
         if (!initialPlaylistValid && !parsed.hasMap) {
             for (let index = deepScannedSegmentCount; index < parsed.entries.length; index++) {
@@ -290,7 +265,7 @@ export async function finalizeMediaIntegrity(
                 ) {
                     processingReport.deepScannedSegmentCount = deepScannedSegmentCount;
                     processingReport.invalidSegments = [...invalidByName.values()];
-                    await writeReport(reportPath, processingReport);
+                    options.checkpointStore?.write(streamPath, fingerprint, processingReport);
                 }
             }
         }
@@ -311,7 +286,7 @@ export async function finalizeMediaIntegrity(
             invalidSegments,
             error,
         };
-        await writeReport(reportPath, report);
+        options.checkpointStore?.write(streamPath, fingerprint, report);
         logger.info("[MediaIntegrity] validation finished", {
             streamPath,
             status: report.status,
@@ -327,7 +302,7 @@ export async function finalizeMediaIntegrity(
             completedAt: now().toISOString(),
             error: error?.message ?? String(error),
         };
-        await writeReport(reportPath, failedReport);
+        options.checkpointStore?.write(streamPath, fingerprint, failedReport);
         logger.error("[MediaIntegrity] stream finalization failed", {
             streamPath,
             error: failedReport.error,
@@ -336,67 +311,7 @@ export async function finalizeMediaIntegrity(
     }
 }
 
-function isOwnedDownloaderPath(streamPath: string): boolean {
-    const resolved = path.resolve(streamPath);
-    return SUPPORTED_PROVIDERS.some((provider) =>
-        path.dirname(resolved) === path.resolve(getProviderPaths(provider).downloader)
-    );
-}
-
-async function findRelocatedStreamPath(streamPath: string): Promise<string | null> {
-    const resolved = path.resolve(streamPath);
-    const provider = SUPPORTED_PROVIDERS.find((name) => {
-        const paths = getProviderPaths(name);
-        return [paths.downloader, paths.edited, paths.trash]
-            .some((rootPath) => path.dirname(resolved) === path.resolve(rootPath));
-    });
-    if (!provider) return null;
-
-    const originalPlaylistPath = path.join(resolved, FILE_NAMES.HLS_PLAYLIST);
-    const originalName = path.basename(resolved);
-    const paths = getProviderPaths(provider);
-    const roots = [paths.downloader, paths.edited, paths.trash];
-
-    for (const rootPath of roots) {
-        const exactPath = path.join(rootPath, originalName);
-        if (path.resolve(exactPath) === resolved) continue;
-        if (await isFinalizedCandidate(exactPath)) return exactPath;
-    }
-
-    for (const rootPath of roots) {
-        let entries;
-        try {
-            entries = await fs.readdir(rootPath, { withFileTypes: true });
-        } catch {
-            continue;
-        }
-        for (const entry of entries) {
-            if (!entry.isDirectory() || !entry.name.startsWith(`${originalName} (`)) continue;
-            const candidatePath = path.join(rootPath, entry.name);
-            const report = await readReport(path.join(candidatePath, REPORT_FILE_NAME));
-            if (report?.version === 2 && report.playlistPath === originalPlaylistPath) {
-                return candidatePath;
-            }
-        }
-    }
-
-    return null;
-}
-
-async function readOrCreateEnabledAt(): Promise<number> {
-    const statePath = path.join(path.dirname(LIVE_STATUS_PATH), ENABLED_AT_FILE_NAME);
-    try {
-        const parsed = JSON.parse(await fs.readFile(statePath, MISC.ENCODING_UTF8));
-        const timestamp = Date.parse(parsed.enabledAt);
-        if (Number.isFinite(timestamp)) return timestamp;
-    } catch {}
-
-    const enabledAt = new Date().toISOString();
-    await writeFileAtomic(statePath, JSON.stringify({ enabledAt }, null, MISC.JSON_INDENT) + MISC.NEW_LINE);
-    return Date.parse(enabledAt);
-}
-
-async function isFinalizedCandidate(streamPath: string): Promise<boolean> {
+async function isPendingCandidate(streamPath: string): Promise<boolean> {
     try {
         const content = await fs.readFile(path.join(streamPath, FILE_NAMES.HLS_PLAYLIST), MISC.ENCODING_UTF8);
         return content.split(/\r?\n/).some((line) => line.trim() === HLS.ENDLIST);
@@ -405,10 +320,16 @@ async function isFinalizedCandidate(streamPath: string): Promise<boolean> {
     }
 }
 
-async function needsIntegrityProcessing(streamPath: string): Promise<boolean> {
-    if (!await isFinalizedCandidate(streamPath)) return false;
-    const report = await readReport(path.join(streamPath, REPORT_FILE_NAME));
-    return report === null || report.status === "processing";
+function pendingRoots(): string[] {
+    return SUPPORTED_PROVIDERS.flatMap((provider) => {
+        const paths = getProviderPaths(provider);
+        return [pendingRoot(paths.downloader), pendingRoot(paths.edited)];
+    });
+}
+
+function isOwnedPendingPath(streamPath: string, roots: readonly string[]): boolean {
+    const parent = path.dirname(path.resolve(streamPath));
+    return roots.some((rootPath) => parent === path.resolve(rootPath));
 }
 
 export class MediaIntegrityQueue {
@@ -475,74 +396,49 @@ export class MediaIntegrityQueue {
     }
 }
 
-let managedIntegrityQueue: MediaIntegrityQueue | null = null;
-const requestedRevalidationPaths = new Set<string>();
-const requestedFailedRetryPaths = new Set<string>();
-
-export async function requestMediaIntegrity(
-    streamPath: string,
-    options: { revalidate?: boolean; retryFailed?: boolean } = {},
-): Promise<StoredMediaIntegrityReport> {
-    if (!managedIntegrityQueue) throw new Error("Media-integrity queue has not started");
-    const resolvedPath = path.resolve(streamPath);
-    if (options.revalidate) requestedRevalidationPaths.add(resolvedPath);
-    if (options.retryFailed) requestedFailedRetryPaths.add(resolvedPath);
-    if (!managedIntegrityQueue.enqueue(resolvedPath)) {
-        requestedRevalidationPaths.delete(resolvedPath);
-        requestedFailedRetryPaths.delete(resolvedPath);
-    }
-    await managedIntegrityQueue.onIdle();
-    const report = await readReport(path.join(resolvedPath, REPORT_FILE_NAME));
-    if (!report) throw new Error(`Media-integrity processing produced no report for ${streamPath}`);
-    return report;
-}
-
 export function startMediaIntegrityFinalizer(): void {
+    const roots = pendingRoots();
+    const checkpointStore = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
     let catchUpRunning = false;
     const processingQueue = new MediaIntegrityQueue(async (streamPath) => {
-        logger.info("[MediaIntegrity] queue started stream", {
+        logger.info("[Finalization] queue started pending recording", {
             streamPath,
             queueDepth: processingQueue.depth,
         });
-        try {
-            const revalidate = requestedRevalidationPaths.delete(path.resolve(streamPath));
-            const retryFailed = requestedFailedRetryPaths.delete(path.resolve(streamPath));
-            if (revalidate || retryFailed || await needsIntegrityProcessing(streamPath)) {
-                await processFinalizedRecording(streamPath, { revalidate, retryFailed });
-            }
-        } catch (error: any) {
-            if (error?.code === MISC.ERROR_CODE.ENOENT) {
-                const relocatedPath = await findRelocatedStreamPath(streamPath);
-                if (relocatedPath && processingQueue.enqueue(relocatedPath)) {
-                    logger.info("[MediaIntegrity] followed relocated stream", {
-                        previousPath: streamPath,
-                        relocatedPath,
-                        queueDepth: processingQueue.depth,
-                    });
-                    return;
-                }
-            }
-            throw error;
+        const result = await processFinalizedRecording(streamPath, { checkpointStore });
+        if (result.kind === "not-finalized") return;
+        if (result.report.status !== "ready") {
+            logger.error("[Finalization] pending recording remains unpublished", {
+                streamPath,
+                error: result.report.error,
+                invalidSegmentCount: result.report.invalidSegments.length,
+            });
+            return;
         }
+        const finalizedPath = await publishPendingRecording(streamPath);
+        checkpointStore.clear(streamPath);
+        logger.info("[Finalization] atomically published validated recording", {
+            pendingPath: streamPath,
+            finalizedPath,
+            segmentCount: result.report.segmentCount,
+        });
     });
-    managedIntegrityQueue = processingQueue;
 
     const enqueue = (streamPath: string) => {
-        if (!isOwnedDownloaderPath(streamPath)) return;
+        if (!isOwnedPendingPath(streamPath, roots)) return;
         if (processingQueue.enqueue(streamPath)) {
-            logger.info("[MediaIntegrity] queued finalized stream", {
+            logger.info("[Finalization] queued pending recording", {
                 streamPath,
                 queueDepth: processingQueue.depth,
             });
         }
     };
 
-    const catchUp = async (enabledAt: number) => {
+    const catchUp = async () => {
         if (catchUpRunning) return;
         catchUpRunning = true;
         try {
-            for (const provider of SUPPORTED_PROVIDERS) {
-                const rootPath = getProviderPaths(provider).downloader;
+            for (const rootPath of roots) {
                 let entries;
                 try {
                     entries = await fs.readdir(rootPath, { withFileTypes: true });
@@ -552,11 +448,7 @@ export function startMediaIntegrityFinalizer(): void {
                 for (const entry of entries) {
                     if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
                     const streamPath = path.join(rootPath, entry.name);
-                    try {
-                        const playlistStats = await fs.stat(path.join(streamPath, FILE_NAMES.HLS_PLAYLIST));
-                        if (playlistStats.mtimeMs < enabledAt) continue;
-                        if (await needsIntegrityProcessing(streamPath)) enqueue(streamPath);
-                    } catch {}
+                    if (await isPendingCandidate(streamPath)) enqueue(streamPath);
                 }
             }
         } finally {
@@ -565,29 +457,30 @@ export function startMediaIntegrityFinalizer(): void {
     };
 
     void (async () => {
-        const enabledAt = await readOrCreateEnabledAt();
-        const observer = new FinalizedDirectoryObserver(
-            SUPPORTED_PROVIDERS.map((provider) => getProviderPaths(provider).downloader),
+        await Promise.all(roots.map((rootPath) => fs.mkdir(rootPath, { recursive: true })));
+        const observer = new PendingDirectoryObserver(
+            roots,
             (streamPath) => {
-                void isFinalizedCandidate(streamPath).then((finalized) => {
-                    if (finalized) enqueue(streamPath);
+                void isPendingCandidate(streamPath).then((pending) => {
+                    if (pending) enqueue(streamPath);
                 }).catch(() => {});
             },
-            () => catchUp(enabledAt),
+            catchUp,
             (rootPath, error) => logger.error(
-                "[MediaIntegrity] provider-root watch failed; hourly reconciliation remains active",
+                "[Finalization] pending-root watch failed; hourly reconciliation remains active",
                 { rootPath, error: error.message },
             ),
         );
         await observer.start();
-        setInterval(() => void catchUp(enabledAt), CATCH_UP_INTERVAL_MS);
-        logger.info("[MediaIntegrity] watching atomically promoted finalized streams", {
+        setInterval(() => void catchUp(), CATCH_UP_INTERVAL_MS);
+        logger.info("[Finalization] watching downloader/server handoff roots", {
             completionSignal: HLS.ENDLIST,
-            enabledAt: new Date(enabledAt).toISOString(),
+            roots,
             workerCount: QUEUE_WORKER_COUNT,
             cooldownMs: QUEUE_COOLDOWN_MS,
         });
     })().catch((error: any) => {
-        logger.error("[MediaIntegrity] failed to start finalizer", { error: error?.message });
+        checkpointStore.close();
+        logger.error("[Finalization] failed to start finalizer", { error: error?.message });
     });
 }

@@ -1,7 +1,5 @@
 export const PIPELINE_STATES = [
-    "discovered",
-    "playlist_repaired",
-    "integrity_ready",
+    "server_ready",
     "remuxed",
     "artifact_valid",
     "described",
@@ -18,9 +16,7 @@ export const PIPELINE_STATES = [
 export type PipelineState = typeof PIPELINE_STATES[number];
 
 const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState[]>> = {
-    discovered: ["playlist_repaired", "blocked", "failed"],
-    playlist_repaired: ["integrity_ready", "blocked", "failed"],
-    integrity_ready: ["remuxed", "blocked", "failed"],
+    server_ready: ["remuxed", "blocked", "failed"],
     remuxed: ["artifact_valid", "blocked", "failed"],
     artifact_valid: ["described", "blocked", "failed"],
     described: ["xvideos_admitted", "blocked", "failed"],
@@ -31,7 +27,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState
     xvideos_verified: ["cleanup_eligible", "failed"],
     cleanup_eligible: [],
     blocked: [],
-    failed: ["discovered", "playlist_repaired", "integrity_ready", "remuxed", "artifact_valid", "described"],
+    failed: ["server_ready", "remuxed", "artifact_valid", "described"],
 };
 
 export function assertTransition(from: PipelineState, to: PipelineState): void {

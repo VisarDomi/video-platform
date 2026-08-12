@@ -37,9 +37,7 @@
         "status:all": "systemctl --user status video-auth.service video-downloader.service video-server.service --no-pager",
         "status:auth": "systemctl --user status video-auth.service --no-pager",
         "status:downloader": "systemctl --user status video-downloader.service --no-pager",
-        "status:server": "systemctl --user status video-server.service --no-pager",
-        "fix-playlists": "npm run build:shared && npm run build -w server && node --no-warnings scripts/fix-historical-playlists.mjs",
-        "repair-failed-integrity": "npm run build:shared && npm run build -w server && node --no-warnings scripts/repair-failed-integrity.mjs"
+        "status:server": "systemctl --user status video-server.service --no-pager"
     },
     "workspaces": [
         "packages/shared",

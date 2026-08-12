@@ -112,9 +112,18 @@ without ENDLIST so the next process can compare recording identity and resume.
 
 **Why:** Process shutdown is not evidence that the remote broadcast ended.
 
-## Server serves active playlists; it finalizes completed playlists
+## Server serves active playlists and publishes validated recordings
 
-The HLS route reads the playlist file directly. No `ensurePlaylist`, no `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns active append correctness. Once ENDLIST is written and the directory is promoted, the server's idempotent finalized-recording processor owns crash recovery, validation, corruption repair, and canonical playlist repair.
+The HLS route reads the playlist file directly. No `ensurePlaylist`, no
+`generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns
+active append correctness. Once ENDLIST is written and the directory is handed
+to `.pending`, the server's idempotent finalized-recording processor owns crash
+recovery, validation, corruption repair, canonical playlist repair, and final
+publication.
+
+ENDLIST moves the directory only from `.active` to hidden `.pending`. This is a
+handoff, not final publication. The server alone moves a validated `.pending`
+recording into the visible downloader root.
 
 **Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
 

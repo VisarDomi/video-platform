@@ -9,14 +9,7 @@ export interface DescriptionEvidence {
     readonly evidencePath: string;
 }
 
-export interface ConfirmedIntegrity {
-    readonly sourceFingerprint: string;
-    readonly durationSeconds: number;
-}
-
 export interface PipelineStages {
-    repairPlaylist(recording: Recording): Promise<void>;
-    confirmIntegrity(recording: Recording): Promise<ConfirmedIntegrity>;
     remux(recording: Recording): Promise<string>;
     validateArtifact(recording: Recording, artifactPath: string): Promise<Omit<ArtifactRecord, "recordingId">>;
     describe(recording: Recording, artifact: ArtifactRecord): Promise<DescriptionEvidence>;
@@ -32,7 +25,7 @@ export class PipelineOrchestrator {
 
     async processOne(now = new Date()): Promise<Recording | null> {
         const recording = this.database.claimNext(
-            ["discovered", "playlist_repaired", "integrity_ready", "remuxed", "artifact_valid"],
+            ["server_ready", "remuxed", "artifact_valid"],
             this.workerId,
             this.leaseMilliseconds,
             now,
@@ -41,17 +34,7 @@ export class PipelineOrchestrator {
         let result: Recording;
         try {
             switch (recording.state) {
-                case "discovered":
-                    await this.stages.repairPlaylist(recording);
-                    result = this.database.transition(recording.id, "discovered", "playlist_repaired");
-                    break;
-                case "playlist_repaired":
-                    result = this.database.saveIntegrityReady(
-                        recording.id,
-                        await this.stages.confirmIntegrity(recording),
-                    );
-                    break;
-                case "integrity_ready": {
+                case "server_ready": {
                     const artifactPath = await this.stages.remux(recording);
                     result = this.database.saveRemuxOutput(recording.id, artifactPath);
                     break;

@@ -12,6 +12,7 @@ async function fixture(t) {
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
     const finalizedRoot = path.join(root, "fc2", "downloader");
     const activeRoot = path.join(finalizedRoot, ".active");
+    const pendingRoot = path.join(finalizedRoot, ".pending");
     const name = "2026-08-12 090000 12345";
     const recordingPath = path.join(activeRoot, name);
     await mkdir(recordingPath, { recursive: true });
@@ -31,6 +32,7 @@ async function fixture(t) {
     return {
         finalizedRoot,
         activeRoot,
+        pendingRoot,
         name,
         recordingPath,
         reconciler: new ActiveRecordingReconciler("fc2", manager, (alias) => alias, activeRoot),
@@ -88,8 +90,9 @@ test("terminal state needs successful observations spanning sixty seconds", asyn
     await stat(value.recordingPath);
     await value.reconciler.reconcile(terminal(60_000));
     await assert.rejects(stat(value.recordingPath), { code: "ENOENT" });
-    const finalizedPath = path.join(value.finalizedRoot, value.name);
-    assert.match(await readFile(path.join(finalizedPath, "playlist.m3u8"), "utf8"), /#EXT-X-ENDLIST\n$/);
+    const pendingPath = path.join(value.pendingRoot, value.name);
+    assert.match(await readFile(path.join(pendingPath, "playlist.m3u8"), "utf8"), /#EXT-X-ENDLIST\n$/);
+    await assert.rejects(stat(path.join(value.finalizedRoot, value.name)), { code: "ENOENT" });
 });
 
 test("a different identity finalizes immediately", async (t) => {
@@ -105,10 +108,11 @@ test("a different identity finalizes immediately", async (t) => {
         terminalTargetIds: new Set(),
     });
     await assert.rejects(stat(value.recordingPath), { code: "ENOENT" });
-    await stat(path.join(value.finalizedRoot, value.name));
+    await stat(path.join(value.pendingRoot, value.name));
+    await assert.rejects(stat(path.join(value.finalizedRoot, value.name)), { code: "ENOENT" });
 });
 
-test("startup completes an interrupted ENDLIST promotion without provider access", async (t) => {
+test("startup completes an interrupted ENDLIST handoff without publishing it", async (t) => {
     const value = await fixture(t);
     await writeFile(path.join(value.recordingPath, "playlist.m3u8"), [
         "#EXTM3U",
@@ -120,7 +124,8 @@ test("startup completes an interrupted ENDLIST promotion without provider access
     ].join("\n"));
     await value.reconciler.recoverLocalState();
     await assert.rejects(stat(value.recordingPath), { code: "ENOENT" });
-    await stat(path.join(value.finalizedRoot, value.name));
+    await stat(path.join(value.pendingRoot, value.name));
+    await assert.rejects(stat(path.join(value.finalizedRoot, value.name)), { code: "ENOENT" });
 });
 
 test("a first segment persisted before playlist creation remains resumable", async (t) => {

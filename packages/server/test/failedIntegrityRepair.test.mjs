@@ -43,19 +43,19 @@ async function createFailedStream(t) {
     await Promise.all([mkdir(streamPath), mkdir(trashPath)]);
     await writeFile(path.join(streamPath, "playlist.m3u8"), PLAYLIST);
     await Promise.all(["1.ts", "2.ts", "3.ts"].map(name => writeFile(path.join(streamPath, name), name)));
-    await writeFile(
-        path.join(streamPath, ".media-integrity.json"),
-        JSON.stringify(report(streamPath, "failed", [{ name: "2.ts", error: "corrupt decoded frame" }])),
-    );
-    return { streamPath, trashPath };
+    return {
+        streamPath,
+        trashPath,
+        failedReport: report(streamPath, "failed", [{ name: "2.ts", error: "corrupt decoded frame" }]),
+    };
 }
 
 test("failed integrity repair publishes the safe playlist before moving the exact bad file", async (t) => {
-    const { streamPath, trashPath } = await createFailedStream(t);
+    const { streamPath, trashPath, failedReport } = await createFailedStream(t);
     const observedOrder = [];
     const readyReport = report(streamPath, "ready");
 
-    const result = await repairFailedMediaIntegrity(streamPath, {
+    const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
         repairPlaylist: async () => {
             const playlist = await readFile(path.join(streamPath, "playlist.m3u8"), "utf8");
             assert.equal(playlist.includes("2.ts"), false);
@@ -84,14 +84,14 @@ test("failed integrity repair publishes the safe playlist before moving the exac
 });
 
 test("failed integrity repair safely resumes after playlist publication and file movement", async (t) => {
-    const { streamPath, trashPath } = await createFailedStream(t);
+    const { streamPath, trashPath, failedReport } = await createFailedStream(t);
     await rename(path.join(streamPath, "2.ts"), path.join(trashPath, "2.ts"));
     await writeFile(
         path.join(streamPath, "playlist.m3u8"),
         `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n1.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:1,\n3.ts\n#EXT-X-ENDLIST\n`,
     );
 
-    const result = await repairFailedMediaIntegrity(streamPath, {
+    const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
         repairPlaylist: async () => {},
         dropFile: async () => assert.fail("an already absent source file must not be moved again"),
         revalidate: async () => ({ kind: "processed", report: report(streamPath, "ready") }),
