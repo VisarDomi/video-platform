@@ -10,6 +10,7 @@
         "status": "npm run build && node --no-warnings dist/main.js status",
         "discover:plan": "npm run build && node --no-warnings dist/main.js discover-plan",
         "discover": "npm run build && node --no-warnings dist/main.js discover --apply",
+        "remux-one": "npm run build && node scripts/run-bounded-remux-one.mjs",
         "retry": "npm run build && node --no-warnings dist/main.js retry",
         "dry-run": "npm run build && node --no-warnings dist/main.js upload-plan"
     },

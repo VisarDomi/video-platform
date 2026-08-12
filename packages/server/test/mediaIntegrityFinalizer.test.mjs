@@ -11,6 +11,10 @@ import {
     MediaIntegrityQueue,
     mediaDecodeErrors,
 } from "../dist/services/hls/mediaIntegrityFinalizer.js";
+import {
+    FinalizationCheckpointStore,
+    playlistFingerprint,
+} from "../dist/services/hls/finalizationCheckpointStore.js";
 
 const PLAYLIST_HEADER = `#EXTM3U
 #EXT-X-VERSION:7
@@ -26,6 +30,16 @@ async function createStream(t, playlist) {
         writeFile(path.join(streamPath, name), Buffer.alloc(188, 0x47))
     ));
     return streamPath;
+}
+
+async function createCheckpointStore(t) {
+    const root = await mkdtemp(path.join(tmpdir(), "finalization-checkpoints-"));
+    const store = new FinalizationCheckpointStore(path.join(root, "finalization.sqlite"));
+    t.after(async () => {
+        store.close();
+        await import("node:fs/promises").then(fs => fs.rm(root, { recursive: true, force: true }));
+    });
+    return store;
 }
 
 test("null muxer DTS bookkeeping is not classified as decoded-media corruption", () => {
@@ -151,8 +165,10 @@ test("failed whole-playlist validation reports exact bad segments without changi
 #EXT-X-ENDLIST
 `;
     const streamPath = await createStream(t, originalPlaylist);
+    const checkpointStore = await createCheckpointStore(t);
 
     const result = await finalizeMediaIntegrity(streamPath, {
+        checkpointStore,
         validateMedia: async inputPath => {
             const name = path.basename(inputPath);
             if (name === "2.ts") {
@@ -178,6 +194,7 @@ test("failed whole-playlist validation reports exact bad segments without changi
     assert.equal((await stat(path.join(streamPath, "2.ts"))).size, 188);
 
     const repeated = await finalizeMediaIntegrity(streamPath, {
+        checkpointStore,
         validateMedia: async () => {
             throw new Error("completed streams must not be revalidated");
         },
@@ -200,15 +217,17 @@ test("playlist without ENDLIST remains owned by the downloader", async (t) => {
 });
 
 test("resuming a deep scan continues after the last checkpoint", async (t) => {
-    const streamPath = await createStream(t, `${PLAYLIST_HEADER}#EXTINF:1,
+    const playlist = `${PLAYLIST_HEADER}#EXTINF:1,
 1.ts
 #EXTINF:1,
 2.ts
 #EXTINF:1,
 3.ts
 #EXT-X-ENDLIST
-`);
-    await writeFile(path.join(streamPath, ".media-integrity.json"), JSON.stringify({
+`;
+    const streamPath = await createStream(t, playlist);
+    const checkpointStore = await createCheckpointStore(t);
+    checkpointStore.write(streamPath, playlistFingerprint(playlist), {
         version: 2,
         status: "processing",
         startedAt: "2026-08-11T00:00:00.000Z",
@@ -220,10 +239,11 @@ test("resuming a deep scan continues after the last checkpoint", async (t) => {
         deepScannedSegmentCount: 2,
         invalidSegments: [{ name: "2.ts", error: "corrupt decoded frame" }],
         error: null,
-    }));
+    });
 
     const validated = [];
     const result = await finalizeMediaIntegrity(streamPath, {
+        checkpointStore,
         validateMedia: async inputPath => {
             validated.push(path.basename(inputPath));
             return { valid: true, exitCode: 0, stderr: "" };

@@ -30,9 +30,7 @@ function input(directory, suffix = "one") {
 }
 
 function advanceToRemuxed(database, id) {
-    database.transition(id, "discovered", "playlist_repaired");
-    database.transition(id, "playlist_repaired", "integrity_ready");
-    database.transition(id, "integrity_ready", "remuxed");
+    database.transition(id, "server_ready", "remuxed");
 }
 
 function advanceToDescribed(database, recording, directory, sizeBytes = 1_000) {
@@ -72,7 +70,6 @@ test("schema initialization is idempotent and discovery deduplicates across rest
 test("changed source fingerprints block downstream reuse", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    database.transition(recording.id, "discovered", "playlist_repaired");
     const changed = database.discover({ ...input(directory), sourceFingerprint: "changed" });
     assert.equal(changed.state, "blocked");
     assert.match(changed.blockReason, /source changed/);
@@ -82,10 +79,10 @@ test("leases prevent duplicate claims and expired leases are recoverable", async
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     const now = new Date("2026-08-12T08:00:00Z");
-    assert.equal(database.claimNext(["discovered"], "worker-a", 1_000, now)?.id, recording.id);
-    assert.equal(database.claimNext(["discovered"], "worker-b", 1_000, now), null);
+    assert.equal(database.claimNext(["server_ready"], "worker-a", 1_000, now)?.id, recording.id);
+    assert.equal(database.claimNext(["server_ready"], "worker-b", 1_000, now), null);
     assert.equal(
-        database.claimNext(["discovered"], "worker-b", 1_000, new Date(now.getTime() + 1_001))?.id,
+        database.claimNext(["server_ready"], "worker-b", 1_000, new Date(now.getTime() + 1_001))?.id,
         recording.id,
     );
     assert.throws(() => database.releaseLease(recording.id, "worker-a"), /not owned/);
@@ -95,10 +92,10 @@ test("leases prevent duplicate claims and expired leases are recoverable", async
 test("state transitions cannot skip, reverse, or double-complete stages", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    assert.throws(() => database.transition(recording.id, "discovered", "integrity_ready"), /Invalid pipeline transition/);
-    database.transition(recording.id, "discovered", "playlist_repaired");
-    assert.throws(() => database.transition(recording.id, "discovered", "playlist_repaired"), /expected state/);
-    assert.throws(() => database.transition(recording.id, "playlist_repaired", "discovered"), /Invalid pipeline transition/);
+    assert.throws(() => database.transition(recording.id, "server_ready", "artifact_valid"), /Invalid pipeline transition/);
+    database.transition(recording.id, "server_ready", "remuxed");
+    assert.throws(() => database.transition(recording.id, "server_ready", "remuxed"), /expected state/);
+    assert.throws(() => database.transition(recording.id, "remuxed", "server_ready"), /Invalid pipeline transition/);
 });
 
 test("description evidence must name the exact validated artifact hash", async (t) => {
@@ -215,11 +212,6 @@ test("the orchestrator resumes one durable stage at a time", async (t) => {
     const artifactPath = path.join(directory, "artifact.mp4");
     const artifactHash = "f".repeat(64);
     const stages = {
-        async repairPlaylist() { calls.push("repair"); },
-        async confirmIntegrity() {
-            calls.push("integrity");
-            return { sourceFingerprint: "e".repeat(64), durationSeconds: 600 };
-        },
         async remux() { calls.push("remux"); return artifactPath; },
         async validateArtifact() {
             calls.push("validate");
@@ -242,8 +234,8 @@ test("the orchestrator resumes one durable stage at a time", async (t) => {
         },
     };
     const orchestrator = new PipelineOrchestrator(database, stages, "worker-test");
-    for (let index = 0; index < 5; index++) await orchestrator.processOne();
-    assert.deepEqual(calls, ["repair", "integrity", "remux", "validate", "describe"]);
+    for (let index = 0; index < 3; index++) await orchestrator.processOne();
+    assert.deepEqual(calls, ["remux", "validate", "describe"]);
     assert.equal(database.get(recording.id)?.state, "described");
     assert.equal(database.get(recording.id)?.leaseOwner, null);
 });
@@ -252,17 +244,15 @@ test("stage failures persist diagnostics without continuing downstream", async (
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     const stages = {
-        async repairPlaylist() { throw new Error("repair exploded"); },
-        async confirmIntegrity() { throw new Error("not called"); },
-        async remux() { throw new Error("not called"); },
+        async remux() { throw new Error("remux exploded"); },
         async validateArtifact() { throw new Error("not called"); },
         async describe() { throw new Error("not called"); },
     };
     const result = await new PipelineOrchestrator(database, stages, "worker-test").processOne();
     assert.equal(result.state, "failed");
-    assert.equal(result.blockReason, "repair exploded");
+    assert.equal(result.blockReason, "remux exploded");
     assert.equal(result.leaseOwner, null);
-    assert.equal(database.retryFailed(recording.id).state, "discovered");
+    assert.equal(database.retryFailed(recording.id).state, "server_ready");
 });
 
 test("the upload coordinator records fake transport success without a real network", async (t) => {

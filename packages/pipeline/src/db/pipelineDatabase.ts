@@ -5,7 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type { ArtifactRecord, Recording, RecordingInput } from "../domain/types.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
 interface RecordingRow {
@@ -219,13 +219,13 @@ export class PipelineDatabase {
                     INSERT INTO recordings (
                         id, provider, source_kind, source_path, playlist_path,
                         source_fingerprint, duration_seconds, state, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'server_ready', ?, ?)
                 `).run(
                     id, normalized.provider, normalized.sourceKind, normalized.sourcePath,
                     normalized.playlistPath, normalized.sourceFingerprint,
                     normalized.durationSeconds, timestamp, timestamp,
                 );
-                this.insertEvent(id, null, "discovered", "eligible finalized recording discovered", timestamp);
+                this.insertEvent(id, null, "server_ready", "server-published finalized recording discovered", timestamp);
             });
         } else if (existing.sourceFingerprint !== normalized.sourceFingerprint) {
             this.transaction(() => {
@@ -272,27 +272,6 @@ export class PipelineDatabase {
         return recording;
     }
 
-    saveIntegrityReady(id: string, evidence: {
-        sourceFingerprint: string;
-        durationSeconds: number;
-    }, now = new Date()): Recording {
-        if (!/^[a-f0-9]{64}$/.test(evidence.sourceFingerprint)) throw new Error("Invalid integrity fingerprint");
-        if (!Number.isFinite(evidence.durationSeconds) || evidence.durationSeconds <= 0) {
-            throw new Error("Invalid integrity duration");
-        }
-        const timestamp = now.toISOString();
-        this.transaction(() => {
-            const result = this.database.prepare(`
-                UPDATE recordings SET state = 'integrity_ready', source_fingerprint = ?,
-                    duration_seconds = ?, block_reason = NULL, updated_at = ?
-                WHERE id = ? AND state = 'playlist_repaired'
-            `).run(evidence.sourceFingerprint, evidence.durationSeconds, timestamp, id);
-            if (result.changes !== 1) throw new Error(`Recording ${id} is not in expected state playlist_repaired`);
-            this.insertEvent(id, "playlist_repaired", "integrity_ready", "ready integrity evidence matched repaired source", timestamp);
-        });
-        return this.requireRecording(id);
-    }
-
     claimNext(states: readonly PipelineState[], owner: string, leaseMilliseconds: number, now = new Date()): Recording | null {
         if (states.length === 0 || leaseMilliseconds <= 0) throw new Error("claimNext needs states and a positive lease");
         const timestamp = now.toISOString();
@@ -335,7 +314,7 @@ export class PipelineDatabase {
             `).get(id) as { from_state: PipelineState | null } | undefined;
             const retryState = lastFailure?.from_state;
             if (!retryState || ![
-                "discovered", "playlist_repaired", "integrity_ready", "remuxed", "artifact_valid", "described",
+                "server_ready", "remuxed", "artifact_valid", "described",
             ].includes(retryState)) {
                 throw new Error(`Recording ${id} has no retryable failure state`);
             }
@@ -377,7 +356,7 @@ export class PipelineDatabase {
                 VALUES (?, ?, ?)
                 ON CONFLICT(recording_id) DO UPDATE SET path = excluded.path, created_at = excluded.created_at
             `).run(id, path.resolve(outputPath), timestamp);
-            this.updateStateInTransaction(id, "integrity_ready", "remuxed", "stream-copy artifact published", timestamp);
+            this.updateStateInTransaction(id, "server_ready", "remuxed", "stream-copy artifact published", timestamp);
         });
         return this.requireRecording(id);
     }

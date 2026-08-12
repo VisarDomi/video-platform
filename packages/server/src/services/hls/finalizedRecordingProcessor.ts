@@ -9,6 +9,7 @@ import {
     type MediaIntegrityFinalizerOptions,
     type MediaIntegrityReport,
 } from "./mediaIntegrityFinalizer.js";
+import { playlistFingerprint } from "./finalizationCheckpointStore.js";
 import { repairPlaylistDurations } from "./playlistAuthority.js";
 
 export interface FinalizedRecordingProcessorDependencies {
@@ -18,7 +19,10 @@ export interface FinalizedRecordingProcessorDependencies {
         streamPath: string,
         options: MediaIntegrityFinalizerOptions,
     ) => Promise<MediaIntegrityFinalizationResult>;
-    readonly repairFailed?: (streamPath: string) => Promise<{ finalReport: MediaIntegrityReport }>;
+    readonly repairFailed?: (
+        streamPath: string,
+        report: MediaIntegrityReport,
+    ) => Promise<{ finalReport: MediaIntegrityReport }>;
 }
 
 export async function moveUnreferencedTransportSegmentsToTrash(
@@ -49,11 +53,30 @@ export async function processFinalizedRecording(
     options: MediaIntegrityFinalizerOptions = {},
     dependencies: FinalizedRecordingProcessorDependencies = {},
 ): Promise<MediaIntegrityFinalizationResult> {
+    if (options.checkpointStore && options.revalidate !== true) {
+        const playlistPath = path.join(streamPath, "playlist.m3u8");
+        const playlist = await fs.readFile(playlistPath, "utf8");
+        const existingReport = options.checkpointStore.read<MediaIntegrityReport>(
+            streamPath,
+            playlistFingerprint(playlist),
+        );
+        if (existingReport?.version === 2 && existingReport.status === "ready") {
+            return { kind: "already-processed", report: existingReport };
+        }
+    }
+
     const cleanup = dependencies.cleanup ?? moveUnreferencedTransportSegmentsToTrash;
     const repairPlaylist = dependencies.repairPlaylist
         ?? ((target: string) => repairPlaylistDurations(target, { apply: true }));
     const validate = dependencies.validate ?? finalizeMediaIntegrity;
-    const repairFailed = dependencies.repairFailed ?? repairFailedMediaIntegrity;
+    const repairFailed = dependencies.repairFailed
+        ?? ((target: string, report: MediaIntegrityReport) => repairFailedMediaIntegrity(target, report, {
+            revalidate: (revalidationTarget) => finalizeMediaIntegrity(revalidationTarget, {
+                ...options,
+                retryFailed: true,
+                revalidate: true,
+            }),
+        }));
     await cleanup(streamPath);
     await repairPlaylist(streamPath);
     const initial = await validate(streamPath, options);
@@ -63,7 +86,7 @@ export async function processFinalizedRecording(
         && initial.report.status === "failed"
         && initial.report.invalidSegments.length > 0
     ) {
-        const repaired = await repairFailed(streamPath);
+        const repaired = await repairFailed(streamPath, initial.report);
         return { kind: "processed", report: repaired.finalReport };
     }
     return initial;
