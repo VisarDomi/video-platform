@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const packageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cpuQuotaPercent = Math.max(100, os.cpus().length * 50);
+const isSingleRecording = process.argv.slice(2).includes("--recording");
+const cpuWeight = isSingleRecording ? 1000 : 100;
 // A stable scope name makes the migration single-instance and gives the
 // operator one predictable unit to stop, inspect, and restart.
 const scopeName = "video-finalize-library";
@@ -15,7 +17,9 @@ const arguments_ = [
     "--scope",
     "--quiet",
     "--collect",
+    "--slice=video-processing.slice",
     `--unit=${scopeName}`,
+    `--property=CPUWeight=${cpuWeight}`,
     "--property=MemoryHigh=70%",
     "--property=MemoryMax=80%",
     "--property=MemorySwapMax=0",

@@ -37,7 +37,9 @@
         "status:all": "systemctl --user status video-auth.service video-downloader.service video-server.service --no-pager",
         "status:auth": "systemctl --user status video-auth.service --no-pager",
         "status:downloader": "systemctl --user status video-downloader.service --no-pager",
-        "status:server": "systemctl --user status video-server.service --no-pager"
+        "status:server": "systemctl --user status video-server.service --no-pager",
+        "systemd:check": "node scripts/sync-systemd.mjs --check",
+        "systemd:sync": "node scripts/sync-systemd.mjs --apply"
     },
     "workspaces": [
         "packages/shared",

@@ -66,7 +66,7 @@ export async function describeArtifact(
     const evidenceDirectory = options.evidenceKey
         ? path.join(descriptorConfig.evidenceDirectory, "artifacts", options.evidenceKey, promptVersion)
         : path.join(
-            descriptorConfig.evidenceDirectory,
+            descriptorConfig.evidenceDirectory, "manual",
             `${now().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`,
         );
     const evidencePath = path.join(evidenceDirectory, "result.json");

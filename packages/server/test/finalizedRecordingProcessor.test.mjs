@@ -19,7 +19,7 @@ const readyReport = {
     invalidSegments: [],
 };
 
-test("finalized processing cleans, repairs, then validates", async () => {
+test("finalized processing repairs, cleans newly unreferenced media, then validates", async () => {
     const trace = [];
     const result = await processFinalizedRecording("/recording", {}, {
         cleanup: async () => trace.push("cleanup"),
@@ -32,7 +32,7 @@ test("finalized processing cleans, repairs, then validates", async () => {
             throw new Error("unexpected failed repair");
         },
     });
-    assert.deepEqual(trace, ["cleanup", "repair-playlist", "validate"]);
+    assert.deepEqual(trace, ["repair-playlist", "cleanup", "validate"]);
     assert.equal(result.report.status, "ready");
 });
 
@@ -51,7 +51,7 @@ test("attributable MPEG-TS failure enters the idempotent repair path", async () 
             return { finalReport: readyReport };
         },
     });
-    assert.deepEqual(trace, ["cleanup", "repair-playlist", "validate", "repair-failed"]);
+    assert.deepEqual(trace, ["repair-playlist", "cleanup", "validate", "repair-failed"]);
     assert.equal(result.report.status, "ready");
 });
 
