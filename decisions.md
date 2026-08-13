@@ -19,11 +19,24 @@ the lifecycle authority.
 New media filenames are
 `{monotonic-local-number}_{recording-identity}_{provider-sequence}.ts`. Recording
 identity is Tango `streamId`, FC2 `start_time`, and Stripchat
-`statusChangedAt`. On restart the downloader compares the current HLS window
-only with the last ten accepted `(recording identity, provider sequence)` pairs.
-This removes ordinary window overlap while allowing an FC2 sequence reset to be
-accepted with the next local number. Writes must never overwrite a media file.
-Historical numeric names remain valid and are never migrated.
+`statusChangedAt`. Within one recording identity, the downloader persists and
+resumes from the highest accepted HLS media-sequence number. It accepts only
+higher sequence numbers, so arbitrarily large overlapping live windows cannot
+redownload old media and the deduplication state remains constant-sized. FC2
+may reset the number embedded in a segment URI (for example `2555.ts` followed
+by `0.ts`), but that is not an HLS media-sequence reset: the semantic sequence
+continues by playlist position and is what the compound filename stores. A
+genuine regression of the HLS media sequence for the same broadcast identity
+is therefore rejected instead of guessed to be new media. Writes must never
+overwrite a media file. Historical numeric names remain valid and are never
+migrated.
+
+As a publication backstop for MPEG-TS recordings using compound names, server
+finalization removes any entry whose HLS media sequence does not exceed the
+highest earlier entry, then moves the newly unreferenced owned segment files to
+desktop Trash before strict validation. This repairs overlap accidentally
+accepted by a downloader defect; it does not sort media or reinterpret legacy
+numeric filenames.
 
 Folder timestamps use the operator's local clock. Provider-supplied UTC
 recording identities retain their `Z` standard but omit colon punctuation for
@@ -70,25 +83,46 @@ runs one strict whole-playlist ffmpeg decode, and performs the expensive
 per-segment decode only when that recording-level check fails. Failed MPEG-TS
 playlists with exact fragment attribution are repaired automatically: corrupt
 entries are removed, the playlist is made canonical, the files are moved to
-desktop Trash, and a strict decode must then pass. Failed fMP4 playlists remain
-blocked without destructive repair because individual fragments require
-initialization/context for attribution.
+desktop Trash, and a strict decode must then pass. Failed fMP4 playlists are
+scanned with their active initialization map. A fragment is attributable only
+when it fails alone, its adjacent fragments pass alone, and every available
+overlapping two-fragment context still fails. Repair drops that exact fragment,
+renews both discontinuity and map before the next fragment, moves the dropped
+file to desktop Trash, and requires a clean full decode. Initialization damage,
+adjacent failures, and boundary-only failures remain blocked because they do
+not establish a uniquely safe discard.
 
-Completed recordings enter one deduplicating FIFO queue with a worker count of
-half the host's logical CPUs. Each worker runs one single-threaded ffmpeg at nice
-priority 10 and waits 15 seconds between recordings, providing about 50% of
-aggregate CPU capacity while yielding to interactive work. The systemd service
-also has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
-`MemoryMax=80%`, and `MemorySwapMax=0`. Segment scans checkpoint every 25
-segments in the central SQLite ledger, so service restarts resume from the last checkpoint. Harmless
-null-muxer DTS diagnostics are filtered before bounded stderr capture,
-preventing truncation from turning them into false corruption.
+Completed recordings enter one deduplicating FIFO queue. Normal live operation
+processes one recording at a time and gives its whole-playlist decoder half the
+host's logical CPUs; fMP4 attribution uses the same budget as parallel
+single-fragment checks. This makes a lone stream completion use the intended
+capacity while additional completions wait durably instead of multiplying
+resource demand. The historical catalog command instead parallelizes
+single-threaded decodes across its operator-selected `--concurrency`. FFmpeg
+runs at nice priority 10 and the live queue waits 15 seconds between recordings.
+The `video-processing.slice` shared by the server and manual/future pipeline
+workers has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
+`MemoryMax=80%`, and `MemorySwapMax=0`. The server and explicit single-recording
+finalization scopes have `CPUWeight=1000`, while backlog remux, descriptor, and
+all-library catalogue scopes use weight 100. Thus just-ended livestream
+finalization, its on-demand test equivalent, and API work win CPU time under
+contention without preventing background work from using otherwise idle
+capacity. Downloader and auth remain outside the processing slice. Segment scans checkpoint every 25
+segments in the central SQLite ledger, so service restarts resume from the last
+checkpoint. Harmless null-muxer DTS diagnostics are filtered before bounded
+stderr capture, and FFmpeg repeat compression is disabled. A legacy compressed
+`Last message repeated` summary is ignored only when it directly follows an
+ignored DTS line, preventing both truncation and repeat summaries from turning
+them into false corruption. Failed checkpoints carry a validator revision;
+after validation semantics change, older failures are retried once while
+current genuine failures remain durable and do not loop on hourly reconciliation.
 
-When an automatic or explicit failed-integrity repair is requested, attributable MPEG-TS
-segments are removed from the playlist, a discontinuity is inserted before the
-next good segment, canonical durations are recalculated, and the exact corrupt
-files are moved to desktop Trash. A fresh strict decode must pass before the
-recording becomes pipeline-eligible. Desktop Trash and the video library are on
+When an automatic or explicit failed-integrity repair is requested, attributable
+MPEG-TS segments or conservatively isolated fMP4 fragments are removed from the
+playlist, the required discontinuity (and fMP4 map) is inserted before the next
+good segment, canonical durations are recalculated where supported, and the
+exact corrupt files are moved to desktop Trash. A fresh strict decode must pass
+before the recording becomes pipeline-eligible. Desktop Trash and the video library are on
 the same filesystem on this host, so the move is atomic and the operator can
 recover files until intentionally emptying Trash. fMP4 failures without exact
 fragment attribution remain blocked.
@@ -301,8 +335,8 @@ the pipeline is enabled, establishing the same invariant for legacy entries.
 
 The local stages use non-overwriting stream-copy MP4 publication, then decode,
 probe, and SHA-256 the exact artifact before describing it. Descriptor is now a
-library entry point as well as a smoke command; it retains automatic duration and
-token-budget FPS selection and persists the prompt hash with every result.
+library entry point with a manual single-artifact command; it retains automatic
+duration and token-budget FPS selection and persists the prompt hash with every result.
 Artifact-hash/prompt-hash evidence paths allow a restarted worker to adopt a
 completed description rather than spend the model work twice. Stages commit one
 durable transition at a time, recover expired leases, and restore explicit
@@ -320,6 +354,21 @@ and uncertain acceptance. Cleanup and network upload are hard-disabled. A
 service and real adapter wait for authenticated manual discovery of the form,
 CSRF/session flow, accepted media/metadata constraints, returned identity,
 processing states, and playback verification.
+
+## The monorepo owns its systemd user configuration (2026-08-13)
+
+Versioned user units, the aggregate processing slice, and service drop-ins live
+under `systemd/user`. `npm run systemd:check` detects drift from installed files;
+`npm run systemd:sync` atomically installs only the declared video-platform
+files and reloads the user manager. Unit templates use a `{{HOME}}` parameter
+that the synchronizer expands for the invoking user, keeping machine-specific
+usernames out of version control. Synchronization never restarts, starts, stops,
+enables, or disables a service implicitly. Chezmoi must not maintain a second
+divergent copy of these units.
+
+**Why:** The resource hierarchy and CPU priority determine production behavior
+as directly as the queue implementation. Leaving them as unversioned machine
+state makes concurrency tests irreproducible and permits deployment drift.
 
 ## Ownership: Video is a self-contained unit (2026-04-05)
 

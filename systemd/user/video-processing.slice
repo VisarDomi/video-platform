@@ -1,0 +1,8 @@
+[Unit]
+Description=Video processing aggregate resource boundary
+
+[Slice]
+CPUQuota=600%
+MemoryHigh=70%
+MemoryMax=80%
+MemorySwapMax=0

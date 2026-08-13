@@ -7,24 +7,26 @@ import { fileURLToPath } from "node:url";
 
 const input = process.argv[2];
 if (!input) {
-    throw new Error("Usage: npm run smoke:bounded -w descriptor -- <remuxed-video-file>");
+    throw new Error("Usage: npm run describe-one:bounded -w descriptor -- <remuxed-video-file>");
 }
 
 const packageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cpuQuotaPercent = Math.max(100, os.cpus().length * 80);
-const scopeName = `video-descriptor-smoke-${process.pid}`;
+const scopeName = `video-descriptor-${process.pid}`;
 const arguments_ = [
     "--user",
     "--scope",
     "--quiet",
     "--collect",
+    "--slice=video-processing.slice",
     `--unit=${scopeName}`,
+    "--property=CPUWeight=100",
     "--property=MemoryHigh=70%",
     "--property=MemoryMax=80%",
     "--property=MemorySwapMax=0",
     `--property=CPUQuota=${cpuQuotaPercent}%`,
     process.execPath,
-    path.join(packageDirectory, "dist", "smoke.js"),
+    path.join(packageDirectory, "dist", "describe-one.js"),
     path.resolve(input),
 ];
 

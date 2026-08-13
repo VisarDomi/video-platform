@@ -1,0 +1,12 @@
+[Unit]
+Description=Video Downloader
+After=network.target
+
+[Service]
+Type=simple
+ExecStart="{{HOME}}/.local/bin/video-downloader"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

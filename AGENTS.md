@@ -5,6 +5,11 @@ Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`)
 Providers: `tango`, `fc2`, `sc`.
 Systemd user services: `video-server`, `video-downloader`, `video-auth`. The old `video-descriptor` unit was removed; do not recreate or enable a pipeline service until the uploader and authenticated verification flow are complete.
 
+The monorepo owns its systemd user configuration under `systemd/user/`. Keep
+the installed copies synchronized with `npm run systemd:check` and
+`npm run systemd:sync`; do not maintain divergent chezmoi copies. Syncing
+reloads systemd but deliberately does not restart services.
+
 ## Read
 
 - Decisions:

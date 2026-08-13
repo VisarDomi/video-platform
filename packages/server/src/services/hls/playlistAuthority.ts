@@ -55,6 +55,7 @@ export interface PlaylistRepairBatchSummary {
 interface PlaylistSegment {
     metadata: string[];
     name: string;
+    activeMapLine: string | null;
     originalDuration: number | null;
     repairedDuration: number | null;
     probe: SegmentProbe | null;
@@ -81,6 +82,12 @@ export interface DroppedPlaylistSegments {
     readonly removedSegmentNames: readonly string[];
     readonly missingSegmentNames: readonly string[];
     readonly insertedDiscontinuityCount: number;
+}
+
+export interface CompoundSequenceRepair {
+    readonly content: string;
+    readonly removedSegmentNames: readonly string[];
+    readonly skippedReason: "fmp4-map" | "legacy-or-mixed-names" | null;
 }
 
 type PlaylistLine =
@@ -117,12 +124,14 @@ function parsePlaylist(content: string): ParsedPlaylist {
     let metadataBuffer: string[] = [];
     let targetDuration: number | null = null;
     let hasMap = false;
+    let activeMapLine: string | null = null;
 
     for (const rawLine of rawLines) {
         const trimmed = rawLine.trim();
         if (trimmed === "") continue;
         if (trimmed.startsWith(HLS.MAP_PREFIX)) {
             hasMap = true;
+            activeMapLine = trimmed;
         }
 
         if (trimmed.startsWith(HLS.TARGET_DURATION_PREFIX)) {
@@ -148,6 +157,7 @@ function parsePlaylist(content: string): ParsedPlaylist {
         const segment: PlaylistSegment = {
             metadata: [...metadataBuffer],
             name: trimmed,
+            activeMapLine,
             originalDuration: originalDurationLine ? parseExtinfDuration(originalDurationLine) : null,
             repairedDuration: null,
             probe: null,
@@ -250,6 +260,119 @@ export function dropSegmentsFromPlaylist(
         removedSegmentNames,
         missingSegmentNames,
         insertedDiscontinuityCount,
+    };
+}
+
+export function dropFmp4FragmentsFromPlaylist(
+    content: string,
+    requestedSegmentNames: ReadonlySet<string>,
+): DroppedPlaylistSegments {
+    const parsed = parsePlaylist(content);
+    if (!parsed.hasMap) throw new Error("Playlist is not fMP4");
+
+    const presentNames = new Set(parsed.segments.map((segment) => segment.name));
+    const removedSegmentNames: string[] = [];
+    const missingSegmentNames = [...requestedSegmentNames].filter((name) => !presentNames.has(name));
+    const keptLines: PlaylistLine[] = [];
+    let gapBeforeNextSegment = false;
+    let insertedDiscontinuityCount = 0;
+
+    for (const line of parsed.lines) {
+        if (line.kind !== "segment") {
+            keptLines.push(line);
+            continue;
+        }
+        if (requestedSegmentNames.has(line.segment.name)) {
+            removedSegmentNames.push(line.segment.name);
+            gapBeforeNextSegment = true;
+            continue;
+        }
+        if (gapBeforeNextSegment) {
+            if (line.segment.activeMapLine === null) {
+                throw new Error(`fMP4 fragment has no active EXT-X-MAP: ${line.segment.name}`);
+            }
+            line.segment.metadata = [
+                HLS.DISCONTINUITY,
+                line.segment.activeMapLine,
+                ...line.segment.metadata.filter((metadata) => (
+                    metadata !== HLS.DISCONTINUITY && !metadata.startsWith(HLS.MAP_PREFIX)
+                )),
+            ];
+            insertedDiscontinuityCount++;
+            gapBeforeNextSegment = false;
+        }
+        keptLines.push(line);
+    }
+
+    const removed = new Set(removedSegmentNames);
+    return {
+        content: serializePlaylist({
+            ...parsed,
+            lines: keptLines,
+            segments: parsed.segments.filter((segment) => !removed.has(segment.name)),
+        }, parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION),
+        removedSegmentNames,
+        missingSegmentNames,
+        insertedDiscontinuityCount,
+    };
+}
+
+export function dropRegressedCompoundSegments(content: string): CompoundSequenceRepair {
+    const parsed = parsePlaylist(content);
+    if (parsed.hasMap) {
+        return { content, removedSegmentNames: [], skippedReason: "fmp4-map" };
+    }
+
+    const identities = parsed.segments.map((segment) => {
+        const match = segment.name.match(/^(\d+)_(.+)_(-?\d+)\.ts$/);
+        if (!match) return null;
+        const localNumber = Number.parseInt(match[1], 10);
+        const providerSequence = Number.parseInt(match[3], 10);
+        if (!Number.isSafeInteger(localNumber) || !Number.isSafeInteger(providerSequence)) return null;
+        return { recordingId: match[2], providerSequence };
+    });
+    const recordingId = identities[0]?.recordingId;
+    if (
+        identities.some((identity) => identity === null)
+        || identities.some((identity) => identity?.recordingId !== recordingId)
+    ) {
+        return { content, removedSegmentNames: [], skippedReason: "legacy-or-mixed-names" };
+    }
+
+    let highestProviderSequence: number | null = null;
+    const removedSegmentNames: string[] = [];
+    const keptLines: PlaylistLine[] = [];
+    let segmentIndex = 0;
+    for (const line of parsed.lines) {
+        if (line.kind !== "segment") {
+            keptLines.push(line);
+            continue;
+        }
+        const identity = identities[segmentIndex++];
+        if (!identity) throw new Error(`Missing compound identity for ${line.segment.name}`);
+        if (
+            highestProviderSequence !== null
+            && identity.providerSequence <= highestProviderSequence
+        ) {
+            removedSegmentNames.push(line.segment.name);
+            continue;
+        }
+        highestProviderSequence = identity.providerSequence;
+        keptLines.push(line);
+    }
+
+    if (removedSegmentNames.length === 0) {
+        return { content, removedSegmentNames, skippedReason: null };
+    }
+    const removed = new Set(removedSegmentNames);
+    return {
+        content: serializePlaylist({
+            ...parsed,
+            lines: keptLines,
+            segments: parsed.segments.filter((segment) => !removed.has(segment.name)),
+        }, parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION),
+        removedSegmentNames,
+        skippedReason: null,
     };
 }
 
@@ -463,6 +586,20 @@ async function writeFileAtomic(filePath: string, content: string): Promise<void>
         await fs.unlink(tmpPath).catch(() => {});
         throw error;
     }
+}
+
+export async function repairRegressedCompoundSegments(videoPath: string): Promise<CompoundSequenceRepair> {
+    const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
+    const originalContent = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
+    const result = dropRegressedCompoundSegments(originalContent);
+    if (result.removedSegmentNames.length > 0) {
+        await writeFileAtomic(playlistPath, result.content);
+        logger.warn("[PlaylistAuthority] removed regressed compound media sequences", {
+            playlistPath,
+            removedSegmentCount: result.removedSegmentNames.length,
+        });
+    }
+    return result;
 }
 
 export async function repairPlaylistDurations(

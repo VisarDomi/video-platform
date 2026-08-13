@@ -13,15 +13,20 @@ import { pendingRoot, publishPendingRecording } from "./pendingRecordingPublishe
 
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
-const QUEUE_WORKER_COUNT = Math.max(1, Math.floor(os.cpus().length / 2));
+const FINALIZATION_CPU_BUDGET = Math.max(1, Math.floor(os.cpus().length / 2));
+const QUEUE_WORKER_COUNT = 1;
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const FFMPEG_NICE_PRIORITY = 10;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
 const SUPPORTED_PROVIDERS = ["tango", "fc2", "sc"];
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
+export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 2;
 
 interface PlaylistEntry {
     name: string;
+    duration: number;
+    mapLine: string | null;
+    continuityEpoch: number;
 }
 
 interface ParsedMediaPlaylist {
@@ -42,6 +47,7 @@ export interface InvalidSegment {
 
 export interface MediaIntegrityReport {
     version: 2;
+    validatorRevision: number;
     status: "processing" | "ready" | "failed";
     startedAt: string;
     completedAt: string | null;
@@ -61,6 +67,8 @@ export type MediaIntegrityFinalizationResult =
 
 export interface MediaIntegrityFinalizerOptions {
     validateMedia?: (inputPath: string) => Promise<MediaValidationResult>;
+    ffmpegThreads?: number;
+    fmp4ScanConcurrency?: number;
     now?: () => Date;
     retryFailed?: boolean;
     revalidate?: boolean;
@@ -70,6 +78,9 @@ export interface MediaIntegrityFinalizerOptions {
 function parseMediaPlaylist(content: string): ParsedMediaPlaylist {
     const entries: PlaylistEntry[] = [];
     let hasMap = false;
+    let activeMapLine: string | null = null;
+    let duration = 0;
+    let continuityEpoch = 0;
 
     for (const rawLine of content.split("\n")) {
         const line = rawLine.trim();
@@ -77,9 +88,21 @@ function parseMediaPlaylist(content: string): ParsedMediaPlaylist {
 
         if (line.startsWith(HLS.MAP_PREFIX)) {
             hasMap = true;
+            if (activeMapLine !== null && activeMapLine !== line) continuityEpoch++;
+            activeMapLine = line;
+        }
+        if (line === HLS.DISCONTINUITY) {
+            continuityEpoch++;
+        }
+        if (line.startsWith(HLS.INF_PREFIX)) {
+            const parsedDuration = Number.parseFloat(line.slice(HLS.INF_PREFIX.length).split(",")[0]);
+            duration = Number.isFinite(parsedDuration) && parsedDuration > 0 ? parsedDuration : 0;
         }
 
-        if (!line.startsWith("#")) entries.push({ name: line });
+        if (!line.startsWith("#")) {
+            entries.push({ name: line, duration, mapLine: activeMapLine, continuityEpoch });
+            duration = 0;
+        }
     }
 
     return { entries, hasMap };
@@ -89,17 +112,29 @@ function isIgnoredMediaDecodeError(line: string): boolean {
     return line.includes(IGNORED_NULL_MUXER_ERROR);
 }
 
+function isRepeatedIgnoredError(line: string, previousLineWasIgnored: boolean): boolean {
+    return previousLineWasIgnored && /^\s*Last message repeated \d+ times?\s*$/.test(line);
+}
+
 export function mediaDecodeErrors(stderr: string): string {
-    return stderr
-        .split("\n")
-        .filter((line) => !isIgnoredMediaDecodeError(line))
-        .join("\n")
-        .trim();
+    const errors: string[] = [];
+    let previousLineWasIgnored = false;
+    for (const line of stderr.split("\n")) {
+        if (isIgnoredMediaDecodeError(line)) {
+            previousLineWasIgnored = true;
+            continue;
+        }
+        if (isRepeatedIgnoredError(line, previousLineWasIgnored)) continue;
+        previousLineWasIgnored = false;
+        errors.push(line);
+    }
+    return errors.join("\n").trim();
 }
 
 class FfmpegErrorCollector {
     private remainder = "";
     private captured = "";
+    private previousLineWasIgnored = false;
 
     append(chunk: Buffer): void {
         const lines = (this.remainder + chunk.toString(MISC.ENCODING_UTF8)).split("\n");
@@ -113,7 +148,13 @@ class FfmpegErrorCollector {
     }
 
     private capture(line: string): void {
-        if (isIgnoredMediaDecodeError(line) || this.captured.length >= MAX_CAPTURED_STDERR_BYTES) return;
+        if (isIgnoredMediaDecodeError(line)) {
+            this.previousLineWasIgnored = true;
+            return;
+        }
+        if (isRepeatedIgnoredError(line, this.previousLineWasIgnored)) return;
+        this.previousLineWasIgnored = false;
+        if (this.captured.length >= MAX_CAPTURED_STDERR_BYTES) return;
         this.captured = `${this.captured}${line}\n`.slice(0, MAX_CAPTURED_STDERR_BYTES);
     }
 }
@@ -124,14 +165,15 @@ export function collectMediaDecodeErrors(chunks: Buffer[]): string {
     return collector.finish();
 }
 
-export function buildFfmpegValidationArgs(inputPath: string): string[] {
+export function buildFfmpegValidationArgs(inputPath: string, threads = 1): string[] {
+    const normalizedThreads = Number.isSafeInteger(threads) && threads > 0 ? threads : 1;
     return [
         "-nostdin",
         "-hide_banner",
-        "-v", "error",
+        "-loglevel", "repeat+error",
         "-filter_threads", "1",
         "-filter_complex_threads", "1",
-        "-threads", "1",
+        "-threads", String(normalizedThreads),
         "-i", inputPath,
         "-map", "0:v?",
         "-map", "0:a?",
@@ -140,9 +182,9 @@ export function buildFfmpegValidationArgs(inputPath: string): string[] {
     ];
 }
 
-export function validateMediaWithFfmpeg(inputPath: string): Promise<MediaValidationResult> {
+export function validateMediaWithFfmpeg(inputPath: string, threads = 1): Promise<MediaValidationResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn("ffmpeg", buildFfmpegValidationArgs(inputPath), {
+        const child = spawn("ffmpeg", buildFfmpegValidationArgs(inputPath, threads), {
             stdio: ["ignore", "ignore", "pipe"],
         });
 
@@ -175,6 +217,132 @@ export function validateMediaWithFfmpeg(inputPath: string): Promise<MediaValidat
     });
 }
 
+function localPlaylistFileUri(filePath: string): string {
+    const resolved = path.resolve(filePath);
+    if (/[\r\n"]/.test(resolved)) {
+        throw new Error(`Unsupported control character in fMP4 media path: ${resolved}`);
+    }
+    return `file://${resolved}`;
+}
+
+function localMapLine(streamPath: string, mapLine: string | null): string {
+    if (mapLine === null) throw new Error("fMP4 fragment has no active EXT-X-MAP");
+    const match = mapLine.match(/\bURI="([^"]+)"/);
+    if (!match) throw new Error(`Unsupported EXT-X-MAP without a quoted URI: ${mapLine}`);
+    const mapName = match[1];
+    if (path.basename(mapName) !== mapName || /[|\r\n"]/.test(mapName)) {
+        throw new Error(`Unsafe fMP4 initialization filename: ${mapName}`);
+    }
+    return mapLine.replace(match[1], localPlaylistFileUri(path.join(streamPath, mapName)));
+}
+
+function safeFmp4FragmentPath(streamPath: string, name: string): string {
+    if (path.basename(name) !== name || /[|\r\n]/.test(name)) {
+        throw new Error(`Unsafe fMP4 fragment filename: ${name}`);
+    }
+    return path.join(streamPath, name);
+}
+
+async function writeFmp4ValidationWindow(
+    playlistPath: string,
+    streamPath: string,
+    entries: readonly PlaylistEntry[],
+): Promise<void> {
+    if (entries.length === 0) throw new Error("Cannot validate an empty fMP4 window");
+    const mapLine = localMapLine(streamPath, entries[0].mapLine);
+    if (entries.some((entry) => entry.mapLine !== entries[0].mapLine)) {
+        throw new Error("An fMP4 validation window cannot span initialization epochs");
+    }
+    const targetDuration = Math.max(1, Math.ceil(Math.max(...entries.map((entry) => entry.duration))));
+    const lines = [
+        HLS.HEADER,
+        "#EXT-X-VERSION:7",
+        `${HLS.TARGET_DURATION_PREFIX}${targetDuration}`,
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        mapLine,
+    ];
+    for (const entry of entries) {
+        lines.push(
+            `${HLS.INF_PREFIX}${entry.duration.toFixed(6)},`,
+            localPlaylistFileUri(safeFmp4FragmentPath(streamPath, entry.name)),
+        );
+    }
+    lines.push(HLS.ENDLIST, "");
+    await fs.writeFile(playlistPath, lines.join(MISC.NEW_LINE), MISC.ENCODING_UTF8);
+}
+
+async function attributeInvalidFmp4Fragments(
+    streamPath: string,
+    entries: readonly PlaylistEntry[],
+    validateMedia: (inputPath: string) => Promise<MediaValidationResult>,
+    initialScanCount: number,
+    initialFailures: ReadonlyMap<string, InvalidSegment>,
+    checkpoint: (scanCount: number, failures: readonly InvalidSegment[]) => void,
+    scanConcurrency: number,
+): Promise<{ scanCount: number; invalidSegments: InvalidSegment[]; isolatedFailureCount: number }> {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "video-fmp4-integrity-"));
+    const windowPath = path.join(temporaryRoot, "window.m3u8");
+    const failedSingles = new Map(initialFailures);
+    let scanCount = Math.min(initialScanCount, entries.length);
+
+    try {
+        const concurrency = Math.max(1, Math.floor(scanConcurrency));
+        while (scanCount < entries.length) {
+            const batch = entries.slice(scanCount, Math.min(entries.length, scanCount + concurrency));
+            const results = await Promise.all(batch.map(async (entry, batchIndex) => {
+                const batchWindowPath = path.join(temporaryRoot, `window-${batchIndex}.m3u8`);
+                await writeFmp4ValidationWindow(batchWindowPath, streamPath, [entry]);
+                return { entry, result: await validateMedia(batchWindowPath) };
+            }));
+            for (const { entry, result } of results) {
+                if (!result.valid) {
+                    failedSingles.set(entry.name, {
+                        name: entry.name,
+                        error: summarizeValidationFailure(result),
+                    });
+                }
+            }
+            scanCount += batch.length;
+            checkpoint(scanCount, [...failedSingles.values()]);
+        }
+
+        const attributable: InvalidSegment[] = [];
+        for (let index = 0; index < entries.length; index++) {
+            const entry = entries[index];
+            const failure = failedSingles.get(entry.name);
+            if (!failure) continue;
+
+            const previous = entries[index - 1];
+            const next = entries[index + 1];
+            const neighbors = [previous, next].filter((neighbor): neighbor is PlaylistEntry => (
+                neighbor !== undefined && neighbor.continuityEpoch === entry.continuityEpoch
+            ));
+            if (neighbors.length === 0 || neighbors.some((neighbor) => failedSingles.has(neighbor.name))) {
+                continue;
+            }
+
+            let everyContextFails = true;
+            for (const neighbor of neighbors) {
+                const pair = neighbor === previous ? [neighbor, entry] : [entry, neighbor];
+                await writeFmp4ValidationWindow(windowPath, streamPath, pair);
+                if ((await validateMedia(windowPath)).valid) {
+                    everyContextFails = false;
+                    break;
+                }
+            }
+            if (everyContextFails) attributable.push(failure);
+        }
+
+        return {
+            scanCount,
+            invalidSegments: attributable,
+            isolatedFailureCount: failedSingles.size,
+        };
+    } finally {
+        await fs.rm(temporaryRoot, { recursive: true, force: true });
+    }
+}
+
 function summarizeValidationFailure(result: MediaValidationResult): string {
     if (result.stderr !== "") return result.stderr;
     return `ffmpeg exited with code ${result.exitCode ?? "unknown"}`;
@@ -188,7 +356,11 @@ export async function finalizeMediaIntegrity(
     streamPath: string,
     options: MediaIntegrityFinalizerOptions = {},
 ): Promise<MediaIntegrityFinalizationResult> {
-    const validateMedia = options.validateMedia ?? validateMediaWithFfmpeg;
+    const ffmpegThreads = Math.max(1, Math.floor(options.ffmpegThreads ?? 1));
+    const validateMedia = options.validateMedia
+        ?? ((inputPath: string) => validateMediaWithFfmpeg(inputPath, ffmpegThreads));
+    const validateFragment = options.validateMedia
+        ?? ((inputPath: string) => validateMediaWithFfmpeg(inputPath, 1));
     const now = options.now ?? (() => new Date());
     const playlistPath = path.join(streamPath, FILE_NAMES.HLS_PLAYLIST);
     const originalPlaylist = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
@@ -201,17 +373,24 @@ export async function finalizeMediaIntegrity(
     const existingReport = options.checkpointStore?.read<MediaIntegrityReport>(streamPath, fingerprint) ?? null;
     if (
         (existingReport?.status === "ready" && options.revalidate !== true) ||
-        (existingReport?.status === "failed" && options.retryFailed !== true)
+        (
+            existingReport?.status === "failed"
+            && existingReport.validatorRevision === MEDIA_INTEGRITY_VALIDATOR_REVISION
+            && options.retryFailed !== true
+        )
     ) {
         return { kind: "already-processed", report: existingReport };
     }
 
     const parsed = parseMediaPlaylist(originalPlaylist);
-    const resumableReport = existingReport?.version === 2 && existingReport.status === "processing"
+    const resumableReport = existingReport?.version === 2
+        && existingReport.validatorRevision === MEDIA_INTEGRITY_VALIDATOR_REVISION
+        && existingReport.status === "processing"
         ? existingReport
         : null;
     const processingReport: MediaIntegrityReport = {
         version: 2,
+        validatorRevision: MEDIA_INTEGRITY_VALIDATOR_REVISION,
         status: "processing",
         startedAt: resumableReport?.startedAt ?? now().toISOString(),
         completedAt: null,
@@ -239,6 +418,7 @@ export async function finalizeMediaIntegrity(
             processingReport.invalidSegments.map((segment) => [segment.name, segment]),
         );
         let deepScannedSegmentCount = Math.min(processingReport.deepScannedSegmentCount, parsed.entries.length);
+        let isolatedFmp4FailureCount = 0;
 
         processingReport.initialPlaylistValid = initialPlaylistValid;
         processingReport.initialValidationError = initialValidationError;
@@ -268,13 +448,33 @@ export async function finalizeMediaIntegrity(
                     options.checkpointStore?.write(streamPath, fingerprint, processingReport);
                 }
             }
+        } else if (!initialPlaylistValid && parsed.hasMap) {
+            const attribution = await attributeInvalidFmp4Fragments(
+                streamPath,
+                parsed.entries,
+                validateFragment,
+                deepScannedSegmentCount,
+                invalidByName,
+                (scanCount, failures) => {
+                    processingReport.deepScannedSegmentCount = scanCount;
+                    processingReport.invalidSegments = [...failures];
+                    options.checkpointStore?.write(streamPath, fingerprint, processingReport);
+                },
+                options.fmp4ScanConcurrency ?? 1,
+            );
+            deepScannedSegmentCount = attribution.scanCount;
+            isolatedFmp4FailureCount = attribution.isolatedFailureCount;
+            invalidByName.clear();
+            for (const segment of attribution.invalidSegments) invalidByName.set(segment.name, segment);
         }
 
         const invalidSegments = [...invalidByName.values()];
         const error = initialPlaylistValid
             ? null
             : parsed.hasMap
-                ? `strict playlist validation failed; fMP4 segment attribution is not supported: ${initialValidationError ?? "unknown ffmpeg error"}`
+                ? invalidSegments.length > 0
+                    ? `strict playlist validation failed; ${invalidSegments.length} isolated fMP4 fragments failed contextual validation`
+                    : `strict playlist validation failed; ${isolatedFmp4FailureCount} fMP4 fragments failed individual validation but no safe isolated repair boundary was established: ${initialValidationError ?? "unknown ffmpeg error"}`
                 : `strict playlist validation failed; ${invalidSegments.length} of ${parsed.entries.length} MPEG-TS segments failed individual validation`;
         const report: MediaIntegrityReport = {
             ...processingReport,
@@ -405,7 +605,11 @@ export function startMediaIntegrityFinalizer(): void {
             streamPath,
             queueDepth: processingQueue.depth,
         });
-        const result = await processFinalizedRecording(streamPath, { checkpointStore });
+        const result = await processFinalizedRecording(streamPath, {
+            checkpointStore,
+            ffmpegThreads: FINALIZATION_CPU_BUDGET,
+            fmp4ScanConcurrency: FINALIZATION_CPU_BUDGET,
+        });
         if (result.kind === "not-finalized") return;
         if (result.report.status !== "ready") {
             logger.error("[Finalization] pending recording remains unpublished", {
@@ -477,6 +681,7 @@ export function startMediaIntegrityFinalizer(): void {
             completionSignal: HLS.ENDLIST,
             roots,
             workerCount: QUEUE_WORKER_COUNT,
+            cpuBudget: FINALIZATION_CPU_BUDGET,
             cooldownMs: QUEUE_COOLDOWN_MS,
         });
     })().catch((error: any) => {

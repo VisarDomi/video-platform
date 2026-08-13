@@ -1,14 +1,15 @@
-# Descriptor prototype
+# Descriptor engine
 
-This package contains the local native-video descriptor engine and smoke test.
+This package contains the local native-video descriptor engine and a manual
+single-artifact command.
 The pipeline can call its `describeArtifact()` library entry point, but the
 descriptor remains neither the durable job owner nor a standalone daemon.
 
-The smoke test accepts a remuxed media file, probes its duration, chooses a
+The manual command accepts a remuxed media file, probes its duration, chooses a
 sampling rate that fits the configured video-token budget, and sends the file
 to the pinned local llama.cpp fork through an OpenAI-compatible
 `input_video` request. Evidence is written beneath
-`~/.local/share/video-services/descriptor-smoke/`.
+`~/.local/share/video-services/pipeline/descriptions/`.
 
 Install and activate the exact runtime pinned in
 `runtime/llama-cpp.lock.json`:
@@ -29,16 +30,16 @@ Runtime builds default to one job per available logical CPU. Use `--jobs` to
 override that explicit limit. The installer also normalizes ccache paths to the
 selected source root so clean checkouts can reuse compiled objects.
 
-Run a smoke test against a remuxed media file:
+Describe one remuxed media file:
 
 ```bash
-npm run smoke -w descriptor -- "/path/to/video.mp4"
+npm run describe-one -w descriptor -- "/path/to/video.mp4"
 ```
 
 For long or production-sized inputs, run the bounded form:
 
 ```bash
-npm run smoke:bounded -w descriptor -- "/path/to/video.mp4"
+npm run describe-one:bounded -w descriptor -- "/path/to/video.mp4"
 ```
 
 It runs the descriptor in a transient user scope with aggregate CPU capped at

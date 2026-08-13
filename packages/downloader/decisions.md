@@ -10,13 +10,16 @@ a different identity or upstream ENDLIST ends immediately, and successful
 absent/non-public observations must span 60 seconds with no media progress.
 Unavailable provider responses never finalize media.
 
-After ENDLIST is atomically published, the directory is atomically promoted to
-the provider downloader root for server ownership. `live-status.json` is only
-runtime display state. New segment names contain monotonic local number,
-provider recording identity, and provider media sequence. Restart deduplication
-uses only the last ten accepted identity/sequence pairs, allowing legitimate
-FC2 media-sequence resets. Legacy numeric filenames remain readable but are not
-guessed as resumable identities.
+After ENDLIST is atomically published, the directory is atomically moved to the
+provider's hidden `.pending` root for server ownership. `live-status.json` is
+only runtime display state. New segment names contain monotonic local number,
+provider recording identity, and HLS media sequence. Within one recording
+identity, the downloader accepts only a sequence above its constant-sized
+high-water mark, reconstructed from the playlist on restart. FC2 segment URI
+numbers may reset while their semantic HLS sequence continues by playlist
+position; URI resets therefore remain accepted without treating an overlapping
+old HLS window as new media. Legacy numeric filenames remain readable but are
+not guessed as resumable identities.
 
 FC2 discovery uses one adult all-channel-list request no more often than every
 30 seconds. Tango `streamId`, FC2 `start_time`, and Stripchat
@@ -36,10 +39,10 @@ ffprobe per media segment. Upstream EXTINF remains provisional while the stream
 is live.
 
 `PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST` before
-the `.active` directory is promoted into the provider downloader root. That
-rename is the durable handoff to the server. The server owns strict decoding,
-failed-segment repair, desktop-Trash discard, discontinuity insertion, and
-authoritative duration repair after capture.
+the `.active` directory is moved into the provider's hidden `.pending` root.
+That rename is the durable handoff to the server. The server owns publication,
+strict decoding, failed-segment repair, desktop-Trash discard, discontinuity
+insertion, and authoritative duration repair after capture.
 
 **Why:** Transport success and media decodability are separate concerns.
 Metadata-only per-segment probing did not detect the corrupt packets that froze

@@ -125,12 +125,12 @@ prompt on two persistent remuxes:
 
 Evidence:
 
-- 12.35 s / 0.5 FPS: `descriptor-smoke/2026-08-11T20-25-00-230Z-3393e2f7/result.json`
-- 12.35 s / 1 FPS: `descriptor-smoke/2026-08-11T21-08-06-659Z-f236edc9/result.json`
-- 12.35 s / 4 FPS: `descriptor-smoke/2026-08-11T17-25-47-704Z-6c9d403c/result.json`
-- 176.27 s / 0.5 FPS: `descriptor-smoke/2026-08-11T21-09-07-200Z-58eedf08/result.json`
-- 176.27 s / 1 FPS: `descriptor-smoke/2026-08-11T20-26-16-152Z-e375e3dd/result.json`
-- 176.27 s / 4 FPS: `descriptor-smoke/2026-08-11T17-29-21-117Z-317865a2/result.json`
+- 12.35 s / 0.5 FPS: `pipeline/descriptions/experiments/2026-08-11T20-25-00-230Z-3393e2f7/result.json`
+- 12.35 s / 1 FPS: `pipeline/descriptions/experiments/2026-08-11T21-08-06-659Z-f236edc9/result.json`
+- 12.35 s / 4 FPS: `pipeline/descriptions/experiments/2026-08-11T17-25-47-704Z-6c9d403c/result.json`
+- 176.27 s / 0.5 FPS: `pipeline/descriptions/experiments/2026-08-11T21-09-07-200Z-58eedf08/result.json`
+- 176.27 s / 1 FPS: `pipeline/descriptions/experiments/2026-08-11T20-26-16-152Z-e375e3dd/result.json`
+- 176.27 s / 4 FPS: `pipeline/descriptions/experiments/2026-08-11T17-29-21-117Z-317865a2/result.json`
 
 The default `DESCRIPTOR_MAX_FPS` is therefore 4. Duration policy caps it at 4
 FPS below seven minutes, 2 FPS from seven to below fifteen minutes, and 1 FPS
@@ -142,7 +142,7 @@ does not threaten the upload schedule.
 ## Near-two-hour host-memory benchmark
 
 The longest current eligible recording was remuxed without transcoding and run
-through the bounded smoke command after changing local `file://` video handling
+through the bounded single-artifact command after changing local `file://` video handling
 to stream from its validated path. The earlier implementation copied the whole
 4.91 GB MP4 into two anonymous buffers and fed FFmpeg through `cache:pipe:0`.
 
@@ -161,11 +161,11 @@ At the comparable ingest point, anonymous memory fell from approximately
 17.2 GB to 9.0 GB. The fixed run retained file-backed cache that Linux could
 reclaim and completed with approximately 14.2 GB anonymous memory near the end
 of context evaluation. Evidence:
-`descriptor-smoke/2026-08-11T23-05-25-619Z-715f2faf/result.json`.
+`pipeline/descriptions/experiments/2026-08-11T23-05-25-619Z-715f2faf/result.json`.
 
 ## Fixed near-128K benchmark
 
-- Source: `/home/visar/Videos/downloads/tango/editor/edited/2026-02-04 120231 lyliiii/playlist.m3u8`
+- Source: `~/Videos/downloads/tango/editor/edited/2026-02-04 120231 lyliiii/playlist.m3u8`
 - Remux: `/tmp/tango-remux/2026-02-04_120231_lyliiii.mp4`
 - Remux operation: stream copy; source media is not transcoded
 - MP4 duration: 1,840.025667 seconds

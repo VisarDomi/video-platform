@@ -11,7 +11,6 @@ import {
     formatSegmentName,
     normalizeRecordingId,
     parseCompoundSegmentName,
-    RECOVERY_DEDUP_TAIL_SIZE,
 } from "../dist/services/download/segmentIdentity.js";
 
 test("compound names round-trip recording IDs containing separators", () => {
@@ -21,7 +20,6 @@ test("compound names round-trip recording IDs containing separators", () => {
         recordingId: "broadcast_value-with.parts",
         providerSequence: 0,
     });
-    assert.equal(RECOVERY_DEDUP_TAIL_SIZE, 10);
 });
 
 test("Stripchat UTC identities stay visible without URI escape sequences", () => {
@@ -46,7 +44,7 @@ test("the short-lived percent-encoded format remains readable for migration", ()
     });
 });
 
-test("resume skips tail overlap and accepts a provider sequence reset", async (t) => {
+test("resume skips overlap using the highest persisted HLS media sequence", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-playlist-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
     const recordingId = "broadcast-abc";
@@ -80,48 +78,67 @@ test("resume skips tail overlap and accepts a provider sequence reset", async (t
     assert.deepEqual(overlap.map((segment) => segment.providerSequence), [69]);
     assert.equal(overlap[0].localName, formatSegmentName(8, recordingId, 69));
 
-    const reset = await manager.identifyNewSegments([
+    const regressedWindow = await manager.identifyNewSegments([
         "#EXTM3U",
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-DISCONTINUITY",
         "#EXTINF:1,",
         "0.ts",
     ].join("\n"), (line) => `https://example.test/reset/${line}`);
-    assert.equal(reset.length, 1);
-    assert.equal(reset[0].localName, formatSegmentName(9, recordingId, 0));
+    assert.deepEqual(regressedWindow, []);
 });
 
-test("a reused provider URL is accepted after its sequence leaves the ten-decision tail", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-sequence-reset-"));
+test("an HLS window overlapping by more than ten segments downloads only its new edge", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-long-overlap-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
     const recordingId = "fc2-start";
     const disk = new DiskSession("alias", { update() {} }, async () => root);
     const manager = new PlaylistManager(disk, recordingId);
 
-    for (let sequence = 0; sequence <= RECOVERY_DEDUP_TAIL_SIZE; sequence++) {
-        const remoteName = sequence === 0 ? "0.ts" : `${sequence}.ts`;
-        const [segment] = await manager.identifyNewSegments([
-            "#EXTM3U",
-            "#EXT-X-TARGETDURATION:2",
-            `#EXT-X-MEDIA-SEQUENCE:${sequence}`,
-            "#EXTINF:1,",
-            remoteName,
-        ].join("\n"), (line) => `https://example.test/${line}`);
-        assert.ok(segment);
+    const firstWindow = await manager.identifyNewSegments([
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION:2",
+        "#EXT-X-MEDIA-SEQUENCE:2",
+        ...Array.from({ length: 17 }, (_, offset) => ["#EXTINF:1,", `${offset + 2}.ts`]).flat(),
+    ].join("\n"), (line) => `https://example.test/${line}`);
+    for (const segment of firstWindow) {
         await disk.materialize();
         await manager.appendSegmentToPlaylist(segment);
     }
 
-    const [reset] = await manager.identifyNewSegments([
+    const nextWindow = await manager.identifyNewSegments([
         "#EXTM3U",
-        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-MEDIA-SEQUENCE:8",
+        ...Array.from({ length: 12 }, (_, offset) => ["#EXTINF:1,", `${offset + 8}.ts`]).flat(),
+    ].join("\n"), (line) => `https://example.test/${line}`);
+    assert.deepEqual(nextWindow.map((segment) => segment.providerSequence), [19]);
+    assert.equal(nextWindow[0].localName, formatSegmentName(17, recordingId, 19));
+});
+
+test("a reset FC2 URI remains new when its HLS media sequence is monotonic", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-uri-reset-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const recordingId = "fc2-start";
+    const disk = new DiskSession("alias", { update() {} }, async () => root);
+    const manager = new PlaylistManager(disk, recordingId);
+
+    const segments = await manager.identifyNewSegments([
+        "#EXTM3U",
+        "#EXT-X-MEDIA-SEQUENCE:2554",
+        "#EXTINF:1,",
+        "2554.ts",
+        "#EXTINF:1,",
+        "2555.ts",
         "#EXT-X-DISCONTINUITY",
         "#EXTINF:1,",
         "0.ts",
+        "#EXTINF:1,",
+        "1.ts",
     ].join("\n"), (line) => `https://example.test/${line}`);
-    assert.ok(reset);
-    assert.equal(reset.providerSequence, 0);
-    assert.equal(reset.localName, formatSegmentName(RECOVERY_DEDUP_TAIL_SIZE + 1, recordingId, 0));
+
+    assert.deepEqual(segments.map((segment) => segment.providerSequence), [2554, 2555, 2556, 2557]);
+    assert.equal(segments[2].remoteUrl, "https://example.test/0.ts");
+    assert.equal(segments[2].localName, formatSegmentName(2, recordingId, 2556));
 });
 
 test("resume drops a torn playlist tail and never reuses an unreferenced local number", async (t) => {

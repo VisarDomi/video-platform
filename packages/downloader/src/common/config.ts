@@ -9,6 +9,7 @@ if (!fs.existsSync(SHARED_STATE_PATH)) {
 }
 
 export const config = {
-    storagePath: "/home/visar/Videos/downloads",
+    storagePath: process.env.VIDEO_DOWNLOADS_ROOT
+        ?? path.join(os.homedir(), "Videos", "downloads"),
     sharedStatePath: SHARED_STATE_PATH,
 } as const;

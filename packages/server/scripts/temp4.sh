@@ -1,1 +1,0 @@
-find /home/visar/Videos/tango/modified/'2025-10-02 233205 dilaras7'/ -name "*.ts" -print0 | xargs -0 -I {} -P $(nproc) bash -c 'f="{}"; bitrate=$(ffprobe -v error -show_entries format=bit_rate -of default=noprint_wrappers=1:nokey=1 "$f" 2>/dev/null); if [ -n "$bitrate" ]; then echo "$((bitrate/1000)) $f"; fi' | sort -nr | head -n 5

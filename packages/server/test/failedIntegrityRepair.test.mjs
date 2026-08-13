@@ -102,3 +102,40 @@ test("failed integrity repair safely resumes after playlist publication and file
     assert.deepEqual(result.droppedSegmentNames, []);
     assert.deepEqual(result.alreadyAbsentFileNames, ["2.ts"]);
 });
+
+test("failed fMP4 repair drops only the attributed fragment and republishes its map", async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), "failed-fmp4-repair-"));
+    t.after(() => import("node:fs/promises").then(fs => fs.rm(root, { recursive: true })));
+    const streamPath = path.join(root, "recording");
+    const trashPath = path.join(root, "trash");
+    await Promise.all([mkdir(streamPath), mkdir(trashPath)]);
+    await writeFile(path.join(streamPath, "playlist.m3u8"), `#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-TARGETDURATION:8
+#EXT-X-MAP:URI="init.mp4"
+#EXTINF:2,
+1.ts
+#EXTINF:8,
+2.ts
+#EXTINF:2,
+3.ts
+#EXT-X-ENDLIST
+`);
+    await Promise.all(["init.mp4", "1.ts", "2.ts", "3.ts"].map(name =>
+        writeFile(path.join(streamPath, name), name)
+    ));
+    const failedReport = report(streamPath, "failed", [
+        { name: "2.ts", error: "missing reference picture" },
+    ]);
+
+    const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
+        repairPlaylist: async () => {},
+        dropFile: async filePath => rename(filePath, path.join(trashPath, path.basename(filePath))),
+        revalidate: async () => ({ kind: "processed", report: report(streamPath, "ready") }),
+    });
+
+    const repaired = await readFile(path.join(streamPath, "playlist.m3u8"), "utf8");
+    assert.match(repaired, /1\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init\.mp4"\n#EXTINF:2\.000000,\n3\.ts/);
+    assert.deepEqual(result.droppedSegmentNames, ["2.ts"]);
+    assert.equal((await stat(path.join(trashPath, "2.ts"))).isFile(), true);
+});

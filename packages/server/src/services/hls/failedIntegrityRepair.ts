@@ -7,7 +7,11 @@ import {
     type MediaIntegrityFinalizationResult,
     type MediaIntegrityReport,
 } from "./mediaIntegrityFinalizer.js";
-import { dropSegmentsFromPlaylist, repairPlaylistDurations } from "./playlistAuthority.js";
+import {
+    dropFmp4FragmentsFromPlaylist,
+    dropSegmentsFromPlaylist,
+    repairPlaylistDurations,
+} from "./playlistAuthority.js";
 
 export interface FailedIntegrityRepairDependencies {
     readonly dropFile?: (filePath: string) => Promise<void>;
@@ -39,9 +43,9 @@ async function writeFileAtomic(filePath: string, content: string): Promise<void>
 
 function safeInvalidSegmentNames(report: MediaIntegrityReport): string[] {
     const names = [...new Set(report.invalidSegments.map((segment) => segment.name))];
-    if (names.length === 0) throw new Error("Failed integrity report has no attributable MPEG-TS segments");
+    if (names.length === 0) throw new Error("Failed integrity report has no attributable media segments");
     for (const name of names) {
-        if (path.basename(name) !== name || !name.endsWith(".ts")) {
+        if (path.basename(name) !== name || (!name.endsWith(".ts") && !name.endsWith(".m4s"))) {
             throw new Error(`Unsafe invalid segment name: ${name}`);
         }
     }
@@ -64,7 +68,10 @@ export async function repairFailedMediaIntegrity(
         throw new Error("Refusing to repair a playlist without ENDLIST");
     }
 
-    const dropped = dropSegmentsFromPlaylist(originalPlaylist, new Set(invalidSegmentNames));
+    const hasMap = originalPlaylist.split(/\r?\n/).some((line) => line.trim().startsWith(HLS.MAP_PREFIX));
+    const dropped = hasMap
+        ? dropFmp4FragmentsFromPlaylist(originalPlaylist, new Set(invalidSegmentNames))
+        : dropSegmentsFromPlaylist(originalPlaylist, new Set(invalidSegmentNames));
     if (dropped.removedSegmentNames.length > 0) {
         await writeFileAtomic(playlistPath, dropped.content);
     }

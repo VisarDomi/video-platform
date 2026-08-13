@@ -1,16 +1,10 @@
 import { formatTimestampForPath } from "../../common/pathTimestamp.js";
 
-export const RECOVERY_DEDUP_TAIL_SIZE = 10;
 const SAFE_RECORDING_ID = /^[A-Za-z0-9._-]+$/;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
 export interface CompoundSegmentIdentity {
     localNumber: number;
-    recordingId: string;
-    providerSequence: number;
-}
-
-export interface ProviderSegmentIdentity {
     recordingId: string;
     providerSequence: number;
 }
@@ -58,8 +52,4 @@ export function parseCompoundSegmentName(name: string): CompoundSegmentIdentity 
     } catch {
         return null;
     }
-}
-
-export function providerSegmentKey(identity: ProviderSegmentIdentity): string {
-    return `${identity.recordingId}\0${identity.providerSequence}`;
 }

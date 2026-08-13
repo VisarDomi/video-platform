@@ -153,6 +153,9 @@ function createCpuGuard(maxCpu: number) {
 
 async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
+    const singleRecordingCpuBudget = Math.max(1, Math.floor(os.cpus().length / 2));
+    const ffmpegThreads = options.recording === null ? 1 : singleRecordingCpuBudget;
+    const fmp4ScanConcurrency = options.recording === null ? 1 : singleRecordingCpuBudget;
     const discovered = await discoverTargets(options);
     const selected = discovered.slice(0, options.limit);
     console.log(JSON.stringify({
@@ -166,6 +169,8 @@ async function main(): Promise<void> {
         concurrency: options.concurrency,
         maxCpu: options.maxCpu,
         retryFailed: options.retryFailed,
+        ffmpegThreads,
+        fmp4ScanConcurrency,
         checkpointPath: FINALIZATION_DB_PATH,
     }));
     if (!options.apply) return;
@@ -185,6 +190,8 @@ async function main(): Promise<void> {
                 const result = await processFinalizedRecording(target.recordingPath, {
                     checkpointStore: checkpoints,
                     retryFailed: options.retryFailed,
+                    ffmpegThreads,
+                    fmp4ScanConcurrency,
                 });
                 let status: string;
                 let error: string | null = null;
