@@ -1,0 +1,12 @@
+[Unit]
+Description=Video Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart="{{HOME}}/.local/bin/video-server"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

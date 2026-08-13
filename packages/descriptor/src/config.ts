@@ -10,7 +10,7 @@ const modelDirectory = path.join(dataRoot, "models", "gemma-4-e4b-obliterated");
 export const descriptorConfig = {
     packageDirectory,
     dataRoot,
-    evidenceDirectory: path.join(dataRoot, "descriptor-smoke"),
+    evidenceDirectory: path.join(dataRoot, "pipeline", "descriptions"),
     mediaDirectory: process.env.DESCRIPTOR_MEDIA_PATH ?? path.join(dataRoot, "descriptor-media"),
     promptPath: process.env.DESCRIPTOR_PROMPT_PATH
         ?? path.join(packageDirectory, "prompts", "video-description.txt"),

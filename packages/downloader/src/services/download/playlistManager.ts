@@ -7,15 +7,12 @@ import { DiskSession } from "./diskSession.js";
 import {
     formatSegmentName,
     parseCompoundSegmentName,
-    providerSegmentKey,
-    RECOVERY_DEDUP_TAIL_SIZE,
 } from "./segmentIdentity.js";
 
 export interface SegmentInfo {
     remoteUrl: string;
     localName: string;
     providerSequence: number;
-    identityKey: string;
     metadata: string[];
     accurateDuration?: number;
     programDateTime?: string;
@@ -33,9 +30,8 @@ export interface PlaylistTimeline {
 export class PlaylistManager {
     private readonly disk: DiskSession;
     private lastProviderSequence: number | null = null;
+    private highestHandledProviderSequence: number | null = null;
     private nextLocalNumber = 0;
-    private recentProviderKeys: string[] = [];
-    private recentProviderKeySet = new Set<string>();
     private resumeDiscontinuityPending = false;
     private readonly recordingId: string;
     public startSequence: number = 0;
@@ -166,25 +162,25 @@ export class PlaylistManager {
             (maximum, identity) => Math.max(maximum, identity.localNumber + 1),
             parsed.reduce((maximum, identity) => Math.max(maximum, identity.localNumber + 1), 0),
         );
-        const tail = parsed.slice(-RECOVERY_DEDUP_TAIL_SIZE);
-        for (const identity of tail) this.rememberProviderKey(providerSegmentKey(identity));
-        this.lastProviderSequence = tail.at(-1)?.providerSequence ?? null;
+        this.highestHandledProviderSequence = parsed.reduce<number | null>(
+            (maximum, identity) => maximum === null
+                ? identity.providerSequence
+                : Math.max(maximum, identity.providerSequence),
+            null,
+        );
+        this.lastProviderSequence = parsed.at(-1)?.providerSequence ?? null;
         this.resumeDiscontinuityPending = parsed.length > 0;
         this.pendingHeader = null;
 
         const targetDuration = recoveredContent.match(/^#EXT-X-TARGETDURATION:(\d+)$/m);
         this.currentTargetDuration = targetDuration ? Number.parseInt(targetDuration[1], 10) : 0;
-        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} dedupTail=${tail.length} unreferencedMedia=${Math.max(0, diskIdentities.length - parsed.length)}`);
+        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} highestProviderSequence=${this.highestHandledProviderSequence ?? "none"} unreferencedMedia=${Math.max(0, diskIdentities.length - parsed.length)}`);
     }
 
-    private rememberProviderKey(key: string): void {
-        if (this.recentProviderKeySet.has(key)) return;
-        this.recentProviderKeys.push(key);
-        this.recentProviderKeySet.add(key);
-        while (this.recentProviderKeys.length > RECOVERY_DEDUP_TAIL_SIZE) {
-            const removed = this.recentProviderKeys.shift();
-            if (removed !== undefined) this.recentProviderKeySet.delete(removed);
-        }
+    private markProviderSequenceHandled(providerSequence: number): void {
+        this.highestHandledProviderSequence = this.highestHandledProviderSequence === null
+            ? providerSequence
+            : Math.max(this.highestHandledProviderSequence, providerSequence);
     }
 
     private getExtinfDuration(metadata: string[]): number {
@@ -196,8 +192,8 @@ export class PlaylistManager {
         return 2;
     }
 
-    public addIgnoredSegment(segmentName: string): void {
-        this.rememberProviderKey(segmentName);
+    public addIgnoredSegment(providerSequence: number): void {
+        this.markProviderSequenceHandled(providerSequence);
     }
 
     public setEdge(variantUrl: string): void {
@@ -276,9 +272,9 @@ export class PlaylistManager {
             const remoteTsUrl = urlResolver(line);
             const providerSequence = this._timeline.mediaSequence + segmentOffset;
             segmentOffset++;
-            const identityKey = providerSegmentKey({ recordingId: this.recordingId, providerSequence });
 
-            if (!this.recentProviderKeySet.has(identityKey)) {
+            if (this.highestHandledProviderSequence === null
+                || providerSequence > this.highestHandledProviderSequence) {
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();
@@ -296,7 +292,6 @@ export class PlaylistManager {
                     remoteUrl: remoteTsUrl,
                     localName: formatSegmentName(this.nextLocalNumber++, this.recordingId, providerSequence),
                     providerSequence,
-                    identityKey,
                     metadata: segmentMetadata,
                     programDateTime: currentPDT ?? undefined,
                 });
@@ -380,7 +375,7 @@ export class PlaylistManager {
         if (!await FileSystemManager.appendFile(this.fullPlaylistPath, entry)) {
             throw new Error(`Could not append segment to ${this.fullPlaylistPath}`);
         }
-        this.rememberProviderKey(segment.identityKey);
+        this.markProviderSequenceHandled(segment.providerSequence);
     }
 
     public async finalizePlaylist(): Promise<void> {

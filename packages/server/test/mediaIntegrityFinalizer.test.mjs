@@ -8,6 +8,7 @@ import {
     buildFfmpegValidationArgs,
     collectMediaDecodeErrors,
     finalizeMediaIntegrity,
+    MEDIA_INTEGRITY_VALIDATOR_REVISION,
     MediaIntegrityQueue,
     mediaDecodeErrors,
 } from "../dist/services/hls/mediaIntegrityFinalizer.js";
@@ -45,24 +46,93 @@ async function createCheckpointStore(t) {
 test("null muxer DTS bookkeeping is not classified as decoded-media corruption", () => {
     const timestampError = "[null] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 4 >= 4";
     const decoderError = "[h264] corrupt decoded frame";
+    const repeated = "Last message repeated 27 times";
 
     assert.equal(mediaDecodeErrors(timestampError), "");
+    assert.equal(mediaDecodeErrors(`${timestampError}\n${repeated}`), "");
+    assert.equal(mediaDecodeErrors(`${decoderError}\n${repeated}`), `${decoderError}\n${repeated}`);
     assert.equal(mediaDecodeErrors(`${timestampError}\n${decoderError}`), decoderError);
 
     const noisyChunks = [
-        Buffer.from(`${timestampError}\n`.repeat(300)),
+        Buffer.from(`${timestampError}\n${repeated.slice(0, 12)}`),
+        Buffer.from(`${repeated.slice(12)}\n${`${timestampError}\n`.repeat(300)}`),
         Buffer.from(`${decoderError}\n`),
     ];
     assert.equal(collectMediaDecodeErrors(noisyChunks), decoderError);
 });
 
 test("ffmpeg validation accepts recordings with only video or only audio", () => {
-    const args = buildFfmpegValidationArgs("playlist.m3u8");
+    const args = buildFfmpegValidationArgs("playlist.m3u8", 6);
+    assert.deepEqual(args.slice(args.indexOf("-loglevel"), args.indexOf("-loglevel") + 2), [
+        "-loglevel", "repeat+error",
+    ]);
     assert.equal(args.includes("[0:v:0]"), false);
     assert.deepEqual(
         args.filter((value, index) => args[index - 1] === "-map"),
         ["0:v?", "0:a?"],
     );
+    assert.equal(args[args.indexOf("-threads") + 1], "6");
+});
+
+test("failed fMP4 validation attributes an isolated fragment using clean neighbors and failing contexts", async (t) => {
+    const streamPath = await mkdtemp(path.join(tmpdir(), "fmp4-integrity-"));
+    t.after(() => import("node:fs/promises").then(fs => fs.rm(streamPath, { recursive: true })));
+    const playlist = `${PLAYLIST_HEADER}#EXT-X-MAP:URI="init.mp4"
+#EXTINF:1,
+1.ts
+#EXTINF:1,
+2.ts
+#EXTINF:1,
+3.ts
+#EXT-X-ENDLIST
+`;
+    await writeFile(path.join(streamPath, "playlist.m3u8"), playlist);
+    await Promise.all(["init.mp4", "1.ts", "2.ts", "3.ts"].map(name =>
+        writeFile(path.join(streamPath, name), name)
+    ));
+
+    const result = await finalizeMediaIntegrity(streamPath, {
+        fmp4ScanConcurrency: 2,
+        validateMedia: async inputPath => {
+            if (inputPath === path.join(streamPath, "playlist.m3u8")) {
+                return { valid: false, exitCode: 0, stderr: "missing reference picture" };
+            }
+            const content = await readFile(inputPath, "utf8");
+            assert.match(content, /#EXT-X-MAP:URI="file:\/\//);
+            return content.includes("/2.ts")
+                ? { valid: false, exitCode: 0, stderr: "missing reference picture" }
+                : { valid: true, exitCode: 0, stderr: "" };
+        },
+    });
+
+    assert.equal(result.kind, "processed");
+    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.deepScannedSegmentCount, 3);
+    assert.deepEqual(result.report.invalidSegments, [
+        { name: "2.ts", error: "missing reference picture" },
+    ]);
+    assert.match(result.report.error, /1 isolated fMP4 fragment/);
+});
+
+test("fMP4 validation blocks ambiguous adjacent fragment failures", async (t) => {
+    const streamPath = await mkdtemp(path.join(tmpdir(), "fmp4-ambiguous-"));
+    t.after(() => import("node:fs/promises").then(fs => fs.rm(streamPath, { recursive: true })));
+    await writeFile(path.join(streamPath, "playlist.m3u8"), `${PLAYLIST_HEADER}#EXT-X-MAP:URI="init.mp4"
+#EXTINF:1,
+1.ts
+#EXTINF:1,
+2.ts
+#EXT-X-ENDLIST
+`);
+
+    const result = await finalizeMediaIntegrity(streamPath, {
+        validateMedia: async () => ({ valid: false, exitCode: 0, stderr: "broken initialization context" }),
+    });
+
+    assert.equal(result.kind, "processed");
+    assert.equal(result.report.status, "failed");
+    assert.deepEqual(result.report.invalidSegments, []);
+    assert.match(result.report.error, /no safe isolated repair boundary/);
 });
 
 test("media-integrity queue deduplicates paths and runs one stream at a time", async () => {
@@ -229,6 +299,7 @@ test("resuming a deep scan continues after the last checkpoint", async (t) => {
     const checkpointStore = await createCheckpointStore(t);
     checkpointStore.write(streamPath, playlistFingerprint(playlist), {
         version: 2,
+        validatorRevision: MEDIA_INTEGRITY_VALIDATOR_REVISION,
         status: "processing",
         startedAt: "2026-08-11T00:00:00.000Z",
         completedAt: null,
@@ -257,4 +328,40 @@ test("resuming a deep scan continues after the last checkpoint", async (t) => {
         { name: "2.ts", error: "corrupt decoded frame" },
     ]);
     assert.deepEqual(validated, ["3.ts"]);
+});
+
+test("a failed checkpoint from an older validator revision is retried once", async (t) => {
+    const playlist = `${PLAYLIST_HEADER}#EXTINF:1,
+1.ts
+#EXT-X-ENDLIST
+`;
+    const streamPath = await createStream(t, playlist);
+    const checkpointStore = await createCheckpointStore(t);
+    checkpointStore.write(streamPath, playlistFingerprint(playlist), {
+        version: 2,
+        status: "failed",
+        startedAt: "2026-08-11T00:00:00.000Z",
+        completedAt: "2026-08-11T00:01:00.000Z",
+        playlistPath: path.join(streamPath, "playlist.m3u8"),
+        segmentCount: 1,
+        initialPlaylistValid: false,
+        initialValidationError: "Last message repeated 1 times",
+        deepScannedSegmentCount: 1,
+        invalidSegments: [],
+        error: "stale validator failure",
+    });
+    let validationCount = 0;
+
+    const result = await finalizeMediaIntegrity(streamPath, {
+        checkpointStore,
+        validateMedia: async () => {
+            validationCount++;
+            return { valid: true, exitCode: 0, stderr: "" };
+        },
+    });
+
+    assert.equal(result.kind, "processed");
+    assert.equal(result.report.status, "ready");
+    assert.equal(result.report.validatorRevision, MEDIA_INTEGRITY_VALIDATOR_REVISION);
+    assert.equal(validationCount, 1);
 });

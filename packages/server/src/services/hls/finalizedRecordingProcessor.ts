@@ -10,7 +10,10 @@ import {
     type MediaIntegrityReport,
 } from "./mediaIntegrityFinalizer.js";
 import { playlistFingerprint } from "./finalizationCheckpointStore.js";
-import { repairPlaylistDurations } from "./playlistAuthority.js";
+import {
+    repairPlaylistDurations,
+    repairRegressedCompoundSegments,
+} from "./playlistAuthority.js";
 
 export interface FinalizedRecordingProcessorDependencies {
     readonly cleanup?: (streamPath: string) => Promise<void>;
@@ -66,8 +69,10 @@ export async function processFinalizedRecording(
     }
 
     const cleanup = dependencies.cleanup ?? moveUnreferencedTransportSegmentsToTrash;
-    const repairPlaylist = dependencies.repairPlaylist
-        ?? ((target: string) => repairPlaylistDurations(target, { apply: true }));
+    const repairPlaylist = dependencies.repairPlaylist ?? (async (target: string) => {
+        await repairRegressedCompoundSegments(target);
+        return repairPlaylistDurations(target, { apply: true });
+    });
     const validate = dependencies.validate ?? finalizeMediaIntegrity;
     const repairFailed = dependencies.repairFailed
         ?? ((target: string, report: MediaIntegrityReport) => repairFailedMediaIntegrity(target, report, {
@@ -77,8 +82,8 @@ export async function processFinalizedRecording(
                 revalidate: true,
             }),
         }));
-    await cleanup(streamPath);
     await repairPlaylist(streamPath);
+    await cleanup(streamPath);
     const initial = await validate(streamPath, options);
     if (
         initial.kind !== "not-finalized"

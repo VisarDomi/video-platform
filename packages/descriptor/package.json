@@ -3,7 +3,7 @@
     "type": "module",
     "version": "1.0.0",
     "private": true,
-    "description": "Video description worker and local model smoke tests",
+    "description": "Local native-video description engine",
     "main": "dist/index.js",
     "types": "src/index.ts",
     "exports": {
@@ -15,8 +15,8 @@
     "scripts": {
         "build": "rm -rf dist && tsc",
         "test": "npm run build && node --test test/*.test.mjs",
-        "smoke": "npm run build && node dist/smoke.js",
-        "smoke:bounded": "npm run build && node scripts/run-bounded-smoke.mjs",
+        "describe-one": "npm run build && node dist/describe-one.js",
+        "describe-one:bounded": "npm run build && node scripts/run-bounded-describe-one.mjs",
         "runtime:install": "node scripts/install-runtime.mjs",
         "runtime:activate": "node scripts/activate-runtime.mjs"
     },

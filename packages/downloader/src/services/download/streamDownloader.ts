@@ -193,7 +193,7 @@ export class StreamDownloader {
                 if (!fetchResult.data) {
                     if (fetchResult.retryable) {
                         logger.warn(`[StreamDownloader] ${alias} segment skipped segment=${segment.localName}`);
-                        playlistManager.addIgnoredSegment(segment.identityKey);
+                        playlistManager.addIgnoredSegment(segment.providerSequence);
                         continue;
                     }
                     logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
@@ -219,7 +219,7 @@ export class StreamDownloader {
                 const result = await this.provider.validateSegment(segmentPath);
                 if (!result.valid) {
                     await fs.unlink(segmentPath).catch(() => {});
-                    playlistManager.addIgnoredSegment(segment.identityKey);
+                    playlistManager.addIgnoredSegment(segment.providerSequence);
                     this.rejectedCount++;
                 } else {
                     if (result.duration !== undefined) {
