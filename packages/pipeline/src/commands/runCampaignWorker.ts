@@ -1,0 +1,51 @@
+import type { PipelineConfig } from "../config.js";
+import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { reconcileDueUploads } from "./reconcileUploads.js";
+import { campaignStep } from "./campaign.js";
+
+const IDLE_POLL_MILLISECONDS = 30_000;
+
+function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+        if (signal.aborted) return resolve();
+        const timer = setTimeout(done, milliseconds);
+        function done() {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", done);
+            resolve();
+        }
+        signal.addEventListener("abort", done, { once: true });
+    });
+}
+
+function confirmationsAreDue(config: PipelineConfig): boolean {
+    const database = new PipelineDatabase(config.databasePath);
+    try {
+        return database.dueUploadConfirmations().length > 0;
+    } finally {
+        database.close();
+    }
+}
+
+export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+        try {
+            if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
+                console.log(JSON.stringify({ event: "campaign-reconcile", result: await reconcileDueUploads(config) }));
+            }
+            const result = await campaignStep(config) as {
+                step?: { disposition?: string };
+            };
+            console.log(JSON.stringify({ event: "campaign-step", result }));
+            const disposition = result.step?.disposition;
+            if (disposition === "admitted" || disposition === "stage_completed"
+                || disposition === "upload_completed") continue;
+        } catch (error) {
+            console.error(JSON.stringify({
+                event: "campaign-error",
+                error: error instanceof Error ? error.message : String(error),
+            }));
+        }
+        await wait(IDLE_POLL_MILLISECONDS, signal);
+    }
+}
