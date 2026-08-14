@@ -67,7 +67,7 @@ export async function requestDescription(videoUrl: string, fps: number, prompt: 
                 required: ["title", "description", "tags"],
                 properties: {
                     title: { type: "string", minLength: 5, maxLength: 100 },
-                    description: { type: "string", minLength: 20, maxLength: 1200 },
+                    description: { type: "string", minLength: 20, maxLength: 750 },
                     tags: {
                         type: "array",
                         minItems: 5,
