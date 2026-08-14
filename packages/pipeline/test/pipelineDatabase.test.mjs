@@ -21,7 +21,7 @@ function input(directory, suffix = "one") {
     const sourcePath = path.join(directory, suffix);
     return {
         provider: "tango",
-        sourceKind: "downloader",
+        sourceKind: "edited",
         sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"),
         sourceFingerprint: `fingerprint-${suffix}`,
@@ -33,7 +33,7 @@ function advanceToRemuxed(database, id) {
     database.transition(id, "server_ready", "remuxed");
 }
 
-function advanceToDescribed(database, recording, directory, sizeBytes = 1_000) {
+function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_000) {
     advanceToRemuxed(database, recording.id);
     const sha256 = "a".repeat(64);
     database.saveArtifact(recording.id, {
@@ -46,8 +46,24 @@ function advanceToDescribed(database, recording, directory, sizeBytes = 1_000) {
         artifactSha256: sha256,
         promptVersion: "test-v1",
         fps: 2,
-        output: { title: "Test" },
+        output: { title: "Specific test title", description: "A concrete test description for metadata.", tags: ["room", "standing"] },
         evidencePath: path.join(directory, "evidence.json"),
+    });
+    database.saveProvenance(recording.id, {
+        observedIdentifier: "alias",
+        status: "resolved",
+        streamerId: "streamer-id",
+        alias: "alias",
+        streamerUrl: "https://tango.me/streamer-id",
+        aliasUrl: "https://tango.me/alias",
+        reason: null,
+        updatedAt: new Date("2026-08-12T08:00:00Z").toISOString(),
+    });
+    database.saveUploadMetadata(recording.id, {
+        title: `Specific test title [tango-${recording.id.slice(0, 12)}]`,
+        description: "A concrete test description.\n\nRecorded: unknown\nSource: https://tango.me/streamer-id",
+        tags: ["tango", "live", "room"],
+        matchKey: `[tango-${recording.id.slice(0, 12)}]`,
     });
     return database.get(recording.id);
 }
@@ -122,8 +138,8 @@ test("monthly quota reserves atomically, counts retries, and rolls over by timez
     const { database, directory } = await databaseFixture(t);
     const first = database.discover(input(directory, "one"));
     const second = database.discover(input(directory, "two"));
-    advanceToDescribed(database, first, directory, 600);
-    advanceToDescribed(database, second, directory, 500);
+    advanceToMetadataReady(database, first, directory, 600);
+    advanceToMetadataReady(database, second, directory, 500);
     const now = new Date("2026-08-12T08:00:00Z");
     const firstReservation = database.reserveUpload(first.id, 600, now, "Europe/Tirane", 1_000);
     assert.throws(() => database.reserveUpload(second.id, 500, now, "Europe/Tirane", 1_000), /limit exceeded/);
@@ -142,7 +158,7 @@ test("monthly quota reserves atomically, counts retries, and rolls over by timez
 test("accepted uploads require remote identity and preserve exact byte accounting", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    advanceToDescribed(database, recording, directory, 1_000);
+    advanceToMetadataReady(database, recording, directory, 1_000);
     const now = new Date("2026-08-12T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 1_000, now);
     const attempt = database.beginUpload(recording.id, reservation, now);
@@ -173,7 +189,7 @@ test("accepted uploads require remote identity and preserve exact byte accountin
 test("uncertain remote acceptance requires reconciliation instead of blind retry", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    advanceToDescribed(database, recording, directory, 500);
+    advanceToMetadataReady(database, recording, directory, 500);
     const now = new Date("2026-08-12T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 500, now);
     const attempt = database.beginUpload(recording.id, reservation, now);
@@ -181,6 +197,7 @@ test("uncertain remote acceptance requires reconciliation instead of blind retry
         status: "uncertain",
         transmittedBytes: 500,
         error: "response lost after request body was sent",
+        confirmation: { matchKey: "[test]", confirmAfter: new Date(now.getTime() + 86_400_000) },
     }, now).state, "xvideos_uncertain");
     assert.equal(database.claimNext(["described"], "retry-worker", 1_000, now), null);
     assert.equal(database.reconcileUncertain(
@@ -195,7 +212,7 @@ test("uncertain remote acceptance requires reconciliation instead of blind retry
 test("dry-run plans are deterministic and mutate neither state nor quota", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    advanceToDescribed(database, recording, directory, 400);
+    advanceToMetadataReady(database, recording, directory, 400);
     const before = database.get(recording.id);
     const first = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", 1_000);
     const second = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", 1_000);
@@ -240,6 +257,22 @@ test("the orchestrator resumes one durable stage at a time", async (t) => {
     assert.equal(database.get(recording.id)?.leaseOwner, null);
 });
 
+test("the production orchestrator ignores downloader recordings", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const downloader = database.discover({ ...input(directory, "raw"), sourceKind: "downloader" });
+    const edited = database.discover(input(directory, "edited"));
+    const artifactPath = path.join(directory, "artifact.mp4");
+    const stages = {
+        async remux() { return artifactPath; },
+        async validateArtifact() { throw new Error("not called"); },
+        async describe() { throw new Error("not called"); },
+    };
+    const result = await new PipelineOrchestrator(database, stages, "edited-only-worker").processOne();
+    assert.equal(result?.id, edited.id);
+    assert.equal(result?.state, "remuxed");
+    assert.equal(database.get(downloader.id)?.state, "server_ready");
+});
+
 test("stage failures persist diagnostics without continuing downstream", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
@@ -258,7 +291,7 @@ test("stage failures persist diagnostics without continuing downstream", async (
 test("the upload coordinator records fake transport success without a real network", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    advanceToDescribed(database, recording, directory, 500);
+    advanceToMetadataReady(database, recording, directory, 500);
     const now = new Date("2026-08-12T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 550, now);
     let calls = 0;
@@ -267,9 +300,14 @@ test("the upload coordinator records fake transport success without a real netwo
             calls++;
             assert.equal(request.visibility, "private");
             return {
-                remoteId: "fake-remote",
-                remoteUrl: "https://example.invalid/fake-remote",
                 transmittedBytes: 525,
+                remoteEntry: {
+                    remoteId: "fake-remote",
+                    remoteUrl: "https://example.invalid/fake-remote",
+                    moderationStatus: "Blocked",
+                },
+                metadataSubmittedAt: now.toISOString(),
+                selectedModelId: null,
             };
         },
     });
@@ -279,17 +317,19 @@ test("the upload coordinator records fake transport success without a real netwo
         sizeBytes: 500,
         title: "Fake upload",
         description: "No network transport exists in this test.",
+        tags: ["tango", "live"],
+        matchKey: "[test]",
         visibility: "private",
     }, now);
     assert.equal(calls, 1);
-    assert.equal(database.get(recording.id)?.state, "xvideos_uploaded");
+    assert.equal(database.get(recording.id)?.state, "xvideos_verified");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
 });
 
 test("transport errors meter bytes and uncertain acceptance cannot retry", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    advanceToDescribed(database, recording, directory, 500);
+    advanceToMetadataReady(database, recording, directory, 500);
     const now = new Date("2026-08-12T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 550, now);
     const coordinator = new UploadCoordinator(database, {
@@ -303,8 +343,40 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
         sizeBytes: 500,
         title: "Fake upload",
         description: "No network transport exists in this test.",
+        tags: ["tango", "live"],
+        matchKey: "[test]",
         visibility: "private",
     }, now), /response disappeared/);
     assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
+});
+
+test("restart recovery distinguishes interrupted transfer from possible metadata acceptance", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const firstNow = new Date("2026-08-12T08:00:00Z");
+    const firstReservation = database.reserveUpload(recording.id, 550, firstNow);
+    const firstAttempt = database.beginUpload(recording.id, firstReservation, firstNow);
+    database.updateUploadProgress(firstAttempt, "file_uploading", 500, firstNow);
+    assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T08:01:00Z")), [{
+        recordingId: recording.id,
+        disposition: "retryable",
+    }]);
+    assert.equal(database.get(recording.id)?.state, "metadata_ready");
+    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 500, reserved: 0 });
+
+    const secondNow = new Date("2026-08-12T09:00:00Z");
+    const secondReservation = database.reserveUpload(recording.id, 550, secondNow);
+    const secondAttempt = database.beginUpload(recording.id, secondReservation, secondNow);
+    database.updateUploadProgress(secondAttempt, "file_uploaded", 500, secondNow);
+    database.updateUploadProgress(secondAttempt, "metadata_submitting", 500, secondNow);
+    assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T09:01:00Z")), [{
+        recordingId: recording.id,
+        disposition: "confirmation_required",
+    }]);
+    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:00:59Z")).length, 0);
+    assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:01:00Z")).length, 1);
+    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 1_000, reserved: 0 });
 });

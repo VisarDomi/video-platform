@@ -1,5 +1,6 @@
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { ArtifactRecord, Recording } from "../domain/types.js";
+import { composeUploadMetadata } from "../metadata/composeUploadMetadata.js";
 
 export interface DescriptionEvidence {
     readonly artifactSha256: string;
@@ -25,12 +26,30 @@ export class PipelineOrchestrator {
 
     async processOne(now = new Date()): Promise<Recording | null> {
         const recording = this.database.claimNext(
-            ["server_ready", "remuxed", "artifact_valid"],
+            ["server_ready", "remuxed", "artifact_valid", "described"],
             this.workerId,
             this.leaseMilliseconds,
             now,
+            ["edited"],
         );
         if (!recording) return null;
+        return await this.processClaimed(recording);
+    }
+
+    async processRecording(id: string, now = new Date()): Promise<Recording | null> {
+        const recording = this.database.claimRecording(
+            id,
+            ["server_ready", "remuxed", "artifact_valid", "described"],
+            this.workerId,
+            this.leaseMilliseconds,
+            now,
+            ["edited"],
+        );
+        if (!recording) return null;
+        return await this.processClaimed(recording);
+    }
+
+    private async processClaimed(recording: Recording): Promise<Recording> {
         let result: Recording;
         try {
             switch (recording.state) {
@@ -51,6 +70,23 @@ export class PipelineOrchestrator {
                     if (!artifact) throw new Error("Valid recording has no artifact metadata");
                     const description = await this.stages.describe(recording, artifact);
                     result = this.database.saveDescription(recording.id, description);
+                    break;
+                }
+                case "described": {
+                    const description = this.database.getDescription(recording.id);
+                    const provenance = this.database.getProvenance(recording.id);
+                    if (!description) throw new Error("Described recording has no description evidence");
+                    if (!provenance || provenance.status === "review_required") {
+                        result = this.database.markProvenanceReviewRequired(
+                            recording.id,
+                            provenance?.reason ?? "recording provenance has not been resolved",
+                        );
+                        break;
+                    }
+                    result = this.database.saveUploadMetadata(
+                        recording.id,
+                        composeUploadMetadata(recording, description, provenance),
+                    );
                     break;
                 }
                 default:

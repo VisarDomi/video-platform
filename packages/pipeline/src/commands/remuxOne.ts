@@ -3,7 +3,6 @@ import path from "node:path";
 
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
-import { readFinalizationContract } from "../discovery/finalizationContract.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import { readRecordingFinalization } from "../discovery/recordingFinalization.js";
 import { streamCopyRemux } from "../stages/remux.js";
@@ -13,7 +12,7 @@ export interface RemuxOneResult {
     readonly mode: "single-recording-remux";
     readonly recordingId: string;
     readonly sourcePath: string;
-    readonly authority: "catalogue-contract" | "recording-checkpoint";
+    readonly authority: "recording-checkpoint";
     readonly state: string;
     readonly artifactPath: string;
     readonly sizeBytes: number;
@@ -28,7 +27,7 @@ export async function remuxOne(
     config: PipelineConfig,
 ): Promise<RemuxOneResult> {
     const sourcePath = path.resolve(requestedPath);
-    const root = config.discoveryRoots.find(
+    const root = config.manualRemuxRoots.find(
         (candidate) => path.resolve(candidate.path) === path.dirname(sourcePath),
     );
     if (!root || path.basename(sourcePath).startsWith(".")) {
@@ -49,14 +48,8 @@ export async function remuxOne(
         sourcePath,
         playlistContent,
     );
-    const catalogueAuthority = readFinalizationContract(config.finalizationDatabasePath);
-    const authority = recordingAuthority
-        ? "recording-checkpoint"
-        : catalogueAuthority
-            ? "catalogue-contract"
-            : null;
-    if (!authority) {
-        throw new Error("Recording has no matching successful server checkpoint and the catalogue contract is incomplete");
+    if (!recordingAuthority) {
+        throw new Error("Recording has no matching successful server checkpoint");
     }
 
     const database = new PipelineDatabase(config.databasePath);
@@ -90,7 +83,7 @@ export async function remuxOne(
             mode: "single-recording-remux",
             recordingId: recording.id,
             sourcePath: recording.sourcePath,
-            authority,
+            authority: "recording-checkpoint",
             state: recording.state,
             artifactPath: artifact.path,
             sizeBytes: artifact.sizeBytes,

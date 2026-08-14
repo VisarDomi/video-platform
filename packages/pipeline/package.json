@@ -10,12 +10,26 @@
         "status": "npm run build && node --no-warnings dist/main.js status",
         "discover:plan": "npm run build && node --no-warnings dist/main.js discover-plan",
         "discover": "npm run build && node --no-warnings dist/main.js discover --apply",
-        "remux-one": "npm run build && node scripts/run-bounded-remux-one.mjs",
+        "remux-one": "npm run build -w server && npm run build && node scripts/run-bounded-remux-one.mjs",
+        "describe-one": "npm run build && node scripts/run-bounded-describe-one.mjs",
+        "process-one": "npm run build && node --no-warnings dist/main.js process-one --apply",
+        "provenance:refresh": "npm run build && node --no-warnings dist/main.js provenance-refresh --apply",
+        "provenance:review": "npm run build && node --no-warnings dist/main.js provenance-review",
+        "provenance:set": "npm run build && node --no-warnings dist/main.js provenance-set",
+        "model:set": "npm run build && node --no-warnings dist/main.js model-set",
         "retry": "npm run build && node --no-warnings dist/main.js retry",
-        "dry-run": "npm run build && node --no-warnings dist/main.js upload-plan"
+        "dry-run": "npm run build && node --no-warnings dist/main.js upload-plan",
+        "upload-one": "npm run build && node --no-warnings dist/main.js upload-one",
+        "reconcile-uploads": "npm run build && node --no-warnings dist/main.js reconcile-uploads --apply",
+        "campaign:configure": "npm run build && node --no-warnings dist/main.js campaign-configure",
+        "campaign:resume": "npm run build && node --no-warnings dist/main.js campaign-resume --apply",
+        "campaign:pause": "npm run build && node --no-warnings dist/main.js campaign-pause --apply",
+        "campaign:status": "npm run build && node --no-warnings dist/main.js campaign-status",
+        "campaign:step": "npm run build && node --no-warnings dist/main.js campaign-step --apply"
     },
     "dependencies": {
         "descriptor": "1.0.0",
+        "playwright": "^1.58.2",
         "shared": "1.0.0"
     },
     "devDependencies": {

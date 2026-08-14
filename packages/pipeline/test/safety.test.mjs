@@ -35,6 +35,8 @@ test("the XVideos adapter cannot perform network uploads", async () => {
         sizeBytes: 1,
         title: "test",
         description: "test",
+        tags: ["test"],
+        matchKey: "test",
         visibility: "private",
     }), /network uploads are disabled/);
 });

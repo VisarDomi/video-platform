@@ -1,8 +1,7 @@
 import { SC_FILE_PATH } from "../../core/config.js";
 import { resolveScUsername } from "../../services/sc/apiClient.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
-
-const PREFIX = "https://stripchat.com/";
+import { formatStreamerTarget, parseStreamerTargetLine } from "shared";
 
 function parseUsername(identifier: string): string {
     if (identifier.includes("stripchat.com/")) {
@@ -28,12 +27,8 @@ const adapter: ListProviderAdapter = {
     filePath: SC_FILE_PATH,
 
     parseLine(line: string) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(PREFIX)) return null;
-        const rest = trimmed.slice(PREFIX.length);
-        const spaceIdx = rest.indexOf(" ");
-        if (spaceIdx === -1) return { id: rest.replace(/\/$/, ""), label: rest.replace(/\/$/, "") };
-        return { id: rest.slice(spaceIdx + 1), label: rest.slice(0, spaceIdx) };
+        const parsed = parseStreamerTargetLine("sc", line);
+        return parsed ? { id: parsed.id, label: parsed.label } : null;
     },
 
     isResolved(line: string) {
@@ -49,7 +44,7 @@ const adapter: ListProviderAdapter = {
     },
 
     formatEntry(entry) {
-        return `${PREFIX}${entry.label} ${entry.id}`;
+        return formatStreamerTarget({ provider: "sc", ...entry });
     },
 
     async resolveForRemove(identifier: string) {

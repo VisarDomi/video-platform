@@ -10,6 +10,11 @@ import type { ProfileData } from "../../services/tango/apiClient.js";
 import type { AliasSnapshot } from "../../services/aliasRegistry.js";
 import { registry } from "../../services/aliasRefreshService.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
+import {
+    formatStreamerTarget,
+    parseStreamerTargetLine,
+    targetMembershipIdentifiers,
+} from "shared";
 
 const PREFIX = "https://tango.me/";
 
@@ -54,12 +59,8 @@ export function createTangoAdapter(
         filePath,
 
         parseLine(line: string) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(PREFIX)) return null;
-            const rest = trimmed.slice(PREFIX.length);
-            const spaceIdx = rest.indexOf(" ");
-            if (spaceIdx === -1) return null;
-            return { id: rest.slice(0, spaceIdx), label: rest.slice(spaceIdx + 1) };
+            const parsed = parseStreamerTargetLine("tango", line);
+            return parsed ? { id: parsed.id, label: parsed.label } : null;
         },
 
         isResolved(line: string) {
@@ -95,19 +96,17 @@ export function createTangoAdapter(
         },
 
         formatEntry(entry) {
-            return `${PREFIX}${entry.id} ${entry.label}`;
+            return formatStreamerTarget({ provider: "tango", ...entry });
         },
 
         enrichList(parsed) {
             const allAliases = aliasLookup.getAllWithHistory();
             const identifiers = new Set<string>();
             for (const { id, label } of parsed) {
-                identifiers.add(id);
-                identifiers.add(label);
-                const cached = allAliases[id];
-                if (cached) {
-                    for (const a of cached) identifiers.add(a);
-                }
+                for (const identifier of targetMembershipIdentifiers(
+                    { provider: "tango", id, label },
+                    allAliases[id] ?? [],
+                )) identifiers.add(identifier);
             }
             return [...identifiers];
         },

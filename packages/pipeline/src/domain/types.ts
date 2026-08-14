@@ -29,3 +29,66 @@ export interface ArtifactRecord {
     readonly sha256: string;
     readonly validatedAt: string;
 }
+
+export type ProvenanceResolutionStatus = "resolved" | "review_required" | "manual";
+
+export interface RecordingProvenance {
+    readonly recordingId: string;
+    readonly observedIdentifier: string;
+    readonly status: ProvenanceResolutionStatus;
+    readonly streamerId: string | null;
+    readonly alias: string | null;
+    readonly streamerUrl: string | null;
+    readonly aliasUrl: string | null;
+    readonly reason: string | null;
+    readonly updatedAt: string;
+}
+
+export interface DescriptionRecord {
+    readonly recordingId: string;
+    readonly artifactSha256: string;
+    readonly promptVersion: string;
+    readonly fps: number;
+    readonly output: unknown;
+    readonly evidencePath: string;
+    readonly createdAt: string;
+}
+
+export interface UploadMetadataRecord {
+    readonly recordingId: string;
+    readonly title: string;
+    readonly description: string;
+    readonly tags: readonly string[];
+    readonly matchKey: string;
+    readonly createdAt: string;
+}
+
+export interface StreamerModelRecord {
+    readonly provider: string;
+    readonly streamerId: string;
+    readonly stageName: string;
+    readonly gender: string;
+    readonly howKnown: string;
+    readonly profilePicture: string;
+    readonly xvideosModelId: string | null;
+    readonly updatedAt: string;
+}
+
+export interface UploadConfirmation {
+    readonly attemptId: string;
+    readonly recordingId: string;
+    readonly matchKey: string;
+    readonly confirmAfter: string;
+    readonly status: "pending" | "found" | "absent";
+    readonly checkedAt: string | null;
+}
+
+export type CampaignProviderFilter = "all" | "tango" | "fc2" | "sc";
+
+export interface CampaignControl {
+    readonly state: "paused" | "running";
+    readonly providerFilter: CampaignProviderFilter;
+    readonly ordering: "oldest";
+    readonly monthlyUploadLimitBytes: number;
+    readonly updatedAt: string;
+}

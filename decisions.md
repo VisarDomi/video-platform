@@ -195,7 +195,14 @@ the rolling rate, remains authority.
 
 The durable per-recording state machine is:
 
-`server_ready -> remuxed -> artifact_valid -> described -> xvideos_admitted -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
+`server_ready -> remuxed -> artifact_valid -> described -> metadata_ready -> xvideos_admitted -> xvideos_uploading -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
+
+An identifier that cannot be resolved after description branches to
+`provenance_review_required` and returns to `described` after a reusable manual
+override. An upload whose metadata submission may have succeeded branches to
+`xvideos_uncertain`; it is adopted when the authenticated uploads list contains
+the stable match key, or returns to `metadata_ready` only after the full
+24-hour absence window.
 
 Before the global historical-finalization contract is complete, an operator may
 prepare one explicitly selected historical recording only when the central
@@ -324,14 +331,12 @@ validated artifact hashes, description evidence, upload reservations/attempts,
 actual transmitted-byte events, and remote verification evidence. It is not a
 systemd service and is not started by the monorepo start command.
 
-Read-only discovery considers only immediate entries in finalized downloader
-and edited roots, ignores hidden directories such as `.active`, and prefers a
-finalized edited copy over the same provider/filename in downloader. Hidden
-`.pending` directories are never discoverable. The server is the sole publisher
-into those roots, so root membership is the integrity contract and discovery
-enters `server_ready` without a sidecar or a redundant server repair/decode
-request. A one-time bounded historical finalization pass must complete before
-the pipeline is enabled, establishing the same invariant for legacy entries.
+Production discovery considers only immediate entries in `editor/edited` and
+never admits raw downloader recordings. Every candidate needs an exact current
+`ready` checkpoint in the server finalization ledger; root membership or an old
+whole-catalog contract does not authorize a changed edit. Hidden `.active` and
+`.pending` directories remain undiscoverable. A one-time bounded historical
+finalization pass must complete before the campaign is enabled.
 
 The local stages use non-overwriting stream-copy MP4 publication, then decode,
 probe, and SHA-256 the exact artifact before describing it. Descriptor is now a
@@ -348,12 +353,98 @@ retried attempts are append-only. A lost response after sending a body enters
 `xvideos_uncertain` and requires reconciliation rather than a blind duplicate
 upload. Dry-run upload planning mutates neither quota nor state.
 
-There is deliberately no real XVideos transport. The only concrete adapter
-throws before network access; fake transports test success, failure, metering,
-and uncertain acceptance. Cleanup and network upload are hard-disabled. A
-service and real adapter wait for authenticated manual discovery of the form,
-CSRF/session flow, accepted media/metadata constraints, returned identity,
-processing states, and playback verification.
+At this foundation stage there was deliberately no real XVideos transport. The
+2026-08-13 decision below supersedes that implementation detail while retaining
+the separate-service, durable-ledger, disabled-cleanup, and default-off network
+boundaries.
+
+## XVideos browser uploader is implemented but production-disabled (2026-08-13)
+
+Authenticated discovery established the XVideos Google OAuth, Friendly Captcha,
+local-file upload, metadata, model, and uploads-list flows. The pipeline now has
+a visible persistent-Chromium adapter, but a real upload requires both an
+explicit `upload-one --apply` command and `VIDEO_PIPELINE_NETWORK_UPLOADS=1`.
+There is still no pipeline systemd service. Friendly Captcha and unexpected
+Google/account challenges fail closed and require operator action; the adapter
+does not click or bypass human verification.
+
+Recording provenance uses the same shared provider target parsing and membership
+identifiers as the server's `+ / -` download-list control. Tango may resolve an
+old folder alias through API-provided alias history. FC2 uses its channel ID.
+Stripchat uses only the current username/room-ID target relationship; no local
+Stripchat alias history is invented. Failed resolutions enter durable review.
+An operator override is keyed by `(provider, observed folder identifier)` and
+therefore resolves every matching recording instead of requiring per-recording
+decisions. The resolved ID, alias, and source URLs are snapshotted into pipeline
+SQLite, so later target-list removal cannot erase upload provenance.
+
+The descriptor remains responsible only for evidence-derived title,
+description, and tags. The pipeline metadata composer adds a stable per-recording
+title match key, recording time, streamer-ID URL, and alias URL when known. It
+enforces the authenticated form's limits: title 255, description 1000, and 20
+tags. Descriptor descriptions are capped at 750 characters to reserve suffix
+room. Default tags are the public provider name (`tango`, `fc2`, or
+`stripchat`) followed by `live`; normalized descriptor tags follow with stable
+deduplication. Fixed form choices are explicit, Straight + Solo Girls, XVideos
+only, Direct link, no translations, no blocked countries, and no commercial
+communication.
+
+Streamer models are a separate durable mapping keyed by `(provider,
+streamerId)`. `upload-one` always requires that mapping. The supervised browser
+searches the configured stage name but never chooses a suggestion by name:
+XVideos may return several ambiguous people and does not know the source
+provider ID. The operator manually selects the correct result or opens create.
+When create is opened, the adapter fills the configured stage name, gender,
+professional-model explanation, and profile picture, then waits for operator
+review/submission. A captured XVideos model ID is reused only by the future
+unattended campaign. Test environment values are never global defaults for an
+unrelated streamer.
+
+Remote success means the authenticated `/account/uploads` list contains the
+stable title match key and exposes a numeric XVideos ID and video URL. Public
+moderation states such as Online, Blocked, or Edit required are stored as
+informational observations and do not change upload success. The adapter uses
+the list's search control, so reconciliation does not depend on the entry being
+on the first page.
+
+Upload attempts checkpoint file-transfer progress, `file_uploaded`, and
+`metadata_submitting` boundaries in SQLite. Interrupted transfer or pre-submit
+work is charged to the byte ledger and becomes immediately retryable. Once
+metadata submission may have occurred, the job becomes uncertain, receives a
+durable `confirm_after = recovery/submission time + 24 hours`, and cannot retry
+during that interval. The due reconciliation searches the authenticated list;
+a found entry is adopted regardless of moderation status, while absence after
+the full grace period returns the recording to `metadata_ready`. Every transfer
+and retry consumes the calendar-month byte budget.
+
+Production activation still has three independent blockers: the historical
+server-finalization contract must be complete, descriptor model/prompt output
+must be approved, and one controlled upload must actually save metadata so the
+final submit response plus uploads-list reconciliation are validated. Source
+and artifact cleanup remain disabled.
+
+## Upload work is supervised first and a durable campaign later (2026-08-14)
+
+Descriptor output exists only for upload metadata. During development,
+`remux-one`, `describe-one`, and `upload-one` select one exact recording.
+Manual remux accepts either a managed downloader or edited folder and invokes
+the production single-recording server finalizer when its exact checkpoint is
+missing. Durable description metadata and production uploads are edited-only;
+the descriptor package retains a separate arbitrary-MP4 prompt experiment.
+
+The eventual campaign persists paused/running intent, an
+`all|tango|fc2|sc` filter, strict oldest-first ordering, and the monthly byte
+limit in SQLite. Eligibility comes from exact server checkpoints; capture order
+comes from the timestamp in the edited folder name, not finalizer scan time.
+The worker advances one durable stage at a time and rereads pause intent between
+stages. Missing provenance/models, stale edits, monthly quota exhaustion,
+authentication challenges, and uncertain uploads remain explicit recoverable
+boundaries.
+
+Systemd will own worker lifetime while SQLite owns intent and progress. The
+worker and controls are implemented, but no unit is installed or enabled until
+the catalog, descriptor, authenticated uploader verification, and temporary-MP4
+retention decisions are complete. All cleanup remains disabled.
 
 ## The monorepo owns its systemd user configuration (2026-08-13)
 

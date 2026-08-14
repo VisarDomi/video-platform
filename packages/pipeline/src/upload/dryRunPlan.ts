@@ -16,7 +16,16 @@ export function createDryRunUploadPlan(
     monthlyLimitBytes = 600_000_000_000,
 ): DryRunUploadItem[] {
     let simulatedReserved = 0;
-    return database.list("described").map((recording) => {
+    return database.list("metadata_ready").map((recording) => {
+        if (recording.sourceKind !== "edited") {
+            return {
+                recordingId: recording.id,
+                artifactPath: database.getArtifact(recording.id)?.path ?? null,
+                sizeBytes: database.getArtifact(recording.id)?.sizeBytes ?? null,
+                disposition: "blocked" as const,
+                reason: "source_not_edited",
+            };
+        }
         const artifact = database.getArtifact(recording.id);
         if (!artifact) {
             return {

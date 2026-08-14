@@ -12,10 +12,10 @@ import { remuxOne } from "../dist/commands/remuxOne.js";
 
 const execFileAsync = promisify(execFile);
 
-test("one exact server-verified folder is remuxed and validated without a global contract", async (t) => {
+test("manual remux accepts an exact server-verified downloader folder outside production discovery", async (t) => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pipeline-remux-one-"));
     t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-    const managedRoot = path.join(temporaryRoot, "downloads", "tango", "editor", "edited");
+    const managedRoot = path.join(temporaryRoot, "downloads", "tango", "downloader");
     const recordingPath = path.join(managedRoot, "recording");
     const dataRoot = path.join(temporaryRoot, "data");
     await mkdir(recordingPath, { recursive: true });
@@ -53,7 +53,12 @@ test("one exact server-verified folder is remuxed and validated without a global
         finalizationDatabasePath,
         databasePath: path.join(dataRoot, "pipeline.sqlite"),
         stagingRoot: path.join(dataRoot, "artifacts"),
-        discoveryRoots: [{ provider: "tango", sourceKind: "edited", path: managedRoot }],
+        discoveryRoots: [{
+            provider: "tango",
+            sourceKind: "edited",
+            path: path.join(temporaryRoot, "downloads", "tango", "editor", "edited"),
+        }],
+        manualRemuxRoots: [{ provider: "tango", sourceKind: "downloader", path: managedRoot }],
         uploadTimeZone: "Europe/Tirane",
         monthlyUploadLimitBytes: 600_000_000_000,
         cleanupEnabled: false,
@@ -67,7 +72,7 @@ test("one exact server-verified folder is remuxed and validated without a global
     assert.equal(path.dirname(result.artifactPath), config.stagingRoot);
 });
 
-test("single remux refuses a historical folder without exact or global server authority", async (t) => {
+test("single remux refuses a historical folder without exact server authority", async (t) => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pipeline-remux-unverified-"));
     t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
     const managedRoot = path.join(temporaryRoot, "edited");
@@ -81,6 +86,7 @@ test("single remux refuses a historical folder without exact or global server au
         databasePath: path.join(temporaryRoot, "pipeline.sqlite"),
         stagingRoot: path.join(temporaryRoot, "artifacts"),
         discoveryRoots: [{ provider: "sc", sourceKind: "edited", path: managedRoot }],
+        manualRemuxRoots: [{ provider: "sc", sourceKind: "edited", path: managedRoot }],
         uploadTimeZone: "Europe/Tirane",
         monthlyUploadLimitBytes: 600_000_000_000,
         cleanupEnabled: false,

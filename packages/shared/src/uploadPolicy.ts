@@ -61,13 +61,12 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         maintenanceVisitIntervalDays: null,
         unresolvedConstraints: [
             "minimumDurationSeconds",
-            "acceptedContainersAndCodecs",
-            "titleDescriptionAndTagLimits",
+            "acceptedContainersAndCodecsBeyondH264AacMp4",
         ],
         evidence: [{
             url: "https://www.xvideos.com/account/uploads/new",
-            verifiedAt: "2026-08-11",
-            note: "Working limits supplied by the operator: two hours and 50 GB. The authenticated uploader still needs a manual lower-limit test.",
+            verifiedAt: "2026-08-13",
+            note: "Authenticated upload form confirms two hours, 50 GB, 255 title characters, 1000 description characters, and 20 tags. A validated H.264/AAC MP4 uploaded successfully without saving metadata; the minimum duration remains unknown.",
         }],
     },
     bunkr: {
