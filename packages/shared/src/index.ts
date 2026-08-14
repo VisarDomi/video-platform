@@ -22,6 +22,18 @@ export {
     assessRecording,
     planRecordingsForUpload,
 } from "./uploadPlanner.js";
+export {
+    extractRecordingIdentifier,
+    formatStreamerTarget,
+    parseStreamerTargetLine,
+    streamerSourceLinks,
+    targetMembershipIdentifiers,
+} from "./streamerTarget.js";
+export type {
+    StreamProvider,
+    StreamerSourceLinks,
+    StreamerTarget,
+} from "./streamerTarget.js";
 export type {
     FinalUploadArtifact,
     RecordingUploadPlan,
