@@ -127,28 +127,36 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
     }
 
-    async probeUploadStatus(page: Page, uploadId: string): Promise<{
-        outcome: "online" | "not_ready";
-        remoteUrl: string | null;
-    }> {
+    // One edit-page read serves both the online check (direct link) and the
+    // existence check (title). No duplicated navigation or parsing.
+    private async readEditPage(page: Page, uploadId: string): Promise<{ title: string; directLink: string | null }> {
         const response = await page.goto(`https://www.xvideos.com/account/uploads/${uploadId}/edit`, {
             waitUntil: "domcontentloaded",
             timeout: 30_000,
         });
         if ((response?.status() ?? 0) >= 400) {
-            return { outcome: "not_ready", remoteUrl: null };
+            return { title: "", directLink: null };
         }
+        const title = await page.title().catch(() => "");
+        const href = await page.locator('a[href*="/video."]').first()
+            .getAttribute("href").catch(() => null);
+        return {
+            title,
+            directLink: href ? new URL(href, "https://www.xvideos.com/").href : null,
+        };
+    }
+
+    async probeUploadStatus(page: Page, uploadId: string): Promise<{
+        outcome: "online" | "not_ready";
+        remoteUrl: string | null;
+    }> {
         // Online check: the edit page shows the "Direct link to the video
         // page" anchor only once the video is published.
-        const directLink = page.locator('a[href*="/video."]').first();
-        const href = await directLink.getAttribute("href").catch(() => null);
-        if (!href) {
+        const edit = await this.readEditPage(page, uploadId);
+        if (!edit.title || !edit.directLink) {
             return { outcome: "not_ready", remoteUrl: null };
         }
-        return {
-            outcome: "online",
-            remoteUrl: new URL(href, "https://www.xvideos.com/").href,
-        };
+        return { outcome: "online", remoteUrl: edit.directLink };
     }
 
     // One login flow, then the callers run their specific work on the
@@ -409,16 +417,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     }
 
     async findEntries(page: Page, searchTerm: string): Promise<XvideosEntry[]> {
-        await page.goto(UPLOADS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const filter = page.locator("#videos-list-filter_title_tag_type_title_tags");
-        if (await filter.count()) {
-            await filter.fill(searchTerm);
-            const search = page.locator("#videos-list-filter").getByText("Search", { exact: true });
-            if (await search.count()) {
-                await search.click();
-                await page.waitForLoadState("domcontentloaded");
-            }
-        }
+        // The uploads-list filter is a server-side search reachable directly
+        // by URL (verified live: /account/uploads/f:t:<query>). One goto, no
+        // selector dependencies.
+        await page.goto(`${UPLOADS_URL}/f:t:${encodeURIComponent(searchTerm)}`, {
+            waitUntil: "domcontentloaded",
+            timeout: 30_000,
+        });
         const candidates = await page.locator('[id^="listing-video-"]').evaluateAll((elements) => elements.map((element) => {
             const titleLink = [...element.querySelectorAll("a")].find((link) => {
                 const href = link.getAttribute("href") ?? "";
@@ -454,12 +459,8 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     > {
         const entries = await this.findEntries(page, folderName);
         for (const entry of entries) {
-            await page.goto(`https://www.xvideos.com/account/uploads/${entry.remoteId}/edit`, {
-                waitUntil: "domcontentloaded",
-                timeout: 30_000,
-            });
-            const title = await page.title().catch(() => "");
-            if (title.includes(`[${folderName}]`)) {
+            const edit = await this.readEditPage(page, entry.remoteId);
+            if (edit.title.includes(`[${folderName}]`)) {
                 return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
             }
         }
