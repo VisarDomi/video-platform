@@ -114,54 +114,49 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
     }
 
-    async probeUploadStatus(uploadId: string): Promise<{
+    async probeUploadStatus(page: Page, uploadId: string): Promise<{
         outcome: "online" | "not_ready";
         remoteUrl: string | null;
     }> {
-        const context = await chromium.launchPersistentContext(this.config.profilePath, {
-            executablePath: this.config.executablePath,
-            headless: this.config.headless ?? false,
-            viewport: null,
-            args: ["--disable-blink-features=AutomationControlled"],
-            ignoreDefaultArgs: ["--enable-automation"],
+        const response = await page.goto(`https://www.xvideos.com/account/uploads/${uploadId}/edit`, {
+            waitUntil: "domcontentloaded",
+            timeout: 30_000,
         });
-        try {
-            const page = context.pages()[0] ?? await context.newPage();
-            const response = await page.goto(`https://www.xvideos.com/account/uploads/${uploadId}/edit`, {
-                waitUntil: "domcontentloaded",
-                timeout: 30_000,
-            });
-            if ((response?.status() ?? 0) >= 400) {
-                return { outcome: "not_ready", remoteUrl: null };
-            }
-            // Online check: the edit page shows the "Direct link to the video
-            // page" anchor only once the video is published.
-            const directLink = page.locator('a[href*="/video."]').first();
-            const href = await directLink.getAttribute("href").catch(() => null);
-            if (!href) {
-                return { outcome: "not_ready", remoteUrl: null };
-            }
-            return {
-                outcome: "online",
-                remoteUrl: new URL(href, "https://www.xvideos.com/").href,
-            };
-        } finally {
-            await context.close();
+        if ((response?.status() ?? 0) >= 400) {
+            return { outcome: "not_ready", remoteUrl: null };
         }
+        // Online check: the edit page shows the "Direct link to the video
+        // page" anchor only once the video is published.
+        const directLink = page.locator('a[href*="/video."]').first();
+        const href = await directLink.getAttribute("href").catch(() => null);
+        if (!href) {
+            return { outcome: "not_ready", remoteUrl: null };
+        }
+        return {
+            outcome: "online",
+            remoteUrl: new URL(href, "https://www.xvideos.com/").href,
+        };
     }
 
-    async findEntryByMatchKey(matchKey: string): Promise<XvideosEntry | null> {
+    // One login flow, then the callers run their specific work on the
+    // authenticated page. Reconcile and any future checks share this instead
+    // of each launching their own browser and login.
+    async withAuthenticatedPage<T>(run: (page: Page) => Promise<T>): Promise<T> {
         const context = await chromium.launchPersistentContext(this.config.profilePath, {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
             args: ["--disable-blink-features=AutomationControlled"],
             ignoreDefaultArgs: ["--enable-automation"],
+        }).catch((error: unknown) => {
+            throw new HumanActionRequiredError("session_login",
+                "Could not launch the XVideos browser profile. If an earlier run left a browser open, close it manually first. "
+                + (error instanceof Error ? error.message : String(error)));
         });
         try {
             const page = context.pages()[0] ?? await context.newPage();
             await this.ensureAuthenticated(page);
-            return await this.findEntry(page, matchKey);
+            return await run(page);
         } finally {
             await context.close();
         }
@@ -389,7 +384,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         return null;
     }
 
-    private async findEntry(page: Page, matchKey: string): Promise<XvideosEntry | null> {
+    async findEntry(page: Page, matchKey: string): Promise<XvideosEntry | null> {
         await page.goto(UPLOADS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
         const filter = page.locator("#videos-list-filter_title_tag_type_title_tags");
         if (await filter.count()) {

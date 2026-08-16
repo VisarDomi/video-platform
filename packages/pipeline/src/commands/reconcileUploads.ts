@@ -17,46 +17,50 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
     const results: unknown[] = [];
     try {
         results.push(...database.recoverInterruptedUploads(now));
-        for (const confirmation of database.dueUploadConfirmations(now)) {
-            let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
-            if (!remoteId) {
-                // Older attempts without a captured ID: resolve it via the
-                // authenticated uploads list first.
-                const entry = await browser.findEntryByMatchKey(confirmation.matchKey);
-                remoteId = entry?.remoteId ?? null;
+        // One login flow, then every due confirmation is checked on that same
+        // authenticated page.
+        await browser.withAuthenticatedPage(async (page) => {
+            for (const confirmation of database.dueUploadConfirmations(now)) {
+                let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
+                if (!remoteId) {
+                    // Older attempts without a captured ID: resolve it via the
+                    // authenticated uploads list first.
+                    const entry = await browser.findEntry(page, confirmation.matchKey);
+                    remoteId = entry?.remoteId ?? null;
+                }
+                if (!remoteId) {
+                    results.push({
+                        recordingId: confirmation.recordingId,
+                        disposition: "not_ready",
+                        reason: "no remote upload ID resolved yet",
+                    });
+                    continue;
+                }
+                const probe = await browser.probeUploadStatus(page, remoteId);
+                if (probe.outcome === "online" && probe.remoteUrl) {
+                    database.reconcileUncertain(confirmation.attemptId, remoteId, probe.remoteUrl, now);
+                    database.markRemoteVerified(
+                        confirmation.recordingId,
+                        remoteId,
+                        probe.remoteUrl,
+                        null,
+                        now,
+                    );
+                    results.push({
+                        recordingId: confirmation.recordingId,
+                        disposition: "online",
+                        remoteId,
+                        remoteUrl: probe.remoteUrl,
+                    });
+                } else {
+                    results.push({
+                        recordingId: confirmation.recordingId,
+                        disposition: "not_ready",
+                        reason: "edit page has no direct video link yet",
+                    });
+                }
             }
-            if (!remoteId) {
-                results.push({
-                    recordingId: confirmation.recordingId,
-                    disposition: "not_ready",
-                    reason: "no remote upload ID resolved yet",
-                });
-                continue;
-            }
-            const probe = await browser.probeUploadStatus(remoteId);
-            if (probe.outcome === "online" && probe.remoteUrl) {
-                database.reconcileUncertain(confirmation.attemptId, remoteId, probe.remoteUrl, now);
-                database.markRemoteVerified(
-                    confirmation.recordingId,
-                    remoteId,
-                    probe.remoteUrl,
-                    null,
-                    now,
-                );
-                results.push({
-                    recordingId: confirmation.recordingId,
-                    disposition: "online",
-                    remoteId,
-                    remoteUrl: probe.remoteUrl,
-                });
-            } else {
-                results.push({
-                    recordingId: confirmation.recordingId,
-                    disposition: "not_ready",
-                    reason: "edit page has no direct video link yet",
-                });
-            }
-        }
+        });
         return { checkedAt: now.toISOString(), results };
     } finally {
         database.close();
