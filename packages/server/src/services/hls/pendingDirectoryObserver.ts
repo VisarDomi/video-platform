@@ -21,26 +21,42 @@ export class PendingDirectoryObserver {
 
     public async start(): Promise<void> {
         const watchDirectory = this.dependencies.watchDirectory
-            ?? ((rootPath, listener) => watch(rootPath, listener));
+            ?? ((rootPath, listener) => watch(rootPath, { recursive: true }, listener));
 
+        // Watch the PARENT of each handoff root recursively: the hidden
+        // handoff directory is created on demand and removed when empty, so
+        // watching it directly would die with it. Events are filtered to the
+        // handoff child and its direct recording entries.
+        const parents = new Map<string, string>();
         for (const rootPath of this.rootPaths) {
+            const resolved = path.resolve(rootPath);
+            parents.set(path.dirname(resolved), path.basename(resolved));
+        }
+        for (const [parent, child] of parents) {
             try {
-                const watcher = watchDirectory(rootPath, (_eventType, fileName) => {
+                const watcher = watchDirectory(parent, (_eventType, fileName) => {
                     const name = fileName?.toString();
                     if (!name) {
                         void this.reconcile();
                         return;
                     }
-                    if (name.startsWith(".")) return;
-                    this.onCandidate(path.join(rootPath, name));
+                    if (name !== child && !name.startsWith(child + path.sep)) return;
+                    if (name === child) {
+                        // The handoff directory itself appeared/disappeared.
+                        void this.reconcile();
+                        return;
+                    }
+                    const rest = name.slice(child.length + 1);
+                    if (!rest || rest.includes(path.sep)) return;
+                    this.onCandidate(path.join(parent, name));
                 });
                 watcher.on("error", (error) => {
-                    this.onWatchError(rootPath, error);
+                    this.onWatchError(parent, error);
                     void this.reconcile();
                 });
                 this.watchers.push(watcher);
             } catch (error: any) {
-                this.onWatchError(rootPath, error);
+                this.onWatchError(parent, error);
             }
         }
 

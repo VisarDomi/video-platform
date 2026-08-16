@@ -621,6 +621,9 @@ export function startMediaIntegrityFinalizer(): void {
         }
         const finalizedPath = await publishPendingRecording(streamPath);
         checkpointStore.clear(streamPath);
+        // Remove the handoff directory once it is empty; it is recreated on
+        // demand by the producer (downloader handoff or the video editor).
+        await fs.rmdir(path.dirname(streamPath)).catch(() => {});
         logger.info("[Finalization] atomically published validated recording", {
             pendingPath: streamPath,
             finalizedPath,
@@ -661,7 +664,6 @@ export function startMediaIntegrityFinalizer(): void {
     };
 
     void (async () => {
-        await Promise.all(roots.map((rootPath) => fs.mkdir(rootPath, { recursive: true })));
         const observer = new PendingDirectoryObserver(
             roots,
             (streamPath) => {

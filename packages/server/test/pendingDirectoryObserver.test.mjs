@@ -4,11 +4,11 @@ import test from "node:test";
 
 import { PendingDirectoryObserver } from "../dist/services/hls/pendingDirectoryObserver.js";
 
-test("provider watches are registered before startup reconciliation", async () => {
+test("handoff parents are watched recursively and only pending entries surface", async () => {
     const trace = [];
     const listeners = new Map();
     const observer = new PendingDirectoryObserver(
-        ["/library/tango", "/library/fc2", "/library/sc"],
+        ["/library/tango/.pending", "/library/fc2/.pending"],
         (candidate) => trace.push(`candidate:${candidate}`),
         () => trace.push("reconcile"),
         (root, error) => trace.push(`error:${root}:${error.message}`),
@@ -27,13 +27,18 @@ test("provider watches are registered before startup reconciliation", async () =
     assert.deepEqual(trace, [
         "watch:/library/tango",
         "watch:/library/fc2",
-        "watch:/library/sc",
         "reconcile",
     ]);
 
-    listeners.get("/library/fc2")("rename", "recording");
-    listeners.get("/library/fc2")("rename", ".active");
+    listeners.get("/library/fc2")("rename", ".pending/recording");
+    listeners.get("/library/fc2")("rename", ".pending/recording/segment.ts");
+    listeners.get("/library/fc2")("rename", ".active/other");
+    listeners.get("/library/fc2")("rename", ".pending");
     listeners.get("/library/fc2")("rename", null);
-    assert.deepEqual(trace.slice(4), ["candidate:/library/fc2/recording", "reconcile"]);
+    assert.deepEqual(trace.slice(3), [
+        "candidate:/library/fc2/.pending/recording",
+        "reconcile",
+        "reconcile",
+    ]);
     observer.close();
 });
