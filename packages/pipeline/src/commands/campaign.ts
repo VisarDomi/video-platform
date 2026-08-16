@@ -35,7 +35,7 @@ export function campaignStatus(config: PipelineConfig): unknown {
         const control = database.getCampaignControl();
         return {
             ...control,
-            systemdUnitInstalled: false,
+            systemdUnitInstalled: true,
             cleanupEnabled: config.cleanupEnabled,
             networkUploadsEnabled: config.networkUploadsEnabled,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
