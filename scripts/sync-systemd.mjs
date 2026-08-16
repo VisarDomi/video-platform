@@ -17,6 +17,7 @@ const managedFiles = [
     "video-reconcile.service",
     "video-reconcile.timer",
     "video-server.service",
+    "video-xvfb.service",
     path.join("video-server.service.d", "resources.conf"),
 ];
 
