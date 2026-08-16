@@ -82,31 +82,24 @@ export class UploadCoordinator {
         }
         const submittedAt = new Date(receipt.metadataSubmittedAt);
         if (!Number.isFinite(submittedAt.getTime())) throw new Error("Uploader returned an invalid submission timestamp");
-        if (receipt.remoteEntry) {
-            this.database.finishUploadAttempt(attemptId, {
-                status: "accepted",
-                transmittedBytes: receipt.transmittedBytes,
-                remoteId: receipt.remoteEntry.remoteId,
-                remoteUrl: receipt.remoteEntry.remoteUrl,
-            }, submittedAt);
-            this.database.markRemoteVerified(
-                recordingId,
-                receipt.remoteEntry.remoteId,
-                receipt.remoteEntry.remoteUrl,
-                receipt.remoteEntry.moderationStatus,
-                submittedAt,
-            );
-        } else {
-            this.database.finishUploadAttempt(attemptId, {
-                status: "uncertain",
-                transmittedBytes: receipt.transmittedBytes,
-                error: "metadata submitted; authenticated uploads-list entry not visible yet",
-                confirmation: {
-                    matchKey: request.matchKey,
-                    confirmAfter: new Date(submittedAt.getTime() + 24 * 60 * 60_000),
-                },
-            }, submittedAt);
-        }
+        // Success is never decided at submit time: the attempt parks as
+        // uncertain with the captured video ID, and the 24-hour reconcile
+        // verifies the public video link.
+        const remoteId = receipt.submittedVideoId;
+        const remoteUrl = remoteId ? `https://www.xvideos.com/video.${remoteId}/` : null;
+        this.database.finishUploadAttempt(attemptId, {
+            status: "uncertain",
+            transmittedBytes: receipt.transmittedBytes,
+            remoteId: remoteId ?? undefined,
+            remoteUrl: remoteUrl ?? undefined,
+            error: remoteId
+                ? "metadata submitted; awaiting 24-hour video-link verification"
+                : "metadata submitted; submitted video ID was not captured",
+            confirmation: {
+                matchKey: request.matchKey,
+                confirmAfter: new Date(submittedAt.getTime() + 24 * 60 * 60_000),
+            },
+        }, submittedAt);
         return receipt;
     }
 }

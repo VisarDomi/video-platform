@@ -7,7 +7,6 @@ import { findXvideosEntry, type XvideosEntry, type XvideosEntryCandidate } from 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
 const UPLOADS_URL = "https://www.xvideos.com/account/uploads";
-const MANUAL_MODEL_TIMEOUT_MILLISECONDS = 60 * 60_000;
 
 export interface ChromiumUploaderConfig {
     readonly executablePath: string;
@@ -84,7 +83,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 .waitFor({ state: "visible", timeout: 30 * 60_000 });
             await request.onProgress?.("file_uploaded", counter.transmitted(request.sizeBytes));
 
-            const selectedModelId = await this.selectOrCreateModel(page, request);
+            const selectedModelId = await this.selectModelByAlias(page, request.streamerAlias);
             const submittedAt = new Date();
             await request.onProgress?.("metadata_submitting", counter.transmitted(request.sizeBytes));
             await Promise.all([
@@ -92,11 +91,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 page.getByRole("button", { name: "Save modifications", exact: true }).click(),
             ]);
             await page.waitForTimeout(1_000);
-            const remoteEntry = await this.findEntry(page, request.matchKey);
+            // Success is NOT decided here: the attempt parks as uncertain and
+            // the 24-hour reconcile verifies the public video link.
+            const submittedId = await this.captureSubmittedVideoId(page);
             completed = true;
             return {
                 transmittedBytes: counter.transmitted(request.sizeBytes),
-                remoteEntry,
+                remoteEntry: null,
+                submittedVideoId: submittedId,
                 metadataSubmittedAt: submittedAt.toISOString(),
                 selectedModelId,
             };
@@ -109,6 +111,28 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                     instruction: "The upload did not complete cleanly, so the browser was left open for manual handling. Close it manually before running another upload.",
                 }));
             }
+        }
+    }
+
+    async probeVideoLink(url: string): Promise<"published" | "deleted" | "unavailable"> {
+        const context = await chromium.launchPersistentContext(this.config.profilePath, {
+            executablePath: this.config.executablePath,
+            headless: this.config.headless ?? false,
+            viewport: null,
+            args: ["--disable-blink-features=AutomationControlled"],
+            ignoreDefaultArgs: ["--enable-automation"],
+        });
+        try {
+            const page = context.pages()[0] ?? await context.newPage();
+            const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            const status = response?.status() ?? 0;
+            const text = await page.locator("body").innerText().catch(() => "");
+            if (/video has been deleted|deleted video|no longer available/i.test(text)) return "deleted";
+            const pathname = new URL(page.url()).pathname;
+            if (status >= 200 && status < 400 && /video\.\d+/i.test(pathname)) return "published";
+            return "unavailable";
+        } finally {
+            await context.close();
         }
     }
 
@@ -323,55 +347,42 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
     }
 
-    private async selectOrCreateModel(page: Page, request: UploadRequest): Promise<string | null> {
-        if (!request.model) return null;
+    private async selectModelByAlias(page: Page, alias: string | undefined): Promise<string | null> {
+        if (!alias) return null;
         const modelInput = page.locator("#upload_form_models .models-list > input[type=text]");
-        await modelInput.fill(request.model.stageName);
+        await modelInput.fill(alias);
         await page.locator("#upload_form_models button[data-role=add]").click();
         await page.waitForTimeout(500);
-        if (request.model.selectionMode === "automatic-known") {
-            if (!request.model.xvideosModelId) {
-                throw new Error("Unattended campaign upload requires a previously confirmed XVideos model ID");
-            }
-            const candidate = page.locator(`[data-id="${request.model.xvideosModelId}"]`).first();
-            if (!await candidate.count()) throw new Error("Configured XVideos model ID was not offered by the selector");
-            await candidate.click();
-            return request.model.xvideosModelId;
+        // The operator previously clicked this suggestion by hand: click the
+        // first offered suggestion automatically. XVideos does not attach the
+        // model to the video, so the exact suggestion does not matter.
+        const suggestion = page.locator("#upload_form_models [data-id]").first();
+        if (await suggestion.count()) {
+            await suggestion.click();
         }
-
-        console.log(JSON.stringify({
-            event: "xvideos-model-selection-required",
-            stageName: request.model.stageName,
-            instruction: "Select the correct existing model or click create model in the visible browser",
-        }));
         const hiddenSelection = page.locator("#upload_form_models_modelsList");
-        const initialSelection = await hiddenSelection.inputValue().catch(() => "");
-        const form = page.locator("form.model-info-form");
-        let creationFormFilled = false;
-        const deadline = Date.now() + MANUAL_MODEL_TIMEOUT_MILLISECONDS;
+        const deadline = Date.now() + 10_000;
         while (Date.now() < deadline) {
-            const value = await hiddenSelection.inputValue().catch(() => initialSelection);
-            if (value !== initialSelection && hasModelSelection(value)) {
-                console.log(JSON.stringify({ event: "xvideos-model-selected" }));
-                return extractSelectedModelId(value);
-            }
-            const formVisible = await form.isVisible().catch(() => false);
-            if (formVisible && !creationFormFilled) {
-                await form.locator('input[name="name"]').fill(request.model.stageName);
-                await form.locator('select[name="sex"]').selectOption({ label: request.model.gender });
-                await form.locator('textarea[name="who_are_they"]').fill(request.model.howKnown);
-                await form.locator('input[name="profile_pic"]').setInputFiles(request.model.profilePicture);
-                creationFormFilled = true;
-                console.log(JSON.stringify({
-                    event: "xvideos-model-creation-filled",
-                    instruction: "Review the populated model form and submit it in the visible browser",
-                }));
-            } else if (!formVisible) {
-                creationFormFilled = false;
-            }
+            const value = await hiddenSelection.inputValue().catch(() => "");
+            if (hasModelSelection(value)) return extractSelectedModelId(value);
             await page.waitForTimeout(250);
         }
-        throw new HumanActionRequiredError("model_selection", "Timed out waiting for manual XVideos model selection");
+        return null;
+    }
+
+    private async captureSubmittedVideoId(page: Page): Promise<string | null> {
+        // After saving, XVideos shows a success view whose "edit here" link
+        // (or the current URL) carries the new upload ID. Capture it before
+        // the uploads-list search so the attempt can be verified immediately
+        // even while the video is still in the encoding queue.
+        const links = await page.locator('a[href*="/account/uploads/"]')
+            .evaluateAll((elements) => elements.map((element) => element.getAttribute("href") ?? ""))
+            .catch(() => [] as string[]);
+        for (const raw of [page.url(), ...links]) {
+            const match = raw.match(/\/account\/uploads\/(\d+)/);
+            if (match?.[1]) return match[1];
+        }
+        return null;
     }
 
     private async findEntry(page: Page, matchKey: string): Promise<XvideosEntry | null> {

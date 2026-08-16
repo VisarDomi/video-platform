@@ -7,14 +7,7 @@ export interface UploadRequest {
     readonly tags: readonly string[];
     readonly matchKey: string;
     readonly visibility: "private";
-    readonly model?: {
-        readonly stageName: string;
-        readonly gender: string;
-        readonly howKnown: string;
-        readonly profilePicture: string;
-        readonly xvideosModelId: string | null;
-        readonly selectionMode: "manual" | "automatic-known";
-    };
+    readonly streamerAlias?: string;
     readonly onProgress?: (
         phase: "file_uploading" | "file_uploaded" | "metadata_submitting",
         transmittedBytes: number,
@@ -28,6 +21,7 @@ export interface UploadReceipt {
         readonly remoteUrl: string;
         readonly moderationStatus: string | null;
     } | null;
+    readonly submittedVideoId: string | null;
     readonly metadataSubmittedAt: string;
     readonly selectedModelId: string | null;
 }

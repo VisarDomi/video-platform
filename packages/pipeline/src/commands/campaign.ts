@@ -62,7 +62,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
                 ? (recordingId, monthlyUploadLimitBytes) => uploadOne(recordingId, {
                     ...config,
                     monthlyUploadLimitBytes,
-                }, { modelSelection: "automatic-known" })
+                })
                 : undefined,
         );
         return { recovery, step: await worker.step() };

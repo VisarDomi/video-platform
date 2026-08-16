@@ -82,21 +82,11 @@ export class CampaignWorker {
                 };
             }
             const provenance = this.database.getProvenance(uploadReady.id);
-            const model = provenance?.streamerId
-                ? this.database.getStreamerModel(uploadReady.provider, provenance.streamerId)
-                : null;
-            if (!provenance?.streamerId || !model) {
+            if (!provenance?.streamerId) {
                 return {
                     disposition: "attention_required",
                     recordingId: uploadReady.id,
-                    reason: "streamer_model_not_configured",
-                };
-            }
-            if (this.upload && !model.xvideosModelId) {
-                return {
-                    disposition: "attention_required",
-                    recordingId: uploadReady.id,
-                    reason: "xvideos_model_id_not_confirmed_by_supervised_upload",
+                    reason: "streamer_unresolved",
                 };
             }
             const artifact = this.database.getArtifact(uploadReady.id);

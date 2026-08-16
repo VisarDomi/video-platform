@@ -288,7 +288,7 @@ test("stage failures persist diagnostics without continuing downstream", async (
     assert.equal(database.retryFailed(recording.id).state, "server_ready");
 });
 
-test("the upload coordinator records fake transport success without a real network", async (t) => {
+test("the upload coordinator parks submit success as uncertain until 24-hour video-link verification", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
@@ -301,11 +301,8 @@ test("the upload coordinator records fake transport success without a real netwo
             assert.equal(request.visibility, "private");
             return {
                 transmittedBytes: 525,
-                remoteEntry: {
-                    remoteId: "fake-remote",
-                    remoteUrl: "https://example.invalid/fake-remote",
-                    moderationStatus: "Blocked",
-                },
+                remoteEntry: null,
+                submittedVideoId: "91362268",
                 metadataSubmittedAt: now.toISOString(),
                 selectedModelId: null,
             };
@@ -322,8 +319,26 @@ test("the upload coordinator records fake transport success without a real netwo
         visibility: "private",
     }, now);
     assert.equal(calls, 1);
-    assert.equal(database.get(recording.id)?.state, "xvideos_verified");
+    // Submit success is NOT accepted immediately: it waits for the 24-hour
+    // public video-link verification.
+    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
+    assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-13T07:59:59Z")), []);
+
+    const after = new Date("2026-08-13T08:00:00Z");
+    const [confirmation] = database.dueUploadConfirmations(after);
+    assert.ok(confirmation);
+    assert.deepEqual(database.getUncertainUploadRemote(confirmation.attemptId), {
+        remoteId: "91362268",
+        remoteUrl: "https://www.xvideos.com/video.91362268/",
+    });
+
+    // The video link opens -> that is the success signal.
+    database.reconcileUncertain(confirmation.attemptId, "91362268",
+        "https://www.xvideos.com/video.91362268/", after);
+    database.markRemoteVerified(recording.id, "91362268",
+        "https://www.xvideos.com/video.91362268/", null, after);
+    assert.equal(database.get(recording.id)?.state, "xvideos_verified");
 });
 
 test("transport errors meter bytes and uncertain acceptance cannot retry", async (t) => {

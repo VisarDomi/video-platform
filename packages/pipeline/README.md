@@ -18,9 +18,9 @@ Implemented:
 - XVideos-safe metadata composition with deterministic reconciliation keys,
   provenance suffixes, provider/live defaults, and normalized tag deduplication.
 - Persistent-Chromium XVideos upload through Google OAuth, automated
-  Friendly Captcha completion with a manual fallback, supervised model
-  selection/creation, fixed metadata policy, and authenticated uploads-list
-  reconciliation.
+  Friendly Captcha completion with a manual fallback, automatic model
+  suggestion selection by streamer alias, fixed metadata policy, and 24-hour
+  public video-link verification.
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane`, restart recovery, and a 24-hour no-retry confirmation window
   after metadata submission may have succeeded.
@@ -97,18 +97,18 @@ npm run provenance:set -w pipeline -- RECORDING_ID \
   --streamer-id ID --alias NAME --streamer-url URL --alias-url URL
 ```
 
-Configure the resolved streamer's model. `--from-env` applies values only to
-this explicit streamer; those values are not global defaults:
+During `upload-one` the browser types the streamer alias into the model
+search, clicks add, and clicks the first offered suggestion automatically —
+the same click that used to be manual. No model creation or human selection is
+needed; if no suggestion appears the upload proceeds without a model, since
+XVideos does not attach the model to the video anyway.
+
+`model:set` still stores per-streamer model details for future use, but the
+upload no longer requires them:
 
 ```bash
 npm run model:set -w pipeline -- RECORDING_ID --from-env
 ```
-
-During supervised `upload-one`, the browser searches that stage name and then
-waits. It never selects a suggestion by name. Choose the correct result
-manually, or click create; when the creation form opens, the configured details
-and picture are filled and the command waits for you to review/submit. The
-future unattended campaign requires a confirmed stored XVideos model ID.
 
 ## Persistent XVideos browser profile
 
@@ -138,6 +138,11 @@ Setting the profile up on a fresh clone:
 3. Confirm the dashboard shows "My Content", then close the browser. Cookies,
    local storage, and anti-bot state persist on disk for the next run.
 
+A submitted upload is never accepted on submit alone: the attempt parks as
+uncertain with the captured video ID, and `reconcile-uploads` (due 24 hours
+later) opens the public `/video.<id>/` link. The video page actually opening —
+not the edit page — is the success signal.
+
 The uploader handles the remaining sign-in steps itself: the account chooser,
 identifier/password entry, the consent "Continue" button — whether the OAuth
 flow runs in the same tab or in a popup, and even when a saved Google session
@@ -149,9 +154,9 @@ a Google challenge still demands human help, the upload command fails with a
 `HumanActionRequiredError` instead of retrying blindly. Once the file upload
 has started, the run uses patient five-minute action timeouts and never closes
 the browser on failure; any post-upload failure is recorded as
-acceptance-unknown and must be confirmed against the uploads list with
-`reconcile-uploads` before the recording becomes retryable, so a retry cannot
-silently upload the same video twice. The canonical agent-profile notes live in
+acceptance-unknown and must be verified by opening the public video link
+with `reconcile-uploads` (24 hours after submission) before the recording
+becomes retryable, so a retry cannot silently upload the same video twice. The canonical agent-profile notes live in
 `~/Documents/environment/browser/chromium-agent.md`.
 
 Preview upload admission without credentials, reservations, or network access:

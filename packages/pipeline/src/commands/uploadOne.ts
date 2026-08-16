@@ -11,7 +11,6 @@ export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 export async function uploadOne(
     recordingId: string,
     config: PipelineConfig,
-    options: { readonly modelSelection?: "manual" | "automatic-known" } = {},
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network uploads are disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
@@ -40,8 +39,6 @@ export async function uploadOne(
         if (assessment.disposition !== "ready_for_upload") {
             throw new Error(`XVideos policy blocks artifact: ${assessment.disposition}`);
         }
-        const model = database.getStreamerModel(recording.provider, provenance.streamerId);
-        if (!model) throw new Error(`Streamer model needs review for ${recording.provider}:${provenance.streamerId}`);
         const credentials = await readXvideosCredentials(config.credentialsFilePath);
         const uploader = new ChromiumXvideosUploader({
             executablePath: config.chromiumExecutablePath,
@@ -68,19 +65,9 @@ export async function uploadOne(
                 tags: metadata.tags,
                 matchKey: metadata.matchKey,
                 visibility: "private",
-                model: {
-                    stageName: model.stageName,
-                    gender: model.gender,
-                    howKnown: model.howKnown,
-                    profilePicture: model.profilePicture,
-                    xvideosModelId: model.xvideosModelId,
-                    selectionMode: options.modelSelection ?? "manual",
-                },
+                streamerAlias: provenance.alias ?? provenance.streamerId,
             },
         );
-        if (!model.xvideosModelId && receipt.selectedModelId) {
-            database.setRemoteModelId(recording.provider, provenance.streamerId, receipt.selectedModelId);
-        }
         return {
             recordingId,
             state: database.get(recordingId)?.state,
