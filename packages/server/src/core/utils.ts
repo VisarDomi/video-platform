@@ -27,8 +27,8 @@ export function findProjectRoot(): string {
 export async function resolveVideo(filename: string, provider: string): Promise<types.VideoRef> {
     const paths = getProviderPaths(provider);
     const searchPaths = [
-        { path: path.join(paths.downloader, ".active"), type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
-        { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
+        { path: path.join(paths.downloaded, ".active"), type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
+        { path: paths.downloaded, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL },
         { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED },
     ];
 

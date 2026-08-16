@@ -13,7 +13,7 @@ export async function moveVideo(ref: types.VideoRef, destination: types.Destinat
     if (destination === DESTINATIONS.TRASH) {
         newPath = paths.trash;
     } else if (destination === DESTINATIONS.ORIGINAL) {
-        newPath = paths.downloader;
+        newPath = paths.downloaded;
     } else if (destination === DESTINATIONS.EDITED) {
         newPath = paths.edited;
     } else {

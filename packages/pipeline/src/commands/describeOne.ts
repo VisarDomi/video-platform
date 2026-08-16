@@ -24,7 +24,7 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
             throw new Error(refusalMessage(identityOutcome));
         }
         if (recording.sourceKind !== "edited") {
-            throw new Error("Durable upload metadata is restricted to editor/edited recordings");
+            throw new Error("Durable upload metadata is restricted to edited recordings");
         }
         if (recording.state !== "artifact_valid" && recording.state !== "described"
             && recording.state !== "provenance_review_required" && recording.state !== "metadata_ready") {

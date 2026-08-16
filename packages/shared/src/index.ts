@@ -1,3 +1,5 @@
+export { downloadsRoot, providerFolder, providerFolders, VIDEO_FOLDER_KINDS } from "./providerLayout.js";
+export type { VideoFolderKind } from "./providerLayout.js";
 export { fixTargetDuration, selectLongestMediaDuration } from "./hlsUtils.js";
 export { readTokens } from "./tokenManager.js";
 export type { Tokens } from "./tokenManager.js";

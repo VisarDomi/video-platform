@@ -1,8 +1,7 @@
 import { open, readdir, stat } from "node:fs/promises";
 import * as path from "node:path";
-import { moveToDesktopTrash } from "shared";
+import { moveToDesktopTrash, providerFolder } from "shared";
 
-import { config } from "../../common/config.js";
 import logger from "../../common/logger.js";
 import { DownloadsManager } from "../state/downloadsManager.js";
 import { finalizeInactiveRecording, handoffActiveRecording } from "../download/activeRecording.js";
@@ -109,7 +108,7 @@ export class ActiveRecordingReconciler {
         private readonly targetIdForAlias: (alias: string) => string | null,
         activeRoot?: string,
     ) {
-        this.activeRoot = activeRoot ?? path.join(config.storagePath, providerName, "downloader", ".active");
+        this.activeRoot = activeRoot ?? path.join(providerFolder(providerName, "downloaded"), ".active");
     }
 
     public async recoverLocalState(): Promise<void> {

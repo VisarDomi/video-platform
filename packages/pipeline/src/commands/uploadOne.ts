@@ -64,7 +64,7 @@ export async function uploadOne(
             throw new Error(`Recording ${recordingId} is not metadata_ready`);
         }
         if (recording.sourceKind !== "edited") {
-            throw new Error("Production uploads are restricted to editor/edited recordings");
+            throw new Error("Production uploads are restricted to edited recordings");
         }
         await verifyCurrentServerAuthority(recording, config);
         const artifact = database.getArtifact(recordingId);
