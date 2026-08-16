@@ -9,6 +9,7 @@ import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { findOldHostEntry } from "../dist/upload/oldhostEntries.js";
 import { hasModelSelection } from "../dist/upload/chromiumOldHostUploader.js";
+import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
 
 async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
@@ -67,7 +68,7 @@ test("canonical target resolution uses TsLive API alias history and current LADD
     );
 });
 
-test("metadata reserves provenance room and prepends provider/live before normalized descriptor tags", async (t) => {
+test("metadata reserves provenance room and uses fixed provider/live tags", async (t) => {
     const { root } = await rootFixture(t);
     const source = input(root, "fmp4", "2026-08-13 101112 channel-561");
     const recording = {
@@ -104,8 +105,9 @@ test("metadata reserves provenance room and prepends provider/live before normal
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
-    assert.deepEqual(metadata.tags, ["fmp4live", "live", "solo-female", "bedroom"]);
-    assert(metadata.title.includes("[fmp4-aaaaaaaaaaaa]"));
+    assert.deepEqual(metadata.tags, ["fmp4live", "live"]);
+    assert.equal(metadata.matchKey, "[2026-08-13 101112 channel-561]");
+    assert(metadata.title.includes("[2026-08-13 101112 channel-561]"));
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://fmp4-live.example/226494362"));
     assert(metadata.description.includes("Alias: https://fmp4-live.example/channel-561"));
@@ -224,4 +226,74 @@ test("uncertain metadata submission cannot retry before 24 hours and becomes ret
     assert.throws(() => database.markConfirmationAbsent(attempt, new Date("2026-08-14T07:59:59Z")), /not due/);
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-14T08:00:00Z")).length, 1);
     assert.equal(database.markConfirmationAbsent(attempt, new Date("2026-08-14T08:00:00Z")).state, "metadata_ready");
+});
+
+test("failure after the upload started is acceptance-unknown instead of an immediate blind retry", async (t) => {
+    const { root } = await rootFixture(t);
+    const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
+    t.after(() => database.close());
+    const recording = database.discover(input(root, "ladder", "2026-08-13 101112 68190398"));
+    database.transition(recording.id, "server_ready", "remuxed");
+    const artifactPath = path.join(root, "artifact.mp4");
+    database.saveArtifact(recording.id, {
+        path: artifactPath,
+        sizeBytes: 100,
+        sha256: "c".repeat(64),
+        validatedAt: "2026-08-13T08:00:00Z",
+    });
+    database.saveDescription(recording.id, {
+        artifactSha256: "c".repeat(64),
+        promptVersion: "test",
+        fps: 1,
+        output: { title: "Specific title", description: "Specific concrete description.", tags: ["room"] },
+        evidencePath: path.join(root, "evidence.json"),
+    });
+    database.saveProvenance(recording.id, {
+        observedIdentifier: "68190398",
+        status: "resolved",
+        streamerId: "68190398",
+        alias: "68190398",
+        streamerUrl: "https://ladder-live.example/68190398/",
+        aliasUrl: null,
+        reason: null,
+        updatedAt: "2026-08-13T08:00:00Z",
+    });
+    const matchKey = "[2026-08-13 101112 68190398]";
+    database.saveUploadMetadata(recording.id, {
+        title: `Specific title ${matchKey}`,
+        description: "Specific concrete description.\n\nSource: https://ladder-live.example/68190398/",
+        tags: ["ladder", "live"],
+        matchKey,
+    });
+    const now = new Date("2026-08-13T08:00:00Z");
+    const reservationId = database.reserveUpload(recording.id, 100, now);
+    const failingUploader = {
+        async upload(request) {
+            await request.onProgress?.("file_uploading", request.sizeBytes);
+            throw new Error("locator.fill timed out mid-flight");
+        },
+    };
+    await assert.rejects(
+        () => new UploadCoordinator(database, failingUploader).uploadAdmitted(
+            recording.id,
+            reservationId,
+            {
+                recordingId: recording.id,
+                artifactPath,
+                sizeBytes: 100,
+                title: `Specific title ${matchKey}`,
+                description: "Specific concrete description.",
+                tags: ["ladder", "live"],
+                matchKey,
+                visibility: "private",
+            },
+            now,
+        ),
+        /locator.fill timed out mid-flight/,
+    );
+    // The run must NOT drop back to metadata_ready for an immediate retry that
+    // would re-upload the file: it stays uncertain until a reconciliation pass
+    // confirms whether the upload landed.
+    assert.equal(database.get(recording.id)?.state, "oldhost_uncertain");
+    assert.equal(database.dueUploadConfirmations(new Date("2026-08-14T08:00:00Z")).length, 1);
 });

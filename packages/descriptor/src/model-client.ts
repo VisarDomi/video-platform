@@ -5,7 +5,7 @@ import { descriptorConfig } from "./config.js";
 export interface DescriptionResult {
     title: string;
     description: string;
-    tags: string[];
+    tags?: string[];
 }
 
 interface ChatCompletionResponse {
@@ -64,16 +64,10 @@ export async function requestDescription(videoUrl: string, fps: number, prompt: 
             schema: {
                 type: "object",
                 additionalProperties: false,
-                required: ["title", "description", "tags"],
+                required: ["title", "description"],
                 properties: {
                     title: { type: "string", minLength: 5, maxLength: 100 },
                     description: { type: "string", minLength: 20, maxLength: 750 },
-                    tags: {
-                        type: "array",
-                        minItems: 5,
-                        maxItems: 12,
-                        items: { type: "string", minLength: 2, maxLength: 40 },
-                    },
                 },
             },
         },
