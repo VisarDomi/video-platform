@@ -1,5 +1,5 @@
 import * as path from "path";
-import { config } from "../../common/config.js";
+import { providerFolder } from "shared";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { formatTimestampForPath } from "../../common/pathTimestamp.js";
@@ -18,7 +18,7 @@ export function formatDownloadDirName(alias: string, date: Date): string {
 
 export async function setupDownloadDir(providerName: string, alias: string, date: Date): Promise<string | null> {
     const baseName = formatDownloadDirName(alias, date);
-    const storageLocation = path.join(config.storagePath, providerName, "downloader", ".active");
+    const storageLocation = path.join(providerFolder(providerName, "downloaded"), ".active");
 
     const storageLocationExists = await FileSystemManager.ensureDirExists(storageLocation);
     if (!storageLocationExists) {

@@ -28,7 +28,7 @@ async function addFinalized(authority, root, folderName) {
 test("production roots are edited-only while manual remux roots retain downloader access", () => {
     assert.equal(pipelineConfig.discoveryRoots.length, 3);
     assert(pipelineConfig.discoveryRoots.every((root) => root.sourceKind === "edited"));
-    assert(pipelineConfig.discoveryRoots.every((root) => root.path.endsWith(path.join("editor", "edited"))));
+    assert(pipelineConfig.discoveryRoots.every((root) => root.path.endsWith("edited")));
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "downloader").length, 3);
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "edited").length, 3);
 });
@@ -50,9 +50,9 @@ test("campaign selection uses exact ready checkpoints, edited roots, oldest time
         report_json TEXT NOT NULL,
         updated_at TEXT NOT NULL
     ) STRICT`);
-    const tsliveEdited = path.join(root, "tslive", "editor", "edited");
-    const ladderEdited = path.join(root, "ladder", "editor", "edited");
-    const tsliveDownloader = path.join(root, "tslive", "downloader");
+    const tsliveEdited = path.join(root, "tslive", "edited");
+    const ladderEdited = path.join(root, "ladder", "edited");
+    const tsliveDownloader = path.join(root, "tslive", "downloaded");
     const tslivePath = await addFinalized(authority, tsliveEdited, "2025-02-03 040506 tslive_alias");
     const ladderPath = await addFinalized(authority, ladderEdited, "2024-01-02 030405 12345");
     await addFinalized(authority, tsliveDownloader, "2020-01-01 000000 ignored_raw");
