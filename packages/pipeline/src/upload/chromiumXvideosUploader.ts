@@ -114,7 +114,10 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
     }
 
-    async probeVideoLink(url: string): Promise<"published" | "deleted" | "unavailable"> {
+    async probeUploadStatus(uploadId: string): Promise<{
+        outcome: "online" | "not_ready";
+        remoteUrl: string | null;
+    }> {
         const context = await chromium.launchPersistentContext(this.config.profilePath, {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
@@ -124,13 +127,24 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         });
         try {
             const page = context.pages()[0] ?? await context.newPage();
-            const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-            const status = response?.status() ?? 0;
-            const text = await page.locator("body").innerText().catch(() => "");
-            if (/video has been deleted|deleted video|no longer available/i.test(text)) return "deleted";
-            const pathname = new URL(page.url()).pathname;
-            if (status >= 200 && status < 400 && /video\.\d+/i.test(pathname)) return "published";
-            return "unavailable";
+            const response = await page.goto(`https://www.xvideos.com/account/uploads/${uploadId}/edit`, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000,
+            });
+            if ((response?.status() ?? 0) >= 400) {
+                return { outcome: "not_ready", remoteUrl: null };
+            }
+            // Online check: the edit page shows the "Direct link to the video
+            // page" anchor only once the video is published.
+            const directLink = page.locator('a[href*="/video."]').first();
+            const href = await directLink.getAttribute("href").catch(() => null);
+            if (!href) {
+                return { outcome: "not_ready", remoteUrl: null };
+            }
+            return {
+                outcome: "online",
+                remoteUrl: new URL(href, "https://www.xvideos.com/").href,
+            };
         } finally {
             await context.close();
         }
@@ -349,24 +363,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
 
     private async selectModelByAlias(page: Page, alias: string | undefined): Promise<string | null> {
         if (!alias) return null;
+        // The model input is a zero-width typeahead (Playwright treats it as
+        // invisible, so fill() can never work), and XVideos does NOT require a
+        // real model selection: typing the streamer alias and clicking Save
+        // submits successfully with an empty model list. No suggestion click
+        // or selection wait is needed.
         const modelInput = page.locator("#upload_form_models .models-list > input[type=text]");
-        await modelInput.fill(alias);
-        await page.locator("#upload_form_models button[data-role=add]").click();
-        await page.waitForTimeout(500);
-        // The operator previously clicked this suggestion by hand: click the
-        // first offered suggestion automatically. XVideos does not attach the
-        // model to the video, so the exact suggestion does not matter.
-        const suggestion = page.locator("#upload_form_models [data-id]").first();
-        if (await suggestion.count()) {
-            await suggestion.click();
-        }
-        const hiddenSelection = page.locator("#upload_form_models_modelsList");
-        const deadline = Date.now() + 10_000;
-        while (Date.now() < deadline) {
-            const value = await hiddenSelection.inputValue().catch(() => "");
-            if (hasModelSelection(value)) return extractSelectedModelId(value);
-            await page.waitForTimeout(250);
-        }
+        await modelInput.focus();
+        await page.keyboard.type(alias);
         return null;
     }
 
@@ -412,31 +416,6 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             ...candidate,
             remoteUrl: candidate.remoteUrl ? new URL(candidate.remoteUrl, UPLOADS_URL).href : "",
         })), matchKey);
-    }
-}
-
-function extractSelectedModelId(serialized: string): string | null {
-    try {
-        const parsed = JSON.parse(serialized) as unknown;
-        const visit = (value: unknown): string | null => {
-            if (Array.isArray(value)) {
-                for (const item of value) {
-                    const result = visit(item);
-                    if (result) return result;
-                }
-            } else if (value && typeof value === "object") {
-                for (const [key, item] of Object.entries(value)) {
-                    if (/^(?:id|model_id|modelId)$/i.test(key)
-                        && (typeof item === "string" || typeof item === "number")) return String(item);
-                    const result = visit(item);
-                    if (result) return result;
-                }
-            }
-            return null;
-        };
-        return visit(parsed);
-    } catch {
-        return null;
     }
 }
 

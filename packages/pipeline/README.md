@@ -13,14 +13,16 @@ Implemented:
   excluded from campaign processing.
 - One-recording stream-copy remux, full decode/probe, SHA-256 evidence, and
   exact-artifact description.
-- Shared target resolution with Tango API alias history, current FC2/Stripchat
-  identities, grouped unresolved review, and reusable manual overrides.
+- Server-delegated per-provider identity resolution through
+  `GET /api/{provider}/resolve` (Tango alias registry + live Tango API, FC2
+  numeric IDs, Stripchat username lookup), grouped unresolved review, and
+  reusable manual overrides.
 - XVideos-safe metadata composition with deterministic reconciliation keys,
   provenance suffixes, provider/live defaults, and normalized tag deduplication.
 - Persistent-Chromium XVideos upload through Google OAuth, automated
-  Friendly Captcha completion with a manual fallback, automatic model
-  suggestion selection by streamer alias, fixed metadata policy, and 24-hour
-  public video-link verification.
+  Friendly Captcha completion with a manual fallback, streamer alias typed
+  into the model search without selection, fixed metadata policy, and 24-hour
+  edit-page verification.
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane`, restart recovery, and a 24-hour no-retry confirmation window
   after metadata submission may have succeeded.
@@ -83,7 +85,9 @@ npm run process-one -w pipeline
 ```
 
 Refresh provenance, then inspect unresolved identifiers grouped by provider and
-observed folder alias:
+observed folder alias. Resolution asks the API server (default
+`https://127.0.0.1:7973`, override with `VIDEO_SERVER_URL`) instead of
+matching catalog files locally:
 
 ```bash
 npm run provenance:refresh -w pipeline
@@ -98,10 +102,10 @@ npm run provenance:set -w pipeline -- RECORDING_ID \
 ```
 
 During `upload-one` the browser types the streamer alias into the model
-search, clicks add, and clicks the first offered suggestion automatically —
-the same click that used to be manual. No model creation or human selection is
-needed; if no suggestion appears the upload proceeds without a model, since
-XVideos does not attach the model to the video anyway.
+search and saves without selecting any model — verified live that XVideos
+accepts the submission with an empty model list and never attaches the model
+to the video anyway. The model search input is a zero-width typeahead, so the
+uploader types into it with keyboard events instead of `fill()`.
 
 `model:set` still stores per-streamer model details for future use, but the
 upload no longer requires them:
@@ -140,8 +144,9 @@ Setting the profile up on a fresh clone:
 
 A submitted upload is never accepted on submit alone: the attempt parks as
 uncertain with the captured video ID, and `reconcile-uploads` (due 24 hours
-later) opens the public `/video.<id>/` link. The video page actually opening —
-not the edit page — is the success signal.
+later) opens the authenticated edit page `/account/uploads/<id>/edit`. The
+presence of the "Direct link to the video page" anchor (`/video.<key>/<slug>`)
+is the online success signal; without it the confirmation stays pending.
 
 The uploader handles the remaining sign-in steps itself: the account chooser,
 identifier/password entry, the consent "Continue" button — whether the OAuth
@@ -154,9 +159,10 @@ a Google challenge still demands human help, the upload command fails with a
 `HumanActionRequiredError` instead of retrying blindly. Once the file upload
 has started, the run uses patient five-minute action timeouts and never closes
 the browser on failure; any post-upload failure is recorded as
-acceptance-unknown and must be verified by opening the public video link
-with `reconcile-uploads` (24 hours after submission) before the recording
-becomes retryable, so a retry cannot silently upload the same video twice. The canonical agent-profile notes live in
+acceptance-unknown and must be verified with `reconcile-uploads` (24 hours
+after submission), which checks the edit page for the direct video link,
+before the recording becomes retryable, so a retry cannot silently upload the
+same video twice. The canonical agent-profile notes live in
 `~/Documents/environment/browser/chromium-agent.md`.
 
 Preview upload admission without credentials, reservations, or network access:

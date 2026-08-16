@@ -1,38 +1,60 @@
-import { promises as fs } from "node:fs";
+import https from "node:https";
 import path from "node:path";
-import {
-    extractRecordingIdentifier,
-    parseStreamerTargetLine,
-    streamerSourceLinks,
-    targetMembershipIdentifiers,
-    type StreamProvider,
-    type StreamerTarget,
-} from "shared";
+import { extractRecordingIdentifier, streamerSourceLinks, type StreamProvider } from "shared";
 import type { RecordingInput, RecordingProvenance } from "../domain/types.js";
 
+// Recording provenance is resolved by the SERVER's own per-provider capability
+// (GET /api/{provider}/resolve): the Tango alias registry + live Tango API,
+// FC2 numeric IDs, and the Stripchat username lookup. The pipeline keeps no
+// catalog-matching logic of its own.
+
 export interface TargetResolverConfig {
-    readonly targetFiles: Readonly<Record<StreamProvider, string>>;
-    readonly tangoAliasesPath: string;
+    readonly serverUrl?: string;
+    readonly resolveIdentifier?: (
+        provider: StreamProvider,
+        identifier: string,
+    ) => Promise<{ id: string; label: string } | null>;
 }
 
-type AliasHistory = Readonly<Record<string, readonly string[]>>;
+export type ProviderIdentifierResolver = (
+    provider: StreamProvider,
+    identifier: string,
+) => Promise<{ id: string; label: string } | null>;
 
-function normalizeAliasHistory(value: unknown): AliasHistory {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    const result: Record<string, string[]> = {};
-    for (const [id, raw] of Object.entries(value)) {
-        const aliases = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
-        result[id] = aliases.filter((alias): alias is string => typeof alias === "string" && alias.trim() !== "");
-    }
-    return result;
-}
-
-async function readText(filePath: string): Promise<string> {
-    try { return await fs.readFile(filePath, "utf8"); } catch { return ""; }
-}
-
-async function readAliasHistory(filePath: string): Promise<AliasHistory> {
-    try { return normalizeAliasHistory(JSON.parse(await fs.readFile(filePath, "utf8"))); } catch { return {}; }
+// The API server serves HTTPS with a local mkcert certificate, so the
+// client accepts the local certificate instead of failing TLS verification.
+function defaultServerResolver(serverUrl: string): ProviderIdentifierResolver {
+    return (provider, identifier) => new Promise((resolve) => {
+        const url = new URL(`${serverUrl}/api/${provider}/resolve?identifier=${encodeURIComponent(identifier)}`);
+        const request = https.request({
+            hostname: url.hostname,
+            port: url.port || 443,
+            path: `${url.pathname}${url.search}`,
+            method: "GET",
+            rejectUnauthorized: false,
+            timeout: 15_000,
+        }, (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => { body += chunk; });
+            response.on("end", () => {
+                if (response.statusCode !== 200) return resolve(null);
+                try {
+                    const parsed = JSON.parse(body) as { id?: unknown; label?: unknown };
+                    if (typeof parsed.id === "string" && typeof parsed.label === "string") {
+                        resolve({ id: parsed.id, label: parsed.label });
+                    } else {
+                        resolve(null);
+                    }
+                } catch {
+                    resolve(null);
+                }
+            });
+        });
+        request.on("error", () => resolve(null));
+        request.on("timeout", () => { request.destroy(); resolve(null); });
+        request.end();
+    });
 }
 
 function isProvider(value: string): value is StreamProvider {
@@ -40,29 +62,19 @@ function isProvider(value: string): value is StreamProvider {
 }
 
 export class TargetCatalogResolver {
-    private constructor(
-        private readonly targets: Readonly<Record<StreamProvider, readonly StreamerTarget[]>>,
-        private readonly tangoAliases: AliasHistory,
-    ) {}
+    private constructor(private readonly resolveIdentifier: ProviderIdentifierResolver) {}
 
-    static async load(config: TargetResolverConfig): Promise<TargetCatalogResolver> {
-        const [tango, fc2, sc, aliases] = await Promise.all([
-            readText(config.targetFiles.tango),
-            readText(config.targetFiles.fc2),
-            readText(config.targetFiles.sc),
-            readAliasHistory(config.tangoAliasesPath),
-        ]);
-        const parse = (provider: StreamProvider, content: string) => content.split(/\r?\n/)
-            .map((line) => parseStreamerTargetLine(provider, line))
-            .filter((target): target is StreamerTarget => target !== null);
-        return new TargetCatalogResolver({
-            tango: parse("tango", tango),
-            fc2: parse("fc2", fc2),
-            sc: parse("sc", sc),
-        }, aliases);
+    static load(config: TargetResolverConfig): TargetCatalogResolver {
+        return new TargetCatalogResolver(
+            config.resolveIdentifier
+                ?? defaultServerResolver(config.serverUrl ?? "http://127.0.0.1:7973"),
+        );
     }
 
-    resolve(recording: RecordingInput, now = new Date()): Omit<RecordingProvenance, "recordingId"> {
+    async resolve(
+        recording: RecordingInput,
+        now = new Date(),
+    ): Promise<Omit<RecordingProvenance, "recordingId">> {
         const observedIdentifier = extractRecordingIdentifier(path.basename(recording.sourcePath));
         const timestamp = now.toISOString();
         if (!isProvider(recording.provider)) {
@@ -77,12 +89,8 @@ export class TargetCatalogResolver {
                 updatedAt: timestamp,
             };
         }
-        const target = this.targets[recording.provider].find((candidate) => {
-            if (recording.provider === "sc" && candidate.id === candidate.label) return false;
-            const aliases = recording.provider === "tango" ? this.tangoAliases[candidate.id] ?? [] : [];
-            return targetMembershipIdentifiers(candidate, aliases).includes(observedIdentifier);
-        });
-        if (!target) {
+        const resolved = await this.resolveIdentifier(recording.provider, observedIdentifier);
+        if (!resolved) {
             return {
                 observedIdentifier,
                 status: "review_required",
@@ -90,16 +98,20 @@ export class TargetCatalogResolver {
                 alias: null,
                 streamerUrl: null,
                 aliasUrl: null,
-                reason: "identifier_not_resolved_by_current_target_catalog",
+                reason: "identifier_not_resolved_by_server",
                 updatedAt: timestamp,
             };
         }
-        const links = streamerSourceLinks(target);
+        const links = streamerSourceLinks({
+            provider: recording.provider,
+            id: resolved.id,
+            label: resolved.label,
+        });
         return {
             observedIdentifier,
             status: "resolved",
-            streamerId: target.id,
-            alias: target.label,
+            streamerId: resolved.id,
+            alias: resolved.label,
             streamerUrl: links.streamerUrl,
             aliasUrl: links.aliasUrl,
             reason: null,

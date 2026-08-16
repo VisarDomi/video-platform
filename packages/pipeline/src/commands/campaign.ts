@@ -50,10 +50,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
     const database = new PipelineDatabase(config.databasePath);
     try {
         const recovery = database.recoverInterruptedUploads();
-        const resolver = await TargetCatalogResolver.load({
-            targetFiles: config.targetFiles,
-            tangoAliasesPath: config.tangoAliasesPath,
-        });
+        const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const worker = new CampaignWorker(
             database,
             config,

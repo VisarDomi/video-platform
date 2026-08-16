@@ -28,11 +28,8 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
         }
         await verifyCurrentServerAuthority(recording, config);
 
-        const resolver = await TargetCatalogResolver.load({
-            targetFiles: config.targetFiles,
-            tangoAliasesPath: config.tangoAliasesPath,
-        });
-        const resolution = resolver.resolve(recording);
+        const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
+        const resolution = await resolver.resolve(recording);
         database.saveProvenance(recordingId,
             database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution);
         const orchestrator = new PipelineOrchestrator(

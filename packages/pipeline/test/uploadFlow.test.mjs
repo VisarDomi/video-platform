@@ -14,20 +14,21 @@ import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
 async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
     t.after(() => rm(root, { recursive: true, force: true }));
-    await mkdir(path.join(root, "targets"));
-    await writeFile(path.join(root, "targets", "tango.txt"), "https://tango.me/account-id current_alias\n");
-    await writeFile(path.join(root, "targets", "fc2.txt"), "https://live.fc2.com/68190398/\n");
-    await writeFile(path.join(root, "targets", "sc.txt"), "https://stripchat.com/Minami_jjjj 226494362\n");
-    await writeFile(path.join(root, "aliases.json"), JSON.stringify({
-        "account-id": ["old_alias", "current_alias"],
-    }));
-    const resolver = await TargetCatalogResolver.load({
-        targetFiles: {
-            tango: path.join(root, "targets", "tango.txt"),
-            fc2: path.join(root, "targets", "fc2.txt"),
-            sc: path.join(root, "targets", "sc.txt"),
+    // The resolver delegates to the per-provider server capability; the test
+    // injects a stub standing in for GET /api/{provider}/resolve.
+    const resolver = TargetCatalogResolver.load({
+        resolveIdentifier: async (provider, identifier) => {
+            if (provider === "tango" && identifier === "old_alias") {
+                return { id: "account-id", label: "current_alias" };
+            }
+            if (provider === "fc2" && identifier === "68190398") {
+                return { id: "68190398", label: "68190398" };
+            }
+            if (provider === "sc" && identifier === "Minami_jjjj") {
+                return { id: "226494362", label: "Minami_jjjj" };
+            }
+            return null;
         },
-        tangoAliasesPath: path.join(root, "aliases.json"),
     });
     return { root, resolver };
 }
@@ -44,9 +45,9 @@ function input(root, provider, filename) {
     };
 }
 
-test("canonical target resolution uses Tango API alias history and current FC2/SC targets", async (t) => {
+test("provenance resolution delegates to the per-provider server resolver", async (t) => {
     const { root, resolver } = await rootFixture(t);
-    const tango = resolver.resolve(input(root, "tango", "2026-08-13 101112 old_alias"));
+    const tango = await resolver.resolve(input(root, "tango", "2026-08-13 101112 old_alias"));
     assert.deepEqual({
         status: tango.status,
         streamerId: tango.streamerId,
@@ -60,10 +61,10 @@ test("canonical target resolution uses Tango API alias history and current FC2/S
         streamerUrl: "https://tango.me/account-id",
         aliasUrl: "https://tango.me/current_alias",
     });
-    assert.equal(resolver.resolve(input(root, "fc2", "2026-08-13 101112 68190398")).status, "resolved");
-    assert.equal(resolver.resolve(input(root, "sc", "2026-08-13 101112 Minami_jjjj")).streamerId, "226494362");
+    assert.equal((await resolver.resolve(input(root, "fc2", "2026-08-13 101112 68190398"))).status, "resolved");
+    assert.equal((await resolver.resolve(input(root, "sc", "2026-08-13 101112 Minami_jjjj"))).streamerId, "226494362");
     assert.equal(
-        resolver.resolve(input(root, "sc", "2026-08-13 101112 previous_sc_alias")).status,
+        (await resolver.resolve(input(root, "sc", "2026-08-13 101112 previous_sc_alias"))).status,
         "review_required",
     );
 });

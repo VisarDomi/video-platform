@@ -86,14 +86,12 @@ export class UploadCoordinator {
         // uncertain with the captured video ID, and the 24-hour reconcile
         // verifies the public video link.
         const remoteId = receipt.submittedVideoId;
-        const remoteUrl = remoteId ? `https://www.xvideos.com/video.${remoteId}/` : null;
         this.database.finishUploadAttempt(attemptId, {
             status: "uncertain",
             transmittedBytes: receipt.transmittedBytes,
             remoteId: remoteId ?? undefined,
-            remoteUrl: remoteUrl ?? undefined,
             error: remoteId
-                ? "metadata submitted; awaiting 24-hour video-link verification"
+                ? "metadata submitted; awaiting 24-hour edit-page verification"
                 : "metadata submitted; submitted video ID was not captured",
             confirmation: {
                 matchKey: request.matchKey,

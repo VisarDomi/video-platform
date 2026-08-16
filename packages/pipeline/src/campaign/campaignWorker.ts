@@ -115,7 +115,7 @@ export class CampaignWorker {
         });
         if (!candidate) return { disposition: "idle", reviewRequired };
         const recording = this.database.discover(candidate, now);
-        const resolution = this.resolver.resolve(candidate, now);
+        const resolution = await this.resolver.resolve(candidate, now);
         this.database.saveProvenance(recording.id,
             this.database.getProvenanceOverride(candidate.provider, resolution.observedIdentifier) ?? resolution);
         return { disposition: "admitted", recordingId: recording.id, state: recording.state };

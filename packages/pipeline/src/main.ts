@@ -162,13 +162,10 @@ async function main(): Promise<void> {
                 throw new Error("Historical server finalization is incomplete; refusing to trust finalized roots");
             }
             const plan = await planDiscovery(pipelineConfig.discoveryRoots);
-            const resolver = await TargetCatalogResolver.load({
-                targetFiles: pipelineConfig.targetFiles,
-                tangoAliasesPath: pipelineConfig.tangoAliasesPath,
-            });
+            const resolver = TargetCatalogResolver.load({ serverUrl: pipelineConfig.serverUrl });
             console.log(JSON.stringify({
                 mode: "ledger-write-only",
-                ...applyDiscovery(database, plan, resolver),
+                ...(await applyDiscovery(database, plan, resolver)),
             }, null, 2));
             return;
         }
@@ -184,14 +181,11 @@ async function main(): Promise<void> {
         }
         if (command === "provenance-refresh") {
             requireApply(process.argv.slice(3));
-            const resolver = await TargetCatalogResolver.load({
-                targetFiles: pipelineConfig.targetFiles,
-                tangoAliasesPath: pipelineConfig.tangoAliasesPath,
-            });
+            const resolver = TargetCatalogResolver.load({ serverUrl: pipelineConfig.serverUrl });
             let resolved = 0;
             let reviewRequired = 0;
             for (const recording of database.list()) {
-                const resolution = resolver.resolve(recording);
+                const resolution = await resolver.resolve(recording);
                 const provenance = database.saveProvenance(recording.id,
                     database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution);
                 if (provenance.status === "review_required") reviewRequired++;

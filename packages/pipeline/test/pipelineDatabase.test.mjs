@@ -330,7 +330,7 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
     assert.ok(confirmation);
     assert.deepEqual(database.getUncertainUploadRemote(confirmation.attemptId), {
         remoteId: "91362268",
-        remoteUrl: "https://www.xvideos.com/video.91362268/",
+        remoteUrl: null,
     });
 
     // The video link opens -> that is the success signal.

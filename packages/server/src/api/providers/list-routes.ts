@@ -117,6 +117,27 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
         }
     });
 
+    // Read-only resolution capability for every provider: the same
+    // resolveIdentifier the add flow uses, without catalog writes or follow
+    // actions. The pipeline consumes this for recording provenance instead of
+    // re-implementing its own catalog-scoped matching.
+    router.get(`${prefix}/resolve`, async (req, res) => {
+        const identifier = typeof req.query.identifier === "string" ? req.query.identifier.trim() : "";
+        if (!identifier) {
+            return res.status(400).json({ error: "identifier required" });
+        }
+        try {
+            const resolved = await adapter.resolveIdentifier(identifier);
+            if (!resolved) {
+                return res.status(404).json({ error: `Could not resolve: ${identifier}` });
+            }
+            res.json({ id: resolved.id, label: resolved.label });
+        } catch (error) {
+            logger.error(`Error resolving ${adapter.name} identifier`, { error });
+            res.status(500).json({ error: "Failed to resolve identifier" });
+        }
+    });
+
     router.post(prefix, async (req, res) => {
         const { content } = req.body;
         if (typeof content !== "string") {
