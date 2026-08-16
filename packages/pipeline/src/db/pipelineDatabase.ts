@@ -776,8 +776,8 @@ export class PipelineDatabase {
         if (!metadata.description || metadata.description.length > 1_000) {
             throw new Error("Upload description must contain at most 1000 characters");
         }
-        if (metadata.tags.length === 0 || metadata.tags.length > 20 || metadata.tags.some((tag) => !tag.trim())) {
-            throw new Error("Upload metadata needs one to twenty nonempty tags");
+        if (metadata.tags.length > 20 || metadata.tags.some((tag) => !tag.trim())) {
+            throw new Error("Upload metadata allows at most twenty nonempty tags");
         }
         if (!metadata.matchKey || metadata.matchKey.length > 80 || !metadata.title.includes(metadata.matchKey)) {
             throw new Error("Upload title must contain its deterministic match key");
@@ -1011,7 +1011,7 @@ export class PipelineDatabase {
         const results: Array<{ recordingId: string; disposition: string }> = [];
         for (const attempt of attempts) {
             this.transaction(() => {
-                const uncertain = attempt.phase === "metadata_submitting";
+                const uncertain = attempt.phase === "metadata_submitting" || attempt.phase === "file_uploaded";
                 if (attempt.progress_bytes > 0) {
                     this.database.prepare(`
                         INSERT INTO bandwidth_events (

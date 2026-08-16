@@ -7,7 +7,7 @@ import { findXvideosEntry, type XvideosEntry, type XvideosEntryCandidate } from 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
 const UPLOADS_URL = "https://www.xvideos.com/account/uploads";
-const MANUAL_MODEL_TIMEOUT_MILLISECONDS = 30 * 60_000;
+const MANUAL_MODEL_TIMEOUT_MILLISECONDS = 60 * 60_000;
 
 export interface ChromiumUploaderConfig {
     readonly executablePath: string;
@@ -29,13 +29,17 @@ class RequestByteCounter {
     private bytes = 0;
 
     async observe(request: Request): Promise<void> {
-        if (this.seen.has(request) || request.method() === "GET") return;
-        this.seen.add(request);
-        const url = new URL(request.url());
-        if (!url.hostname.endsWith("xvideos.com") && !url.hostname.endsWith("upload-serv.com")) return;
-        const raw = await request.headerValue("content-length");
-        const length = raw ? Number.parseInt(raw, 10) : 0;
-        if (Number.isSafeInteger(length) && length > 0) this.bytes += length;
+        try {
+            if (this.seen.has(request) || request.method() === "GET") return;
+            this.seen.add(request);
+            const url = new URL(request.url());
+            if (!url.hostname.endsWith("xvideos.com") && !url.hostname.endsWith("upload-serv.com")) return;
+            const raw = await request.headerValue("content-length");
+            const length = raw ? Number.parseInt(raw, 10) : 0;
+            if (Number.isSafeInteger(length) && length > 0) this.bytes += length;
+        } catch {
+            // aborted or intercepted request; not billable and never fatal
+        }
     }
 
     transmitted(fallback: number): number { return Math.max(this.bytes, fallback); }
@@ -51,7 +55,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             headless: this.config.headless ?? false,
             viewport: null,
             args: ["--disable-blink-features=AutomationControlled"],
+            ignoreDefaultArgs: ["--enable-automation"],
+        }).catch((error: unknown) => {
+            throw new HumanActionRequiredError("session_login",
+                "Could not launch the XVideos browser profile. If an earlier run left a browser open, close it manually first. "
+                + (error instanceof Error ? error.message : String(error)));
         });
+        let completed = false;
         try {
             const page = context.pages()[0] ?? await context.newPage();
             const counter = new RequestByteCounter();
@@ -62,11 +72,18 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             await page.locator("#file_form_file_file_options_file_1_file").setInputFiles(request.artifactPath);
             await request.onProgress?.("file_uploading", request.sizeBytes);
             await page.getByRole("button", { name: "Upload", exact: true }).click();
+            // The file now uploads in the background. From here on the run must
+            // not die on a 30-second action timeout: the form may stay hidden or
+            // disabled while the transfer progresses, so every action waits
+            // patiently until the page is ready.
+            page.setDefaultTimeout(5 * 60_000);
+            console.log(JSON.stringify({ event: "xvideos-upload-started", instruction: "Filling metadata while the file uploads" }));
+            await page.locator("#upload_form").waitFor({ state: "visible", timeout: 30 * 60_000 });
+            await this.fillUploadMetadata(page, request);
             await page.getByText("The file upload was completed successfully.", { exact: false })
                 .waitFor({ state: "visible", timeout: 30 * 60_000 });
             await request.onProgress?.("file_uploaded", counter.transmitted(request.sizeBytes));
 
-            await this.fillUploadMetadata(page, request);
             const selectedModelId = await this.selectOrCreateModel(page, request);
             const submittedAt = new Date();
             await request.onProgress?.("metadata_submitting", counter.transmitted(request.sizeBytes));
@@ -76,6 +93,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             ]);
             await page.waitForTimeout(1_000);
             const remoteEntry = await this.findEntry(page, request.matchKey);
+            completed = true;
             return {
                 transmittedBytes: counter.transmitted(request.sizeBytes),
                 remoteEntry,
@@ -83,7 +101,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 selectedModelId,
             };
         } finally {
-            await context.close();
+            if (completed) {
+                await context.close();
+            } else {
+                console.log(JSON.stringify({
+                    event: "upload-browser-left-open",
+                    instruction: "The upload did not complete cleanly, so the browser was left open for manual handling. Close it manually before running another upload.",
+                }));
+            }
         }
     }
 
@@ -92,6 +117,8 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
+            args: ["--disable-blink-features=AutomationControlled"],
+            ignoreDefaultArgs: ["--enable-automation"],
         });
         try {
             const page = context.pages()[0] ?? await context.newPage();
@@ -121,32 +148,116 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         const google = page.locator("a.social-login-icon[data-name=Google][data-method=signin]");
         if (!await google.count()) throw new HumanActionRequiredError("session_login", "XVideos login form changed");
         await google.click();
-        await page.getByRole("button", { name: "Sign in with Google", exact: true }).click();
-        await page.waitForLoadState("domcontentloaded");
-        if (await page.locator("#identifierId").count()) {
-            await page.locator("#identifierId").fill(this.config.email);
-            await page.getByRole("button", { name: "Next" }).click();
+        const signInWithGoogle = page.getByRole("button", { name: "Sign in with Google", exact: true });
+        await signInWithGoogle.waitFor({ state: "visible", timeout: 15_000 });
+        await signInWithGoogle.click();
+
+        // Drive the Google OAuth flow until it lands back on XVideos. The
+        // possible steps are the account chooser, the identifier page, the
+        // password page, and the consent "Continue" button. A persistent
+        // manual challenge (2FA, recovery, unusual activity) is reported as
+        // a human action instead of being retried blindly.
+        const deadline = Date.now() + 180_000;
+        let sawGoogle = false;
+        let challengeStreak = 0;
+        while (Date.now() < deadline) {
+            const url = page.url();
+            if (url.startsWith("https://accounts.google.com")) sawGoogle = true;
+            if (sawGoogle && url.startsWith("https://www.xvideos.com")) break;
+
+            const accountRow = page.locator(
+                `[data-identifier="${this.config.email}"], [data-email="${this.config.email}"]`,
+            ).first();
+            if (await accountRow.count()) {
+                await accountRow.click();
+                challengeStreak = 0;
+                await page.waitForTimeout(1_500);
+                continue;
+            }
+            if (await page.locator("#identifierId").count()) {
+                await page.locator("#identifierId").fill(this.config.email);
+                await page.getByRole("button", { name: "Next", exact: true }).click();
+                challengeStreak = 0;
+                await page.waitForTimeout(1_500);
+                continue;
+            }
+            if (await page.locator('input[type="password"]').count()) {
+                await page.locator('input[type="password"]').fill(this.config.password);
+                await page.getByRole("button", { name: "Next", exact: true }).click();
+                challengeStreak = 0;
+                await page.waitForTimeout(1_500);
+                continue;
+            }
+            const continueButton = page.getByRole("button", { name: "Continue", exact: true });
+            if (await continueButton.count()) {
+                await continueButton.click();
+                challengeStreak = 0;
+                await page.waitForTimeout(1_500);
+                continue;
+            }
+            const text = await page.locator("body").innerText().catch(() => "");
+            if (/confirm it.s you|verify it.s you|2-step verification|two-step verification|try another way|recover your account|unusual activity/i.test(text)) {
+                challengeStreak++;
+                if (challengeStreak >= 2) {
+                    throw new HumanActionRequiredError("google_challenge", "Google requires manual account verification: " + text.slice(0, 200));
+                }
+            } else {
+                challengeStreak = 0;
+            }
+            await page.waitForTimeout(750);
         }
-        await page.waitForTimeout(750);
-        if (await page.locator('input[type="password"]').count()) {
-            await page.locator('input[type="password"]').fill(this.config.password);
-            await page.getByRole("button", { name: "Next" }).click();
-        }
-        await page.waitForTimeout(1_000);
-        const continueButton = page.getByRole("button", { name: "Continue" });
-        if (await continueButton.count()) await continueButton.click();
-        await page.waitForTimeout(1_000);
-        if (!page.url().startsWith("https://www.xvideos.com/account")) {
-            throw new HumanActionRequiredError("google_challenge", "Google requires manual account verification");
+        await page.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        if (!await page.getByText("My Content", { exact: true }).count()) {
+            throw new HumanActionRequiredError("google_challenge", "Google login did not reach the XVideos account dashboard");
         }
     }
 
     private async openUploadForm(page: Page): Promise<void> {
         await page.goto(UPLOAD_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        if ((await page.locator("body").innerText()).includes("Confirm that you are not a robot")) {
-            throw new HumanActionRequiredError("captcha", "Friendly Captcha requires manual completion");
-        }
+        await this.solveFriendlyCaptcha(page);
         await page.locator("#file_form_file_file_options_file_1_file").waitFor({ state: "attached", timeout: 15_000 });
+    }
+
+    private async solveFriendlyCaptcha(page: Page): Promise<void> {
+        const fileInput = page.locator("#file_form_file_file_options_file_1_file");
+        const confirmButton = page.getByRole("button", { name: "Confirm that you are not a robot", exact: true });
+        const deadline = Date.now() + 120_000;
+        while (Date.now() < deadline) {
+            if (await fileInput.count()) return;
+            // Friendly Captcha does not auto-solve on the upload page: its
+            // widget checkbox has to be clicked, the proof-of-work runs for a
+            // few seconds, and only then does the page-level confirm button
+            // accept a click and reveal the file form.
+            let widgetSolved = false;
+            for (const frame of page.frames()) {
+                try {
+                    if (!frame.url().includes("frcapi.com/api/v2/captcha/widget")) continue;
+                    const checkbox = frame.locator("button[role=checkbox]").first();
+                    if (!await checkbox.count()) continue;
+                    const stateClass = await frame.locator(".main").first()
+                        .getAttribute("class").catch(() => "") ?? "";
+                    // Click only the unactivated widget; while it solves, wait.
+                    // Re-clicking restarts the proof-of-work and escalates the
+                    // captcha difficulty, which caused a minute-long stall.
+                    if (stateClass.includes("state-unactivated")) {
+                        await checkbox.click({ timeout: 5_000 }).catch(() => undefined);
+                    }
+                    const checked = await checkbox.getAttribute("aria-checked").catch(() => null);
+                    widgetSolved = checked === "true" || stateClass.includes("state-completed");
+                } catch {
+                    // widget frame still mounting or detaching; retry next iteration
+                }
+            }
+            if (widgetSolved && await confirmButton.count() && await confirmButton.isEnabled()) {
+                await confirmButton.click();
+                await page.waitForTimeout(1_500);
+                continue;
+            }
+            await page.waitForTimeout(750);
+        }
+        if (!await fileInput.count()) {
+            throw new HumanActionRequiredError("captcha", "Friendly Captcha did not complete automatically on the upload page");
+        }
     }
 
     private async fillUploadMetadata(page: Page, request: UploadRequest): Promise<void> {
@@ -162,10 +273,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         await page.locator("#upload_form_privacy_privacy_centered_privacy_NO_LISTING").check();
         await page.locator("#upload_form_titledesc_title").fill(request.title);
         await page.locator("#upload_form_titledesc_description").fill(request.description);
+        const tagInput = page.locator("#upload_form_tags .tag-list > input[type=text]");
         for (const tag of request.tags) {
-            const input = page.locator("#upload_form_tags .tag-list > input[type=text]");
-            await input.fill(tag.replace(/-/g, " "));
-            await input.press("Enter");
+            // The tag input is zero-width until it receives text, so Playwright
+            // treats it as invisible and fill() can never work: focus it, type,
+            // and press Enter. The widget expands the input and adds the chip.
+            await tagInput.focus();
+            await tagInput.pressSequentially(tag.replace(/-/g, " "));
+            await tagInput.press("Enter");
         }
         if (await page.locator("#upload_form_ads_has_commercial_com").isChecked()) {
             await page.locator("#upload_form_ads_has_commercial_com").uncheck();
@@ -194,12 +309,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             instruction: "Select the correct existing model or click create model in the visible browser",
         }));
         const hiddenSelection = page.locator("#upload_form_models_modelsList");
-        const initialSelection = await hiddenSelection.inputValue();
+        const initialSelection = await hiddenSelection.inputValue().catch(() => "");
         const form = page.locator("form.model-info-form");
         let creationFormFilled = false;
         const deadline = Date.now() + MANUAL_MODEL_TIMEOUT_MILLISECONDS;
         while (Date.now() < deadline) {
-            const value = await hiddenSelection.inputValue();
+            const value = await hiddenSelection.inputValue().catch(() => initialSelection);
             if (value !== initialSelection && hasModelSelection(value)) {
                 console.log(JSON.stringify({ event: "xvideos-model-selected" }));
                 return extractSelectedModelId(value);

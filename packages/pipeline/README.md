@@ -17,9 +17,10 @@ Implemented:
   identities, grouped unresolved review, and reusable manual overrides.
 - XVideos-safe metadata composition with deterministic reconciliation keys,
   provenance suffixes, provider/live defaults, and normalized tag deduplication.
-- Persistent-Chromium XVideos upload through Google OAuth, explicit CAPTCHA
-  pauses, supervised model selection/creation, fixed metadata policy, and
-  authenticated uploads-list reconciliation.
+- Persistent-Chromium XVideos upload through Google OAuth, automated
+  Friendly Captcha completion with a manual fallback, supervised model
+  selection/creation, fixed metadata policy, and authenticated uploads-list
+  reconciliation.
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane`, restart recovery, and a 24-hour no-retry confirmation window
   after metadata submission may have succeeded.
@@ -108,6 +109,48 @@ waits. It never selects a suggestion by name. Choose the correct result
 manually, or click create; when the creation form opens, the configured details
 and picture are filled and the command waits for you to review/submit. The
 future unattended campaign requires a confirmed stored XVideos model ID.
+
+## Persistent XVideos browser profile
+
+The uploader drives a real Chromium through a persistent user-data directory so
+the Google OAuth session and XVideos cookies survive between runs. The default
+profile is the shared agent-control directory:
+
+```text
+/home/visar/.config/chromium-agent
+```
+
+Override it with `VIDEO_XVIDEOS_BROWSER_PROFILE=/absolute/path`. Only one
+Chromium process may use the directory at a time: close any agent-controlled
+browser (remote debugging on port 9222) before running an upload. The uploader
+closes its own Chromium only when the upload completes cleanly; on any failure
+it leaves the browser open for manual handling and logs
+`upload-browser-left-open`, so close that browser before retrying.
+
+Setting the profile up on a fresh clone:
+
+1. Create the profile by launching Chromium once:
+   `/usr/bin/chromium --user-data-dir=/home/visar/.config/chromium-agent`
+2. Open `https://www.xvideos.com/account`, click the Google login icon and
+   then "Sign in with Google", and complete the Google flow with the account
+   from `packages/.env` (`EMAIL_XVIDEOS` / `PASSWORD_XVIDEOS`). Accept the
+   XVideos consent modal and resolve any Google challenge or captcha by hand.
+3. Confirm the dashboard shows "My Content", then close the browser. Cookies,
+   local storage, and anti-bot state persist on disk for the next run.
+
+The uploader handles the remaining sign-in steps itself: the account chooser,
+identifier/password entry, the consent "Continue" button, and the upload page's
+Friendly Captcha. For the captcha it clicks the widget's "I am human" checkbox,
+waits for the proof-of-work to complete, clicks the page's "Confirm that you
+are not a robot" button, and only then expects the file form. If the captcha or
+a Google challenge still demands human help, the upload command fails with a
+`HumanActionRequiredError` instead of retrying blindly. Once the file upload
+has started, the run uses patient five-minute action timeouts and never closes
+the browser on failure; any post-upload failure is recorded as
+acceptance-unknown and must be confirmed against the uploads list with
+`reconcile-uploads` before the recording becomes retryable, so a retry cannot
+silently upload the same video twice. The canonical agent-profile notes live in
+`~/Documents/environment/browser/chromium-agent.md`.
 
 Preview upload admission without credentials, reservations, or network access:
 

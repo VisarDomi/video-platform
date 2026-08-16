@@ -59,8 +59,14 @@ export class UploadCoordinator {
         } catch (error) {
             const transportError = error instanceof UploadTransportError ? error : null;
             const progress = this.database.getUploadProgress(attemptId);
+            // Any failure once the file upload started is acceptance-unknown:
+            // the file may still land on XVideos (or already have), so the
+            // attempt must be confirmed against the uploads list instead of
+            // blindly re-uploading gigabytes.
             const acceptanceUnknown = transportError?.acceptanceUnknown
-                || progress.phase === "metadata_submitting";
+                || progress.phase === "metadata_submitting"
+                || progress.phase === "file_uploaded"
+                || progress.transmittedBytes > 0;
             this.database.finishUploadAttempt(attemptId, {
                 status: acceptanceUnknown ? "uncertain" : "failed",
                 transmittedBytes: Math.max(transportError?.transmittedBytes ?? 0, progress.transmittedBytes),
@@ -71,7 +77,7 @@ export class UploadCoordinator {
                         confirmAfter: new Date(now.getTime() + 24 * 60 * 60_000),
                     },
                 } : {}),
-            }, now);
+            }, new Date());
             throw error;
         }
         const submittedAt = new Date(receipt.metadataSubmittedAt);

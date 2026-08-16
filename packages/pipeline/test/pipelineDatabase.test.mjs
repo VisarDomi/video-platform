@@ -380,3 +380,20 @@ test("restart recovery distinguishes interrupted transfer from possible metadata
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:01:00Z")).length, 1);
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 1_000, reserved: 0 });
 });
+
+test("interrupted upload after the file completed requires confirmation before retry", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const now = new Date("2026-08-12T11:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 550, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.updateUploadProgress(attempt, "file_uploading", 500, now);
+    database.updateUploadProgress(attempt, "file_uploaded", 500, now);
+    assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T11:01:00Z")), [{
+        recordingId: recording.id,
+        disposition: "confirmation_required",
+    }]);
+    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T11:01:00Z")).length, 1);
+});

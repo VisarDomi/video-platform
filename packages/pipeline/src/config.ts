@@ -55,7 +55,7 @@ export const pipelineConfig: PipelineConfig = {
     },
     tangoAliasesPath: process.env.VIDEO_TANGO_ALIASES_PATH ?? path.join(dataRoot, "aliases.json"),
     browserProfilePath: process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
-        ?? path.join(dataRoot, "xvideos-browser-profile"),
+        ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
     credentialsFilePath: process.env.VIDEO_XVIDEOS_ENV_FILE
         ?? path.resolve(import.meta.dirname, "..", "..", ".env"),
