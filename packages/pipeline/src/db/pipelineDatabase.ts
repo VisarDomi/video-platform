@@ -1123,6 +1123,14 @@ export class PipelineDatabase {
         return this.requireRecording(recordingId);
     }
 
+    getUncertainUploadRemote(attemptId: string): { remoteId: string; remoteUrl: string } | null {
+        const row = this.database.prepare(`
+            SELECT remote_id, remote_url FROM upload_attempts WHERE id = ? AND status = 'uncertain'
+        `).get(attemptId) as { remote_id: string | null; remote_url: string | null } | undefined;
+        if (!row?.remote_id || !row?.remote_url) return null;
+        return { remoteId: row.remote_id, remoteUrl: row.remote_url };
+    }
+
     reconcileUncertain(attemptId: string, remoteId: string, remoteUrl: string, now = new Date()): Recording {
         if (!remoteId || !remoteUrl) throw new Error("Reconciliation requires remote identity");
         const timestamp = now.toISOString();

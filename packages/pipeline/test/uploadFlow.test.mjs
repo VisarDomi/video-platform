@@ -129,7 +129,7 @@ test("uploads-list matching adopts blocked entries by stable numeric ID", () => 
     });
 });
 
-test("manual OldHost model selection waits for a nonempty form selection", () => {
+test("OldHost model selection detection accepts a nonempty serialized form selection", () => {
     assert.equal(hasModelSelection(""), false);
     assert.equal(hasModelSelection("[]"), false);
     assert.equal(hasModelSelection("{}"), false);
