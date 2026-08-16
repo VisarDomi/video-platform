@@ -100,3 +100,12 @@ Hourly cycle: fetch all following IDs (size=5000), batch-fetch aliases (chunked 
 ## Batch alias endpoint caps at 500
 
 The Tango batch profile API returns at most 500 results per request. The fetcher chunks requests in groups of 500 sequentially.
+
+## Notes
+
+- The API server has HTTP fallback.
+- Userscript integration uses API endpoints to manage download lists.
+- Userscripts on external sites should use `GM_xmlhttpRequest` or `GM.xmlHttpRequest` to bypass CORS and mixed-content restrictions.
+- `.pending` and media validation are capture-only (`downloaded` roots).
+  Edited recordings publish directly into `edited/` with a derivation
+  checkpoint — never route an edit through the validation finalizer.

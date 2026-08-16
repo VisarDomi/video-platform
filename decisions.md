@@ -1,5 +1,26 @@
 # Monorepo Decisions
 
+## Validation happens once; .pending is capture-only (2026-08-17)
+
+Media validation runs exactly once per recording — at capture finalization.
+Edited recordings (segmentation) publish directly into `edited/`: their kept
+segments are the already-validated capture bytes, so the edit service records
+a "ready" checkpoint by derivation (playlist fingerprint + report, no
+decoding) and atomically renames the build into place. The finalizer's
+`.pending` roots are `downloaded` only; `edited/.pending` no longer
+exists as a concept. The finalizer also runs parallel workers (cores/3, per
+-worker budget cores/workers) instead of a single serial lane.
+
+### CPU belongs to systemd; the app asks, never throttles (2026-08-17)
+
+The app makes no thread, budget, priority, or load decisions. ffmpeg is
+spawned with no thread flags (its own defaults), no re-nicing, no load
+guards. The single parallelism decision — how many recordings process at
+once — is `os.availableParallelism()`: the kernel/cgroup answer, which
+respects the `video-processing.slice` `CPUQuota=600%` (currently 6
+lanes). The slice is the only throttle; raising its quota raises the lanes
+with zero app changes.
+
 ## Provider userscripts live in packages/userscripts (2026-08-16)
 
 The fc2 and stripchat download-list userscripts were ported into the monorepo

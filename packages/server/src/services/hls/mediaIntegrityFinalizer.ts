@@ -13,10 +13,11 @@ import { pendingRoot, publishPendingRecording } from "./pendingRecordingPublishe
 
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
-const FINALIZATION_CPU_BUDGET = Math.max(1, Math.floor(os.cpus().length / 2));
-const QUEUE_WORKER_COUNT = 1;
+// One lane per core (the canonical batch default — GNU parallel, ninja):
+// parallelism the app must open itself. Actual CPU usage is governed by the
+// systemd slice; the app neither throttles nor budgets anything.
+const QUEUE_WORKER_COUNT = os.availableParallelism();
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
-const FFMPEG_NICE_PRIORITY = 10;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
 const SUPPORTED_PROVIDERS = ["tango", "fc2", "sc"];
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
@@ -67,8 +68,6 @@ export type MediaIntegrityFinalizationResult =
 
 export interface MediaIntegrityFinalizerOptions {
     validateMedia?: (inputPath: string) => Promise<MediaValidationResult>;
-    ffmpegThreads?: number;
-    fmp4ScanConcurrency?: number;
     now?: () => Date;
     retryFailed?: boolean;
     revalidate?: boolean;
@@ -165,15 +164,13 @@ export function collectMediaDecodeErrors(chunks: Buffer[]): string {
     return collector.finish();
 }
 
-export function buildFfmpegValidationArgs(inputPath: string, threads = 1): string[] {
-    const normalizedThreads = Number.isSafeInteger(threads) && threads > 0 ? threads : 1;
+// No thread/priority flags: ffmpeg picks its own defaults, and the
+// systemd slice governs how much CPU the unit actually gets.
+export function buildFfmpegValidationArgs(inputPath: string): string[] {
     return [
         "-nostdin",
         "-hide_banner",
         "-loglevel", "repeat+error",
-        "-filter_threads", "1",
-        "-filter_complex_threads", "1",
-        "-threads", String(normalizedThreads),
         "-i", inputPath,
         "-map", "0:v?",
         "-map", "0:a?",
@@ -182,17 +179,11 @@ export function buildFfmpegValidationArgs(inputPath: string, threads = 1): strin
     ];
 }
 
-export function validateMediaWithFfmpeg(inputPath: string, threads = 1): Promise<MediaValidationResult> {
+export function validateMediaWithFfmpeg(inputPath: string): Promise<MediaValidationResult> {
     return new Promise((resolve, reject) => {
-        const child = spawn("ffmpeg", buildFfmpegValidationArgs(inputPath, threads), {
+        const child = spawn("ffmpeg", buildFfmpegValidationArgs(inputPath), {
             stdio: ["ignore", "ignore", "pipe"],
         });
-
-        if (child.pid !== undefined) {
-            try {
-                os.setPriority(child.pid, FFMPEG_NICE_PRIORITY);
-            } catch {}
-        }
 
         const errors = new FfmpegErrorCollector();
         let spawnError: Error | null = null;
@@ -278,7 +269,6 @@ async function attributeInvalidFmp4Fragments(
     initialScanCount: number,
     initialFailures: ReadonlyMap<string, InvalidSegment>,
     checkpoint: (scanCount: number, failures: readonly InvalidSegment[]) => void,
-    scanConcurrency: number,
 ): Promise<{ scanCount: number; invalidSegments: InvalidSegment[]; isolatedFailureCount: number }> {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "video-fmp4-integrity-"));
     const windowPath = path.join(temporaryRoot, "window.m3u8");
@@ -286,23 +276,18 @@ async function attributeInvalidFmp4Fragments(
     let scanCount = Math.min(initialScanCount, entries.length);
 
     try {
-        const concurrency = Math.max(1, Math.floor(scanConcurrency));
         while (scanCount < entries.length) {
-            const batch = entries.slice(scanCount, Math.min(entries.length, scanCount + concurrency));
-            const results = await Promise.all(batch.map(async (entry, batchIndex) => {
-                const batchWindowPath = path.join(temporaryRoot, `window-${batchIndex}.m3u8`);
-                await writeFmp4ValidationWindow(batchWindowPath, streamPath, [entry]);
-                return { entry, result: await validateMedia(batchWindowPath) };
-            }));
-            for (const { entry, result } of results) {
-                if (!result.valid) {
-                    failedSingles.set(entry.name, {
-                        name: entry.name,
-                        error: summarizeValidationFailure(result),
-                    });
-                }
+            const entry = entries[scanCount];
+            const singleWindowPath = path.join(temporaryRoot, "window-single.m3u8");
+            await writeFmp4ValidationWindow(singleWindowPath, streamPath, [entry]);
+            const result = await validateMedia(singleWindowPath);
+            if (!result.valid) {
+                failedSingles.set(entry.name, {
+                    name: entry.name,
+                    error: summarizeValidationFailure(result),
+                });
             }
-            scanCount += batch.length;
+            scanCount++;
             checkpoint(scanCount, [...failedSingles.values()]);
         }
 
@@ -356,11 +341,8 @@ export async function finalizeMediaIntegrity(
     streamPath: string,
     options: MediaIntegrityFinalizerOptions = {},
 ): Promise<MediaIntegrityFinalizationResult> {
-    const ffmpegThreads = Math.max(1, Math.floor(options.ffmpegThreads ?? 1));
     const validateMedia = options.validateMedia
-        ?? ((inputPath: string) => validateMediaWithFfmpeg(inputPath, ffmpegThreads));
-    const validateFragment = options.validateMedia
-        ?? ((inputPath: string) => validateMediaWithFfmpeg(inputPath, 1));
+        ?? ((inputPath: string) => validateMediaWithFfmpeg(inputPath));
     const now = options.now ?? (() => new Date());
     const playlistPath = path.join(streamPath, FILE_NAMES.HLS_PLAYLIST);
     const originalPlaylist = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
@@ -452,7 +434,7 @@ export async function finalizeMediaIntegrity(
             const attribution = await attributeInvalidFmp4Fragments(
                 streamPath,
                 parsed.entries,
-                validateFragment,
+                validateMedia,
                 deepScannedSegmentCount,
                 invalidByName,
                 (scanCount, failures) => {
@@ -460,7 +442,6 @@ export async function finalizeMediaIntegrity(
                     processingReport.invalidSegments = [...failures];
                     options.checkpointStore?.write(streamPath, fingerprint, processingReport);
                 },
-                options.fmp4ScanConcurrency ?? 1,
             );
             deepScannedSegmentCount = attribution.scanCount;
             isolatedFmp4FailureCount = attribution.isolatedFailureCount;
@@ -521,9 +502,12 @@ async function isPendingCandidate(streamPath: string): Promise<boolean> {
 }
 
 function pendingRoots(): string[] {
+    // .pending is capture-only: edited recordings publish directly (their
+    // kept segments were already validated at capture), so only the
+    // downloaded handoff roots flow through media validation.
     return SUPPORTED_PROVIDERS.flatMap((provider) => {
         const paths = getProviderPaths(provider);
-        return [pendingRoot(paths.downloaded), pendingRoot(paths.edited)];
+        return [pendingRoot(paths.downloaded)];
     });
 }
 
@@ -607,8 +591,6 @@ export function startMediaIntegrityFinalizer(): void {
         });
         const result = await processFinalizedRecording(streamPath, {
             checkpointStore,
-            ffmpegThreads: FINALIZATION_CPU_BUDGET,
-            fmp4ScanConcurrency: FINALIZATION_CPU_BUDGET,
         });
         if (result.kind === "not-finalized") return;
         if (result.report.status !== "ready") {
@@ -683,7 +665,6 @@ export function startMediaIntegrityFinalizer(): void {
             completionSignal: HLS.ENDLIST,
             roots,
             workerCount: QUEUE_WORKER_COUNT,
-            cpuBudget: FINALIZATION_CPU_BUDGET,
             cooldownMs: QUEUE_COOLDOWN_MS,
         });
     })().catch((error: any) => {

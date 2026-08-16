@@ -12,9 +12,3 @@ This subtree owns the HTTP API, frontend serving, alias refresh, orphan finaliza
   - `POST /api/tango/add`
   - `POST /api/tango/remove`
   - `GET /api/tango/list`
-
-## Notes
-
-- The API server has HTTP fallback.
-- Userscript integration uses API endpoints to manage download lists.
-- Userscripts on external sites should use `GM_xmlhttpRequest` or `GM.xmlHttpRequest` to bypass CORS and mixed-content restrictions.
