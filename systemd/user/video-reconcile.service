@@ -1,10 +1,11 @@
 [Unit]
 Description=Video Pipeline Upload Verification (reconcile)
-After=network.target
+After=network.target video-xvfb.service
 
 [Service]
 Type=oneshot
 Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=DISPLAY=:111
 Environment=VIDEO_PIPELINE_NETWORK_UPLOADS=1
 Environment=PLAYWRIGHT_BROWSERS_PATH=0
 WorkingDirectory={{HOME}}/Documents/work/video/video-platform
