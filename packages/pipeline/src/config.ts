@@ -55,7 +55,7 @@ export const pipelineConfig: PipelineConfig = {
     },
     tsliveAliasesPath: process.env.VIDEO_TSLIVE_ALIASES_PATH ?? path.join(dataRoot, "aliases.json"),
     browserProfilePath: process.env.VIDEO_OLDHOST_BROWSER_PROFILE
-        ?? path.join(dataRoot, "oldhost-browser-profile"),
+        ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
     credentialsFilePath: process.env.VIDEO_OLDHOST_ENV_FILE
         ?? path.resolve(import.meta.dirname, "..", "..", ".env"),
