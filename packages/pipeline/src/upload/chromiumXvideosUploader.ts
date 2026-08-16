@@ -1,6 +1,6 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
-import { chromium, type Page, type Request } from "playwright";
+import { chromium, type BrowserContext, type Page, type Request } from "playwright";
 import type { UploadReceipt, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { findXvideosEntry, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 
@@ -152,63 +152,97 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         await signInWithGoogle.waitFor({ state: "visible", timeout: 15_000 });
         await signInWithGoogle.click();
 
-        // Drive the Google OAuth flow until it lands back on XVideos. The
-        // possible steps are the account chooser, the identifier page, the
-        // password page, and the consent "Continue" button. A persistent
-        // manual challenge (2FA, recovery, unusual activity) is reported as
-        // a human action instead of being retried blindly.
-        const deadline = Date.now() + 180_000;
-        let sawGoogle = false;
+        // Drive the Google OAuth flow across every page of the context: it
+        // may run in the same tab or in a popup, and with a saved Google
+        // session it can complete instantly without ever showing a Google
+        // page. Completion is therefore verified by probing the XVideos
+        // dashboard in a spare tab instead of watching URLs. Possible steps
+        // are the account chooser, the identifier page, the password page,
+        // and the consent "Continue" button. A persistent manual challenge
+        // (2FA, recovery, unusual activity) is reported as a human action
+        // instead of being retried blindly.
+        const context = page.context();
+        const startedAt = Date.now();
+        const deadline = startedAt + 180_000;
+        let stepsTaken = 0;
         let challengeStreak = 0;
-        while (Date.now() < deadline) {
-            const url = page.url();
-            if (url.startsWith("https://accounts.google.com")) sawGoogle = true;
-            if (sawGoogle && url.startsWith("https://www.xvideos.com")) break;
-
-            const accountRow = page.locator(
-                `[data-identifier="${this.config.email}"], [data-email="${this.config.email}"]`,
-            ).first();
-            if (await accountRow.count()) {
-                await accountRow.click();
-                challengeStreak = 0;
-                await page.waitForTimeout(1_500);
-                continue;
-            }
-            if (await page.locator("#identifierId").count()) {
-                await page.locator("#identifierId").fill(this.config.email);
-                await page.getByRole("button", { name: "Next", exact: true }).click();
-                challengeStreak = 0;
-                await page.waitForTimeout(1_500);
-                continue;
-            }
-            if (await page.locator('input[type="password"]').count()) {
-                await page.locator('input[type="password"]').fill(this.config.password);
-                await page.getByRole("button", { name: "Next", exact: true }).click();
-                challengeStreak = 0;
-                await page.waitForTimeout(1_500);
-                continue;
-            }
-            const continueButton = page.getByRole("button", { name: "Continue", exact: true });
-            if (await continueButton.count()) {
-                await continueButton.click();
-                challengeStreak = 0;
-                await page.waitForTimeout(1_500);
-                continue;
-            }
-            const text = await page.locator("body").innerText().catch(() => "");
-            if (/confirm it.s you|verify it.s you|2-step verification|two-step verification|try another way|recover your account|unusual activity/i.test(text)) {
-                challengeStreak++;
-                if (challengeStreak >= 2) {
-                    throw new HumanActionRequiredError("google_challenge", "Google requires manual account verification: " + text.slice(0, 200));
+        let lastProbeAt = 0;
+        let verified = false;
+        while (Date.now() < deadline && !verified) {
+            let sawGooglePage = false;
+            let acted = false;
+            for (const candidate of context.pages()) {
+                try {
+                    const url = candidate.url();
+                    if (url.startsWith("https://accounts.google.com")) sawGooglePage = true;
+                    const accountRow = candidate.locator(
+                        `[data-identifier="${this.config.email}"], [data-email="${this.config.email}"]`,
+                    ).first();
+                    if (await accountRow.count()) {
+                        await accountRow.click();
+                        acted = true;
+                        stepsTaken++;
+                        continue;
+                    }
+                    if (await candidate.locator("#identifierId").count()) {
+                        await candidate.locator("#identifierId").fill(this.config.email);
+                        await candidate.getByRole("button", { name: "Next", exact: true }).click();
+                        acted = true;
+                        stepsTaken++;
+                        continue;
+                    }
+                    if (await candidate.locator('input[type="password"]').count()) {
+                        await candidate.locator('input[type="password"]').fill(this.config.password);
+                        await candidate.getByRole("button", { name: "Next", exact: true }).click();
+                        acted = true;
+                        stepsTaken++;
+                        continue;
+                    }
+                    const continueButton = candidate.getByRole("button", { name: "Continue", exact: true });
+                    if (await continueButton.count()) {
+                        await continueButton.click();
+                        acted = true;
+                        stepsTaken++;
+                        continue;
+                    }
+                    const text = await candidate.locator("body").innerText().catch(() => "");
+                    if (sawGooglePage && /confirm it.s you|verify it.s you|2-step verification|two-step verification|try another way|recover your account|unusual activity/i.test(text)) {
+                        challengeStreak++;
+                        if (challengeStreak >= 2) {
+                            throw new HumanActionRequiredError("google_challenge",
+                                "Google requires manual account verification: " + text.slice(0, 200));
+                        }
+                    }
+                } catch {
+                    // page closed or navigating; retry next iteration
                 }
-            } else {
-                challengeStreak = 0;
+            }
+            if (acted) challengeStreak = 0;
+            if (!sawGooglePage && !acted && (stepsTaken > 0 || Date.now() - startedAt > 3_000)) {
+                if (Date.now() - lastProbeAt > 8_000) {
+                    lastProbeAt = Date.now();
+                    verified = await this.verifyAccountDashboard(context);
+                }
             }
             await page.waitForTimeout(750);
         }
-        await page.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        if (!await page.getByText("My Content", { exact: true }).count()) {
-            throw new HumanActionRequiredError("google_challenge", "Google login did not reach the XVideos account dashboard");
+        if (!verified) {
+            await page.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            if (!await page.getByText("My Content", { exact: true }).count()) {
+                throw new HumanActionRequiredError("google_challenge", "Google login did not reach the XVideos account dashboard");
+            }
+        }
+    }
+
+    private async verifyAccountDashboard(context: BrowserContext): Promise<boolean> {
+        const probe = await context.newPage();
+        try {
+            await probe.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            return await probe.getByText("My Content", { exact: true }).count() > 0;
+        } catch {
+            return false;
+        } finally {
+            await probe.close().catch(() => undefined);
         }
     }
 
@@ -276,11 +310,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         const tagInput = page.locator("#upload_form_tags .tag-list > input[type=text]");
         for (const tag of request.tags) {
             // The tag input is zero-width until it receives text, so Playwright
-            // treats it as invisible and fill() can never work: focus it, type,
-            // and press Enter. The widget expands the input and adds the chip.
+            // treats it as invisible and fill() can never work. focus() only
+            // requires attachment, and page.keyboard has no actionability
+            // checks: focus, type, and press Enter. The widget expands the
+            // input as text arrives and adds the chip on Enter.
             await tagInput.focus();
-            await tagInput.pressSequentially(tag.replace(/-/g, " "));
-            await tagInput.press("Enter");
+            await page.keyboard.type(tag.replace(/-/g, " "));
+            await page.keyboard.press("Enter");
         }
         if (await page.locator("#upload_form_ads_has_commercial_com").isChecked()) {
             await page.locator("#upload_form_ads_has_commercial_com").uncheck();

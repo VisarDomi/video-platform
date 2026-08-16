@@ -139,8 +139,10 @@ Setting the profile up on a fresh clone:
    local storage, and anti-bot state persist on disk for the next run.
 
 The uploader handles the remaining sign-in steps itself: the account chooser,
-identifier/password entry, the consent "Continue" button, and the upload page's
-Friendly Captcha. For the captcha it clicks the widget's "I am human" checkbox,
+identifier/password entry, the consent "Continue" button — whether the OAuth
+flow runs in the same tab or in a popup, and even when a saved Google session
+completes it instantly — and the upload page's Friendly Captcha. For the
+captcha it clicks the widget's "I am human" checkbox,
 waits for the proof-of-work to complete, clicks the page's "Confirm that you
 are not a robot" button, and only then expects the file form. If the captcha or
 a Google challenge still demands human help, the upload command fails with a
