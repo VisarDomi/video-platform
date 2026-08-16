@@ -20,7 +20,7 @@ interface Options {
     scope: string;
     recording: string | null;
     concurrency: number;
-    maxCpu: number;
+
     limit: number;
     apply: boolean;
     retryFailed: boolean;
@@ -37,8 +37,7 @@ function parseArgs(argv: readonly string[]): Options {
         provider: "all",
         scope: "all",
         recording: null,
-        concurrency: 4,
-        maxCpu: 80,
+        concurrency: os.availableParallelism(),
         limit: Number.POSITIVE_INFINITY,
         apply: false,
         retryFailed: false,
@@ -64,9 +63,6 @@ function parseArgs(argv: readonly string[]): Options {
         else if (argument === "--limit") {
             limitSpecified = true;
             options.limit = parsePositiveInteger(argv[++index], argument);
-        } else if (argument === "--max-cpu") {
-            options.maxCpu = Number.parseFloat(argv[++index] ?? "");
-            if (!(options.maxCpu > 0 && options.maxCpu <= 100)) throw new Error("--max-cpu must be in (0, 100]");
         } else {
             throw new Error(`Unknown argument: ${argument}`);
         }
@@ -121,41 +117,8 @@ async function discoverTargets(options: Options): Promise<HistoricalFinalization
     return targets.sort((left, right) => left.recordingPath.localeCompare(right.recordingPath));
 }
 
-function readCpuCounters(): { idle: number; total: number } {
-    return os.cpus().reduce((result, cpu) => {
-        result.idle += cpu.times.idle;
-        result.total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq;
-        return result;
-    }, { idle: 0, total: 0 });
-}
-
-function createCpuGuard(maxCpu: number) {
-    let previous = readCpuCounters();
-    let current = 0;
-    let peak = 0;
-    const interval = setInterval(() => {
-        const next = readCpuCounters();
-        const totalDelta = next.total - previous.total;
-        const idleDelta = next.idle - previous.idle;
-        previous = next;
-        if (totalDelta <= 0) return;
-        current = 100 * (1 - idleDelta / totalDelta);
-        peak = Math.max(peak, current);
-    }, 500);
-    return {
-        async wait(): Promise<void> {
-            while (current > maxCpu) await new Promise((resolve) => setTimeout(resolve, 500));
-        },
-        snapshot: () => ({ current, peak }),
-        close: () => clearInterval(interval),
-    };
-}
-
 async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
-    const singleRecordingCpuBudget = Math.max(1, Math.floor(os.cpus().length / 2));
-    const ffmpegThreads = options.recording === null ? 1 : singleRecordingCpuBudget;
-    const fmp4ScanConcurrency = options.recording === null ? 1 : singleRecordingCpuBudget;
     const discovered = await discoverTargets(options);
     const selected = discovered.slice(0, options.limit);
     console.log(JSON.stringify({
@@ -167,16 +130,12 @@ async function main(): Promise<void> {
         discovered: discovered.length,
         selected: selected.length,
         concurrency: options.concurrency,
-        maxCpu: options.maxCpu,
         retryFailed: options.retryFailed,
-        ffmpegThreads,
-        fmp4ScanConcurrency,
         checkpointPath: FINALIZATION_DB_PATH,
     }));
     if (!options.apply) return;
 
     const checkpoints = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
-    const cpu = createCpuGuard(options.maxCpu);
     const totals = { ready: 0, failed: 0, notFinalized: 0, sidecarsRemoved: 0 };
     let nextIndex = 0;
     const worker = async () => {
@@ -185,13 +144,10 @@ async function main(): Promise<void> {
             const target = selected[position];
             if (!target) return;
             const startedAt = Date.now();
-            await cpu.wait();
             try {
                 const result = await processFinalizedRecording(target.recordingPath, {
                     checkpointStore: checkpoints,
                     retryFailed: options.retryFailed,
-                    ffmpegThreads,
-                    fmp4ScanConcurrency,
                 });
                 let status: string;
                 let error: string | null = null;
@@ -220,7 +176,6 @@ async function main(): Promise<void> {
                     status,
                     error,
                     elapsedSeconds: (Date.now() - startedAt) / 1000,
-                    cpu: cpu.snapshot(),
                 }));
             } catch (error: any) {
                 totals.failed++;
@@ -231,7 +186,6 @@ async function main(): Promise<void> {
                     status: "failed",
                     error: error?.message ?? String(error),
                     elapsedSeconds: (Date.now() - startedAt) / 1000,
-                    cpu: cpu.snapshot(),
                 }));
             }
         }
@@ -254,11 +208,9 @@ async function main(): Promise<void> {
             event: "finished",
             ...totals,
             contractEstablished: completeScope && totals.failed === 0 && totals.notFinalized === 0,
-            cpu: cpu.snapshot(),
         }));
         if (totals.failed > 0 || totals.notFinalized > 0) process.exitCode = 1;
     } finally {
-        cpu.close();
         checkpoints.close();
     }
 }

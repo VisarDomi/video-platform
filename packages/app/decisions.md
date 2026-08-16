@@ -88,3 +88,13 @@ bfcache `pageshow`, a full refresh completes before exactly one poller resumes.
 The frontend does not post diagnostic events to the server. The old
 `POST /api/log` route, logging helpers, watchdog, and timer-drift sentinel are
 removed.
+
+## Rules
+
+- Verify frontend changes against the running app, not only static code.
+- Preserve native Safari list/viewer navigation, bfcache restoration, and edge-back
+  ownership.
+- The viewer is a native scrolling 10k/natural/10k three-scope document.
+  Videos use intrinsic `width: 100%; height: auto` geometry without clipping.
+- Player units own video, timeline, and media lifecycle. One fixed overlay,
+  inset from Safari's top and bottom boundaries, latches to the settled scope.
