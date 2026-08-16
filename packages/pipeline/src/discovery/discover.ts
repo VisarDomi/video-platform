@@ -8,21 +8,21 @@ export async function planDiscovery(
     return await scanFinalizedRoots(roots);
 }
 
-export function applyDiscovery(
+export async function applyDiscovery(
     database: PipelineDatabase,
     plan: readonly FinalizedInspectionResult[],
     resolver?: TargetCatalogResolver,
-): {
+): Promise<{
     discovered: number;
     excluded: number;
-} {
+}> {
     let discovered = 0;
     let excluded = 0;
     for (const result of plan) {
         if (result.status === "finalized") {
             const recording = database.discover(result.recording);
             if (resolver) {
-                const resolved = resolver.resolve(result.recording);
+                const resolved = await resolver.resolve(result.recording);
                 database.saveProvenance(recording.id,
                     database.getProvenanceOverride(result.recording.provider, resolved.observedIdentifier) ?? resolved);
             }

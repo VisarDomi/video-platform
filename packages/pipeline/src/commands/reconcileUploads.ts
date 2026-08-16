@@ -18,40 +18,42 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
     try {
         results.push(...database.recoverInterruptedUploads(now));
         for (const confirmation of database.dueUploadConfirmations(now)) {
-            let remote = database.getUncertainUploadRemote(confirmation.attemptId);
-            if (!remote) {
-                // Older attempts without a captured ID: resolve the URL via
-                // the authenticated uploads list first.
+            let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
+            if (!remoteId) {
+                // Older attempts without a captured ID: resolve it via the
+                // authenticated uploads list first.
                 const entry = await browser.findEntryByMatchKey(confirmation.matchKey);
-                if (entry) remote = { remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
+                remoteId = entry?.remoteId ?? null;
             }
-            if (!remote) {
+            if (!remoteId) {
                 results.push({
                     recordingId: confirmation.recordingId,
                     disposition: "not_ready",
-                    reason: "no remote video URL resolved yet",
+                    reason: "no remote upload ID resolved yet",
                 });
                 continue;
             }
-            const probe = await browser.probeVideoLink(remote.remoteUrl);
-            if (probe === "published") {
-                database.reconcileUncertain(confirmation.attemptId, remote.remoteId, remote.remoteUrl, now);
+            const probe = await browser.probeUploadStatus(remoteId);
+            if (probe.outcome === "online" && probe.remoteUrl) {
+                database.reconcileUncertain(confirmation.attemptId, remoteId, probe.remoteUrl, now);
                 database.markRemoteVerified(
                     confirmation.recordingId,
-                    remote.remoteId,
-                    remote.remoteUrl,
+                    remoteId,
+                    probe.remoteUrl,
                     null,
                     now,
                 );
-                results.push({ recordingId: confirmation.recordingId, disposition: "verified", remote });
-            } else if (probe === "deleted") {
-                database.markConfirmationAbsent(confirmation.attemptId, now);
-                results.push({ recordingId: confirmation.recordingId, disposition: "absent_retryable" });
+                results.push({
+                    recordingId: confirmation.recordingId,
+                    disposition: "online",
+                    remoteId,
+                    remoteUrl: probe.remoteUrl,
+                });
             } else {
                 results.push({
                     recordingId: confirmation.recordingId,
                     disposition: "not_ready",
-                    reason: "video link does not open yet",
+                    reason: "edit page has no direct video link yet",
                 });
             }
         }

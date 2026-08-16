@@ -1,7 +1,6 @@
 import os from "node:os";
 import path from "node:path";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
-import type { StreamProvider } from "shared";
 
 export interface PipelineConfig {
     readonly finalizationDatabasePath: string;
@@ -11,8 +10,7 @@ export interface PipelineConfig {
     readonly manualRemuxRoots: readonly DiscoveryRoot[];
     readonly uploadTimeZone: string;
     readonly monthlyUploadLimitBytes: number;
-    readonly targetFiles: Readonly<Record<StreamProvider, string>>;
-    readonly tsliveAliasesPath: string;
+    readonly serverUrl: string;
     readonly browserProfilePath: string;
     readonly chromiumExecutablePath: string;
     readonly credentialsFilePath: string;
@@ -25,8 +23,6 @@ const dataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
 const downloadsRoot = process.env.VIDEO_DOWNLOADS_ROOT
     ?? path.join(os.homedir(), "Videos", "downloads");
 const providers = ["tslive", "ladder", "fmp4"];
-const targetFilesRoot = process.env.VIDEO_TARGET_FILES_ROOT
-    ?? path.resolve(import.meta.dirname, "..", "..", "downloader");
 
 const discoveryRoots: DiscoveryRoot[] = providers.map((provider) => ({
     provider,
@@ -48,12 +44,7 @@ export const pipelineConfig: PipelineConfig = {
         ?? path.join(dataRoot, "pipeline", "artifacts"),
     discoveryRoots,
     manualRemuxRoots,
-    targetFiles: {
-        tslive: path.join(targetFilesRoot, "tslive.txt"),
-        ladder: path.join(targetFilesRoot, "ladder.txt"),
-        fmp4: path.join(targetFilesRoot, "fmp4.txt"),
-    },
-    tsliveAliasesPath: process.env.VIDEO_TSLIVE_ALIASES_PATH ?? path.join(dataRoot, "aliases.json"),
+    serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:7973",
     browserProfilePath: process.env.VIDEO_OLDHOST_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",

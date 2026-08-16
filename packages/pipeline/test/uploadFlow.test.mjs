@@ -14,20 +14,21 @@ import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
 async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
     t.after(() => rm(root, { recursive: true, force: true }));
-    await mkdir(path.join(root, "targets"));
-    await writeFile(path.join(root, "targets", "tslive.txt"), "https://ts-live.example/account-id current_alias\n");
-    await writeFile(path.join(root, "targets", "ladder.txt"), "https://ladder-live.example/68190398/\n");
-    await writeFile(path.join(root, "targets", "fmp4.txt"), "https://fmp4-live.example/channel-561 226494362\n");
-    await writeFile(path.join(root, "aliases.json"), JSON.stringify({
-        "account-id": ["old_alias", "current_alias"],
-    }));
-    const resolver = await TargetCatalogResolver.load({
-        targetFiles: {
-            tslive: path.join(root, "targets", "tslive.txt"),
-            ladder: path.join(root, "targets", "ladder.txt"),
-            fmp4: path.join(root, "targets", "fmp4.txt"),
+    // The resolver delegates to the per-provider server capability; the test
+    // injects a stub standing in for GET /api/{provider}/resolve.
+    const resolver = TargetCatalogResolver.load({
+        resolveIdentifier: async (provider, identifier) => {
+            if (provider === "tslive" && identifier === "old_alias") {
+                return { id: "account-id", label: "current_alias" };
+            }
+            if (provider === "ladder" && identifier === "68190398") {
+                return { id: "68190398", label: "68190398" };
+            }
+            if (provider === "fmp4" && identifier === "channel-561") {
+                return { id: "226494362", label: "channel-561" };
+            }
+            return null;
         },
-        tsliveAliasesPath: path.join(root, "aliases.json"),
     });
     return { root, resolver };
 }
@@ -44,9 +45,9 @@ function input(root, provider, filename) {
     };
 }
 
-test("canonical target resolution uses TsLive API alias history and current LADDER/FMP4 targets", async (t) => {
+test("provenance resolution delegates to the per-provider server resolver", async (t) => {
     const { root, resolver } = await rootFixture(t);
-    const tslive = resolver.resolve(input(root, "tslive", "2026-08-13 101112 old_alias"));
+    const tslive = await resolver.resolve(input(root, "tslive", "2026-08-13 101112 old_alias"));
     assert.deepEqual({
         status: tslive.status,
         streamerId: tslive.streamerId,
@@ -60,10 +61,10 @@ test("canonical target resolution uses TsLive API alias history and current LADD
         streamerUrl: "https://ts-live.example/account-id",
         aliasUrl: "https://ts-live.example/current_alias",
     });
-    assert.equal(resolver.resolve(input(root, "ladder", "2026-08-13 101112 68190398")).status, "resolved");
-    assert.equal(resolver.resolve(input(root, "fmp4", "2026-08-13 101112 channel-561")).streamerId, "226494362");
+    assert.equal((await resolver.resolve(input(root, "ladder", "2026-08-13 101112 68190398"))).status, "resolved");
+    assert.equal((await resolver.resolve(input(root, "fmp4", "2026-08-13 101112 channel-561"))).streamerId, "226494362");
     assert.equal(
-        resolver.resolve(input(root, "fmp4", "2026-08-13 101112 previous_fmp4_alias")).status,
+        (await resolver.resolve(input(root, "fmp4", "2026-08-13 101112 previous_fmp4_alias"))).status,
         "review_required",
     );
 });
