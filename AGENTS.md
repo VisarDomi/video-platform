@@ -1,9 +1,9 @@
 # Video Platform
 
-Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), and `pipeline` (inactive durable processing foundation).
+Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), and `pipeline` (durable processing foundation).
 
 Providers: `tango`, `fc2`, `sc`.
-Systemd user services: `video-server`, `video-downloader`, `video-auth`. The old `video-descriptor` unit was removed; do not recreate or enable a pipeline service until the uploader and authenticated verification flow are complete.
+Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and the `video-reconcile.timer` (daily upload verification at 04:33). The old `video-descriptor` unit was removed; do not recreate it.
 
 The monorepo owns its systemd user configuration under `systemd/user/`. Keep
 the installed copies synchronized with `npm run systemd:check` and

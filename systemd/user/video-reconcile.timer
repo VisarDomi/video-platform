@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily pipeline upload verification at 04:33
+
+[Timer]
+OnCalendar=*-*-* 04:33:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

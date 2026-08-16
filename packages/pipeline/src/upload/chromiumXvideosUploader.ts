@@ -138,6 +138,10 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         };
     }
 
+    async findExistingByMatchKey(matchKey: string): Promise<XvideosEntry | null> {
+        return await this.withAuthenticatedPage((page) => this.findEntry(page, matchKey));
+    }
+
     // One login flow, then the callers run their specific work on the
     // authenticated page. Reconcile and any future checks share this instead
     // of each launching their own browser and login.

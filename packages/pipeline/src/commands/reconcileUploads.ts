@@ -1,6 +1,7 @@
 import type { PipelineConfig } from "../config.js";
 import { readXvideosCredentials } from "../config/secrets.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { cleanupArtifact } from "../stages/cleanupArtifact.js";
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date()): Promise<unknown> {
@@ -46,6 +47,21 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         null,
                         now,
                     );
+                    // Verified online: clean up only the pipeline staging
+                    // artifact. Original recording folders are left untouched.
+                    if (config.cleanupEnabled) {
+                        const artifact = database.getArtifact(confirmation.recordingId);
+                        if (artifact) {
+                            await cleanupArtifact(artifact.path);
+                            database.transition(
+                                confirmation.recordingId,
+                                "xvideos_verified",
+                                "cleanup_eligible",
+                                "verified online; pipeline artifact cleaned",
+                                now,
+                            );
+                        }
+                    }
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "online",

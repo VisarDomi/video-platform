@@ -25,7 +25,8 @@
         "campaign:resume": "npm run build && node --no-warnings dist/main.js campaign-resume --apply",
         "campaign:pause": "npm run build && node --no-warnings dist/main.js campaign-pause --apply",
         "campaign:status": "npm run build && node --no-warnings dist/main.js campaign-status",
-        "campaign:step": "npm run build && node --no-warnings dist/main.js campaign-step --apply"
+        "campaign:step": "npm run build && node --no-warnings dist/main.js campaign-step --apply",
+        "campaign-worker": "npm run build && node --no-warnings dist/main.js campaign-worker"
     },
     "dependencies": {
         "descriptor": "1.0.0",

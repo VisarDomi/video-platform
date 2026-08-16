@@ -1,5 +1,43 @@
 # Monorepo Decisions
 
+## First controlled XVideos upload verified end-to-end (2026-08-16)
+
+One controlled upload completed the full circle: remux, describe, upload,
+24-hour-style verification, and verified-online cleanup. Decisions made along
+the way:
+
+- Recording provenance is resolved by the SERVER's per-provider capability,
+  `GET /api/{provider}/resolve` (Tango alias registry + live API, FC2 numeric
+  IDs, Stripchat username lookup). The pipeline keeps no catalog-matching
+  logic of its own; unresolved identifiers stay in
+  `provenance_review_required` for manual `provenance:set`.
+- The metadata tags are fixed `[provider, live]`; descriptor tags are
+  ignored. The reconciliation match key is the source folder filename
+  (datetime + alias), e.g. `[2026-06-20 005838 boo_1234]`.
+- The XVideos model field is not required for submission: the uploader types
+  the streamer alias into the (zero-width typeahead) model search and saves
+  without selecting a model; XVideos never attaches the model to the video.
+- Friendly Captcha on the upload page is solved automatically (click the
+  widget checkbox only while unactivated, wait for completion, click the
+  page's "Confirm that you are not a robot" button). Tag and model inputs are
+  zero-width typeaheads, so they are typed via keyboard events, never
+  `fill()`.
+- A submitted upload is never accepted on submit alone: the attempt parks as
+  `uncertain` with the captured numeric upload ID and a 24-hour confirmation.
+  The online check opens the authenticated edit page
+  `/account/uploads/<id>/edit`; the presence of the "Direct link to the
+  video page" anchor (`/video.<key>/<slug>`) is the success signal.
+- Uploads never duplicate an existing XVideos entry: before uploading, the
+  uploads list is searched by match key, and an existing entry parks the
+  recording as uncertain for verification instead of re-uploading.
+- Cleanup runs only on verified-online uploads and deletes only the pipeline
+  staging artifact; original downloader/editor folders are never touched.
+- One login flow per browser session: `withAuthenticatedPage` launches and
+  logs in once, then callers run their specific work on that page.
+- The managed `video-pipeline.service` campaign worker (power-off robust,
+  idles while paused) and the daily `video-reconcile.timer` at 04:33 are
+  installed under `systemd/user/`.
+
 ## Active recording folders are the durable downloader/server boundary (2026-08-12)
 
 The downloader owns mutable `<provider>/downloader/.active/<recording>/`

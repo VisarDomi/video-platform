@@ -18,7 +18,10 @@ Implemented:
   numeric IDs, Stripchat username lookup), grouped unresolved review, and
   reusable manual overrides.
 - XVideos-safe metadata composition with deterministic reconciliation keys,
-  provenance suffixes, provider/live defaults, and normalized tag deduplication.
+  provenance suffixes, and fixed provider/live tags.
+- Pre-upload duplicate guard: a recording whose match key already exists on
+  XVideos (unverified or online) is parked as uncertain with that entry instead
+  of being uploaded again.
 - Persistent-Chromium XVideos upload through Google OAuth, automated
   Friendly Captcha completion with a manual fallback, streamer alias typed
   into the model search without selection, fixed metadata policy, and 24-hour
@@ -26,13 +29,16 @@ Implemented:
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane`, restart recovery, and a 24-hour no-retry confirmation window
   after metadata submission may have succeeded.
-- Source/artifact cleanup hard-disabled.
+- Cleanup runs only on verified-online uploads and deletes only the pipeline
+  staging artifact; original downloader/editor folders are never touched
+  (disable with `VIDEO_PIPELINE_CLEANUP=0`).
 
-Production activation is still blocked until the historical finalization
-contract completes, descriptor output is approved, and one controlled upload
-saves metadata and validates the final submission/reconciliation boundary.
-The temporary-MP4 retention policy is also intentionally undecided. Network
-access is disabled by default and there is no pipeline service.
+The historical finalization contract is complete, and one controlled upload
+has gone the full circle: submitted, published on XVideos, verified online
+through the edit-page check, and its staging artifact cleaned. Network
+commands remain gated behind `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
+`video-pipeline` campaign worker and the daily `video-reconcile` timer
+(04:33) are installed under `systemd/user/`.
 
 Run isolated tests:
 
@@ -202,10 +208,11 @@ first. The worker rereads paused/running intent between every durable stage.
 `campaign:step` advances at most one admission, local stage, or upload and is
 available for bounded integration testing.
 
-No systemd unit is installed yet. The private worker loop is ready for the
-future managed service, which will start at boot and idle while SQLite says
-paused. Do not activate it until finalization, descriptor, uploader, and
-retention decisions are complete.
+The managed `video-pipeline.service` runs the campaign worker at boot and
+idles while SQLite says paused; it is power-off robust. Control it with
+`systemctl --user start|stop|restart video-pipeline` and the campaign intent
+with `campaign:resume` / `campaign:pause`. The `video-reconcile.timer`
+runs `reconcile-uploads` daily at 04:33.
 
 Failures retain their last successful stage. Retry an eligible local failure:
 

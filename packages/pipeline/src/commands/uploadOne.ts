@@ -45,6 +45,35 @@ export async function uploadOne(
             profilePath: config.browserProfilePath,
             ...credentials,
         });
+        // Never re-upload a video that already exists on XVideos (unverified or
+        // online): park the recording as uncertain with the existing entry and
+        // let the daily reconcile verify it instead of spending bandwidth.
+        const existing = await uploader.findExistingByMatchKey(metadata.matchKey);
+        if (existing) {
+            const skipNow = new Date();
+            const reservationId = database.reserveUpload(
+                recordingId,
+                artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
+                skipNow,
+                config.uploadTimeZone,
+                config.monthlyUploadLimitBytes,
+            );
+            const attemptId = database.beginUpload(recordingId, reservationId, skipNow);
+            database.finishUploadAttempt(attemptId, {
+                status: "uncertain",
+                transmittedBytes: 0,
+                remoteId: existing.remoteId,
+                remoteUrl: existing.remoteUrl,
+                error: "skipped re-upload; matching XVideos entry already exists",
+                confirmation: { matchKey: metadata.matchKey, confirmAfter: skipNow },
+            }, skipNow);
+            return {
+                recordingId,
+                state: database.get(recordingId)?.state,
+                disposition: "skipped_existing",
+                remoteEntry: existing,
+            };
+        }
         const reservedBytes = artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES;
         const reservationId = database.reserveUpload(
             recordingId,
