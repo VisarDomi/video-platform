@@ -172,55 +172,6 @@ test("one manual alias override resolves every matching recording and survives r
     assert.equal(database.getProvenance(first.id)?.status, "manual");
 });
 
-test("uncertain metadata submission cannot retry before 24 hours and becomes retryable only after absence", async (t) => {
-    const { root } = await rootFixture(t);
-    const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
-    t.after(() => database.close());
-    const recording = database.discover(input(root, "fc2", "2026-08-13 101112 68190398"));
-    database.transition(recording.id, "server_ready", "remuxed");
-    database.saveArtifact(recording.id, {
-        path: path.join(root, "artifact.mp4"),
-        sizeBytes: 100,
-        sha256: "c".repeat(64),
-        validatedAt: "2026-08-13T08:00:00Z",
-    });
-    database.saveDescription(recording.id, {
-        artifactSha256: "c".repeat(64),
-        promptVersion: "test",
-        fps: 1,
-        output: { title: "Specific title", description: "Specific concrete description.", tags: ["room"] },
-        evidencePath: path.join(root, "evidence.json"),
-    });
-    database.saveProvenance(recording.id, {
-        observedIdentifier: "68190398",
-        status: "resolved",
-        streamerId: "68190398",
-        alias: "68190398",
-        streamerUrl: "https://live.fc2.com/68190398/",
-        aliasUrl: null,
-        reason: null,
-        updatedAt: "2026-08-13T08:00:00Z",
-    });
-    database.saveUploadMetadata(recording.id, {
-        title: "Specific title [2026-08-13 101112 68190398]",
-        description: "Specific concrete description.\n\nSource: https://live.fc2.com/68190398/",
-        tags: ["fc2", "live"],
-    });
-    const submittedAt = new Date("2026-08-13T08:00:00Z");
-    const reservation = database.reserveUpload(recording.id, 100, submittedAt);
-    const attempt = database.beginUpload(recording.id, reservation, submittedAt);
-    database.finishUploadAttempt(attempt, {
-        status: "uncertain",
-        transmittedBytes: 100,
-        error: "entry not visible immediately",
-        confirmation: { confirmAfter: new Date("2026-08-14T08:00:00Z") },
-    }, submittedAt);
-    assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-14T07:59:59Z")), []);
-    assert.throws(() => database.markConfirmationAbsent(attempt, new Date("2026-08-14T07:59:59Z")), /not due/);
-    assert.equal(database.dueUploadConfirmations(new Date("2026-08-14T08:00:00Z")).length, 1);
-    assert.equal(database.markConfirmationAbsent(attempt, new Date("2026-08-14T08:00:00Z")).state, "metadata_ready");
-});
-
 test("failure after the upload started is acceptance-unknown instead of an immediate blind retry", async (t) => {
     const { root } = await rootFixture(t);
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));

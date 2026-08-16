@@ -1,4 +1,3 @@
-import path from "node:path";
 import { assessFinalArtifact } from "shared";
 import type { PipelineConfig } from "../config.js";
 import { readXvideosCredentials } from "../config/secrets.js";
@@ -42,24 +41,6 @@ export async function uploadOne(
             profilePath: config.browserProfilePath,
             ...credentials,
         });
-        // Backup remote check: the folder name is the local truth, the
-        // edit-page title is the XVideos truth. Covers recordings admitted
-        // while the network was off.
-        const copy = await uploader.findUploadedCopy(path.basename(recording.sourcePath));
-        if (copy.kind === "found") {
-            database.parkUploadedCopy(recordingId, copy.remoteId, copy.remoteUrl);
-            return {
-                recordingId,
-                state: database.get(recordingId)?.state,
-                disposition: "parked_existing_upload",
-                remoteId: copy.remoteId,
-            };
-        }
-        if (copy.kind === "title_mismatch") {
-            database.transition(recordingId, recording.state, "blocked",
-                `XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`);
-            throw new Error(`XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`);
-        }
         if (recording.state !== "metadata_ready") {
             throw new Error(`Recording ${recordingId} is not metadata_ready`);
         }
@@ -88,7 +69,7 @@ export async function uploadOne(
             config.uploadTimeZone,
             config.monthlyUploadLimitBytes,
         );
-        const receipt = await new UploadCoordinator(database, uploader).uploadAdmitted(
+        const outcome = await new UploadCoordinator(database, uploader).uploadAdmitted(
             recordingId,
             reservationId,
             {
@@ -102,6 +83,18 @@ export async function uploadOne(
                 streamerAlias: provenance.alias ?? provenance.streamerId,
             },
         );
+        if (outcome.kind === "existing") {
+            return {
+                recordingId,
+                state: database.get(recordingId)?.state,
+                disposition: "parked_existing_upload",
+                remoteId: outcome.remoteId,
+            };
+        }
+        if (outcome.kind === "title_mismatch") {
+            throw new Error(`XVideos entry ${outcome.remoteId} title does not match the folder identity; manual review required`);
+        }
+        const receipt = outcome.receipt;
         return {
             recordingId,
             state: database.get(recordingId)?.state,

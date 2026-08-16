@@ -1228,30 +1228,6 @@ export class PipelineDatabase {
         `).run(now.toISOString(), attemptId);
     }
 
-    markConfirmationAbsent(attemptId: string, now = new Date()): Recording {
-        const timestamp = now.toISOString();
-        let recordingId = "";
-        this.transaction(() => {
-            const row = this.database.prepare(`
-                SELECT c.recording_id FROM upload_confirmations c
-                JOIN upload_attempts a ON a.id = c.attempt_id
-                WHERE c.attempt_id = ? AND c.status = 'pending'
-                  AND c.confirm_after <= ? AND a.status = 'uncertain'
-            `).get(attemptId, timestamp) as { recording_id: string } | undefined;
-            if (!row) throw new Error(`Upload confirmation ${attemptId} is not due`);
-            recordingId = row.recording_id;
-            this.database.prepare(`
-                UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ?
-            `).run(timestamp, attemptId);
-            this.database.prepare(`
-                UPDATE upload_attempts SET status = 'failed', error = ?, completed_at = ? WHERE id = ?
-            `).run("no matching uploads-list entry after 24-hour grace period", timestamp, attemptId);
-            this.updateStateInTransaction(recordingId, "xvideos_uncertain", "metadata_ready",
-                "no matching uploads-list entry after 24-hour grace period", timestamp);
-        });
-        return this.requireRecording(recordingId);
-    }
-
     private validateProvenance(provenance: Omit<RecordingProvenance, "recordingId">): void {
         if (!provenance.observedIdentifier.trim()) throw new Error("Observed recording identifier is required");
         if (provenance.status === "review_required") return;

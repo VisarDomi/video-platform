@@ -19,8 +19,15 @@ export interface UploadReceipt {
     readonly metadataSubmittedAt: string;
 }
 
+// One browser session per upload: the existence check runs inside the same
+// session, and the outcome tells the caller what happened.
+export type UploadOutcome =
+    | { kind: "uploaded"; receipt: UploadReceipt }
+    | { kind: "existing"; remoteId: string; remoteUrl: string }
+    | { kind: "title_mismatch"; remoteId: string };
+
 export interface XvideosUploader {
-    upload(request: UploadRequest): Promise<UploadReceipt>;
+    upload(request: UploadRequest): Promise<UploadOutcome>;
 }
 
 export class DisabledXvideosUploader implements XvideosUploader {

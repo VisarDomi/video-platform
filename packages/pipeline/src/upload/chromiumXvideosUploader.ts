@@ -1,7 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page, type Request } from "playwright";
-import type { UploadReceipt, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
+import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
@@ -47,7 +47,7 @@ class RequestByteCounter {
 export class ChromiumXvideosUploader implements XvideosUploader {
     constructor(private readonly config: ChromiumUploaderConfig) {}
 
-    async upload(request: UploadRequest): Promise<UploadReceipt> {
+    async upload(request: UploadRequest): Promise<UploadOutcome> {
         await this.validateRequest(request);
         const context = await chromium.launchPersistentContext(this.config.profilePath, {
             executablePath: this.config.executablePath,
@@ -66,6 +66,18 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const counter = new RequestByteCounter();
             page.on("request", (networkRequest) => { void counter.observe(networkRequest); });
             await this.ensureAuthenticated(page);
+            // Backup remote check inside this same session: the folder name is
+            // the local truth, the edit-page title is the XVideos truth. No
+            // second browser launch, no second login.
+            const existing = await this.findUploadedCopyOnPage(page, request.recordingId);
+            if (existing.kind === "found") {
+                completed = true;
+                return { kind: "existing", remoteId: existing.remoteId, remoteUrl: existing.remoteUrl };
+            }
+            if (existing.kind === "title_mismatch") {
+                completed = true;
+                return { kind: "title_mismatch", remoteId: existing.remoteId };
+            }
             await this.openUploadForm(page);
             await page.locator("#file_form_file_terms").check();
             await page.locator("#file_form_file_file_options_file_1_file").setInputFiles(request.artifactPath);
@@ -96,9 +108,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const submittedId = await this.captureSubmittedVideoId(page, request.recordingId);
             completed = true;
             return {
-                transmittedBytes: counter.transmitted(request.sizeBytes),
-                submittedVideoId: submittedId,
-                metadataSubmittedAt: submittedAt.toISOString(),
+                kind: "uploaded",
+                receipt: {
+                    transmittedBytes: counter.transmitted(request.sizeBytes),
+                    submittedVideoId: submittedId,
+                    metadataSubmittedAt: submittedAt.toISOString(),
+                },
             };
         } finally {
             if (completed) {
@@ -382,8 +397,8 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
         // Fallback: the panel never revealed the link — look the upload up in
         // the authenticated uploads list by the folder name (the title carries
-        // it). Edge case to revisit: the uploads list may be paginated and the
-        // search may not cover pages beyond the first.
+        // it). The filter is a server-side search (/account/uploads/f:t:<query>,
+        // verified live) that surfaces matches regardless of list pagination.
         try {
             const entries = await this.findEntries(page, folderName);
             if (entries.length > 0) return entries[0].remoteId;
@@ -422,28 +437,35 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     }
 
     // Admission-time existence check: the folder name is the local truth, the
-    // edit-page title is the XVideos truth.
+    // edit-page title is the XVideos truth. Runs in its own session for
+    // remux-one/campaign intake, and inside the upload session as the backup.
     async findUploadedCopy(folderName: string): Promise<
         | { kind: "found"; remoteId: string; remoteUrl: string }
         | { kind: "title_mismatch"; remoteId: string }
         | { kind: "not_found" }
     > {
-        return await this.withAuthenticatedPage(async (page) => {
-            const entries = await this.findEntries(page, folderName);
-            for (const entry of entries) {
-                await page.goto(`https://www.xvideos.com/account/uploads/${entry.remoteId}/edit`, {
-                    waitUntil: "domcontentloaded",
-                    timeout: 30_000,
-                });
-                const title = await page.title().catch(() => "");
-                if (title.includes(`[${folderName}]`)) {
-                    return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
-                }
+        return await this.withAuthenticatedPage((page) => this.findUploadedCopyOnPage(page, folderName));
+    }
+
+    async findUploadedCopyOnPage(page: Page, folderName: string): Promise<
+        | { kind: "found"; remoteId: string; remoteUrl: string }
+        | { kind: "title_mismatch"; remoteId: string }
+        | { kind: "not_found" }
+    > {
+        const entries = await this.findEntries(page, folderName);
+        for (const entry of entries) {
+            await page.goto(`https://www.xvideos.com/account/uploads/${entry.remoteId}/edit`, {
+                waitUntil: "domcontentloaded",
+                timeout: 30_000,
+            });
+            const title = await page.title().catch(() => "");
+            if (title.includes(`[${folderName}]`)) {
+                return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
             }
-            if (entries.length > 0) {
-                return { kind: "title_mismatch", remoteId: entries[0].remoteId };
-            }
-            return { kind: "not_found" };
-        });
+        }
+        if (entries.length > 0) {
+            return { kind: "title_mismatch", remoteId: entries[0].remoteId };
+        }
+        return { kind: "not_found" };
     }
 }

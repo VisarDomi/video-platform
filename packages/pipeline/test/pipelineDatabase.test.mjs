@@ -299,11 +299,12 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
             calls++;
             assert.equal(request.visibility, "private");
             return {
-                transmittedBytes: 525,
-                remoteEntry: null,
-                submittedVideoId: "91362268",
-                metadataSubmittedAt: now.toISOString(),
-                selectedModelId: null,
+                kind: "uploaded",
+                receipt: {
+                    transmittedBytes: 525,
+                    submittedVideoId: "91362268",
+                    metadataSubmittedAt: now.toISOString(),
+                },
             };
         },
     });
