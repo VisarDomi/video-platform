@@ -73,7 +73,6 @@ export class UploadCoordinator {
                 error: error instanceof Error ? error.message : String(error),
                 ...(acceptanceUnknown ? {
                     confirmation: {
-                        matchKey: request.matchKey,
                         confirmAfter: new Date(now.getTime() + 24 * 60 * 60_000),
                     },
                 } : {}),
@@ -94,7 +93,6 @@ export class UploadCoordinator {
                 ? "metadata submitted; awaiting 24-hour edit-page verification"
                 : "metadata submitted; submitted video ID was not captured",
             confirmation: {
-                matchKey: request.matchKey,
                 confirmAfter: new Date(submittedAt.getTime() + 24 * 60 * 60_000),
             },
         }, submittedAt);
