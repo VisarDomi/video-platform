@@ -59,6 +59,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
             uploader = new ChromiumXvideosUploader({
                 executablePath: config.chromiumExecutablePath,
                 profilePath: config.browserProfilePath,
+                leaveOpenOnFailure: false,
                 ...credentials,
             });
         }

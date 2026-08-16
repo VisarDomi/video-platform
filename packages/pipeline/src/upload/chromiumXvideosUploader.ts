@@ -14,6 +14,11 @@ export interface ChromiumUploaderConfig {
     readonly email: string;
     readonly password: string;
     readonly headless?: boolean;
+    // Interactive (manual upload-one) runs keep the browser open on failure so
+    // a human can finish the job by hand. Unattended runs (the campaign) set
+    // this to false: every failure closes the browser so it never holds the
+    // profile lock against the next step.
+    readonly leaveOpenOnFailure?: boolean;
 }
 
 export class HumanActionRequiredError extends Error {
@@ -116,7 +121,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 },
             };
         } finally {
-            if (completed) {
+            if (completed || this.config.leaveOpenOnFailure === false) {
                 await context.close();
             } else {
                 console.log(JSON.stringify({
@@ -308,9 +313,16 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     private async solveFriendlyCaptcha(page: Page): Promise<void> {
         const fileInput = page.locator("#file_form_file_file_options_file_1_file");
         const confirmButton = page.getByRole("button", { name: "Confirm that you are not a robot", exact: true });
-        const deadline = Date.now() + 120_000;
+        const startedAt = Date.now();
+        const deadline = startedAt + 60 * 60_000;
+        const elapsed = () => Math.round((Date.now() - startedAt) / 1000);
+        let previousSolved = false;
+        let lastProgressLoggedAt = 0;
         while (Date.now() < deadline) {
-            if (await fileInput.count()) return;
+            if (await fileInput.count()) {
+                console.log(JSON.stringify({ event: "friendly-captcha-complete", elapsedSeconds: elapsed() }));
+                return;
+            }
             // Friendly Captcha does not auto-solve on the upload page: its
             // widget checkbox has to be clicked, the proof-of-work runs for a
             // few seconds, and only then does the page-level confirm button
@@ -327,6 +339,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                     // Re-clicking restarts the proof-of-work and escalates the
                     // captcha difficulty, which caused a minute-long stall.
                     if (stateClass.includes("state-unactivated")) {
+                        console.log(JSON.stringify({ event: "friendly-captcha-widget-click", elapsedSeconds: elapsed() }));
                         await checkbox.click({ timeout: 5_000 }).catch(() => undefined);
                     }
                     const checked = await checkbox.getAttribute("aria-checked").catch(() => null);
@@ -335,13 +348,23 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                     // widget frame still mounting or detaching; retry next iteration
                 }
             }
+            if (widgetSolved && !previousSolved) {
+                console.log(JSON.stringify({ event: "friendly-captcha-widget-solved", elapsedSeconds: elapsed() }));
+            }
+            previousSolved = widgetSolved;
             if (widgetSolved && await confirmButton.count() && await confirmButton.isEnabled()) {
+                console.log(JSON.stringify({ event: "friendly-captcha-confirm-click", elapsedSeconds: elapsed() }));
                 await confirmButton.click();
                 await page.waitForTimeout(1_500);
                 continue;
             }
+            if (Date.now() - lastProgressLoggedAt >= 60_000) {
+                lastProgressLoggedAt = Date.now();
+                console.log(JSON.stringify({ event: "friendly-captcha-waiting", elapsedSeconds: elapsed(), widgetSolved }));
+            }
             await page.waitForTimeout(750);
         }
+        console.log(JSON.stringify({ event: "friendly-captcha-timeout", elapsedSeconds: elapsed() }));
         if (!await fileInput.count()) {
             throw new HumanActionRequiredError("captcha", "Friendly Captcha did not complete automatically on the upload page");
         }

@@ -10,7 +10,7 @@ import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "
 import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
-import type { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { HumanActionRequiredError, type ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 
 export type CampaignStepResult =
     | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
@@ -109,11 +109,20 @@ export class CampaignWorker {
                 control.monthlyUploadLimitBytes,
             )) return { disposition: "monthly_quota_wait", recordingId: uploadReady.id };
             if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
-            return {
-                disposition: "upload_completed",
-                recordingId: uploadReady.id,
-                result: await this.upload(uploadReady.id, control.monthlyUploadLimitBytes),
-            };
+            try {
+                return {
+                    disposition: "upload_completed",
+                    recordingId: uploadReady.id,
+                    result: await this.upload(uploadReady.id, control.monthlyUploadLimitBytes),
+                };
+            } catch (error) {
+                if (error instanceof HumanActionRequiredError) {
+                    this.database.transition(uploadReady.id, "metadata_ready", "blocked",
+                        `XVideos ${error.action} needs a human decision: ${error.message}`, now);
+                    return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
+                }
+                throw error;
+            }
         }
 
         const candidate = await selectOldestFinalizedEditedCandidate({

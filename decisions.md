@@ -1,5 +1,14 @@
 # Monorepo Decisions
 
+## Browser failures: human decisions go to review, never lock the loop (2026-08-17)
+
+Interactive `upload-one` keeps the browser open on failure (a human is
+present). The unattended campaign sets `leaveOpenOnFailure: false` — every
+failure closes the browser so it can never hold the profile lock against the
+next step — and `HumanActionRequiredError`s (captcha / google_challenge /
+session_login) transition the recording to `blocked` with the reason, where
+`review` picks it up instead of retrying forever.
+
 ## Validation happens once; .pending is capture-only (2026-08-17)
 
 Media validation runs exactly once per recording — at capture finalization.
