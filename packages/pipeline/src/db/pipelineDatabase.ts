@@ -1123,11 +1123,11 @@ export class PipelineDatabase {
         return this.requireRecording(recordingId);
     }
 
-    getUncertainUploadRemote(attemptId: string): { remoteId: string; remoteUrl: string } | null {
+    getUncertainUploadRemote(attemptId: string): { remoteId: string; remoteUrl: string | null } | null {
         const row = this.database.prepare(`
             SELECT remote_id, remote_url FROM upload_attempts WHERE id = ? AND status = 'uncertain'
         `).get(attemptId) as { remote_id: string | null; remote_url: string | null } | undefined;
-        if (!row?.remote_id || !row?.remote_url) return null;
+        if (!row?.remote_id) return null;
         return { remoteId: row.remote_id, remoteUrl: row.remote_url };
     }
 
