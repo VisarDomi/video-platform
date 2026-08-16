@@ -12,7 +12,10 @@ const sourceRoot = path.join(repositoryRoot, "systemd", "user");
 const managedFiles = [
     "video-auth.service",
     "video-downloader.service",
+    "video-pipeline.service",
     "video-processing.slice",
+    "video-reconcile.service",
+    "video-reconcile.timer",
     "video-server.service",
     path.join("video-server.service.d", "resources.conf"),
 ];
