@@ -12,6 +12,7 @@
         "build:downloader": "npm run build:shared && npm run build -w downloader",
         "build:server": "npm run build:shared && npm run build -w server && npm run build:app",
         "build:descriptor": "npm run build:shared && npm run build -w descriptor",
+        "build:userscripts": "npm run build -w userscripts",
         "build:pipeline": "npm run build:shared && npm run build -w pipeline",
         "start": "npm run start:auth && npm run start:downloader && npm run start:server",
         "start:auth": "npm run build:auth && systemctl --user start video-auth.service",
@@ -48,6 +49,7 @@
         "packages/pipeline",
         "packages/downloader",
         "packages/server",
-        "packages/app"
+        "packages/app",
+        "packages/userscripts"
     ]
 }
