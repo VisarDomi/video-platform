@@ -1,10 +1,11 @@
 [Unit]
 Description=Video Pipeline Campaign Worker
-After=network.target video-server.service
+After=network.target video-server.service video-xvfb.service
 
 [Service]
 Type=simple
 Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=DISPLAY=:111
 Environment=VIDEO_PIPELINE_SERVICE_MODE=1
 Environment=VIDEO_PIPELINE_NETWORK_UPLOADS=1
 Environment=PLAYWRIGHT_BROWSERS_PATH=0
