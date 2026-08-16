@@ -1,5 +1,32 @@
 # Monorepo Decisions
 
+## Folder names are the identity; disk is the truth; zombies are dead (2026-08-16)
+
+Follow-up decisions from the first controlled upload:
+
+- Recording IDs are the source folder names (datetime + alias) instead of
+  hashes; a cross-provider identical folder name goes to manual review.
+  Migrated the live ledger and renamed staging artifacts accordingly.
+- The disk is the source of truth: every campaign step sweeps recordings whose
+  source folder is missing — the ledger row, its confirmations and
+  verifications, and the pipeline-owned files are deleted (24-hour cooldown,
+  in-flight uploads and leased rows skipped). ISP billing in
+  `bandwidth_events` is never refunded or deleted, and the server-owned
+  `finalization.sqlite` is never touched.
+- A re-added folder is always fresh (full remux); the admission-time remote
+  check searches XVideos by folder name and verifies the edit-page title
+  carries `[datetime alias]` — a match parks the recording as uncertain with
+  that edit ID instead of processing it.
+- Zombie concepts removed: the matchKey column (folder name is derived from
+  the source path), the streamer-models table and model:set command,
+  remote_verifications/xvideos_entries merged into `remote_uploads`,
+  moderation status parsing, and every dead model helper.
+- Verification is the edit-page direct link; ID-less uncertain leftovers and
+  contradictory states go to manual review, listed by the new `review`
+  command.
+- The campaign worker (`video-pipeline.service`) sweeps every step even
+  while the campaign is paused.
+
 ## First controlled XVideos upload verified end-to-end (2026-08-16)
 
 One controlled upload completed the full circle: remux, describe, upload,

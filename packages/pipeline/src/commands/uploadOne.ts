@@ -1,7 +1,9 @@
+import path from "node:path";
 import { assessFinalArtifact } from "shared";
 import type { PipelineConfig } from "../config.js";
 import { readXvideosCredentials } from "../config/secrets.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
@@ -19,7 +21,46 @@ export async function uploadOne(
     try {
         database.recoverInterruptedUploads();
         const recording = database.get(recordingId);
-        if (!recording || recording.state !== "metadata_ready") {
+        if (!recording) {
+            throw new Error(`Unknown pipeline recording ${recordingId}`);
+        }
+        const identityOutcome = await guardUploadIdentity(database, recording, config);
+        if (identityOutcome.kind === "verified_cleaned") {
+            return {
+                recordingId,
+                state: database.get(recordingId)?.state,
+                disposition: "already_verified_cleaned",
+                remoteId: identityOutcome.remoteId,
+            };
+        }
+        if (identityOutcome.kind === "unverified_refused") {
+            throw new Error(refusalMessage(identityOutcome));
+        }
+        const credentials = await readXvideosCredentials(config.credentialsFilePath);
+        const uploader = new ChromiumXvideosUploader({
+            executablePath: config.chromiumExecutablePath,
+            profilePath: config.browserProfilePath,
+            ...credentials,
+        });
+        // Backup remote check: the folder name is the local truth, the
+        // edit-page title is the XVideos truth. Covers recordings admitted
+        // while the network was off.
+        const copy = await uploader.findUploadedCopy(path.basename(recording.sourcePath));
+        if (copy.kind === "found") {
+            database.parkUploadedCopy(recordingId, copy.remoteId, copy.remoteUrl);
+            return {
+                recordingId,
+                state: database.get(recordingId)?.state,
+                disposition: "parked_existing_upload",
+                remoteId: copy.remoteId,
+            };
+        }
+        if (copy.kind === "title_mismatch") {
+            database.transition(recordingId, recording.state, "blocked",
+                `XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`);
+            throw new Error(`XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`);
+        }
+        if (recording.state !== "metadata_ready") {
             throw new Error(`Recording ${recordingId} is not metadata_ready`);
         }
         if (recording.sourceKind !== "edited") {
@@ -39,41 +80,6 @@ export async function uploadOne(
         if (assessment.disposition !== "ready_for_upload") {
             throw new Error(`XVideos policy blocks artifact: ${assessment.disposition}`);
         }
-        const credentials = await readXvideosCredentials(config.credentialsFilePath);
-        const uploader = new ChromiumXvideosUploader({
-            executablePath: config.chromiumExecutablePath,
-            profilePath: config.browserProfilePath,
-            ...credentials,
-        });
-        // Never re-upload a video that already exists on XVideos (unverified or
-        // online): park the recording as uncertain with the existing entry and
-        // let the daily reconcile verify it instead of spending bandwidth.
-        const existing = await uploader.findExistingByMatchKey(metadata.matchKey);
-        if (existing) {
-            const skipNow = new Date();
-            const reservationId = database.reserveUpload(
-                recordingId,
-                artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
-                skipNow,
-                config.uploadTimeZone,
-                config.monthlyUploadLimitBytes,
-            );
-            const attemptId = database.beginUpload(recordingId, reservationId, skipNow);
-            database.finishUploadAttempt(attemptId, {
-                status: "uncertain",
-                transmittedBytes: 0,
-                remoteId: existing.remoteId,
-                remoteUrl: existing.remoteUrl,
-                error: "skipped re-upload; matching XVideos entry already exists",
-                confirmation: { matchKey: metadata.matchKey, confirmAfter: skipNow },
-            }, skipNow);
-            return {
-                recordingId,
-                state: database.get(recordingId)?.state,
-                disposition: "skipped_existing",
-                remoteEntry: existing,
-            };
-        }
         const reservedBytes = artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES;
         const reservationId = database.reserveUpload(
             recordingId,
@@ -92,7 +98,6 @@ export async function uploadOne(
                 title: metadata.title,
                 description: metadata.description,
                 tags: metadata.tags,
-                matchKey: metadata.matchKey,
                 visibility: "private",
                 streamerAlias: provenance.alias ?? provenance.streamerId,
             },
@@ -101,8 +106,7 @@ export async function uploadOne(
             recordingId,
             state: database.get(recordingId)?.state,
             transmittedBytes: receipt.transmittedBytes,
-            remoteEntry: receipt.remoteEntry,
-            confirmAfter: receipt.remoteEntry ? null : new Date(
+            confirmAfter: new Date(
                 new Date(receipt.metadataSubmittedAt).getTime() + 24 * 60 * 60_000,
             ).toISOString(),
         };

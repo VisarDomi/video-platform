@@ -10,7 +10,6 @@ import { reconcileDueUploads } from "./commands/reconcileUploads.js";
 import { TargetCatalogResolver } from "./provenance/targetResolver.js";
 import { PipelineOrchestrator } from "./scheduler/orchestrator.js";
 import { createDefaultStages } from "./stages/defaultStages.js";
-import { readSecretFile } from "./config/secrets.js";
 import {
     campaignStatus,
     campaignStep,
@@ -28,8 +27,7 @@ function usage(): never {
         "  describe-one --recording ID",
         "  process-one --apply | provenance-refresh --apply | provenance-review",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
-        "  model-set ID --from-env | model-set ID --stage-name NAME --gender VALUE --how VALUE --picture PATH",
-        "  retry ID | upload-plan",
+        "  review | retry ID | upload-plan",
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
@@ -55,7 +53,7 @@ function campaignProvider(value: string | null): CampaignProviderFilter {
 async function main(): Promise<void> {
     const command = process.argv[2];
     if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "provenance-refresh",
-        "provenance-review", "provenance-set", "model-set", "retry", "upload-plan", "upload-one",
+        "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker"].includes(command ?? "")) usage();
     if (command === "discover-plan") {
@@ -233,29 +231,26 @@ async function main(): Promise<void> {
             }), null, 2));
             return;
         }
-        if (command === "model-set") {
-            const args = process.argv.slice(3);
-            const id = args[0];
-            const recording = id ? database.get(id) : null;
-            const provenance = id ? database.getProvenance(id) : null;
-            if (!recording || !provenance?.streamerId) throw new Error("model-set requires a recording with resolved provenance");
-            const secrets = args.includes("--from-env")
-                ? await readSecretFile(pipelineConfig.credentialsFilePath)
-                : {};
-            const stageName = option(args, "--stage-name") ?? secrets.MODEL_STAGE_NAME;
-            const gender = option(args, "--gender") ?? secrets.MODEL_GENDER;
-            const howKnown = option(args, "--how") ?? secrets.MODEL_HOW;
-            const profilePicture = option(args, "--picture") ?? secrets.MODEL_PROFILE_PICTURE;
-            if (!stageName || !gender || !howKnown || !profilePicture) usage();
-            console.log(JSON.stringify(database.saveStreamerModel({
-                provider: recording.provider,
-                streamerId: provenance.streamerId,
-                stageName,
-                gender,
-                howKnown,
-                profilePicture,
-                xvideosModelId: option(args, "--xvideos-model-id"),
-            }), null, 2));
+        if (command === "review") {
+            const blocked = database.list().filter((recording) => recording.state === "blocked")
+                .map((recording) => ({
+                    recordingId: recording.id,
+                    provider: recording.provider,
+                    state: recording.state,
+                    reason: recording.blockReason,
+                    sourcePath: recording.sourcePath,
+                }));
+            const provenance = database.listProvenanceReview().map((item) => {
+                const recording = database.get(item.recordingId);
+                return {
+                    recordingId: item.recordingId,
+                    provider: recording?.provider ?? "unknown",
+                    observedIdentifier: item.observedIdentifier,
+                    reason: item.reason,
+                    sourcePath: recording?.sourcePath ?? null,
+                };
+            });
+            console.log(JSON.stringify({ blocked, provenanceReview: provenance }, null, 2));
             return;
         }
         if (command === "retry") {

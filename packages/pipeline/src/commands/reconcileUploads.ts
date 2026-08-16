@@ -22,18 +22,22 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         // authenticated page.
         await browser.withAuthenticatedPage(async (page) => {
             for (const confirmation of database.dueUploadConfirmations(now)) {
-                let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
+                const remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
                 if (!remoteId) {
-                    // Older attempts without a captured ID: resolve it via the
-                    // authenticated uploads list first.
-                    const entry = await browser.findEntry(page, confirmation.matchKey);
-                    remoteId = entry?.remoteId ?? null;
-                }
-                if (!remoteId) {
+                    // Should never happen: uploaded without a captured edit ID.
+                    // Manual review, never a blind re-upload.
+                    database.settleConfirmationManualReview(confirmation.attemptId, now);
+                    database.transition(
+                        confirmation.recordingId,
+                        "xvideos_uncertain",
+                        "blocked",
+                        "upload without a stored edit ID; manual review required",
+                        now,
+                    );
                     results.push({
                         recordingId: confirmation.recordingId,
-                        disposition: "not_ready",
-                        reason: "no remote upload ID resolved yet",
+                        disposition: "manual_review",
+                        reason: "no stored edit ID",
                     });
                     continue;
                 }
@@ -44,7 +48,6 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         confirmation.recordingId,
                         remoteId,
                         probe.remoteUrl,
-                        null,
                         now,
                     );
                     // Verified online: clean up only the pipeline staging
@@ -77,6 +80,18 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 }
             }
         });
+        // Contradictory recordings (upload states without any remote identity
+        // and without a pending confirmation) go to manual review.
+        for (const contradiction of database.listUploadContradictions()) {
+            database.transition(
+                contradiction.id,
+                contradiction.state,
+                "blocked",
+                "upload state without remote identity or pending confirmation; manual review required",
+                now,
+            );
+            results.push({ recordingId: contradiction.id, disposition: "manual_review" });
+        }
         return { checkedAt: now.toISOString(), results };
     } finally {
         database.close();

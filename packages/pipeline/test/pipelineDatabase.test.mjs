@@ -60,10 +60,9 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         updatedAt: new Date("2026-08-12T08:00:00Z").toISOString(),
     });
     database.saveUploadMetadata(recording.id, {
-        title: `Specific test title [tango-${recording.id.slice(0, 12)}]`,
+        title: `Specific test title [${path.basename(directory)}]`,
         description: "A concrete test description.\n\nRecorded: unknown\nSource: https://tango.me/streamer-id",
         tags: ["tango", "live", "room"],
-        matchKey: `[tango-${recording.id.slice(0, 12)}]`,
     });
     return database.get(recording.id);
 }
@@ -197,7 +196,7 @@ test("uncertain remote acceptance requires reconciliation instead of blind retry
         status: "uncertain",
         transmittedBytes: 500,
         error: "response lost after request body was sent",
-        confirmation: { matchKey: "[test]", confirmAfter: new Date(now.getTime() + 86_400_000) },
+        confirmation: { confirmAfter: new Date(now.getTime() + 86_400_000) },
     }, now).state, "xvideos_uncertain");
     assert.equal(database.claimNext(["described"], "retry-worker", 1_000, now), null);
     assert.equal(database.reconcileUncertain(
@@ -315,7 +314,6 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
         title: "Fake upload",
         description: "No network transport exists in this test.",
         tags: ["tango", "live"],
-        matchKey: "[test]",
         visibility: "private",
     }, now);
     assert.equal(calls, 1);
@@ -337,7 +335,7 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
     database.reconcileUncertain(confirmation.attemptId, "91362268",
         "https://www.xvideos.com/video.91362268/", after);
     database.markRemoteVerified(recording.id, "91362268",
-        "https://www.xvideos.com/video.91362268/", null, after);
+        "https://www.xvideos.com/video.91362268/", after);
     assert.equal(database.get(recording.id)?.state, "xvideos_verified");
 });
 
@@ -359,7 +357,6 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
         title: "Fake upload",
         description: "No network transport exists in this test.",
         tags: ["tango", "live"],
-        matchKey: "[test]",
         visibility: "private",
     }, now), /response disappeared/);
     assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");

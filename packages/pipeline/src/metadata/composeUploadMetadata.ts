@@ -29,12 +29,6 @@ function recordingTime(sourcePath: string): string {
     return `${match[1]} ${match[2].slice(0, 2)}:${match[2].slice(2, 4)}:${match[2].slice(4, 6)}`;
 }
 
-function matchKeyFor(recording: Recording): string {
-    // The reconciliation key is the source folder name (datetime + alias).
-    const basename = path.basename(recording.sourcePath).trim();
-    return `[${basename || recording.id.slice(0, 12)}]`;
-}
-
 function shorten(text: string, maximum: number): string {
     const normalized = text.trim().replace(/\s+/g, " ");
     if (normalized.length <= maximum) return normalized;
@@ -52,9 +46,11 @@ export function composeUploadMetadata(
         throw new Error("Cannot compose upload metadata with unresolved provenance");
     }
     const output = descriptorOutput(description.output);
-    const matchKey = matchKeyFor(recording);
-    const titleRoom = TITLE_LIMIT - matchKey.length - 1;
-    const title = `${shorten(output.title, titleRoom)} ${matchKey}`;
+    // The folder name is the identity; the title carries it only for human
+    // readability on XVideos.
+    const folderSuffix = `[${path.basename(recording.sourcePath)}]`;
+    const titleRoom = TITLE_LIMIT - folderSuffix.length - 1;
+    const title = `${shorten(output.title, titleRoom)} ${folderSuffix}`;
 
     const suffix = [
         `Recorded: ${recordingTime(recording.sourcePath)}`,
@@ -68,5 +64,5 @@ export function composeUploadMetadata(
     // Descriptor tags are intentionally ignored. The only tags uploaded are
     // the fixed provider tag and "live": fc2 -> fc2 + live, sc -> stripchat + live.
     const providerTag = recording.provider === "sc" ? "stripchat" : recording.provider;
-    return { title, description: composedDescription, tags: [providerTag, "live"], matchKey };
+    return { title, description: composedDescription, tags: [providerTag, "live"] };
 }

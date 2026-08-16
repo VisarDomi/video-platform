@@ -1,27 +1,34 @@
 # Durable video pipeline
 
 This package owns the months-long per-recording processing queue. It remains
-separate from Express and is not installed as a systemd service yet.
+separate from Express; the managed `video-pipeline` campaign worker runs it
+under systemd.
 
 Implemented:
 
 - SQLite WAL/FULL recording state, transition events, leases, artifact hashes,
-  description evidence, provenance, metadata, streamer-model mappings, upload
-  attempts, transmitted-byte accounting, and remote-entry evidence.
+  description evidence, provenance, metadata, upload attempts, transmitted-byte
+  accounting, and remote upload identity. Recording IDs are the source folder
+  names (datetime + alias) — the disk is the source of truth.
 - Production discovery of only exact server-checkpointed `editor/edited`
   recordings. Hidden handoff directories and raw downloader recordings are
   excluded from campaign processing.
+- Disk-truth sweep every campaign step: recordings whose source folder is
+  missing are deleted from the ledger with their pipeline files (24-hour
+  cooldown, in-flight uploads skipped). ISP billing (`bandwidth_events`) is
+  never refunded or deleted.
 - One-recording stream-copy remux, full decode/probe, SHA-256 evidence, and
   exact-artifact description.
 - Server-delegated per-provider identity resolution through
   `GET /api/{provider}/resolve` (Tango alias registry + live Tango API, FC2
   numeric IDs, Stripchat username lookup), grouped unresolved review, and
   reusable manual overrides.
-- XVideos-safe metadata composition with deterministic reconciliation keys,
-  provenance suffixes, and fixed provider/live tags.
-- Pre-upload duplicate guard: a recording whose match key already exists on
-  XVideos (unverified or online) is parked as uncertain with that entry instead
-  of being uploaded again.
+- Admission-time remote check: a new folder whose name already exists on
+  XVideos (edit-page title carries `[datetime alias]`) is parked as uncertain
+  with that edit ID instead of being remuxed/described/uploaded.
+- XVideos-safe metadata composition with the folder name appended to the
+  title for human readability, provenance suffixes, and fixed provider/live
+  tags.
 - Persistent-Chromium XVideos upload through Google OAuth, automated
   Friendly Captcha completion with a manual fallback, streamer alias typed
   into the model search without selection, fixed metadata policy, and 24-hour
@@ -32,6 +39,8 @@ Implemented:
 - Cleanup runs only on verified-online uploads and deletes only the pipeline
   staging artifact; original downloader/editor folders are never touched
   (disable with `VIDEO_PIPELINE_CLEANUP=0`).
+- `review` lists everything that cannot be solved programmatically: blocked
+  recordings with reasons, and unresolved provenance.
 
 The historical finalization contract is complete, and one controlled upload
 has gone the full circle: submitted, published on XVideos, verified online
@@ -113,12 +122,7 @@ accepts the submission with an empty model list and never attaches the model
 to the video anyway. The model search input is a zero-width typeahead, so the
 uploader types into it with keyboard events instead of `fill()`.
 
-`model:set` still stores per-streamer model details for future use, but the
-upload no longer requires them:
 
-```bash
-npm run model:set -w pipeline -- RECORDING_ID --from-env
-```
 
 ## Persistent XVideos browser profile
 

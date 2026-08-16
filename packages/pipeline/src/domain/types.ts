@@ -59,25 +59,12 @@ export interface UploadMetadataRecord {
     readonly title: string;
     readonly description: string;
     readonly tags: readonly string[];
-    readonly matchKey: string;
     readonly createdAt: string;
-}
-
-export interface StreamerModelRecord {
-    readonly provider: string;
-    readonly streamerId: string;
-    readonly stageName: string;
-    readonly gender: string;
-    readonly howKnown: string;
-    readonly profilePicture: string;
-    readonly xvideosModelId: string | null;
-    readonly updatedAt: string;
 }
 
 export interface UploadConfirmation {
     readonly attemptId: string;
     readonly recordingId: string;
-    readonly matchKey: string;
     readonly confirmAfter: string;
     readonly status: "pending" | "found" | "absent";
     readonly checkedAt: string | null;

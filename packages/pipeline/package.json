@@ -16,7 +16,7 @@
         "provenance:refresh": "npm run build && node --no-warnings dist/main.js provenance-refresh --apply",
         "provenance:review": "npm run build && node --no-warnings dist/main.js provenance-review",
         "provenance:set": "npm run build && node --no-warnings dist/main.js provenance-set",
-        "model:set": "npm run build && node --no-warnings dist/main.js model-set",
+        "review": "npm run build && node --no-warnings dist/main.js review",
         "retry": "npm run build && node --no-warnings dist/main.js retry",
         "dry-run": "npm run build && node --no-warnings dist/main.js upload-plan",
         "upload-one": "npm run build && node --no-warnings dist/main.js upload-one",

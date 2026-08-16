@@ -5,7 +5,6 @@ export interface UploadRequest {
     readonly title: string;
     readonly description: string;
     readonly tags: readonly string[];
-    readonly matchKey: string;
     readonly visibility: "private";
     readonly streamerAlias?: string;
     readonly onProgress?: (
@@ -16,14 +15,8 @@ export interface UploadRequest {
 
 export interface UploadReceipt {
     readonly transmittedBytes: number;
-    readonly remoteEntry: {
-        readonly remoteId: string;
-        readonly remoteUrl: string;
-        readonly moderationStatus: string | null;
-    } | null;
     readonly submittedVideoId: string | null;
     readonly metadataSubmittedAt: string;
-    readonly selectedModelId: string | null;
 }
 
 export interface XvideosUploader {

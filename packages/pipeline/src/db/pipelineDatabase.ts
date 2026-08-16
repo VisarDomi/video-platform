@@ -12,7 +12,6 @@ import type {
     RecordingInput,
     RecordingProvenance,
     SourceKind,
-    StreamerModelRecord,
     UploadConfirmation,
     UploadMetadataRecord,
 } from "../domain/types.js";
@@ -70,6 +69,10 @@ interface DescriptionRow {
 }
 
 function recordingId(input: RecordingInput): string {
+    // The folder name (datetime + alias) is the identity; the disk is the
+    // source of truth.
+    const basename = path.basename(path.resolve(input.sourcePath));
+    if (basename) return basename;
     return createHash("sha256")
         .update(`${input.provider}\0${input.sourceKind}\0${path.resolve(input.sourcePath)}`)
         .digest("hex");
@@ -193,7 +196,7 @@ export class PipelineDatabase {
                 ON upload_reservations (recording_id) WHERE status = 'reserved';
             CREATE TABLE IF NOT EXISTS upload_attempts (
                 id TEXT PRIMARY KEY,
-                reservation_id TEXT NOT NULL REFERENCES upload_reservations(id),
+                reservation_id TEXT REFERENCES upload_reservations(id),
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
                 provider TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (status IN ('started', 'failed', 'accepted', 'uncertain')),
@@ -208,19 +211,18 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS bandwidth_events (
                 id INTEGER PRIMARY KEY,
-                recording_id TEXT NOT NULL REFERENCES recordings(id),
-                attempt_id TEXT NOT NULL REFERENCES upload_attempts(id),
+                recording_id TEXT NOT NULL,
+                attempt_id TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 calendar_month TEXT NOT NULL,
                 transmitted_bytes INTEGER NOT NULL CHECK (transmitted_bytes >= 0),
                 created_at TEXT NOT NULL
             ) STRICT;
-            CREATE TABLE IF NOT EXISTS remote_verifications (
+            CREATE TABLE IF NOT EXISTS remote_uploads (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
-                attempt_id TEXT NOT NULL REFERENCES upload_attempts(id),
+                attempt_id TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
                 remote_url TEXT NOT NULL,
-                playback_verified INTEGER NOT NULL CHECK (playback_verified = 1),
                 verified_at TEXT NOT NULL
             ) STRICT;
             CREATE TABLE IF NOT EXISTS recording_provenance (
@@ -255,38 +257,17 @@ export class PipelineDatabase {
                 title TEXT NOT NULL,
                 description TEXT NOT NULL,
                 tags_json TEXT NOT NULL,
-                match_key TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL
-            ) STRICT;
-            CREATE TABLE IF NOT EXISTS streamer_models (
-                provider TEXT NOT NULL,
-                streamer_id TEXT NOT NULL,
-                stage_name TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                how_known TEXT NOT NULL,
-                profile_picture TEXT NOT NULL,
-                xvideos_model_id TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (provider, streamer_id)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS upload_confirmations (
                 attempt_id TEXT PRIMARY KEY REFERENCES upload_attempts(id),
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
-                match_key TEXT NOT NULL,
                 confirm_after TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (status IN ('pending', 'found', 'absent')),
                 checked_at TEXT
             ) STRICT;
             CREATE INDEX IF NOT EXISTS upload_confirmations_due_idx
                 ON upload_confirmations (status, confirm_after);
-            CREATE TABLE IF NOT EXISTS xvideos_entries (
-                recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
-                attempt_id TEXT NOT NULL REFERENCES upload_attempts(id),
-                remote_id TEXT NOT NULL,
-                remote_url TEXT NOT NULL,
-                moderation_status TEXT,
-                observed_at TEXT NOT NULL
-            ) STRICT;
             CREATE TABLE IF NOT EXISTS campaign_control (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 state TEXT NOT NULL CHECK (state IN ('paused', 'running')),
@@ -333,7 +314,18 @@ export class PipelineDatabase {
         const id = recordingId(normalized);
         const existing = this.get(id);
         const timestamp = now.toISOString();
-        if (!existing) {
+        if (existing && existing.provider !== normalized.provider) {
+            // The identical folder name exists under another provider: manual review.
+            this.transaction(() => {
+                this.database.prepare(`
+                    UPDATE recordings SET state = 'blocked', block_reason = ?,
+                        lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                    WHERE id = ?
+                `).run("identical folder name exists under another provider; manual review required",
+                    timestamp, id);
+                this.insertEvent(id, existing.state, "blocked", "cross-provider folder name collision", timestamp);
+            });
+        } else if (!existing) {
             this.transaction(() => {
                 this.database.prepare(`
                     INSERT INTO recordings (
@@ -347,7 +339,7 @@ export class PipelineDatabase {
                 );
                 this.insertEvent(id, null, "server_ready", "server-published finalized recording discovered", timestamp);
             });
-        } else if (existing.sourceFingerprint !== normalized.sourceFingerprint) {
+        } else if (existing && existing.sourceFingerprint !== normalized.sourceFingerprint) {
             this.transaction(() => {
                 this.database.prepare(`
                     UPDATE recordings SET state = 'blocked', block_reason = ?, lease_owner = NULL,
@@ -601,6 +593,8 @@ export class PipelineDatabase {
                 WHERE state IN (${placeholders})
                   AND source_kind IN (${sourcePlaceholders})
                   AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                  AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = recordings.id AND a.remote_id IS NOT NULL)
+                  AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = recordings.id)
                 ORDER BY created_at, id LIMIT 1
             `).get(...states as SQLInputValue[], ...sourceKinds, timestamp) as { id: string } | undefined;
             if (!row) return;
@@ -635,6 +629,8 @@ export class PipelineDatabase {
             WHERE id = ? AND state IN (${statePlaceholders})
               AND source_kind IN (${sourcePlaceholders})
               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+              AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = recordings.id AND a.remote_id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = recordings.id)
         `).run(owner, expiry, timestamp, id, ...states, ...sourceKinds, timestamp);
         return result.changes === 1 ? this.get(id) : null;
     }
@@ -764,7 +760,6 @@ export class PipelineDatabase {
         title: string;
         description: string;
         tags: readonly string[];
-        matchKey: string;
     }, now = new Date()): Recording {
         const recording = this.requireRecording(id);
         const provenance = this.getProvenance(id);
@@ -779,23 +774,19 @@ export class PipelineDatabase {
         if (metadata.tags.length > 20 || metadata.tags.some((tag) => !tag.trim())) {
             throw new Error("Upload metadata allows at most twenty nonempty tags");
         }
-        if (!metadata.matchKey || metadata.matchKey.length > 80 || !metadata.title.includes(metadata.matchKey)) {
-            throw new Error("Upload title must contain its deterministic match key");
-        }
         const timestamp = now.toISOString();
         this.transaction(() => {
             this.database.prepare(`
                 INSERT INTO upload_metadata (
-                    recording_id, title, description, tags_json, match_key, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    recording_id, title, description, tags_json, created_at
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(recording_id) DO UPDATE SET
                     title = excluded.title,
                     description = excluded.description,
                     tags_json = excluded.tags_json,
-                    match_key = excluded.match_key,
                     created_at = excluded.created_at
             `).run(id, metadata.title, metadata.description,
-                JSON.stringify(metadata.tags), metadata.matchKey, timestamp);
+                JSON.stringify(metadata.tags), timestamp);
             this.updateStateInTransaction(id, "described", "metadata_ready", "upload metadata composed", timestamp);
         });
         return this.requireRecording(id);
@@ -807,7 +798,6 @@ export class PipelineDatabase {
             title: string;
             description: string;
             tags_json: string;
-            match_key: string;
             created_at: string;
         } | undefined;
         if (!row) return null;
@@ -820,71 +810,8 @@ export class PipelineDatabase {
             title: row.title,
             description: row.description,
             tags,
-            matchKey: row.match_key,
             createdAt: row.created_at,
         };
-    }
-
-    saveStreamerModel(model: Omit<StreamerModelRecord, "updatedAt">, now = new Date()): StreamerModelRecord {
-        for (const [name, value] of Object.entries(model)) {
-            if (name !== "xvideosModelId" && (typeof value !== "string" || value.trim() === "")) {
-                throw new Error(`Streamer model ${name} is required`);
-            }
-        }
-        this.database.prepare(`
-            INSERT INTO streamer_models (
-                provider, streamer_id, stage_name, gender, how_known,
-                profile_picture, xvideos_model_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(provider, streamer_id) DO UPDATE SET
-                stage_name = excluded.stage_name,
-                gender = excluded.gender,
-                how_known = excluded.how_known,
-                profile_picture = excluded.profile_picture,
-                xvideos_model_id = COALESCE(excluded.xvideos_model_id, streamer_models.xvideos_model_id),
-                updated_at = excluded.updated_at
-        `).run(model.provider, model.streamerId, model.stageName, model.gender,
-            model.howKnown, path.resolve(model.profilePicture), model.xvideosModelId, now.toISOString());
-        const saved = this.getStreamerModel(model.provider, model.streamerId);
-        if (!saved) throw new Error("Failed to save streamer model");
-        return saved;
-    }
-
-    getStreamerModel(provider: string, streamerId: string): StreamerModelRecord | null {
-        const row = this.database.prepare(`
-            SELECT * FROM streamer_models WHERE provider = ? AND streamer_id = ?
-        `).get(provider, streamerId) as {
-            provider: string;
-            streamer_id: string;
-            stage_name: string;
-            gender: string;
-            how_known: string;
-            profile_picture: string;
-            xvideos_model_id: string | null;
-            updated_at: string;
-        } | undefined;
-        return row ? {
-            provider: row.provider,
-            streamerId: row.streamer_id,
-            stageName: row.stage_name,
-            gender: row.gender,
-            howKnown: row.how_known,
-            profilePicture: row.profile_picture,
-            xvideosModelId: row.xvideos_model_id,
-            updatedAt: row.updated_at,
-        } : null;
-    }
-
-    setRemoteModelId(provider: string, streamerId: string, xvideosModelId: string, now = new Date()): StreamerModelRecord {
-        if (!xvideosModelId.trim()) throw new Error("XVideos model ID is required");
-        const result = this.database.prepare(`
-            UPDATE streamer_models SET xvideos_model_id = ?, updated_at = ?
-            WHERE provider = ? AND streamer_id = ?
-        `).run(xvideosModelId.trim(), now.toISOString(), provider, streamerId);
-        if (result.changes !== 1) throw new Error(`No streamer model configured for ${provider}:${streamerId}`);
-        const saved = this.getStreamerModel(provider, streamerId);
-        if (!saved) throw new Error("Streamer model disappeared");
-        return saved;
     }
 
     uploadUsage(month: string): UsageRow {
@@ -992,10 +919,9 @@ export class PipelineDatabase {
         const timestamp = now.toISOString();
         const attempts = this.database.prepare(`
             SELECT a.id, a.recording_id, a.reservation_id, a.phase, a.progress_bytes,
-                r.calendar_month, m.match_key
+                r.calendar_month
             FROM upload_attempts a
             JOIN upload_reservations r ON r.id = a.reservation_id
-            LEFT JOIN upload_metadata m ON m.recording_id = a.recording_id
             JOIN recordings rec ON rec.id = a.recording_id
             WHERE a.status = 'started' AND rec.state = 'xvideos_uploading'
             ORDER BY a.started_at, a.id
@@ -1006,7 +932,6 @@ export class PipelineDatabase {
             phase: "started" | "file_uploading" | "file_uploaded" | "metadata_submitting";
             progress_bytes: number;
             calendar_month: string;
-            match_key: string | null;
         }>;
         const results: Array<{ recordingId: string; disposition: string }> = [];
         for (const attempt of attempts) {
@@ -1030,12 +955,11 @@ export class PipelineDatabase {
                     UPDATE upload_reservations SET status = 'released', updated_at = ? WHERE id = ?
                 `).run(timestamp, attempt.reservation_id);
                 if (uncertain) {
-                    if (!attempt.match_key) throw new Error("Interrupted metadata submission has no match key");
                     this.database.prepare(`
                         INSERT INTO upload_confirmations (
-                            attempt_id, recording_id, match_key, confirm_after, status, checked_at
-                        ) VALUES (?, ?, ?, ?, 'pending', NULL)
-                    `).run(attempt.id, attempt.recording_id, attempt.match_key,
+                            attempt_id, recording_id, confirm_after, status, checked_at
+                        ) VALUES (?, ?, ?, 'pending', NULL)
+                    `).run(attempt.id, attempt.recording_id,
                         new Date(now.getTime() + 24 * 60 * 60_000).toISOString());
                     this.updateStateInTransaction(attempt.recording_id, "xvideos_uploading", "xvideos_uncertain",
                         "interrupted while metadata submission may have been accepted", timestamp);
@@ -1058,7 +982,7 @@ export class PipelineDatabase {
         remoteId?: string;
         remoteUrl?: string;
         error?: string;
-        confirmation?: { matchKey: string; confirmAfter: Date };
+        confirmation?: { confirmAfter: Date };
     }, now = new Date()): Recording {
         if (!Number.isSafeInteger(outcome.transmittedBytes) || outcome.transmittedBytes < 0) {
             throw new Error("transmittedBytes must be a nonnegative integer");
@@ -1109,9 +1033,9 @@ export class PipelineDatabase {
             if (outcome.status === "uncertain" && outcome.confirmation) {
                 this.database.prepare(`
                     INSERT INTO upload_confirmations (
-                        attempt_id, recording_id, match_key, confirm_after, status, checked_at
-                    ) VALUES (?, ?, ?, ?, 'pending', NULL)
-                `).run(attemptId, recordingId, outcome.confirmation.matchKey,
+                        attempt_id, recording_id, confirm_after, status, checked_at
+                    ) VALUES (?, ?, ?, 'pending', NULL)
+                `).run(attemptId, recordingId,
                     outcome.confirmation.confirmAfter.toISOString());
             }
             const next: PipelineState = outcome.status === "accepted"
@@ -1121,6 +1045,94 @@ export class PipelineDatabase {
                 outcome.error ?? `upload attempt ${outcome.status}`, timestamp);
         });
         return this.requireRecording(recordingId);
+    }
+
+    getUploadIdentity(id: string): { remoteId: string; remoteUrl: string | null; verified: boolean } | null {
+        const verified = this.database.prepare(`
+            SELECT remote_id, remote_url FROM remote_uploads
+            WHERE recording_id = ? ORDER BY verified_at DESC LIMIT 1
+        `).get(id) as { remote_id: string; remote_url: string | null } | undefined;
+        if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url, verified: true };
+        const attempt = this.database.prepare(`
+            SELECT remote_id, remote_url FROM upload_attempts
+            WHERE recording_id = ? AND remote_id IS NOT NULL ORDER BY started_at DESC LIMIT 1
+        `).get(id) as { remote_id: string; remote_url: string | null } | undefined;
+        if (attempt) return { remoteId: attempt.remote_id, remoteUrl: attempt.remote_url, verified: false };
+        return null;
+    }
+
+    makePendingConfirmationDue(id: string, now = new Date()): number {
+        const result = this.database.prepare(`
+            UPDATE upload_confirmations SET confirm_after = ?
+            WHERE recording_id = ? AND status = 'pending'
+        `).run(now.toISOString(), id);
+        return Number(result.changes);
+    }
+
+    transitionToCleanupEligible(id: string, reason: string, now = new Date()): Recording {
+        const recording = this.requireRecording(id);
+        if (recording.state === "cleanup_eligible") return recording;
+        return this.transition(id, recording.state, "cleanup_eligible", reason, now);
+    }
+
+    findRecordingByBasename(provider: string, basename: string): Recording | null {
+        const row = this.database.prepare(`
+            SELECT * FROM recordings
+            WHERE provider = ? AND source_path GLOB ? LIMIT 1
+        `).get(provider, `*/${basename}`) as RecordingRow | undefined;
+        return row ? mapRecording(row) : null;
+    }
+
+    listUploadContradictions(): Array<{ id: string; state: PipelineState }> {
+        const rows = this.database.prepare(`
+            SELECT r.id, r.state FROM recordings r
+            WHERE r.state IN ('xvideos_admitted', 'xvideos_uploading', 'xvideos_uploaded', 'xvideos_uncertain')
+              AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = r.id AND a.remote_id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM upload_confirmations c
+                  WHERE c.recording_id = r.id AND c.status = 'pending')
+        `).all() as unknown as Array<{ id: string; state: PipelineState }>;
+        return rows;
+    }
+
+    // Disk is the source of truth: the source folder is gone, so forget the
+    // recording entirely — except the ISP billing truth in bandwidth_events.
+    deleteRecording(id: string): void {
+        this.transaction(() => {
+            for (const table of [
+                "upload_confirmations", "upload_attempts", "upload_reservations",
+                "remote_uploads", "recording_provenance", "upload_metadata",
+                "descriptions", "remux_outputs", "artifacts", "state_events",
+            ]) {
+                this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
+            }
+            this.database.prepare("DELETE FROM recordings WHERE id = ?").run(id);
+        });
+    }
+
+    // The folder's video already exists on XVideos: park it as uncertain with
+    // the known edit ID and let the daily reconcile confirm it online.
+    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date()): Recording {
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            const recording = this.requireRecording(id);
+            const attemptId = randomUUID();
+            this.database.prepare(`
+                INSERT INTO upload_attempts (
+                    id, reservation_id, recording_id, provider, status, phase,
+                    progress_bytes, transmitted_bytes, remote_id, remote_url, error, started_at, completed_at
+                ) VALUES (?, NULL, ?, ?, 'uncertain', 'metadata_submitting', 0, 0, ?, ?, ?, ?, ?)
+            `).run(attemptId, id, recording.provider, remoteId, remoteUrl,
+                "parked: already uploaded on XVideos", timestamp, timestamp);
+            this.database.prepare(`
+                INSERT INTO upload_confirmations (
+                    attempt_id, recording_id, confirm_after, status, checked_at
+                ) VALUES (?, ?, ?, 'pending', NULL)
+            `).run(attemptId, id, timestamp);
+            this.updateStateInTransaction(id, recording.state, "xvideos_uncertain",
+                "already uploaded on XVideos; parked for verification", timestamp);
+        });
+        return this.requireRecording(id);
     }
 
     getUncertainUploadRemote(attemptId: string): { remoteId: string; remoteUrl: string | null } | null {
@@ -1161,7 +1173,6 @@ export class PipelineDatabase {
         id: string,
         remoteId: string,
         remoteUrl: string,
-        moderationStatus: string | null = null,
         now = new Date(),
     ): Recording {
         const timestamp = now.toISOString();
@@ -1173,23 +1184,17 @@ export class PipelineDatabase {
             `).get(id, remoteId, remoteUrl) as { id: string } | undefined;
             if (!attempt) throw new Error("Verification does not match an accepted upload attempt");
             this.database.prepare(`
-                INSERT INTO remote_verifications (
-                    recording_id, attempt_id, remote_id, remote_url, playback_verified, verified_at
-                ) VALUES (?, ?, ?, ?, 1, ?)
-            `).run(id, attempt.id, remoteId, remoteUrl, timestamp);
-            this.database.prepare(`
-                INSERT INTO xvideos_entries (
-                    recording_id, attempt_id, remote_id, remote_url, moderation_status, observed_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO remote_uploads (
+                    recording_id, attempt_id, remote_id, remote_url, verified_at
+                ) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(recording_id) DO UPDATE SET
                     attempt_id = excluded.attempt_id,
                     remote_id = excluded.remote_id,
                     remote_url = excluded.remote_url,
-                    moderation_status = excluded.moderation_status,
-                    observed_at = excluded.observed_at
-            `).run(id, attempt.id, remoteId, remoteUrl, moderationStatus, timestamp);
+                    verified_at = excluded.verified_at
+            `).run(id, attempt.id, remoteId, remoteUrl, timestamp);
             this.updateStateInTransaction(id, "xvideos_uploaded", "xvideos_verified",
-                "authenticated XVideos uploads-list entry verified", timestamp);
+                "authenticated edit-page verification", timestamp);
         });
         return this.requireRecording(id);
     }
@@ -1203,7 +1208,6 @@ export class PipelineDatabase {
         `).all(now.toISOString()) as unknown as Array<{
             attempt_id: string;
             recording_id: string;
-            match_key: string;
             confirm_after: string;
             status: UploadConfirmation["status"];
             checked_at: string | null;
@@ -1211,11 +1215,17 @@ export class PipelineDatabase {
         return rows.map((row) => ({
             attemptId: row.attempt_id,
             recordingId: row.recording_id,
-            matchKey: row.match_key,
             confirmAfter: row.confirm_after,
             status: row.status,
             checkedAt: row.checked_at,
         }));
+    }
+
+    settleConfirmationManualReview(attemptId: string, now = new Date()): void {
+        this.database.prepare(`
+            UPDATE upload_confirmations SET status = 'absent', checked_at = ?
+            WHERE attempt_id = ? AND status = 'pending'
+        `).run(now.toISOString(), attemptId);
     }
 
     markConfirmationAbsent(attemptId: string, now = new Date()): Recording {

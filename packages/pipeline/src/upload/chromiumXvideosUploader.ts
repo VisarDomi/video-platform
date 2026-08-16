@@ -2,7 +2,7 @@ import { access, stat } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page, type Request } from "playwright";
 import type { UploadReceipt, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
-import { findXvideosEntry, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
+import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
@@ -17,7 +17,7 @@ export interface ChromiumUploaderConfig {
 }
 
 export class HumanActionRequiredError extends Error {
-    constructor(readonly action: "captcha" | "google_challenge" | "session_login" | "model_selection", message: string) {
+    constructor(readonly action: "captcha" | "google_challenge" | "session_login", message: string) {
         super(message);
         this.name = "HumanActionRequiredError";
     }
@@ -83,7 +83,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 .waitFor({ state: "visible", timeout: 30 * 60_000 });
             await request.onProgress?.("file_uploaded", counter.transmitted(request.sizeBytes));
 
-            const selectedModelId = await this.selectModelByAlias(page, request.streamerAlias);
+            await this.typeModelAlias(page, request.streamerAlias);
             const submittedAt = new Date();
             await request.onProgress?.("metadata_submitting", counter.transmitted(request.sizeBytes));
             await Promise.all([
@@ -92,15 +92,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             ]);
             await page.waitForTimeout(1_000);
             // Success is NOT decided here: the attempt parks as uncertain and
-            // the 24-hour reconcile verifies the public video link.
+            // the 24-hour reconcile verifies the edit page.
             const submittedId = await this.captureSubmittedVideoId(page);
             completed = true;
             return {
                 transmittedBytes: counter.transmitted(request.sizeBytes),
-                remoteEntry: null,
                 submittedVideoId: submittedId,
                 metadataSubmittedAt: submittedAt.toISOString(),
-                selectedModelId,
             };
         } finally {
             if (completed) {
@@ -138,10 +136,6 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         };
     }
 
-    async findExistingByMatchKey(matchKey: string): Promise<XvideosEntry | null> {
-        return await this.withAuthenticatedPage((page) => this.findEntry(page, matchKey));
-    }
-
     // One login flow, then the callers run their specific work on the
     // authenticated page. Reconcile and any future checks share this instead
     // of each launching their own browser and login.
@@ -167,13 +161,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     }
 
     private async validateRequest(request: UploadRequest): Promise<void> {
-        if (!/^[a-f0-9]{64}$/.test(request.recordingId)) throw new Error("Invalid pipeline recording ID");
+        if (!request.recordingId.trim()) throw new Error("Upload request lacks a recording identity");
         if (request.visibility !== "private") throw new Error("Only Direct-link XVideos uploads are supported");
         const artifactPath = path.resolve(request.artifactPath);
         await access(artifactPath);
         const stats = await stat(artifactPath);
         if (!stats.isFile() || stats.size !== request.sizeBytes) throw new Error("Upload artifact size no longer matches its ledger record");
-        if (!request.title.includes(request.matchKey)) throw new Error("Upload title lacks its reconciliation match key");
         if (request.title.length > 255 || request.description.length > 1_000 || request.tags.length > 20) {
             throw new Error("Upload metadata exceeds XVideos limits");
         }
@@ -360,17 +353,15 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
     }
 
-    private async selectModelByAlias(page: Page, alias: string | undefined): Promise<string | null> {
-        if (!alias) return null;
+    private async typeModelAlias(page: Page, alias: string | undefined): Promise<void> {
+        if (!alias) return;
         // The model input is a zero-width typeahead (Playwright treats it as
         // invisible, so fill() can never work), and XVideos does NOT require a
         // real model selection: typing the streamer alias and clicking Save
-        // submits successfully with an empty model list. No suggestion click
-        // or selection wait is needed.
+        // submits successfully with an empty model list.
         const modelInput = page.locator("#upload_form_models .models-list > input[type=text]");
         await modelInput.focus();
         await page.keyboard.type(alias);
-        return null;
     }
 
     private async captureSubmittedVideoId(page: Page): Promise<string | null> {
@@ -388,11 +379,11 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         return null;
     }
 
-    async findEntry(page: Page, matchKey: string): Promise<XvideosEntry | null> {
+    async findEntries(page: Page, searchTerm: string): Promise<XvideosEntry[]> {
         await page.goto(UPLOADS_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
         const filter = page.locator("#videos-list-filter_title_tag_type_title_tags");
         if (await filter.count()) {
-            await filter.fill(matchKey);
+            await filter.fill(searchTerm);
             const search = page.locator("#videos-list-filter").getByText("Search", { exact: true });
             if (await search.count()) {
                 await search.click();
@@ -408,24 +399,37 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 containerId: element.id,
                 remoteUrl: titleLink?.getAttribute("href") ?? "",
                 title: titleLink?.textContent?.trim() ?? "",
-                text: element.textContent ?? "",
             } satisfies XvideosEntryCandidate;
         }));
-        return findXvideosEntry(candidates.map((candidate) => ({
+        return filterXvideosEntries(candidates.map((candidate) => ({
             ...candidate,
             remoteUrl: candidate.remoteUrl ? new URL(candidate.remoteUrl, UPLOADS_URL).href : "",
-        })), matchKey);
+        })), searchTerm);
     }
-}
 
-export function hasModelSelection(serialized: string): boolean {
-    const trimmed = serialized.trim();
-    if (!trimmed || trimmed === "[]" || trimmed === "{}" || trimmed === "null") return false;
-    try {
-        const value = JSON.parse(trimmed) as unknown;
-        if (Array.isArray(value)) return value.length > 0;
-        return value !== null && typeof value === "object" && Object.keys(value).length > 0;
-    } catch {
-        return true;
+    // Admission-time existence check: the folder name is the local truth, the
+    // edit-page title is the XVideos truth.
+    async findUploadedCopy(folderName: string): Promise<
+        | { kind: "found"; remoteId: string; remoteUrl: string }
+        | { kind: "title_mismatch"; remoteId: string }
+        | { kind: "not_found" }
+    > {
+        return await this.withAuthenticatedPage(async (page) => {
+            const entries = await this.findEntries(page, folderName);
+            for (const entry of entries) {
+                await page.goto(`https://www.xvideos.com/account/uploads/${entry.remoteId}/edit`, {
+                    waitUntil: "domcontentloaded",
+                    timeout: 30_000,
+                });
+                const title = await page.title().catch(() => "");
+                if (title.includes(`[${folderName}]`)) {
+                    return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
+                }
+            }
+            if (entries.length > 0) {
+                return { kind: "title_mismatch", remoteId: entries[0].remoteId };
+            }
+            return { kind: "not_found" };
+        });
     }
 }

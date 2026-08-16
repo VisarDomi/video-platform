@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
+import { guardUploadIdentity } from "../dist/commands/uploadIdentityGuard.js";
 import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
-import { findXvideosEntry } from "../dist/upload/xvideosEntries.js";
-import { hasModelSelection } from "../dist/upload/chromiumXvideosUploader.js";
+import { filterXvideosEntries } from "../dist/upload/xvideosEntries.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
 
 async function rootFixture(t) {
@@ -107,7 +107,6 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         updatedAt: "2026-08-13T08:00:00Z",
     });
     assert.deepEqual(metadata.tags, ["stripchat", "live"]);
-    assert.equal(metadata.matchKey, "[2026-08-13 101112 Minami_jjjj]");
     assert(metadata.title.includes("[2026-08-13 101112 Minami_jjjj]"));
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://stripchat.com/226494362"));
@@ -115,26 +114,21 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
     assert(metadata.description.length <= 1_000);
 });
 
-test("uploads-list matching adopts blocked entries by stable numeric ID", () => {
-    const entry = findXvideosEntry([{
+test("uploads-list matching filters entries by title search term", () => {
+    const entries = filterXvideosEntries([{
         containerId: "listing-video-85165541",
         remoteUrl: "https://www.xvideos.com/video.example/title",
         title: "Specific title [fc2-deadbeef1234]",
-        text: "Status: Blocked for reason: Stolen private content\nViews: 0",
+    }, {
+        containerId: "listing-video-99999999",
+        remoteUrl: "https://www.xvideos.com/video.example/other",
+        title: "Unrelated title",
     }], "[fc2-deadbeef1234]");
-    assert.deepEqual(entry, {
+    assert.deepEqual(entries, [{
         remoteId: "85165541",
         remoteUrl: "https://www.xvideos.com/video.example/title",
         title: "Specific title [fc2-deadbeef1234]",
-        moderationStatus: "Blocked for reason: Stolen private content",
-    });
-});
-
-test("XVideos model selection detection accepts a nonempty serialized form selection", () => {
-    assert.equal(hasModelSelection(""), false);
-    assert.equal(hasModelSelection("[]"), false);
-    assert.equal(hasModelSelection("{}"), false);
-    assert.equal(hasModelSelection('[{"id":"123","name":"stage"}]'), true);
+    }]);
 });
 
 test("one manual alias override resolves every matching recording and survives refreshes", async (t) => {
@@ -207,12 +201,10 @@ test("uncertain metadata submission cannot retry before 24 hours and becomes ret
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
-    const matchKey = `[fc2-${recording.id.slice(0, 12)}]`;
     database.saveUploadMetadata(recording.id, {
-        title: `Specific title ${matchKey}`,
+        title: "Specific title [2026-08-13 101112 68190398]",
         description: "Specific concrete description.\n\nSource: https://live.fc2.com/68190398/",
         tags: ["fc2", "live"],
-        matchKey,
     });
     const submittedAt = new Date("2026-08-13T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 100, submittedAt);
@@ -221,7 +213,7 @@ test("uncertain metadata submission cannot retry before 24 hours and becomes ret
         status: "uncertain",
         transmittedBytes: 100,
         error: "entry not visible immediately",
-        confirmation: { matchKey, confirmAfter: new Date("2026-08-14T08:00:00Z") },
+        confirmation: { confirmAfter: new Date("2026-08-14T08:00:00Z") },
     }, submittedAt);
     assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-14T07:59:59Z")), []);
     assert.throws(() => database.markConfirmationAbsent(attempt, new Date("2026-08-14T07:59:59Z")), /not due/);
@@ -259,12 +251,10 @@ test("failure after the upload started is acceptance-unknown instead of an immed
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
-    const matchKey = "[2026-08-13 101112 68190398]";
     database.saveUploadMetadata(recording.id, {
-        title: `Specific title ${matchKey}`,
+        title: "Specific title [2026-08-13 101112 68190398]",
         description: "Specific concrete description.\n\nSource: https://live.fc2.com/68190398/",
         tags: ["fc2", "live"],
-        matchKey,
     });
     const now = new Date("2026-08-13T08:00:00Z");
     const reservationId = database.reserveUpload(recording.id, 100, now);
@@ -282,10 +272,9 @@ test("failure after the upload started is acceptance-unknown instead of an immed
                 recordingId: recording.id,
                 artifactPath,
                 sizeBytes: 100,
-                title: `Specific title ${matchKey}`,
+                title: "Specific title [2026-08-13 101112 68190398]",
                 description: "Specific concrete description.",
                 tags: ["fc2", "live"],
-                matchKey,
                 visibility: "private",
             },
             now,
@@ -297,4 +286,77 @@ test("failure after the upload started is acceptance-unknown instead of an immed
     // confirms whether the upload landed.
     assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-14T08:00:00Z")).length, 1);
+});
+
+test("the upload identity guard refuses unverified and cleans verified recordings", async (t) => {
+    const { root } = await rootFixture(t);
+    const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
+    t.after(() => database.close());
+    const recording = database.discover(input(root, "fc2", "2026-08-13 101112 68190398"));
+    database.transition(recording.id, "server_ready", "remuxed");
+    const artifactPath = path.join(root, "artifact.mp4");
+    await writeFile(artifactPath, "artifact-bytes");
+    database.saveArtifact(recording.id, {
+        path: artifactPath,
+        sizeBytes: 100,
+        sha256: "c".repeat(64),
+        validatedAt: "2026-08-13T08:00:00Z",
+    });
+    database.saveDescription(recording.id, {
+        artifactSha256: "c".repeat(64),
+        promptVersion: "test",
+        fps: 1,
+        output: { title: "Specific title", description: "Specific concrete description.", tags: ["room"] },
+        evidencePath: path.join(root, "evidence.json"),
+    });
+    database.saveProvenance(recording.id, {
+        observedIdentifier: "68190398",
+        status: "resolved",
+        streamerId: "68190398",
+        alias: "68190398",
+        streamerUrl: "https://live.fc2.com/68190398/",
+        aliasUrl: null,
+        reason: null,
+        updatedAt: "2026-08-13T08:00:00Z",
+    });
+    database.saveUploadMetadata(recording.id, {
+        title: "Specific title [2026-08-13 101112 68190398]",
+        description: "Specific concrete description.\n\nSource: https://live.fc2.com/68190398/",
+        tags: ["fc2", "live"],
+    });
+    const now = new Date("2026-08-13T08:00:00Z");
+    const reservationId = database.reserveUpload(recording.id, 100, now);
+    const attemptId = database.beginUpload(recording.id, reservationId, now);
+    database.finishUploadAttempt(attemptId, {
+        status: "uncertain",
+        transmittedBytes: 100,
+        remoteId: "91362268",
+        error: "metadata submitted",
+        confirmation: { confirmAfter: new Date("2026-08-14T08:00:00Z") },
+    }, now);
+
+    // Unverified identity: every job refuses, and the pending confirmation is
+    // accelerated so the next reconcile verifies it.
+    const unverified = await guardUploadIdentity(database, database.get(recording.id), { cleanupEnabled: true });
+    assert.deepEqual(unverified, {
+        kind: "unverified_refused",
+        remoteId: "91362268",
+        verificationScheduled: true,
+    });
+    assert.equal(database.dueUploadConfirmations(new Date()).length, 1);
+
+    // Once verified, the guard cleans the staging artifact and parks the
+    // recording at cleanup_eligible.
+    const [confirmation] = database.dueUploadConfirmations(new Date());
+    database.reconcileUncertain(attemptId, "91362268", "https://www.xvideos.com/video.abc123/title", now);
+    database.markRemoteVerified(recording.id, "91362268", "https://www.xvideos.com/video.abc123/title", now);
+    assert.equal(confirmation.attemptId, attemptId);
+    const verified = await guardUploadIdentity(database, database.get(recording.id), { cleanupEnabled: true });
+    assert.deepEqual(verified, {
+        kind: "verified_cleaned",
+        remoteId: "91362268",
+        remoteUrl: "https://www.xvideos.com/video.abc123/title",
+    });
+    assert.equal(database.get(recording.id)?.state, "cleanup_eligible");
+    await assert.rejects(access(artifactPath), /ENOENT/);
 });
