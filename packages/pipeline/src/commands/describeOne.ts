@@ -1,5 +1,6 @@
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { PipelineOrchestrator } from "../scheduler/orchestrator.js";
 import { createDefaultStages } from "../stages/defaultStages.js";
@@ -10,6 +11,18 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
     try {
         const recording = database.get(recordingId);
         if (!recording) throw new Error(`Unknown pipeline recording ${recordingId}`);
+        const identityOutcome = await guardUploadIdentity(database, recording, config);
+        if (identityOutcome.kind === "verified_cleaned") {
+            return {
+                recordingId,
+                state: database.get(recordingId)?.state,
+                disposition: "already_verified_cleaned",
+                remoteId: identityOutcome.remoteId,
+            };
+        }
+        if (identityOutcome.kind === "unverified_refused") {
+            throw new Error(refusalMessage(identityOutcome));
+        }
         if (recording.sourceKind !== "edited") {
             throw new Error("Durable upload metadata is restricted to editor/edited recordings");
         }

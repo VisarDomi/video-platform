@@ -21,7 +21,9 @@ export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput:
 }
 
 export function containedArtifactPath(stagingRoot: string, recordingId: string): string {
-    if (!/^[a-f0-9]{64}$/.test(recordingId)) throw new Error("Invalid recording ID for artifact path");
+    // Recording IDs are folder names (datetime + alias): no slashes, no
+    // traversal, sane length.
+    if (!/^[^/\\]{1,200}$/.test(recordingId)) throw new Error("Invalid recording ID for artifact path");
     const resolvedRoot = path.resolve(stagingRoot);
     const artifactPath = path.resolve(resolvedRoot, `${recordingId}.mp4`);
     if (path.dirname(artifactPath) !== resolvedRoot) throw new Error("Artifact path escapes staging root");

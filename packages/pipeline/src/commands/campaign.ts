@@ -1,7 +1,9 @@
 import type { PipelineConfig } from "../config.js";
+import { readOldHostCredentials } from "../config/secrets.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
+import { ChromiumOldHostUploader } from "../upload/chromiumOldHostUploader.js";
 import { CampaignWorker } from "../campaign/campaignWorker.js";
 import { uploadOne } from "./uploadOne.js";
 
@@ -51,6 +53,15 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
     try {
         const recovery = database.recoverInterruptedUploads();
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
+        let uploader: ChromiumOldHostUploader | undefined;
+        if (config.networkUploadsEnabled) {
+            const credentials = await readOldHostCredentials(config.credentialsFilePath);
+            uploader = new ChromiumOldHostUploader({
+                executablePath: config.chromiumExecutablePath,
+                profilePath: config.browserProfilePath,
+                ...credentials,
+            });
+        }
         const worker = new CampaignWorker(
             database,
             config,
@@ -61,6 +72,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
                     monthlyUploadLimitBytes,
                 })
                 : undefined,
+            uploader,
         );
         return { recovery, step: await worker.step() };
     } finally {
