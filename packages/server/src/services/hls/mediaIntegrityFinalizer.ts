@@ -523,7 +523,7 @@ async function isPendingCandidate(streamPath: string): Promise<boolean> {
 function pendingRoots(): string[] {
     return SUPPORTED_PROVIDERS.flatMap((provider) => {
         const paths = getProviderPaths(provider);
-        return [pendingRoot(paths.downloader), pendingRoot(paths.edited)];
+        return [pendingRoot(paths.downloaded), pendingRoot(paths.edited)];
     });
 }
 

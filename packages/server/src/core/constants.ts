@@ -25,16 +25,6 @@ export const DIRECTORIES = {
     SHARED_STATE_BASE: ".local/share/video-services",
 } as const;
 
-export const DEFAULT_PATHS = {
-    HOME_VIDEOS: "Videos",
-    DOWNLOADS: "downloads",
-    TANGO: "tango",
-    DOWNLOADER: "downloader",
-    EDITOR: "editor",
-    EDITED: "edited",
-    TRASH: "trash",
-} as const;
-
 export const FILE_EXTENSIONS = {
     TS: ".ts",
     MP4: ".mp4",

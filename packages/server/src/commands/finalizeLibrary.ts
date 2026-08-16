@@ -87,7 +87,7 @@ function managedRoots(): ManagedRecordingRoot[] {
     return PROVIDERS.flatMap((provider) => {
         const paths = getProviderPaths(provider);
         return [
-            { provider, scope: "downloads", rootPath: paths.downloader },
+            { provider, scope: "downloads", rootPath: paths.downloaded },
             { provider, scope: "edited", rootPath: paths.edited },
         ];
     });
@@ -104,7 +104,7 @@ async function discoverTargets(options: Options): Promise<HistoricalFinalization
     for (const provider of providers) {
         const providerPaths = getProviderPaths(provider);
         for (const scope of scopes) {
-            const root = scope === "downloads" ? providerPaths.downloader : providerPaths.edited;
+            const root = scope === "downloads" ? providerPaths.downloaded : providerPaths.edited;
             let entries;
             try {
                 entries = await fs.readdir(root, { withFileTypes: true });

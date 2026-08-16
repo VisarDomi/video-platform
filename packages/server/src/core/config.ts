@@ -3,11 +3,12 @@ import * as path from "path";
 import * as os from "os";
 import * as utils from "./utils.js";
 import * as constants from "./constants.js";
+import { providerFolders } from "shared";
 
 const projectRoot = utils.findProjectRoot();
 
 interface PathConfig {
-    downloader: string;
+    downloaded: string;
     edited: string;
     trash: string;
 }
@@ -23,32 +24,9 @@ interface IConfig {
 
 const DEFAULT_PROVIDERS = ["tango", "fc2", "sc"];
 
+// The layout lives in the shared package: the single source of truth.
 function generateDefaultPaths(providerName: string): PathConfig {
-    return {
-        downloader: path.join(
-            os.homedir(),
-            constants.DEFAULT_PATHS.HOME_VIDEOS,
-            constants.DEFAULT_PATHS.DOWNLOADS,
-            providerName,
-            constants.DEFAULT_PATHS.DOWNLOADER
-        ),
-        edited: path.join(
-            os.homedir(),
-            constants.DEFAULT_PATHS.HOME_VIDEOS,
-            constants.DEFAULT_PATHS.DOWNLOADS,
-            providerName,
-            constants.DEFAULT_PATHS.EDITOR,
-            constants.DEFAULT_PATHS.EDITED
-        ),
-        trash: path.join(
-            os.homedir(),
-            constants.DEFAULT_PATHS.HOME_VIDEOS,
-            constants.DEFAULT_PATHS.DOWNLOADS,
-            providerName,
-            constants.DEFAULT_PATHS.EDITOR,
-            constants.DEFAULT_PATHS.TRASH
-        ),
-    };
+    return providerFolders(providerName);
 }
 
 const config: IConfig = {

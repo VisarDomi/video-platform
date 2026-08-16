@@ -90,11 +90,11 @@ router.post("/videos/repair-playlists", async (req, res) => {
     try {
         const paths = getProviderPaths(provider);
         const activeDownloadFolders = new Set([
-            path.join(paths.downloader, ".active"),
-            path.join(paths.downloader, ".pending"),
+            path.join(paths.downloaded, ".active"),
+            path.join(paths.downloaded, ".pending"),
         ]);
         const roots = [
-            ...(scope === "all" || scope === "downloads" ? [{ scope: "downloads", path: paths.downloader }] : []),
+            ...(scope === "all" || scope === "downloads" ? [{ scope: "downloads", path: paths.downloaded }] : []),
             ...(scope === "all" || scope === "edited" ? [{ scope: "edited", path: paths.edited }] : []),
         ];
 

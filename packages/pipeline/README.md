@@ -10,8 +10,8 @@ Implemented:
   description evidence, provenance, metadata, upload attempts, transmitted-byte
   accounting, and remote upload identity. Recording IDs are the source folder
   names (datetime + alias) — the disk is the source of truth.
-- Production discovery of only exact server-checkpointed `editor/edited`
-  recordings. Hidden handoff directories and raw downloader recordings are
+- Production discovery of only exact server-checkpointed `edited`
+  recordings. Hidden handoff directories and raw downloaded recordings are
   excluded from campaign processing.
 - Disk-truth sweep every campaign step: recordings whose source folder is
   missing are deleted from the ledger with their pipeline files (24-hour

@@ -1,5 +1,26 @@
 # Monorepo Decisions
 
+## The layout lives in shared (2026-08-16)
+
+The provider folder layout is now defined exactly once, in
+`packages/shared/src/providerLayout.ts`
+(`downloadsRoot`, `providerFolder(provider, kind)`,
+`providerFolders(provider)`, with the `VIDEO_DOWNLOADS_ROOT` override).
+The server, downloader, and pipeline derive every root from it — a layout
+rename is now a one-line change in that module. The server's
+`PathConfig` key was renamed `downloader` → `downloaded` to match.
+
+## Flat per-provider layout: downloaded / edited / trash (2026-08-16)
+
+The capture/processed layout is now `~/Videos/downloads/<provider>/{downloaded,edited,trash}`:
+`downloader` became `downloaded`, and `editor/edited` + `editor/trash` were
+flattened to `edited` + `trash`. The server, downloader, and pipeline path
+derivations were updated, the folders moved (same filesystem renames), and both
+`finalization.sqlite` (`integrity_checkpoints.recording_path`) and
+`pipeline.sqlite` (`recordings.source_path`/`playlist_path`) had their
+paths rewritten. The downloader-side `.pending` handoff lives under
+`downloaded`, the edit handoff under `edited`.
+
 ## Folder names are the identity; disk is the truth; zombies are dead (2026-08-16)
 
 Follow-up decisions from the first controlled upload:

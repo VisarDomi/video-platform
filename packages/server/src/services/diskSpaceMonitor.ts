@@ -8,7 +8,7 @@ const DISK_CHECK_INTERVAL_MS = 60_000;
 const DISK_LIMIT_BYTES = 50 * 1024 * 1024 * 1024;
 
 export function startDiskSpaceMonitor(): void {
-    const storagePath = getProviderPaths("tango").downloader;
+    const storagePath = getProviderPaths("tango").downloaded;
 
     const run = async () => {
         logger.info("[System] DiskSpaceMonitor started.");

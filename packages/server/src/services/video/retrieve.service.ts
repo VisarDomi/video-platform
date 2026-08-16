@@ -8,8 +8,8 @@ import { getDurationsFromGo } from "../../core/playlist-daemon.js";
 export async function getAllVideos(provider: string = "tango", after?: string): Promise<types.VideoItem[]> {
     const paths = config.getProviderPaths(provider);
     const providerPaths = [
-        { path: path.join(paths.downloader, ".active"), type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL, isLive: true },
-        { path: paths.downloader, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL, isLive: false },
+        { path: path.join(paths.downloaded, ".active"), type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL, isLive: true },
+        { path: paths.downloaded, type: constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL, isLive: false },
         { path: paths.edited, type: constants.ALL_VIDEO_PATHS_TYPES.EDITED, isLive: false },
     ];
 

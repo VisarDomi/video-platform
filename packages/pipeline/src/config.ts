@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { providerFolders } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 
 export interface PipelineConfig {
@@ -20,20 +21,22 @@ export interface PipelineConfig {
 
 const dataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
     ?? path.join(os.homedir(), ".local", "share", "video-services");
-const downloadsRoot = process.env.VIDEO_DOWNLOADS_ROOT
-    ?? path.join(os.homedir(), "Videos", "downloads");
 const providers = ["tango", "fc2", "sc"];
 
+// Roots come from the shared layout module: the single source of truth.
 const discoveryRoots: DiscoveryRoot[] = providers.map((provider) => ({
     provider,
     sourceKind: "edited",
-    path: path.join(downloadsRoot, provider, "editor", "edited"),
+    path: providerFolders(provider).edited,
 }));
 
-const manualRemuxRoots: DiscoveryRoot[] = providers.flatMap((provider) => [
-    { provider, sourceKind: "downloader", path: path.join(downloadsRoot, provider, "downloader") },
-    { provider, sourceKind: "edited", path: path.join(downloadsRoot, provider, "editor", "edited") },
-]);
+const manualRemuxRoots: DiscoveryRoot[] = providers.flatMap((provider) => {
+    const folders = providerFolders(provider);
+    return [
+        { provider, sourceKind: "downloader", path: folders.downloaded },
+        { provider, sourceKind: "edited", path: folders.edited },
+    ];
+});
 
 export const pipelineConfig: PipelineConfig = {
     finalizationDatabasePath: process.env.VIDEO_FINALIZATION_DB
