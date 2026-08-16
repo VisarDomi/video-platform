@@ -53,7 +53,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
-            args: ["--disable-blink-features=AutomationControlled"],
+            args: ["--disable-blink-features=AutomationControlled", "--remote-debugging-port=9222"],
             ignoreDefaultArgs: ["--enable-automation"],
         }).catch((error: unknown) => {
             throw new HumanActionRequiredError("session_login",
@@ -93,7 +93,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             await page.waitForTimeout(1_000);
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
-            const submittedId = await this.captureSubmittedVideoId(page);
+            const submittedId = await this.captureSubmittedVideoId(page, request.recordingId);
             completed = true;
             return {
                 transmittedBytes: counter.transmitted(request.sizeBytes),
@@ -144,7 +144,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
-            args: ["--disable-blink-features=AutomationControlled"],
+            args: ["--disable-blink-features=AutomationControlled", "--remote-debugging-port=9222"],
             ignoreDefaultArgs: ["--enable-automation"],
         }).catch((error: unknown) => {
             throw new HumanActionRequiredError("session_login",
@@ -364,17 +364,31 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         await page.keyboard.type(alias);
     }
 
-    private async captureSubmittedVideoId(page: Page): Promise<string | null> {
-        // After saving, XVideos shows a success view whose "edit here" link
-        // (or the current URL) carries the new upload ID. Capture it before
-        // the uploads-list search so the attempt can be verified immediately
-        // even while the video is still in the encoding queue.
-        const links = await page.locator('a[href*="/account/uploads/"]')
-            .evaluateAll((elements) => elements.map((element) => element.getAttribute("href") ?? ""))
-            .catch(() => [] as string[]);
-        for (const raw of [page.url(), ...links]) {
-            const match = raw.match(/\/account\/uploads\/(\d+)/);
-            if (match?.[1]) return match[1];
+    private async captureSubmittedVideoId(page: Page, folderName: string): Promise<string | null> {
+        // After saving, XVideos first shows "Processing video 0% Publication:
+        // pending" and only reveals the "edit it here" link once the panel
+        // updates to "Video processed. Publication succeeded." (measured live:
+        // ~20 seconds). Poll for the link instead of reading once.
+        const deadline = Date.now() + 5 * 60_000;
+        while (Date.now() < deadline) {
+            const links = await page.locator('a[href*="/account/uploads/"]')
+                .evaluateAll((elements) => elements.map((element) => element.getAttribute("href") ?? ""))
+                .catch(() => [] as string[]);
+            for (const raw of [page.url(), ...links]) {
+                const match = raw.match(/\/account\/uploads\/(\d+)\/edit/);
+                if (match?.[1]) return match[1];
+            }
+            await page.waitForTimeout(2_000);
+        }
+        // Fallback: the panel never revealed the link — look the upload up in
+        // the authenticated uploads list by the folder name (the title carries
+        // it). Edge case to revisit: the uploads list may be paginated and the
+        // search may not cover pages beyond the first.
+        try {
+            const entries = await this.findEntries(page, folderName);
+            if (entries.length > 0) return entries[0].remoteId;
+        } catch {
+            // list unreachable; manual review remains the last resort
         }
         return null;
     }
