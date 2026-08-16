@@ -180,3 +180,6 @@ download entries with `pay == 0`.
 
 **Why:** A paid broadcast can be live while its HLS WebSocket handshake remains
 unavailable without payment.
+## Rule
+
+- Keep downloader concerns separate from server/API concerns.

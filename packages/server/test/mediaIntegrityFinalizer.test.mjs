@@ -62,7 +62,7 @@ test("null muxer DTS bookkeeping is not classified as decoded-media corruption",
 });
 
 test("ffmpeg validation accepts recordings with only video or only audio", () => {
-    const args = buildFfmpegValidationArgs("playlist.m3u8", 6);
+    const args = buildFfmpegValidationArgs("playlist.m3u8");
     assert.deepEqual(args.slice(args.indexOf("-loglevel"), args.indexOf("-loglevel") + 2), [
         "-loglevel", "repeat+error",
     ]);
@@ -71,7 +71,9 @@ test("ffmpeg validation accepts recordings with only video or only audio", () =>
         args.filter((value, index) => args[index - 1] === "-map"),
         ["0:v?", "0:a?"],
     );
-    assert.equal(args[args.indexOf("-threads") + 1], "6");
+    assert.equal(args.includes("-threads"), false);
+    assert.equal(args.includes("-filter_threads"), false);
+    assert.equal(args.includes("-filter_complex_threads"), false);
 });
 
 test("failed fMP4 validation attributes an isolated fragment using clean neighbors and failing contexts", async (t) => {
@@ -92,7 +94,6 @@ test("failed fMP4 validation attributes an isolated fragment using clean neighbo
     ));
 
     const result = await finalizeMediaIntegrity(streamPath, {
-        fmp4ScanConcurrency: 2,
         validateMedia: async inputPath => {
             if (inputPath === path.join(streamPath, "playlist.m3u8")) {
                 return { valid: false, exitCode: 0, stderr: "missing reference picture" };

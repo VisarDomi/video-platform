@@ -1,10 +1,11 @@
 import { promises as fsPromises } from "fs";
 import { randomUUID } from "node:crypto";
 import path from "path";
-import { getProviderPaths } from "../../core/config.js";
+import { FINALIZATION_DB_PATH, getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import type { VideoRef } from "../../core/types.js";
 import { DESTINATIONS, FILE_EXTENSIONS, FILE_NAMES, HLS } from "../../core/constants.js";
+import { FinalizationCheckpointStore, playlistFingerprint } from "../hls/finalizationCheckpointStore.js";
 import * as moveService from "./move.service.js";
 
 interface DerivePlaylistResult {
@@ -135,18 +136,14 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
         return;
     }
 
-    const pendingRoot = path.join(paths.edited, ".pending");
-    const pendingPath = path.join(pendingRoot, filename);
-    const finalizedPath = path.join(paths.edited, filename);
-    const buildingPath = path.join(pendingRoot, `.building-${randomUUID()}`);
-    await fsPromises.mkdir(pendingRoot, { recursive: true });
-    for (const destination of [pendingPath, finalizedPath]) {
-        try {
-            await fsPromises.lstat(destination);
-            throw new Error(`Edited recording destination already exists: ${destination}`);
-        } catch (error: any) {
-            if (error?.code !== "ENOENT") throw error;
-        }
+    const editedRoot = paths.edited;
+    const finalizedPath = path.join(editedRoot, filename);
+    const buildingPath = path.join(editedRoot, `.building-${randomUUID()}`);
+    try {
+        await fsPromises.lstat(finalizedPath);
+        throw new Error(`Edited recording destination already exists: ${finalizedPath}`);
+    } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
     }
     await fsPromises.mkdir(buildingPath);
 
@@ -176,9 +173,33 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
     }
 
     await syncPath(buildingPath);
-    await fsPromises.rename(buildingPath, pendingPath);
-    await syncPath(pendingRoot);
-    logger.info(`[edit] ${filename}: handed ${validSegments.length} edited segments to server validation at ${pendingPath}`);
+    // The kept segments came from an already-validated recording and were
+    // never modified: record a ready checkpoint by derivation instead of
+    // re-running media validation. Both the pipeline's authority check and
+    // the historical verifier accept this checkpoint, so the edited
+    // recording is validated exactly once — at capture.
+    const checkpointStore = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
+    try {
+        checkpointStore.write(finalizedPath, playlistFingerprint(playlistResult.content), {
+            version: 2,
+            status: "ready",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            playlistPath: path.resolve(path.join(finalizedPath, FILE_NAMES.HLS_PLAYLIST)),
+            segmentCount: playlistResult.keptSegmentCount,
+            initialPlaylistValid: true,
+            initialValidationError: null,
+            deepScannedSegmentCount: 0,
+            invalidSegments: [],
+            error: null,
+            trustedDerivation: "edited-from-validated-recording",
+        });
+    } finally {
+        checkpointStore.close();
+    }
+    await fsPromises.rename(buildingPath, finalizedPath);
+    await syncPath(editedRoot);
+    logger.info(`[edit] ${filename}: published ${validSegments.length} edited segments at ${finalizedPath}`);
 
     await moveService.moveVideo(ref, DESTINATIONS.TRASH);
     logger.info(`[edit] ${filename}: original moved to trash`);
