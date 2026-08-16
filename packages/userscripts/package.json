@@ -1,0 +1,17 @@
+{
+    "name": "userscripts",
+    "version": "1",
+    "description": "Video platform provider userscripts: download-list controls for fc2 and stripchat",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build",
+        "check": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@types/tampermonkey": "^5.0.4",
+        "typescript": "^5.9.3",
+        "vite": "^7.1.9",
+        "vite-plugin-monkey": "^7.1.4"
+    }
+}

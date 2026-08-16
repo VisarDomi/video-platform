@@ -1,5 +1,16 @@
 # Monorepo Decisions
 
+## Provider userscripts live in packages/userscripts (2026-08-16)
+
+The fc2 and stripchat download-list userscripts were ported into the monorepo
+as `packages/userscripts`: one Vite + vite-plugin-monkey bundle
+(`video-platform.user.js`) with provider modules inside (the manga-reader
+provider pattern). The shared bar logic lives once in
+`src/core/downloadListBar.ts`; providers only define route classification.
+The server URL is build-configurable via `VITE_VIDEO_SERVER_URL` (default
+`https://192.168.1.197:7973`). Tango's control remains in the separate
+stream-viewer repo and is not duplicated here.
+
 ## The layout lives in shared (2026-08-16)
 
 The provider folder layout is now defined exactly once, in
