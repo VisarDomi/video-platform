@@ -1,5 +1,16 @@
 # Monorepo Decisions
 
+## Verification is inline and single-flight; the daily timer is gone (2026-08-17)
+
+The pipeline is single-flight: the campaign worker processes exactly one
+recording at a time. Upload verification (`reconcileDueUploads`) runs
+INLINE in the worker loop as soon as confirmations come due — the separate
+`video-reconcile.timer` (daily 04:33) was removed because it duplicated the
+worker's job, launched a browser on the same profile outside the
+single-flight loop (the "Opening in existing browser session" failure
+class), and is structurally impossible to keep safe while a campaign is
+running.
+
 ## .pending mailboxes are permanent; watches are direct and non-recursive (2026-08-17)
 
 The capture handoff roots (`<provider>/downloaded/.pending`) are permanent
