@@ -28,6 +28,20 @@ function confirmationsAreDue(config: PipelineConfig): boolean {
 }
 
 export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
+    // The pipeline is single-flight by construction: any lease present at
+    // boot belongs to a dead process. Clear them so a restart resumes
+    // immediately instead of waiting out the 30-minute stage lease.
+    {
+        const database = new PipelineDatabase(config.databasePath);
+        try {
+            const cleared = database.releaseAllLeases();
+            if (cleared > 0) {
+                console.log(JSON.stringify({ event: "campaign-boot-clear-leases", cleared }));
+            }
+        } finally {
+            database.close();
+        }
+    }
     while (!signal.aborted) {
         try {
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
