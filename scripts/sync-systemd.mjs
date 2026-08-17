@@ -14,8 +14,6 @@ const managedFiles = [
     "video-downloader.service",
     "video-pipeline.service",
     "video-processing.slice",
-    "video-reconcile.service",
-    "video-reconcile.timer",
     "video-server.service",
     "video-xvfb.service",
     path.join("video-pipeline.service.d", "resources.conf"),
