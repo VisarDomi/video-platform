@@ -30,7 +30,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState
     xvideos_uncertain: ["xvideos_uploaded", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     xvideos_verified: ["cleanup_eligible", "failed"],
     cleanup_eligible: [],
-    blocked: [],
+    blocked: ["server_ready", "remuxed", "artifact_valid", "described", "metadata_ready"],
     failed: ["server_ready", "remuxed", "artifact_valid", "described", "metadata_ready"],
 };
 

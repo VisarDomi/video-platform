@@ -287,6 +287,16 @@ test("stage failures persist diagnostics without continuing downstream", async (
     assert.equal(database.retryFailed(recording.id).state, "server_ready");
 });
 
+test("blocked recordings unblock back to their pre-block state", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    database.transition(recording.id, "server_ready", "blocked", "captcha needs a human decision");
+    assert.equal(database.get(recording.id).state, "blocked");
+    assert.equal(database.get(recording.id).blockReason, "captcha needs a human decision");
+    assert.equal(database.retryBlocked(recording.id).state, "server_ready");
+    assert.equal(database.get(recording.id).blockReason, null);
+});
+
 test("the upload coordinator parks submit success as uncertain until 24-hour video-link verification", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
