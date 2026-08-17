@@ -67,10 +67,18 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 console.log(JSON.stringify({ event: "campaign-reconcile", result: await reconcileDueUploads(config) }));
             }
             const result = await campaignStep(config) as {
-                step?: { disposition?: string };
+                step?: { disposition?: string; resumeAt?: string };
             };
             console.log(JSON.stringify({ event: "campaign-step", result }));
             const disposition = result.step?.disposition;
+            if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown")
+                && result.step?.resumeAt) {
+                const resumeAt = Date.parse(result.step.resumeAt);
+                if (Number.isFinite(resumeAt)) {
+                    await wait(Math.max(0, resumeAt - Date.now()), signal);
+                    continue;
+                }
+            }
             if (disposition === "admitted" || disposition === "stage_completed"
                 || disposition === "upload_completed") continue;
         } catch (error) {

@@ -1,5 +1,15 @@
 # Monorepo Decisions
 
+## Antibot failures cooldown the campaign, never block it (2026-08-17)
+
+Captcha solving gets exactly 60 seconds. On timeout the browser closes, the
+campaign parks in a cooldown (`resume_at` on the control row) and the worker
+sleeps exactly until then — no polling. The wait doubles per consecutive
+antibot failure (1/2/4/8… minutes, no cap) using one shared streak counter
+that any successful upload resets. On resume the single-flight worker picks
+the same `metadata_ready` recording and re-enters the upload. Manual
+pause/resume clears the cooldown and the streak.
+
 ## Verification is inline and single-flight; the daily timer is gone (2026-08-17)
 
 The pipeline is single-flight: the campaign worker processes exactly one

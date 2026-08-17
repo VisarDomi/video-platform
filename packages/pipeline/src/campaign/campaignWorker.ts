@@ -19,6 +19,8 @@ export type CampaignStepResult =
     | { readonly disposition: "attention_required"; readonly recordingId: string; readonly reason: string }
     | { readonly disposition: "monthly_quota_wait"; readonly recordingId: string }
     | { readonly disposition: "parked_existing_upload"; readonly recordingId: string; readonly state: string }
+    | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
+    | { readonly disposition: "daily_limit_cooldown"; readonly recordingId: string; readonly resumeAt: string }
     | { readonly disposition: "upload_completed"; readonly recordingId: string; readonly result: unknown };
 
 function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
@@ -57,9 +59,15 @@ export class CampaignWorker {
         if (swept.length > 0) {
             console.log(JSON.stringify({ event: "campaign-sweep", swept }));
         }
-        const control = this.database.getCampaignControl();
+        let control = this.database.getCampaignControl();
         const reviewRequired = this.database.listProvenanceReview().length;
-        if (control.state === "paused") return { disposition: "paused", reviewRequired };
+        if (control.state === "paused") {
+            if (control.resumeAt && now.getTime() >= Date.parse(control.resumeAt)) {
+                control = this.database.resumeFromCooldown(now);
+            } else {
+                return { disposition: "paused", reviewRequired };
+            }
+        }
 
         const local = ordered(this.database.list().filter((recording) => [
             "server_ready", "remuxed", "artifact_valid", "described",
@@ -110,16 +118,33 @@ export class CampaignWorker {
             )) return { disposition: "monthly_quota_wait", recordingId: uploadReady.id };
             if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
             try {
+                const result = await this.upload(uploadReady.id, control.monthlyUploadLimitBytes);
+                this.database.resetAntibotFailures(now);
                 return {
                     disposition: "upload_completed",
                     recordingId: uploadReady.id,
-                    result: await this.upload(uploadReady.id, control.monthlyUploadLimitBytes),
+                    result,
                 };
             } catch (error) {
+                if (error instanceof HumanActionRequiredError && error.action === "daily_limit") {
+                    const after = this.database.recordUploadLimitCooldown(now);
+                    return {
+                        disposition: "daily_limit_cooldown",
+                        recordingId: uploadReady.id,
+                        resumeAt: after.resumeAt ?? "",
+                    };
+                }
                 if (error instanceof HumanActionRequiredError) {
-                    this.database.transition(uploadReady.id, "metadata_ready", "blocked",
-                        `XVideos ${error.action} needs a human decision: ${error.message}`, now);
-                    return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
+                    const streak = control.antibotFailures + 1;
+                    const exponent = Math.min(streak - 1, 40);
+                    const waitMilliseconds = 60_000 * (2 ** exponent);
+                    const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
+                    return {
+                        disposition: "antibot_cooldown",
+                        recordingId: uploadReady.id,
+                        streak,
+                        resumeAt: after.resumeAt ?? "",
+                    };
                 }
                 throw error;
             }

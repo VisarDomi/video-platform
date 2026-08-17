@@ -22,7 +22,7 @@ export interface ChromiumUploaderConfig {
 }
 
 export class HumanActionRequiredError extends Error {
-    constructor(readonly action: "captcha" | "google_challenge" | "session_login", message: string) {
+    constructor(readonly action: "captcha" | "google_challenge" | "session_login" | "daily_limit", message: string) {
         super(message);
         this.name = "HumanActionRequiredError";
     }
@@ -314,7 +314,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         const fileInput = page.locator("#file_form_file_file_options_file_1_file");
         const confirmButton = page.getByRole("button", { name: "Confirm that you are not a robot", exact: true });
         const startedAt = Date.now();
-        const deadline = startedAt + 60 * 60_000;
+        const deadline = startedAt + 60_000;
         const elapsed = () => Math.round((Date.now() - startedAt) / 1000);
         let previousSolved = false;
         let lastProgressLoggedAt = 0;
@@ -322,6 +322,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             if (await fileInput.count()) {
                 console.log(JSON.stringify({ event: "friendly-captcha-complete", elapsedSeconds: elapsed() }));
                 return;
+            }
+            // Hard stop: XVideos caps uploads per day. The form never appears
+            // while the cap is in force, so detect the page message here.
+            const limitNotice = page.getByText("uploaded too many videos", { exact: false });
+            if (await limitNotice.count()) {
+                throw new HumanActionRequiredError("daily_limit", "XVideos daily upload limit reached");
             }
             // Friendly Captcha does not auto-solve on the upload page: its
             // widget checkbox has to be clicked, the proof-of-work runs for a

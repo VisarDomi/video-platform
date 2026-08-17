@@ -278,12 +278,21 @@ export class PipelineDatabase {
                 provider_filter TEXT NOT NULL CHECK (provider_filter IN ('all', 'tango', 'fc2', 'sc')),
                 ordering TEXT NOT NULL CHECK (ordering = 'oldest'),
                 monthly_upload_limit_bytes INTEGER NOT NULL CHECK (monthly_upload_limit_bytes > 0),
+                antibot_failures INTEGER NOT NULL DEFAULT 0,
+                resume_at TEXT,
                 updated_at TEXT NOT NULL
             ) STRICT;
             INSERT OR IGNORE INTO campaign_control (
                 id, state, provider_filter, ordering, monthly_upload_limit_bytes, updated_at
             ) VALUES (1, 'paused', 'all', 'oldest', ${DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES}, '1970-01-01T00:00:00.000Z');
         `);
+        const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
+        if (!controlColumns.some((column) => column.name === "antibot_failures")) {
+            this.database.exec("ALTER TABLE campaign_control ADD COLUMN antibot_failures INTEGER NOT NULL DEFAULT 0");
+        }
+        if (!controlColumns.some((column) => column.name === "resume_at")) {
+            this.database.exec("ALTER TABLE campaign_control ADD COLUMN resume_at TEXT");
+        }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
         if (!attemptColumns.some((column) => column.name === "phase")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN phase TEXT NOT NULL DEFAULT 'started'");
@@ -384,6 +393,8 @@ export class PipelineDatabase {
             provider_filter: CampaignProviderFilter;
             ordering: "oldest";
             monthly_upload_limit_bytes: number;
+            antibot_failures: number;
+            resume_at: string | null;
             updated_at: string;
         } | undefined;
         if (!row) throw new Error("Campaign control row is missing");
@@ -392,6 +403,8 @@ export class PipelineDatabase {
             providerFilter: row.provider_filter,
             ordering: row.ordering,
             monthlyUploadLimitBytes: row.monthly_upload_limit_bytes,
+            antibotFailures: row.antibot_failures,
+            resumeAt: row.resume_at,
             updatedAt: row.updated_at,
         };
     }
@@ -416,8 +429,49 @@ export class PipelineDatabase {
 
     setCampaignState(state: CampaignControl["state"], now = new Date()): CampaignControl {
         if (state !== "paused" && state !== "running") throw new Error("Campaign state must be paused or running");
-        this.database.prepare("UPDATE campaign_control SET state = ?, updated_at = ? WHERE id = 1")
-            .run(state, now.toISOString());
+        // A manual pause is indefinite; a manual resume starts a fresh streak.
+        if (state === "paused") {
+            this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, updated_at = ? WHERE id = 1")
+                .run(now.toISOString());
+        } else {
+            this.database.prepare("UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0, updated_at = ? WHERE id = 1")
+                .run(now.toISOString());
+        }
+        return this.getCampaignControl();
+    }
+
+    recordAntibotFailure(streak: number, waitMilliseconds: number, now = new Date()): CampaignControl {
+        const timestamp = now.toISOString();
+        const resumeAt = new Date(now.getTime() + waitMilliseconds).toISOString();
+        this.database.prepare(`
+            UPDATE campaign_control SET state = 'paused', resume_at = ?, antibot_failures = ?, updated_at = ?
+            WHERE id = 1
+        `).run(resumeAt, streak, timestamp);
+        return this.getCampaignControl();
+    }
+
+    recordUploadLimitCooldown(now = new Date()): CampaignControl {
+        const timestamp = now.toISOString();
+        const resumeAt = new Date(now.getTime() + 24 * 60 * 60_000).toISOString();
+        this.database.prepare(`
+            UPDATE campaign_control SET state = 'paused', resume_at = ?, antibot_failures = 0, updated_at = ?
+            WHERE id = 1
+        `).run(resumeAt, timestamp);
+        return this.getCampaignControl();
+    }
+
+    resumeFromCooldown(now = new Date()): CampaignControl {
+        const timestamp = now.toISOString();
+        this.database.prepare(`
+            UPDATE campaign_control SET state = 'running', resume_at = NULL, updated_at = ?
+            WHERE id = 1 AND resume_at IS NOT NULL AND resume_at <= ?
+        `).run(timestamp, timestamp);
+        return this.getCampaignControl();
+    }
+
+    resetAntibotFailures(now = new Date()): CampaignControl {
+        this.database.prepare("UPDATE campaign_control SET antibot_failures = 0, updated_at = ? WHERE id = 1")
+            .run(now.toISOString());
         return this.getCampaignControl();
     }
 

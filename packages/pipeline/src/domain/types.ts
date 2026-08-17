@@ -77,5 +77,7 @@ export interface CampaignControl {
     readonly providerFilter: CampaignProviderFilter;
     readonly ordering: "oldest";
     readonly monthlyUploadLimitBytes: number;
+    readonly antibotFailures: number;
+    readonly resumeAt: string | null;
     readonly updatedAt: string;
 }
