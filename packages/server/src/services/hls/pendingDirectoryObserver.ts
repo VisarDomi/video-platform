@@ -21,42 +21,32 @@ export class PendingDirectoryObserver {
 
     public async start(): Promise<void> {
         const watchDirectory = this.dependencies.watchDirectory
-            ?? ((rootPath, listener) => watch(rootPath, { recursive: true }, listener));
+            ?? ((rootPath, listener) => watch(rootPath, listener));
 
-        // Watch the PARENT of each handoff root recursively: the hidden
-        // handoff directory is created on demand and removed when empty, so
-        // watching it directly would die with it. Events are filtered to the
-        // handoff child and its direct recording entries.
-        const parents = new Map<string, string>();
+        // Watch each handoff mailbox DIRECTLY and non-recursively: one kernel
+        // watch per root, constant forever. The mailboxes are permanent
+        // infrastructure (created eagerly at startup), so the watch never
+        // dies and no recursive tree-watch is needed. A handoff is a folder
+        // rename INTO the mailbox: a direct child event on the mailbox.
         for (const rootPath of this.rootPaths) {
             const resolved = path.resolve(rootPath);
-            parents.set(path.dirname(resolved), path.basename(resolved));
-        }
-        for (const [parent, child] of parents) {
             try {
-                const watcher = watchDirectory(parent, (_eventType, fileName) => {
+                const watcher = watchDirectory(resolved, (_eventType, fileName) => {
                     const name = fileName?.toString();
                     if (!name) {
                         void this.reconcile();
                         return;
                     }
-                    if (name !== child && !name.startsWith(child + path.sep)) return;
-                    if (name === child) {
-                        // The handoff directory itself appeared/disappeared.
-                        void this.reconcile();
-                        return;
-                    }
-                    const rest = name.slice(child.length + 1);
-                    if (!rest || rest.includes(path.sep)) return;
-                    this.onCandidate(path.join(parent, name));
+                    if (name.includes(path.sep)) return;
+                    this.onCandidate(path.join(resolved, name));
                 });
                 watcher.on("error", (error) => {
-                    this.onWatchError(parent, error);
+                    this.onWatchError(resolved, error);
                     void this.reconcile();
                 });
                 this.watchers.push(watcher);
             } catch (error: any) {
-                this.onWatchError(parent, error);
+                this.onWatchError(resolved, error);
             }
         }
 
