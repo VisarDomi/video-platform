@@ -1,5 +1,15 @@
 # Monorepo Decisions
 
+## .pending mailboxes are permanent; watches are direct and non-recursive (2026-08-17)
+
+The capture handoff roots (`<provider>/downloaded/.pending`) are permanent
+infrastructure, created eagerly at server boot, and watched DIRECTLY and
+non-recursively: one kernel inotify watch per mailbox, constant forever. The
+earlier "watch the parent recursively so the dir can come and go" workaround
+was reverted — recursive node watches grow one kernel watch per recording
+folder and exhaust the system inotify budget. The empty mailboxes are inboxes,
+not zombies; they are never rmdir'd.
+
 ## Browser failures: human decisions go to review, never lock the loop (2026-08-17)
 
 Interactive `upload-one` keeps the browser open on failure (a human is

@@ -582,6 +582,11 @@ export class MediaIntegrityQueue {
 
 export function startMediaIntegrityFinalizer(): void {
     const roots = pendingRoots();
+    // The handoff mailboxes are permanent infrastructure: create them eagerly
+    // so the direct non-recursive watches always have a live target.
+    for (const rootPath of roots) {
+        void fs.mkdir(rootPath, { recursive: true }).catch(() => {});
+    }
     const checkpointStore = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
     let catchUpRunning = false;
     const processingQueue = new MediaIntegrityQueue(async (streamPath) => {
@@ -603,9 +608,6 @@ export function startMediaIntegrityFinalizer(): void {
         }
         const finalizedPath = await publishPendingRecording(streamPath);
         checkpointStore.clear(streamPath);
-        // Remove the handoff directory once it is empty; it is recreated on
-        // demand by the producer (downloader handoff or the video editor).
-        await fs.rmdir(path.dirname(streamPath)).catch(() => {});
         logger.info("[Finalization] atomically published validated recording", {
             pendingPath: streamPath,
             finalizedPath,
