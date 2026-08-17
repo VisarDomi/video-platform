@@ -42,6 +42,25 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             database.close();
         }
     }
+    // Heartbeat on its own timer so manual *-one commands can tell the
+    // campaign is alive even mid-step (a single step can take minutes).
+    const heartbeat = setInterval(() => {
+        const database = new PipelineDatabase(config.databasePath);
+        try {
+            database.writeWorkerHeartbeat();
+        } finally {
+            database.close();
+        }
+    }, 30_000);
+    {
+        const database = new PipelineDatabase(config.databasePath);
+        try {
+            database.writeWorkerHeartbeat();
+        } finally {
+            database.close();
+        }
+    }
+    signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
     while (!signal.aborted) {
         try {
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
