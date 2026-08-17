@@ -287,6 +287,23 @@ test("stage failures persist diagnostics without continuing downstream", async (
     assert.equal(database.retryFailed(recording.id).state, "server_ready");
 });
 
+test("releaseAllLeases clears claims held by dead processes", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    const claimed = database.claimRecording(
+        recording.id,
+        ["server_ready"],
+        "dead-worker",
+        30 * 60_000,
+        new Date(),
+        ["edited"],
+    );
+    assert.equal(claimed?.id, recording.id);
+    assert.equal(database.get(recording.id).leaseOwner, "dead-worker");
+    assert.equal(database.releaseAllLeases(), 1);
+    assert.equal(database.get(recording.id).leaseOwner, null);
+});
+
 test("blocked recordings unblock back to their pre-block state", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
