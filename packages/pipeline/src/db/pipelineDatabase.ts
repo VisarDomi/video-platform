@@ -662,6 +662,14 @@ export class PipelineDatabase {
         return this.requireRecording(id);
     }
 
+    releaseAllLeases(now = new Date()): number {
+        const result = this.database.prepare(`
+            UPDATE recordings SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE lease_owner IS NOT NULL
+        `).run(now.toISOString());
+        return Number(result.changes);
+    }
+
     retryBlocked(id: string, now = new Date()): Recording {
         const timestamp = now.toISOString();
         this.transaction(() => {
