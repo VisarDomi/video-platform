@@ -36,9 +36,13 @@ export async function uploadOne(
             throw new Error(refusalMessage(identityOutcome));
         }
         const credentials = await readXvideosCredentials(config.credentialsFilePath);
+        // Interactive manual runs keep the browser open on failure so a
+        // human can finish the job; the unattended campaign closes it so it
+        // can never hold the profile lock against the next step.
         const uploader = new ChromiumXvideosUploader({
             executablePath: config.chromiumExecutablePath,
             profilePath: config.browserProfilePath,
+            leaveOpenOnFailure: process.env.VIDEO_PIPELINE_SERVICE_MODE !== "1",
             ...credentials,
         });
         if (recording.state !== "metadata_ready") {
