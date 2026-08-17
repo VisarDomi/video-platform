@@ -268,6 +268,10 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE INDEX IF NOT EXISTS upload_confirmations_due_idx
                 ON upload_confirmations (status, confirm_after);
+            CREATE TABLE IF NOT EXISTS worker_heartbeat (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                updated_at TEXT NOT NULL
+            ) STRICT;
             CREATE TABLE IF NOT EXISTS campaign_control (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 state TEXT NOT NULL CHECK (state IN ('paused', 'running')),
@@ -660,6 +664,21 @@ export class PipelineDatabase {
             this.updateStateInTransaction(id, "failed", retryState, "manual retry requested", timestamp);
         });
         return this.requireRecording(id);
+    }
+
+    writeWorkerHeartbeat(now = new Date()): void {
+        this.database.prepare(`
+            INSERT INTO worker_heartbeat (id, updated_at) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at
+        `).run(now.toISOString());
+    }
+
+    campaignIsActive(now = new Date(), staleAfterMilliseconds = 90_000): boolean {
+        const row = this.database.prepare("SELECT updated_at FROM worker_heartbeat WHERE id = 1")
+            .get() as { updated_at: string } | undefined;
+        if (!row) return false;
+        const heartbeat = Date.parse(row.updated_at);
+        return Number.isFinite(heartbeat) && now.getTime() - heartbeat < staleAfterMilliseconds;
     }
 
     releaseAllLeases(now = new Date()): number {

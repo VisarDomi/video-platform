@@ -287,6 +287,14 @@ test("stage failures persist diagnostics without continuing downstream", async (
     assert.equal(database.retryFailed(recording.id).state, "server_ready");
 });
 
+test("campaign heartbeat drives the manual-command active guard", async (t) => {
+    const { database } = await databaseFixture(t);
+    assert.equal(database.campaignIsActive(new Date()), false);
+    database.writeWorkerHeartbeat(new Date("2026-08-17T10:00:00Z"));
+    assert.equal(database.campaignIsActive(new Date("2026-08-17T10:00:30Z")), true);
+    assert.equal(database.campaignIsActive(new Date("2026-08-17T10:02:00Z")), false);
+});
+
 test("releaseAllLeases clears claims held by dead processes", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));

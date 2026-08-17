@@ -1,4 +1,4 @@
-import { pipelineConfig } from "./config.js";
+import { pipelineConfig, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
 import { applyDiscovery, planDiscovery } from "./discovery/discover.js";
@@ -45,6 +45,17 @@ function requireApply(args: readonly string[]): void {
     if (!args.includes("--apply")) throw new Error("This command mutates the pipeline ledger and requires --apply");
 }
 
+function assertCampaignIdle(config: PipelineConfig): void {
+    const database = new PipelineDatabase(config.databasePath);
+    try {
+        if (database.campaignIsActive()) {
+            throw new Error("The campaign worker is active; stop it first (systemctl --user stop video-pipeline) before running manual commands");
+        }
+    } finally {
+        database.close();
+    }
+}
+
 function campaignProvider(value: string | null): CampaignProviderFilter {
     if (value === "all" || value === "tango" || value === "fc2" || value === "sc") return value;
     throw new Error("Campaign provider must be all, tango, fc2, or sc");
@@ -77,12 +88,14 @@ async function main(): Promise<void> {
         return;
     }
     if (command === "remux-one") {
+        assertCampaignIdle(pipelineConfig);
         const args = process.argv.slice(3);
         if (args.length !== 2 || args[0] !== "--recording" || args[1] === "") usage();
         console.log(JSON.stringify(await ensureFinalizedRemuxOne(args[1], pipelineConfig), null, 2));
         return;
     }
     if (command === "describe-one") {
+        assertCampaignIdle(pipelineConfig);
         const args = process.argv.slice(3);
         const recordingId = option(args, "--recording");
         if (!recordingId) usage();
@@ -90,6 +103,7 @@ async function main(): Promise<void> {
         return;
     }
     if (command === "upload-one") {
+        assertCampaignIdle(pipelineConfig);
         const args = process.argv.slice(3);
         requireApply(args);
         const recordingId = option(args, "--recording");
@@ -168,6 +182,7 @@ async function main(): Promise<void> {
             return;
         }
         if (command === "process-one") {
+            assertCampaignIdle(pipelineConfig);
             requireApply(process.argv.slice(3));
             const orchestrator = new PipelineOrchestrator(
                 database,
