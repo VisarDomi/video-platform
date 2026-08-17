@@ -662,6 +662,25 @@ export class PipelineDatabase {
         return this.requireRecording(id);
     }
 
+    retryBlocked(id: string, now = new Date()): Recording {
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            const lastBlock = this.database.prepare(`
+                SELECT from_state FROM state_events
+                WHERE recording_id = ? AND to_state = 'blocked'
+                ORDER BY id DESC LIMIT 1
+            `).get(id) as { from_state: PipelineState | null } | undefined;
+            const retryState = lastBlock?.from_state;
+            if (!retryState || ![
+                "server_ready", "remuxed", "artifact_valid", "described", "metadata_ready",
+            ].includes(retryState)) {
+                throw new Error(`Recording ${id} has no unblockable blocked state`);
+            }
+            this.updateStateInTransaction(id, "blocked", retryState, "manual unblock requested", timestamp);
+        });
+        return this.requireRecording(id);
+    }
+
     saveArtifact(id: string, artifact: Omit<ArtifactRecord, "recordingId">, now = new Date()): Recording {
         const recording = this.get(id);
         if (!recording || recording.state !== "remuxed") throw new Error(`Recording ${id} is not remuxed`);

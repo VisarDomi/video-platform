@@ -256,7 +256,13 @@ async function main(): Promise<void> {
         if (command === "retry") {
             const recordingId = process.argv[3];
             if (!recordingId) throw new Error("retry requires a recording ID");
-            console.log(JSON.stringify(database.retryFailed(recordingId), null, 2));
+            const recording = database.get(recordingId);
+            if (!recording) throw new Error(`Recording ${recordingId} does not exist`);
+            if (recording.state === "blocked") {
+                console.log(JSON.stringify(database.retryBlocked(recordingId), null, 2));
+            } else {
+                console.log(JSON.stringify(database.retryFailed(recordingId), null, 2));
+            }
             return;
         }
         console.log(JSON.stringify({
