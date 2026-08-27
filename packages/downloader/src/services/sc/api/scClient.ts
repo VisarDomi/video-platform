@@ -103,29 +103,23 @@ export class ScClient implements IStreamProvider {
         }
     }
 
-    private static uniq(length = 16): string {
-        const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        let result = "";
-        for (let i = 0; i < length; i++) {
-            result += chars[Math.floor(Math.random() * chars.length)];
-        }
-        return result;
-    }
-
-    private async fetchCamData(username: string): Promise<{ roomId: string; username: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean; statusChangedAt: string } | null> {
-        const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${ScClient.uniq()}`;
+    private async fetchCamData(roomId: string, fallbackUsername: string): Promise<{ roomId: string; username: string; streamName: string; isCamAvailable: boolean; isCamActive: boolean; statusChangedAt: string } | null> {
+        const url = `https://stripchat.com/api/front/v2/models/${encodeURIComponent(roomId)}/cam`;
         const data = await this.fetchApi<any>(url);
         if (!data) return null;
 
         if (!data.user?.user?.id) {
-            if (data.error === "Not Found") {
-                logger.warn(`[SC] User ${username} not found`);
-            }
+            logger.warn(`[SC] Room ${roomId} returned no user identity`);
             return null;
         }
 
-        const roomId = String(data.user.user.id);
-        const currentUsername = data.user.user.username || username;
+        const resolvedRoomId = String(data.user.user.id);
+        if (resolvedRoomId !== roomId) {
+            logger.warn(`[SC] Room identity mismatch: requested=${roomId} resolved=${resolvedRoomId}`);
+            return null;
+        }
+
+        const currentUsername = data.user.user.username || fallbackUsername;
         const streamName = data.cam?.streamName || roomId;
         const isCamAvailable = data.cam?.isCamAvailable ?? false;
         const isCamActive = data.cam?.isCamActive ?? false;
@@ -135,20 +129,8 @@ export class ScClient implements IStreamProvider {
         return { roomId, username: currentUsername, streamName, isCamAvailable, isCamActive, statusChangedAt };
     }
 
-    public async refreshStreamName(username: string): Promise<string | null> {
-        const result = await this.fetchCamData(username);
-        if (!result) return null;
-
-        if (!result.isCamAvailable || !result.isCamActive) {
-            logger.debug(`[SC] ${username}: cam not ready (available=${result.isCamAvailable}, active=${result.isCamActive})`);
-            return null;
-        }
-
-        return result.streamName;
-    }
-
-    public async refreshTarget(username: string): Promise<{ roomId: string; username: string; streamName: string | null; statusChangedAt: string } | null> {
-        const result = await this.fetchCamData(username);
+    public async refreshTarget(roomId: string, fallbackUsername: string): Promise<{ roomId: string; username: string; streamName: string | null; statusChangedAt: string } | null> {
+        const result = await this.fetchCamData(roomId, fallbackUsername);
         if (!result) return null;
 
         if (result.statusChangedAt) this.latestRecordingIds.set(result.roomId, result.statusChangedAt);
@@ -310,7 +292,7 @@ export class ScClient implements IStreamProvider {
             return context.lastMasterUrl;
         }
         const lookupAlias = context.lookupAlias ?? context.streamerId;
-        const refreshed = await this.refreshTarget(lookupAlias);
+        const refreshed = await this.refreshTarget(context.streamerId, lookupAlias);
         if (!refreshed?.streamName || refreshed.statusChangedAt !== context.recordingId) {
             return context.lastMasterUrl;
         }

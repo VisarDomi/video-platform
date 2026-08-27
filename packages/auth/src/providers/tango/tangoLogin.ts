@@ -12,7 +12,10 @@ const BROWSER_LOGIN_FLOW_TIMEOUT_MS = 30_000;
 const BROWSER_RESPONSE_TIMEOUT_MS = 60_000;
 
 async function findAndClickLoginButton(page: Page, account: Account): Promise<void> {
-    const signInButton = page.getByTestId("join-now");
+    const signInButton = page
+        .getByTestId("visitor-join-now")
+        .or(page.getByTestId("join-now"))
+        .first();
     await signInButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
 
     const googleButton = page.getByTestId("GOOGLE");

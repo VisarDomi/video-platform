@@ -78,7 +78,7 @@ export class ScDiscoveryService {
                     ?? this.scClient.getKnownRecordingId(target.roomId);
                 const lastRefresh = this.identityRefreshedAt.get(target.roomId) ?? 0;
                 if (!recordingId || Date.now() - lastRefresh >= SC_IDENTITY_REFRESH_MS) {
-                    const refreshed = await this.scClient.refreshTarget(target.username);
+                    const refreshed = await this.scClient.refreshTarget(target.roomId, target.username);
                     this.identityRefreshedAt.set(target.roomId, Date.now());
                     resolvedTargets.set(target.roomId, refreshed);
                     recordingId = refreshed?.statusChangedAt || null;
@@ -110,7 +110,7 @@ export class ScDiscoveryService {
             }
 
             const refreshedTarget = resolvedTargets.get(target.roomId)
-                ?? await this.scClient.refreshTarget(target.username);
+                ?? await this.scClient.refreshTarget(target.roomId, target.username);
             const currentAlias = refreshedTarget?.username ?? target.username;
             const streamName = refreshedTarget?.streamName ?? null;
             const recordingId = refreshedTarget?.statusChangedAt ?? this.scClient.getKnownRecordingId(target.roomId);
@@ -119,7 +119,7 @@ export class ScDiscoveryService {
                 continue;
             }
             if (!streamName) {
-                logger.info(`[SC] ${currentAlias}: refreshStreamName failed, falling back to roomId=${target.roomId}`);
+                logger.info(`[SC] ${currentAlias}: cam metadata has no active stream name, falling back to roomId=${target.roomId}`);
             }
 
             const masterUrl = this.scClient.buildMasterUrl(streamName || target.roomId);

@@ -8,11 +8,8 @@ export interface ScResolvedUser {
 }
 
 export async function resolveScUsername(username: string): Promise<ScResolvedUser | null> {
-    const uniq = Array.from({ length: 16 }, () =>
-        "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]
-    ).join("");
-
-    const url = `https://stripchat.com/api/front/v2/models/username/${username}/cam?uniq=${uniq}`;
+    const normalizedUsername = username.trim();
+    const url = `https://stripchat.com/api/front/users/user-ids/${encodeURIComponent(normalizedUsername)}`;
 
     try {
         const response = await fetch(url, {
@@ -26,17 +23,12 @@ export async function resolveScUsername(username: string): Promise<ScResolvedUse
 
         const data = await response.json() as any;
 
-        if (!data?.user?.user?.id) {
-            if (data?.error === "Not Found") {
-                logger.warn(`[SC] User ${username} not found`);
-            }
+        if (!data?.id) {
+            logger.warn(`[SC] User ${username} not found`);
             return null;
         }
 
-        const roomId = String(data.user.user.id);
-        const currentUsername = data.user.user.username || username;
-
-        return { username: currentUsername, roomId };
+        return { username: normalizedUsername, roomId: String(data.id) };
     } catch (error: any) {
         logger.error(`[SC] resolveScUsername error: ${username}`, { error: error.message });
         return null;
