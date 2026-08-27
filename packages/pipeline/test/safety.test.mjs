@@ -16,14 +16,16 @@ import { UploadByteMeter } from "../dist/upload/uploadCoordinator.js";
 
 const execFileAsync = promisify(execFile);
 
-test("artifact paths are contained and stream-copy remux is single-threaded and non-overwriting", () => {
+test("artifact paths are contained and stream-copy remux leaves threading to ffmpeg", () => {
     const id = "d".repeat(64);
     assert.equal(containedArtifactPath("/tmp/staging", id), `/tmp/staging/${id}.mp4`);
     assert.throws(() => containedArtifactPath("/tmp/staging", "../escape"), /Invalid recording ID/);
     const args = buildStreamCopyRemuxArgs("/source/playlist.m3u8", "/staging/output.partial");
     assert.deepEqual(args.slice(args.indexOf("-c"), args.indexOf("-c") + 2), ["-c", "copy"]);
     assert(args.includes("-nostdin"));
-    assert(args.includes("1"));
+    assert(!args.includes("-threads"));
+    assert(!args.includes("-filter_threads"));
+    assert(!args.includes("-filter_complex_threads"));
     assert(!args.includes("-y"));
 });
 

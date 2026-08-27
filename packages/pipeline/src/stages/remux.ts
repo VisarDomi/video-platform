@@ -8,7 +8,6 @@ export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput:
         "-nostdin",
         "-hide_banner",
         "-v", "error",
-        "-threads", "1",
         "-fflags", "+genpts",
         "-i", inputPlaylist,
         "-map", "0:v?",

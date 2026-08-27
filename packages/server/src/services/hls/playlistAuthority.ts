@@ -1,4 +1,5 @@
 import { promises as fs } from "fs";
+import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 import pLimit from "p-limit";
@@ -95,7 +96,9 @@ type PlaylistLine =
     | { kind: "target-duration"; value: string }
     | { kind: "segment"; segment: PlaylistSegment };
 
-const PROBE_CONCURRENCY = 2;
+// Bound subprocess count by Node's cgroup-aware available CPU count while
+// leaving aggregate CPU allocation to the service's systemd slice.
+const PROBE_CONCURRENCY = os.availableParallelism();
 const REPAIRED_DURATION_PRECISION = 6;
 const DURATION_EPSILON_SECONDS = 0.0000005;
 const SEGMENT_METADATA_PREFIXES = [
