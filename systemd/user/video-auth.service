@@ -1,9 +1,10 @@
 [Unit]
 Description=Video Auth
-After=network.target
+After=network.target video-xvfb.service
 
 [Service]
 Type=simple
+Environment=DISPLAY=:111
 ExecStart="{{HOME}}/.local/bin/video-auth"
 Restart=on-failure
 RestartSec=5
