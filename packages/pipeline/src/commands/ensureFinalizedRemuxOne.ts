@@ -38,8 +38,6 @@ async function finalizeExactRecording(recordingPath: string): Promise<void> {
             entrypoint,
             "--recording", recordingPath,
             "--apply",
-            "--concurrency", "1",
-            "--max-cpu", "80",
         ], { stdio: "inherit" });
         child.once("error", reject);
         child.once("close", (code, signal) => {

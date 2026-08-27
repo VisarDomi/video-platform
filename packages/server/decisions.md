@@ -1,5 +1,22 @@
 # Server Decisions
 
+## Finalization exposes work while systemd allocates resources (2026-08-27)
+
+The live queue and historical catalogue expose up to
+`os.availableParallelism()` recording workers, and fallback duration probing
+uses the same cgroup-aware subprocess ceiling. This is a boundedness and
+parallel-work decision, not a CPU throttle: systemd caps all processing at the
+parent slice's `CPUQuota=600%` and gives the live server `CPUWeight=1000` over
+weight-100 background scopes. In that slice the current Node runtime reports
+six available CPUs; a process outside the slice reports all 12 host CPUs.
+
+FFmpeg receives no thread or priority flags. The historical command has no
+operator `--concurrency` option. The existing 15-second live-queue cooldown is
+retained pending dedicated testing. Exact `--recording` library finalization
+runs as `video-finalize-library-single.scope`, whose systemd-owned drop-in gives
+it foreground weight; catalogue finalization remains
+`video-finalize-library.scope` at the default weight.
+
 ## Server promotion defines finalized recording integrity
 
 For Tango, FC2, and SC, the downloader atomically writes `#EXT-X-ENDLIST` and
@@ -9,7 +26,7 @@ the visible downloader root after validation passes. Watch-before-scan startup r
 non-recursive safety reconciliation cover server downtime and missed/coalesced
 events without inspecting segment inventories.
 
-The first integrity check is one strict, single-threaded whole-playlist ffmpeg
+The first integrity check is one strict whole-playlist ffmpeg
 decode. Clean streams do not spawn a validator for every segment. If that pass
 fails, the server decodes each MPEG-TS segment sequentially to attribute the
 failure. Attributable corrupt MPEG-TS entries are removed from the playlist,
@@ -17,9 +34,9 @@ the playlist is canonically repaired, the unreferenced files are moved to
 desktop Trash, and strict validation runs again. Failed fMP4 playlists are
 reported without fragment attribution and remain nondestructively blocked.
 
-Completed recordings enter one deduplicating FIFO queue with half as many
-workers as the host has logical CPUs. Each worker runs one single-threaded
-ffmpeg at nice priority 10 and waits 15 seconds between recordings. On the
+Completed recordings enter one deduplicating FIFO queue with one worker per
+cgroup-aware available CPU. Each worker runs ffmpeg with its own defaults and
+waits 15 seconds between recordings. On the
 current 12-CPU host, systemd additionally caps the whole service at 600% CPU,
 starts memory reclaim at 70% of physical RAM, hard-limits it at 80%, and denies
 swap. Deep scans checkpoint every 25 segments in the central
@@ -46,9 +63,9 @@ video-decoder, and audio-decoder errors remain fatal.
 Historical folders created before this behavior was enabled are not
 automatically decoded. They remain an explicit batch/manual migration so a
 server restart cannot unexpectedly launch millions of segment decodes.
-The bounded migration uses the stable `video-finalize-library.scope` unit, so a
-second invocation cannot run concurrently and the operator can stop it by a
-predictable name. Restarting reuses unchanged successful playlist checkpoints
+The bounded migration uses stable catalogue and exact-recording scope names, so
+a second invocation of the same kind cannot run concurrently and the operator
+can stop it by a predictable name. Restarting reuses unchanged successful playlist checkpoints
 before cleanup or duration probing; failed MPEG-TS deep scans retain their
 25-segment checkpoint granularity. `--recording /exact/managed/folder` restricts
 the same processor to one visible immediate downloader/edited recording and is

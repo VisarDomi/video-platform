@@ -19,8 +19,6 @@ interface Options {
     provider: string;
     scope: string;
     recording: string | null;
-    concurrency: number;
-
     limit: number;
     apply: boolean;
     retryFailed: boolean;
@@ -37,7 +35,6 @@ function parseArgs(argv: readonly string[]): Options {
         provider: "all",
         scope: "all",
         recording: null,
-        concurrency: os.availableParallelism(),
         limit: Number.POSITIVE_INFINITY,
         apply: false,
         retryFailed: false,
@@ -59,8 +56,7 @@ function parseArgs(argv: readonly string[]): Options {
         } else if (argument === "--recording") {
             options.recording = argv[++index] ?? "";
             if (options.recording === "") throw new Error("--recording requires a directory path");
-        } else if (argument === "--concurrency") options.concurrency = parsePositiveInteger(argv[++index], argument);
-        else if (argument === "--limit") {
+        } else if (argument === "--limit") {
             limitSpecified = true;
             options.limit = parsePositiveInteger(argv[++index], argument);
         } else {
@@ -119,6 +115,7 @@ async function discoverTargets(options: Options): Promise<HistoricalFinalization
 
 async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
+    const workerCount = os.availableParallelism();
     const discovered = await discoverTargets(options);
     const selected = discovered.slice(0, options.limit);
     console.log(JSON.stringify({
@@ -129,7 +126,7 @@ async function main(): Promise<void> {
         recording: options.recording,
         discovered: discovered.length,
         selected: selected.length,
-        concurrency: options.concurrency,
+        concurrency: workerCount,
         retryFailed: options.retryFailed,
         checkpointPath: FINALIZATION_DB_PATH,
     }));
@@ -192,7 +189,7 @@ async function main(): Promise<void> {
     };
 
     try {
-        await Promise.all(Array.from({ length: Math.min(options.concurrency, selected.length) }, worker));
+        await Promise.all(Array.from({ length: Math.min(workerCount, selected.length) }, worker));
         const completeScope = options.provider === "all"
             && options.scope === "all"
             && options.recording === null

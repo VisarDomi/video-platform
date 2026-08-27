@@ -13,9 +13,9 @@ import { pendingRoot, publishPendingRecording } from "./pendingRecordingPublishe
 
 const CATCH_UP_INTERVAL_MS = 60 * 60_000;
 const QUEUE_COOLDOWN_MS = 15_000;
-// One lane per core (the canonical batch default — GNU parallel, ninja):
-// parallelism the app must open itself. Actual CPU usage is governed by the
-// systemd slice; the app neither throttles nor budgets anything.
+// Expose one validation lane per cgroup-aware available CPU so the systemd
+// slice has enough runnable work to use its quota. On the current host Node
+// reports 6 here for CPUQuota=600%; systemd remains the CPU authority.
 const QUEUE_WORKER_COUNT = os.availableParallelism();
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;

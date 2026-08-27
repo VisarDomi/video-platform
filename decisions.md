@@ -1,5 +1,26 @@
 # Monorepo Decisions
 
+## Processing exposes parallel work; systemd owns allocation (2026-08-27)
+
+CPU-intensive application paths must expose enough runnable work to saturate
+the processing allowance, while `video-processing.slice` remains the sole
+authority for aggregate CPU and memory allocation. FFmpeg receives no thread,
+priority, or load-control flags. Finalization and fallback probe pools use
+`os.availableParallelism()` only as a bounded subprocess/worker ceiling. In
+the processing cgroup, the current Node runtime reports six available CPUs for
+the parent slice's `CPUQuota=600%`, while a shell outside the slice reports all
+12 host CPUs.
+
+The historical finalizer has no operator `--concurrency` control. The live
+finalization queue retains its established 15-second inter-recording cooldown
+until that behavior is changed with dedicated testing. Correctness
+serialization, retry backoff, and bounded process counts remain application
+logic; CPU quota, memory limits, and scheduling weight remain systemd policy.
+Transient commands only join the processing slice and inherit its aggregate
+limits. Exact operator-selected library finalization receives foreground
+`CPUWeight=1000` through a systemd scope drop-in; catalogue, remux, and
+descriptor scopes use the default weight of 100.
+
 ## Antibot failures cooldown the campaign, never block it (2026-08-17)
 
 Captcha solving gets exactly 60 seconds. On timeout the browser closes, the
@@ -51,7 +72,7 @@ decoding) and atomically renames the build into place. The finalizer's
 exists as a concept. The finalizer also runs parallel workers (cores/3, per
 -worker budget cores/workers) instead of a single serial lane.
 
-### CPU belongs to systemd; the app asks, never throttles (2026-08-17)
+### CPU belongs to systemd; the app asks, never throttles (2026-08-17, superseded 2026-08-27)
 
 The app makes no thread, budget, priority, or load decisions. ffmpeg is
 spawned with no thread flags (its own defaults), no re-nicing, no load
@@ -251,13 +272,11 @@ adjacent failures, and boundary-only failures remain blocked because they do
 not establish a uniquely safe discard.
 
 Completed recordings enter one deduplicating FIFO queue. Normal live operation
-processes one recording at a time and gives its whole-playlist decoder half the
-host's logical CPUs; fMP4 attribution uses the same budget as parallel
-single-fragment checks. This makes a lone stream completion use the intended
-capacity while additional completions wait durably instead of multiplying
-resource demand. The historical catalog command instead parallelizes
-single-threaded decodes across its operator-selected `--concurrency`. FFmpeg
-runs at nice priority 10 and the live queue waits 15 seconds between recordings.
+and the historical catalogue expose affinity-bounded recording workers, while
+systemd governs their aggregate CPU allocation. FFmpeg uses its own thread and
+priority defaults. Fallback segment probing is bounded by the same affinity
+count so it cannot create an unlimited subprocess set. The live queue retains
+its established 15-second wait between recordings pending dedicated testing.
 The `video-processing.slice` shared by the server and manual/future pipeline
 workers has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
 `MemoryMax=80%`, and `MemorySwapMax=0`. The server and explicit single-recording

@@ -64,7 +64,6 @@ export async function validateArtifact(artifactPath: string, now = new Date()): 
 
     await run("ffmpeg", [
         "-nostdin", "-hide_banner", "-v", "error",
-        "-filter_threads", "1", "-filter_complex_threads", "1", "-threads", "1",
         "-i", resolvedPath,
         "-map", "0:v?", "-map", "0:a?", "-f", "null", "-",
     ]);

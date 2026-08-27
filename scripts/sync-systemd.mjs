@@ -18,6 +18,7 @@ const managedFiles = [
     "video-xvfb.service",
     path.join("video-pipeline.service.d", "resources.conf"),
     path.join("video-server.service.d", "resources.conf"),
+    path.join("video-finalize-library-single.scope.d", "resources.conf"),
 ];
 
 function usage() {

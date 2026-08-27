@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,7 +10,6 @@ if (!input) {
 }
 
 const packageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const cpuQuotaPercent = Math.max(100, os.cpus().length * 80);
 const scopeName = `video-descriptor-${process.pid}`;
 const arguments_ = [
     "--user",
@@ -20,11 +18,6 @@ const arguments_ = [
     "--collect",
     "--slice=video-processing.slice",
     `--unit=${scopeName}`,
-    "--property=CPUWeight=100",
-    "--property=MemoryHigh=70%",
-    "--property=MemoryMax=80%",
-    "--property=MemorySwapMax=0",
-    `--property=CPUQuota=${cpuQuotaPercent}%`,
     process.execPath,
     path.join(packageDirectory, "dist", "describe-one.js"),
     path.resolve(input),
