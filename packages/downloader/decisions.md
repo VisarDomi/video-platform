@@ -82,9 +82,11 @@ Quality checks are inline. The stale timeout (60s) is the exit condition. On var
 
 ## No silent recovery — every transition is logged
 
-Recovery from CDN failures is allowed, but every state change must be visible in logs: EDGE-SWITCH, EDGE-DEDUP, EDGE-GAP, session retry with reason.
+Recovery from CDN failures is allowed, but every state change must be visible in logs: EDGE-SWITCH, EDGE-DEDUP, EDGE-GAP, session retry with reason. Repeated HTTP attempts are aggregated into one access incident spanning retry-created HTTP sessions. The incident logs one opening failure, one SC evidence snapshot, and one close summary with duration and counts; recovery candidates that never work remain debug-only.
 
-**Why:** Three rounds of invisible self-healing masked root causes for weeks.
+For SC, the evidence snapshot is observational and does not change download behavior. It records a fresh cam status, the complete master variant ranking, the selected and next-lower resolutions, and bounded probes of the selected variant on two CDN TLDs plus the next-lower variant. Variant URLs are represented by paths and metadata; Mouflon query keys are not logged.
+
+**Why:** Three rounds of invisible self-healing masked root causes for weeks. Logging every five-second retry later created the opposite problem: hundreds of lines still could not prove whether a 403 happened while public, whether all qualities were denied in a paid state, or whether a lower variant worked. Transition-scoped evidence preserves that proof with low noise.
 
 ## Nothing on disk until first byte write
 
@@ -150,6 +152,8 @@ The bulk API returns both. `isOnline` returns `false` for some actively broadcas
 ## SC selects the highest-bandwidth named variant, including source
 
 The SC master playlist's `NAME="source"` variant is the broadcaster's highest-quality feed and is downloadable with the same Mouflon parameters as transcoded variants. Include it in normal bandwidth-based selection rather than forcing recordings down to the highest transcoded resolution.
+
+Selection logs carry the master name, resolution, bandwidth, rank, and whether the choice is master-best. A different URL is logged as `VARIANT_CHANGE`, not assumed to be an upgrade, because edge moves and source-resolution changes can also change the URL or init map.
 
 ## No token cache — read from disk on every request
 

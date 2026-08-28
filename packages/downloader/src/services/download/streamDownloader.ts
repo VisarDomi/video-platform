@@ -8,9 +8,10 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import type { PlaylistManager } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
-import { IDownloadSession, IStreamProvider } from "../core/interfaces.js";
+import { IDownloadSession, IStreamProvider, PlaylistFetchFailure } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
 import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS } from "../../common/timing.js";
+import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 
 export type ExitReason = "aborted" | "remote-endlist" | "segment-failed" | "stale-timeout" | "fetch-failed";
 
@@ -24,12 +25,14 @@ export interface DownloadResult {
 export class StreamDownloader {
     private handle: DownloadHandle;
     private provider: IStreamProvider;
+    private accessIncidents: AccessIncidentTracker;
     private _aborted = false;
     private rejectedCount = 0;
 
-    constructor(handle: DownloadHandle, provider: IStreamProvider) {
+    constructor(handle: DownloadHandle, provider: IStreamProvider, accessIncidents: AccessIncidentTracker) {
         this.handle = handle;
         this.provider = provider;
+        this.accessIncidents = accessIncidents;
     }
 
     public abort(): void {
@@ -54,12 +57,81 @@ export class StreamDownloader {
 
         const edgeMatch = liveUrl.match(/\/(b-hls-\d+)\//);
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
-        logger.info(`[StreamDownloader] START ${alias} edge=${edge} variant=${liveUrl.split("?")[0]}`);
+        logger.info(`[StreamDownloader] START ${alias} edge=${edge}`, {
+            variant: this.provider.describeVariant?.(liveUrl) ?? null,
+            variantPath: new URL(liveUrl).pathname,
+        });
 
         let session = this.provider.createDownloadSession();
         playlistManager.setEdge(liveUrl);
 
         return await this.downloadLoop(alias, masterUrl, liveUrl, session, playlistManager, initTracker, disk);
+    }
+
+    private async recordAccessFailure(
+        stage: "playlist" | "segment",
+        alias: string,
+        masterUrl: string,
+        liveUrl: string,
+        failure: PlaylistFetchFailure,
+    ): Promise<void> {
+        const state = this.handle.state;
+        if (!state) return;
+        const recorded = this.accessIncidents.record(failure);
+        if (!recorded.opened) return;
+
+        const identity = {
+            provider: this.provider.providerName,
+            streamerId: state.streamerId,
+            alias,
+            recordingId: state.recordingId,
+        };
+        logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_OPEN`, {
+            ...identity,
+            stage,
+            failure,
+            selected: this.provider.describeVariant?.(liveUrl) ?? null,
+        });
+
+        if (!this.provider.diagnoseAccessFailure) return;
+        try {
+            const evidence = await this.provider.diagnoseAccessFailure({
+                stage,
+                ...identity,
+                masterUrl,
+                liveUrl,
+                failure,
+            });
+            logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_EVIDENCE`, {
+                ...identity,
+                stage,
+                failure,
+                ...evidence,
+            });
+        } catch (error: any) {
+            logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_EVIDENCE_UNAVAILABLE`, {
+                ...identity,
+                stage,
+                error: error.name ?? "diagnostic-error",
+            });
+        }
+    }
+
+    private closeAccessIncident(alias: string, liveUrl: string, outcome: string): void {
+        const state = this.handle.state;
+        const closed = this.accessIncidents.close(outcome);
+        if (!state || !closed) return;
+        logger.info(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_CLOSE`, {
+            provider: this.provider.providerName,
+            streamerId: state.streamerId,
+            alias,
+            recordingId: state.recordingId,
+            outcome,
+            durationMs: closed.durationMs,
+            attempts: closed.attempts,
+            failures: closed.failures,
+            selected: this.provider.describeVariant?.(liveUrl) ?? null,
+        });
     }
 
     private async checkForQualityUpgrade(
@@ -112,7 +184,13 @@ export class StreamDownloader {
                 lastQualityCheck = Date.now();
                 const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
                 if (betterUrl) {
-                    logger.info(`[StreamDownloader] Quality upgrade for ${alias}: ${betterUrl.split("?")[0]}`);
+                    logger.info(`[StreamDownloader] VARIANT_CHANGE ${alias}`, {
+                        reason: "master-selection-changed",
+                        from: this.provider.describeVariant?.(liveUrl) ?? null,
+                        to: this.provider.describeVariant?.(betterUrl) ?? null,
+                        fromPath: new URL(liveUrl).pathname,
+                        toPath: new URL(betterUrl).pathname,
+                    });
                     liveUrl = betterUrl;
                     this.handle.update({ liveUrl });
                 }
@@ -120,9 +198,11 @@ export class StreamDownloader {
 
             let content = await session.fetchPlaylist(liveUrl);
             if (!content) {
+                const failure = session.getLastPlaylistFailure?.();
+                if (failure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
                 const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
                 if (!recovered) {
-                    logger.info(`[StreamDownloader] ${alias} variant failed, no recovery available (segments=${initTracker.count} url=${liveUrl})`);
+                    logger.debug(`[StreamDownloader] ${alias} variant failed, no recovery candidate (segments=${initTracker.count})`);
                     await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
@@ -134,9 +214,12 @@ export class StreamDownloader {
                 if (newEdge && newEdge !== oldEdge) {
                     playlistManager.setEdge(recovered);
                     playlistManager.onEdgeSwitch(oldEdge, newEdge);
-                    logger.info(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge} variant=${recovered.split("?")[0]}`);
+                    logger.info(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge}`, {
+                        variant: this.provider.describeVariant?.(recovered) ?? null,
+                        variantPath: new URL(recovered).pathname,
+                    });
                 } else {
-                    logger.info(`[StreamDownloader] ${alias} variant recovered (same edge) variant=${recovered.split("?")[0]}`);
+                    logger.debug(`[StreamDownloader] ${alias} recovery candidate uses same edge`);
                 }
 
                 liveUrl = recovered;
@@ -145,11 +228,14 @@ export class StreamDownloader {
 
                 content = await session.fetchPlaylist(liveUrl);
                 if (!content) {
-                    logger.warn(`[StreamDownloader] ${alias} recovered variant also failed — retrying`);
+                    const recoveredFailure = session.getLastPlaylistFailure?.();
+                    if (recoveredFailure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, recoveredFailure);
+                    logger.debug(`[StreamDownloader] ${alias} recovery candidate also failed`);
                     await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
             }
+            this.closeAccessIncident(alias, liveUrl, "playlist-recovered");
 
             const mapMatch = content.match(/#EXT-X-MAP:URI="([^"]+)"/);
             if (mapMatch) {
@@ -192,11 +278,25 @@ export class StreamDownloader {
 
                 if (!fetchResult.data) {
                     if (fetchResult.retryable) {
-                        logger.warn(`[StreamDownloader] ${alias} segment skipped segment=${segment.localName}`);
+                        logger.warn(`[StreamDownloader] ${alias} segment skipped`, {
+                            segment: segment.localName,
+                            error: fetchResult.error ?? "retryable-fetch-failure",
+                        });
                         playlistManager.addIgnoredSegment(segment.providerSequence);
                         continue;
                     }
-                    logger.warn(`[StreamDownloader] ${alias} segment download failed segment=${segment.localName} url=${segment.remoteUrl} — stopping`);
+                    if (fetchResult.status !== undefined) {
+                        await this.recordAccessFailure("segment", alias, masterUrl, liveUrl, {
+                            kind: "http",
+                            status: fetchResult.status,
+                        });
+                    }
+                    logger.warn(`[StreamDownloader] ${alias} segment download failed — stopping`, {
+                        segment: segment.localName,
+                        providerSequence: segment.providerSequence,
+                        status: fetchResult.status ?? null,
+                        error: fetchResult.error ?? null,
+                    });
                     segmentFailed = true;
                     break;
                 }

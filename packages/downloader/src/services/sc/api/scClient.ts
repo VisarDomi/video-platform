@@ -1,7 +1,13 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import logger from "../../../common/logger.js";
-import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
+import {
+    AccessFailureContext,
+    IDownloadSession,
+    IStreamProvider,
+    PlaylistFetchFailure,
+    StreamVariantDescription,
+} from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 import { normalizeRecordingId } from "../../download/segmentIdentity.js";
@@ -45,11 +51,28 @@ function parseFmp4Duration(data: Buffer): number {
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const CDN_TLDS = ["org", "com", "net"];
 const BULK_BATCH_SIZE = 100;
+const ACCESS_DIAGNOSTIC_TIMEOUT_MS = 5_000;
+
+interface ScVariant {
+    url: string;
+    bandwidth: number;
+    name: string;
+    resolution: string;
+    hasResolution: boolean;
+}
+
+function normalizedVariantKey(variantUrl: string): string {
+    return variantUrl
+        .split("?")[0]
+        .replace(/doppiocdn\.(org|com|net)/g, "doppiocdn._");
+}
 
 export class ScClient implements IStreamProvider {
     public readonly providerName = "sc";
     private latestStatuses = new Map<string, { status: string; isLive: boolean; statusChangedAt: string }>();
+    private latestStatusObservedAt = 0;
     private latestRecordingIds = new Map<string, string>();
+    private readonly selectedVariants = new Map<string, StreamVariantDescription>();
 
     constructor() {
         logger.info("[SC] ScClient initialized.");
@@ -169,17 +192,36 @@ export class ScClient implements IStreamProvider {
             }
 
             for (const model of data.models) {
-                result.set(String(model.id), {
+                const roomId = String(model.id);
+                const next = {
                     status: model.status ?? "unknown",
                     isLive: model.isLive ?? false,
                     statusChangedAt: model.statusChangedAt
                         ? normalizeRecordingId(String(model.statusChangedAt))
                         : "",
-                });
+                };
+                const previous = this.latestStatuses.get(roomId);
+                if (previous && (
+                    previous.status !== next.status
+                    || previous.isLive !== next.isLive
+                    || previous.statusChangedAt !== next.statusChangedAt
+                )) {
+                    logger.info("[SC] STATE_CHANGE", {
+                        streamerId: roomId,
+                        alias: model.username ?? null,
+                        fromStatus: previous.status,
+                        toStatus: next.status,
+                        fromIsLive: previous.isLive,
+                        toIsLive: next.isLive,
+                        statusChangedAt: next.statusChangedAt || null,
+                    });
+                }
+                result.set(roomId, next);
             }
         }
 
         this.latestStatuses = result;
+        this.latestStatusObservedAt = Date.now();
         return result;
     }
 
@@ -193,13 +235,12 @@ export class ScClient implements IStreamProvider {
         return `https://edge-hls.doppiocdn.${tld}/hls/${streamName}/master/${streamName}_auto.m3u8`;
     }
 
-    private selectBestVariantUrl(content: string, masterUrl: string): string | null {
+    private parseVariants(content: string, masterUrl: string): ScVariant[] {
         const { pkey } = getMouflonUrlParams(content);
-        if (!pkey) return null;
+        if (!pkey) return [];
 
         const lines = content.split("\n");
-        let bestNamed: { url: string; bandwidth: number } | null = null;
-        let bestAuto: { url: string; bandwidth: number } | null = null;
+        const variants: ScVariant[] = [];
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
@@ -210,36 +251,56 @@ export class ScClient implements IStreamProvider {
 
             const bwMatch = line.match(/BANDWIDTH=(\d+)/);
             const bandwidth = bwMatch ? parseInt(bwMatch[1], 10) : 0;
-            const hasResolution = line.includes("RESOLUTION=");
-
-            if (hasResolution) {
-                if (!bestNamed || bandwidth > bestNamed.bandwidth) {
-                    bestNamed = { url: nextLine, bandwidth };
-                }
-            } else {
-                if (!bestAuto || bandwidth > bestAuto.bandwidth) {
-                    bestAuto = { url: nextLine, bandwidth };
-                }
-            }
+            const resolution = line.match(/RESOLUTION=([^,]+)/)?.[1] ?? "unknown";
+            const name = line.match(/NAME="([^"]+)"/)?.[1] ?? "unnamed";
+            const variantUrl = new URL(nextLine, masterUrl).href;
+            const separator = variantUrl.includes("?") ? "&" : "?";
+            variants.push({
+                url: `${variantUrl}${separator}psch=v2&pkey=${pkey}`,
+                bandwidth,
+                name,
+                resolution,
+                hasResolution: line.includes("RESOLUTION="),
+            });
         }
 
-        const namedCount = lines.filter(l => l.trim().startsWith("#EXT-X-STREAM-INF") && l.includes("RESOLUTION=")).length;
-        const autoCount = lines.filter(l => l.trim().startsWith("#EXT-X-STREAM-INF") && !l.includes("RESOLUTION=")).length;
+        return variants;
+    }
+
+    private selectBestVariantUrl(content: string, masterUrl: string): string | null {
+        const variants = this.parseVariants(content, masterUrl);
+        const named = variants.filter((variant) => variant.hasResolution);
+        const auto = variants.filter((variant) => !variant.hasResolution);
+        const bestNamed = named.sort((a, b) => b.bandwidth - a.bandwidth)[0] ?? null;
+        const bestAuto = auto.sort((a, b) => b.bandwidth - a.bandwidth)[0] ?? null;
+
+        const namedCount = named.length;
+        const autoCount = auto.length;
 
         const best = bestNamed ?? bestAuto;
         if (!best) return null;
 
         if (!bestNamed) {
-            logger.warn(`[SC] No named variants in master playlist (auto=${autoCount}), falling back to auto variant: ${bestAuto!.url}`);
+            logger.warn("[SC] No named variants in master playlist; using best auto variant", {
+                autoCount,
+                variantPath: new URL(bestAuto!.url).pathname,
+                bandwidth: bestAuto!.bandwidth,
+            });
         } else {
-            const resMatch = lines.find(l => l.includes(`BANDWIDTH=${bestNamed!.bandwidth}`) && l.includes("RESOLUTION="))?.match(/RESOLUTION=(\S+)/);
-            const res = resMatch ? resMatch[1].replace(/,.*/, "") : "unknown";
-            logger.debug(`[SC] Master has ${namedCount} named + ${autoCount} auto variants. Best: ${res} @ ${bestNamed.bandwidth}bps → ${bestNamed.url}`);
+            logger.debug(`[SC] Master has ${namedCount} named + ${autoCount} auto variants. Best: ${bestNamed.resolution} @ ${bestNamed.bandwidth}bps → ${bestNamed.url.split("?")[0]}`);
         }
 
-        const variantUrl = new URL(best.url, masterUrl).href;
-        const separator = variantUrl.includes("?") ? "&" : "?";
-        return `${variantUrl}${separator}psch=v2&pkey=${pkey}`;
+        this.selectedVariants.set(normalizedVariantKey(best.url), {
+            name: best.name,
+            resolution: best.resolution,
+            bandwidth: best.bandwidth,
+            isMasterBest: true,
+        });
+        return best.url;
+    }
+
+    public describeVariant(url: string): StreamVariantDescription | null {
+        return this.selectedVariants.get(normalizedVariantKey(url)) ?? null;
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
@@ -258,7 +319,10 @@ export class ScClient implements IStreamProvider {
 
         const bestUrl = this.selectBestVariantUrl(result.text, masterUrl);
         if (!bestUrl) {
-            logger.warn(`[SC] No variants/mouflon key in master playlist: url=${masterUrl} body=${result.text.slice(0, 500)}`);
+            logger.warn("[SC] No variants or usable Mouflon key in master playlist", {
+                masterPath: new URL(masterUrl).pathname,
+                responseBytes: Buffer.byteLength(result.text),
+            });
             return null;
         }
 
@@ -266,6 +330,98 @@ export class ScClient implements IStreamProvider {
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
         logger.debug(`[SC] Selected variant: ${bestUrl.split("?")[0]} (edge=${edge})`);
         return bestUrl;
+    }
+
+    private async probePlaylist(url: string): Promise<{ status: number; decryptable: boolean; error?: string }> {
+        try {
+            const response = await fetch(url, {
+                headers: { "User-Agent": USER_AGENT },
+                signal: AbortSignal.timeout(ACCESS_DIAGNOSTIC_TIMEOUT_MS),
+            });
+            if (!response.ok) return { status: response.status, decryptable: false };
+            const content = await response.text();
+            return { status: response.status, decryptable: decryptM3u8(content) !== null };
+        } catch (error: any) {
+            return { status: 0, decryptable: false, error: error.name ?? "network-error" };
+        }
+    }
+
+    public async diagnoseAccessFailure(context: AccessFailureContext): Promise<Record<string, unknown>> {
+        const observedAt = Date.now();
+        const cached = this.latestStatuses.get(context.streamerId);
+        const camUrl = `https://stripchat.com/api/front/v2/models/${encodeURIComponent(context.streamerId)}/cam`;
+        const camData = await this.fetchApi<any>(camUrl, true);
+        const cam = camData?.cam && !Array.isArray(camData.cam) ? camData.cam : null;
+        const user = camData?.user?.user ?? null;
+        const freshStatus = typeof user?.status === "string" ? user.status : null;
+        const freshIsLive = typeof user?.isLive === "boolean" ? user.isLive : null;
+        const rawStatusChangedAt = user?.statusChangedAt ?? cam?.statusChangedAt ?? null;
+
+        let masterStatus = 0;
+        let variants: ScVariant[] = [];
+        try {
+            const response = await fetch(context.masterUrl, {
+                headers: { "User-Agent": USER_AGENT },
+                signal: AbortSignal.timeout(ACCESS_DIAGNOSTIC_TIMEOUT_MS),
+            });
+            masterStatus = response.status;
+            if (response.ok) variants = this.parseVariants(await response.text(), context.masterUrl);
+        } catch {
+            masterStatus = 0;
+        }
+
+        const ordered = [...variants].sort((a, b) => b.bandwidth - a.bandwidth);
+        const selected = ordered.find((variant) => normalizedVariantKey(variant.url) === normalizedVariantKey(context.liveUrl))
+            ?? ordered[0]
+            ?? null;
+        const nextLower = selected
+            ? ordered.find((variant) => variant.bandwidth < selected.bandwidth) ?? null
+            : null;
+
+        let alternateUrl: string | null = null;
+        if (selected) {
+            const currentTld = selected.url.match(/doppiocdn\.(org|com|net)/)?.[1] ?? null;
+            const alternateTld = CDN_TLDS.find((tld) => tld !== currentTld) ?? null;
+            if (currentTld && alternateTld) {
+                alternateUrl = selected.url.replace(`doppiocdn.${currentTld}`, `doppiocdn.${alternateTld}`);
+            }
+        }
+        const [primaryProbe, alternateProbe, lowerProbe] = await Promise.all([
+            selected ? this.probePlaylist(selected.url) : Promise.resolve(null),
+            alternateUrl ? this.probePlaylist(alternateUrl) : Promise.resolve(null),
+            nextLower ? this.probePlaylist(nextLower.url) : Promise.resolve(null),
+        ]);
+
+        const describe = (variant: ScVariant | null) => variant ? {
+            name: variant.name,
+            resolution: variant.resolution,
+            bandwidth: variant.bandwidth,
+        } : null;
+
+        return {
+            evidenceObservedAt: new Date(observedAt).toISOString(),
+            providerState: {
+                source: freshStatus ? "fresh-cam" : cached ? "cached-bulk" : "unavailable",
+                status: freshStatus ?? cached?.status ?? "unknown",
+                isLive: freshIsLive ?? cached?.isLive ?? null,
+                camActive: typeof cam?.isCamActive === "boolean" ? cam.isCamActive : null,
+                camAvailable: typeof cam?.isCamAvailable === "boolean" ? cam.isCamAvailable : null,
+                statusChangedAt: rawStatusChangedAt,
+                cachedAgeMs: this.latestStatusObservedAt > 0 ? observedAt - this.latestStatusObservedAt : null,
+            },
+            master: {
+                status: masterStatus,
+                variants: ordered.map((variant, index) => ({ ...describe(variant), rank: index + 1 })),
+            },
+            selected: describe(selected),
+            nextLower: describe(nextLower),
+            probes: {
+                selectedPrimary: primaryProbe,
+                selectedAlternateTld: alternateProbe,
+                nextLower: lowerProbe,
+            },
+            behavior: "observe-only",
+        };
     }
 
     public createDownloadSession(): IDownloadSession {
@@ -327,8 +483,7 @@ const CDN_HEADERS = { "User-Agent": USER_AGENT };
 
 
 class ScDownloadSession implements IDownloadSession {
-    private playlistFailCount = 0;
-    private lastPlaylistFailStatus = 0;
+    private lastPlaylistFailure: PlaylistFetchFailure | null = null;
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
@@ -338,34 +493,26 @@ class ScDownloadSession implements IDownloadSession {
             });
 
             if (!response.ok) {
-                this.playlistFailCount++;
-                if (response.status !== this.lastPlaylistFailStatus) {
-                    logger.warn(`[SC] Playlist fetch failed: status=${response.status} url=${url}`);
-                    this.lastPlaylistFailStatus = response.status;
-                }
+                this.lastPlaylistFailure = { kind: "http", status: response.status };
                 return null;
-            }
-
-            if (this.playlistFailCount > 0) {
-                logger.info(`[SC] Playlist fetch recovered after ${this.playlistFailCount} failures url=${url}`);
-                this.playlistFailCount = 0;
-                this.lastPlaylistFailStatus = 0;
             }
 
             const text = await response.text();
             const decrypted = decryptM3u8(text);
             if (!decrypted) {
-                logger.warn(`[SC] Playlist decryption failed (mouflon keys missing or wrong): url=${url}`);
+                this.lastPlaylistFailure = { kind: "decrypt" };
                 return null;
             }
+            this.lastPlaylistFailure = null;
             return decrypted;
         } catch (error: any) {
-            this.playlistFailCount++;
-            if (this.playlistFailCount === 1) {
-                logger.error(`[SC] Playlist fetch error: ${url}`, { error: error.message });
-            }
+            this.lastPlaylistFailure = { kind: "network", error: error.name ?? "network-error" };
             return null;
         }
+    }
+
+    public getLastPlaylistFailure(): PlaylistFetchFailure | null {
+        return this.lastPlaylistFailure ? { ...this.lastPlaylistFailure } : null;
     }
 
     public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
@@ -378,11 +525,9 @@ class ScDownloadSession implements IDownloadSession {
                 const buf = await response.arrayBuffer();
                 return { data: Buffer.from(buf) };
             }
-            logger.warn(`[SC] Segment download failed: ${response.status}`, { tsUrl });
-            return { data: null, retryable: false };
+            return { data: null, retryable: false, status: response.status };
         } catch (error: any) {
-            logger.warn(`[SC] Segment fetch error: ${error.message}`, { tsUrl });
-            return { data: null, retryable: true };
+            return { data: null, retryable: true, error: error.name ?? "network-error" };
         }
     }
 }

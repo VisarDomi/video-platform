@@ -11,6 +11,7 @@ import { PlaylistManager } from "./playlistManager.js";
 import { InitTracker } from "./initTracker.js";
 import { DiskSession } from "./diskSession.js";
 import { handoffActiveRecording } from "./activeRecording.js";
+import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 
 export interface SessionResult {
     totalSegments: number;
@@ -71,9 +72,10 @@ export class StreamSession {
 
         let masterUrl = initialMasterUrl;
         let endedByUpstream = false;
+        const accessIncidents = new AccessIncidentTracker();
 
         while (!this._aborted) {
-            const downloader = new StreamDownloader(this.handle, this.provider);
+            const downloader = new StreamDownloader(this.handle, this.provider, accessIncidents);
             this.activeDownloader = downloader;
             const result = await downloader.run(masterUrl, playlistManager, initTracker, disk);
             this.activeDownloader = null;
@@ -103,6 +105,31 @@ export class StreamSession {
 
             logger.info(`[StreamSession] ${this.alias}: retrying (reason=${result.exitReason}, newMaster=${masterUrl !== context.lastMasterUrl})`);
             await timersPromises.setTimeout(SESSION_RETRY_SLEEP_MS);
+        }
+
+        const outstandingIncident = accessIncidents.close(
+            this._finalizeRequested
+                ? "provider-finalized"
+                : this._aborted
+                    ? "shutdown-abort"
+                    : endedByUpstream
+                        ? "upstream-endlist"
+                        : "session-ended",
+        );
+        if (outstandingIncident) {
+            logger.info(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_CLOSE`, {
+                provider: this.provider.providerName,
+                streamerId: this.streamerId,
+                alias: this.alias,
+                recordingId: this.recordingId,
+                outcome: outstandingIncident.outcome,
+                durationMs: outstandingIncident.durationMs,
+                attempts: outstandingIncident.attempts,
+                failures: outstandingIncident.failures,
+                selected: this.handle.state?.liveUrl
+                    ? this.provider.describeVariant?.(this.handle.state.liveUrl) ?? null
+                    : null,
+            });
         }
 
         if (disk.materialized && (endedByUpstream || this._finalizeRequested)) {

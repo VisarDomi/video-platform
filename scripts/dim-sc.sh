@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-edited_root="${SC_EDITED_ROOT:-/home/visar/Videos/downloads/sc/edited}"
+edited_root="${SC_EDITED_ROOT:-/home/visar/Videos/downloads/sc/downloaded}"
 
 usage() {
     printf 'Usage: %s "STREAMER_ID"\n' "$(basename "$0")" >&2
