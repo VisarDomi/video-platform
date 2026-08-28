@@ -67,7 +67,7 @@ export class TargetCatalogResolver {
     static load(config: TargetResolverConfig): TargetCatalogResolver {
         return new TargetCatalogResolver(
             config.resolveIdentifier
-                ?? defaultServerResolver(config.serverUrl ?? "http://127.0.0.1:7973"),
+                ?? defaultServerResolver(config.serverUrl ?? "http://127.0.0.1:9999"),
         );
     }
 
