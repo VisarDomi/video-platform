@@ -18,12 +18,14 @@ import {
 } from "./commands/campaign.js";
 import type { CampaignProviderFilter } from "./domain/types.js";
 import { runCampaignWorker } from "./commands/runCampaignWorker.js";
+import { parseRemuxOneArguments } from "./commands/remuxOneArguments.js";
 
 function usage(): never {
     throw new Error([
         "Usage: pipeline <command>",
         "Commands:",
-        "  status | discover-plan | discover --apply | remux-one --recording PATH",
+        "  status | discover-plan | discover --apply",
+        "  remux-one --recording PATH [--upscale1080p | --upscale1440p]",
         "  describe-one --recording ID",
         "  process-one --apply | provenance-refresh --apply | provenance-review",
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
@@ -89,9 +91,12 @@ async function main(): Promise<void> {
     }
     if (command === "remux-one") {
         assertCampaignIdle(pipelineConfig);
-        const args = process.argv.slice(3);
-        if (args.length !== 2 || args[0] !== "--recording" || args[1] === "") usage();
-        console.log(JSON.stringify(await ensureFinalizedRemuxOne(args[1], pipelineConfig), null, 2));
+        const args = parseRemuxOneArguments(process.argv.slice(3));
+        console.log(JSON.stringify(
+            await ensureFinalizedRemuxOne(args.recordingPath, pipelineConfig, args.upscaleMode),
+            null,
+            2,
+        ));
         return;
     }
     if (command === "describe-one") {

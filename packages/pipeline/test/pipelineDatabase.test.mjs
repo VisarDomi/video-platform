@@ -133,6 +133,30 @@ test("description evidence must name the exact validated artifact hash", async (
     assert.equal(database.get(recording.id)?.state, "artifact_valid");
 });
 
+test("named artifact variants coexist without changing canonical state or artifact", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    assert.equal(recording.state, "server_ready");
+    const variant = database.saveArtifactVariant(recording.id, "upscale1080p", {
+        path: path.join(directory, `${recording.id}.upscale1080p.mp4`),
+        sizeBytes: 2_000,
+        sha256: "d".repeat(64),
+        validatedAt: new Date("2026-08-28T08:00:00Z").toISOString(),
+    }, 300, 10);
+    assert.equal(variant.variant, "upscale1080p");
+    assert.equal(variant.sourceFrameCount, 300);
+    assert.equal(variant.droppedSourceFrames, 10);
+    assert.equal(database.getArtifact(recording.id), null);
+    assert.equal(database.get(recording.id)?.state, "server_ready");
+    assert.deepEqual(database.listArtifactVariants(recording.id), [variant]);
+    assert.throws(() => database.saveArtifactVariant(recording.id, "upscale1440p", {
+        path: path.join(directory, `${recording.id}.upscale1440p.mp4`),
+        sizeBytes: 2_000,
+        sha256: "e".repeat(64),
+        validatedAt: new Date().toISOString(),
+    }, 10, 10), /valid source and dropped frame counts/);
+});
+
 test("monthly quota reserves atomically, counts retries, and rolls over by timezone", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const first = database.discover(input(directory, "one"));

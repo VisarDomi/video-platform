@@ -23,11 +23,11 @@ test("manual remux accepts an exact server-verified downloader folder outside pr
     const segmentPath = path.join(recordingPath, "00001.ts");
     await execFileAsync("ffmpeg", [
         "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=10",
-        "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=10",
+        "-t", "0.3", "-c:v", "libx264", "-pix_fmt", "yuv420p",
         "-f", "mpegts", segmentPath,
     ]);
-    const playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n00001.ts\n#EXT-X-ENDLIST\n";
+    const playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.3,\n00001.ts\n#EXT-X-ENDLIST\n";
     await writeFile(path.join(recordingPath, "playlist.m3u8"), playlist);
 
     const finalizationDatabasePath = path.join(dataRoot, "finalization.sqlite");
@@ -68,8 +68,41 @@ test("manual remux accepts an exact server-verified downloader folder outside pr
     assert.equal(result.authority, "recording-checkpoint");
     assert.equal(result.state, "artifact_valid");
     assert.equal(result.videoCodec, "h264");
+    assert.equal(result.artifactMode, "stream-copy");
+    assert.equal(result.videoWidth, 1280);
+    assert.equal(result.videoHeight, 720);
+    assert.equal(result.sourceFrameCount, null);
+    assert.equal(result.droppedSourceFrames, null);
     assert.match(result.sha256, /^[a-f0-9]{64}$/);
     assert.equal(path.dirname(result.artifactPath), config.stagingRoot);
+
+    const ledgerBeforeVariant = new DatabaseSync(config.databasePath, { readOnly: true });
+    const stateBeforeVariant = ledgerBeforeVariant
+        .prepare("SELECT state FROM recordings WHERE id = ?").get(result.recordingId).state;
+    ledgerBeforeVariant.close();
+    const upscale = await remuxOne(recordingPath, config, { upscaleMode: "upscale1080p" });
+    assert.equal(upscale.state, stateBeforeVariant);
+    assert.equal(upscale.artifactMode, "upscale1080p");
+    assert.equal(upscale.videoWidth, 1920);
+    assert.equal(upscale.videoHeight, 1080);
+    assert.equal(upscale.sampleAspectRatio, "1:1");
+    assert.equal(upscale.displayAspectRatio, "16:9");
+    assert.equal(upscale.pixelFormat, "yuv420p");
+    assert.equal(upscale.sourceFrameCount, 3);
+    assert.equal(upscale.droppedSourceFrames, 0);
+    assert.notEqual(upscale.artifactPath, result.artifactPath);
+    assert.match(upscale.artifactPath, /\.upscale1080p\.mp4$/);
+
+    const ledger = new DatabaseSync(config.databasePath, { readOnly: true });
+    const canonical = ledger.prepare("SELECT path FROM artifacts WHERE recording_id = ?").get(result.recordingId);
+    const variant = ledger.prepare(`
+        SELECT variant, path FROM artifact_variants WHERE recording_id = ? AND variant = 'upscale1080p'
+    `).get(result.recordingId);
+    const stateAfterVariant = ledger.prepare("SELECT state FROM recordings WHERE id = ?").get(result.recordingId).state;
+    ledger.close();
+    assert.equal(canonical.path, result.artifactPath);
+    assert.equal(variant.path, upscale.artifactPath);
+    assert.equal(stateAfterVariant, stateBeforeVariant);
 });
 
 test("single remux refuses a historical folder without exact server authority", async (t) => {
