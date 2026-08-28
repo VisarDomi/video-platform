@@ -147,9 +147,9 @@ Safari actually presented and made time-based editing inaccurate.
 
 The bulk API returns both. `isOnline` returns `false` for some actively broadcasting streamers. `isLive` is the correct field.
 
-## SC skip NAME="source" variant
+## SC selects the highest-bandwidth named variant, including source
 
-The "source" variant is the raw broadcaster feed — the CDN restricts it with 403. Select the highest bandwidth transcoded variant instead.
+The SC master playlist's `NAME="source"` variant is the broadcaster's highest-quality feed and is downloadable with the same Mouflon parameters as transcoded variants. Include it in normal bandwidth-based selection rather than forcing recordings down to the highest transcoded resolution.
 
 ## No token cache — read from disk on every request
 
