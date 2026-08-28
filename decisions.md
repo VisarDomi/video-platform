@@ -1,5 +1,18 @@
 # Monorepo Decisions
 
+## Supervised upscales are named artifact variants (2026-08-28)
+
+`remux-one` has two explicitly supervised comparison modes:
+`--upscale1080p` and `--upscale1440p`. They decode every source video frame,
+drop frames whose coded short edge is below 720 or 1080 pixels respectively,
+preserve display aspect ratio and orientation without crop or padding, resize
+with zscale Lanczos, and encode H.264/yuv420p with libx264 slow CRF 16 while
+stream-copying audio. The outputs are suffixed `.upscale1080p.mp4` or
+`.upscale1440p.mp4` and are recorded in `artifact_variants`; they never replace
+the canonical stream-copy artifact or advance/reset recording, description,
+quota, upload, or remote-identity state. The normal campaign remains
+stream-copy-only.
+
 ## Processing exposes parallel work; systemd owns allocation (2026-08-27)
 
 CPU-intensive application paths must expose enough runnable work to saturate

@@ -10,12 +10,25 @@ export interface ValidatedArtifact {
     readonly durationSeconds: number;
     readonly videoCodec: string | null;
     readonly audioCodec: string | null;
+    readonly videoWidth: number | null;
+    readonly videoHeight: number | null;
+    readonly sampleAspectRatio: string | null;
+    readonly displayAspectRatio: string | null;
+    readonly pixelFormat: string | null;
     readonly validatedAt: string;
 }
 
 interface ProbeOutput {
     format?: { duration?: string; format_name?: string };
-    streams?: Array<{ codec_type?: string; codec_name?: string }>;
+    streams?: Array<{
+        codec_type?: string;
+        codec_name?: string;
+        width?: number;
+        height?: number;
+        sample_aspect_ratio?: string;
+        display_aspect_ratio?: string;
+        pix_fmt?: string;
+    }>;
 }
 
 async function run(command: string, args: readonly string[]): Promise<string> {
@@ -51,14 +64,16 @@ export async function validateArtifact(artifactPath: string, now = new Date()): 
 
     const probe = JSON.parse(await run("ffprobe", [
         "-v", "error",
-        "-show_entries", "format=duration,format_name:stream=codec_type,codec_name",
+        "-show_entries",
+        "format=duration,format_name:stream=codec_type,codec_name,width,height,sample_aspect_ratio,display_aspect_ratio,pix_fmt",
         "-of", "json",
         resolvedPath,
     ])) as ProbeOutput;
     const durationSeconds = Number.parseFloat(probe.format?.duration ?? "");
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error("Artifact has no positive duration");
     if (!probe.format?.format_name?.split(",").includes("mp4")) throw new Error("Artifact is not an MP4 container");
-    const videoCodec = probe.streams?.find((stream) => stream.codec_type === "video")?.codec_name ?? null;
+    const videoStream = probe.streams?.find((stream) => stream.codec_type === "video");
+    const videoCodec = videoStream?.codec_name ?? null;
     const audioCodec = probe.streams?.find((stream) => stream.codec_type === "audio")?.codec_name ?? null;
     if (!videoCodec && !audioCodec) throw new Error("Artifact has neither a video nor audio stream");
 
@@ -75,6 +90,11 @@ export async function validateArtifact(artifactPath: string, now = new Date()): 
         durationSeconds,
         videoCodec,
         audioCodec,
+        videoWidth: videoStream?.width ?? null,
+        videoHeight: videoStream?.height ?? null,
+        sampleAspectRatio: videoStream?.sample_aspect_ratio ?? null,
+        displayAspectRatio: videoStream?.display_aspect_ratio ?? null,
+        pixelFormat: videoStream?.pix_fmt ?? null,
         validatedAt: now.toISOString(),
     };
 }

@@ -10,6 +10,7 @@ import { readRecordingFinalization } from "../discovery/recordingFinalization.js
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { remuxOne } from "./remuxOne.js";
+import type { UpscaleMode } from "../stages/upscale.js";
 
 function serverFinalizerEntrypoint(): string {
     return path.resolve(
@@ -47,39 +48,45 @@ async function finalizeExactRecording(recordingPath: string): Promise<void> {
     });
 }
 
-export async function ensureFinalizedRemuxOne(requestedPath: string, config: PipelineConfig) {
+export async function ensureFinalizedRemuxOne(
+    requestedPath: string,
+    config: PipelineConfig,
+    upscaleMode: UpscaleMode | null = null,
+) {
     const recordingPath = path.resolve(requestedPath);
     const root = config.manualRemuxRoots.find((candidate) => path.resolve(candidate.path) === path.dirname(recordingPath));
     if (!root || path.basename(recordingPath).startsWith(".")) {
         throw new Error("--recording must be one visible immediate child of a managed downloader or edited root");
     }
-    // Never start remux/finalization work on a recording that is already on
-    // XVideos: the ledger identity (edit ID) is the single source of truth.
-    const identityDatabase = new PipelineDatabase(config.databasePath);
-    try {
-        const existing = identityDatabase.findRecordingByBasename(root.provider, path.basename(recordingPath));
-        if (existing) {
-            const outcome = await guardUploadIdentity(identityDatabase, existing, config);
-            if (outcome.kind === "verified_cleaned") {
-                return {
-                    mode: "single-recording-remux",
-                    recordingId: existing.id,
-                    sourcePath: recordingPath,
-                    disposition: "already_verified_cleaned",
-                    state: identityDatabase.get(existing.id)?.state,
-                    remoteId: outcome.remoteId,
-                };
+    if (upscaleMode === null) {
+        // Canonical remux work is identity-guarded. A named upscale variant is
+        // local comparison evidence only and does not alter upload identity.
+        const identityDatabase = new PipelineDatabase(config.databasePath);
+        try {
+            const existing = identityDatabase.findRecordingByBasename(root.provider, path.basename(recordingPath));
+            if (existing) {
+                const outcome = await guardUploadIdentity(identityDatabase, existing, config);
+                if (outcome.kind === "verified_cleaned") {
+                    return {
+                        mode: "single-recording-remux",
+                        recordingId: existing.id,
+                        sourcePath: recordingPath,
+                        disposition: "already_verified_cleaned",
+                        state: identityDatabase.get(existing.id)?.state,
+                        remoteId: outcome.remoteId,
+                    };
+                }
+                if (outcome.kind === "unverified_refused") {
+                    throw new Error(refusalMessage(outcome));
+                }
             }
-            if (outcome.kind === "unverified_refused") {
-                throw new Error(refusalMessage(outcome));
-            }
+        } finally {
+            identityDatabase.close();
         }
-    } finally {
-        identityDatabase.close();
     }
     // Admission-time remote check: the folder name is the local truth, the
     // edit-page title is the XVideos truth.
-    if (config.networkUploadsEnabled) {
+    if (upscaleMode === null && config.networkUploadsEnabled) {
         const credentials = await readXvideosCredentials(config.credentialsFilePath);
         const uploader = new ChromiumXvideosUploader({
             executablePath: config.chromiumExecutablePath,
@@ -130,5 +137,5 @@ export async function ensureFinalizedRemuxOne(requestedPath: string, config: Pip
     if (!await hasExactCheckpoint(recordingPath, config)) {
         throw new Error("Server finalization completed without a matching ready checkpoint");
     }
-    return { finalizedNow, ...await remuxOne(recordingPath, config) };
+    return { finalizedNow, ...await remuxOne(recordingPath, config, { upscaleMode }) };
 }

@@ -30,6 +30,14 @@ export interface ArtifactRecord {
     readonly validatedAt: string;
 }
 
+export type ArtifactVariant = "upscale1080p" | "upscale1440p";
+
+export interface ArtifactVariantRecord extends ArtifactRecord {
+    readonly variant: ArtifactVariant;
+    readonly sourceFrameCount: number;
+    readonly droppedSourceFrames: number;
+}
+
 export type ProvenanceResolutionStatus = "resolved" | "review_required" | "manual";
 
 export interface RecordingProvenance {

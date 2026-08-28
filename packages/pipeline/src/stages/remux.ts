@@ -19,21 +19,33 @@ export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput:
     ];
 }
 
-export function containedArtifactPath(stagingRoot: string, recordingId: string): string {
+export function containedArtifactPath(
+    stagingRoot: string,
+    recordingId: string,
+    artifactSuffix?: string,
+): string {
     // Recording IDs are folder names (datetime + alias): no slashes, no
     // traversal, sane length.
     if (!/^[^/\\]{1,200}$/.test(recordingId)) throw new Error("Invalid recording ID for artifact path");
+    if (artifactSuffix !== undefined && !/^[a-z0-9-]+$/.test(artifactSuffix)) {
+        throw new Error("Invalid artifact suffix");
+    }
     const resolvedRoot = path.resolve(stagingRoot);
-    const artifactPath = path.resolve(resolvedRoot, `${recordingId}.mp4`);
+    const suffix = artifactSuffix === undefined ? "" : `.${artifactSuffix}`;
+    const artifactPath = path.resolve(resolvedRoot, `${recordingId}${suffix}.mp4`);
     if (path.dirname(artifactPath) !== resolvedRoot) throw new Error("Artifact path escapes staging root");
     return artifactPath;
 }
 
-export async function prepareAtomicRemuxPaths(stagingRoot: string, recordingId: string): Promise<{
+export async function prepareAtomicRemuxPaths(
+    stagingRoot: string,
+    recordingId: string,
+    artifactSuffix?: string,
+): Promise<{
     finalPath: string;
     temporaryPath: string;
 }> {
-    const finalPath = containedArtifactPath(stagingRoot, recordingId);
+    const finalPath = containedArtifactPath(stagingRoot, recordingId, artifactSuffix);
     await fs.mkdir(path.dirname(finalPath), { recursive: true });
     return {
         finalPath,

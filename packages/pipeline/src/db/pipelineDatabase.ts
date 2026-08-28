@@ -5,6 +5,8 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type {
     ArtifactRecord,
+    ArtifactVariant,
+    ArtifactVariantRecord,
     CampaignControl,
     CampaignProviderFilter,
     DescriptionRecord,
@@ -16,7 +18,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
 interface RecordingRow {
@@ -42,6 +44,12 @@ interface ArtifactRow {
     size_bytes: number;
     sha256: string;
     validated_at: string;
+}
+
+interface ArtifactVariantRow extends ArtifactRow {
+    variant: ArtifactVariant;
+    source_frame_count: number;
+    dropped_source_frames: number;
 }
 
 interface UsageRow { spent: number; reserved: number }
@@ -107,6 +115,15 @@ function mapArtifact(row: ArtifactRow): ArtifactRecord {
     };
 }
 
+function mapArtifactVariant(row: ArtifactVariantRow): ArtifactVariantRecord {
+    return {
+        ...mapArtifact(row),
+        variant: row.variant,
+        sourceFrameCount: row.source_frame_count,
+        droppedSourceFrames: row.dropped_source_frames,
+    };
+}
+
 export function calendarMonth(date: Date, timeZone: string): string {
     const parts = new Intl.DateTimeFormat("en-CA", {
         timeZone,
@@ -167,6 +184,19 @@ export class PipelineDatabase {
                 size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
                 sha256 TEXT NOT NULL,
                 validated_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS artifact_variants (
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                variant TEXT NOT NULL CHECK (variant IN ('upscale1080p', 'upscale1440p')),
+                path TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+                sha256 TEXT NOT NULL,
+                source_frame_count INTEGER NOT NULL CHECK (source_frame_count > 0),
+                dropped_source_frames INTEGER NOT NULL CHECK (
+                    dropped_source_frames >= 0 AND dropped_source_frames < source_frame_count
+                ),
+                validated_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, variant)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS remux_outputs (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
@@ -301,7 +331,7 @@ export class PipelineDatabase {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN progress_bytes INTEGER NOT NULL DEFAULT 0");
         }
         const version = this.database.prepare("SELECT version FROM schema_version").get() as { version: number };
-        if (version.version === 2 || version.version === 3) {
+        if (version.version === 2 || version.version === 3 || version.version === 4) {
             this.database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
@@ -787,7 +817,70 @@ export class PipelineDatabase {
         return row ? mapArtifact(row) : null;
     }
 
-    saveRemuxOutput(id: string, outputPath: string, now = new Date()): Recording {
+    saveArtifactVariant(
+        id: string,
+        variant: ArtifactVariant,
+        artifact: Omit<ArtifactRecord, "recordingId">,
+        sourceFrameCount: number,
+        droppedSourceFrames: number,
+    ): ArtifactVariantRecord {
+        this.requireRecording(id);
+        if (!Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes <= 0
+            || !/^[a-f0-9]{64}$/.test(artifact.sha256)) {
+            throw new Error("Artifact variant requires a positive integer size and lowercase SHA-256");
+        }
+        if (!Number.isSafeInteger(sourceFrameCount) || sourceFrameCount <= 0
+            || !Number.isSafeInteger(droppedSourceFrames) || droppedSourceFrames < 0
+            || droppedSourceFrames >= sourceFrameCount) {
+            throw new Error("Artifact variant requires valid source and dropped frame counts");
+        }
+        this.database.prepare(`
+            INSERT INTO artifact_variants (
+                recording_id, variant, path, size_bytes, sha256,
+                source_frame_count, dropped_source_frames, validated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(recording_id, variant) DO UPDATE SET
+                path = excluded.path,
+                size_bytes = excluded.size_bytes,
+                sha256 = excluded.sha256,
+                source_frame_count = excluded.source_frame_count,
+                dropped_source_frames = excluded.dropped_source_frames,
+                validated_at = excluded.validated_at
+        `).run(
+            id,
+            variant,
+            path.resolve(artifact.path),
+            artifact.sizeBytes,
+            artifact.sha256,
+            sourceFrameCount,
+            droppedSourceFrames,
+            artifact.validatedAt,
+        );
+        const saved = this.getArtifactVariant(id, variant);
+        if (!saved) throw new Error(`Failed to save ${variant} artifact for ${id}`);
+        return saved;
+    }
+
+    getArtifactVariant(id: string, variant: ArtifactVariant): ArtifactVariantRecord | null {
+        const row = this.database.prepare(`
+            SELECT * FROM artifact_variants WHERE recording_id = ? AND variant = ?
+        `).get(id, variant) as ArtifactVariantRow | undefined;
+        return row ? mapArtifactVariant(row) : null;
+    }
+
+    listArtifactVariants(id: string): ArtifactVariantRecord[] {
+        const rows = this.database.prepare(`
+            SELECT * FROM artifact_variants WHERE recording_id = ? ORDER BY variant
+        `).all(id) as unknown as ArtifactVariantRow[];
+        return rows.map(mapArtifactVariant);
+    }
+
+    saveRemuxOutput(
+        id: string,
+        outputPath: string,
+        now = new Date(),
+        eventReason = "stream-copy artifact published",
+    ): Recording {
         const timestamp = now.toISOString();
         this.transaction(() => {
             this.database.prepare(`
@@ -795,7 +888,7 @@ export class PipelineDatabase {
                 VALUES (?, ?, ?)
                 ON CONFLICT(recording_id) DO UPDATE SET path = excluded.path, created_at = excluded.created_at
             `).run(id, path.resolve(outputPath), timestamp);
-            this.updateStateInTransaction(id, "server_ready", "remuxed", "stream-copy artifact published", timestamp);
+            this.updateStateInTransaction(id, "server_ready", "remuxed", eventReason, timestamp);
         });
         return this.requireRecording(id);
     }
@@ -1202,7 +1295,7 @@ export class PipelineDatabase {
             for (const table of [
                 "upload_confirmations", "upload_attempts", "upload_reservations",
                 "remote_uploads", "recording_provenance", "upload_metadata",
-                "descriptions", "remux_outputs", "artifacts", "state_events",
+                "descriptions", "artifact_variants", "remux_outputs", "artifacts", "state_events",
             ]) {
                 this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
             }

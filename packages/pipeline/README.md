@@ -78,6 +78,27 @@ server processor:
 npm run remux-one -w pipeline -- --recording "/absolute/managed/recording/folder"
 ```
 
+For controlled provider-quality experiments, the same command can create a
+named upscale variant without replacing the canonical artifact or changing the
+recording's pipeline/upload state:
+
+```bash
+npm run remux-one -w pipeline -- \
+  --recording "/absolute/managed/recording/folder" --upscale1080p
+
+npm run remux-one -w pipeline -- \
+  --recording "/absolute/managed/recording/folder" --upscale1440p
+```
+
+The modes are mutually exclusive. `--upscale1080p` drops decoded source frames
+whose coded short edge is below 720 pixels and targets a 1080-pixel short edge;
+`--upscale1440p` uses a 1080-pixel floor and a 1440-pixel target. Both preserve
+display aspect ratio (including portrait video) with no crop or padding, use
+zscale Lanczos plus libx264 slow/CRF 16/yuv420p, and stream-copy audio. Their
+files end in `.upscale1080p.mp4` or `.upscale1440p.mp4` and their validation
+records live separately in `artifact_variants`. They are comparison artifacts,
+not automatic campaign/upload inputs.
+
 The result contains a recording ID. Describe that exact validated artifact and
 compose its upload metadata durably:
 
