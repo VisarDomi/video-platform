@@ -56,7 +56,14 @@ async function startServer() {
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);
 
-  app.use(express.static(FRONTEND_DIST_PATH));
+  const frontendAssetsPath = path.join(FRONTEND_DIST_PATH, "assets") + path.sep;
+  app.use(express.static(FRONTEND_DIST_PATH, {
+    setHeaders: (res, filePath) => {
+      if (filePath.startsWith(frontendAssetsPath)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }));
 
   app.get(/.*/, (_req: Request, res: Response) => {
     res.sendFile(path.join(FRONTEND_DIST_PATH, FILE_NAMES.INDEX_HTML));

@@ -1,6 +1,6 @@
 # Video Platform
 
-Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `7973`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing foundation), and `userscripts` (browser download-list controls for ladder/fmp4; built with Vite + vite-plugin-monkey).
+Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `9999`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing foundation), and `userscripts` (browser download-list controls for ladder/fmp4; built with Vite + vite-plugin-monkey).
 
 Providers: `tslive`, `ladder`, `fmp4`.
 Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for pipeline Chromium). Upload verification runs inline in the campaign worker; the old `video-reconcile.timer` (daily 04:33) and the old `video-descriptor` unit were removed; do not recreate either.

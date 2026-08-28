@@ -45,7 +45,7 @@ export const HLS = {
 } as const;
 
 export const API = {
-    PORT: 7973,
+    PORT: 9999,
     HOST: "0.0.0.0",
     JSON_LIMIT: "10mb",
     MESSAGES: {
