@@ -6,6 +6,8 @@ import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import { readRecordingFinalization } from "../discovery/recordingFinalization.js";
 import { streamCopyRemux } from "../stages/remux.js";
+import { containedArtifactPath } from "../stages/remux.js";
+import { upscaleTranscode, type UpscaleMode } from "../stages/upscale.js";
 import { validateArtifact, type ValidatedArtifact } from "../stages/validateArtifact.js";
 
 export interface RemuxOneResult {
@@ -20,11 +22,24 @@ export interface RemuxOneResult {
     readonly durationSeconds: number;
     readonly videoCodec: string | null;
     readonly audioCodec: string | null;
+    readonly artifactMode: "stream-copy" | UpscaleMode;
+    readonly videoWidth: number | null;
+    readonly videoHeight: number | null;
+    readonly sampleAspectRatio: string | null;
+    readonly displayAspectRatio: string | null;
+    readonly pixelFormat: string | null;
+    readonly sourceFrameCount: number | null;
+    readonly droppedSourceFrames: number | null;
+}
+
+export interface RemuxOneOptions {
+    readonly upscaleMode?: UpscaleMode | null;
 }
 
 export async function remuxOne(
     requestedPath: string,
     config: PipelineConfig,
+    options: RemuxOneOptions = {},
 ): Promise<RemuxOneResult> {
     const sourcePath = path.resolve(requestedPath);
     const root = config.manualRemuxRoots.find(
@@ -56,6 +71,61 @@ export async function remuxOne(
     try {
         let recording = database.discover(inspection.recording);
         let validatedArtifact: ValidatedArtifact | null = null;
+        const upscaleMode = options.upscaleMode ?? null;
+        if (upscaleMode !== null) {
+            // Comparison artifacts are durable named variants, not recording
+            // state transitions. The canonical artifact and every downstream
+            // upload/description identity remain untouched.
+            const transcoded = await upscaleTranscode(
+                recording.playlistPath,
+                config.stagingRoot,
+                recording.id,
+                upscaleMode,
+            );
+            const validated = await validateArtifact(transcoded.path);
+            if (validated.videoWidth !== transcoded.plan.outputWidth
+                || validated.videoHeight !== transcoded.plan.outputHeight) {
+                throw new Error(
+                    `${upscaleMode} produced ${validated.videoWidth ?? "unknown"}x${validated.videoHeight ?? "unknown"}; `
+                    + `expected ${transcoded.plan.outputWidth}x${transcoded.plan.outputHeight}`,
+                );
+            }
+            if (validated.sampleAspectRatio !== "1:1") {
+                throw new Error(`${upscaleMode} output sample aspect ratio is not 1:1`);
+            }
+            if (validated.pixelFormat !== "yuv420p") {
+                throw new Error(`${upscaleMode} output pixel format is not yuv420p`);
+            }
+            const variant = database.saveArtifactVariant(
+                recording.id,
+                upscaleMode,
+                validated,
+                transcoded.plan.sourceFrameCount,
+                transcoded.plan.droppedSourceFrames,
+            );
+            return {
+                mode: "single-recording-remux",
+                recordingId: recording.id,
+                sourcePath: recording.sourcePath,
+                authority: "recording-checkpoint",
+                state: recording.state,
+                artifactPath: variant.path,
+                sizeBytes: variant.sizeBytes,
+                sha256: variant.sha256,
+                durationSeconds: validated.durationSeconds,
+                videoCodec: validated.videoCodec,
+                audioCodec: validated.audioCodec,
+                artifactMode: upscaleMode,
+                videoWidth: validated.videoWidth,
+                videoHeight: validated.videoHeight,
+                sampleAspectRatio: validated.sampleAspectRatio,
+                displayAspectRatio: validated.displayAspectRatio,
+                pixelFormat: validated.pixelFormat,
+                sourceFrameCount: variant.sourceFrameCount,
+                droppedSourceFrames: variant.droppedSourceFrames,
+            };
+        }
+        const expectedArtifactPath = containedArtifactPath(config.stagingRoot, recording.id);
         if (recording.state === "server_ready") {
             const artifactPath = await streamCopyRemux(
                 recording.playlistPath,
@@ -67,6 +137,11 @@ export async function remuxOne(
         if (recording.state === "remuxed") {
             const artifactPath = database.getRemuxOutput(recording.id);
             if (!artifactPath) throw new Error("Remuxed recording has no durable artifact path");
+            if (path.resolve(artifactPath) !== path.resolve(expectedArtifactPath)) {
+                throw new Error(
+                    `Recording was already materialized with a different artifact mode at ${artifactPath}`,
+                );
+            }
             validatedArtifact = await validateArtifact(artifactPath);
             recording = database.saveArtifact(recording.id, validatedArtifact);
         }
@@ -74,6 +149,9 @@ export async function remuxOne(
         const artifact = database.getArtifact(recording.id);
         if (!artifact) {
             throw new Error(`Recording cannot produce an artifact from pipeline state ${recording.state}`);
+        }
+        if (path.resolve(artifact.path) !== path.resolve(expectedArtifactPath)) {
+            throw new Error(`Recording was already materialized with a different artifact mode at ${artifact.path}`);
         }
         const validated = validatedArtifact ?? await validateArtifact(artifact.path);
         if (validated.sha256 !== artifact.sha256) {
@@ -91,6 +169,14 @@ export async function remuxOne(
             durationSeconds: validated.durationSeconds,
             videoCodec: validated.videoCodec,
             audioCodec: validated.audioCodec,
+            artifactMode: "stream-copy",
+            videoWidth: validated.videoWidth,
+            videoHeight: validated.videoHeight,
+            sampleAspectRatio: validated.sampleAspectRatio,
+            displayAspectRatio: validated.displayAspectRatio,
+            pixelFormat: validated.pixelFormat,
+            sourceFrameCount: null,
+            droppedSourceFrames: null,
         };
     } finally {
         database.close();

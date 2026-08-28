@@ -30,6 +30,9 @@ export async function sweepMissingRecordings(
         }
         const artifact = database.getArtifact(recording.id);
         if (artifact) await unlink(artifact.path).catch(() => undefined);
+        for (const variant of database.listArtifactVariants(recording.id)) {
+            await unlink(variant.path).catch(() => undefined);
+        }
         const remuxOutput = database.getRemuxOutput(recording.id);
         if (remuxOutput) await unlink(remuxOutput).catch(() => undefined);
         const description = database.getDescription(recording.id);
