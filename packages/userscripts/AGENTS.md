@@ -17,6 +17,6 @@ video platform download lists.
 ## Rules
 
 - The server URL is build-configurable (`VITE_VIDEO_SERVER_URL`), default
-  `https://192.168.1.197:7973`. Never hardcode a second URL elsewhere.
+  `https://192.168.1.197:9999`. Never hardcode a second URL elsewhere.
 - Build with `npm run build -w userscripts`; the output for Tampermonkey is
   `packages/userscripts/dist/video-platform.user.js`.

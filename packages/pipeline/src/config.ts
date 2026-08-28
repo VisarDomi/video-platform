@@ -47,7 +47,7 @@ export const pipelineConfig: PipelineConfig = {
         ?? path.join(dataRoot, "pipeline", "artifacts"),
     discoveryRoots,
     manualRemuxRoots,
-    serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:7973",
+    serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
     browserProfilePath: process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",

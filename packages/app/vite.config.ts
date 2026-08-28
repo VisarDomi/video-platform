@@ -30,8 +30,8 @@ export default defineConfig({
 		port: 43210,
 		https: getHttpsConfig(),
 		proxy: {
-			'/api': 'http://localhost:7973',
-			'/hls': 'http://localhost:7973'
+			'/api': 'http://localhost:9999',
+			'/hls': 'http://localhost:9999'
 		}
 	}
 });

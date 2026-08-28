@@ -90,7 +90,7 @@ as `packages/userscripts`: one Vite + vite-plugin-monkey bundle
 provider pattern). The shared bar logic lives once in
 `src/core/downloadListBar.ts`; providers only define route classification.
 The server URL is build-configurable via `VITE_VIDEO_SERVER_URL` (default
-`https://192.168.1.197:7973`). Tango's control remains in the separate
+`https://192.168.1.197:9999`). Tango's control remains in the separate
 stream-viewer repo and is not duplicated here.
 
 ## The layout lives in shared (2026-08-16)

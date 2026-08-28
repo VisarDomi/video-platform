@@ -101,7 +101,7 @@ npm run process-one -w pipeline
 
 Refresh provenance, then inspect unresolved identifiers grouped by provider and
 observed folder alias. Resolution asks the API server (default
-`https://127.0.0.1:7973`, override with `VIDEO_SERVER_URL`) instead of
+`https://127.0.0.1:9999`, override with `VIDEO_SERVER_URL`) instead of
 matching catalog files locally:
 
 ```bash

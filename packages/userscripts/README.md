@@ -8,7 +8,7 @@ download lists.
 - Providers: `fc2` (live.fc2.com) and `sc` (stripchat.com). Each adds a
   fixed top bar with a "+ Add / - Remove" toggle that drives the server's
   `/api/{provider}/list|add|remove` endpoints.
-- Server URL: `https://192.168.1.197:7973` by default; override at build
+- Server URL: `https://192.168.1.197:9999` by default; override at build
   time with `VITE_VIDEO_SERVER_URL`.
 
 ## Build
