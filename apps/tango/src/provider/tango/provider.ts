@@ -2,7 +2,7 @@ import { Handler, type Provider, type Route, type Stream } from "../types";
 
 const GATEWAY = "https://gateway.tango.me";
 const PUBLIC = `${GATEWAY}/proxycador/api/public/v1`;
-const DOWNLOADS = "https://192.168.1.197:7973/api/tango";
+const DOWNLOADS = "https://192.168.1.197:9999/api/tango";
 
 interface XhrResult {
     status: number;
