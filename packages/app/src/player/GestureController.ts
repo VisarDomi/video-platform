@@ -18,7 +18,7 @@ export class GestureController {
 	private readonly seekSecondsPerWidth = 60;
 
 	constructor(
-		private readonly target: HTMLElement,
+		target: HTMLElement,
 		private readonly callbacks: GestureCallbacks
 	) {
 		target.addEventListener('touchstart', this.handleStart, { passive: true, capture: true });
