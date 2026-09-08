@@ -53,6 +53,7 @@ export async function selectOldestFinalizedEditedCandidate(options: {
     readonly roots: readonly DiscoveryRoot[];
     readonly providerFilter: CampaignProviderFilter;
     readonly pipelineDatabase: PipelineDatabase;
+    readonly allowedProviders?: readonly string[];
 }): Promise<RecordingInput | null> {
     const database = new DatabaseSync(options.finalizationDatabasePath, { readOnly: true });
     let rows: CheckpointRow[];
@@ -72,7 +73,8 @@ export async function selectOldestFinalizedEditedCandidate(options: {
             return [];
         }
         const candidate = managedCandidate(row.recording_path, options.roots, options.providerFilter);
-        return candidate && !options.pipelineDatabase.getBySourcePath(candidate.recordingPath) ? [candidate] : [];
+        return candidate && (options.allowedProviders === undefined || options.allowedProviders.includes(candidate.root.provider))
+            && !options.pipelineDatabase.getBySourcePath(candidate.recordingPath) ? [candidate] : [];
     }).sort((left, right) => left.captureKey.localeCompare(right.captureKey)
         || left.root.provider.localeCompare(right.root.provider)
         || left.recordingPath.localeCompare(right.recordingPath));

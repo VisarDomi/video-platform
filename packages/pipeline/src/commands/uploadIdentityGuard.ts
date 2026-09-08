@@ -25,11 +25,13 @@ export async function guardUploadIdentity(
             const artifact = database.getArtifact(recording.id);
             if (artifact) await cleanupArtifact(artifact.path);
         }
-        database.transitionToCleanupEligible(
-            recording.id,
-            `already verified online (${identity.remoteId}); no further processing`,
-            new Date(),
-        );
+        if (database.listQueuedProductionArtifacts(recording.id).length === 0) {
+            database.transitionToCleanupEligible(
+                recording.id,
+                `already verified online (${identity.remoteId}); no further processing`,
+                new Date(),
+            );
+        }
         return { kind: "verified_cleaned", remoteId: identity.remoteId, remoteUrl: identity.remoteUrl };
     }
     // Unverified: refuse every local job. If a pending confirmation exists,

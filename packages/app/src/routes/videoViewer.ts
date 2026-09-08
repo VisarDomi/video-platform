@@ -13,7 +13,6 @@ import { PlayerUnit } from '../player/PlayerUnit.js';
 import type { TimelineSnapshot } from '../player/PlaybackTimeline.js';
 import type { Video, VideoType } from '../types.js';
 
-const SETTLEMENT_DELAY_MS = 100;
 const GEOMETRY_WAIT_MS = 8000;
 const PROGRESS_SAVE_MS = 3000;
 
@@ -27,8 +26,12 @@ export class VideoViewerPage {
 	private segments: number[] = [];
 	private controlsVisible = true;
 	private unsettled = false;
-	private settlementTimer: number | null = null;
 	private programmaticScroll = false;
+	private touching = false;
+	private scrollFinished = true;
+	private layoutOffset = 0;
+	private lastScrollY = window.scrollY;
+	private scrollDirection: -1 | 0 | 1 = 0;
 	private lastProgressSave = 0;
 	private membership: MembershipState = { state: 'loading' };
 	private membershipToken = 0;
@@ -170,6 +173,10 @@ export class VideoViewerPage {
 
 	private gestureCallbacks() {
 		return {
+			onContact: (active: boolean) => {
+				this.touching = active;
+				if (!active) this.settleNavigation();
+			},
 			getCurrentTime: () => this.activeUnit().getSnapshot().currentTime,
 			getSeekMax: () => this.activeUnit().getSnapshot().seekMax,
 			seekDirect: (time: number) => this.activeUnit().seek(time, false),
@@ -221,52 +228,75 @@ export class VideoViewerPage {
 
 	private readonly handleScroll = (): void => {
 		if (this.programmaticScroll) return;
+		const delta = window.scrollY - this.lastScrollY;
+		if (Math.abs(delta) >= 0.5) this.scrollDirection = delta > 0 ? 1 : -1;
+		this.lastScrollY = window.scrollY;
+		this.scrollFinished = false;
 		this.commitMidpointVideo();
 	};
 
 	private beginUnsettled(): void {
-		if (this.settlementTimer !== null) {
-			clearTimeout(this.settlementTimer);
-			this.settlementTimer = null;
-		}
 		if (this.unsettled) return;
 		this.unsettled = true;
+		this.lastScrollY = window.scrollY;
+		this.scrollDirection = 0;
 		this.stage.classList.add('viewer-navigating');
 		this.overlay.setInteractive(false);
 	}
 
 	private readonly handleScrollEnd = (): void => {
-		if (this.settlementTimer !== null) clearTimeout(this.settlementTimer);
-		this.settlementTimer = window.setTimeout(() => {
-			this.settlementTimer = null;
-			this.commitMidpointVideo();
-			this.endUnsettled();
-		}, SETTLEMENT_DELAY_MS);
+		if (this.programmaticScroll) return;
+		this.scrollFinished = true;
+		this.settleNavigation();
 	};
 
-	private endUnsettled(): void {
+	private settleNavigation(): void {
+		if (!this.unsettled || this.touching || !this.scrollFinished || !this.stage.isConnected) return;
+		// Match Stream Viewer: a spacer landing advances only one adjacent entry
+		// in the scroll direction, regardless of distance through the 10k runway.
+		const midpoint = this.viewportMidpoint();
+		const winner = this.unitAtMidpoint(midpoint);
+		if (winner !== -1 && winner !== 1) {
+			this.commitScope(winner === 0 ? -1 : 1);
+		} else if (winner === -1 && this.scrollDirection !== 0) {
+			this.commitScope(this.scrollDirection);
+		}
+		const rect = this.activeUnit().video.getBoundingClientRect();
+		const outside = midpoint < rect.top || midpoint >= rect.bottom;
+		const desiredTop = outside ? midpoint - rect.height / 2 : rect.top;
 		this.unsettled = false;
 		this.stage.classList.remove('viewer-navigating');
 		this.overlay.setInteractive(true);
+		this.layoutOffset = 0;
+		this.stage.style.removeProperty('transform');
+		// Normalize only after native momentum is over, with no extra delay.
+		this.correctScroll(this.activeUnit().video.getBoundingClientRect().top - desiredTop);
+	}
+
+	private viewportMidpoint(): number {
+		return visualViewport
+			? visualViewport.offsetTop + visualViewport.height / 2
+			: window.innerHeight / 2;
+	}
+
+	private unitAtMidpoint(midpoint: number): number {
+		return this.units.findIndex((unit) => {
+			if (!unit.currentVideo || unit.video.hidden) return false;
+			const rect = unit.video.getBoundingClientRect();
+			return rect.top <= midpoint && midpoint < rect.bottom;
+		});
 	}
 
 	private commitMidpointVideo(): void {
 		if (!this.unsettled) return;
-		const midpoint = visualViewport
-			? visualViewport.offsetTop + visualViewport.height / 2
-			: window.innerHeight / 2;
-		const winner = this.units.findIndex((unit) => {
-			const rect = unit.video.getBoundingClientRect();
-			return rect.top <= midpoint && midpoint < rect.bottom;
-		});
+		const winner = this.unitAtMidpoint(this.viewportMidpoint());
 		if (winner === -1 || winner === 1) return;
-
-		const direction = winner === 0 ? -1 : 1;
-		const target = this.currentIndex + direction;
-		if (target >= 0 && target < this.videos.length) this.commitScope(direction, target);
+		this.commitScope(winner === 0 ? -1 : 1);
 	}
 
-	private commitScope(direction: -1 | 1, targetIndex: number): void {
+	private commitScope(direction: -1 | 1): void {
+		const targetIndex = this.currentIndex + direction;
+		if (!this.videos[targetIndex]) return;
 		const oldActive = this.activeUnit();
 		this.saveProgress(oldActive.getSnapshot().currentTime);
 		const selected = direction === 1 ? this.units[2] : this.units[0];
@@ -281,7 +311,10 @@ export class VideoViewerPage {
 		this.applyScopeRoles();
 
 		const afterTop = this.activeUnit().video.getBoundingClientRect().top;
-		this.correctScroll(afterTop - beforeTop);
+		// Never write scroll position during iOS momentum. Keep the same playing
+		// element at its screen position by offsetting layout until scrollend.
+		this.layoutOffset += beforeTop - afterTop;
+		this.stage.style.transform = `translateY(${this.layoutOffset}px)`;
 		this.loadEdgeUnits();
 		this.activateCurrent();
 	}
@@ -462,12 +495,15 @@ export class VideoViewerPage {
 	}
 
 	private readonly handlePageHide = (): void => {
+		this.touching = false;
 		this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		void this.releaseWakeLock();
 	};
 
 	private readonly handlePageShow = (event: PageTransitionEvent): void => {
 		if (!event.persisted) return;
+		this.scrollFinished = true;
+		this.settleNavigation();
 		this.resumeAll();
 		void this.requestWakeLock();
 	};
