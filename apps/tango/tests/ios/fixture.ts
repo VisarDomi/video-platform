@@ -92,9 +92,6 @@ HTMLMediaElement.prototype.addEventListener = function addEventListener(
 };
 
 const provider: Provider = {
-    name: "fixture",
-    matches: ["https://example.com/*"],
-
     matchRoute(pathname) {
         const match = pathname.match(/^\/fixture\/stream\/([^/]+)/);
         return match
@@ -106,11 +103,7 @@ const provider: Provider = {
         return `/fixture/stream/${encodeURIComponent(streamId)}`;
     },
 
-    async startAuthentication() {
-        return () => {};
-    },
-
-    async refreshStreamTokens() {},
+    async startAuthentication() {},
 
     async fetchStreams() {
         const state = load();

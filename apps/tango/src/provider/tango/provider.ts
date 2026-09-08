@@ -176,10 +176,11 @@ async function refreshSession(): Promise<void> {
     });
 }
 
-export const tango: Provider = {
-    name: "tango",
-    matches: ["https://tango.me/*", "https://www.tango.me/*"],
+async function refreshStreamTokens(): Promise<void> {
+    await ok(`${PUBLIC}/live/stream/v1/tokenData`);
+}
 
+export const tango: Provider = {
     matchRoute(pathname: string): Route {
         const match = pathname.match(/^\/stream\/([^/]+)/);
         return match
@@ -191,22 +192,13 @@ export const tango: Provider = {
         return `/stream/${encodeURIComponent(streamId)}`;
     },
 
-    async startAuthentication(): Promise<() => void> {
+    async startAuthentication(): Promise<void> {
         await refreshSession();
-        await this.refreshStreamTokens();
-        const short = window.setInterval(() => void this.refreshStreamTokens(), 5_000);
-        const session = window.setInterval(() => void refreshSession(), 30 * 60_000);
-        const resume = () => void this.refreshStreamTokens();
-        addEventListener("pageshow", resume);
-        return () => {
-            clearInterval(short);
-            clearInterval(session);
-            removeEventListener("pageshow", resume);
-        };
-    },
-
-    async refreshStreamTokens(): Promise<void> {
-        await ok(`${PUBLIC}/live/stream/v1/tokenData`);
+        await refreshStreamTokens();
+        // These belong to this document, including its bfcache lifetime.
+        window.setInterval(() => void refreshStreamTokens(), 5_000);
+        window.setInterval(() => void refreshSession(), 30 * 60_000);
+        addEventListener("pageshow", () => void refreshStreamTokens());
     },
 
     async fetchStreams(): Promise<Stream[]> {

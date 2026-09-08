@@ -37,6 +37,7 @@ const session = createSession({
 const reporter = createReporter();
 const { results, check, skip } = reporter;
 let client = null;
+let testStarted = false;
 
 async function command(code, expectResult = true) {
     return session.command(code, { expectResult });
@@ -60,6 +61,7 @@ async function navigate(url) {
 
 async function inject(bundle) {
     await session.command(`
+        if (window.__streamViewerExtensionBoot) throw new Error("Disable the Stream Viewer Safari extension before injecting the userscript test.");
         window.__streamViewerTest={startedAt:performance.now(),firstRowsAt:null,mutationCount:0};
         const source=${JSON.stringify(bundle)};
         new Function(source+"\\n//# sourceURL=stream-viewer.test.user.js")();
@@ -74,6 +76,7 @@ async function inject(bundle) {
 
 async function injectFixture(bundle, scenario, path, shared = null) {
     return command(`
+        if (window.__streamViewerExtensionBoot) throw new Error("Disable the Stream Viewer Safari extension before injecting fixtures.");
         sessionStorage.setItem("stream-viewer-fixture",${JSON.stringify(JSON.stringify(scenario))});
         ${shared
             ? `sessionStorage.setItem("stream-viewer-state",${JSON.stringify(JSON.stringify(shared))});`
@@ -98,10 +101,12 @@ async function waitForDebugger() {
         controlledCode: `
             return Boolean(
                 globalThis.__streamViewerTest ||
-                document.querySelector(".stream-list, .stream-stage")
+                document.querySelector(".stream-row, .stream-stage")
             );
         `,
     });
+    const extensionActive = await command('return !!window.__streamViewerExtensionBoot;');
+    assert(!extensionActive, "Disable the Stream Viewer Safari extension before running userscript tests.");
 }
 
 async function homeSnapshot() {
@@ -299,6 +304,7 @@ async function main() {
     const bundle = await readFile(resolve(root, "dist/stream-viewer.user.js"), "utf8");
     const fixtureBundle = await readFile(resolve(root, "dist/stream-viewer-fixture.js"), "utf8");
 
+    testStarted = true;
     await navigate(entryUrl);
         await inject(bundle);
         const homeClientId = client.client;
@@ -755,14 +761,15 @@ try {
     process.exitCode = 1;
 } finally {
     try {
-        if (session.client && new URL(session.client.href).hostname === "example.com") {
+        // A rejected preflight must not navigate or clear the user's tab.
+        if (testStarted && session.client && new URL(session.client.href).hostname === "example.com") {
             await session.reload("https://example.com/", {
                 before: `
                     sessionStorage.removeItem("stream-viewer-fixture");
                     sessionStorage.removeItem("stream-viewer-state");
                 `,
             });
-        } else {
+        } else if (testStarted) {
             await session.cleanup();
         }
     } catch (error) {

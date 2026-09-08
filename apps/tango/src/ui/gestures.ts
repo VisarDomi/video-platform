@@ -1,4 +1,5 @@
 export interface GestureCallbacks {
+    contact(active: boolean): void;
     verticalStart(): void;
     controls(visible: boolean): void;
 }
@@ -10,6 +11,7 @@ export function attachGestures(element: HTMLElement, callbacks: GestureCallbacks
     const edgeWidth = 28;
 
     element.addEventListener("touchstart", event => {
+        callbacks.contact(event.touches.length > 0);
         if (event.touches.length > 1) {
             axis = "browser";
             return;
@@ -39,6 +41,7 @@ export function attachGestures(element: HTMLElement, callbacks: GestureCallbacks
     }, { passive: false, capture: true });
 
     element.addEventListener("touchend", event => {
+        callbacks.contact(event.touches.length > 0);
         if (axis === "browser") {
             if (event.touches.length === 0) axis = "none";
             return;
@@ -49,6 +52,7 @@ export function attachGestures(element: HTMLElement, callbacks: GestureCallbacks
     }, { capture: true });
 
     element.addEventListener("touchcancel", () => {
+        callbacks.contact(false);
         axis = "none";
     }, { capture: true });
 }

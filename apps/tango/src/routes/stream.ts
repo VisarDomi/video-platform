@@ -8,7 +8,6 @@ interface Slot {
     stream?: Stream;
 }
 
-const SETTLEMENT_DELAY_MS = 100;
 const GEOMETRY_WAIT_MS = 8000;
 
 async function bestEffortCostreamers(provider: Provider, stream: Stream): Promise<Stream[]> {
@@ -41,8 +40,12 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     applyScopeRoles();
     let controlsVisible = true;
     let navigating = false;
-    let settlementTimer: number | null = null;
     let programmaticScroll = false;
+    let touching = false;
+    let scrollFinished = true;
+    let layoutOffset = 0;
+    let lastScrollY = window.scrollY;
+    let scrollDirection: -1 | 0 | 1 = 0;
     const removing = new Set<string>();
     const removed = new Set<string>();
     const processedForCostreamers = new Set<string>();
@@ -231,49 +234,75 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     }
 
     function beginNavigating(): void {
-        if (settlementTimer !== null) {
-            clearTimeout(settlementTimer);
-            settlementTimer = null;
-        }
         if (navigating) return;
         navigating = true;
+        lastScrollY = window.scrollY;
+        scrollDirection = 0;
         stage.classList.add("viewer-navigating");
         controls.classList.add("unsettled");
     }
 
-    function endNavigating(): void {
+    function settleNavigation(): void {
+        if (!navigating || touching || !scrollFinished || !stage.isConnected) return;
+        // Keep a video already under the midpoint. A spacer landing advances
+        // only one adjacent entry in the last scroll direction, never a jump
+        // proportional to the distance travelled through the 10k runway.
+        const midpoint = viewportMidpoint();
+        const winner = slotAtMidpoint(midpoint);
+        if (winner !== -1 && winner !== 1) {
+            commitScope(winner === 0 ? -1 : 1);
+        } else if (winner === -1 && scrollDirection !== 0) {
+            commitScope(scrollDirection);
+        }
+        const rect = slots[1].video.getBoundingClientRect();
+        const outside = midpoint < rect.top || midpoint >= rect.bottom;
+        const desiredTop = outside ? midpoint - rect.height / 2 : rect.top;
         navigating = false;
         stage.classList.remove("viewer-navigating");
         controls.classList.remove("unsettled");
+        layoutOffset = 0;
+        stage.style.removeProperty('transform');
+        // Momentum is now over. Rebase the virtual layout without moving the
+        // visible video; only spacer landings are brought back to its center.
+        correctScroll(slots[1].video.getBoundingClientRect().top - desiredTop);
+    }
+
+    function viewportMidpoint(): number {
+        return visualViewport
+            ? visualViewport.offsetTop + visualViewport.height / 2
+            : innerHeight / 2;
+    }
+
+    function slotAtMidpoint(midpoint: number): number {
+        return slots.findIndex(slot => {
+            if (!slot.stream || slot.video.hidden) return false;
+            const rect = slot.video.getBoundingClientRect();
+            return rect.top <= midpoint && midpoint < rect.bottom;
+        });
     }
 
     function commitMidpointStream(): void {
         if (!navigating) return;
-        const midpoint = visualViewport
-            ? visualViewport.offsetTop + visualViewport.height / 2
-            : innerHeight / 2;
-        const winner = slots.findIndex(slot => {
-            const rect = slot.video.getBoundingClientRect();
-            return rect.top <= midpoint && midpoint < rect.bottom;
-        });
+        const winner = slotAtMidpoint(viewportMidpoint());
         if (winner === -1 || winner === 1) return;
-
-        const direction = winner === 0 ? -1 : 1;
-        const target = index + direction;
-        if (!streams[target]) return;
-        commitScope(direction, target);
+        commitScope(winner === 0 ? -1 : 1);
     }
 
-    function commitScope(direction: -1 | 1, target: number): void {
+    function commitScope(direction: -1 | 1): void {
+        const target = index + direction;
+        if (!streams[target]) return;
         const selected = direction === 1 ? slots[2] : slots[0];
         const beforeTop = selected.video.getBoundingClientRect().top;
         slots = direction === 1
             ? [slots[1], slots[2], slots[0]]
             : [slots[2], slots[0], slots[1]];
-        index = target;
         applyScopeRoles();
         const afterTop = slots[1].video.getBoundingClientRect().top;
-        correctScroll(afterTop - beforeTop);
+        // Recycling must not write scroll position while iOS owns momentum.
+        // Offset layout instead, keeping the selected video at the same screen
+        // position. The offset is normalized once the gesture actually settles.
+        layoutOffset += beforeTop - afterTop;
+        stage.style.transform = `translateY(${layoutOffset}px)`;
         void select(target);
     }
 
@@ -289,9 +318,11 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     }
 
     attachGestures(stage, {
-        verticalStart() {
-            beginNavigating();
+        contact(active) {
+            touching = active;
+            if (!active) settleNavigation();
         },
+        verticalStart: beginNavigating,
         controls(visible) {
             controlsVisible = visible;
             updateControls();
@@ -299,15 +330,26 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     });
 
     window.addEventListener("scroll", () => {
-        if (!programmaticScroll) commitMidpointStream();
+        if (programmaticScroll) return;
+        const delta = window.scrollY - lastScrollY;
+        if (Math.abs(delta) >= 0.5) scrollDirection = delta > 0 ? 1 : -1;
+        lastScrollY = window.scrollY;
+        scrollFinished = false;
+        commitMidpointStream();
     }, { passive: true });
     window.addEventListener("scrollend", () => {
-        if (settlementTimer !== null) clearTimeout(settlementTimer);
-        settlementTimer = window.setTimeout(() => {
-            settlementTimer = null;
-            commitMidpointStream();
-            endNavigating();
-        }, SETTLEMENT_DELAY_MS);
+        if (programmaticScroll) return;
+        scrollFinished = true;
+        settleNavigation();
+    });
+
+    window.addEventListener('pagehide', () => {
+        touching = false;
+    });
+    window.addEventListener('pageshow', event => {
+        if (!event.persisted) return;
+        scrollFinished = true;
+        settleNavigation();
     });
 
     controls.addEventListener("click", async event => {

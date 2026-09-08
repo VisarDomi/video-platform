@@ -18,12 +18,9 @@ export interface Stream {
 }
 
 export interface Provider {
-    readonly name: string;
-    readonly matches: string[];
     matchRoute(pathname: string): Route;
     streamUrl(streamId: string): string;
-    startAuthentication(): Promise<() => void>;
-    refreshStreamTokens(): Promise<void>;
+    startAuthentication(): Promise<void>;
     fetchStreams(): Promise<Stream[]>;
     fetchCostreamers(stream: Stream): Promise<Stream[]>;
     enrichAll(streams: Stream[]): Promise<Stream[]>;
