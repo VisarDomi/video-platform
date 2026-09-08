@@ -2,6 +2,11 @@ import type { Stream } from "../provider";
 
 const KEY = "stream-viewer-state";
 
+export function isPageReload(): boolean {
+    return performance.getEntriesByType("navigation")
+        .some(entry => (entry as PerformanceNavigationTiming).type === "reload");
+}
+
 export interface SharedState {
     streams: Stream[];
     currentStreamerId: string;

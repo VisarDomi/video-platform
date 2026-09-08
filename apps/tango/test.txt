@@ -7,6 +7,7 @@ Features:
 - Streamer names and other details may improve afterward without delaying the
   list.
 - Refreshing Home fetches a fresh list.
+- Navigation and Back keep the saved list until the page is refreshed.
 - Selecting a streamer navigates to that streamer's own URL.
 
 2. Stream
@@ -32,8 +33,8 @@ Features:
 - Releasing a short drag returns to the current stream.
 - The correct previous and next streams are loaded around the current stream.
 - Moving to another stream changes the URL without adding another Back step.
-- Discovered costreamers enter the stream order at the appropriate position
-  and may become the next or previous stream.
+- Newly discovered costreamers are appended to the end without duplicates or
+  moving existing streamers.
 - Pinch zoom and Safari's leading-edge Back gesture remain browser-owned.
 
 4. Back to Home

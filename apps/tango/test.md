@@ -7,6 +7,8 @@ controlled network/media boundaries in a disposable browser. Cases cover Home
 ordering, same-window reinjection without duplicate requests, native stream URL
 navigation, session handoff, three adjacent slots, mute, first-step block
 confirmation without a provider write, and no takeover on an unmatched host.
+It also checks a stable saved list across navigation and Back, fresh lists on
+Home/stream reload, and costreamers appended without duplicates or reordering.
 The same production bundle also exercises midpoint continuity without scroll
 writes, held touches, video/spacer landings, directional next/previous selection,
 direction reversal, list boundaries, and finger-down/continued-momentum guards.

@@ -6,6 +6,7 @@ import type { Provider, Stream } from "../../src/provider";
 const FIXTURE_KEY = "stream-viewer-fixture";
 
 interface FixtureState {
+    reload?: boolean;
     fetches: Stream[][];
     fetchCount?: number;
     fetchDelay?: number;
@@ -27,6 +28,12 @@ function load(): FixtureState {
 function save(state: FixtureState): void {
     sessionStorage.setItem(FIXTURE_KEY, JSON.stringify(state));
 }
+
+// Fixtures replace the document in place; explicitly model reload vs navigation.
+const getEntriesByType = performance.getEntriesByType.bind(performance);
+performance.getEntriesByType = type => type === "navigation"
+    ? [{ type: load().reload ? "reload" : "navigate" } as PerformanceNavigationTiming]
+    : getEntriesByType(type);
 
 function delay(milliseconds = 0): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));

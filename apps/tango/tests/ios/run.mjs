@@ -620,7 +620,7 @@ async function main() {
                 return outcome;
             }, { continueOnFailure: true });
 
-            await check(["S3", "N5"], "Fixture stream starts before delayed enrichment and inserts costreamers in order", async () => {
+            await check(["S3", "N5"], "Fixture stream starts before delayed enrichment and appends costreamers", async () => {
                 const previous = fixtureStream("previous");
                 const parent = fixtureStream("parent", { name: "Raw Parent" });
                 const next = fixtureStream("next");
@@ -656,11 +656,11 @@ async function main() {
                 assert(settled.ids.join("|") === [
                     previous.streamerId,
                     parent.streamerId,
+                    next.streamerId,
                     coOne.streamerId,
                     coTwo.streamerId,
-                    next.streamerId,
                 ].join("|"), "Costreamers were inserted at the wrong position", settled);
-                assert(settled.slots[2] === coOne.masterListUrl, "First discovered costreamer did not become next", settled);
+                assert(settled.slots[2] === next.masterListUrl, "Discovery changed the next stream", settled);
                 assert(settled.visibleName.includes("best-parent") && settled.visibleName.includes("Enriched Parent"), "Best streamer name did not appear after enrichment", settled);
                 return { earlyName: early.visibleName, settled };
             }, { continueOnFailure: true });
@@ -672,6 +672,7 @@ async function main() {
                 const freshFirst = fixtureStream("fresh-first-with-stale-co");
                 const freshSecond = fixtureStream("fresh-second-with-stale-co");
                 const scenario = {
+                    reload: true,
                     fetches: [[freshFirst, freshSecond]],
                     fetchDelay: 250,
                     costreamers: { [missing.streamerId]: [staleCostreamer] },
@@ -690,7 +691,7 @@ async function main() {
                 const missing = fixtureStream("missing-no-co");
                 const freshFirst = fixtureStream("fresh-first");
                 const freshSecond = fixtureStream("fresh-second");
-                const scenario = { fetches: [[freshFirst, freshSecond]], fetchDelay: 250, costreamers: {} };
+                const scenario = { reload: true, fetches: [[freshFirst, freshSecond]], fetchDelay: 250, costreamers: {} };
                 const shared = { streams: [missing], currentStreamerId: missing.streamerId };
                 await injectFixture(fixtureBundle, scenario, `/fixture/stream/${missing.streamId}`, shared);
                 const settled = await fixtureState(freshFirst.streamerId);

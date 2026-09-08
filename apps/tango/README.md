@@ -7,6 +7,11 @@ This script changes the UI of the providers supported by this script so that's i
 1. show list of favorites and recommended.
 2. show streams in tiktok style: swipe to go to next/prev stream
 
+The list stays in the same order while browsing and returning to Home. Newly
+discovered costreamers are appended to the end without duplicates. Refresh Home
+or a stream page to fetch a new list. Blocked or unavailable streams are still
+removed from navigation.
+
 ## Why?
 Native navigation is cumbersome and too resource intensive and wastes phone battery.
 
@@ -35,6 +40,18 @@ Build output is `dist/extension/{manifest.json,content.js}`. The shared iOS Xcod
 host is in `../../manga/gallery-reader/extension/apple/`; run `npm run build:extensions`
 in Gallery Reader to stage all three bundles before building/installing that host.
 The Stream Viewer extension ID is `com.visar.galleryreader.extensiontest.StreamViewer`.
+
+For device delivery, coordinate with the **extension-all** task before building
+or installing the shared host. Build Stream Viewer with `npm run build:extension`,
+then stage only `dist/extension/` to the Mac's
+`/Users/visar/Developer/gallery-reader-extension/dist/stream-viewer-extension/`.
+The shared [extension deployment guide](../../manga/gallery-reader/extension/README.md)
+documents SSH, GUI-session signing and iPhone installation. Verify the staged
+and embedded `Stream Viewer.appex/content.js` hashes against the local bundle.
+A local web bundle build alone does not update the installed Safari extension;
+the shared **Reader Extensions** app must be rebuilt and installed, then the
+Tango page refreshed. Coordinate this install so other extensions' pending
+experiments are not deployed accidentally.
 
 Enable Stream Viewer in Settings → Apps → Safari → Extensions and allow
 `tango.me`/`www.tango.me`. Disable its Userscripts version while using the extension.

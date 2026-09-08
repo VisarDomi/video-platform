@@ -10,6 +10,9 @@ try {
     const context=await browser.newContext({viewport:{width:428,height:800}});
     const requests=[];
     const records=[1,2,3].map(n=>({isPublic:true,anchor:{encryptedAccountId:'person-'+n,firstName:'Person '+n},stream:{id:'stream-'+n,masterListUrl:'https://media.invalid/'+n+'.m3u8',status:'LIVING'}}));
+    let recommendations=records.slice(1);
+    let costreamers=[];
+    const listRequests=()=>requests.filter(path=>path.includes('/recommendator/')).length;
     await context.route('**/*',async route=>{
         const url=new URL(route.request().url());
         requests.push(url.pathname);
@@ -18,9 +21,10 @@ try {
         if(url.hostname==='gateway.tango.me'){
             let data={};
             if(url.pathname.includes('blocklist'))data=[];
-            else if(url.pathname.includes('following_recommendations'))data={records:records.slice(1)};
+            else if(url.pathname.includes('following_recommendations'))data={records:recommendations};
             else if(url.pathname.includes('/following'))data={records:records.slice(0,1)};
             else if(url.pathname.includes('/single'))data={basicProfile:{firstName:'Enriched'}};
+            else if(url.pathname.endsWith('/watch'))data={multiBroadcast:{streams:costreamers.map(n=>({stream:{mbDescriptor:{accountId:'person-'+n,streamId:'stream-'+n},streamURL:'https://media.invalid/'+n+'.m3u8'}}))}};
             return route.fulfill({headers,json:data});
         }
         if(url.port==='9999')return route.fulfill({headers,json:[]});
@@ -56,6 +60,7 @@ try {
     await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
     await page.waitForTimeout(100);
     assert.equal(requests.filter(path=>path.endsWith('/tokenData')).length,refreshes+1,'Restoring a document must refresh stream authentication once');
+    const initialListRequests=listRequests();
     await page.locator('.stream-row').first().click();
     await page.waitForURL('**/stream/stream-1');
     await page.addScriptTag({content:bundle});
@@ -73,7 +78,42 @@ try {
     const saved=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')));
     assert.equal(saved.streams.length,3);
     assert.equal(saved.currentStreamerId,'person-1');
+    assert.equal(listRequests(),initialListRequests,'Opening a saved stream must not fetch a replacement list');
     await testScrollSettlement(page);
+    const readIds=()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')).streams.map(s=>s.streamerId));
+    recommendations=[records[2],records[1]];
+    await page.goBack();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
+    assert.deepEqual(await readIds(),['person-1','person-2','person-3']);
+    assert.equal(listRequests(),initialListRequests,'Back must reuse the saved list even when the provider changes');
+    await page.reload();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
+    assert.deepEqual(await readIds(),['person-1','person-3','person-2'],'Home reload must fetch the new order');
+    assert.equal(listRequests(),initialListRequests+2);
+    costreamers=[2,4,4,5];
+    await page.locator('.stream-row').first().click();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')).streams.length===5);
+    assert.deepEqual(await readIds(),['person-1','person-3','person-2','person-4','person-5'],'Costreamers append once without moving existing streamers');
+    assert.equal(await page.locator('.next-scope video').getAttribute('src'),'https://media.invalid/3.m3u8','Discovery must preserve the next streamer');
+    assert.equal(listRequests(),initialListRequests+2);
+    await page.goBack();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===5);
+    assert.deepEqual(await page.locator('.stream-row').evaluateAll(rows=>rows.map(row=>row.dataset.streamerId)),['person-1','person-3','person-2','person-4','person-5']);
+    await page.locator('.stream-row').first().click();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
+    recommendations=[records[1]];
+    costreamers=[];
+    await page.reload();
+    await page.addScriptTag({content:bundle});
+    await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
+    assert.deepEqual(await readIds(),['person-1','person-2'],'Stream reload must replace the saved list');
+    assert.equal(listRequests(),initialListRequests+4);
+    console.log('PASS: stable list across navigation and Back; Home/stream reload fetches; costreamers append without duplicates or reordering.');
     await page.goto('https://example.com/');
     const outside=requests.length;
     await page.addScriptTag({content:bundle});

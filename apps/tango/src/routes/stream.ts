@@ -1,4 +1,4 @@
-import { loadState, saveState } from "../core/state";
+import { isPageReload, loadState, saveState } from "../core/state";
 import type { Provider, Stream } from "../provider";
 import { attachGestures } from "../ui/gestures";
 
@@ -21,12 +21,26 @@ async function bestEffortCostreamers(provider: Provider, stream: Stream): Promis
 
 export async function openStream(provider: Provider, requestedStreamId: string): Promise<void> {
     const shared = loadState();
-    const freshStreams = provider.fetchStreams();
-    const handedOff = shared?.streams.some(stream => stream.streamId === requestedStreamId) === true;
-    const streams = handedOff ? [...shared.streams] : await freshStreams;
+    const handedOff = !isPageReload()
+        && shared?.streams.some(stream => stream.streamId === requestedStreamId) === true;
+    const streams = handedOff ? [...shared.streams] : await provider.fetchStreams();
+    const cachedCurrent = shared?.streams.find(stream => stream.streamId === requestedStreamId);
+    if (!handedOff && cachedCurrent?.parentStreamerId
+        && !streams.some(stream => stream.streamerId === cachedCurrent.streamerId)) {
+        const parent = streams.find(stream => stream.streamerId === cachedCurrent.parentStreamerId);
+        if (parent) {
+            for (const costreamer of await bestEffortCostreamers(provider, parent)) {
+                if (!streams.some(stream => stream.streamerId === costreamer.streamerId)) streams.push(costreamer);
+            }
+        }
+    }
     let index = streams.findIndex(stream => stream.streamId === requestedStreamId);
+    if (index < 0 && cachedCurrent) index = streams.findIndex(stream => stream.streamerId === cachedCurrent.streamerId);
     if (index < 0) index = 0;
-    if (!streams[index]) throw new Error("No live streams are available.");
+    if (!streams[index]) {
+        saveState({ streams, currentStreamerId: "" });
+        throw new Error("No live streams are available.");
+    }
 
     document.body.replaceChildren();
     document.body.className = "stream-page";
@@ -147,28 +161,10 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         processedForCostreamers.add(stream.streamerId);
         const available = additions.filter(item => !removed.has(item.streamerId));
         if (!available.length) return;
-        const discovered = available.map(addition => {
-            const existing = streams.find(item => item.streamerId === addition.streamerId);
-            return existing
-                ? {
-                    ...addition,
-                    ...existing,
-                    streamId: addition.streamId,
-                    masterListUrl: addition.masterListUrl,
-                    parentStreamerId: stream.streamerId,
-                }
-                : addition;
-        });
-        const selectedId = streams[index]?.streamerId;
-        const discoveredIds = new Set(discovered.map(item => item.streamerId));
-        for (let position = streams.length - 1; position >= 0; position--) {
-            if (discoveredIds.has(streams[position].streamerId)) streams.splice(position, 1);
+        if (!streams.some(item => item.streamerId === stream.streamerId)) return;
+        for (const addition of available) {
+            if (!streams.some(item => item.streamerId === addition.streamerId)) streams.push(addition);
         }
-        const parentIndex = streams.findIndex(item => item.streamerId === stream.streamerId);
-        if (parentIndex < 0) return;
-        streams.splice(parentIndex + 1, 0, ...discovered);
-        index = streams.findIndex(item => item.streamerId === selectedId);
-        if (index < 0) index = parentIndex;
         persist();
         updateSlots();
     }
@@ -200,12 +196,9 @@ export async function openStream(provider: Provider, requestedStreamId: string):
             return;
         }
         removed.add(streamerId);
-        const failedCurrent = failedIndex === index;
-        const costreamerId = failedCurrent
-            ? streams.find(stream => stream.parentStreamerId === streamerId)?.streamerId
-            : undefined;
         streams.splice(failedIndex, 1);
         if (!streams.length) {
+            saveState({ streams, currentStreamerId: "" });
             document.body.replaceChildren();
             const message = document.createElement("p");
             message.className = "status";
@@ -214,10 +207,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
             removing.delete(streamerId);
             return;
         }
-        if (failedCurrent && costreamerId) {
-            const costreamerIndex = streams.findIndex(stream => stream.streamerId === costreamerId);
-            index = costreamerIndex >= 0 ? costreamerIndex : Math.min(index, streams.length - 1);
-        } else if (failedIndex < index) index--;
+        if (failedIndex < index) index--;
         else if (index >= streams.length) index = streams.length - 1;
         await select(index);
         removing.delete(streamerId);
@@ -420,28 +410,6 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     updateControls();
     void discover(current);
     await revealWhenCurrentGeometryIsReady(slots[1].video, stage);
-
-    if (handedOff) {
-        void freshStreams.then(async fresh => {
-            const cachedCurrent = streams[index];
-            fresh = fresh.filter(stream => !removed.has(stream.streamerId));
-            let discovered: Stream[] = [];
-            if (cachedCurrent?.parentStreamerId) {
-                const parentIndex = fresh.findIndex(stream => stream.streamerId === cachedCurrent.parentStreamerId);
-                if (parentIndex >= 0) {
-                    const costreamers = await bestEffortCostreamers(provider, fresh[parentIndex]);
-                    discovered = costreamers.filter(stream => !removed.has(stream.streamerId));
-                    const freshIds = new Set(fresh.map(stream => stream.streamerId));
-                    fresh.splice(parentIndex + 1, 0, ...discovered.filter(stream => !freshIds.has(stream.streamerId)));
-                }
-            }
-            const currentId = cachedCurrent?.streamerId;
-            streams.splice(0, streams.length, ...fresh);
-            const freshIndex = streams.findIndex(stream => stream.streamerId === currentId);
-            index = freshIndex >= 0 ? freshIndex : 0;
-            if (streams[index]) await select(index);
-        });
-    }
 }
 
 function createSlot(): Slot {

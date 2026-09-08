@@ -1,4 +1,4 @@
-import { loadState, saveState } from "../core/state";
+import { isPageReload, loadState, saveState } from "../core/state";
 import type { Provider, Stream } from "../provider";
 
 function row(provider: Provider, stream: Stream): HTMLAnchorElement {
@@ -51,24 +51,30 @@ function render(provider: Provider, streams: Stream[]): () => void {
 }
 
 export async function openHome(provider: Provider): Promise<void> {
-    let streams = await provider.fetchStreams();
-    const alignCurrent = render(provider, streams);
-    void provider.enrichAll(streams).then(enriched => {
-        streams = enriched;
-        for (const stream of streams) updateRow(stream);
-        requestAnimationFrame(alignCurrent);
-    });
+    const shared = loadState();
+    let streams = shared && !isPageReload() ? shared.streams : await provider.fetchStreams();
+
+    function show(current: Stream[]): void {
+        streams = current;
+        const currentStreamerId = loadState()?.currentStreamerId ?? "";
+        saveState({ streams, currentStreamerId });
+        const alignCurrent = render(provider, streams);
+        void provider.enrichAll(current).then(enriched => {
+            if (streams !== current) return;
+            // Keep the array used by row clicks in sync with the displayed names.
+            current.splice(0, current.length, ...enriched);
+            for (const stream of current) updateRow(stream);
+            saveState({ streams, currentStreamerId: loadState()?.currentStreamerId ?? "" });
+            requestAnimationFrame(alignCurrent);
+        });
+    }
+
+    show(streams);
 
     addEventListener("pageshow", event => {
         if (!event.persisted) return;
         const shared = loadState();
         if (!shared) return;
-        streams = shared.streams;
-        const alignRestored = render(provider, streams);
-        void provider.enrichAll(streams).then(enriched => {
-            streams = enriched;
-            for (const stream of streams) updateRow(stream);
-            requestAnimationFrame(alignRestored);
-        });
+        show(shared.streams);
     });
 }
