@@ -22,7 +22,6 @@ export class VideoViewerPage {
 	private units: PlayerUnit[] = [];
 	private videos: Video[] = [];
 	private currentIndex = -1;
-	private gesture!: GestureController;
 	private segments: number[] = [];
 	private controlsVisible = true;
 	private unsettled = false;
@@ -66,7 +65,7 @@ export class VideoViewerPage {
 		const listTask = this.loadCanonicalListAndNeighbors();
 		await Promise.all([revealTask, listTask]);
 
-		this.gesture = new GestureController(this.stage, this.gestureCallbacks());
+		new GestureController(this.stage, this.gestureCallbacks());
 		addEventListener('scroll', this.handleScroll, { passive: true });
 		addEventListener('scrollend', this.handleScrollEnd);
 		addEventListener('pagehide', this.handlePageHide);
