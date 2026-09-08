@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -13,6 +13,7 @@ import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/chromiumXvideosUploader.js";
+import { configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
 function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_000) {
     database.transition(recording.id, "server_ready", "remuxed");
@@ -45,6 +46,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.",
         tags: ["tango", "live"],
     });
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v3: test fixture");
 }
 
 async function campaignWorkerFixture(t) {
@@ -98,6 +100,8 @@ test("production roots are edited-only while manual remux roots retain downloade
     assert(pipelineConfig.discoveryRoots.every((root) => root.path.endsWith("edited")));
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "downloader").length, 3);
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "edited").length, 3);
+    assert.equal(pipelineConfig.stagingRoot, path.join(pipelineConfig.artifactsRoot, "production-v2"));
+    assert.equal(pipelineConfig.manualStagingRoot, path.join(pipelineConfig.stagingRoot, "manual"));
 });
 
 test("capture timestamps are strict and sortable", () => {
@@ -243,4 +247,221 @@ test("campaign intent and limits persist independently of worker lifetime", asyn
     }, { state: "running", provider: "sc", limit: 123_456_789 });
     reopened.setCampaignState("paused");
     reopened.close();
+    const configured = configureCampaign({ ...pipelineConfig, databasePath }, "all", undefined, 10);
+    assert.equal(configured.monthlyUploadLimitBytes, 123_456_789);
+    assert.equal(configured.state, "paused");
+    assert.equal(configured.trialPerProvider, 10);
 });
+
+test("a 30-recording trial stops at ten per provider, persists, and normal resume continues oldest-first", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-campaign-trial-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const finalizationDatabasePath = path.join(root, "finalization.sqlite");
+    const authority = new DatabaseSync(finalizationDatabasePath);
+    authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT NOT NULL, report_json TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT");
+    const providers = ["tango", "fc2", "sc"];
+    const roots = providers.map((provider) => ({ provider, sourceKind: "edited", path: path.join(root, provider, "edited") }));
+    for (const [providerIndex, discoveryRoot] of roots.entries()) {
+        for (let index = 1; index <= 11; index++) {
+            await addFinalized(authority, discoveryRoot.path, `202${providerIndex}-01-${String(index).padStart(2, "0")} 120000 ${discoveryRoot.provider}`);
+        }
+    }
+    authority.close();
+    const databasePath = path.join(root, "pipeline.sqlite");
+    let database = new PipelineDatabase(databasePath);
+    t.after(() => database.close());
+    const config = { ...pipelineConfig, databasePath, finalizationDatabasePath, discoveryRoots: roots, cleanupEnabled: false };
+    const resolver = { resolve: async (candidate) => ({
+        observedIdentifier: candidate.provider, status: "resolved", streamerId: "streamer", alias: candidate.provider,
+        streamerUrl: "https://example.com/streamer", aliasUrl: null, reason: null, updatedAt: new Date().toISOString(),
+    }) };
+    const uploaded = [];
+    const upload = async (id) => {
+        uploaded.push(id);
+        database.transition(id, "metadata_ready", "xvideos_admitted");
+        database.transition(id, "xvideos_admitted", "xvideos_uploading");
+        database.transition(id, "xvideos_uploading", "xvideos_uncertain");
+        return { state: "xvideos_uncertain" };
+    };
+    let worker = new CampaignWorker(database, config, resolver, upload);
+    const newer = await inspectFinalizedRecording(path.join(roots[0].path, "2020-01-11 120000 tango"), "tango", "edited");
+    const queued = database.discover(newer.recording);
+    advanceToMetadataReady(database, queued, root);
+    database.configureCampaign("all", 1_000_000_000, new Date(), 10);
+    assert.equal(database.getCampaignControl().state, "paused");
+    database.setCampaignState("running");
+    let finished;
+    let waitedForVerification = false;
+    for (let step = 0; step < 70; step++) {
+        const result = await worker.step();
+        if (result.disposition === "admitted") advanceToMetadataReady(database, database.get(result.recordingId), root);
+        else if (result.disposition === "trial_finished") { finished = result; break; }
+        else if (result.disposition === "trial_verification_wait") {
+            assert.equal(uploaded.length, 30);
+            assert.equal(database.getCampaignControl().state, "running");
+            assert.equal(database.getCampaignControl().trialFinishedAt, null);
+            waitedForVerification = true;
+            for (const id of uploaded) {
+                database.transition(id, "xvideos_uncertain", "xvideos_uploaded");
+                database.transition(id, "xvideos_uploaded", "xvideos_verified");
+                database.transition(id, "xvideos_verified", "cleanup_eligible");
+            }
+        }
+        else assert.equal(result.disposition, "upload_completed");
+        if (step === 12) {
+            database.setCampaignState("paused");
+            database.close();
+            database = new PipelineDatabase(databasePath);
+            assert.equal(database.getCampaignControl().trialPerProvider, 10);
+            database.setCampaignState("running");
+            assert.equal(database.getCampaignControl().trialPerProvider, 10);
+            worker = new CampaignWorker(database, config, resolver, upload);
+        }
+    }
+    assert(finished);
+    assert(waitedForVerification);
+    assert.equal(uploaded.length, 30);
+    assert.equal(new Set(uploaded).size, 30);
+    assert(!uploaded.includes(queued.id));
+    assert.deepEqual(finished.trial.map(({ provider, admitted }) => ({ provider, admitted })), providers.map((provider) => ({ provider, admitted: 10 })));
+    assert(finished.trial.every((provider) => provider.recordings.every((recording) => recording.state === "cleanup_eligible")));
+    assert.equal(database.getCampaignControl().state, "paused");
+    assert.equal(database.getCampaignControl().resumeAt, null);
+    assert.equal((await worker.step()).disposition, "paused");
+    database.setCampaignState("running");
+    assert.equal(database.getCampaignControl().trialPerProvider, null);
+    const next = await worker.step();
+    assert.equal(next.disposition, "upload_completed");
+    assert.equal(database.get(next.recordingId).provider, "tango");
+    assert.match(database.get(next.recordingId).sourcePath, /2020-01-11/);
+});
+
+test("trial slots survive missing sources, limits can be adjusted, and incomplete libraries pause", async (t) => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    const now = new Date();
+    for (const limit of [0, -1, 1.5, NaN, Infinity]) {
+        assert.throws(() => database.configureCampaign("all", 1_000_000_000, now, limit), /positive integer/);
+    }
+    assert.throws(() => database.configureCampaign("sc", 1_000_000_000, now, 10), /provider all/);
+    database.configureCampaign("all", 1_000_000_000, now, 1);
+    database.enrollCampaignTrial(recording);
+    database.enrollCampaignTrial(recording);
+    assert.equal(database.getCampaignTrialProgress()[0].admitted, 1);
+    assert.equal(database.campaignTrialAllows("tango"), false);
+    database.deleteRecording(recording.id);
+    assert.equal(database.campaignTrialAllows("tango"), false);
+    assert.equal(database.getCampaignTrialProgress()[0].recordings[0].state, "source_missing");
+    database.setCampaignState("running");
+    assert.throws(() => database.configureCampaign("all", 1_000_000_000, now, 2), /Pause/);
+    const worker = new CampaignWorker(database, { ...config, discoveryRoots: [], cleanupEnabled: false }, resolver);
+    assert.equal((await worker.step()).disposition, "trial_attention_required");
+    assert.equal(database.getCampaignControl().state, "paused");
+    assert.equal(database.getCampaignControl().trialFinishedAt, null);
+    database.setCampaignState("running");
+    assert.equal(database.getCampaignControl().trialPerProvider, 1);
+    database.setCampaignState("paused");
+    database.configureCampaign("all", 1_000_000_000, now, 2);
+    assert.equal(database.getCampaignTrialProgress()[0].admitted, 1);
+    database.configureCampaign("all", 1_000_000_000, now, null);
+    assert.equal(database.getCampaignControl().trialPerProvider, null);
+});
+
+test("campaign resume performs a pending production rollover and archives retired staging files", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-version-resume-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const databasePath = path.join(root, "pipeline.sqlite");
+    const artifactsRoot = path.join(root, "artifacts");
+    const stagingRoot = path.join(artifactsRoot, "production-v2");
+    await mkdir(artifactsRoot);
+    const database = new PipelineDatabase(databasePath);
+    const recording = database.discover(inputForRollover(root));
+    const artifactPath = path.join(artifactsRoot, `${recording.id}.upscale1080p.mp4`);
+    await writeFile(artifactPath, "retired artifact");
+    database.saveArtifactVariant(recording.id, "upscale1080p", {
+        path: artifactPath,
+        sizeBytes: 16,
+        sha256: "d".repeat(64),
+        validatedAt: "2026-08-30T10:00:00.000Z",
+    }, 10, 0);
+    const interruptedSource = path.join(artifactsRoot, `${recording.id}.upscale1440p.mp4`);
+    database.saveArtifactVariant(recording.id, "upscale1440p", {
+        path: interruptedSource,
+        sizeBytes: 17,
+        sha256: "e".repeat(64),
+        validatedAt: "2026-08-30T10:00:00.000Z",
+    }, 10, 0);
+    const interruptedTarget = path.join(
+        artifactsRoot,
+        "legacy-production-v1",
+        path.basename(interruptedSource),
+    );
+    await mkdir(path.dirname(interruptedTarget), { recursive: true });
+    await writeFile(interruptedTarget, "already archived");
+    const orphanPath = path.join(artifactsRoot, "orphaned-old-output.tmp");
+    await writeFile(orphanPath, "orphaned old output");
+    advanceToMetadataReady(database, recording, root);
+    database.configureCampaign("all", 1_000_000_000, new Date(), 10);
+    database.enrollCampaignTrial(recording);
+    database.close();
+    const raw = new DatabaseSync(databasePath);
+    raw.prepare("UPDATE production_version SET version = 'legacy-production-v1' WHERE id = 1").run();
+    raw.close();
+
+    const config = {
+        ...pipelineConfig,
+        databasePath,
+        artifactsRoot,
+        stagingRoot,
+        manualStagingRoot: path.join(stagingRoot, "manual"),
+    };
+    const result = await setCampaignRunning(config, true);
+    assert.equal(result.productionVersion, "production-v2");
+    assert.equal(result.rollover.rolledOver, true);
+    assert.equal(result.rollover.retiredRecordings, 1);
+    assert.equal(path.dirname(result.rollover.historySnapshotPath), path.join(root, "history", "legacy-production-v1"));
+    const snapshot = new DatabaseSync(result.rollover.historySnapshotPath, { readOnly: true });
+    assert.equal(snapshot.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
+    assert.equal(snapshot.prepare("SELECT COUNT(*) AS count FROM descriptions").get().count, 1);
+    assert.equal(snapshot.prepare("SELECT title FROM upload_metadata").get().title, "Specific test title [alias]");
+    assert.equal(snapshot.prepare("SELECT state FROM campaign_control").get().state, "paused");
+    snapshot.close();
+    assert.equal(result.rollover.artifactArchival.unversioned.moved, 2);
+    assert.equal(result.rollover.artifactArchival.retiredGeneration.alreadyArchived, 2);
+    await assert.rejects(access(artifactPath), /ENOENT/);
+    await access(path.join(artifactsRoot, "legacy-production-v1", path.basename(artifactPath)));
+    await access(path.join(artifactsRoot, "legacy-production-v1", path.basename(orphanPath)));
+    await access(interruptedTarget);
+    await access(stagingRoot);
+    const inspection = new PipelineDatabase(databasePath);
+    assert.equal(inspection.getCampaignControl().state, "running");
+    assert.equal(inspection.getCampaignControl().trialPerProvider, 10);
+    assert(inspection.getCampaignTrialProgress().every((provider) => provider.admitted === 0));
+    assert.deepEqual(inspection.list(), []);
+    inspection.setCampaignState("paused");
+    inspection.close();
+
+    const orphanAfterDatabaseReset = path.join(artifactsRoot, "unversioned-after-reset.tmp");
+    await writeFile(orphanAfterDatabaseReset, "not represented in the current database");
+    const resumedCurrent = await setCampaignRunning(config, true);
+    assert.equal(resumedCurrent.rollover.rolledOver, false);
+    assert.equal(resumedCurrent.rollover.historySnapshotPath, null);
+    assert.equal(resumedCurrent.rollover.artifactArchival.unversioned.moved, 1);
+    await assert.rejects(access(orphanAfterDatabaseReset), /ENOENT/);
+    await access(path.join(
+        artifactsRoot,
+        "legacy-production-v1",
+        path.basename(orphanAfterDatabaseReset),
+    ));
+});
+
+function inputForRollover(directory) {
+    const sourcePath = path.join(directory, "2025-01-01 000000 alias");
+    return {
+        provider: "tango",
+        sourceKind: "edited",
+        sourcePath,
+        playlistPath: path.join(sourcePath, "playlist.m3u8"),
+        sourceFingerprint: "rollover-fixture",
+        durationSeconds: 10,
+    };
+}

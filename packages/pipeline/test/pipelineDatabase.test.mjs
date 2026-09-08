@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { PipelineDatabase, calendarMonth } from "../dist/db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "../dist/upload/dryRunPlan.js";
@@ -64,6 +65,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.\n\nRecorded: unknown\nSource: https://tango.me/streamer-id",
         tags: ["tango", "live", "room"],
     });
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v3: test fixture");
     return database.get(recording.id);
 }
 
@@ -73,12 +75,168 @@ test("schema initialization is idempotent and discovery deduplicates across rest
     const second = database.discover(input(directory));
     assert.equal(first.id, second.id);
     assert.equal(database.list().length, 1);
+    assert.equal(database.getProductionVersion(), "production-v2");
     assert.equal(database.integrityCheck(), "ok");
 
     database.close();
     const reopened = new PipelineDatabase(databasePath);
     assert.equal(reopened.list().length, 1);
     assert.equal(reopened.integrityCheck(), "ok");
+    reopened.close();
+});
+
+test("schema eight gains trial controls without changing generation, history, or campaign intent", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory));
+    database.configureCampaign("sc", 123_456_789);
+    database.close();
+    const old = new DatabaseSync(databasePath);
+    old.exec(`ALTER TABLE campaign_control DROP COLUMN trial_per_provider;
+        ALTER TABLE campaign_control DROP COLUMN trial_finished_at;
+        DROP TABLE campaign_trial_recordings;
+        UPDATE schema_version SET version = 8;`);
+    old.close();
+    const migrated = new PipelineDatabase(databasePath);
+    t.after(() => migrated.close());
+    assert.equal(migrated.getProductionVersion(), "production-v2");
+    assert.equal(migrated.get(recording.id).state, "server_ready");
+    assert.equal(migrated.getCampaignControl().state, "paused");
+    assert.equal(migrated.getCampaignControl().providerFilter, "sc");
+    assert.equal(migrated.getCampaignControl().monthlyUploadLimitBytes, 123_456_789);
+    assert.equal(migrated.getCampaignControl().trialPerProvider, null);
+    assert.equal(migrated.getCampaignControl().trialFinishedAt, null);
+    assert(migrated.getCampaignTrialProgress().every((provider) => provider.admitted === 0));
+});
+
+test("schema six migrates remote uploads and marks the old production generation for rollover", async (t) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "video-pipeline-v6-migration-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const databasePath = path.join(directory, "pipeline.sqlite");
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE schema_version (version INTEGER NOT NULL) STRICT;
+        INSERT INTO schema_version VALUES (6);
+        CREATE TABLE recordings (
+            id TEXT PRIMARY KEY, provider TEXT NOT NULL, source_kind TEXT NOT NULL,
+            source_path TEXT NOT NULL UNIQUE, playlist_path TEXT NOT NULL,
+            source_fingerprint TEXT NOT NULL, duration_seconds REAL NOT NULL,
+            state TEXT NOT NULL, block_reason TEXT, lease_owner TEXT,
+            lease_expires_at TEXT, attempt_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE remote_uploads (
+            recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
+            attempt_id TEXT NOT NULL, remote_id TEXT NOT NULL,
+            remote_url TEXT NOT NULL, verified_at TEXT NOT NULL
+        ) STRICT;
+    `);
+    legacy.close();
+
+    const migrated = new PipelineDatabase(databasePath);
+    assert.equal(migrated.integrityCheck(), "ok");
+    migrated.close();
+    const inspection = new DatabaseSync(databasePath);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 9);
+    assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
+    const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
+    assert(columns.includes("artifact_part"));
+    inspection.close();
+});
+
+test("production rollover retires workflow state while preserving quota, overrides, and campaign configuration", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 1_000);
+    database.saveManualProvenance(recording.id, {
+        observedIdentifier: "alias",
+        streamerId: "manual-id",
+        alias: "alias",
+        streamerUrl: "https://example.test/manual-id",
+    });
+    database.configureCampaign("sc", 123_456_789);
+    const now = new Date("2026-08-30T10:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 1_000, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.finishUploadAttempt(attempt, {
+        status: "accepted",
+        transmittedBytes: 900,
+        remoteId: "old-remote",
+        remoteUrl: "https://example.test/old-remote",
+    }, now);
+    database.markRemoteVerified(recording.id, "old-remote", "https://example.test/old-remote", now);
+    database.close();
+
+    const raw = new DatabaseSync(databasePath);
+    raw.prepare("UPDATE production_version SET version = 'legacy-production-v1' WHERE id = 1").run();
+    raw.close();
+    const reopened = new PipelineDatabase(databasePath);
+    const plan = reopened.planProductionRollover();
+    assert.equal(plan.required, true);
+    assert.equal(plan.recordingCount, 1);
+    assert.equal(plan.remoteUploadCount, 1);
+    const leased = reopened.claimRecording(
+        recording.id,
+        ["xvideos_verified"],
+        "still-running-old-worker",
+        60_000,
+    );
+    assert.equal(leased?.id, recording.id);
+    assert.equal(reopened.planProductionRollover().leasedRecordingCount, 1);
+    assert.throws(() => reopened.commitProductionRollover(), /refuses 1 leased recording/);
+    reopened.releaseLease(recording.id, "still-running-old-worker");
+    assert.equal(plan.preservedBandwidthBytes, 900);
+    assert(plan.ownedPaths.includes(path.resolve(path.join(directory, `${recording.id}.mp4`))));
+
+    const rollover = reopened.commitProductionRollover();
+    assert.equal(rollover.rolledOver, true);
+    assert.equal(reopened.getProductionVersion(), "production-v2");
+    assert.deepEqual(reopened.list(), []);
+    assert.deepEqual(reopened.uploadUsage("2026-08"), { spent: 900, reserved: 0 });
+    assert.equal(reopened.getProvenanceOverride("tango", "alias")?.streamerId, "manual-id");
+    assert.equal(reopened.getCampaignControl().providerFilter, "sc");
+    assert.equal(reopened.getCampaignControl().monthlyUploadLimitBytes, 123_456_789);
+    assert.deepEqual(reopened.listProductionRollovers().map((row) => ({
+        fromVersion: row.fromVersion,
+        toVersion: row.toVersion,
+        retiredRecordings: row.retiredRecordings,
+        retiredRemoteUploads: row.retiredRemoteUploads,
+    })), [{
+        fromVersion: "legacy-production-v1",
+        toVersion: "production-v2",
+        retiredRecordings: 1,
+        retiredRemoteUploads: 1,
+    }]);
+    assert.equal(reopened.commitProductionRollover().rolledOver, false);
+    reopened.close();
+    const archive = new DatabaseSync(databasePath, { readOnly: true });
+    assert.equal(archive.prepare("SELECT COUNT(*) AS count FROM retired_recordings").get().count, 1);
+    assert.equal(archive.prepare("SELECT COUNT(*) AS count FROM retired_upload_attempts").get().count, 1);
+    assert.equal(archive.prepare("SELECT COUNT(*) AS count FROM retired_remote_uploads").get().count, 1);
+    archive.close();
+});
+
+test("production rollover refuses an upload that is still in flight", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 1_000);
+    const now = new Date("2026-08-30T10:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 1_000, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.close();
+    const raw = new DatabaseSync(databasePath);
+    raw.prepare("UPDATE production_version SET version = 'legacy-production-v1' WHERE id = 1").run();
+    raw.close();
+
+    const reopened = new PipelineDatabase(databasePath);
+    assert.equal(reopened.planProductionRollover().activeUploadCount, 1);
+    assert.throws(() => reopened.commitProductionRollover(), /1 active upload/);
+    reopened.finishUploadAttempt(attempt, {
+        status: "failed",
+        transmittedBytes: 0,
+        error: "test stopped before rollover",
+    }, now);
+    assert.equal(reopened.commitProductionRollover().rolledOver, true);
     reopened.close();
 });
 
@@ -107,7 +265,7 @@ test("leases prevent duplicate claims and expired leases are recoverable", async
 test("state transitions cannot skip, reverse, or double-complete stages", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
-    assert.throws(() => database.transition(recording.id, "server_ready", "artifact_valid"), /Invalid pipeline transition/);
+    assert.throws(() => database.transition(recording.id, "server_ready", "described"), /Invalid pipeline transition/);
     database.transition(recording.id, "server_ready", "remuxed");
     assert.throws(() => database.transition(recording.id, "server_ready", "remuxed"), /expected state/);
     assert.throws(() => database.transition(recording.id, "remuxed", "server_ready"), /Invalid pipeline transition/);
@@ -241,6 +399,14 @@ test("dry-run plans are deterministic and mutate neither state nor quota", async
     const second = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", 1_000);
     assert.deepEqual(first, second);
     assert.equal(first[0].disposition, "would_upload");
+    const wrongGeneration = createDryRunUploadPlan(
+        database,
+        new Date("2026-08-12T08:00:00Z"),
+        "Europe/Tirane",
+        1_000,
+        path.join(directory, "production-v2"),
+    );
+    assert.equal(wrongGeneration[0].reason, "artifact_generation_mismatch");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 0, reserved: 0 });
     assert.deepEqual(database.get(recording.id), before);
 });
@@ -309,6 +475,152 @@ test("stage failures persist diagnostics without continuing downstream", async (
     assert.equal(result.blockReason, "remux exploded");
     assert.equal(result.leaseOwner, null);
     assert.equal(database.retryFailed(recording.id).state, "server_ready");
+});
+
+test("mixed-resolution results persist a primary artifact and automatic queued upload", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    const now = new Date("2026-08-30T10:00:00.000Z").toISOString();
+    const stages = {
+        async remux() {
+            return {
+                disposition: "artifact_set",
+                reason: "mixed artifacts are automatic uploads",
+                primary: {
+                    part: "max1080p",
+                    path: path.join(directory, "max1080p.mp4"),
+                    sizeBytes: 200,
+                    sha256: "a".repeat(64),
+                    validatedAt: now,
+                    segmentCount: 8,
+                    sourceDimensions: ["1920x1080"],
+                },
+                queued: [{
+                    part: "nonmax1080p",
+                    path: path.join(directory, "nonmax-upscale1080p.mp4"),
+                    sizeBytes: 100,
+                    sha256: "b".repeat(64),
+                    validatedAt: now,
+                    segmentCount: 2,
+                    sourceDimensions: ["1280x720"],
+                }],
+            };
+        },
+        async validateArtifact() { throw new Error("not called"); },
+        async describe() { throw new Error("not called"); },
+    };
+    const result = await new PipelineOrchestrator(database, stages, "resolution-worker").processOne();
+    assert.equal(result.state, "artifact_valid", result.blockReason ?? undefined);
+    assert.equal(result.blockReason, null);
+    assert.equal(database.getArtifactPart(recording.id), "max1080p");
+    assert.deepEqual(database.listQueuedProductionArtifacts(recording.id).map((artifact) => ({
+        part: artifact.part,
+        segmentCount: artifact.segmentCount,
+        sourceDimensions: artifact.sourceDimensions,
+    })), [
+        { part: "nonmax1080p", segmentCount: 2, sourceDimensions: ["1280x720"] },
+    ]);
+    assert.equal(database.getRemuxOutput(recording.id), null);
+});
+
+test("verification promotes the converted mixed artifact and completes only after both uploads", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    const validatedAt = "2026-08-30T10:00:00.000Z";
+    database.saveProductionArtifactSet(recording.id, {
+        part: "max1080p",
+        path: path.join(directory, "max1080p.mp4"),
+        sizeBytes: 200,
+        sha256: "a".repeat(64),
+        validatedAt,
+        segmentCount: 8,
+        sourceDimensions: ["1920x1080"],
+    }, [{
+        part: "nonmax1080p",
+        path: path.join(directory, "nonmax-upscale1080p.mp4"),
+        sizeBytes: 100,
+        sha256: "b".repeat(64),
+        validatedAt,
+        segmentCount: 2,
+        sourceDimensions: ["1280x720"],
+    }], "resolution-policy-v2: automatic split");
+    database.saveProvenance(recording.id, {
+        observedIdentifier: "alias",
+        status: "resolved",
+        streamerId: "streamer-id",
+        alias: "alias",
+        streamerUrl: "https://example.test/streamer-id",
+        aliasUrl: null,
+        reason: null,
+        updatedAt: validatedAt,
+    });
+
+    const prepareCurrent = (sha256, label) => {
+        database.saveDescription(recording.id, {
+            artifactSha256: sha256,
+            promptVersion: "test-v2",
+            fps: 1,
+            output: { title: label, description: `${label} description` },
+            evidencePath: path.join(directory, `${label}.json`),
+        });
+        database.saveUploadMetadata(recording.id, {
+            title: label,
+            description: `${label} description`,
+            tags: ["tango", "live"],
+        });
+    };
+    const uploadAndVerify = (remoteId, now) => {
+        const reservation = database.reserveUpload(recording.id, 250, now);
+        const attempt = database.beginUpload(recording.id, reservation, now);
+        database.finishUploadAttempt(attempt, {
+            status: "uncertain",
+            transmittedBytes: 200,
+            remoteId,
+            confirmation: { confirmAfter: now },
+        }, now);
+        database.reconcileUncertain(attempt, remoteId, `https://example.test/${remoteId}`, now);
+        return database.markRemoteVerified(recording.id, remoteId, `https://example.test/${remoteId}`, now);
+    };
+
+    prepareCurrent("a".repeat(64), "max");
+    const afterFirst = uploadAndVerify("remote-max", new Date("2026-08-30T11:00:00Z"));
+    assert.equal(afterFirst.state, "artifact_valid");
+    assert.equal(database.getArtifactPart(recording.id), "nonmax1080p");
+    assert.equal(database.getArtifact(recording.id).sha256, "b".repeat(64));
+    assert.equal(database.getDescription(recording.id), null);
+    assert.equal(database.getUploadMetadata(recording.id), null);
+    assert.deepEqual(database.listQueuedProductionArtifacts(recording.id), []);
+    assert.deepEqual(database.listVerifiedUploadParts(recording.id).map((row) => row.part), ["max1080p"]);
+
+    prepareCurrent("b".repeat(64), "converted");
+    const afterSecond = uploadAndVerify("remote-converted", new Date("2026-08-30T12:00:00Z"));
+    assert.equal(afterSecond.state, "xvideos_verified");
+    assert.deepEqual(database.listVerifiedUploadParts(recording.id).map((row) => row.part), [
+        "max1080p",
+        "nonmax1080p",
+    ]);
+});
+
+test("legacy local artifacts can be durably reset for the production resolution policy", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    const artifactPath = path.join(directory, "legacy-720.mp4");
+    database.saveRemuxOutput(recording.id, artifactPath);
+    database.saveArtifact(recording.id, {
+        path: artifactPath,
+        sizeBytes: 100,
+        sha256: "c".repeat(64),
+        validatedAt: new Date().toISOString(),
+    });
+    const reset = database.resetLocalWorkForResolutionPolicy(
+        recording.id,
+        "resolution-policy-v2: legacy 720p artifact must be rebuilt",
+    );
+    assert.equal(reset.recording.state, "server_ready");
+    assert.deepEqual(reset.obsoletePaths, [artifactPath]);
+    assert.equal(database.getArtifact(recording.id), null);
+    assert.equal(database.getRemuxOutput(recording.id), null);
+    assert(database.hasResolutionPolicyAssessment(recording.id, "resolution-policy-v2"));
 });
 
 test("campaign heartbeat drives the manual-command active guard", async (t) => {

@@ -1,5 +1,6 @@
 export interface UploadRequest {
     readonly recordingId: string;
+    readonly uploadIdentity: string;
     readonly artifactPath: string;
     readonly sizeBytes: number;
     readonly title: string;

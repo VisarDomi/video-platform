@@ -6,6 +6,10 @@ import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
+import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
+import { productionUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
+import { isDirectArtifactPath } from "../stages/remux.js";
 
 export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 
@@ -18,10 +22,18 @@ export async function uploadOne(
     }
     const database = new PipelineDatabase(config.databasePath);
     try {
+        if (database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
+            throw new Error(`Upload requires active ${CURRENT_PRODUCTION_VERSION}; resume the campaign rollover first`);
+        }
         database.recoverInterruptedUploads();
         const recording = database.get(recordingId);
         if (!recording) {
             throw new Error(`Unknown pipeline recording ${recordingId}`);
+        }
+        if (!database.hasResolutionPolicyAssessment(recordingId, RESOLUTION_POLICY_VERSION)) {
+            throw new Error(
+                `Recording ${recordingId} has not passed ${RESOLUTION_POLICY_VERSION}; run it through the campaign before upload`,
+            );
         }
         const identityOutcome = await guardUploadIdentity(database, recording, config);
         if (identityOutcome.kind === "verified_cleaned") {
@@ -53,9 +65,15 @@ export async function uploadOne(
         }
         await verifyCurrentServerAuthority(recording, config);
         const artifact = database.getArtifact(recordingId);
+        const artifactPart = database.getArtifactPart(recordingId) ?? "full";
         const metadata = database.getUploadMetadata(recordingId);
         const provenance = database.getProvenance(recordingId);
         if (!artifact || !metadata || !provenance?.streamerId) throw new Error("Upload prerequisites are incomplete");
+        if (!isDirectArtifactPath(config.stagingRoot, artifact.path)) {
+            throw new Error(
+                `Artifact ${artifact.path} does not belong to active ${CURRENT_PRODUCTION_VERSION} staging`,
+            );
+        }
         const assessment = assessFinalArtifact({
             id: recording.id,
             path: artifact.path,
@@ -78,6 +96,7 @@ export async function uploadOne(
             reservationId,
             {
                 recordingId,
+                uploadIdentity: productionUploadIdentity(recording, artifactPart),
                 artifactPath: artifact.path,
                 sizeBytes: artifact.sizeBytes,
                 title: metadata.title,

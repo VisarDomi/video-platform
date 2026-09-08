@@ -18,7 +18,7 @@ export const PIPELINE_STATES = [
 export type PipelineState = typeof PIPELINE_STATES[number];
 
 const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState[]>> = {
-    server_ready: ["remuxed", "blocked", "failed", "cleanup_eligible"],
+    server_ready: ["remuxed", "artifact_valid", "blocked", "failed", "cleanup_eligible"],
     remuxed: ["artifact_valid", "blocked", "failed", "cleanup_eligible"],
     artifact_valid: ["described", "blocked", "failed", "cleanup_eligible"],
     described: ["provenance_review_required", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
@@ -26,7 +26,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState
     metadata_ready: ["xvideos_admitted", "blocked", "failed", "cleanup_eligible"],
     xvideos_admitted: ["xvideos_uploading", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     xvideos_uploading: ["xvideos_uploaded", "xvideos_uncertain", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
-    xvideos_uploaded: ["xvideos_verified", "xvideos_uncertain", "blocked", "failed", "cleanup_eligible"],
+    xvideos_uploaded: ["artifact_valid", "xvideos_verified", "xvideos_uncertain", "blocked", "failed", "cleanup_eligible"],
     xvideos_uncertain: ["xvideos_uploaded", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     xvideos_verified: ["cleanup_eligible", "failed"],
     cleanup_eligible: [],

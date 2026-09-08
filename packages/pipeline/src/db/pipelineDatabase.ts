@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type {
     ArtifactRecord,
@@ -10,15 +11,19 @@ import type {
     CampaignControl,
     CampaignProviderFilter,
     DescriptionRecord,
+    ProductionArtifactPart,
+    QueuedProductionArtifactRecord,
     Recording,
     RecordingInput,
     RecordingProvenance,
+    ResolutionReviewArtifactRecord,
+    ResolutionReviewPart,
     SourceKind,
     UploadConfirmation,
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 9;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
 interface RecordingRow {
@@ -46,10 +51,26 @@ interface ArtifactRow {
     validated_at: string;
 }
 
+interface ProductionArtifactRow extends ArtifactRow {
+    part: ProductionArtifactPart;
+}
+
+interface QueuedProductionArtifactRow extends ProductionArtifactRow {
+    segment_count: number;
+    source_dimensions_json: string;
+    queue_position: number;
+}
+
 interface ArtifactVariantRow extends ArtifactRow {
     variant: ArtifactVariant;
     source_frame_count: number;
     dropped_source_frames: number;
+}
+
+interface ResolutionReviewArtifactRow extends ArtifactRow {
+    part: ResolutionReviewPart;
+    segment_count: number;
+    source_dimensions_json: string;
 }
 
 interface UsageRow { spent: number; reserved: number }
@@ -115,12 +136,39 @@ function mapArtifact(row: ArtifactRow): ArtifactRecord {
     };
 }
 
+function mapQueuedProductionArtifact(row: QueuedProductionArtifactRow): QueuedProductionArtifactRecord {
+    const sourceDimensions = JSON.parse(row.source_dimensions_json) as unknown;
+    if (!Array.isArray(sourceDimensions) || !sourceDimensions.every((value) => typeof value === "string")) {
+        throw new Error(`Invalid queued artifact dimensions for ${row.recording_id}/${row.part}`);
+    }
+    if (row.part === "full") throw new Error("A full artifact cannot be queued");
+    return {
+        ...mapArtifact(row),
+        part: row.part,
+        segmentCount: row.segment_count,
+        sourceDimensions,
+    };
+}
+
 function mapArtifactVariant(row: ArtifactVariantRow): ArtifactVariantRecord {
     return {
         ...mapArtifact(row),
         variant: row.variant,
         sourceFrameCount: row.source_frame_count,
         droppedSourceFrames: row.dropped_source_frames,
+    };
+}
+
+function mapResolutionReviewArtifact(row: ResolutionReviewArtifactRow): ResolutionReviewArtifactRecord {
+    const sourceDimensions = JSON.parse(row.source_dimensions_json) as unknown;
+    if (!Array.isArray(sourceDimensions) || !sourceDimensions.every((value) => typeof value === "string")) {
+        throw new Error(`Invalid source dimensions for resolution-review artifact ${row.recording_id}/${row.part}`);
+    }
+    return {
+        ...mapArtifact(row),
+        part: row.part,
+        segmentCount: row.segment_count,
+        sourceDimensions,
     };
 }
 
@@ -142,6 +190,10 @@ export class PipelineDatabase {
     constructor(databasePath: string) {
         if (databasePath !== ":memory:") mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
         this.database = new DatabaseSync(databasePath);
+        const existingSchema = this.database.prepare(`
+            SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'
+        `).get() as { present: number } | undefined;
+        const isNewDatabase = existingSchema === undefined;
         this.database.exec(`
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
@@ -180,10 +232,24 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS artifacts (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
+                part TEXT NOT NULL DEFAULT 'full' CHECK (part IN ('full', 'max1080p', 'nonmax1080p')),
                 path TEXT NOT NULL UNIQUE,
                 size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
                 sha256 TEXT NOT NULL,
                 validated_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS production_artifact_queue (
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                part TEXT NOT NULL CHECK (part IN ('max1080p', 'nonmax1080p')),
+                queue_position INTEGER NOT NULL CHECK (queue_position >= 0),
+                path TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+                sha256 TEXT NOT NULL,
+                segment_count INTEGER NOT NULL CHECK (segment_count > 0),
+                source_dimensions_json TEXT NOT NULL,
+                validated_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, part),
+                UNIQUE (recording_id, queue_position)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS artifact_variants (
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
@@ -197,6 +263,17 @@ export class PipelineDatabase {
                 ),
                 validated_at TEXT NOT NULL,
                 PRIMARY KEY (recording_id, variant)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS resolution_review_artifacts (
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                part TEXT NOT NULL CHECK (part IN ('max1080p', 'nonmax')),
+                path TEXT NOT NULL UNIQUE,
+                size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+                sha256 TEXT NOT NULL,
+                segment_count INTEGER NOT NULL CHECK (segment_count > 0),
+                source_dimensions_json TEXT NOT NULL,
+                validated_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, part)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS remux_outputs (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
@@ -215,6 +292,7 @@ export class PipelineDatabase {
             CREATE TABLE IF NOT EXISTS upload_reservations (
                 id TEXT PRIMARY KEY,
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
                 provider TEXT NOT NULL,
                 calendar_month TEXT NOT NULL,
                 reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
@@ -228,6 +306,7 @@ export class PipelineDatabase {
                 id TEXT PRIMARY KEY,
                 reservation_id TEXT REFERENCES upload_reservations(id),
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
                 provider TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (status IN ('started', 'failed', 'accepted', 'uncertain')),
                 phase TEXT NOT NULL DEFAULT 'started' CHECK (phase IN ('started', 'file_uploading', 'file_uploaded', 'metadata_submitting')),
@@ -249,11 +328,14 @@ export class PipelineDatabase {
                 created_at TEXT NOT NULL
             ) STRICT;
             CREATE TABLE IF NOT EXISTS remote_uploads (
-                recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
                 attempt_id TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
                 remote_url TEXT NOT NULL,
-                verified_at TEXT NOT NULL
+                verified_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, artifact_part),
+                UNIQUE (attempt_id)
             ) STRICT;
             CREATE TABLE IF NOT EXISTS recording_provenance (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
@@ -315,6 +397,63 @@ export class PipelineDatabase {
             INSERT OR IGNORE INTO campaign_control (
                 id, state, provider_filter, ordering, monthly_upload_limit_bytes, updated_at
             ) VALUES (1, 'paused', 'all', 'oldest', ${DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES}, '1970-01-01T00:00:00.000Z');
+            CREATE TABLE IF NOT EXISTS production_version (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                version TEXT NOT NULL,
+                activated_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS campaign_trial_recordings (
+                recording_id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL CHECK (provider IN ('tango', 'fc2', 'sc')),
+                admitted_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS production_rollovers (
+                id INTEGER PRIMARY KEY,
+                from_version TEXT NOT NULL,
+                to_version TEXT NOT NULL,
+                retired_recordings INTEGER NOT NULL CHECK (retired_recordings >= 0),
+                retired_remote_uploads INTEGER NOT NULL CHECK (retired_remote_uploads >= 0),
+                preserved_bandwidth_bytes INTEGER NOT NULL CHECK (preserved_bandwidth_bytes >= 0),
+                created_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS retired_recordings (
+                production_version TEXT NOT NULL,
+                recording_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                state TEXT NOT NULL,
+                block_reason TEXT,
+                created_at TEXT NOT NULL,
+                retired_at TEXT NOT NULL,
+                PRIMARY KEY (production_version, recording_id)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS retired_upload_attempts (
+                production_version TEXT NOT NULL,
+                attempt_id TEXT NOT NULL,
+                recording_id TEXT NOT NULL,
+                artifact_part TEXT NOT NULL,
+                status TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                transmitted_bytes INTEGER NOT NULL,
+                remote_id TEXT,
+                remote_url TEXT,
+                error TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                retired_at TEXT NOT NULL,
+                PRIMARY KEY (production_version, attempt_id)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS retired_remote_uploads (
+                production_version TEXT NOT NULL,
+                recording_id TEXT NOT NULL,
+                artifact_part TEXT NOT NULL,
+                attempt_id TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                remote_url TEXT NOT NULL,
+                verified_at TEXT NOT NULL,
+                retired_at TEXT NOT NULL,
+                PRIMARY KEY (production_version, recording_id, artifact_part)
+            ) STRICT;
         `);
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
         if (!controlColumns.some((column) => column.name === "antibot_failures")) {
@@ -323,6 +462,12 @@ export class PipelineDatabase {
         if (!controlColumns.some((column) => column.name === "resume_at")) {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN resume_at TEXT");
         }
+        if (!controlColumns.some((column) => column.name === "trial_per_provider")) {
+            this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_per_provider INTEGER CHECK (trial_per_provider > 0)");
+        }
+        if (!controlColumns.some((column) => column.name === "trial_finished_at")) {
+            this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
+        }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
         if (!attemptColumns.some((column) => column.name === "phase")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN phase TEXT NOT NULL DEFAULT 'started'");
@@ -330,15 +475,60 @@ export class PipelineDatabase {
         if (!attemptColumns.some((column) => column.name === "progress_bytes")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN progress_bytes INTEGER NOT NULL DEFAULT 0");
         }
+        const artifactColumns = this.database.prepare("PRAGMA table_info(artifacts)").all() as unknown as Array<{ name: string }>;
+        if (!artifactColumns.some((column) => column.name === "part")) {
+            this.database.exec("ALTER TABLE artifacts ADD COLUMN part TEXT NOT NULL DEFAULT 'full'");
+        }
+        const reservationColumns = this.database.prepare("PRAGMA table_info(upload_reservations)").all() as unknown as Array<{ name: string }>;
+        if (!reservationColumns.some((column) => column.name === "artifact_part")) {
+            this.database.exec("ALTER TABLE upload_reservations ADD COLUMN artifact_part TEXT NOT NULL DEFAULT 'full'");
+        }
+        if (!attemptColumns.some((column) => column.name === "artifact_part")) {
+            this.database.exec("ALTER TABLE upload_attempts ADD COLUMN artifact_part TEXT NOT NULL DEFAULT 'full'");
+        }
         const version = this.database.prepare("SELECT version FROM schema_version").get() as { version: number };
-        if (version.version === 2 || version.version === 3 || version.version === 4) {
+        if (version.version >= 2 && version.version < SCHEMA_VERSION) {
+            const remoteColumns = this.database.prepare("PRAGMA table_info(remote_uploads)").all() as unknown as Array<{ name: string }>;
+            if (!remoteColumns.some((column) => column.name === "artifact_part")) {
+                this.database.exec(`
+                    CREATE TABLE remote_uploads_v7 (
+                        recording_id TEXT NOT NULL REFERENCES recordings(id),
+                        artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
+                        attempt_id TEXT NOT NULL,
+                        remote_id TEXT NOT NULL,
+                        remote_url TEXT NOT NULL,
+                        verified_at TEXT NOT NULL,
+                        PRIMARY KEY (recording_id, artifact_part),
+                        UNIQUE (attempt_id)
+                    ) STRICT;
+                    INSERT INTO remote_uploads_v7 (
+                        recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at
+                    ) SELECT recording_id, 'full', attempt_id, remote_id, remote_url, verified_at FROM remote_uploads;
+                    DROP TABLE remote_uploads;
+                    ALTER TABLE remote_uploads_v7 RENAME TO remote_uploads;
+                `);
+            }
             this.database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
         }
+        this.database.prepare(`
+            INSERT OR IGNORE INTO production_version (id, version, activated_at)
+            VALUES (1, ?, ?)
+        `).run(
+            isNewDatabase ? CURRENT_PRODUCTION_VERSION : "legacy-production-v1",
+            new Date().toISOString(),
+        );
     }
 
     close(): void { this.database.close(); }
+
+    snapshotTo(destination: string): void {
+        // A complete SQLite snapshot preserves descriptions, provenance and
+        // metadata as well as the narrower retired upload ledger. VACUUM INTO
+        // refuses an existing non-empty destination; it never overwrites one.
+        this.database.prepare("VACUUM INTO ?").run(path.resolve(destination));
+    }
 
     integrityCheck(): string {
         const row = this.database.prepare("PRAGMA integrity_check").get() as { integrity_check: string };
@@ -425,6 +615,8 @@ export class PipelineDatabase {
             monthly_upload_limit_bytes: number;
             antibot_failures: number;
             resume_at: string | null;
+            trial_per_provider: number | null;
+            trial_finished_at: string | null;
             updated_at: string;
         } | undefined;
         if (!row) throw new Error("Campaign control row is missing");
@@ -435,7 +627,209 @@ export class PipelineDatabase {
             monthlyUploadLimitBytes: row.monthly_upload_limit_bytes,
             antibotFailures: row.antibot_failures,
             resumeAt: row.resume_at,
+            trialPerProvider: row.trial_per_provider,
+            trialFinishedAt: row.trial_finished_at,
             updatedAt: row.updated_at,
+        };
+    }
+
+    getProductionVersion(): string {
+        const row = this.database.prepare("SELECT version FROM production_version WHERE id = 1")
+            .get() as { version: string } | undefined;
+        if (!row) throw new Error("Production version row is missing");
+        return row.version;
+    }
+
+    listProductionRollovers(): Array<{
+        fromVersion: string;
+        toVersion: string;
+        retiredRecordings: number;
+        retiredRemoteUploads: number;
+        preservedBandwidthBytes: number;
+        createdAt: string;
+    }> {
+        const rows = this.database.prepare(`
+            SELECT from_version, to_version, retired_recordings,
+                retired_remote_uploads, preserved_bandwidth_bytes, created_at
+            FROM production_rollovers ORDER BY id
+        `).all() as unknown as Array<{
+            from_version: string;
+            to_version: string;
+            retired_recordings: number;
+            retired_remote_uploads: number;
+            preserved_bandwidth_bytes: number;
+            created_at: string;
+        }>;
+        return rows.map((row) => ({
+            fromVersion: row.from_version,
+            toVersion: row.to_version,
+            retiredRecordings: row.retired_recordings,
+            retiredRemoteUploads: row.retired_remote_uploads,
+            preservedBandwidthBytes: row.preserved_bandwidth_bytes,
+            createdAt: row.created_at,
+        }));
+    }
+
+    planProductionRollover(targetVersion = CURRENT_PRODUCTION_VERSION): {
+        required: boolean;
+        fromVersion: string;
+        toVersion: string;
+        recordingCount: number;
+        remoteUploadCount: number;
+        leasedRecordingCount: number;
+        activeUploadCount: number;
+        preservedBandwidthBytes: number;
+        ownedPaths: string[];
+    } {
+        if (!/^production-v\d+$/.test(targetVersion)) throw new Error("Invalid production version");
+        const fromVersion = this.getProductionVersion();
+        const recordingCount = this.database.prepare("SELECT COUNT(*) AS count FROM recordings")
+            .get() as { count: number };
+        const remoteUploadCount = this.database.prepare("SELECT COUNT(*) AS count FROM remote_uploads")
+            .get() as { count: number };
+        const leasedRecordingCount = this.database.prepare(`
+            SELECT COUNT(*) AS count FROM recordings WHERE lease_owner IS NOT NULL
+        `).get() as { count: number };
+        const activeUploadCount = this.database.prepare(`
+            SELECT COUNT(*) AS count FROM upload_attempts WHERE status = 'started'
+        `).get() as { count: number };
+        const bandwidth = this.database.prepare(`
+            SELECT COALESCE(SUM(transmitted_bytes), 0) AS bytes FROM bandwidth_events
+        `).get() as { bytes: number };
+        const ownedRows = this.database.prepare(`
+            SELECT path FROM artifacts
+            UNION SELECT path FROM production_artifact_queue
+            UNION SELECT path FROM artifact_variants
+            UNION SELECT path FROM resolution_review_artifacts
+            UNION SELECT path FROM remux_outputs
+            UNION SELECT evidence_path AS path FROM descriptions
+        `).all() as unknown as Array<{ path: string }>;
+        return {
+            required: fromVersion !== targetVersion,
+            fromVersion,
+            toVersion: targetVersion,
+            recordingCount: recordingCount.count,
+            remoteUploadCount: remoteUploadCount.count,
+            leasedRecordingCount: leasedRecordingCount.count,
+            activeUploadCount: activeUploadCount.count,
+            preservedBandwidthBytes: bandwidth.bytes,
+            ownedPaths: [...new Set(ownedRows.map((row) => path.resolve(row.path)))],
+        };
+    }
+
+    commitProductionRollover(targetVersion = CURRENT_PRODUCTION_VERSION, now = new Date()): {
+        rolledOver: boolean;
+        fromVersion: string;
+        toVersion: string;
+        retiredRecordings: number;
+        retiredRemoteUploads: number;
+        preservedBandwidthBytes: number;
+    } {
+        const plan = this.planProductionRollover(targetVersion);
+        if (!plan.required) return {
+            rolledOver: false,
+            fromVersion: plan.fromVersion,
+            toVersion: plan.toVersion,
+            retiredRecordings: 0,
+            retiredRemoteUploads: 0,
+            preservedBandwidthBytes: plan.preservedBandwidthBytes,
+        };
+        const control = this.getCampaignControl();
+        if (control.state !== "paused") {
+            throw new Error("Production rollover requires a paused campaign");
+        }
+        if (plan.leasedRecordingCount > 0 || plan.activeUploadCount > 0) {
+            throw new Error(
+                `Production rollover refuses ${plan.leasedRecordingCount} leased recording(s) `
+                + `and ${plan.activeUploadCount} active upload(s)`,
+            );
+        }
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            if (this.getProductionVersion() !== plan.fromVersion) {
+                throw new Error("Production version changed while preparing rollover");
+            }
+            const currentLeases = this.database.prepare(`
+                SELECT COUNT(*) AS count FROM recordings WHERE lease_owner IS NOT NULL
+            `).get() as { count: number };
+            const currentUploads = this.database.prepare(`
+                SELECT COUNT(*) AS count FROM upload_attempts WHERE status = 'started'
+            `).get() as { count: number };
+            if (currentLeases.count > 0 || currentUploads.count > 0) {
+                throw new Error("Production work became active while preparing rollover");
+            }
+            this.database.prepare(`
+                INSERT INTO retired_recordings (
+                    production_version, recording_id, provider, source_path, state,
+                    block_reason, created_at, retired_at
+                )
+                SELECT ?, id, provider, source_path, state, block_reason, created_at, ?
+                FROM recordings
+            `).run(plan.fromVersion, timestamp);
+            this.database.prepare(`
+                INSERT INTO retired_upload_attempts (
+                    production_version, attempt_id, recording_id, artifact_part,
+                    status, phase, transmitted_bytes, remote_id, remote_url,
+                    error, started_at, completed_at, retired_at
+                )
+                SELECT ?, id, recording_id, artifact_part, status, phase,
+                    transmitted_bytes, remote_id, remote_url, error,
+                    started_at, completed_at, ?
+                FROM upload_attempts
+            `).run(plan.fromVersion, timestamp);
+            this.database.prepare(`
+                INSERT INTO retired_remote_uploads (
+                    production_version, recording_id, artifact_part, attempt_id,
+                    remote_id, remote_url, verified_at, retired_at
+                )
+                SELECT ?, recording_id, artifact_part, attempt_id,
+                    remote_id, remote_url, verified_at, ?
+                FROM remote_uploads
+            `).run(plan.fromVersion, timestamp);
+            for (const table of [
+                "upload_confirmations",
+                "remote_uploads",
+                "upload_attempts",
+                "upload_reservations",
+                "upload_metadata",
+                "descriptions",
+                "production_artifact_queue",
+                "resolution_review_artifacts",
+                "artifact_variants",
+                "remux_outputs",
+                "artifacts",
+                "recording_provenance",
+                "state_events",
+            ]) {
+                this.database.exec(`DELETE FROM ${table}`);
+            }
+            this.database.exec("DELETE FROM recordings");
+            this.database.exec("DELETE FROM campaign_trial_recordings");
+            this.database.exec("DELETE FROM worker_heartbeat");
+            this.database.prepare(`
+                INSERT INTO production_rollovers (
+                    from_version, to_version, retired_recordings, retired_remote_uploads,
+                    preserved_bandwidth_bytes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            `).run(
+                plan.fromVersion,
+                plan.toVersion,
+                plan.recordingCount,
+                plan.remoteUploadCount,
+                plan.preservedBandwidthBytes,
+                timestamp,
+            );
+            this.database.prepare(`
+                UPDATE production_version SET version = ?, activated_at = ? WHERE id = 1
+            `).run(plan.toVersion, timestamp);
+        });
+        return {
+            rolledOver: true,
+            fromVersion: plan.fromVersion,
+            toVersion: plan.toVersion,
+            retiredRecordings: plan.recordingCount,
+            retiredRemoteUploads: plan.remoteUploadCount,
+            preservedBandwidthBytes: plan.preservedBandwidthBytes,
         };
     }
 
@@ -443,6 +837,7 @@ export class PipelineDatabase {
         providerFilter: CampaignProviderFilter,
         monthlyUploadLimitBytes: number,
         now = new Date(),
+        trialPerProvider?: number | null,
     ): CampaignControl {
         if (!["all", "tango", "fc2", "sc"].includes(providerFilter)) {
             throw new Error("Campaign provider must be all, tango, fc2, or sc");
@@ -450,11 +845,77 @@ export class PipelineDatabase {
         if (!Number.isSafeInteger(monthlyUploadLimitBytes) || monthlyUploadLimitBytes <= 0) {
             throw new Error("Campaign monthly upload limit must be a positive integer");
         }
-        this.database.prepare(`
-            UPDATE campaign_control SET provider_filter = ?, ordering = 'oldest',
-                monthly_upload_limit_bytes = ?, updated_at = ? WHERE id = 1
-        `).run(providerFilter, monthlyUploadLimitBytes, now.toISOString());
-        return this.getCampaignControl();
+        if (trialPerProvider !== undefined) {
+            if (trialPerProvider !== null && (!Number.isSafeInteger(trialPerProvider) || trialPerProvider <= 0)) {
+                throw new Error("Trial recordings per provider must be a positive integer or none");
+            }
+            if (this.getCampaignControl().state !== "paused") throw new Error("Pause the campaign before changing its trial limit");
+            const active = this.database.prepare(`SELECT
+                (SELECT COUNT(*) FROM recordings WHERE lease_owner IS NOT NULL)
+                + (SELECT COUNT(*) FROM upload_attempts WHERE status = 'started') AS count`).get() as { count: number };
+            if (active.count > 0) throw new Error("Wait for in-flight work to finish before changing the trial limit");
+            const control = this.getCampaignControl();
+            if (trialPerProvider !== null && control.trialPerProvider !== null && control.trialFinishedAt === null
+                && this.getCampaignTrialProgress().some((progress) => progress.admitted > trialPerProvider)) {
+                throw new Error("Trial limit cannot be lower than the number already admitted");
+            }
+        }
+        if ((trialPerProvider === undefined ? this.getCampaignControl().trialPerProvider : trialPerProvider) !== null
+            && providerFilter !== "all") throw new Error("A per-provider trial requires --provider all");
+        return this.transaction(() => {
+            if (trialPerProvider !== undefined) {
+                const control = this.getCampaignControl();
+                if (trialPerProvider === null || control.trialPerProvider === null || control.trialFinishedAt !== null) {
+                    this.database.exec("DELETE FROM campaign_trial_recordings");
+                }
+                this.database.prepare("UPDATE campaign_control SET trial_per_provider = ?, trial_finished_at = NULL, resume_at = NULL WHERE id = 1")
+                    .run(trialPerProvider);
+            }
+            this.database.prepare(`
+                UPDATE campaign_control SET provider_filter = ?, ordering = 'oldest',
+                    monthly_upload_limit_bytes = ?, updated_at = ? WHERE id = 1
+            `).run(providerFilter, monthlyUploadLimitBytes, now.toISOString());
+            return this.getCampaignControl();
+        });
+    }
+
+    getCampaignTrialProgress(): Array<{ provider: string; admitted: number; recordings: Array<{ id: string; state: string }> }> {
+        const rows = this.database.prepare(`
+            SELECT t.recording_id AS id, t.provider, COALESCE(r.state, 'source_missing') AS state
+            FROM campaign_trial_recordings t LEFT JOIN recordings r ON r.id = t.recording_id
+            ORDER BY t.admitted_at, t.recording_id
+        `).all() as unknown as Array<{ id: string; provider: string; state: string }>;
+        return ["tango", "fc2", "sc"].map((provider) => ({
+            provider,
+            admitted: rows.filter((row) => row.provider === provider).length,
+            recordings: rows.filter((row) => row.provider === provider).map(({ id, state }) => ({ id, state })),
+        }));
+    }
+
+    campaignTrialAllows(provider: string, recordingId?: string): boolean {
+        const control = this.getCampaignControl();
+        if (control.trialPerProvider === null) return true;
+        if (control.trialFinishedAt !== null) return false;
+        if (recordingId && this.database.prepare("SELECT 1 FROM campaign_trial_recordings WHERE recording_id = ?")
+            .get(recordingId)) return true;
+        const row = this.database.prepare("SELECT COUNT(*) AS count FROM campaign_trial_recordings WHERE provider = ?")
+            .get(provider) as { count: number };
+        return row.count < control.trialPerProvider;
+    }
+
+    enrollCampaignTrial(recording: Recording, now = new Date()): void {
+        this.transaction(() => {
+            if (!this.campaignTrialAllows(recording.provider, recording.id)) throw new Error("Campaign trial provider limit reached");
+            if (this.getCampaignControl().trialPerProvider === null) return;
+            this.database.prepare("INSERT OR IGNORE INTO campaign_trial_recordings VALUES (?, ?, ?)")
+                .run(recording.id, recording.provider, now.toISOString());
+        });
+    }
+
+    finishCampaignTrial(now = new Date()): void {
+        this.database.prepare(`UPDATE campaign_control SET state = 'paused', resume_at = NULL,
+            trial_finished_at = ?, updated_at = ? WHERE id = 1 AND trial_per_provider IS NOT NULL`)
+            .run(now.toISOString(), now.toISOString());
     }
 
     setCampaignState(state: CampaignControl["state"], now = new Date()): CampaignControl {
@@ -464,7 +925,9 @@ export class PipelineDatabase {
             this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, updated_at = ? WHERE id = 1")
                 .run(now.toISOString());
         } else {
-            this.database.prepare("UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0, updated_at = ? WHERE id = 1")
+            this.database.prepare(`UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0,
+                trial_per_provider = CASE WHEN trial_finished_at IS NOT NULL THEN NULL ELSE trial_per_provider END,
+                trial_finished_at = NULL, updated_at = ? WHERE id = 1`)
                 .run(now.toISOString());
         }
         return this.getCampaignControl();
@@ -681,8 +1144,6 @@ export class PipelineDatabase {
                 WHERE state IN (${placeholders})
                   AND source_kind IN (${sourcePlaceholders})
                   AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-                  AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = recordings.id AND a.remote_id IS NOT NULL)
-                  AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = recordings.id)
                 ORDER BY created_at, id LIMIT 1
             `).get(...states as SQLInputValue[], ...sourceKinds, timestamp) as { id: string } | undefined;
             if (!row) return;
@@ -717,8 +1178,6 @@ export class PipelineDatabase {
             WHERE id = ? AND state IN (${statePlaceholders})
               AND source_kind IN (${sourcePlaceholders})
               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-              AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = recordings.id AND a.remote_id IS NOT NULL)
-              AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = recordings.id)
         `).run(owner, expiry, timestamp, id, ...states, ...sourceKinds, timestamp);
         return result.changes === 1 ? this.get(id) : null;
     }
@@ -792,6 +1251,59 @@ export class PipelineDatabase {
         return this.requireRecording(id);
     }
 
+    hasResolutionPolicyAssessment(id: string, version: string): boolean {
+        const row = this.database.prepare(`
+            SELECT 1 AS present FROM state_events
+            WHERE recording_id = ? AND reason LIKE ?
+            LIMIT 1
+        `).get(id, `${version}:%`) as { present: number } | undefined;
+        return row?.present === 1;
+    }
+
+    recordResolutionPolicyAssessment(id: string, reason: string, now = new Date()): Recording {
+        const recording = this.requireRecording(id);
+        this.insertEvent(id, recording.state, recording.state, reason, now.toISOString());
+        return recording;
+    }
+
+    resetLocalWorkForResolutionPolicy(
+        id: string,
+        reason: string,
+        now = new Date(),
+    ): { recording: Recording; obsoletePaths: string[] } {
+        const recording = this.requireRecording(id);
+        if (!["remuxed", "artifact_valid", "described", "metadata_ready"].includes(recording.state)) {
+            throw new Error(`Recording ${id} cannot be reset from ${recording.state}`);
+        }
+        const obsoletePaths = [...new Set([
+            this.getRemuxOutput(id),
+            this.getArtifact(id)?.path ?? null,
+            ...this.listQueuedProductionArtifacts(id).map((artifact) => artifact.path),
+            ...this.listResolutionReviewArtifacts(id).map((artifact) => artifact.path),
+        ].filter((candidate): candidate is string => candidate !== null))];
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            for (const table of [
+                "upload_metadata",
+                "descriptions",
+                "production_artifact_queue",
+                "resolution_review_artifacts",
+                "artifacts",
+                "remux_outputs",
+            ]) {
+                this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
+            }
+            const reset = this.database.prepare(`
+                UPDATE recordings SET state = 'server_ready', block_reason = NULL,
+                    lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE id = ? AND state = ?
+            `).run(timestamp, id, recording.state);
+            if (reset.changes !== 1) throw new Error(`Recording ${id} changed while applying resolution policy`);
+            this.insertEvent(id, recording.state, "server_ready", reason, timestamp);
+        });
+        return { recording: this.requireRecording(id), obsoletePaths };
+    }
+
     saveArtifact(id: string, artifact: Omit<ArtifactRecord, "recordingId">, now = new Date()): Recording {
         const recording = this.get(id);
         if (!recording || recording.state !== "remuxed") throw new Error(`Recording ${id} is not remuxed`);
@@ -801,9 +1313,10 @@ export class PipelineDatabase {
         const timestamp = now.toISOString();
         this.transaction(() => {
             this.database.prepare(`
-                INSERT INTO artifacts (recording_id, path, size_bytes, sha256, validated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO artifacts (recording_id, part, path, size_bytes, sha256, validated_at)
+                VALUES (?, 'full', ?, ?, ?, ?)
                 ON CONFLICT(recording_id) DO UPDATE SET path = excluded.path,
+                    part = excluded.part,
                     size_bytes = excluded.size_bytes, sha256 = excluded.sha256,
                     validated_at = excluded.validated_at
             `).run(id, path.resolve(artifact.path), artifact.sizeBytes, artifact.sha256, artifact.validatedAt);
@@ -813,8 +1326,77 @@ export class PipelineDatabase {
     }
 
     getArtifact(id: string): ArtifactRecord | null {
-        const row = this.database.prepare("SELECT * FROM artifacts WHERE recording_id = ?").get(id) as ArtifactRow | undefined;
+        const row = this.database.prepare("SELECT * FROM artifacts WHERE recording_id = ?").get(id) as ProductionArtifactRow | undefined;
         return row ? mapArtifact(row) : null;
+    }
+
+    getArtifactPart(id: string): ProductionArtifactPart | null {
+        const row = this.database.prepare("SELECT part FROM artifacts WHERE recording_id = ?").get(id) as {
+            part: ProductionArtifactPart;
+        } | undefined;
+        return row?.part ?? null;
+    }
+
+    saveProductionArtifactSet(
+        id: string,
+        primary: Omit<QueuedProductionArtifactRecord, "recordingId"> | (Omit<ArtifactRecord, "recordingId"> & {
+            part: ProductionArtifactPart;
+            segmentCount: number;
+            sourceDimensions: readonly string[];
+        }),
+        queued: readonly (Omit<ArtifactRecord, "recordingId"> & {
+            part: Exclude<ProductionArtifactPart, "full">;
+            segmentCount: number;
+            sourceDimensions: readonly string[];
+        })[],
+        reason: string,
+        now = new Date(),
+    ): Recording {
+        const recording = this.requireRecording(id);
+        if (recording.state !== "server_ready") throw new Error(`Recording ${id} is not server_ready`);
+        if (primary.part === "full") throw new Error("An automatic artifact set requires a split primary part");
+        const all = [primary, ...queued];
+        const parts = new Set<ProductionArtifactPart>();
+        for (const artifact of all) {
+            if (parts.has(artifact.part)) throw new Error(`Duplicate production artifact part ${artifact.part}`);
+            parts.add(artifact.part);
+            if (!Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes <= 0
+                || !/^[a-f0-9]{64}$/.test(artifact.sha256)
+                || !Number.isSafeInteger(artifact.segmentCount) || artifact.segmentCount <= 0
+                || artifact.sourceDimensions.length === 0) {
+                throw new Error("Production artifact metadata is invalid");
+            }
+        }
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            this.database.prepare("DELETE FROM production_artifact_queue WHERE recording_id = ?").run(id);
+            this.database.prepare(`
+                INSERT INTO artifacts (recording_id, part, path, size_bytes, sha256, validated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(recording_id) DO UPDATE SET
+                    part = excluded.part, path = excluded.path, size_bytes = excluded.size_bytes,
+                    sha256 = excluded.sha256, validated_at = excluded.validated_at
+            `).run(id, primary.part, path.resolve(primary.path), primary.sizeBytes, primary.sha256, primary.validatedAt);
+            const insert = this.database.prepare(`
+                INSERT INTO production_artifact_queue (
+                    recording_id, part, queue_position, path, size_bytes, sha256,
+                    segment_count, source_dimensions_json, validated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            queued.forEach((artifact, index) => insert.run(
+                id, artifact.part, index, path.resolve(artifact.path), artifact.sizeBytes, artifact.sha256,
+                artifact.segmentCount, JSON.stringify(artifact.sourceDimensions), artifact.validatedAt,
+            ));
+            this.updateStateInTransaction(id, "server_ready", "artifact_valid", reason, timestamp);
+        });
+        return this.requireRecording(id);
+    }
+
+    listQueuedProductionArtifacts(id: string): QueuedProductionArtifactRecord[] {
+        const rows = this.database.prepare(`
+            SELECT * FROM production_artifact_queue WHERE recording_id = ? ORDER BY queue_position
+        `).all(id) as unknown as QueuedProductionArtifactRow[];
+        return rows.map(mapQueuedProductionArtifact);
     }
 
     saveArtifactVariant(
@@ -873,6 +1455,64 @@ export class PipelineDatabase {
             SELECT * FROM artifact_variants WHERE recording_id = ? ORDER BY variant
         `).all(id) as unknown as ArtifactVariantRow[];
         return rows.map(mapArtifactVariant);
+    }
+
+    saveResolutionReviewAndBlock(
+        id: string,
+        artifacts: readonly Omit<ResolutionReviewArtifactRecord, "recordingId">[],
+        reason: string,
+        now = new Date(),
+    ): Recording {
+        const recording = this.requireRecording(id);
+        if (recording.state !== "server_ready") throw new Error(`Recording ${id} is not ready for resolution review`);
+        const parts = new Set<ResolutionReviewPart>();
+        for (const artifact of artifacts) {
+            if (parts.has(artifact.part)) throw new Error(`Duplicate resolution-review part ${artifact.part}`);
+            parts.add(artifact.part);
+            if (!Number.isSafeInteger(artifact.sizeBytes) || artifact.sizeBytes <= 0
+                || !/^[a-f0-9]{64}$/.test(artifact.sha256)
+                || !Number.isSafeInteger(artifact.segmentCount) || artifact.segmentCount <= 0
+                || artifact.sourceDimensions.length === 0) {
+                throw new Error("Resolution-review artifact metadata is invalid");
+            }
+        }
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            this.database.prepare("DELETE FROM resolution_review_artifacts WHERE recording_id = ?").run(id);
+            const insert = this.database.prepare(`
+                INSERT INTO resolution_review_artifacts (
+                    recording_id, part, path, size_bytes, sha256,
+                    segment_count, source_dimensions_json, validated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `);
+            for (const artifact of artifacts) {
+                insert.run(
+                    id,
+                    artifact.part,
+                    path.resolve(artifact.path),
+                    artifact.sizeBytes,
+                    artifact.sha256,
+                    artifact.segmentCount,
+                    JSON.stringify(artifact.sourceDimensions),
+                    artifact.validatedAt,
+                );
+            }
+            assertTransition("server_ready", "blocked");
+            const blocked = this.database.prepare(`
+                UPDATE recordings SET state = 'blocked', block_reason = ?, updated_at = ?
+                WHERE id = ? AND state = 'server_ready'
+            `).run(reason, timestamp, id);
+            if (blocked.changes !== 1) throw new Error(`Recording ${id} is not in expected state server_ready`);
+            this.insertEvent(id, "server_ready", "blocked", reason, timestamp);
+        });
+        return this.requireRecording(id);
+    }
+
+    listResolutionReviewArtifacts(id: string): ResolutionReviewArtifactRecord[] {
+        const rows = this.database.prepare(`
+            SELECT * FROM resolution_review_artifacts WHERE recording_id = ? ORDER BY part
+        `).all(id) as unknown as ResolutionReviewArtifactRow[];
+        return rows.map(mapResolutionReviewArtifact);
     }
 
     saveRemuxOutput(
@@ -1032,14 +1672,16 @@ export class PipelineDatabase {
         this.transaction(() => {
             const recording = this.requireRecording(id);
             if (recording.state !== "metadata_ready") throw new Error(`Recording ${id} has no upload-ready metadata`);
+            const artifactPart = this.getArtifactPart(id);
+            if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
             const usage = this.uploadUsage(month);
             if (usage.spent + usage.reserved + bytes > limit) throw new Error(`Monthly upload limit exceeded for ${month}`);
             this.database.prepare(`
                 INSERT INTO upload_reservations (
-                    id, recording_id, provider, calendar_month, reserved_bytes,
+                    id, recording_id, artifact_part, provider, calendar_month, reserved_bytes,
                     status, created_at, updated_at
-                ) VALUES (?, ?, 'xvideos', ?, ?, 'reserved', ?, ?)
-            `).run(reservationId, id, month, bytes, timestamp, timestamp);
+                ) VALUES (?, ?, ?, 'xvideos', ?, ?, 'reserved', ?, ?)
+            `).run(reservationId, id, artifactPart, month, bytes, timestamp, timestamp);
             this.updateStateInTransaction(id, "metadata_ready", "xvideos_admitted", "monthly bytes reserved", timestamp);
         });
         return reservationId;
@@ -1050,15 +1692,18 @@ export class PipelineDatabase {
         const timestamp = now.toISOString();
         this.transaction(() => {
             const reservation = this.database.prepare(`
-                SELECT id FROM upload_reservations
+                SELECT id, artifact_part FROM upload_reservations
                 WHERE id = ? AND recording_id = ? AND status = 'reserved'
-            `).get(reservationId, id);
+            `).get(reservationId, id) as { id: string; artifact_part: ProductionArtifactPart } | undefined;
             if (!reservation) throw new Error(`No active reservation ${reservationId} for ${id}`);
+            if (reservation.artifact_part !== this.getArtifactPart(id)) {
+                throw new Error(`Upload reservation ${reservationId} does not match the current artifact part`);
+            }
             this.database.prepare(`
                 INSERT INTO upload_attempts (
-                    id, reservation_id, recording_id, provider, status, started_at
-                ) VALUES (?, ?, ?, 'xvideos', 'started', ?)
-            `).run(attemptId, reservationId, id, timestamp);
+                    id, reservation_id, recording_id, artifact_part, provider, status, started_at
+                ) VALUES (?, ?, ?, ?, 'xvideos', 'started', ?)
+            `).run(attemptId, reservationId, id, reservation.artifact_part, timestamp);
             this.updateStateInTransaction(id, "xvideos_admitted", "xvideos_uploading", "upload attempt started", timestamp);
         });
         return attemptId;
@@ -1241,17 +1886,42 @@ export class PipelineDatabase {
     }
 
     getUploadIdentity(id: string): { remoteId: string; remoteUrl: string | null; verified: boolean } | null {
+        const artifactPart = this.getArtifactPart(id);
+        if (!artifactPart) return null;
         const verified = this.database.prepare(`
             SELECT remote_id, remote_url FROM remote_uploads
-            WHERE recording_id = ? ORDER BY verified_at DESC LIMIT 1
-        `).get(id) as { remote_id: string; remote_url: string | null } | undefined;
+            WHERE recording_id = ? AND artifact_part = ? ORDER BY verified_at DESC LIMIT 1
+        `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
         if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url, verified: true };
         const attempt = this.database.prepare(`
             SELECT remote_id, remote_url FROM upload_attempts
-            WHERE recording_id = ? AND remote_id IS NOT NULL ORDER BY started_at DESC LIMIT 1
-        `).get(id) as { remote_id: string; remote_url: string | null } | undefined;
+            WHERE recording_id = ? AND artifact_part = ? AND remote_id IS NOT NULL ORDER BY started_at DESC LIMIT 1
+        `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
         if (attempt) return { remoteId: attempt.remote_id, remoteUrl: attempt.remote_url, verified: false };
         return null;
+    }
+
+    listVerifiedUploadParts(id: string): Array<{
+        part: ProductionArtifactPart;
+        remoteId: string;
+        remoteUrl: string;
+        verifiedAt: string;
+    }> {
+        const rows = this.database.prepare(`
+            SELECT artifact_part, remote_id, remote_url, verified_at
+            FROM remote_uploads WHERE recording_id = ? ORDER BY verified_at, artifact_part
+        `).all(id) as unknown as Array<{
+            artifact_part: ProductionArtifactPart;
+            remote_id: string;
+            remote_url: string;
+            verified_at: string;
+        }>;
+        return rows.map((row) => ({
+            part: row.artifact_part,
+            remoteId: row.remote_id,
+            remoteUrl: row.remote_url,
+            verifiedAt: row.verified_at,
+        }));
     }
 
     makePendingConfirmationDue(id: string, now = new Date()): number {
@@ -1278,10 +1948,12 @@ export class PipelineDatabase {
 
     listUploadContradictions(): Array<{ id: string; state: PipelineState }> {
         const rows = this.database.prepare(`
-            SELECT r.id, r.state FROM recordings r
+            SELECT r.id, r.state FROM recordings r JOIN artifacts p ON p.recording_id = r.id
             WHERE r.state IN ('xvideos_admitted', 'xvideos_uploading', 'xvideos_uploaded', 'xvideos_uncertain')
-              AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.recording_id = r.id AND a.remote_id IS NOT NULL)
-              AND NOT EXISTS (SELECT 1 FROM remote_uploads v WHERE v.recording_id = r.id)
+              AND NOT EXISTS (SELECT 1 FROM upload_attempts a
+                  WHERE a.recording_id = r.id AND a.artifact_part = p.part AND a.remote_id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM remote_uploads v
+                  WHERE v.recording_id = r.id AND v.artifact_part = p.part)
               AND NOT EXISTS (SELECT 1 FROM upload_confirmations c
                   WHERE c.recording_id = r.id AND c.status = 'pending')
         `).all() as unknown as Array<{ id: string; state: PipelineState }>;
@@ -1295,7 +1967,8 @@ export class PipelineDatabase {
             for (const table of [
                 "upload_confirmations", "upload_attempts", "upload_reservations",
                 "remote_uploads", "recording_provenance", "upload_metadata",
-                "descriptions", "artifact_variants", "remux_outputs", "artifacts", "state_events",
+                "descriptions", "production_artifact_queue", "resolution_review_artifacts", "artifact_variants",
+                "remux_outputs", "artifacts", "state_events",
             ]) {
                 this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
             }
@@ -1370,24 +2043,51 @@ export class PipelineDatabase {
     ): Recording {
         const timestamp = now.toISOString();
         this.transaction(() => {
+            const current = this.database.prepare(`
+                SELECT part FROM artifacts WHERE recording_id = ?
+            `).get(id) as { part: ProductionArtifactPart } | undefined;
+            if (!current) throw new Error("Verification has no current production artifact");
             const attempt = this.database.prepare(`
-                SELECT id FROM upload_attempts
-                WHERE recording_id = ? AND status = 'accepted' AND remote_id = ? AND remote_url = ?
+                SELECT id, artifact_part FROM upload_attempts
+                WHERE recording_id = ? AND artifact_part = ? AND status = 'accepted'
+                    AND remote_id = ? AND remote_url = ?
                 ORDER BY completed_at DESC LIMIT 1
-            `).get(id, remoteId, remoteUrl) as { id: string } | undefined;
+            `).get(id, current.part, remoteId, remoteUrl) as {
+                id: string;
+                artifact_part: ProductionArtifactPart;
+            } | undefined;
             if (!attempt) throw new Error("Verification does not match an accepted upload attempt");
             this.database.prepare(`
                 INSERT INTO remote_uploads (
-                    recording_id, attempt_id, remote_id, remote_url, verified_at
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(recording_id) DO UPDATE SET
+                    recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(recording_id, artifact_part) DO UPDATE SET
                     attempt_id = excluded.attempt_id,
                     remote_id = excluded.remote_id,
                     remote_url = excluded.remote_url,
                     verified_at = excluded.verified_at
-            `).run(id, attempt.id, remoteId, remoteUrl, timestamp);
-            this.updateStateInTransaction(id, "xvideos_uploaded", "xvideos_verified",
-                "authenticated edit-page verification", timestamp);
+            `).run(id, current.part, attempt.id, remoteId, remoteUrl, timestamp);
+
+            const queued = this.database.prepare(`
+                SELECT * FROM production_artifact_queue
+                WHERE recording_id = ? ORDER BY queue_position LIMIT 1
+            `).get(id) as QueuedProductionArtifactRow | undefined;
+            if (!queued) {
+                this.updateStateInTransaction(id, "xvideos_uploaded", "xvideos_verified",
+                    `authenticated edit-page verification for ${current.part}`, timestamp);
+                return;
+            }
+            this.database.prepare("DELETE FROM upload_metadata WHERE recording_id = ?").run(id);
+            this.database.prepare("DELETE FROM descriptions WHERE recording_id = ?").run(id);
+            this.database.prepare(`
+                UPDATE artifacts SET part = ?, path = ?, size_bytes = ?, sha256 = ?, validated_at = ?
+                WHERE recording_id = ?
+            `).run(queued.part, queued.path, queued.size_bytes, queued.sha256, queued.validated_at, id);
+            this.database.prepare(`
+                DELETE FROM production_artifact_queue WHERE recording_id = ? AND part = ?
+            `).run(id, queued.part);
+            this.updateStateInTransaction(id, "xvideos_uploaded", "artifact_valid",
+                `${current.part} verified; promoted queued ${queued.part} artifact`, timestamp);
         });
         return this.requireRecording(id);
     }

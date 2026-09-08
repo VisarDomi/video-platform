@@ -53,6 +53,12 @@ export interface UpscaleTranscodeResult {
     readonly plan: UpscalePlan;
 }
 
+export interface FixedUpscaleSource {
+    readonly width: number;
+    readonly height: number;
+    readonly sampleAspectRatio: string | null;
+}
+
 function parseSampleAspectRatio(value: string | null): number {
     if (value === null || value === "" || value === "N/A") return 1;
     const match = value.match(/^(\d+):(\d+)$/);
@@ -273,7 +279,21 @@ export async function upscaleTranscode(
     mode: UpscaleMode,
 ): Promise<UpscaleTranscodeResult> {
     const plan = await analyzeUpscaleSource(inputPath, mode);
-    const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(stagingRoot, recordingId, mode);
+    return await runUpscaleTranscode(inputPath, stagingRoot, recordingId, plan, mode);
+}
+
+async function runUpscaleTranscode(
+    inputPath: string,
+    stagingRoot: string,
+    recordingId: string,
+    plan: UpscalePlan,
+    artifactSuffix?: string,
+): Promise<UpscaleTranscodeResult> {
+    const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
+        stagingRoot,
+        recordingId,
+        artifactSuffix,
+    );
     const existing = await fs.lstat(finalPath).catch(() => null);
     if (existing?.isFile()) return { path: finalPath, plan };
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
@@ -304,4 +324,33 @@ export async function upscaleTranscode(
         await fs.unlink(temporaryPath).catch(() => undefined);
         throw error;
     }
+}
+
+export async function upscaleWholeRecordingTo1080(
+    inputPath: string,
+    stagingRoot: string,
+    recordingId: string,
+    source: FixedUpscaleSource,
+    artifactSuffix = "production-upscale1080p",
+): Promise<UpscaleTranscodeResult> {
+    // Production conversion includes every segment, even for all-360p/480p
+    // sources. The supervised comparison mode's 720p floor does not apply.
+    const dimensions = targetDimensions(source, 1080);
+    const plan: UpscalePlan = {
+        specification: { mode: "upscale1080p", sourceShortEdgeFloor: 0, targetShortEdge: 1080 },
+        sourceFrameCount: 1,
+        droppedSourceFrames: 0,
+        droppedFrameRanges: [],
+        outputWidth: dimensions.width,
+        outputHeight: dimensions.height,
+        outputDisplayAspectRatio: dimensions.width / dimensions.height,
+        selectExpression: null,
+    };
+    return await runUpscaleTranscode(
+        inputPath,
+        stagingRoot,
+        recordingId,
+        plan,
+        artifactSuffix,
+    );
 }

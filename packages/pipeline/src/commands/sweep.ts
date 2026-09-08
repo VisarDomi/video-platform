@@ -1,6 +1,7 @@
 import { access, unlink } from "node:fs/promises";
 import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { containedArtifactPath } from "../stages/remux.js";
 
 const SWEEP_MIN_AGE_MILLISECONDS = 24 * 60 * 60_000;
 const IN_FLIGHT_STATES = ["xvideos_admitted", "xvideos_uploading"];
@@ -12,7 +13,7 @@ const IN_FLIGHT_STATES = ["xvideos_admitted", "xvideos_uploading"];
 // deleted. Rows younger than 24 hours and in-flight uploads are skipped.
 export async function sweepMissingRecordings(
     database: PipelineDatabase,
-    config: Pick<PipelineConfig, "cleanupEnabled">,
+    config: Pick<PipelineConfig, "cleanupEnabled" | "stagingRoot">,
     now = new Date(),
 ): Promise<Array<{ recordingId: string; provider: string; reason: string }>> {
     if (!config.cleanupEnabled) return [];
@@ -32,6 +33,14 @@ export async function sweepMissingRecordings(
         if (artifact) await unlink(artifact.path).catch(() => undefined);
         for (const variant of database.listArtifactVariants(recording.id)) {
             await unlink(variant.path).catch(() => undefined);
+        }
+        for (const reviewArtifact of database.listResolutionReviewArtifacts(recording.id)) {
+            await unlink(reviewArtifact.path).catch(() => undefined);
+        }
+        // A split can publish one side before the other side fails validation,
+        // so cover deterministic, not-yet-ledgered review outputs too.
+        for (const suffix of ["max1080p", "nonmax", "nonmax-upscale1080p", "production-upscale1080p", "retained1080p"] as const) {
+            await unlink(containedArtifactPath(config.stagingRoot, recording.id, suffix)).catch(() => undefined);
         }
         const remuxOutput = database.getRemuxOutput(recording.id);
         if (remuxOutput) await unlink(remuxOutput).catch(() => undefined);

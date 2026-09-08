@@ -43,8 +43,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 }
                 const probe = await browser.probeUploadStatus(page, remoteId);
                 if (probe.outcome === "online" && probe.remoteUrl) {
+                    const verifiedArtifact = database.getArtifact(confirmation.recordingId);
                     database.reconcileUncertain(confirmation.attemptId, remoteId, probe.remoteUrl, now);
-                    database.markRemoteVerified(
+                    const afterVerification = database.markRemoteVerified(
                         confirmation.recordingId,
                         remoteId,
                         probe.remoteUrl,
@@ -53,10 +54,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     // Verified online: clean up only the pipeline staging
                     // artifact. Original recording folders are left untouched.
                     if (config.cleanupEnabled) {
-                        const artifact = database.getArtifact(confirmation.recordingId);
-                        if (artifact) {
-                            await cleanupArtifact(artifact.path);
-                            database.transition(
+                        if (verifiedArtifact) {
+                            await cleanupArtifact(verifiedArtifact.path);
+                            if (afterVerification.state === "xvideos_verified") database.transition(
                                 confirmation.recordingId,
                                 "xvideos_verified",
                                 "cleanup_eligible",

@@ -49,10 +49,13 @@ test("manual remux accepts an exact server-verified downloader folder outside pr
     );
     authority.close();
 
+    const artifactsRoot = path.join(dataRoot, "artifacts");
     const config = {
         finalizationDatabasePath,
         databasePath: path.join(dataRoot, "pipeline.sqlite"),
-        stagingRoot: path.join(dataRoot, "artifacts"),
+        artifactsRoot,
+        stagingRoot: path.join(artifactsRoot, "production-v2"),
+        manualStagingRoot: path.join(artifactsRoot, "production-v2", "manual"),
         discoveryRoots: [{
             provider: "tango",
             sourceKind: "edited",
@@ -92,6 +95,7 @@ test("manual remux accepts an exact server-verified downloader folder outside pr
     assert.equal(upscale.droppedSourceFrames, 0);
     assert.notEqual(upscale.artifactPath, result.artifactPath);
     assert.match(upscale.artifactPath, /\.upscale1080p\.mp4$/);
+    assert.equal(path.dirname(upscale.artifactPath), config.manualStagingRoot);
 
     const ledger = new DatabaseSync(config.databasePath, { readOnly: true });
     const canonical = ledger.prepare("SELECT path FROM artifacts WHERE recording_id = ?").get(result.recordingId);
@@ -117,7 +121,9 @@ test("single remux refuses a historical folder without exact server authority", 
     await assert.rejects(remuxOne(recordingPath, {
         finalizationDatabasePath: path.join(temporaryRoot, "missing.sqlite"),
         databasePath: path.join(temporaryRoot, "pipeline.sqlite"),
-        stagingRoot: path.join(temporaryRoot, "artifacts"),
+        artifactsRoot: path.join(temporaryRoot, "artifacts"),
+        stagingRoot: path.join(temporaryRoot, "artifacts", "production-v2"),
+        manualStagingRoot: path.join(temporaryRoot, "artifacts", "production-v2", "manual"),
         discoveryRoots: [{ provider: "sc", sourceKind: "edited", path: managedRoot }],
         manualRemuxRoots: [{ provider: "sc", sourceKind: "edited", path: managedRoot }],
         uploadTimeZone: "Europe/Tirane",

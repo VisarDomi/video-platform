@@ -1,5 +1,9 @@
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import type { ArtifactRecord, Recording } from "../domain/types.js";
+import type {
+    ArtifactRecord,
+    ProductionArtifactPart,
+    Recording,
+} from "../domain/types.js";
 import { composeUploadMetadata } from "../metadata/composeUploadMetadata.js";
 
 export interface DescriptionEvidence {
@@ -10,8 +14,25 @@ export interface DescriptionEvidence {
     readonly evidencePath: string;
 }
 
+export interface AutomaticProductionArtifact extends Omit<ArtifactRecord, "recordingId"> {
+    readonly part: Exclude<ProductionArtifactPart, "full">;
+    readonly segmentCount: number;
+    readonly sourceDimensions: readonly string[];
+}
+
+export type RemuxStageResult = string | {
+    readonly disposition: "artifact";
+    readonly path: string;
+    readonly eventReason: string;
+} | {
+    readonly disposition: "artifact_set";
+    readonly reason: string;
+    readonly primary: AutomaticProductionArtifact;
+    readonly queued: readonly AutomaticProductionArtifact[];
+};
+
 export interface PipelineStages {
-    remux(recording: Recording): Promise<string>;
+    remux(recording: Recording): Promise<RemuxStageResult>;
     validateArtifact(recording: Recording, artifactPath: string): Promise<Omit<ArtifactRecord, "recordingId">>;
     describe(recording: Recording, artifact: ArtifactRecord): Promise<DescriptionEvidence>;
 }
@@ -21,7 +42,10 @@ export class PipelineOrchestrator {
         private readonly database: PipelineDatabase,
         private readonly stages: PipelineStages,
         private readonly workerId: string,
-        private readonly leaseMilliseconds = 30 * 60_000,
+        // A full-quality 720p -> 1080p encode can run substantially longer
+        // than source duration. Keep one recording exclusively owned through
+        // the longest supported local stage.
+        private readonly leaseMilliseconds = 6 * 60 * 60_000,
     ) {}
 
     async processOne(now = new Date()): Promise<Recording | null> {
@@ -54,8 +78,26 @@ export class PipelineOrchestrator {
         try {
             switch (recording.state) {
                 case "server_ready": {
-                    const artifactPath = await this.stages.remux(recording);
-                    result = this.database.saveRemuxOutput(recording.id, artifactPath);
+                    const remux = await this.stages.remux(recording);
+                    if (typeof remux === "string") {
+                        result = this.database.saveRemuxOutput(recording.id, remux);
+                    } else if (remux.disposition === "artifact") {
+                        result = this.database.saveRemuxOutput(
+                            recording.id,
+                            remux.path,
+                            new Date(),
+                            remux.eventReason,
+                        );
+                    } else if (remux.disposition === "artifact_set") {
+                        result = this.database.saveProductionArtifactSet(
+                            recording.id,
+                            remux.primary,
+                            remux.queued,
+                            remux.reason,
+                        );
+                    } else {
+                        throw new Error("Unsupported remux stage result");
+                    }
                     break;
                 }
                 case "remuxed": {
@@ -85,7 +127,12 @@ export class PipelineOrchestrator {
                     }
                     result = this.database.saveUploadMetadata(
                         recording.id,
-                        composeUploadMetadata(recording, description, provenance),
+                        composeUploadMetadata(
+                            recording,
+                            description,
+                            provenance,
+                            this.database.getArtifactPart(recording.id) ?? "full",
+                        ),
                     );
                     break;
                 }

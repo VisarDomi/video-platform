@@ -17,15 +17,14 @@ Implemented:
   missing are deleted from the ledger with their pipeline files (24-hour
   cooldown, in-flight uploads skipped). ISP billing (`bandwidth_events`) is
   never refunded or deleted.
-- One-recording stream-copy remux, full decode/probe, SHA-256 evidence, and
-  exact-artifact description.
+- Segment-aware production resolution policy, full decode/probe, SHA-256
+  evidence, and exact-artifact description.
 - Server-delegated per-provider identity resolution through
   `GET /api/{provider}/resolve` (Tango alias registry + live Tango API, FC2
   numeric IDs, Stripchat username lookup), grouped unresolved review, and
   reusable manual overrides.
-- Admission-time remote check: a new folder whose name already exists on
-  XVideos (edit-page title carries `[datetime alias]`) is parked as uncertain
-  with that edit ID instead of being remuxed/described/uploaded.
+- Upload-time remote identity checks use a versioned recording-and-part marker,
+  so retries adopt only the exact production artifact they are meant to upload.
 - XVideos-safe metadata composition with the folder name appended to the
   title for human readability, provenance suffixes, and fixed provider/live
   tags.
@@ -46,8 +45,101 @@ The historical finalization contract is complete, and one controlled upload
 has gone the full circle: submitted, published on XVideos, verified online
 through the edit-page check, and its staging artifact cleaned. Network
 commands remain gated behind `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
-`video-pipeline` campaign worker and the daily `video-reconcile` timer
-(04:33) are installed under `systemd/user/`.
+`video-pipeline` campaign worker performs upload verification inline; there is
+no separate reconcile timer.
+
+## Production resolution policy
+
+The campaign classifies every HLS segment by coded short edge, so landscape
+and portrait recordings use the same rules. For fMP4, the last active
+`#EXT-X-MAP` attached to a segment owns its dimensions; unused consecutive map
+tags are ignored. MPEG-TS uses one whole-playlist keyframe scan rather than an
+`ffprobe` process per segment.
+
+- A recording whose maximum short edge is below 1080 is fully transcoded to a
+  1080-pixel short edge. Lower-resolution segments are included in that same
+  conversion, not dropped. The conversion preserves one consistent display
+  aspect ratio with no crop or padding, uses zscale Lanczos plus libx264
+  slow/CRF 16/yuv420p, stream-copies audio, and publishes a named
+  `.production-upscale1080p.mp4` artifact.
+- A recording whose maximum short edge is 1080 and whose every segment is
+  1080 is stream-copy remuxed and continues toward upload.
+- If a 1080 recording contains lower-resolution segments, measure the native
+  1080 share by summed playlist `EXTINF` durations, not segment/frame counts.
+  At **90% or more**, exclude the lower-resolution segments and stream-copy
+  remux the retained segments to `.retained1080p.mp4`. Below 90%, convert the
+  **entire recording** to `.production-upscale1080p.mp4`, dropping nothing.
+  Both paths produce one upload, never two. Gaps and map changes are represented
+  by HLS discontinuities; source folders and their playlists are never modified.
+- A maximum short edge above 1080, or inconsistent display aspect ratios, is
+  rejected as unsupported input. Resolution policy needs no manual action.
+
+Production uploads carry an exact, versioned title identity:
+`[recording ID | production-v2 | full]`. Old-policy uploads therefore cannot be
+mistaken for new-policy results. Legacy split-part ledger support remains for
+existing data, but resolution-policy-v3 no longer creates split uploads.
+
+Artifacts use the same generation boundary:
+`pipeline/artifacts/<production-version>/`. The first v2 rollover atomically
+moves unversioned files to `artifacts/legacy-production-v1/`; production-v2
+outputs are written only below `artifacts/production-v2/`, with supervised
+comparison variants isolated in its `manual/` child. Old generation folders
+remain available until explicitly pruned. `VIDEO_PIPELINE_ARTIFACTS_ROOT`
+overrides the common artifact root; the old `VIDEO_PIPELINE_STAGING` name is
+accepted as a compatibility alias for that root.
+
+The active database generation is versioned too. The first explicit
+`campaign-resume --apply` after a production-version change performs a one-time
+rollover before setting the campaign to running. It archives the previous
+recording/upload history under its production version, retires those rows from
+the active workflow, and archives their staging files, after which normal
+discovery starts again at the oldest finalized source. Bandwidth accounting,
+provenance overrides, campaign provider/limit configuration, finalized source
+recordings, and the finalization database are preserved. `campaign-status`
+reports the active version and whether this rollover is pending.
+Rollover refuses to start while the old campaign is running, a recording lease
+exists, or an upload attempt remains active.
+Before any rollover moves files or retires workflow rows, it saves and syncs a
+complete SQLite snapshot under `pipeline/history/<old-production-version>/`.
+This preserves all old descriptions, composed upload titles/descriptions,
+provenance and workflow records, not just the narrower retired upload tables.
+The resume result reports `historySnapshotPath`. New-artifact description reuse
+still follows the exact artifact-hash/prompt cache; changed artifacts are
+described again rather than inheriting possibly stale descriptions.
+
+### One-time per-provider trial
+
+Configure a 30-recording trial without starting anything:
+
+```sh
+npm run campaign:configure -w pipeline -- --provider all --trial-per-provider 10 --apply
+```
+
+When ready, `npm run campaign:resume -w pipeline` starts the armed trial (the
+worker service must also be running). The worker takes the oldest eligible
+10 source recordings per provider: tango, fc2, and sc. Existing queued work
+also consumes slots and cannot bypass older sources. Monthly bandwidth limits,
+upload guards, and cooldowns still apply; configuring the trial does not reset
+the existing monthly byte limit. `npm run campaign:status -w pipeline` shows
+`trialPerProvider`, `trialFinishedAt`, and per-provider admissions/recording states.
+
+Trial slots persist across restarts, temporary pauses, retries, and missing
+sources. Failures and uncertain uploads keep their slot rather than being
+replaced with extra videos. Once all thirty are verified, the campaign pauses
+indefinitely; it does **not** automatically start the unrestricted run. After
+submission, it waits for the usual delayed inline verification without admitting
+extra recordings. Confirmed-absent uploads may retry in the same slots. Fewer
+than ten eligible sources in a provider or failed/blocked sources cause an
+attention pause, not a successful trial finish; the cap remains on resume.
+Submission alone is not proof of remote quality or verification.
+
+After reviewing the finished trial, the same `npm run campaign:resume -w pipeline`
+clears its one-time cap and continues normal oldest-first processing, retaining
+all upload history. A manual pause/resume **during** the trial keeps the cap.
+To change its size, pause and reconfigure `--trial-per-provider N`; consumed
+slots are preserved until the trial finishes. To cancel the cap explicitly,
+use `--trial-per-provider none`. Trial configuration is preserved through the
+production rollover, but old-generation slots are not carried forward.
 
 Run isolated tests:
 
@@ -90,7 +182,8 @@ npm run remux-one -w pipeline -- \
   --recording "/absolute/managed/recording/folder" --upscale1440p
 ```
 
-The modes are mutually exclusive. `--upscale1080p` drops decoded source frames
+These supervised comparison modes remain separate from the production policy.
+They are mutually exclusive. `--upscale1080p` drops decoded source frames
 whose coded short edge is below 720 pixels and targets a 1080-pixel short edge;
 `--upscale1440p` uses a 1080-pixel floor and a 1440-pixel target. Both preserve
 display aspect ratio (including portrait video) with no crop or padding, use
@@ -236,8 +329,8 @@ available for bounded integration testing.
 The managed `video-pipeline.service` runs the campaign worker at boot and
 idles while SQLite says paused; it is power-off robust. Control it with
 `systemctl --user start|stop|restart video-pipeline` and the campaign intent
-with `campaign:resume` / `campaign:pause`. The `video-reconcile.timer`
-runs `reconcile-uploads` daily at 04:33.
+with `campaign:resume` / `campaign:pause`. Due upload verification runs inline
+in that worker.
 
 Failures retain their last successful stage. Retry an eligible local failure:
 

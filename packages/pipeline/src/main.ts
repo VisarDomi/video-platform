@@ -31,7 +31,7 @@ function usage(): never {
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
-        "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] --apply",
+        "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-worker (reserved for the future managed service)",
         "No command performs source cleanup. Network commands also require VIDEO_PIPELINE_NETWORK_UPLOADS=1.",
@@ -126,13 +126,18 @@ async function main(): Promise<void> {
         requireApply(args);
         const provider = campaignProvider(option(args, "--provider"));
         const rawLimit = option(args, "--monthly-upload-bytes");
-        const limit = rawLimit === null ? pipelineConfig.monthlyUploadLimitBytes : Number.parseInt(rawLimit, 10);
-        console.log(JSON.stringify(configureCampaign(pipelineConfig, provider, limit), null, 2));
+        const limit = rawLimit === null ? undefined : Number(rawLimit);
+        const rawTrial = option(args, "--trial-per-provider");
+        if (args.includes("--trial-per-provider") && (rawTrial === null || rawTrial.startsWith("--"))) {
+            throw new Error("--trial-per-provider requires a positive integer or none");
+        }
+        const trial = rawTrial === null ? undefined : rawTrial === "none" ? null : Number(rawTrial);
+        console.log(JSON.stringify(configureCampaign(pipelineConfig, provider, limit, trial), null, 2));
         return;
     }
     if (command === "campaign-resume" || command === "campaign-pause") {
         requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(setCampaignRunning(pipelineConfig, command === "campaign-resume"), null, 2));
+        console.log(JSON.stringify(await setCampaignRunning(pipelineConfig, command === "campaign-resume"), null, 2));
         return;
     }
     if (command === "campaign-status") {
@@ -163,6 +168,11 @@ async function main(): Promise<void> {
                 databasePath: pipelineConfig.databasePath,
                 finalizationContract: readFinalizationContract(pipelineConfig.finalizationDatabasePath),
                 integrity: database.integrityCheck(),
+                productionVersion: database.getProductionVersion(),
+                productionRollovers: database.listProductionRollovers(),
+                artifactsRoot: pipelineConfig.artifactsRoot,
+                stagingRoot: pipelineConfig.stagingRoot,
+                manualStagingRoot: pipelineConfig.manualStagingRoot,
                 cleanupEnabled: pipelineConfig.cleanupEnabled,
                 networkUploadsEnabled: pipelineConfig.networkUploadsEnabled,
                 counts,
@@ -259,6 +269,7 @@ async function main(): Promise<void> {
                     state: recording.state,
                     reason: recording.blockReason,
                     sourcePath: recording.sourcePath,
+                    resolutionArtifacts: database.listResolutionReviewArtifacts(recording.id),
                 }));
             const provenance = database.listProvenanceReview().map((item) => {
                 const recording = database.get(item.recordingId);
@@ -294,6 +305,7 @@ async function main(): Promise<void> {
                 new Date(),
                 pipelineConfig.uploadTimeZone,
                 pipelineConfig.monthlyUploadLimitBytes,
+                pipelineConfig.stagingRoot,
             ),
         }, null, 2));
     } finally {

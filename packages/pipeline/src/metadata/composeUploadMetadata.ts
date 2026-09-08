@@ -1,13 +1,20 @@
 import path from "node:path";
 import type {
     DescriptionRecord,
+    ProductionArtifactPart,
     Recording,
     RecordingProvenance,
     UploadMetadataRecord,
 } from "../domain/types.js";
+import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 
 const TITLE_LIMIT = 255;
 const DESCRIPTION_LIMIT = 1_000;
+export const PRODUCTION_UPLOAD_IDENTITY_VERSION = CURRENT_PRODUCTION_VERSION;
+
+export function productionUploadIdentity(recording: Recording, part: ProductionArtifactPart): string {
+    return `${path.basename(recording.sourcePath)} | ${PRODUCTION_UPLOAD_IDENTITY_VERSION} | ${part}`;
+}
 
 interface DescriptorOutput {
     readonly title: string;
@@ -41,6 +48,7 @@ export function composeUploadMetadata(
     recording: Recording,
     description: DescriptionRecord,
     provenance: RecordingProvenance,
+    part: ProductionArtifactPart = "full",
 ): Omit<UploadMetadataRecord, "recordingId" | "createdAt"> {
     if (provenance.status === "review_required" || !provenance.streamerUrl) {
         throw new Error("Cannot compose upload metadata with unresolved provenance");
@@ -48,7 +56,7 @@ export function composeUploadMetadata(
     const output = descriptorOutput(description.output);
     // The folder name is the identity; the title carries it only for human
     // readability on XVideos.
-    const folderSuffix = `[${path.basename(recording.sourcePath)}]`;
+    const folderSuffix = `[${productionUploadIdentity(recording, part)}]`;
     const titleRoom = TITLE_LIMIT - folderSuffix.length - 1;
     const title = `${shorten(output.title, titleRoom)} ${folderSuffix}`;
 

@@ -74,7 +74,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             // Backup remote check inside this same session: the folder name is
             // the local truth, the edit-page title is the XVideos truth. No
             // second browser launch, no second login.
-            const existing = await this.findUploadedCopyOnPage(page, request.recordingId);
+            const existing = await this.findUploadedCopyOnPage(page, request.uploadIdentity);
             if (existing.kind === "found") {
                 completed = true;
                 return { kind: "existing", remoteId: existing.remoteId, remoteUrl: existing.remoteUrl };
@@ -110,7 +110,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             await page.waitForTimeout(1_000);
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
-            const submittedId = await this.captureSubmittedVideoId(page, request.recordingId);
+            const submittedId = await this.captureSubmittedVideoId(page, request.uploadIdentity);
             completed = true;
             return {
                 kind: "uploaded",
@@ -190,6 +190,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
 
     private async validateRequest(request: UploadRequest): Promise<void> {
         if (!request.recordingId.trim()) throw new Error("Upload request lacks a recording identity");
+        if (!request.uploadIdentity.trim()) throw new Error("Upload request lacks a production upload identity");
         if (request.visibility !== "private") throw new Error("Only Direct-link XVideos uploads are supported");
         const artifactPath = path.resolve(request.artifactPath);
         await access(artifactPath);
@@ -473,23 +474,23 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     // Admission-time existence check: the folder name is the local truth, the
     // edit-page title is the XVideos truth. Runs in its own session for
     // remux-one/campaign intake, and inside the upload session as the backup.
-    async findUploadedCopy(folderName: string): Promise<
+    async findUploadedCopy(uploadIdentity: string): Promise<
         | { kind: "found"; remoteId: string; remoteUrl: string }
         | { kind: "title_mismatch"; remoteId: string }
         | { kind: "not_found" }
     > {
-        return await this.withAuthenticatedPage((page) => this.findUploadedCopyOnPage(page, folderName));
+        return await this.withAuthenticatedPage((page) => this.findUploadedCopyOnPage(page, uploadIdentity));
     }
 
-    async findUploadedCopyOnPage(page: Page, folderName: string): Promise<
+    async findUploadedCopyOnPage(page: Page, uploadIdentity: string): Promise<
         | { kind: "found"; remoteId: string; remoteUrl: string }
         | { kind: "title_mismatch"; remoteId: string }
         | { kind: "not_found" }
     > {
-        const entries = await this.findEntries(page, folderName);
+        const entries = await this.findEntries(page, uploadIdentity);
         for (const entry of entries) {
             const edit = await this.readEditPage(page, entry.remoteId);
-            if (edit.title.includes(`[${folderName}]`)) {
+            if (edit.title.includes(`[${uploadIdentity}]`)) {
                 return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
             }
         }

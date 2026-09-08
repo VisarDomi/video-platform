@@ -1,8 +1,9 @@
 import path from "node:path";
+import { unlink } from "node:fs/promises";
 
 import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import type { Recording } from "../domain/types.js";
+import type { Recording, RecordingInput } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { PipelineOrchestrator } from "../scheduler/orchestrator.js";
 import { createDefaultStages } from "../stages/defaultStages.js";
@@ -11,9 +12,17 @@ import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { HumanActionRequiredError, type ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import {
+    analyzeRecordingResolution,
+    chooseRecordingResolutionPolicy,
+    RESOLUTION_POLICY_VERSION,
+    resolutionPolicyReason,
+} from "../stages/resolutionPolicy.js";
 
 export type CampaignStepResult =
     | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
+    | { readonly disposition: "trial_finished"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
+    | { readonly disposition: "trial_verification_wait" | "trial_attention_required"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
     | { readonly disposition: "admitted" | "stage_completed"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "awaiting_upload_activation"; readonly recordingId: string }
     | { readonly disposition: "attention_required"; readonly recordingId: string; readonly reason: string }
@@ -43,7 +52,7 @@ export class CampaignWorker {
         private readonly config: PipelineConfig,
         private readonly resolver: TargetCatalogResolver,
         private readonly upload?: (recordingId: string, monthlyLimitBytes: number) => Promise<unknown>,
-        private readonly uploader?: ChromiumXvideosUploader,
+        _uploader?: ChromiumXvideosUploader,
         workerId = `pipeline-campaign-${process.pid}`,
     ) {
         this.orchestrator = new PipelineOrchestrator(
@@ -53,6 +62,39 @@ export class CampaignWorker {
         );
     }
 
+    private async enforceCurrentResolutionPolicy(
+        recording: Recording,
+        now: Date,
+    ): Promise<CampaignStepResult | null> {
+        if (recording.state === "server_ready"
+            || this.database.hasResolutionPolicyAssessment(recording.id, RESOLUTION_POLICY_VERSION)) {
+            return null;
+        }
+        const analysis = await analyzeRecordingResolution(recording.playlistPath);
+        const policy = chooseRecordingResolutionPolicy(analysis);
+        const reason = resolutionPolicyReason(policy.reason);
+        if (policy.disposition === "remux1080") {
+            this.database.recordResolutionPolicyAssessment(recording.id, reason, now);
+            return null;
+        }
+        const reset = this.database.resetLocalWorkForResolutionPolicy(recording.id, reason, now);
+        await Promise.all(reset.obsoletePaths.map((obsoletePath) => unlink(obsoletePath).catch(() => undefined)));
+        return {
+            disposition: "stage_completed",
+            recordingId: recording.id,
+            state: reset.recording.state,
+        };
+    }
+
+    private async admit(candidate: RecordingInput, now: Date): Promise<CampaignStepResult> {
+        const recording = this.database.discover(candidate, now);
+        this.database.enrollCampaignTrial(recording, now);
+        const resolution = await this.resolver.resolve(candidate, now);
+        this.database.saveProvenance(recording.id,
+            this.database.getProvenanceOverride(candidate.provider, resolution.observedIdentifier) ?? resolution);
+        return { disposition: "admitted", recordingId: recording.id, state: recording.state };
+    }
+
     async step(now = new Date()): Promise<CampaignStepResult> {
         // Disk is the truth: forget recordings whose source folder is gone.
         const swept = await sweepMissingRecordings(this.database, this.config, now);
@@ -60,7 +102,8 @@ export class CampaignWorker {
             console.log(JSON.stringify({ event: "campaign-sweep", swept }));
         }
         let control = this.database.getCampaignControl();
-        const reviewRequired = this.database.listProvenanceReview().length;
+        const reviewRequired = this.database.listProvenanceReview().length
+            + this.database.list("blocked").length;
         if (control.state === "paused") {
             if (control.resumeAt && now.getTime() >= Date.parse(control.resumeAt)) {
                 control = this.database.resumeFromCooldown(now);
@@ -69,12 +112,39 @@ export class CampaignWorker {
             }
         }
 
+        const selectCandidate = () => selectOldestFinalizedEditedCandidate({
+            finalizationDatabasePath: this.config.finalizationDatabasePath,
+            roots: this.config.discoveryRoots,
+            providerFilter: control.providerFilter,
+            pipelineDatabase: this.database,
+            allowedProviders: ["tango", "fc2", "sc"].filter((provider) => this.database.campaignTrialAllows(provider)),
+        });
+        let trialNextId: string | undefined;
+        if (control.trialPerProvider !== null) {
+            const pending = ordered(this.database.list().filter((recording) => [
+                "server_ready", "remuxed", "artifact_valid", "described", "metadata_ready",
+            ].includes(recording.state) && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter);
+            const first = pending[0];
+            const enrolled = new Set(this.database.getCampaignTrialProgress().flatMap((item) => item.recordings.map((recording) => recording.id)));
+            // Already queued local work must not take a slot ahead of an older,
+            // not-yet-discovered source. Once admitted, finish its stages first.
+            if (first && !enrolled.has(first.id)) {
+                const candidate = await selectCandidate();
+                const key = (recording: RecordingInput) => `${captureKeyFromFolderName(path.basename(recording.sourcePath))}|${recording.provider}|${recording.sourcePath}`;
+                if (candidate && key(candidate).localeCompare(key(first)) < 0) return this.admit(candidate, now);
+            }
+            trialNextId = first?.id;
+        }
         const local = ordered(this.database.list().filter((recording) => [
             "server_ready", "remuxed", "artifact_valid", "described",
-        ].includes(recording.state)), control.providerFilter);
+        ].includes(recording.state) && (!trialNextId || recording.id === trialNextId)
+            && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter);
         if (local[0]) {
+            this.database.enrollCampaignTrial(local[0], now);
             try {
                 await verifyCurrentServerAuthority(local[0], this.config);
+                const resolutionResult = await this.enforceCurrentResolutionPolicy(local[0], now);
+                if (resolutionResult) return resolutionResult;
             } catch (error) {
                 return {
                     disposition: "attention_required",
@@ -87,10 +157,15 @@ export class CampaignWorker {
             return { disposition: "stage_completed", recordingId: result.id, state: result.state };
         }
 
-        const uploadReady = ordered(this.database.list("metadata_ready"), control.providerFilter)[0];
+        const uploadReady = ordered(this.database.list("metadata_ready")
+            .filter((recording) => (!trialNextId || recording.id === trialNextId)
+                && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter)[0];
         if (uploadReady) {
+            this.database.enrollCampaignTrial(uploadReady, now);
             try {
                 await verifyCurrentServerAuthority(uploadReady, this.config);
+                const resolutionResult = await this.enforceCurrentResolutionPolicy(uploadReady, now);
+                if (resolutionResult) return resolutionResult;
             } catch (error) {
                 return {
                     disposition: "attention_required",
@@ -150,47 +225,30 @@ export class CampaignWorker {
             }
         }
 
-        const candidate = await selectOldestFinalizedEditedCandidate({
-            finalizationDatabasePath: this.config.finalizationDatabasePath,
-            roots: this.config.discoveryRoots,
-            providerFilter: control.providerFilter,
-            pipelineDatabase: this.database,
-        });
-        if (!candidate) return { disposition: "idle", reviewRequired };
-        // Admission-time remote check: the folder name is the local truth, the
-        // edit-page title is the XVideos truth. Never remux/describe/upload a
-        // folder whose video already exists on XVideos.
-        if (this.uploader) {
-            const folderName = path.basename(candidate.sourcePath);
-            try {
-                const copy = await this.uploader.findUploadedCopy(folderName);
-                if (copy.kind === "found") {
-                    const recording = this.database.discover(candidate, now);
-                    this.database.parkUploadedCopy(recording.id, copy.remoteId, copy.remoteUrl, now);
-                    return {
-                        disposition: "parked_existing_upload",
-                        recordingId: recording.id,
-                        state: this.database.get(recording.id)?.state ?? recording.state,
-                    };
+        const candidate = await selectCandidate();
+        if (!candidate) {
+            if (control.trialPerProvider !== null) {
+                const trial = this.database.getCampaignTrialProgress();
+                const pending = trial.flatMap((provider) => provider.recordings);
+                if (pending.some((recording) => ["xvideos_admitted", "xvideos_uploading", "xvideos_uploaded", "xvideos_uncertain"].includes(recording.state))) {
+                    // Verification runs inline even without new campaign work.
+                    // Confirmed absence can return the same slot to metadata_ready
+                    // for retry; never substitute an extra recording for it.
+                    return { disposition: "trial_verification_wait", reviewRequired, trial };
                 }
-                if (copy.kind === "title_mismatch") {
-                    const recording = this.database.discover(candidate, now);
-                    this.database.transition(recording.id, recording.state, "blocked",
-                        `XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`, now);
-                    return { disposition: "attention_required", recordingId: recording.id, reason: "xvideos title mismatch" };
+                if (trial.some((provider) => provider.admitted < control.trialPerProvider!)
+                    || pending.some((recording) => !["xvideos_verified", "cleanup_eligible"].includes(recording.state))) {
+                    // Do not clear the trial on a later manual resume: failed
+                    // slots still belong to this unfinished bounded run.
+                    this.database.setCampaignState("paused", now);
+                    return { disposition: "trial_attention_required", reviewRequired, trial };
                 }
-            } catch (error) {
-                return {
-                    disposition: "attention_required",
-                    recordingId: candidate.sourcePath,
-                    reason: error instanceof Error ? error.message : String(error),
-                };
+                this.database.finishCampaignTrial(now);
+                return { disposition: "trial_finished", reviewRequired, trial };
             }
+            return { disposition: "idle", reviewRequired };
         }
-        const recording = this.database.discover(candidate, now);
-        const resolution = await this.resolver.resolve(candidate, now);
-        this.database.saveProvenance(recording.id,
-            this.database.getProvenanceOverride(candidate.provider, resolution.observedIdentifier) ?? resolution);
-        return { disposition: "admitted", recordingId: recording.id, state: recording.state };
+        // Check the current-generation remote identity immediately before upload.
+        return this.admit(candidate, now);
     }
 }

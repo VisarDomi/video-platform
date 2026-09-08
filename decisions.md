@@ -11,7 +11,7 @@ stream-copying audio. The outputs are suffixed `.upscale1080p.mp4` or
 `.upscale1440p.mp4` and are recorded in `artifact_variants`; they never replace
 the canonical stream-copy artifact or advance/reset recording, description,
 quota, upload, or remote-identity state. The normal campaign remains
-stream-copy-only.
+separate and follows the segment-owned production resolution policy below.
 
 ## Processing exposes parallel work; systemd owns allocation (2026-08-27)
 
@@ -188,9 +188,9 @@ the way:
   staging artifact; original downloader/editor folders are never touched.
 - One login flow per browser session: `withAuthenticatedPage` launches and
   logs in once, then callers run their specific work on that page.
-- The managed `video-pipeline.service` campaign worker (power-off robust,
-  idles while paused) and the daily `video-reconcile.timer` at 04:33 are
-  installed under `systemd/user/`.
+- The managed `video-pipeline.service` campaign worker is power-off robust,
+  idles while paused, and performs due upload verification inline. The old
+  `video-reconcile.timer` is removed.
 
 ## Active recording folders are the durable downloader/server boundary (2026-08-12)
 
@@ -668,8 +668,10 @@ lifecycle. A single imperative `OverlayView` belongs to the settled viewer
 selection and remains stationary while the native document scrolls.
 
 The overlay disables mutations while unsettled and switches atomically when an
-adjacent video contains the visual viewport's exact midpoint pixel. After
-`scrollend + 100ms`, the viewer returns to its resting presentation.
+adjacent video contains the visual viewport's exact midpoint pixel. On
+`scrollend`, with no finger down, the viewer immediately returns to its resting
+presentation (Stream Viewer port, 2026-09-08). Stage translation preserves
+position during midpoint recycling; scroll correction occurs only at settlement.
 Its fixed box is transparent and may touch the viewport boundaries. Only the
 controls paint pixels; a full-box background or backdrop makes Safari's browser
 chrome opaque.
@@ -740,7 +742,10 @@ scrolling, and pinch zoom. The viewer owns horizontal seek and controls.
   video at the bottom of its 10k scope so only the current video is visible.
 - On recognized vertical intent, bring both adjacent videos next to the current
   scope and rotate roles immediately when one contains the viewport midpoint.
-- Park the adjacent videos again after `scrollend + 100ms`.
+- Park the adjacent videos again directly on `scrollend`, with no finger down.
+- A blank-spacer landing selects just the next/previous available video in the
+  scroll direction, or retains current at the list boundary; no distance-based
+  multi-entry jump.
 - Commit viewer-to-viewer navigation with `history.replaceState()`, preserving
   the list as the previous history entry.
 
@@ -847,3 +852,92 @@ Remaining hardening:
 - Add tests for `PlaylistAuthority` parser/serializer, discontinuity handling, fMP4 skip behavior, and byte-derived PTS duration.
 - Consider a checkpointed background repair job if future migrations are large enough that rerunning from the beginning is wasteful.
 - Consider hls.js fragment events if exact decoded-fragment identity is needed at segment boundaries.
+
+## Pipeline resolution policy is automatic and segment-owned (2026-08-30)
+
+The production campaign classifies resolution at HLS segment boundaries using
+the coded short edge, which makes the rule orientation-neutral. For fMP4, the
+last active `#EXT-X-MAP` before a segment owns that segment's dimensions;
+consecutive map tags with no intervening segment do not create phantom
+resolution classes. MPEG-TS is inspected with one whole-playlist keyframe
+scan, not one `ffprobe` process per segment.
+
+- Maximum short edge below 1080: transcode the complete recording to a 1080-pixel
+  short edge. Do not discard lower-resolution segments. Require one consistent
+  display aspect ratio, preserve that ratio without crop or padding, encode
+  H.264 with zscale Lanczos/libx264 slow/CRF 16/yuv420p, copy audio, and use a
+  `.production-upscale1080p.mp4` artifact name so old stream copies and
+  supervised comparison variants cannot be adopted accidentally.
+- Maximum short edge 1080 with every segment at 1080: stream-copy remux and
+  continue automatically.
+- Maximum short edge 1080 with lower-resolution segments (revised 2026-09-07,
+  resolution-policy-v3): sum playlist EXTINF durations. If native 1080p is at
+  least 90% of duration, retain only those whole segments and stream-copy remux
+  to `.retained1080p.mp4`. Otherwise transcode the complete recording to
+  `.production-upscale1080p.mp4`, including all lower-resolution segments.
+  Both branches create one video, not separate uploads. Dropped segments are
+  excluded only from the artifact; originals remain intact.
+- A maximum short edge above 1080, or an inconsistent display aspect ratio,
+  is an unsupported input error. Resolution policy has no manual-review branch.
+
+Derived playlists use absolute references to the already checkpointed source
+files and add discontinuities at source cuts, selection gaps, and map changes.
+They are temporary pipeline inputs only. The edited source folder and its
+authoritative `playlist.m3u8` are not changed.
+
+Local-stage leases are six hours because measured slow/CRF-16 upscales can
+take roughly twice the source duration. The lease prevents another worker from
+claiming a healthy long-running conversion.
+
+Production uploads use the versioned title identity
+`[recording ID | production-v2 | full]`. This prevents an upload made under the
+old policy from satisfying a new upload attempt. Split-part ledger support is
+retained for existing data but the current policy creates no split products.
+
+### One-time campaign trial (2026-09-07)
+
+`campaign-configure --provider all --trial-per-provider N --apply` arms a
+bounded trial while paused; it does not start processing. For N=10 it admits
+the oldest ten eligible recordings per provider, at most thirty recordings.
+Existing queued work is subject to the same cap and ordering. Durable slots
+survive retries, restarts, source removal, and manual/cooldown pauses. Existing
+bandwidth limits remain independent. Failed/uncertain slots are not replaced
+with additional recordings. After submission, wait for delayed inline
+verification without admitting extra recordings; confirmed absence may retry
+in the same slot. Only all thirty verified recordings complete the trial and
+pause indefinitely. Failed/blocked slots or an exhausted provider instead cause
+an attention pause that retains the cap on resume. Expose per-provider
+counts/states. The next explicit resume after a successful trial finish clears
+the one-time cap and uses normal oldest-first
+scheduling, without resetting uploads. A mid-trial resume retains the cap.
+Reconfiguration while paused can adjust the cap without forgetting consumed
+slots, or cancel it with `none`. Production rollover retains the configured
+trial size but clears old-generation trial memberships.
+
+Artifact storage is generation-owned as well:
+`pipeline/artifacts/<production-version>/`. The unversioned pre-v2 files are
+moved with same-filesystem renames to
+`pipeline/artifacts/legacy-production-v1/`; new production outputs go only to
+`pipeline/artifacts/production-v2/`, and supervised `remux-one` comparison
+variants go below that generation's `manual/` directory. Completed old
+generation directories are retained until an explicit pruning decision.
+
+The pipeline database carries the same active production version. The first
+explicit `campaign-resume --apply` after installing a newer production version
+performs a one-time rollover while the campaign is still paused: it archives
+the old recording and upload history under its production version, removes it
+from the active workflow, archives pipeline-owned staging files, records a
+rollover summary, and then changes the campaign to running.
+Discovery consequently starts again from the oldest finalized source. ISP
+bandwidth events, provenance overrides, provider filter, monthly limit, and
+campaign configuration survive the rollover. The finalization database and
+source recordings are outside this boundary. A status command exposes both the
+active version and whether a rollover is pending.
+The rollover aborts before moving files if the old generation is still marked
+running, any recording lease exists, or an upload attempt is in flight.
+Before retiring rows or moving artifacts, rollover now writes and fsyncs a full
+SQLite snapshot in `pipeline/history/<old-version>/` (2026-09-07). The snapshot
+has a unique filename and owner-only file permissions and preserves all prior
+descriptions, upload metadata, provenance and workflow data. It supplements the
+queryable retired upload ledger; it does not silently reuse descriptions for
+changed video artifacts. Existing exact-artifact/prompt cache rules remain.

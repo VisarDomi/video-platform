@@ -33,10 +33,12 @@ canonicalizer. URI percent escapes are not stored in media filenames.
 
 ## ENDLIST transfers finalized-media ownership to the server
 
-The downloader owns transport and active playlist append only. Tango/FC2 write
-the received bytes, reject only an empty/unreadable file, and do not spawn
-ffprobe per media segment. Upstream EXTINF remains provisional while the stream
-is live.
+The downloader owns transport and active playlist append only. FC2 writes the
+received bytes and rejects only an empty/unreadable file. Tango additionally
+probes each downloaded segment and rejects `360x640`/`640x360` video before it
+can enter the local playlist; selecting the `1280x720` master variant is not
+enough because Tango can still serve 360p startup segments. Upstream EXTINF
+remains provisional while the stream is live.
 
 `PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST` before
 the `.active` directory is moved into the provider's hidden `.pending` root.

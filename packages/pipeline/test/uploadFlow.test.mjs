@@ -107,7 +107,7 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         updatedAt: "2026-08-13T08:00:00Z",
     });
     assert.deepEqual(metadata.tags, ["stripchat", "live"]);
-    assert(metadata.title.includes("[2026-08-13 101112 Minami_jjjj]"));
+    assert(metadata.title.includes("[2026-08-13 101112 Minami_jjjj | production-v2 | full]"));
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://stripchat.com/226494362"));
     assert(metadata.description.includes("Alias: https://stripchat.com/Minami_jjjj"));
