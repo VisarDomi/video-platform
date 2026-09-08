@@ -107,7 +107,7 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         updatedAt: "2026-08-13T08:00:00Z",
     });
     assert.deepEqual(metadata.tags, ["fmp4live", "live"]);
-    assert(metadata.title.includes("[2026-08-13 101112 channel-561]"));
+    assert(metadata.title.includes("[2026-08-13 101112 channel-561 | production-v2 | full]"));
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://fmp4-live.example/226494362"));
     assert(metadata.description.includes("Alias: https://fmp4-live.example/channel-561"));

@@ -78,7 +78,7 @@ export async function remuxOne(
             // upload/description identity remain untouched.
             const transcoded = await upscaleTranscode(
                 recording.playlistPath,
-                config.stagingRoot,
+                config.manualStagingRoot ?? config.stagingRoot,
                 recording.id,
                 upscaleMode,
             );

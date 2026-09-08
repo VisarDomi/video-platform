@@ -7,7 +7,7 @@ remains available in Git history and is not part of the build.
 
 Provider lists and viewers are separate native documents. List rows are anchors.
 Safari owns tabs, history, scrolling, scroll restoration, edge-back, and viewer
-vertical movement. Viewer settlement rotates three media scopes and uses
+vertical movement. Viewer midpoint selection rotates three media scopes and uses
 `history.replaceState()`, so Back always returns to the list entry.
 
 The list renders every row without virtualization or filtering. On `pagehide` it
@@ -22,21 +22,30 @@ events.
 ## Intrinsic three-scope viewer (2026-07-29)
 
 The viewer document always contains three media scopes: a 10,000px previous
-scope whose video is bottom-aligned, a natural-height current scope, and a
-10,000px next scope whose video is top-aligned. The videos touch directly.
+scope, a natural-height current scope, and a 10,000px next scope. At rest the
+previous/next videos park at their far edges. On vertical intent they align
+beside the current video so the videos touch directly.
 
 Videos use `width:100%; height:auto`; decoded media geometry is the layout
 authority. No stage or scope clips video overflow. All three videos play muted.
 
-After `scrollend + 100ms`, a neighboring video becomes current only when it has
-a strictly greater visible fraction than both others. Ties retain current.
-Scope roles rotate with measured scroll correction, and only the remote edge
-unit is recycled.
+As in Stream Viewer (ported 2026-09-08), a neighboring video becomes current
+when it contains the visual viewport midpoint. Scope roles rotate while a
+measured stage translation preserves the selected video's screen position;
+there is no scroll-position write during native momentum. Only the remote
+edge unit is recycled, and outgoing progress is saved before rotation.
+
+On `scrollend`, with no finger down, normalize the translation immediately:
+there is no 100ms timer. Keep the visible current video's position. A landing
+in the blank 10k runway selects only the next entry when scrolling down or
+previous entry when scrolling up, then centers it. Missing neighbors retain
+the current real video. Finger release cannot settle ongoing momentum.
 
 The URL-selected HLS source is assigned before the full provider list or
 auxiliary requests. Current playback never waits for neighbor discovery.
 
-One shared overlay remains stationary and latches to the settled current video.
+One shared overlay remains stationary and latches to the midpoint-selected video;
+its controls remain non-interactive until scrolling settles.
 It is a transparent fixed shell at the viewport edges. Only its controls paint
 pixels and receive pointer events. Do not add a full-shell background, gradient,
 backdrop filter, or blur: a painted fixed backdrop makes Safari's browser chrome
@@ -46,7 +55,7 @@ opaque.
 
 Safari owns vertical panning and leading-edge Back. The gesture handler calls
 `preventDefault` only for horizontal seek/control gestures or application zoom.
-Starting vertical movement resets zoom.
+Pinch zoom remains browser-owned.
 
 ## localStorage debounce: 3s
 
@@ -98,3 +107,15 @@ removed.
   Videos use intrinsic `width: 100%; height: auto` geometry without clipping.
 - Player units own video, timeline, and media lifecycle. One fixed overlay,
   inset from Safari's top and bottom boundaries, latches to the settled scope.
+
+## Scroll regression check
+
+After `npm run build:app`, run `node packages/app/test/viewer.mjs` from the repo
+root. It loads the deployed frontend (default `https://192.168.1.197:9999`,
+override with `VIDEO_TEST_ORIGIN`) with isolated API/media fixtures. Cases cover
+midpoint continuity without scroll writes, immediate settlement, held fingers,
+continued momentum, directional spacer landings, reversal and list boundaries,
+native URL history, progress persistence, marker reset, mute, and seeking.
+Non-GET requests are blocked; no real edits or download-list changes occur.
+This is a behavioral regression test, not proof of physical iPhone momentum
+or native HLS playback; those still need an on-phone check.

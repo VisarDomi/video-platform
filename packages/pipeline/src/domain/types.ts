@@ -30,12 +30,28 @@ export interface ArtifactRecord {
     readonly validatedAt: string;
 }
 
+export type ProductionArtifactPart = "full" | "max1080p" | "nonmax1080p";
+
+export interface QueuedProductionArtifactRecord extends ArtifactRecord {
+    readonly part: Exclude<ProductionArtifactPart, "full">;
+    readonly segmentCount: number;
+    readonly sourceDimensions: readonly string[];
+}
+
 export type ArtifactVariant = "upscale1080p" | "upscale1440p";
 
 export interface ArtifactVariantRecord extends ArtifactRecord {
     readonly variant: ArtifactVariant;
     readonly sourceFrameCount: number;
     readonly droppedSourceFrames: number;
+}
+
+export type ResolutionReviewPart = "max1080p" | "nonmax";
+
+export interface ResolutionReviewArtifactRecord extends ArtifactRecord {
+    readonly part: ResolutionReviewPart;
+    readonly segmentCount: number;
+    readonly sourceDimensions: readonly string[];
 }
 
 export type ProvenanceResolutionStatus = "resolved" | "review_required" | "manual";
@@ -87,5 +103,7 @@ export interface CampaignControl {
     readonly monthlyUploadLimitBytes: number;
     readonly antibotFailures: number;
     readonly resumeAt: string | null;
+    readonly trialPerProvider: number | null;
+    readonly trialFinishedAt: string | null;
     readonly updatedAt: string;
 }

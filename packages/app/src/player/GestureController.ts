@@ -1,4 +1,5 @@
 export interface GestureCallbacks {
+	onContact(active: boolean): void;
 	getCurrentTime(): number;
 	getSeekMax(): number;
 	seekDirect(time: number): void;
@@ -27,6 +28,7 @@ export class GestureController {
 	}
 
 	private readonly handleStart = (event: TouchEvent): void => {
+		this.callbacks.onContact(event.touches.length > 0);
 		if (event.touches.length > 1) {
 			this.axis = 'browser';
 			return;
@@ -67,6 +69,7 @@ export class GestureController {
 	};
 
 	private readonly handleEnd = (event: TouchEvent): void => {
+		this.callbacks.onContact(event.touches.length > 0);
 		if (this.axis === 'browser') {
 			if (event.touches.length === 0) this.axis = 'none';
 			return;
@@ -81,6 +84,7 @@ export class GestureController {
 	};
 
 	private readonly handleCancel = (): void => {
+		this.callbacks.onContact(false);
 		this.axis = 'none';
 	};
 }

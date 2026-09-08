@@ -37,6 +37,10 @@ export function containedArtifactPath(
     return artifactPath;
 }
 
+export function isDirectArtifactPath(stagingRoot: string, artifactPath: string): boolean {
+    return path.dirname(path.resolve(artifactPath)) === path.resolve(stagingRoot);
+}
+
 export async function prepareAtomicRemuxPaths(
     stagingRoot: string,
     recordingId: string,
@@ -57,8 +61,13 @@ export async function streamCopyRemux(
     inputPlaylist: string,
     stagingRoot: string,
     recordingId: string,
+    artifactSuffix?: string,
 ): Promise<string> {
-    const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(stagingRoot, recordingId);
+    const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
+        stagingRoot,
+        recordingId,
+        artifactSuffix,
+    );
     const existing = await fs.lstat(finalPath).catch(() => null);
     if (existing?.isFile()) return finalPath;
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
