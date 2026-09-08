@@ -37,16 +37,16 @@ npm run tests:extension
 ```
 
 Build output is `dist/extension/{manifest.json,content.js}`. The shared iOS Xcode
-host is in `../../manga/gallery-reader/extension/apple/`; run `npm run build:extensions`
-in Gallery Reader to stage all three bundles before building/installing that host.
+host is in the separate [Reader Extensions](https://github.com/VisarDomi/reader-extensions)
+repo (default checkout: `../../reader-extensions`). Run `npm run build` there to
+build/stage all four bundles before building/installing the host.
 The Stream Viewer extension ID is `com.visar.galleryreader.extensiontest.StreamViewer`.
 
-For device delivery, coordinate with the **extension-all** task before building
-or installing the shared host. Build Stream Viewer with `npm run build:extension`,
-then stage only `dist/extension/` to the Mac's
-`/Users/visar/Developer/gallery-reader-extension/dist/stream-viewer-extension/`.
-The shared [extension deployment guide](../../manga/gallery-reader/extension/README.md)
-documents SSH, GUI-session signing and iPhone installation. Verify the staged
+For an individual update, run `npm run build -- stream-viewer` from the host repo,
+or build locally here and use `npm run stage -- stream-viewer` there. Other staged
+bundles stay unchanged. The shared
+[fresh-machine/deployment guide](https://github.com/VisarDomi/reader-extensions#fresh-machine-setup)
+documents private configuration, SSH, GUI-session signing and installation. Verify the staged
 and embedded `Stream Viewer.appex/content.js` hashes against the local bundle.
 A local web bundle build alone does not update the installed Safari extension;
 the shared **Reader Extensions** app must be rebuilt and installed, then the
