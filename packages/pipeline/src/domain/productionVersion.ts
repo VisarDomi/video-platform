@@ -1,2 +1,1 @@
-export const CURRENT_PRODUCTION_VERSION = "production-v2";
-
+export const CURRENT_PRODUCTION_VERSION = "production-v3";

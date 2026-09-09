@@ -2,14 +2,16 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { preparePlaylistInput, type PlaylistSelection } from "./playlistInput.js";
 
-export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput: string): string[] {
+export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput: string,
+    inputArgs: readonly string[] = ["-i", inputPlaylist]): string[] {
     return [
         "-nostdin",
         "-hide_banner",
         "-v", "error",
         "-fflags", "+genpts",
-        "-i", inputPlaylist,
+        ...inputArgs,
         "-map", "0:v?",
         "-map", "0:a?",
         "-c", "copy",
@@ -62,6 +64,7 @@ export async function streamCopyRemux(
     stagingRoot: string,
     recordingId: string,
     artifactSuffix?: string,
+    selection?: PlaylistSelection,
 ): Promise<string> {
     const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
         stagingRoot,
@@ -71,9 +74,10 @@ export async function streamCopyRemux(
     const existing = await fs.lstat(finalPath).catch(() => null);
     if (existing?.isFile()) return finalPath;
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
+    const prepared = selection ? await preparePlaylistInput(inputPlaylist, stagingRoot, selection) : null;
     try {
         await new Promise<void>((resolve, reject) => {
-            const child = spawn("ffmpeg", buildStreamCopyRemuxArgs(path.resolve(inputPlaylist), temporaryPath), {
+            const child = spawn("ffmpeg", buildStreamCopyRemuxArgs(path.resolve(inputPlaylist), temporaryPath, prepared?.args), {
                 stdio: ["ignore", "ignore", "pipe"],
             });
             let stderr = "";
@@ -97,5 +101,7 @@ export async function streamCopyRemux(
     } catch (error) {
         await fs.unlink(temporaryPath).catch(() => undefined);
         throw error;
+    } finally {
+        await prepared?.cleanup();
     }
 }

@@ -30,17 +30,20 @@ export async function uploadOne(
         if (!recording) {
             throw new Error(`Unknown pipeline recording ${recordingId}`);
         }
+        if ((config.comparisonTrialOnly || database.getComparisonTrial()) && !database.comparisonAllows(recording)) {
+            throw new Error("Upload refused: recording is not in the explicit comparison selection");
+        }
         if (!database.hasResolutionPolicyAssessment(recordingId, RESOLUTION_POLICY_VERSION)) {
             throw new Error(
                 `Recording ${recordingId} has not passed ${RESOLUTION_POLICY_VERSION}; run it through the campaign before upload`,
             );
         }
         const identityOutcome = await guardUploadIdentity(database, recording, config);
-        if (identityOutcome.kind === "verified_cleaned") {
+        if (identityOutcome.kind === "verified_cleaned" || identityOutcome.kind === "verified_retained") {
             return {
                 recordingId,
                 state: database.get(recordingId)?.state,
-                disposition: "already_verified_cleaned",
+                disposition: `already_${identityOutcome.kind}`,
                 remoteId: identityOutcome.remoteId,
             };
         }

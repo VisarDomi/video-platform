@@ -26,6 +26,9 @@
         "campaign:pause": "npm run build && node --no-warnings dist/main.js campaign-pause --apply",
         "campaign:status": "npm run build && node --no-warnings dist/main.js campaign-status",
         "campaign:step": "npm run build && node --no-warnings dist/main.js campaign-step --apply",
+        "campaign:prepare": "npm run build && node --no-warnings dist/main.js campaign-prepare --apply",
+        "campaign:select": "npm run build && node --no-warnings dist/main.js campaign-select",
+        "comparison:report": "npm run build && node --no-warnings dist/main.js comparison-report",
         "campaign-worker": "npm run build && node --no-warnings dist/main.js campaign-worker"
     },
     "dependencies": {
