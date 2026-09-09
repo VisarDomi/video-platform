@@ -99,6 +99,9 @@ HTMLMediaElement.prototype.addEventListener = function addEventListener(
 };
 
 const provider: Provider = {
+    playback: "live",
+    homeUrl: "/",
+    listTitle: "Streams",
     matchRoute(pathname) {
         const match = pathname.match(/^\/fixture\/stream\/([^/]+)/);
         return match

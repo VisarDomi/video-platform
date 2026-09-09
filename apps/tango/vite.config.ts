@@ -20,9 +20,9 @@ export default defineConfig(({ mode }) => ({
         enforce: 'pre',
         transform(source, id) {
             if (!id.endsWith('/src/core/page.ts')) return;
-            const original = 'document.open();\n    document.close();';
+            const original = 'mode: "rewrite" | "replace" = "rewrite"';
             if (!source.includes(original)) throw new Error('Stream takeover changed; inspect the Safari adapter');
-            return source.replace(original, 'document.documentElement?.replaceChildren();');
+            return source.replace(original, 'mode: "rewrite" | "replace" = "replace"');
         },
     }] : [
         monkey({
@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => ({
                 name: `${pkg.name} v${pkg.version}`,
                 namespace: "https://github.com/VisarDomi",
                 description: "stream viewer takeover",
-                match: ["https://tango.me/*", "https://www.tango.me/*"],
+                match: ["https://tango.me/*", "https://www.tango.me/*", "https://xvideos.com/*", "https://www.xvideos.com/*"],
                 "run-at": "document-start",
             },
         }),

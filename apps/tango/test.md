@@ -1,6 +1,127 @@
 # iOS Safari regression tests
 
+## XVideos provider
+
+`npm run tests:extension` also runs `tests/xvideos.mjs` against the production
+bundle. It covers pagination discovered across pages, duplicate rows/links,
+complete-list handoff, highest-resolution HLS selection (including 1080p over
+higher-bitrate 720p), signed relative variant URLs, malformed playlists, lazy
+source resolution, VOD pause/seeking, hidden Tango actions, retry without dropping
+unavailable uploads, empty accounts, native login redirection, automatic
+uploads navigation after login, account landing redirection, management isolation, and page-fetch
+errors without mistaking a partial list for a complete one. Media decoding is mocked.
+
+Incremental-list tests hold later pages to verify the first page renders first,
+existing nodes survive appends, and opening a video early resumes pagination
+without delaying playback or resetting pause. Hidden/pagehide tests verify
+cancelled responses cannot overwrite newer state; persisted pageshow reconciles
+new rows and the selected marker while retaining cached row nodes. Redirect and
+failed-page fixtures retain the cursor and recover automatically with increasing
+retry delays. Tests also cover cancellation of retry timers while hidden and
+automatic recovery while a video is paused. These lifecycle
+events are synthetic in the controlled browser, separate from native acceptance.
+
+Startup tests require synchronous stop and Safari DOM replacement before the
+first fetch, including when authentication is delayed. Cookie tests cover HttpOnly/Secure and expiry
+preservation, renewal, manual logout and pending-read cancellation, background
+document/worker startup, separate Safari profiles, and private-store exclusion.
+
+Read-only live verification (September 9, 2026): the extension listed 165 uploads
+across nine pages using Video Platform's saved Chromium session. A playable
+sample exposed at most 720p; its selected media playlist returned HTTP 200 via
+browser fetch and included `EXT-X-ENDLIST`. This verifies live markup, CORS and
+source resolution, but does not establish physical iPhone decoding or a live
+1080p sample.
+
+Native iPhone verification (September 9, 2026, version 250):
+
+- After the user granted XVideos website access, the installed extension listed
+  all 165 uploads with one boot. Safari's existing authenticated session was used.
+- Version 249 exposed a real mobile issue: XVideos returned `hls_low.m3u8`, which
+  capped the sample at 480p despite its full master containing 720p. Version 250
+  requests the sibling `hls.m3u8`, preserving the signed path/query, then selects
+  its highest-resolution variant. The production-bundle fixture reproduces this
+  mobile cap and requires 1080p from the full master.
+- The updated installed extension decoded the same sample at 1280×720, with
+  advancing playback and no media error, versus 854×480 before the fix. The live
+  sample's full master tops out at 720p; live 1080p decoding is not claimed.
+- Pause held the playhead, the seek control reached 1155.23075 seconds, resume
+  advanced playback, and the neighboring video stayed paused. The list button
+  is absent. Safari history Back restored the 165-row uploads list.
+- Controls and Back were invoked through real Web Inspector against the installed
+  app. This verifies native media and navigation behavior, not physical finger
+  gesture acceptance. Signed-out login handoff remains covered by controlled
+  browser tests; the phone's existing login was not cleared for testing.
+
+All installed web-file hashes and signatures matched staging. Gallery, Manga and
+KM bundles were preserved. `tests/native-xvideos.py` provides bounded inspection
+without logging media URLs or credentials. The existing automatic renewal job is
+restored after each deliberate install with the delivered inputs approved.
+
+Native login/startup verification (September 9, 2026, version 254):
+
+- Authentication was in HttpOnly/Secure cookies, not sessionStorage. The auth
+  cookie was session-only; the companion session cookie expired December 9.
+  Safari used `persistent-2`, while the default `persistent-1` store was empty.
+- The installed helper preserved the auth cookie with the companion expiry and
+  original security attributes. Reloading caused the site to renew it; the
+  response listener preserved that new cookie too. Safari's cookie-change event
+  alone did not handle renewal on this phone.
+- Terminated and relaunched Safari using devicectl. The final build reopened
+  all 165 uploads without login; both auth cookies remained persistent with
+  matching expiry. No authentication values were logged or exported.
+- The prior authentication-before-takeover delay measured 713 ms. The new
+  synchronous takeover measured 1 ms on reload and 5 ms after restart, from
+  extension entry to shell creation. These measurements exclude Safari's time
+  before injecting the extension. Manual logout is covered by controlled tests;
+  the real account was not deliberately logged out.
+
 ## Extension port
+
+Version 259 adds the persistent Multi toggle, default on for both providers.
+Production-bundle tests verify neighbor sources are unloaded when off, the
+current media element/position/pause/mute remain intact, off survives reload,
+single-video swipe/settlement keeps only one media source, cached pages reread
+the preference, and the UI can re-enable multiple videos. Multi on now requests
+playback for loaded XVideos neighbors too; earlier native paused-neighbor notes
+below describe the behavior of those older versions.
+
+Native iPhone verification (September 9, 2026, version 259): the default-on
+viewer played the current and next videos at decoded 1920×1080. Turning Multi
+off removed the neighbor source and retained the current source, position,
+paused state and mute state. A real Safari document reload retained Multi off
+and loaded only the current video at 1080p. Turning it back on restored neighbor
+playback while the current video continued. The test left Multi on. Physical
+swipe navigation was not exercised in this native check.
+
+Version 258 removes manual pagination retry. Controlled failures verify 1-second
+then 2-second retries, increasing backoff, automatic recovery in both list and
+paused-video views, and cancellation of pending retry timers while hidden.
+The rebuilt-list scroll fallback and pagination visibility handling are scoped
+to providers with paginated lists (currently XVideos only). Tango tests verify
+that its history entry is unchanged and that its existing saved-list and
+persisted-pageshow authentication behavior remains intact.
+Version 258 was built, signed and installed; native reload again showed 20 rows
+first and appended through 165 while retaining the first row node. Fault recovery
+was exercised in the controlled production-bundle tests, not by disrupting the
+phone's live network. Other reader bundles were preserved.
+
+Native incremental-pagination acceptance (September 9, 2026, version 257):
+
+- The first 20 rows rendered with further pages pending. Opened the first video
+  immediately, then invoked Safari history Back before pagination completed.
+- Safari rebuilt the document in these runs (`pageshow.persisted` was not true).
+  The saved cursor resumed at the next unfinished page and rows advanced through
+  40, 60, 80, 100, 120, 140, 160, and 165, without duplicates or replacing the
+  first rendered row. The final cursor was cleared only after completion.
+- Back restored the saved 400 px list position; it stayed at 400 throughout
+  appending the remaining pages. Cached-document behavior is covered by the
+  controlled lifecycle tests above, not claimed as a native bfcache hit here.
+- The previous build's native playback check decoded the first upload at
+  1920×1080 with advancing playback and its neighbor paused. Source selection
+  is unchanged in version 257. Native entry-to-shell takeover remained 1 ms.
+- Build/signature/file hashes verified for the installed shared app; other
+  reader bundles were preserved. Automatic renewal was restored after delivery.
 
 `npm run tests:extension` builds the actual extension bundle and checks it against
 controlled network/media boundaries in a disposable browser. Cases cover Home

@@ -1,9 +1,12 @@
 import css from "../style.css?inline";
 
-export function takeOverPage(): void {
+export function takeOverPage(mode: "rewrite" | "replace" = "rewrite"): void {
     window.stop();
-    document.open();
-    document.close();
+    if (mode === "replace") document.documentElement?.replaceChildren();
+    else {
+        document.open();
+        document.close();
+    }
     if (!document.documentElement) document.appendChild(document.createElement('html'));
     if (!document.head) document.documentElement.appendChild(document.createElement('head'));
     if (!document.body) document.documentElement.appendChild(document.createElement('body'));
@@ -16,10 +19,16 @@ export function takeOverPage(): void {
     document.head.append(style);
 }
 
-export function showStatus(message: string, error = false): void {
+export function showStatus(message: string, error = false, links: { href: string; label: string }[] = []): void {
     document.body.replaceChildren();
     const status = document.createElement("p");
     status.className = error ? "status status-error" : "status";
     status.textContent = message;
+    for (const { href, label } of links) {
+        const link = document.createElement("a");
+        link.href = href;
+        link.textContent = label;
+        status.append(document.createElement("br"), link);
+    }
     document.body.append(status);
 }

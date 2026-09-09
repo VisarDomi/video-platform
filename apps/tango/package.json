@@ -1,12 +1,12 @@
 {
   "name": "stream-viewer",
-  "version": "248",
-  "description": "A lightweight userscript that makes exploring live streams easy",
+  "version": "259",
+  "description": "A lightweight viewer for Tango live streams and XVideos uploads",
   "type": "module",
   "scripts": {
     "build": "node increase.js && vite build",
     "build:extension": "node scripts/build-extension.mjs",
-    "tests:extension": "npm run build:extension && node tests/extension.mjs",
+    "tests:extension": "npm run build:extension && node tests/extension.mjs && node tests/xvideos.mjs && node tests/cookies.mjs",
     "tests": "node tests/ios/run.mjs",
     "tests:smoke": "node tests/ios/run.mjs --smoke",
     "tests:actions": "node tests/ios/run.mjs --actions"

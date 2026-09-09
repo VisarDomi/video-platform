@@ -181,6 +181,9 @@ async function refreshStreamTokens(): Promise<void> {
 }
 
 export const tango: Provider = {
+    playback: "live",
+    homeUrl: "/",
+    listTitle: "Streams",
     matchRoute(pathname: string): Route {
         const match = pathname.match(/^\/stream\/([^/]+)/);
         return match

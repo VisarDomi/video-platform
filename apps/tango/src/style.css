@@ -42,6 +42,12 @@ body {
     color: #ff8a8a;
 }
 
+.status a {
+    display: inline-block;
+    padding: 12px;
+    color: #fff;
+}
+
 .stream-page {
     min-height: 100%;
     overflow: visible;
@@ -181,7 +187,39 @@ body {
     opacity: 0.6;
 }
 
+.stream-controls .multiple-videos {
+    font-size: 14px;
+}
+
+.stream-controls .multiple-videos[aria-pressed="true"] {
+    border-color: #34c759;
+}
+
 .stream-controls button:active {
     border-color: #ff5e3a;
     background: #ff5e3a;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.playback-status {
+    text-shadow: 1px 1px 2px #000;
+}
+
+.seek {
+    width: 100%;
+    margin: 0 0 16px;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.stream-controls.hidden .seek,
+.stream-controls.unsettled .seek {
+    pointer-events: none;
+}
+
+.stream-buttons {
+    flex-wrap: wrap;
 }

@@ -10,6 +10,7 @@ export function isPageReload(): boolean {
 export interface SharedState {
     streams: Stream[];
     currentStreamerId: string;
+    nextPage?: string;
 }
 
 function isStream(value: unknown): value is Stream {
@@ -36,6 +37,7 @@ export function loadState(): SharedState | null {
         || typeof state.currentStreamerId !== "string") {
         throw new Error("Stored stream state is invalid");
     }
+    if (state.nextPage !== undefined && typeof state.nextPage !== "string") throw new Error("Stored pagination is invalid");
     return state as SharedState;
 }
 

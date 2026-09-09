@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 // Drive the production UI with deterministic touch/scroll boundaries. This is
 // not a simulation of iOS momentum: the physical flick still needs native Safari.
-export async function testScrollSettlement(page) {
+export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
     await page.evaluate(() => {
         const stage = document.querySelector('.stream-stage');
         for (const video of stage.querySelectorAll('video')) video.style.height = '600px';
@@ -85,35 +85,35 @@ export async function testScrollSettlement(page) {
     });
     assert.equal(preserved.sameVideo, true, 'Recycle the same playing element');
     assert.ok(Math.abs(preserved.actual - preserved.expected) < 1, 'Recycling must preserve the visible position');
-    assert.equal((await read()).id, 'person-2');
+    assert.equal((await read()).id, itemId(2));
     assert.equal((await read()).writes, 0, 'Midpoint selection must not interrupt native momentum');
     await page.evaluate(() => window.dispatchEvent(new Event('scrollend')));
     await page.waitForTimeout(150);
     assert.equal((await read()).navigating, true, 'A held finger must prevent settlement');
-    assert.equal((await settle()).id, 'person-2', 'A video landing must not advance again');
+    assert.equal((await settle()).id, itemId(2), 'A video landing must not advance again');
 
     await begin();
     await spacer(1);
-    assert.equal((await read()).id, 'person-2', 'Blank space is not itself a stream');
+    assert.equal((await read()).id, itemId(2), 'Blank space is not itself a stream');
     assert.equal((await read()).writes, 0);
     let result = await settle();
-    assert.equal(result.id, 'person-3', 'Downward spacer landing selects only the next entry');
+    assert.equal(result.id, itemId(3), 'Downward spacer landing selects only the next entry');
     assert.ok(Math.abs(result.center - result.midpoint) < 1);
 
     await begin();
     await spacer(1);
-    assert.equal((await settle()).id, 'person-3', 'No next stream: retain the last real entry');
+    assert.equal((await settle()).id, itemId(3), 'No next stream: retain the last real entry');
     await begin();
     await spacer(-1);
-    assert.equal((await settle()).id, 'person-2', 'Upward spacer landing selects only the previous entry');
+    assert.equal((await settle()).id, itemId(2), 'Upward spacer landing selects only the previous entry');
 
     await begin();
     await spacer(1);
     await page.evaluate(() => window.fixtureScroll(window.scrollY - 200));
-    assert.equal((await settle()).id, 'person-1', 'A direction reversal in blank space follows the final direction');
+    assert.equal((await settle()).id, itemId(1), 'A direction reversal in blank space follows the final direction');
     await begin();
     await spacer(-1);
-    assert.equal((await settle()).id, 'person-1', 'No previous stream: retain the first real entry');
+    assert.equal((await settle()).id, itemId(1), 'No previous stream: retain the first real entry');
 
     await begin();
     await spacer(1);
@@ -121,7 +121,7 @@ export async function testScrollSettlement(page) {
     await page.waitForTimeout(150);
     assert.equal((await read()).writes, 0, 'Releasing the finger during momentum must not snap before scrollend');
     assert.equal((await read()).navigating, true);
-    assert.equal((await settle()).id, 'person-2');
+    assert.equal((await settle()).id, itemId(2));
 
     await begin();
     await spacer(1);
@@ -132,9 +132,9 @@ export async function testScrollSettlement(page) {
     await page.waitForTimeout(150);
     assert.equal((await read()).writes, 0, 'Resumed scrolling must invalidate the previous scrollend');
     result = await settle();
-    assert.equal(result.id, 'person-3');
+    assert.equal(result.id, itemId(3));
     await begin();
-    for (const [role, id] of [['previous', 'person-2'], ['previous', 'person-1'], ['next', 'person-2']]) {
+    for (const [role, id] of [['previous', itemId(2)], ['previous', itemId(1)], ['next', itemId(2)]]) {
         await page.evaluate(role => {
             const video = document.querySelector(`.${role}-scope video`);
             const rect = video.getBoundingClientRect();
@@ -143,6 +143,6 @@ export async function testScrollSettlement(page) {
         assert.equal((await read()).id, id, 'Multiple crossings and reversal must preserve stream order');
         assert.equal((await read()).writes, 0, 'Every recycling step must leave native momentum alone');
     }
-    assert.equal((await settle()).id, 'person-2');
+    assert.equal((await settle()).id, itemId(2));
     console.log('PASS: immediate scrollend settlement; midpoint continuity without scroll writes; held touch and momentum guards; video/spacer landings; next/previous, reversal and list limits.');
 }

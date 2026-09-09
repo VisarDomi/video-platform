@@ -1,6 +1,7 @@
 // Full production extension bundle with controlled provider/media boundaries.
 // This checks behavior/port parity; actual document-start and HLS need iOS Safari.
 import assert from 'node:assert/strict';
+import { testMultipleVideos } from './multiple-videos.mjs';
 import fs from 'node:fs';
 import { testScrollSettlement } from './scroll-settlement.mjs';
 import { chromium } from '../../../manga/gallery-downloader/node_modules/playwright-core/index.mjs';
@@ -36,9 +37,14 @@ try {
         localStorage.setItem('latest_account_id','fixture-account');
         sessionStorage.setItem('username','fixture-session');
         Object.defineProperties(HTMLVideoElement.prototype,{videoWidth:{get:()=>640},videoHeight:{get:()=>360}});
-        HTMLMediaElement.prototype.load=function(){};
-        HTMLMediaElement.prototype.pause=function(){};
-        HTMLMediaElement.prototype.play=async function(){};
+        const paused=new WeakMap();
+        Object.defineProperty(HTMLMediaElement.prototype,'paused',{get(){return paused.get(this)??true;}});
+        HTMLMediaElement.prototype.load=function(){paused.set(this,true);};
+        HTMLMediaElement.prototype.pause=function(){paused.set(this,true);};
+        HTMLMediaElement.prototype.play=async function(){
+            if(!this.getAttribute('src'))throw new Error('Playback requested for an empty slot');
+            paused.set(this,false);
+        };
         // Chromium cannot decode the live HLS boundary in this fixture. Suppress
         // its synthetic network/codec failures; real iPhone HLS is tested separately.
         const listen=HTMLMediaElement.prototype.addEventListener;
@@ -61,6 +67,7 @@ try {
     await page.waitForTimeout(100);
     assert.equal(requests.filter(path=>path.endsWith('/tokenData')).length,refreshes+1,'Restoring a document must refresh stream authentication once');
     const initialListRequests=listRequests();
+    await page.evaluate(()=>history.replaceState({tangoHistoryMarker:true},''));
     await page.locator('.stream-row').first().click();
     await page.waitForURL('**/stream/stream-1');
     await page.addScriptTag({content:bundle});
@@ -69,6 +76,8 @@ try {
     assert.equal(await page.locator('.current-scope video').getAttribute('src'),'https://media.invalid/1.m3u8');
     assert.equal(await page.locator('.next-scope video').getAttribute('src'),'https://media.invalid/2.m3u8');
     assert.equal(await page.locator('.previous-scope video').getAttribute('src'),null);
+    assert.deepEqual(await page.locator('.stream-slot video').evaluateAll(videos=>videos.map(video=>video.paused)),[true,false,false],
+        'Current and next must receive playback immediately; empty previous stays idle');
     await page.locator('button.mute').click();
     assert.equal(await page.locator('.current-scope video').evaluate(v=>v.muted),false);
     const writes=requests.length;
@@ -80,12 +89,16 @@ try {
     assert.equal(saved.currentStreamerId,'person-1');
     assert.equal(listRequests(),initialListRequests,'Opening a saved stream must not fetch a replacement list');
     await testScrollSettlement(page);
+    assert.deepEqual(await page.locator('.stream-slot video').evaluateAll(videos=>videos.map(video=>({paused:video.paused,muted:video.muted}))),
+        [{paused:false,muted:true},{paused:false,muted:true},{paused:false,muted:true}],
+        'Previous/current/next must keep playing muted after recycling and reversing direction');
     const readIds=()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')).streams.map(s=>s.streamerId));
     recommendations=[records[2],records[1]];
     await page.goBack();
     await page.addScriptTag({content:bundle});
     await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
     assert.deepEqual(await readIds(),['person-1','person-2','person-3']);
+    assert.deepEqual(await page.evaluate(()=>history.state),{tangoHistoryMarker:true},'Tango keeps its history entry and does not use the XVideos scroll fallback');
     assert.equal(listRequests(),initialListRequests,'Back must reuse the saved list even when the provider changes');
     await page.reload();
     await page.addScriptTag({content:bundle});
@@ -114,6 +127,7 @@ try {
     assert.deepEqual(await readIds(),['person-1','person-2'],'Stream reload must replace the saved list');
     assert.equal(listRequests(),initialListRequests+4);
     console.log('PASS: stable list across navigation and Back; Home/stream reload fetches; costreamers append without duplicates or reordering.');
+    await testMultipleVideos(page, () => page.addScriptTag({content:bundle}));
     await page.goto('https://example.com/');
     const outside=requests.length;
     await page.addScriptTag({content:bundle});

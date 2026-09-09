@@ -1,33 +1,32 @@
-import { takeOverPage, showStatus } from '../src/core/page';
-import { Handler, selectProvider } from '../src/provider';
-import { openHome } from '../src/routes/home';
-import { openStream } from '../src/routes/stream';
+import { startCookiePersistence, type CookieApi } from './cookies';
+import { startViewer, showStartupError } from '../src/core/start';
+import { selectProvider } from '../src/provider';
 
 type Boot = { entries: number; startedAt: number; shellAt?: number; readyAt?: number; error?: string };
-const scope = window as typeof window & { __streamViewerExtensionBoot?: Boot };
+if (typeof window === 'undefined' || ['safari-web-extension:', 'chrome-extension:', 'moz-extension:'].includes(location.protocol)) {
+    const scope = globalThis as typeof globalThis & { browser?: CookieApi; chrome: CookieApi };
+    startCookiePersistence(scope.browser ?? scope.chrome);
+} else {
+    const scope = window as typeof window & { __streamViewerExtensionBoot?: Boot };
 
-// Validate the target before takeover, authentication, or any storage access.
-if (location.hostname === 'tango.me' || location.hostname === 'www.tango.me') {
-    const provider = selectProvider(location.hostname);
-    const route = provider.matchRoute(location.pathname);
-    if (scope.__streamViewerExtensionBoot) {
-        scope.__streamViewerExtensionBoot.entries++;
-    } else {
-        const boot: Boot = { entries: 1, startedAt: performance.now() };
-        Object.defineProperty(scope, '__streamViewerExtensionBoot', { value: boot });
-        takeOverPage();
-        showStatus('Loading…');
-        boot.shellAt = performance.now();
-        void (async () => {
-            try {
-                await provider.startAuthentication();
-                if (route.handler === Handler.Home) await openHome(provider);
-                else await openStream(provider, route.streamId);
+    // Validate the target before takeover, authentication, or any storage access.
+    if (['tango.me', 'www.tango.me', 'xvideos.com', 'www.xvideos.com'].includes(location.hostname)) {
+        const provider = selectProvider(location.hostname);
+        const route = provider.matchRoute(location.pathname);
+        if (!route || (provider.nativeLogin && window.opener)) {
+            // Upload management and OAuth popups stay native.
+        } else if (scope.__streamViewerExtensionBoot) {
+            scope.__streamViewerExtensionBoot.entries++;
+        } else {
+            const boot: Boot = { entries: 1, startedAt: performance.now() };
+            Object.defineProperty(scope, '__streamViewerExtensionBoot', { value: boot });
+            void startViewer(provider, () => { boot.shellAt = performance.now(); }).then(() => {
                 boot.readyAt = performance.now();
-            } catch (error) {
+            }).catch(error => {
                 boot.error = error instanceof Error ? error.message : 'Unable to start stream viewer.';
-                showStatus(boot.error, true);
-            }
-        })();
+                showStartupError(provider, boot.error);
+            });
+        }
     }
+
 }
