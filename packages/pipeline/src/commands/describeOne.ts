@@ -12,11 +12,11 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
         const recording = database.get(recordingId);
         if (!recording) throw new Error(`Unknown pipeline recording ${recordingId}`);
         const identityOutcome = await guardUploadIdentity(database, recording, config);
-        if (identityOutcome.kind === "verified_cleaned") {
+        if (identityOutcome.kind === "verified_cleaned" || identityOutcome.kind === "verified_retained") {
             return {
                 recordingId,
                 state: database.get(recordingId)?.state,
-                disposition: "already_verified_cleaned",
+                disposition: `already_${identityOutcome.kind}`,
                 remoteId: identityOutcome.remoteId,
             };
         }

@@ -1,14 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
-
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
 import { streamCopyRemux } from "./remux.js";
 import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
-    deriveResolutionPlaylist,
     resolutionPolicyReason,
 } from "./resolutionPolicy.js";
 import { upscaleWholeRecordingTo1080 } from "./upscale.js";
@@ -25,6 +20,8 @@ export function createDefaultStages(stagingRoot: string): PipelineStages {
                     stagingRoot,
                     recording.id,
                     policy.source,
+                    undefined,
+                    analysis,
                 );
                 return {
                     disposition: "artifact",
@@ -32,33 +29,19 @@ export function createDefaultStages(stagingRoot: string): PipelineStages {
                     eventReason: resolutionPolicyReason(policy.reason),
                 };
             }
-            if (policy.disposition === "remux1080") {
+            if (policy.disposition === "remuxNative") {
                 return {
                     disposition: "artifact",
-                    path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id),
+                    path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id, undefined, { analysis }),
                     eventReason: resolutionPolicyReason(policy.reason),
                 };
             }
-            await fs.mkdir(path.resolve(stagingRoot), { recursive: true });
-            const temporaryStem = path.join(
-                path.resolve(stagingRoot),
-                `.${recording.id}.${randomUUID()}`,
-            );
-            const maxPlaylist = `${temporaryStem}.retained1080p.m3u8`;
-            try {
-                await fs.writeFile(
-                    maxPlaylist,
-                    deriveResolutionPlaylist(analysis, policy.maxSegmentIndexes),
-                    { encoding: "utf8", flag: "wx" },
-                );
-                return {
-                    disposition: "artifact",
-                    path: await streamCopyRemux(maxPlaylist, stagingRoot, recording.id, "retained1080p"),
-                    eventReason: resolutionPolicyReason(policy.reason),
-                };
-            } finally {
-                await fs.unlink(maxPlaylist).catch(() => undefined);
-            }
+            return {
+                disposition: "artifact",
+                path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id, "retained1080p",
+                    { analysis, keepIndexes: policy.retainedSegmentIndexes }),
+                eventReason: resolutionPolicyReason(policy.reason),
+            };
         },
         validateArtifact: async (_recording, artifactPath) => {
             const artifact = await validateArtifact(artifactPath);

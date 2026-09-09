@@ -322,6 +322,7 @@ export class StreamDownloader {
                     playlistManager.addIgnoredSegment(segment.providerSequence);
                     this.rejectedCount++;
                 } else {
+                    segment.dimensions = result.dimensions;
                     if (result.duration !== undefined) {
                         segment.accurateDuration = result.duration;
                     }

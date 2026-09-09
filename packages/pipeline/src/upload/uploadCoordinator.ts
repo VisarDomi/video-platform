@@ -64,8 +64,7 @@ export class UploadCoordinator {
             // attempt must be confirmed against the uploads list instead of
             // blindly re-uploading gigabytes.
             const acceptanceUnknown = transportError?.acceptanceUnknown
-                || progress.phase === "metadata_submitting"
-                || progress.phase === "file_uploaded"
+                || progress.phase !== "started"
                 || progress.transmittedBytes > 0;
             this.database.finishUploadAttempt(attemptId, {
                 status: acceptanceUnknown ? "uncertain" : "failed",

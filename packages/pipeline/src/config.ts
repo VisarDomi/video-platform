@@ -20,6 +20,8 @@ export interface PipelineConfig {
     readonly credentialsFilePath: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
+    readonly comparisonTrialOnly?: boolean;
+    readonly comparisonSelectionFile?: string;
 }
 
 const dataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
@@ -65,6 +67,8 @@ export const pipelineConfig: PipelineConfig = {
         process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? "600000000000",
         10,
     ),
-    cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP !== "0",
+    cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP === "1",
+    comparisonTrialOnly: true,
+    comparisonSelectionFile: process.env.VIDEO_PIPELINE_SELECTION_FILE ?? path.join(dataRoot, "pipeline", "test-videos.txt"),
     networkUploadsEnabled: process.env.VIDEO_PIPELINE_NETWORK_UPLOADS === "1",
 };
