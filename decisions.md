@@ -1,5 +1,106 @@
 # Monorepo Decisions
 
+## V3 launch preflight hardens descriptor startup without revalidating capture (2026-09-09)
+
+V2 had eight descriptor failures at the fixed 120-second readiness deadline;
+the saved logs show loading started but do not establish the underlying slow-load
+cause. Do not label those recordings corrupt. Descriptor startup now has a
+bounded 10-minute allowance (DESCRIPTOR_STARTUP_TIMEOUT_MS), bounded health
+requests, periodic progress, captured log tails on failure, immediate exit/signal/
+spawn-error reporting and cleanup of failed starts. Shutdown clears its kill
+timer and waits for child exit. Managed mode refuses an already-occupied health
+endpoint rather than adopting an unrelated process. Model, quality, context size,
+FPS policy and systemd resource allocation remain unchanged; no descriptor daemon
+is installed. Preflight uses generated media in /tmp for real inference, plus
+selected-recording metadata/geometry scans, never a catalog-wide decode pass.
+
+## Clean public titles; diagnostic suffixes belong only to comparison trials (2026-09-09)
+
+Normal campaign metadata uses only the descriptor's natural title. A prepared
+comparison trial explicitly appends recording/version/part for operator matching.
+The v3 test retains that suffix. Description provenance and provider/live tags
+are unchanged; no existing remote uploads or stored metadata are rewritten.
+Production identity remains in the versioned SQLite ledger, artifact hashes and
+captured provider edit IDs. Clean titles are never searched to infer ownership.
+Only diagnostic titles support the additional remote lookup. Missing edit IDs
+require review; interrupted file transfers are acceptance-unknown (even if no
+bytes were recorded yet), never automatically retried. Only interruption before
+the upload phase starts is retryable. This also corrects the prior restart path
+which could retry file_uploading attempts while the ordinary error path parked
+them for confirmation. Preserve ledger backups; descriptive titles cannot rebuild
+lost upload identity safely. Unrestricted production is still not authorized.
+
+## Pipeline owns historical and new input geometry normalization (2026-09-09)
+
+Do not invalidate catalog decode checkpoints. Production remux and
+whole-recording conversion reuse the segment
+dimension analysis to open independent temporary input runs at dimension/SAR
+changes, including changes without EXT-X-DISCONTINUITY. Original playlists and
+media are unchanged. Conversion retains all runs; only the established >=90%
+high-pixel remux policy omits sub-threshold segments. Standalone whole-recording
+conversion obtains the same analysis when its caller has not supplied it.
+Generated TS regressions cover untagged 360p/720p/360p transitions in both
+orientations, with continuous and reset timestamps, checking ordered frame IDs,
+presentation timing, AAC payloads, output dimensions and source immutability.
+
+The downloader is the first line of boundary tagging, with pipeline normalization
+as backup for historical or untagged input. Tango reuses its segment header probe
+for width/height/SAR tracking and still rejects exactly 360x640 / 640x360. FC2
+inspects headers of newly fetched segments, retaining every resolution; unknown
+dimensions retain the segment with conservative boundaries before/after it.
+Only successful playlist appends advance the dimension baseline. Existing tags,
+sequence gaps and resume boundaries do not get duplicate geometry tags. SC's
+existing init-map-change discontinuity handling remains in place; no per-fragment
+dimension probe is added to SC. No historical capture playlists are rewritten.
+History: a2845ed (2026-08-12) removed Tango/FC2 media probing, not a dimension
+comparison in PlaylistManager. SC map-boundary handling dates to March 2026 and
+was retained through the d43a30b buffering refactor.
+
+## V3 is a file-controlled pending queue with retained processing history (2026-09-09)
+
+The operator is testing pipeline safety and image fidelity by comparing the
+original, locally converted/remuxed artifact, and uploaded provider copy.
+Automatic deletion of v2 trial artifacts defeated that purpose. Production-v3
+therefore retains comparison artifacts unconditionally through verification,
+identity guards, source-removal sweeps, and policy changes. Cleanup defaults off
+and the managed unit pins it off. Unrestricted production remains unapproved.
+
+`pipeline/test-videos.txt` in the video-services data directory feeds a durable
+selected queue: absolute edited recording-folder paths, one per line, blank
+lines/comments ignored. A 30-second worker timer watches it even during long
+stages/cooldowns. Newly valid entries are checkpoint-checked and queued once.
+Removal cancels unstarted entries; reordering changes the pending order. A local
+stage claim marks processing as started: active/attempted/completed work and
+its evidence are retained even when removed from the file. Re-adding consumed
+paths does not repeat uploads. Missing files are errors, not empty selections.
+No automatic library discovery.
+Queue exhaustion waits only for file additions; manual pause remains authoritative.
+The worker is not started merely by saving the file. Failures pause for review.
+
+V3 uploads and artifact paths are generation-specific. Preparing v3 snapshots
+and retires v2 ledger history without deleting remaining v2 files. It stays
+paused with no inferred selections. `comparison.md` and `comparison.json` in
+the v3 artifact directory map original path/URL/fingerprint to exact local
+artifact/SHA-256 and upload identity/link. Online verification never means
+frame-accurate equivalence or operator quality approval. Resolution-policy-v3
+uses the Full HD pixel budget as a minimum: sum the duration of ALL segments
+with coded width * height >= 1920 * 1080 (2,073,600 pixels). Custom aspect ratios
+and either orientation qualify by area, not short edge or display/SAR stretching.
+If all qualify, remux everything natively. If at least 90% qualify, remux all
+qualifying segments and omit only content below that pixel threshold
+from the output. Otherwise convert the whole recording to 1080p. Higher native
+resolutions are not excluded, rejected, or downscaled on the remux branches.
+The pixel-count change is the classification trigger; existing aspect-preserving
+conversion output sizing (1080 short edge, no crop/pad) is unchanged.
+
+Controlled frame-ID tests exposed fMP4 conversion discarding later runs on
+timestamp resets (6 output frames for 18 expected). Production conversions now
+open discontinuity/map runs independently through a concat timeline. TS
+resolution ownership uses packet byte positions in one playlist-ordered scan,
+not an assumed equal number of keyframes per segment. Frame IDs, presentation
+times, AAC payloads, and real process interruption are tested on temporary
+synthetic media/databases; no library conversion or upload is implied by tests.
+
 ## Supervised upscales are named artifact variants (2026-08-28)
 
 `remux-one` has two explicitly supervised comparison modes:
@@ -856,29 +957,30 @@ Remaining hardening:
 ## Pipeline resolution policy is automatic and segment-owned (2026-08-30)
 
 The production campaign classifies resolution at HLS segment boundaries using
-the coded short edge, which makes the rule orientation-neutral. For fMP4, the
+the coded pixel count (width * height), which makes the rule orientation-neutral. For fMP4, the
 last active `#EXT-X-MAP` before a segment owns that segment's dimensions;
 consecutive map tags with no intervening segment do not create phantom
 resolution classes. MPEG-TS is inspected with one whole-playlist keyframe
 scan, not one `ffprobe` process per segment.
 
-- Maximum short edge below 1080: transcode the complete recording to a 1080-pixel
+- All segments below 2,073,600 coded pixels: transcode the complete recording to a 1080-pixel
   short edge. Do not discard lower-resolution segments. Require one consistent
   display aspect ratio, preserve that ratio without crop or padding, encode
   H.264 with zscale Lanczos/libx264 slow/CRF 16/yuv420p, copy audio, and use a
   `.production-upscale1080p.mp4` artifact name so old stream copies and
   supervised comparison variants cannot be adopted accidentally.
-- Maximum short edge 1080 with every segment at 1080: stream-copy remux and
-  continue automatically.
-- Maximum short edge 1080 with lower-resolution segments (revised 2026-09-07,
-  resolution-policy-v3): sum playlist EXTINF durations. If native 1080p is at
-  least 90% of duration, retain only those whole segments and stream-copy remux
+- All segments at least 2,073,600 coded pixels (clarified 2026-09-09): stream-copy remux at their
+  native resolutions, including mixed 1080p/1440p/2160p, without conversion.
+- Mixed with lower-resolution segments (resolution-policy-v3): sum playlist
+  EXTINF durations. If segments with >=2,073,600 pixels together make up at least 90%
+  of duration, retain ALL those whole segments and stream-copy remux
   to `.retained1080p.mp4`. Otherwise transcode the complete recording to
   `.production-upscale1080p.mp4`, including all lower-resolution segments.
   Both branches create one video, not separate uploads. Dropped segments are
   excluded only from the artifact; originals remain intact.
-- A maximum short edge above 1080, or an inconsistent display aspect ratio,
-  is an unsupported input error. Resolution policy has no manual-review branch.
+- Full conversion requires a consistent display aspect ratio and adds no padding
+  or crop. Native remux retains encoded geometry; per-run concat inputs preserve
+  decoder parameter changes without re-encoding the picture slices.
 
 Derived playlists use absolute references to the already checkpointed source
 files and add discontinuities at source cuts, selection gaps, and map changes.

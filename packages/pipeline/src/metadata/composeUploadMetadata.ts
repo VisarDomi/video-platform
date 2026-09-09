@@ -16,6 +16,10 @@ export function productionUploadIdentity(recording: Recording, part: ProductionA
     return `${path.basename(recording.sourcePath)} | ${PRODUCTION_UPLOAD_IDENTITY_VERSION} | ${part}`;
 }
 
+export function hasDiagnosticUploadIdentity(title: string, identity: string): boolean {
+    return title.trimEnd().endsWith(`[${identity}]`);
+}
+
 interface DescriptorOutput {
     readonly title: string;
     readonly description: string;
@@ -49,16 +53,18 @@ export function composeUploadMetadata(
     description: DescriptionRecord,
     provenance: RecordingProvenance,
     part: ProductionArtifactPart = "full",
+    options: { diagnosticTitle?: boolean } = {},
 ): Omit<UploadMetadataRecord, "recordingId" | "createdAt"> {
     if (provenance.status === "review_required" || !provenance.streamerUrl) {
         throw new Error("Cannot compose upload metadata with unresolved provenance");
     }
     const output = descriptorOutput(description.output);
-    // The folder name is the identity; the title carries it only for human
-    // readability on XVideos.
-    const folderSuffix = `[${productionUploadIdentity(recording, part)}]`;
-    const titleRoom = TITLE_LIMIT - folderSuffix.length - 1;
-    const title = `${shorten(output.title, titleRoom)} ${folderSuffix}`;
+    // Public campaign titles are natural language. Only an explicitly prepared
+    // comparison trial exposes recording/version/part diagnostics in its title.
+    const folderSuffix = options.diagnosticTitle ? ` [${productionUploadIdentity(recording, part)}]` : "";
+    const titleRoom = TITLE_LIMIT - folderSuffix.length;
+    if (titleRoom < 1) throw new Error("Comparison identity leaves no room for a title");
+    const title = `${shorten(output.title, titleRoom)}${folderSuffix}`;
 
     const suffix = [
         `Recorded: ${recordingTime(recording.sourcePath)}`,

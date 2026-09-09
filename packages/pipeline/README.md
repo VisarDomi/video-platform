@@ -4,6 +4,90 @@ This package owns the months-long per-recording processing queue. It remains
 separate from Express; the managed `video-pipeline` campaign worker runs it
 under systemd.
 
+## Active environment: v3 selected comparison queue
+
+The current release is a safety/quality test, not unrestricted production.
+`production-v3` has its own upload title identities and artifact directory.
+Only paths explicitly selected through the comparison queue can be processed or
+uploaded. Automatic oldest-first discovery and the v2 10-per-provider trial are
+not used by this environment.
+
+Selection file: `~/.local/share/video-services/pipeline/test-videos.txt`.
+Put one full, unquoted **edited recording-folder path** per line (the folder
+contains `playlist.m3u8`). Blank lines and `#` comments are ignored. The managed
+worker checks the file every 30 seconds, including during conversions and
+cooldowns, and also before campaign steps. Valid paths form a durable queue in
+file order. Removing a pending path cancels it; reordering changes pending order.
+Admission alone is still pending until a local stage has been claimed. Active,
+previously attempted, and completed recordings retain their workflow/evidence;
+removing or re-adding them does not undo processing or repeat uploads. Invalid lines
+are reported, not admitted; they are retried after corrections. There are no
+library-wide probes: only new selected paths are checkpoint/fingerprint checked.
+
+When the queue drains, the enabled worker waits for more paths. A manual pause
+prevents processing, but file additions may still queue. Resume never switches
+v3 to unrestricted discovery. Failures pause the campaign for attention without
+substituting other videos. Saving the file does not enable a stopped worker.
+
+All validated outputs are retained, including after upload verification, manual
+identity checks and source-removal sweeps. Comparison retention overrides even
+`VIDEO_PIPELINE_CLEANUP=1`; the managed service explicitly sets cleanup to 0 and
+cleanup elsewhere now defaults off. Only an explicit later deletion request
+should remove comparison evidence. Source files are never modified.
+
+`artifacts/production-v3/comparison.md` links **original → local MP4 → uploaded
+copy**. The adjacent `comparison.json` records source fingerprints, the policy
+decision, exact artifact path/SHA-256/size, remote ID and online verification.
+The report refreshes with the worker and verification. Online verification is
+not a frame-fidelity test or human quality approval.
+
+Prepare a new generation without starting work:
+
+```sh
+npm run campaign:prepare -w pipeline
+```
+
+Preparation snapshots the old database (including descriptions and metadata),
+archives its active ledger, retains old-version artifacts in their existing
+version folder, and leaves v3 paused. It does not import or start the selection.
+To explicitly ingest while the worker is stopped:
+
+```sh
+npm run campaign:select -w pipeline -- --file /home/visar/.local/share/video-services/pipeline/test-videos.txt --apply
+```
+
+Once the user approves starting, `campaign:resume` enables queue consumption and
+the managed service must be started. `comparison:report` refreshes the report
+on demand. The resolution routing policy below is unchanged.
+
+### Controlled safety regressions (2026-09-09)
+
+TS classification now streams playlist-ordered segment bytes through a single
+position-aware ffprobe scan. Keyframe packet byte positions establish segment
+ownership; equal keyframe distribution is never assumed. Unknown ownership,
+missing keyframes, or changing dimensions/SAR within a segment fail closed.
+This does not launch a per-segment probe sweep.
+
+Production remux and conversion also treat observed dimension/SAR changes as
+input boundaries when source discontinuity tags are missing. They reuse the
+policy's dimension scan; sources and validation checkpoints are not modified.
+Downloader tagging is the first line of protection for new captures; pipeline
+normalization also protects historical/untagged input. Untagged TS 360p/720p/360p tests cover both
+orientations and both continuous and reset timestamps, retaining every frame
+and AAC packet in conversion.
+
+Production conversion normalizes discontinuity/init-map/geometry runs through FFmpeg's
+concat demuxer, with EXTINF durations preserving the intended timeline. A
+three-run fMP4 fixture previously lost 12 of 18 frames; the regression now
+asserts every distinct frame ID, presentation time, and copied AAC packet.
+Retained-remux fixtures also exercise prefix/suffix/repeated cuts and unchanged
+map transitions. Tests operate only on generated media and isolated databases
+under the system temporary directory, never on the selected library recordings.
+Separate subprocess tests kill an actual encoder and paused worker, checking
+atomic output publication, lease recovery and file-driven queue updates.
+These checks do not certify provider encoding quality or the Irina recording;
+those remain part of the explicitly approved original/local/upload comparison.
+
 Implemented:
 
 - SQLite WAL/FULL recording state, transition events, leases, artifact hashes,
@@ -13,7 +97,7 @@ Implemented:
 - Production discovery of only exact server-checkpointed `edited`
   recordings. Hidden handoff directories and raw downloaded recordings are
   excluded from campaign processing.
-- Disk-truth sweep every campaign step: recordings whose source folder is
+- Legacy disk-truth sweep (disabled for comparisons): recordings whose source folder is
   missing are deleted from the ledger with their pipeline files (24-hour
   cooldown, in-flight uploads skipped). ISP billing (`bandwidth_events`) is
   never refunded or deleted.
@@ -23,11 +107,12 @@ Implemented:
   `GET /api/{provider}/resolve` (Tango alias registry + live Tango API, FC2
   numeric IDs, Stripchat username lookup), grouped unresolved review, and
   reusable manual overrides.
-- Upload-time remote identity checks use a versioned recording-and-part marker,
-  so retries adopt only the exact production artifact they are meant to upload.
-- XVideos-safe metadata composition with the folder name appended to the
-  title for human readability, provenance suffixes, and fixed provider/live
-  tags.
+- Production identity uses the versioned local ledger and captured provider edit
+  ID, not natural-language title matching. Comparison titles retain a diagnostic
+  recording/version/part marker for their additional remote lookup.
+- Public campaign titles contain only the descriptive title. Prepared comparison
+  trials explicitly append diagnostics. Provenance suffixes stay in descriptions;
+  provider/live tags are unchanged.
 - Persistent-Chromium XVideos upload through Google OAuth, automated
   Friendly Captcha completion with a manual fallback, streamer alias typed
   into the model search without selection, fixed metadata policy, and 24-hour
@@ -35,9 +120,9 @@ Implemented:
 - Calendar-month upload admission capped at 600,000,000,000 bytes in
   `Europe/Tirane`, restart recovery, and a 24-hour no-retry confirmation window
   after metadata submission may have succeeded.
-- Cleanup runs only on verified-online uploads and deletes only the pipeline
+- Legacy opt-in cleanup runs only on verified-online uploads and deletes only the pipeline
   staging artifact; original downloader/editor folders are never touched
-  (disable with `VIDEO_PIPELINE_CLEANUP=0`).
+  (off by default, and always disabled for comparison queues).
 - `review` lists everything that cannot be solved programmatically: blocked
   recordings with reasons, and unresolved provenance.
 
@@ -50,34 +135,47 @@ no separate reconcile timer.
 
 ## Production resolution policy
 
-The campaign classifies every HLS segment by coded short edge, so landscape
-and portrait recordings use the same rules. For fMP4, the last active
+The campaign classifies every HLS segment by coded pixel count (`width * height`).
+High-quality means **at least 1920 * 1080 = 2,073,600 pixels**, independent of
+orientation or aspect ratio. SAR/display stretching does not add coded pixels.
+For example, 2560x900 qualifies; 1440x1080 does not. For fMP4, the last active
 `#EXT-X-MAP` attached to a segment owns its dimensions; unused consecutive map
 tags are ignored. MPEG-TS uses one whole-playlist keyframe scan rather than an
 `ffprobe` process per segment.
 
-- A recording whose maximum short edge is below 1080 is fully transcoded to a
+- A recording whose segments all have fewer than 2,073,600 pixels is fully transcoded to a
   1080-pixel short edge. Lower-resolution segments are included in that same
   conversion, not dropped. The conversion preserves one consistent display
   aspect ratio with no crop or padding, uses zscale Lanczos plus libx264
   slow/CRF 16/yuv420p, stream-copies audio, and publishes a named
   `.production-upscale1080p.mp4` artifact.
-- A recording whose maximum short edge is 1080 and whose every segment is
-  1080 is stream-copy remuxed and continues toward upload.
-- If a 1080 recording contains lower-resolution segments, measure the native
-  1080 share by summed playlist `EXTINF` durations, not segment/frame counts.
+- If every segment meets the pixel threshold, stream-copy remux them all at their native
+  resolutions, including mixtures such as 1080p/1440p. No upscaling or downscaling.
+- Otherwise measure the **pixel-qualified** share by summed playlist `EXTINF`
+  durations, not segment/frame counts. The trigger is total pixels, not a
+  short edge, exact dimensions, or the highest resolution present.
   At **90% or more**, exclude the lower-resolution segments and stream-copy
-  remux the retained segments to `.retained1080p.mp4`. Below 90%, convert the
+  remux all retained qualifying segments to `.retained1080p.mp4` (the suffix
+  refers to the Full HD pixel threshold, not fixed dimensions). Below 90%, convert the
   **entire recording** to `.production-upscale1080p.mp4`, dropping nothing.
   Both paths produce one upload, never two. Gaps and map changes are represented
   by HLS discontinuities; source folders and their playlists are never modified.
-- A maximum short edge above 1080, or inconsistent display aspect ratios, is
-  rejected as unsupported input. Resolution policy needs no manual action.
+- Conversion requires one consistent display aspect ratio; incompatible aspect
+  changes fail safely rather than stretching/cropping or adding padding.
+  Native remux keeps the original encoded geometry. Independent init/geometry
+  runs are concatenated with their own decoder parameters and continuous timing.
+  This pixel-count change affects classification only; conversion still targets
+  a 1080-pixel short edge while preserving aspect ratio, not a fixed output pixel budget.
 
-Production uploads carry an exact, versioned title identity:
-`[recording ID | production-v2 | full]`. Old-policy uploads therefore cannot be
-mistaken for new-policy results. Legacy split-part ledger support remains for
-existing data, but resolution-policy-v3 no longer creates split uploads.
+Only prepared comparison uploads carry the diagnostic title suffix
+`[recording ID | production-v3 | full]`. Normal campaign titles are clean by
+default. Version separation stays in the local ledger and artifact paths.
+Captured provider edit IDs drive verification; a missing ID or interrupted
+transfer is acceptance-unknown and cannot trigger an automatic re-upload.
+Clean titles are never searched to guess identity, including when two videos
+have identical descriptive titles. Keep the ledger/backups: clean public titles
+are not a substitute for lost identity records. Legacy split-part ledger support
+remains for existing data, but resolution-policy-v3 no longer creates split uploads.
 
 Artifacts use the same generation boundary:
 `pipeline/artifacts/<production-version>/`. The first v2 rollover atomically
@@ -107,7 +205,7 @@ The resume result reports `historySnapshotPath`. New-artifact description reuse
 still follows the exact artifact-hash/prompt cache; changed artifacts are
 described again rather than inheriting possibly stale descriptions.
 
-### One-time per-provider trial
+### Historical v2 one-time per-provider trial (not active in v3)
 
 Configure a 30-recording trial without starting anything:
 

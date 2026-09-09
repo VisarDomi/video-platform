@@ -8,6 +8,7 @@ Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/l
 Environment=DISPLAY=:111
 Environment=VIDEO_PIPELINE_SERVICE_MODE=1
 Environment=VIDEO_PIPELINE_NETWORK_UPLOADS=1
+Environment=VIDEO_PIPELINE_CLEANUP=0
 Environment=PLAYWRIGHT_BROWSERS_PATH=0
 WorkingDirectory={{HOME}}/Documents/work/video/video-platform
 ExecStart={{HOME}}/.nvm/versions/node/v22.19.0/bin/npm run campaign-worker -w pipeline

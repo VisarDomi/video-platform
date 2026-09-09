@@ -3,6 +3,7 @@ import path from "node:path";
 import { chromium, type BrowserContext, type Page, type Request } from "playwright";
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
+import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
@@ -71,10 +72,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const counter = new RequestByteCounter();
             page.on("request", (networkRequest) => { void counter.observe(networkRequest); });
             await this.ensureAuthenticated(page);
-            // Backup remote check inside this same session: the folder name is
-            // the local truth, the edit-page title is the XVideos truth. No
-            // second browser launch, no second login.
-            const existing = await this.findUploadedCopyOnPage(page, request.uploadIdentity);
+            // SQLite guards all production uploads. Only diagnostic titles can
+            // support this extra remote search: natural titles are not unique.
+            const titleIdentity = hasDiagnosticUploadIdentity(request.title, request.uploadIdentity)
+                ? request.uploadIdentity : null;
+            const existing = titleIdentity
+                ? await this.findUploadedCopyOnPage(page, titleIdentity) : { kind: "not_found" as const };
             if (existing.kind === "found") {
                 completed = true;
                 return { kind: "existing", remoteId: existing.remoteId, remoteUrl: existing.remoteUrl };
@@ -110,7 +113,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             await page.waitForTimeout(1_000);
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
-            const submittedId = await this.captureSubmittedVideoId(page, request.uploadIdentity);
+            const submittedId = await this.captureSubmittedVideoId(page, titleIdentity);
             completed = true;
             return {
                 kind: "uploaded",
@@ -417,7 +420,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         await page.keyboard.type(alias);
     }
 
-    private async captureSubmittedVideoId(page: Page, folderName: string): Promise<string | null> {
+    private async captureSubmittedVideoId(page: Page, titleIdentity: string | null): Promise<string | null> {
         // After saving, XVideos first shows "Processing video 0% Publication:
         // pending" and only reveals the "edit it here" link once the panel
         // updates to "Video processed. Publication succeeded." (measured live:
@@ -427,19 +430,18 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const links = await page.locator('a[href*="/account/uploads/"]')
                 .evaluateAll((elements) => elements.map((element) => element.getAttribute("href") ?? ""))
                 .catch(() => [] as string[]);
-            for (const raw of [page.url(), ...links]) {
-                const match = raw.match(/\/account\/uploads\/(\d+)\/edit/);
-                if (match?.[1]) return match[1];
-            }
+            const currentId = submittedUploadEditId(page.url(), links);
+            if (currentId) return currentId;
             await page.waitForTimeout(2_000);
         }
-        // Fallback: the panel never revealed the link — look the upload up in
-        // the authenticated uploads list by the folder name (the title carries
-        // it). The filter is a server-side search (/account/uploads/f:t:<query>,
-        // verified live) that surfaces matches regardless of list pagination.
+        // Never search a natural title to guess ownership. No captured ID means
+        // uncertain acceptance/manual review, not permission to upload again.
+        if (!titleIdentity) return null;
+        // Legacy/comparison titles still carry an exact diagnostic identity.
         try {
-            const entries = await this.findEntries(page, folderName);
-            if (entries.length > 0) return entries[0].remoteId;
+            const entries = await this.findEntries(page, titleIdentity);
+            const matching = entries.filter((entry) => hasDiagnosticUploadIdentity(entry.title, titleIdentity));
+            if (matching.length === 1) return matching[0].remoteId;
         } catch {
             // list unreachable; manual review remains the last resort
         }
@@ -499,4 +501,20 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         }
         return { kind: "not_found" };
     }
+}
+
+// An exact edit-page URL wins. A post-submit panel must expose a single unique
+// edit ID; never attach an arbitrary first link when ownership is ambiguous.
+export function submittedUploadEditId(currentUrl: string, links: readonly string[]): string | null {
+    const parse = (raw: string): string | null => {
+        try {
+            const url = new URL(raw, UPLOADS_URL);
+            if (url.origin !== new URL(UPLOADS_URL).origin) return null;
+            return url.pathname.match(/^\/account\/uploads\/(\d+)\/edit\/?$/)?.[1] ?? null;
+        } catch { return null; }
+    };
+    const current = parse(currentUrl);
+    if (current) return current;
+    const ids = [...new Set(links.map(parse).filter((id): id is string => id !== null))];
+    return ids.length === 1 ? ids[0] : null;
 }

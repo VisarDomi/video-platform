@@ -21,6 +21,7 @@ import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
     deriveResolutionPlaylist,
+    FULL_HD_PIXEL_COUNT,
 } from "../dist/stages/resolutionPolicy.js";
 import { parseRemuxOneArguments } from "../dist/commands/remuxOneArguments.js";
 import { validateArtifact } from "../dist/stages/validateArtifact.js";
@@ -33,9 +34,9 @@ const execFileAsync = promisify(execFile);
 test("artifact paths are contained and stream-copy remux leaves threading to ffmpeg", () => {
     const id = "d".repeat(64);
     assert.equal(containedArtifactPath("/tmp/staging", id), `/tmp/staging/${id}.mp4`);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v2", `/tmp/artifacts/production-v2/${id}.mp4`), true);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v2", `/tmp/artifacts/legacy-production-v1/${id}.mp4`), false);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v2", `/tmp/artifacts/production-v2/manual/${id}.mp4`), false);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/production-v3/${id}.mp4`), true);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/legacy-production-v1/${id}.mp4`), false);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/production-v3/manual/${id}.mp4`), false);
     assert.throws(() => containedArtifactPath("/tmp/staging", "../escape"), /Invalid recording ID/);
     assert.equal(
         containedArtifactPath("/tmp/staging", id, "upscale1080p"),
@@ -138,7 +139,7 @@ test("upscale plans drop below-floor frames and refuse ambiguous inputs", () => 
     ], "upscale1080p"), /do not share one display aspect ratio/);
 });
 
-test("resolution policy classifies active segment maps by coded short edge", async (t) => {
+test("resolution policy classifies active segment maps by coded pixel count", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-resolution-policy-test-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlistPath = path.join(root, "playlist.m3u8");
@@ -173,14 +174,56 @@ test("resolution policy classifies active segment maps by coded short edge", asy
     assert.equal(analysis.resolutionSummary, "1280x720:1,1920x1080:2");
     const policy = chooseRecordingResolutionPolicy(analysis);
     assert.equal(policy.disposition, "retain1080");
-    assert.deepEqual([...policy.maxSegmentIndexes], [0, 2]);
+    assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2]);
 
-    const derived = deriveResolutionPlaylist(analysis, policy.maxSegmentIndexes);
+    const derived = deriveResolutionPlaylist(analysis, policy.retainedSegmentIndexes);
     assert.match(derived, /#EXT-X-DISCONTINUITY/);
     assert(derived.includes(path.join(root, "1.ts")));
     assert(derived.includes(path.join(root, "3.ts")));
     assert(!derived.includes(path.join(root, "2.ts")));
     assert(!derived.includes("unused.mp4"));
+});
+
+test("custom resolutions use width times height, including the exact Full HD pixel boundary and swapped orientation", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-pixel-threshold-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const playlist = path.join(root, "playlist.m3u8");
+    await writeFile(playlist, '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:1,\na.ts\n#EXT-X-ENDLIST\n');
+    assert.equal(FULL_HD_PIXEL_COUNT, 2_073_600);
+    for (const [width, height, expected] of [[2560, 900, "remuxNative"], [1440, 1440, "remuxNative"],
+        [2304, 900, "remuxNative"], [2302, 900, "convert1080"], [2306, 900, "remuxNative"],
+        [1440, 1080, "convert1080"], [1280, 1280, "convert1080"]]) {
+        for (const pair of [[width, height], [height, width]]) {
+            const analysis = await analyzeRecordingResolution(playlist, async () => ({ width: pair[0], height: pair[1], sampleAspectRatio: "1:1" }));
+            assert.equal(analysis.maxPixelCount, width * height);
+            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, expected, `${pair.join("x")}`);
+        }
+    }
+    const anamorphic = await analyzeRecordingResolution(playlist, async () => ({ width: 1440, height: 1080, sampleAspectRatio: "4:3" }));
+    assert.equal(chooseRecordingResolutionPolicy(anamorphic).disposition, "convert1080", "display stretching does not add coded pixels");
+});
+
+test("custom pixel-qualified runs use the same duration threshold and retain every qualifying index", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-pixel-duration-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const playlist = path.join(root, "playlist.m3u8");
+    // All these are 64:25. High runs have a short edge BELOW 1080 but enough pixels.
+    const sizes = [[2304, 900], [1536, 600], [2560, 1000]];
+    for (const portrait of [false, true]) {
+        for (const [duration, expected] of [[8.999, "convert1080"], [9, "retain1080"], [9.001, "retain1080"]]) {
+            const durations = [duration / 2, 10 - duration, duration / 2];
+            await writeFile(playlist, "#EXTM3U\n" + sizes.map((_, i) => `#EXT-X-MAP:URI="${i}.mp4"\n#EXTINF:${durations[i]},\n${i}.ts\n`).join("") + "#EXT-X-ENDLIST\n");
+            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
+                const pair = [...sizes[Number.parseInt(path.basename(input))]];
+                if (portrait) pair.reverse();
+                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
+            });
+            const policy = chooseRecordingResolutionPolicy(analysis);
+            assert.equal(policy.disposition, expected);
+            if (expected === "retain1080") assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2]);
+            else assert.equal(policy.source.width * policy.source.height, 2_560_000);
+        }
+    }
 });
 
 test("720p policy includes lower segments when the whole recording is transcoded", async (t) => {
@@ -406,5 +449,68 @@ test("mixed threshold uses EXTINF duration, includes exactly 90%, and is orienta
     for (const extinf of ["", "#EXTINF:0,\n", "#EXTINF:-1,\n", "#EXTINF:bad,\n"]) {
         await writeFile(playlist, `#EXTM3U\n${extinf}1.ts\n#EXT-X-ENDLIST\n`);
         await assert.rejects(() => analyzeRecordingResolution(playlist, async () => ({ width: 1920, height: 1080 })), /duration|EXTINF/);
+    }
+});
+
+test("native/retained remux keeps native geometry changes without forcing a fixed output geometry", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-remux-geometry-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const playlist = path.join(root, "playlist.m3u8");
+    for (const retained of [false, true]) {
+        await writeFile(playlist, `#EXTM3U\n#EXT-X-MAP:URI="a.mp4"\n#EXTINF:5,\na.ts\n#EXT-X-MAP:URI="b.mp4"\n#EXTINF:5,\nb.ts\n${retained ? '#EXT-X-MAP:URI="low.mp4"\n#EXTINF:0.5,\nlow.ts\n' : ''}#EXT-X-ENDLIST\n`);
+        for (const alternate of [{ width: 1080, height: 1920, sampleAspectRatio: "1:1" },
+            { width: 1980, height: 1080, sampleAspectRatio: "1:1" },
+            { width: 1920, height: 1080, sampleAspectRatio: "4:3" }]) {
+            const analysis = await analyzeRecordingResolution(playlist, async (input) => path.basename(input) === "b.mp4"
+                ? alternate : path.basename(input) === "low.mp4"
+                    ? { width: 1280, height: 720, sampleAspectRatio: "1:1" }
+                    : { width: 1920, height: 1080, sampleAspectRatio: "1:1" });
+            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, retained ? "retain1080" : "remuxNative");
+        }
+    }
+});
+
+test("1080p-plus threshold combines all higher resolutions by duration, with exact boundaries in both orientations", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-high-quality-threshold-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const playlist = path.join(root, "playlist.m3u8");
+    for (const portrait of [false, true]) {
+        for (const [highDuration, expected] of [[8.999, "convert1080"], [9, "retain1080"], [9.001, "retain1080"]]) {
+            const sizes = [[1920, 1080], [1280, 720], [2560, 1440], [3840, 2160]];
+            const durations = [highDuration / 3, 10 - highDuration, highDuration / 3, highDuration / 3];
+            await writeFile(playlist, "#EXTM3U\n" + sizes.map((_, i) => `#EXT-X-MAP:URI="${i}.mp4"\n#EXTINF:${durations[i]},\n${i}.ts\n`).join("") + "#EXT-X-ENDLIST\n");
+            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
+                const pair = [...sizes[Number.parseInt(path.basename(input))]];
+                if (portrait) pair.reverse();
+                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
+            });
+            const policy = chooseRecordingResolutionPolicy(analysis);
+            assert.equal(policy.disposition, expected);
+            if (expected === "retain1080") assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2, 3]);
+        }
+        // No exact 1080p segment at all: 1440p + 720p still uses the same rule.
+        for (const [highDuration, expected] of [[9, "retain1080"], [1, "convert1080"]]) {
+            await writeFile(playlist, `#EXTM3U\n#EXT-X-MAP:URI="high.mp4"\n#EXTINF:${highDuration},\n1.ts\n#EXT-X-MAP:URI="low.mp4"\n#EXTINF:${10-highDuration},\n2.ts\n#EXT-X-ENDLIST\n`);
+            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
+                const pair = path.basename(input) === "high.mp4" ? [2560, 1440] : [1280, 720];
+                if (portrait) pair.reverse();
+                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
+            });
+            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, expected);
+        }
+    }
+});
+
+test("uniform 1080p, 1440p and 2160p remain native remux in both orientations", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-native-resolution-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const playlist = path.join(root, "playlist.m3u8");
+    await writeFile(playlist, '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts\n#EXT-X-ENDLIST\n');
+    for (const size of [[1920, 1080], [2560, 1440], [3840, 2160]]) {
+        for (const dimensions of [size, [...size].reverse()]) {
+            const analysis = await analyzeRecordingResolution(playlist, async () => ({ width: dimensions[0],
+                height: dimensions[1], sampleAspectRatio: "1:1" }));
+            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, "remuxNative");
+        }
     }
 });

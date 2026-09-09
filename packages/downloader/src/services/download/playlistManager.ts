@@ -4,6 +4,7 @@ import { fixTargetDuration } from "shared";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { DiskSession } from "./diskSession.js";
+import type { SegmentDimensions } from "./segmentDimensions.js";
 import {
     formatSegmentName,
     parseCompoundSegmentName,
@@ -15,6 +16,7 @@ export interface SegmentInfo {
     providerSequence: number;
     metadata: string[];
     accurateDuration?: number;
+    dimensions?: SegmentDimensions | null;
     programDateTime?: string;
 }
 
@@ -30,6 +32,7 @@ export interface PlaylistTimeline {
 export class PlaylistManager {
     private readonly disk: DiskSession;
     private lastProviderSequence: number | null = null;
+    private lastDimensions: SegmentDimensions | null | undefined;
     private highestHandledProviderSequence: number | null = null;
     private nextLocalNumber = 0;
     private resumeDiscontinuityPending = false;
@@ -312,13 +315,21 @@ export class PlaylistManager {
         const sequenceBreak = this.lastProviderSequence !== null
             && segment.providerSequence !== this.lastProviderSequence + 1;
         const boundaryAlreadyBuffered = this.pendingQualityChanges.length > 0;
-        if ((this.resumeDiscontinuityPending || sequenceBreak)
+        if (boundaryAlreadyBuffered) {
+            // The buffered MAP already supplies this segment's discontinuity.
+            segment.metadata = segment.metadata.filter((line) => line !== "#EXT-X-DISCONTINUITY");
+        }
+        const geometryChanged = this.lastProviderSequence !== null
+            && segment.dimensions !== undefined
+            && (segment.dimensions === null || this.lastDimensions == null
+                || segment.dimensions.width !== this.lastDimensions.width
+                || segment.dimensions.height !== this.lastDimensions.height
+                || segment.dimensions.sampleAspectRatio !== this.lastDimensions.sampleAspectRatio);
+        if ((this.resumeDiscontinuityPending || sequenceBreak || geometryChanged)
             && !boundaryAlreadyBuffered
             && !segment.metadata.includes("#EXT-X-DISCONTINUITY")) {
             segment.metadata.unshift("#EXT-X-DISCONTINUITY");
         }
-        this.resumeDiscontinuityPending = false;
-        this.lastProviderSequence = segment.providerSequence;
 
         if (segment.accurateDuration !== undefined && segment.accurateDuration > 0) {
             const idx = segment.metadata.findIndex(l => l.startsWith("#EXTINF:"));
@@ -375,6 +386,10 @@ export class PlaylistManager {
         if (!await FileSystemManager.appendFile(this.fullPlaylistPath, entry)) {
             throw new Error(`Could not append segment to ${this.fullPlaylistPath}`);
         }
+        // Only accepted, committed media advances the dimension baseline.
+        this.resumeDiscontinuityPending = false;
+        this.lastProviderSequence = segment.providerSequence;
+        this.lastDimensions = segment.dimensions;
         this.markProviderSequenceHandled(segment.providerSequence);
     }
 

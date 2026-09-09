@@ -66,12 +66,12 @@ export async function ensureFinalizedRemuxOne(
             const existing = identityDatabase.findRecordingByBasename(root.provider, path.basename(recordingPath));
             if (existing) {
                 const outcome = await guardUploadIdentity(identityDatabase, existing, config);
-                if (outcome.kind === "verified_cleaned") {
+                if (outcome.kind === "verified_cleaned" || outcome.kind === "verified_retained") {
                     return {
                         mode: "single-recording-remux",
                         recordingId: existing.id,
                         sourcePath: recordingPath,
-                        disposition: "already_verified_cleaned",
+                        disposition: `already_${outcome.kind}`,
                         state: identityDatabase.get(existing.id)?.state,
                         remoteId: outcome.remoteId,
                     };

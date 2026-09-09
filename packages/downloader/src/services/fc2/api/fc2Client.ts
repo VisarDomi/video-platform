@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import logger from "../../../common/logger.js";
-import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
+import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from "../../core/interfaces.js";
+import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
 import { resolveSegmentUrl } from "../../core/downloadUtils.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
@@ -312,10 +313,13 @@ export class Fc2Client implements IStreamProvider {
         return masterUrl;
     }
 
-    public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
+    public async validateSegment(filePath: string): Promise<SegmentValidationResult> {
         try {
             const stats = await fs.stat(filePath);
-            return { valid: stats.size > 0 };
+            if (stats.size <= 0) return { valid: false };
+            const dimensions = await probeSegmentDimensions(filePath);
+            if (!dimensions) logger.warn(`[FC2] Unknown segment dimensions; retaining with an input boundary: ${filePath}`);
+            return { valid: true, dimensions };
         } catch {
             return { valid: false };
         }

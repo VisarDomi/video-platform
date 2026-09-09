@@ -19,6 +19,7 @@ import {
 import type { CampaignProviderFilter } from "./domain/types.js";
 import { runCampaignWorker } from "./commands/runCampaignWorker.js";
 import { parseRemuxOneArguments } from "./commands/remuxOneArguments.js";
+import { selectComparisonFile, writeComparisonReport } from "./commands/comparisonTrial.js";
 
 function usage(): never {
     throw new Error([
@@ -33,6 +34,7 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
+        "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
         "  campaign-worker (reserved for the future managed service)",
         "No command performs source cleanup. Network commands also require VIDEO_PIPELINE_NETWORK_UPLOADS=1.",
     ].join("\n"));
@@ -68,7 +70,26 @@ async function main(): Promise<void> {
     if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "provenance-refresh",
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
-        "campaign-status", "campaign-step", "campaign-worker"].includes(command ?? "")) usage();
+        "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report"].includes(command ?? "")) usage();
+    if (command === "campaign-prepare") {
+        requireApply(process.argv.slice(3));
+        assertCampaignIdle(pipelineConfig);
+        console.log(JSON.stringify(await setCampaignRunning(pipelineConfig, false, true), null, 2));
+        return;
+    }
+    if (command === "campaign-select") {
+        const args = process.argv.slice(3);
+        requireApply(args);
+        assertCampaignIdle(pipelineConfig);
+        const filePath = option(args, "--file");
+        if (!filePath || filePath.startsWith("--")) throw new Error("campaign-select requires --file PATH");
+        console.log(JSON.stringify(await selectComparisonFile(pipelineConfig, filePath), null, 2));
+        return;
+    }
+    if (command === "comparison-report") {
+        console.log(JSON.stringify(await writeComparisonReport(pipelineConfig), null, 2));
+        return;
+    }
     if (command === "discover-plan") {
         const finalizationContract = readFinalizationContract(pipelineConfig.finalizationDatabasePath);
         const plan = await planDiscovery(pipelineConfig.discoveryRoots);

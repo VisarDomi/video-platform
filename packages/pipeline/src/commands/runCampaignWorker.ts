@@ -2,6 +2,7 @@ import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { reconcileDueUploads } from "./reconcileUploads.js";
 import { campaignStep } from "./campaign.js";
+import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 
@@ -61,6 +62,28 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         }
     }
     signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
+    // Queue ingestion is independent of long conversions and network cooldowns.
+    // It never changes running/paused intent; pending removals follow the file.
+    let importingSelection = false;
+    let lastSelectionErrors = "";
+    const selectionWatch = setInterval(() => {
+        if (!config.comparisonTrialOnly || importingSelection || signal.aborted) return;
+        importingSelection = true;
+        void (async () => {
+            try {
+                const result = await syncComparisonSelection(config);
+                const errors = JSON.stringify(result.errors);
+                if (result.added > 0 || result.removed > 0 || errors !== lastSelectionErrors) {
+                    console.log(JSON.stringify({ event: "comparison-selection", ...result }));
+                    lastSelectionErrors = errors;
+                }
+                await writeComparisonReport(config);
+            } catch (error) {
+                console.error(JSON.stringify({ event: "comparison-selection-error", error: String(error) }));
+            } finally { importingSelection = false; }
+        })();
+    }, 30_000);
+    signal.addEventListener("abort", () => clearInterval(selectionWatch), { once: true });
     while (!signal.aborted) {
         try {
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {

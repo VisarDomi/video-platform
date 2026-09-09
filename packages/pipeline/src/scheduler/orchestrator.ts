@@ -132,6 +132,7 @@ export class PipelineOrchestrator {
                             description,
                             provenance,
                             this.database.getArtifactPart(recording.id) ?? "full",
+                            { diagnosticTitle: this.database.getComparisonTrial() !== null },
                         ),
                     );
                     break;

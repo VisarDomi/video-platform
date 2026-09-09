@@ -5,6 +5,14 @@ single-artifact command.
 The pipeline can call its `describeArtifact()` library entry point, but the
 descriptor remains neither the durable job owner nor a standalone daemon.
 
+Managed startup allows up to ten minutes for a slow model load, configurable
+with `DESCRIPTOR_STARTUP_TIMEOUT_MS`. Each health request is bounded to two
+seconds; startup logs progress every thirty seconds and includes recent model
+logs on failure. Exited/signalled children and missing executables fail promptly.
+Failed starts clean up their child; shutdown cancels its fallback kill timer.
+An already-occupied health endpoint is refused in managed mode. Use explicit
+`DESCRIPTOR_MODEL_URL` only when intentionally managing an external server.
+
 The manual command accepts a remuxed media file, probes its duration, chooses a
 sampling rate that fits the configured video-token budget, and sends the file
 to the pinned local llama.cpp fork through an OpenAI-compatible

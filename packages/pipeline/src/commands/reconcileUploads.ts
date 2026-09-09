@@ -3,20 +3,26 @@ import { readXvideosCredentials } from "../config/secrets.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { cleanupArtifact } from "../stages/cleanupArtifact.js";
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { writeComparisonReport } from "./comparisonTrial.js";
+import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 
-export async function reconcileDueUploads(config: PipelineConfig, now = new Date()): Promise<unknown> {
+export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
+    browserOverride?: Pick<ChromiumXvideosUploader, "withAuthenticatedPage" | "probeUploadStatus">,
+): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network reconciliation is disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
     }
-    const credentials = await readXvideosCredentials(config.credentialsFilePath);
-    const browser = new ChromiumXvideosUploader({
+    const browser = browserOverride ?? new ChromiumXvideosUploader({
         executablePath: config.chromiumExecutablePath,
         profilePath: config.browserProfilePath,
-        ...credentials,
+        ...await readXvideosCredentials(config.credentialsFilePath),
     });
     const database = new PipelineDatabase(config.databasePath);
     const results: unknown[] = [];
     try {
+        if (config.comparisonTrialOnly && database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
+            throw new Error("Retired-version verification must not run in the v3 comparison worker");
+        }
         results.push(...database.recoverInterruptedUploads(now));
         // One login flow, then every due confirmation is checked on that same
         // authenticated page.
@@ -53,7 +59,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     );
                     // Verified online: clean up only the pipeline staging
                     // artifact. Original recording folders are left untouched.
-                    if (config.cleanupEnabled) {
+                    if (config.cleanupEnabled && !database.getComparisonTrial()) {
                         if (verifiedArtifact) {
                             await cleanupArtifact(verifiedArtifact.path);
                             if (afterVerification.state === "xvideos_verified") database.transition(
@@ -95,5 +101,6 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         return { checkedAt: now.toISOString(), results };
     } finally {
         database.close();
+        if (config.comparisonTrialOnly) await writeComparisonReport(config);
     }
 }

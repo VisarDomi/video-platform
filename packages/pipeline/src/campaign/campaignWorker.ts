@@ -1,5 +1,5 @@
 import path from "node:path";
-import { unlink } from "node:fs/promises";
+import { access, unlink } from "node:fs/promises";
 
 import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
@@ -20,6 +20,7 @@ import {
 } from "../stages/resolutionPolicy.js";
 
 export type CampaignStepResult =
+    | { readonly disposition: "comparison_finished" | "comparison_verification_wait" | "comparison_attention_required"; readonly reason?: string }
     | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
     | { readonly disposition: "trial_finished"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
     | { readonly disposition: "trial_verification_wait" | "trial_attention_required"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
@@ -73,10 +74,11 @@ export class CampaignWorker {
         const analysis = await analyzeRecordingResolution(recording.playlistPath);
         const policy = chooseRecordingResolutionPolicy(analysis);
         const reason = resolutionPolicyReason(policy.reason);
-        if (policy.disposition === "remux1080") {
+        if (policy.disposition === "remuxNative") {
             this.database.recordResolutionPolicyAssessment(recording.id, reason, now);
             return null;
         }
+        if (this.database.getComparisonTrial()) throw new Error("Comparison artifact policy changed; retain evidence and prepare a new version instead of deleting it");
         const reset = this.database.resetLocalWorkForResolutionPolicy(recording.id, reason, now);
         await Promise.all(reset.obsoletePaths.map((obsoletePath) => unlink(obsoletePath).catch(() => undefined)));
         return {
@@ -87,6 +89,9 @@ export class CampaignWorker {
     }
 
     private async admit(candidate: RecordingInput, now: Date): Promise<CampaignStepResult> {
+        if (this.database.getComparisonTrial() && !this.database.comparisonAllows(candidate)) {
+            return { disposition: "idle", reviewRequired: 0 };
+        }
         const recording = this.database.discover(candidate, now);
         this.database.enrollCampaignTrial(recording, now);
         const resolution = await this.resolver.resolve(candidate, now);
@@ -102,6 +107,7 @@ export class CampaignWorker {
             console.log(JSON.stringify({ event: "campaign-sweep", swept }));
         }
         let control = this.database.getCampaignControl();
+        const comparison = this.database.getComparisonTrial();
         const reviewRequired = this.database.listProvenanceReview().length
             + this.database.list("blocked").length;
         if (control.state === "paused") {
@@ -112,7 +118,31 @@ export class CampaignWorker {
             }
         }
 
-        const selectCandidate = () => selectOldestFinalizedEditedCandidate({
+        if (this.config.comparisonTrialOnly && !comparison) {
+            this.database.setCampaignState("paused", now);
+            return { disposition: "comparison_attention_required", reason: "Prepare and select the comparison trial first" };
+        }
+        if (comparison && (comparison.selection.length === 0 || comparison.completedAt)) {
+            return { disposition: "comparison_finished", reason: "Waiting for additions to the selected queue; no library discovery" };
+        }
+        if (comparison && comparison.selection.some((source) => {
+            const recording = this.database.getBySourcePath(source.sourcePath);
+            return recording && ["failed", "blocked", "provenance_review_required"].includes(recording.state);
+        })) {
+            this.database.setCampaignState("paused", now);
+            return { disposition: "comparison_attention_required", reason: "A selected recording failed or requires review" };
+        }
+        const allows = (recording: Recording) => comparison ? this.database.comparisonAllows(recording)
+            : this.database.campaignTrialAllows(recording.provider, recording.id);
+        const order = (recordings: readonly Recording[], provider: string) => {
+            const candidates = ordered(recordings, provider);
+            return comparison ? candidates.filter(allows).sort((a, b) =>
+                comparison.selection.findIndex((r) => r.sourcePath === a.sourcePath)
+                - comparison.selection.findIndex((r) => r.sourcePath === b.sourcePath)) : candidates;
+        };
+        const selectCandidate = async () => comparison
+            ? comparison.selection.find((source) => !this.database.getBySourcePath(source.sourcePath)) ?? null
+            : selectOldestFinalizedEditedCandidate({
             finalizationDatabasePath: this.config.finalizationDatabasePath,
             roots: this.config.discoveryRoots,
             providerFilter: control.providerFilter,
@@ -135,10 +165,10 @@ export class CampaignWorker {
             }
             trialNextId = first?.id;
         }
-        const local = ordered(this.database.list().filter((recording) => [
+        const local = order(this.database.list().filter((recording) => [
             "server_ready", "remuxed", "artifact_valid", "described",
         ].includes(recording.state) && (!trialNextId || recording.id === trialNextId)
-            && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter);
+            && allows(recording)), control.providerFilter);
         if (local[0]) {
             this.database.enrollCampaignTrial(local[0], now);
             try {
@@ -146,20 +176,30 @@ export class CampaignWorker {
                 const resolutionResult = await this.enforceCurrentResolutionPolicy(local[0], now);
                 if (resolutionResult) return resolutionResult;
             } catch (error) {
+                if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",
                     recordingId: local[0].id,
                     reason: error instanceof Error ? error.message : String(error),
                 };
             }
+            // Authority checks above yield to the file watcher. Recheck before
+            // the synchronous stage claim so a just-cancelled pending entry
+            // cannot slip into a conversion from this step's stale snapshot.
+            if (comparison && !this.database.comparisonAllows(local[0])) {
+                return { disposition: "idle", reviewRequired };
+            }
             const result = await this.orchestrator.processRecording(local[0].id, now);
             if (!result) throw new Error(`Could not claim campaign recording ${local[0].id}`);
+            if (comparison && ["failed", "blocked", "provenance_review_required"].includes(result.state)) {
+                this.database.setCampaignState("paused", now);
+            }
             return { disposition: "stage_completed", recordingId: result.id, state: result.state };
         }
 
-        const uploadReady = ordered(this.database.list("metadata_ready")
+        const uploadReady = order(this.database.list("metadata_ready")
             .filter((recording) => (!trialNextId || recording.id === trialNextId)
-                && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter)[0];
+                && allows(recording)), control.providerFilter)[0];
         if (uploadReady) {
             this.database.enrollCampaignTrial(uploadReady, now);
             try {
@@ -167,6 +207,7 @@ export class CampaignWorker {
                 const resolutionResult = await this.enforceCurrentResolutionPolicy(uploadReady, now);
                 if (resolutionResult) return resolutionResult;
             } catch (error) {
+                if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",
                     recordingId: uploadReady.id,
@@ -175,6 +216,7 @@ export class CampaignWorker {
             }
             const provenance = this.database.getProvenance(uploadReady.id);
             if (!provenance?.streamerId) {
+                if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",
                     recordingId: uploadReady.id,
@@ -183,6 +225,7 @@ export class CampaignWorker {
             }
             const artifact = this.database.getArtifact(uploadReady.id);
             if (!artifact) {
+                if (comparison) this.database.setCampaignState("paused", now);
                 return { disposition: "attention_required", recordingId: uploadReady.id, reason: "artifact_missing" };
             }
             if (!this.database.canReserve(
@@ -221,12 +264,33 @@ export class CampaignWorker {
                         resumeAt: after.resumeAt ?? "",
                     };
                 }
+                if (comparison) this.database.setCampaignState("paused", now);
                 throw error;
             }
         }
 
         const candidate = await selectCandidate();
         if (!candidate) {
+            if (comparison) {
+                const selected = comparison.selection.map((source) => this.database.getBySourcePath(source.sourcePath));
+                if (selected.some((recording) => !recording || !allows(recording)
+                    || ["failed", "blocked", "provenance_review_required"].includes(recording.state))) {
+                    this.database.setCampaignState("paused", now);
+                    return { disposition: "comparison_attention_required", reason: "Selected recording failed, changed, or requires review; no replacement will be admitted" };
+                }
+                if (selected.some((recording) => recording?.state !== "xvideos_verified")) {
+                    return { disposition: "comparison_verification_wait" };
+                }
+                for (const recording of selected) {
+                    const artifact = this.database.getArtifact(recording!.id);
+                    if (!artifact || !await access(artifact.path).then(() => true, () => false)) {
+                        this.database.setCampaignState("paused", now);
+                        return { disposition: "comparison_attention_required", reason: "Comparison artifact is missing; trial cannot be considered complete" };
+                    }
+                }
+                this.database.finishComparisonTrial(comparison.selection.length, now);
+                return { disposition: "comparison_finished" };
+            }
             if (control.trialPerProvider !== null) {
                 const trial = this.database.getCampaignTrialProgress();
                 const pending = trial.flatMap((provider) => provider.recordings);

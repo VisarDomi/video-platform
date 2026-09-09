@@ -25,6 +25,8 @@ export const descriptorConfig = {
     modelUrl: process.env.DESCRIPTOR_MODEL_URL ?? "http://127.0.0.1:7976",
     useExternalServer: process.env.DESCRIPTOR_MODEL_URL !== undefined,
     port: Number.parseInt(process.env.DESCRIPTOR_MODEL_PORT ?? "7976", 10),
+    startupTimeoutMilliseconds: Number.parseInt(process.env.DESCRIPTOR_STARTUP_TIMEOUT_MS ?? "600000", 10),
+    healthRequestTimeoutMilliseconds: 2000,
     contextTokens: 131_072,
     videoTokenBudget: Number.parseInt(process.env.DESCRIPTOR_VIDEO_TOKEN_BUDGET ?? "115000", 10),
     tokensPerFrame: Number.parseFloat(process.env.DESCRIPTOR_TOKENS_PER_FRAME ?? "70.5"),

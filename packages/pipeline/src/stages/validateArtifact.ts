@@ -75,10 +75,10 @@ export async function validateArtifact(artifactPath: string, now = new Date()): 
     const videoStream = probe.streams?.find((stream) => stream.codec_type === "video");
     const videoCodec = videoStream?.codec_name ?? null;
     const audioCodec = probe.streams?.find((stream) => stream.codec_type === "audio")?.codec_name ?? null;
-    if (!videoCodec && !audioCodec) throw new Error("Artifact has neither a video nor audio stream");
+    if (!videoCodec) throw new Error("Video artifact has no video stream");
 
     await run("ffmpeg", [
-        "-nostdin", "-hide_banner", "-v", "error",
+        "-nostdin", "-hide_banner", "-v", "error", "-xerror",
         "-i", resolvedPath,
         "-map", "0:v?", "-map", "0:a?", "-f", "null", "-",
     ]);

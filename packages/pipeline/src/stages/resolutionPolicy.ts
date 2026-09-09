@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
+import { probeTsSegmentDimensions } from "./tsSegmentDimensions.js";
 
 export interface VideoDimensions {
     readonly width: number;
@@ -37,7 +37,7 @@ export interface RecordingResolutionAnalysis {
     readonly segments: readonly ResolutionSegment[];
     readonly sourceDimensions: readonly string[];
     readonly resolutionSummary: string;
-    readonly maxShortEdge: number;
+    readonly maxPixelCount: number;
 }
 
 export type RecordingResolutionPolicy =
@@ -47,18 +47,19 @@ export type RecordingResolutionPolicy =
         readonly reason: string;
     }
     | {
-        readonly disposition: "remux1080";
+        readonly disposition: "remuxNative";
         readonly reason: string;
     }
     | {
         readonly disposition: "retain1080";
-        readonly maxSegmentIndexes: ReadonlySet<number>;
+        readonly retainedSegmentIndexes: ReadonlySet<number>;
         readonly reason: string;
     };
 
 type DimensionProbe = (inputPath: string) => Promise<VideoDimensions>;
 
 export const RESOLUTION_POLICY_VERSION = "resolution-policy-v3";
+export const FULL_HD_PIXEL_COUNT = 1920 * 1080;
 
 export function resolutionPolicyReason(reason: string): string {
     return `${RESOLUTION_POLICY_VERSION}: ${reason}`;
@@ -168,44 +169,6 @@ async function probeVideoDimensions(inputPath: string): Promise<VideoDimensions>
     });
 }
 
-async function probePlaylistKeyframes(inputPath: string): Promise<VideoDimensions[]> {
-    return await new Promise((resolve, reject) => {
-        const child = spawn("ffprobe", [
-            "-v", "error",
-            "-skip_frame", "nokey",
-            "-select_streams", "v:0",
-            "-show_frames",
-            "-show_entries", "frame=width,height,sample_aspect_ratio",
-            "-of", "csv=p=0",
-            inputPath,
-        ], { stdio: ["ignore", "pipe", "pipe"] });
-        const frames: VideoDimensions[] = [];
-        let stderr = "";
-        const lines = createInterface({ input: child.stdout });
-        lines.on("line", (line) => {
-            const match = line.match(/^(\d+),(\d+)(?:,([^,]+))?/);
-            if (!match) return;
-            frames.push({
-                width: Number.parseInt(match[1], 10),
-                height: Number.parseInt(match[2], 10),
-                sampleAspectRatio: match[3] ?? null,
-            });
-        });
-        child.stderr.on("data", (chunk: Buffer) => {
-            stderr = `${stderr}${chunk.toString()}`.slice(-16_384);
-        });
-        child.once("error", reject);
-        child.once("close", (code) => {
-            if (code !== 0) {
-                reject(new Error(`ffprobe playlist keyframe scan failed (${code ?? "unknown"}): ${stderr.trim()}`));
-            } else if (frames.length === 0) {
-                reject(new Error(`Playlist contains no video keyframes: ${inputPath}`));
-            } else {
-                resolve(frames);
-            }
-        });
-    });
-}
 
 async function mapConcurrent<T, R>(
     values: readonly T[],
@@ -237,29 +200,9 @@ export async function analyzeRecordingResolution(
     const content = await fs.readFile(resolvedPlaylist, "utf8");
     const playlist = parseResolutionPlaylist(content);
     if (probe === probeVideoDimensions && playlist.segments.every((segment) => segment.mapUri === null)) {
-        const keyframes = await probePlaylistKeyframes(resolvedPlaylist);
-        const uniqueDimensions = new Map(keyframes.map((frame) => [dimensionKey(frame), frame]));
-        let dimensionsBySegment: VideoDimensions[];
-        if (uniqueDimensions.size === 1) {
-            dimensionsBySegment = playlist.segments.map(() => keyframes[0]);
-        } else if (keyframes.length % playlist.segments.length === 0) {
-            const keyframesPerSegment = keyframes.length / playlist.segments.length;
-            dimensionsBySegment = playlist.segments.map((_segment, index) => {
-                const group = keyframes.slice(index * keyframesPerSegment, (index + 1) * keyframesPerSegment);
-                const groupDimensions = new Map(group.map((frame) => [dimensionKey(frame), frame]));
-                if (groupDimensions.size !== 1) {
-                    throw new Error(
-                        `MPEG-TS keyframes change resolution inside segment ${index}; cannot split safely`,
-                    );
-                }
-                return group[0];
-            });
-        } else {
-            throw new Error(
-                `MPEG-TS playlist has ${keyframes.length} keyframes across ${playlist.segments.length} segments `
-                + "with mixed dimensions; cannot establish one resolution per segment",
-            );
-        }
+        const dimensionsBySegment = await probeTsSegmentDimensions(
+            playlist.segments.map((segment) => path.join(sourceDirectory, segment.name)),
+        );
         return buildAnalysis(resolvedPlaylist, sourceDirectory, playlist, dimensionsBySegment);
     }
     const probePaths = playlist.segments.map((segment) => path.join(
@@ -309,7 +252,7 @@ function buildAnalysis(
         segments,
         sourceDimensions,
         resolutionSummary,
-        maxShortEdge: Math.max(...segments.map((segment) => Math.min(segment.width, segment.height))),
+        maxPixelCount: Math.max(...segments.map((segment) => segment.width * segment.height)),
     };
 }
 
@@ -327,73 +270,48 @@ function displayAspectRatio(dimensions: VideoDimensions): number {
 export function chooseRecordingResolutionPolicy(
     analysis: RecordingResolutionAnalysis,
 ): RecordingResolutionPolicy {
-    if (analysis.maxShortEdge < 1080) {
-        const source = analysis.segments.find(
-            (segment) => Math.min(segment.width, segment.height) === analysis.maxShortEdge,
-        );
-        if (!source) throw new Error("Sub-1080p policy has no maximum-resolution source segment");
-        const referenceAspect = displayAspectRatio(source);
-        const consistentAspect = Number.isFinite(referenceAspect) && analysis.segments.every((segment) => {
-            const aspect = displayAspectRatio(segment);
-            return Number.isFinite(aspect) && Math.abs(aspect / referenceAspect - 1) <= 0.01;
-        });
-        if (!consistentAspect) {
-            throw new Error(
-                `Sub-1080p recording changes display aspect ratio (${analysis.resolutionSummary}); `
-                + "cannot produce one unpadded 1080p artifact",
-            );
-        }
+    // Full HD is a pixel budget, not a required shape or short edge. Count
+    // coded pixels (not SAR-stretched display pixels) in either orientation.
+    const high = analysis.segments.filter((segment) => segment.width * segment.height >= FULL_HD_PIXEL_COUNT);
+    const low = analysis.segments.filter((segment) => segment.width * segment.height < FULL_HD_PIXEL_COUNT);
+    const totalDuration = analysis.segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    const highDuration = high.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    const share = highDuration / totalDuration;
+    if (!Number.isFinite(share) || totalDuration <= 0) throw new Error("Cannot measure Full-HD-pixel-count duration share");
+    const measured = `native >=${FULL_HD_PIXEL_COUNT} pixels duration ${highDuration.toFixed(6)}s / ${totalDuration.toFixed(6)}s (${(share * 100).toFixed(6)}%)`;
+    if (low.length === 0) {
         return {
-            disposition: "convert1080",
-            source,
-            reason: `sub-1080p recording will be fully transcoded to 1080p (${analysis.resolutionSummary})`,
+            disposition: "remuxNative",
+            reason: `all ${high.length} segments have >=${FULL_HD_PIXEL_COUNT} pixels; remux at native resolutions without conversion (${analysis.resolutionSummary})`,
         };
     }
-
-    if (analysis.maxShortEdge === 1080) {
-        const nonMax = analysis.segments.filter((segment) => Math.min(segment.width, segment.height) < 1080);
-        if (nonMax.length === 0) {
-            return {
-                disposition: "remux1080",
-                reason: `all ${analysis.segments.length} segments are 1080p (${analysis.resolutionSummary})`,
-            };
-        }
-        const maxSegments = analysis.segments.filter((segment) => Math.min(segment.width, segment.height) === 1080);
-        const totalDuration = analysis.segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
-        const maxDuration = maxSegments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
-        const share = maxDuration / totalDuration;
-        if (!Number.isFinite(share)) throw new Error("Cannot measure 1080p duration share");
-        const measured = `native 1080p duration ${maxDuration.toFixed(6)}s / ${totalDuration.toFixed(6)}s (${(share * 100).toFixed(6)}%)`;
-        if (share >= 0.9 - 1e-12) {
-            return {
-                disposition: "retain1080",
-                maxSegmentIndexes: new Set(maxSegments.map((segment) => segment.index)),
-                reason: `${measured}; keep ${maxSegments.length} 1080p segments and drop ${nonMax.length} lower-resolution segments from the upload; remux one video`,
-            };
-        }
-        const source = maxSegments[0];
-        const referenceAspect = displayAspectRatio(source);
-        const consistentAspect = Number.isFinite(referenceAspect) && analysis.segments.every((segment) => {
-            const aspect = displayAspectRatio(segment);
-            return Number.isFinite(aspect) && Math.abs(aspect / referenceAspect - 1) <= 0.01;
-        });
-        if (!consistentAspect) {
-            throw new Error(
-                `Mixed recording changes display aspect ratio (${analysis.resolutionSummary}); `
-                + "cannot produce one unpadded 1080p artifact",
-            );
-        }
+    if (share >= 0.9 - 1e-12) {
         return {
-            disposition: "convert1080",
-            source,
-            reason: `${measured}; below 90%, convert the complete recording to 1080p with no segments dropped`,
+            disposition: "retain1080",
+            retainedSegmentIndexes: new Set(high.map((segment) => segment.index)),
+            reason: `${measured}; keep ${high.length} qualifying segments and drop ${low.length} segments below ${FULL_HD_PIXEL_COUNT} pixels from the upload; remux without conversion`,
         };
     }
-
-    throw new Error(
-        `Unsupported source above 1080p (${analysis.resolutionSummary}); the production policy only remuxes 1080p `
-        + "or converts lower resolutions",
+    const source = analysis.segments.find(
+        (segment) => segment.width * segment.height === analysis.maxPixelCount,
     );
+    if (!source) throw new Error("Conversion policy has no reference source segment");
+    const referenceAspect = displayAspectRatio(source);
+    const consistentAspect = Number.isFinite(referenceAspect) && analysis.segments.every((segment) => {
+        const aspect = displayAspectRatio(segment);
+        return Number.isFinite(aspect) && Math.abs(aspect / referenceAspect - 1) <= 0.01;
+    });
+    if (!consistentAspect) {
+        throw new Error(
+            `Recording changes display aspect ratio (${analysis.resolutionSummary}); `
+            + "cannot produce one unpadded 1080p artifact",
+        );
+    }
+    return {
+        disposition: "convert1080",
+        source,
+        reason: `${measured}; below 90%, convert the complete recording to 1080p with no segments dropped (${analysis.resolutionSummary})`,
+    };
 }
 
 function absoluteMapLine(mapLine: string, mapUri: string, sourceDirectory: string): string {

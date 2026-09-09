@@ -1,36 +1,13 @@
-import { execFile } from "child_process";
 import { promises as fs } from "fs";
-import { promisify } from "util";
 import { readTokens } from "shared";
 import type { Tokens } from "shared";
 import logger from "../../../common/logger.js";
-import { IDownloadSession, IStreamProvider } from "../../core/interfaces.js";
+import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from "../../core/interfaces.js";
+import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
-
-const execFileAsync = promisify(execFile);
 
 export function isRejectedTangoResolution(width: number, height: number): boolean {
     return (width === 360 && height === 640) || (width === 640 && height === 360);
-}
-
-async function probeSegmentDimensions(filePath: string): Promise<{ width: number; height: number } | null> {
-    try {
-        const { stdout } = await execFileAsync("ffprobe", [
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "json",
-            filePath,
-        ], { encoding: "utf8", maxBuffer: 1024 * 1024 });
-        const parsed = JSON.parse(stdout) as {
-            streams?: Array<{ width?: number; height?: number }>;
-        };
-        const stream = parsed.streams?.[0];
-        if (!Number.isSafeInteger(stream?.width) || !Number.isSafeInteger(stream?.height)) return null;
-        return { width: stream!.width!, height: stream!.height! };
-    } catch {
-        return null;
-    }
 }
 
 export interface TangoLiveStream {
@@ -244,7 +221,7 @@ export class ApiClient implements IStreamProvider {
         return livePlaylistUrl;
     }
 
-    public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
+    public async validateSegment(filePath: string): Promise<SegmentValidationResult> {
         try {
             const stats = await fs.stat(filePath);
             if (stats.size <= 0) return { valid: false };
@@ -261,7 +238,7 @@ export class ApiClient implements IStreamProvider {
             logger.warn(`[Tango] Rejected 360p segment ${filePath}`, dimensions);
             return { valid: false };
         }
-        return { valid: true };
+        return { valid: true, dimensions };
     }
 
     public async recoverVariant(_masterPlaylistUrl: string): Promise<string | null> {

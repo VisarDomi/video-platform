@@ -16,7 +16,7 @@ export async function sweepMissingRecordings(
     config: Pick<PipelineConfig, "cleanupEnabled" | "stagingRoot">,
     now = new Date(),
 ): Promise<Array<{ recordingId: string; provider: string; reason: string }>> {
-    if (!config.cleanupEnabled) return [];
+    if (!config.cleanupEnabled || database.getComparisonTrial()) return [];
     const swept: Array<{ recordingId: string; provider: string; reason: string }> = [];
     for (const recording of database.list()) {
         if (IN_FLIGHT_STATES.includes(recording.state)) continue;

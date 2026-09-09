@@ -1,3 +1,13 @@
+import type { SegmentDimensions } from "../download/segmentDimensions.js";
+
+export interface SegmentValidationResult {
+    valid: boolean;
+    duration?: number;
+    // null means an attempted TS dimension probe failed; undefined means the
+    // provider uses other boundary metadata (SC init maps).
+    dimensions?: SegmentDimensions | null;
+}
+
 export interface SegmentFetchResult {
     data: Buffer | null;
     retryable?: boolean;
@@ -37,7 +47,7 @@ export interface IDownloadSession {
 export interface IStreamProvider {
     readonly providerName: string;
     parseMasterPlaylist(masterUrl: string): Promise<string | null>;
-    validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }>;
+    validateSegment(filePath: string): Promise<SegmentValidationResult>;
     createDownloadSession(): IDownloadSession;
 
     recoverVariant(masterPlaylistUrl: string): Promise<string | null>;

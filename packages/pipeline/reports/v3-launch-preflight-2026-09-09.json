@@ -1,0 +1,357 @@
+{
+  "checkedAt": "2026-09-09T09:44:55.905Z",
+  "selectionSha256": "3c501047703daf56ebc17aa513723e5d5dad8b9fbb4d0d19931f68e750c081e2",
+  "tests": {
+    "pipeline": 95,
+    "downloader": 29,
+    "descriptor": 9
+  },
+  "selection": {
+    "unchanged": true,
+    "rows": [
+      {
+        "source": "/home/visar/Videos/downloads/tango/edited/2025-10-02 183803 kaaysi",
+        "name": "2025-10-02 183803 kaaysi",
+        "provider": "tango",
+        "sourceFingerprint": "222d2a546aee1e4cc48ea7f653d5eb34ee33d72ddc6508c6fd944a841a0d8cf3",
+        "seconds": 484.1823329999999,
+        "resolutions": "720x1280:484",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 484.182333s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (720x1280:484)",
+        "segmentCount": 484,
+        "expectedOutputSeconds": 484.1823329999999,
+        "streamerUrl": "https://tango.me/bGJ2tCcVyE9uSrMMI2v5rA",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/tango/edited/2025-10-07 184656 princess-irina",
+        "name": "2025-10-07 184656 princess-irina",
+        "provider": "tango",
+        "sourceFingerprint": "5ac7b19a19deba5d8581707c6177aa17817a1483603828a1b361030482cec64a",
+        "seconds": 964.3314220000005,
+        "resolutions": "720x1280:958",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 964.331422s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (720x1280:958)",
+        "segmentCount": 958,
+        "expectedOutputSeconds": 964.3314220000005,
+        "streamerUrl": "https://tango.me/sE_VuHhxvoED6GRKpUsxig",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/tango/edited/2025-10-03 233108 rabbit146",
+        "name": "2025-10-03 233108 rabbit146",
+        "provider": "tango",
+        "sourceFingerprint": "55f09d0098b624a0ca52e5fa1cf0e74d715ff63396141db8dc6c9111f3fe48a8",
+        "seconds": 1152.092544,
+        "resolutions": "360x640:2,720x1280:1149",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 1152.092544s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (360x640:2,720x1280:1149)",
+        "segmentCount": 1151,
+        "expectedOutputSeconds": 1152.092544,
+        "streamerUrl": "https://tango.me/JKjfqUrz3Ae2t0iWaBRRZQ",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/tango/edited/2025-10-02 141119 mmarianna",
+        "name": "2025-10-02 141119 mmarianna",
+        "provider": "tango",
+        "sourceFingerprint": "17f18506d74cfe70a50b45a6c4680f64f1b38bcf58099914f7bb3ca5c38887b6",
+        "seconds": 580.2923669999998,
+        "resolutions": "360x640:285,720x1280:294",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 580.292367s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (360x640:285,720x1280:294)",
+        "segmentCount": 579,
+        "expectedOutputSeconds": 580.2923669999998,
+        "streamerUrl": "https://tango.me/vh04Z33UW6HRykBfiBCvPQ",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/fc2/edited/2026-01-27 130031 8175021",
+        "name": "2026-01-27 130031 8175021",
+        "provider": "fc2",
+        "sourceFingerprint": "86cf7f8e36d43161a710ff2e4849b333799c1c083c27b91f1a90a0dbeb4b8b9e",
+        "seconds": 104,
+        "resolutions": "960x768:104",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 104.000000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (960x768:104)",
+        "segmentCount": 104,
+        "expectedOutputSeconds": 104,
+        "streamerUrl": "https://live.fc2.com/8175021/",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/fc2/edited/2026-01-25 153803 1179794",
+        "name": "2026-01-25 153803 1179794",
+        "provider": "fc2",
+        "sourceFingerprint": "9e2c9bfbf7f8afb9866978f85ea57e3b18d9b588261d0d0d30854c8be9d9467a",
+        "seconds": 3289,
+        "resolutions": "852x640:3289",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 3289.000000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (852x640:3289)",
+        "segmentCount": 3289,
+        "expectedOutputSeconds": 3289,
+        "streamerUrl": "https://live.fc2.com/1179794/",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/fc2/edited/2026-01-25 153250 1179794",
+        "name": "2026-01-25 153250 1179794",
+        "provider": "fc2",
+        "sourceFingerprint": "fb801cfbdb61f273ddfbe7d7a8f633eb3352ab5f7b1ee86eaf65b6c53b11253b",
+        "seconds": 233,
+        "resolutions": "640x480:91,852x640:142",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 233.000000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (640x480:91,852x640:142)",
+        "segmentCount": 233,
+        "expectedOutputSeconds": 233,
+        "streamerUrl": "https://live.fc2.com/1179794/",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/fc2/edited/2026-01-23 150039 12830257",
+        "name": "2026-01-23 150039 12830257",
+        "provider": "fc2",
+        "sourceFingerprint": "eb01382914d4a5693663f54810e9be47005686d21fad281712c221c354c2ee36",
+        "seconds": 3637,
+        "resolutions": "568x454:25,782x626:3612",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 3637.000000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (568x454:25,782x626:3612)",
+        "segmentCount": 3637,
+        "expectedOutputSeconds": 3637,
+        "streamerUrl": "https://live.fc2.com/12830257/",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-20 120730 Hanna_18_cute",
+        "name": "2026-03-20 120730 Hanna_18_cute",
+        "provider": "sc",
+        "sourceFingerprint": "2d2e061c7e430a3c8d18291a1764c7c8e75bfb6f048ba8aaa514a161b6128a40",
+        "seconds": 1346.7810000000115,
+        "resolutions": "1280x720:672",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 1346.781000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (1280x720:672)",
+        "segmentCount": 672,
+        "expectedOutputSeconds": 1346.7810000000115,
+        "streamerUrl": "https://stripchat.com/214047501",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-20 065117 Minami_jjjj",
+        "name": "2026-03-20 065117 Minami_jjjj",
+        "provider": "sc",
+        "sourceFingerprint": "cf84e149c47a361eccbac9a950a42b504f44f4347456c9bdac93feca13d85dba",
+        "seconds": 1158.1650000000038,
+        "resolutions": "1280x720:578",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 1158.165000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (1280x720:578)",
+        "segmentCount": 578,
+        "expectedOutputSeconds": 1158.1650000000038,
+        "streamerUrl": "https://stripchat.com/226494362",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-19 164548 _YURIYURI_",
+        "name": "2026-03-19 164548 _YURIYURI_",
+        "provider": "sc",
+        "sourceFingerprint": "70a6865f0bde90cdb10feb46b6cfc07c41debbc9aec6e8e48553afe14df6ee47",
+        "seconds": 592.6819999999994,
+        "resolutions": "640x480:295",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 592.682000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (640x480:295)",
+        "segmentCount": 295,
+        "expectedOutputSeconds": 592.6819999999994,
+        "streamerUrl": "https://stripchat.com/234113138",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-20 123952 _YURIYURI_",
+        "name": "2026-03-20 123952 _YURIYURI_",
+        "provider": "sc",
+        "sourceFingerprint": "4a20459c45be805d4f6c5e19e96856420e6988b4974d60ffc3afc99083db6967",
+        "seconds": 1591.0780000000216,
+        "resolutions": "640x480:794",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 0.000000s / 1591.078000s (0.000000%); below 90%, convert the complete recording to 1080p with no segments dropped (640x480:794)",
+        "segmentCount": 794,
+        "expectedOutputSeconds": 1591.0780000000216,
+        "streamerUrl": "https://stripchat.com/234113138",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-18 161011 AI_channel",
+        "name": "2026-03-18 161011 AI_channel",
+        "provider": "sc",
+        "sourceFingerprint": "206f64fce490942a47a06f6f1a2b08bce808af0e23fe75f541b82497e2ac91bd",
+        "seconds": 629.1719999999991,
+        "resolutions": "1920x1080:314",
+        "policy": "remuxNative",
+        "policyReason": "all 314 segments have >=2073600 pixels; remux at native resolutions without conversion (1920x1080:314)",
+        "segmentCount": 314,
+        "expectedOutputSeconds": 629.1719999999991,
+        "streamerUrl": "https://stripchat.com/154279710",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-20 120646 LOVE_MIREI_LOVE",
+        "name": "2026-03-20 120646 LOVE_MIREI_LOVE",
+        "provider": "sc",
+        "sourceFingerprint": "8af32da524f76cf7bbf82ce9aee119258705254706deca4917c030e4e2ca0806",
+        "seconds": 3081.765000000082,
+        "resolutions": "1920x1080:1538",
+        "policy": "remuxNative",
+        "policyReason": "all 1538 segments have >=2073600 pixels; remux at native resolutions without conversion (1920x1080:1538)",
+        "segmentCount": 1538,
+        "expectedOutputSeconds": 3081.765000000082,
+        "streamerUrl": "https://stripchat.com/224755708",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-04-24 164513 Yukinyan_xoxo",
+        "name": "2026-04-24 164513 Yukinyan_xoxo",
+        "provider": "sc",
+        "sourceFingerprint": "faf3b91ae75076a82ba9a7e2e7591e10b69b2411a22d9f761fba4578b6fab2b7",
+        "seconds": 2429.952000000054,
+        "resolutions": "1280x720:57,1920x1080:1156",
+        "policy": "retain1080",
+        "policyReason": "native >=2073600 pixels duration 2315.744000s / 2429.952000s (95.299989%); keep 1156 qualifying segments and drop 57 segments below 2073600 pixels from the upload; remux without conversion",
+        "segmentCount": 1213,
+        "expectedOutputSeconds": 2315.7440000000493,
+        "streamerUrl": "https://stripchat.com/246946390",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-03-20 222452 akaneppi_",
+        "name": "2026-03-20 222452 akaneppi_",
+        "provider": "sc",
+        "sourceFingerprint": "03db3c3d36f2758c78acd0ea20b0f02cfad51be62701db00c3c19c5367ce1f54",
+        "seconds": 2304.6010000000433,
+        "resolutions": "1280x720:81,1920x1080:1068",
+        "policy": "retain1080",
+        "policyReason": "native >=2073600 pixels duration 2142.145000s / 2304.601000s (92.950797%); keep 1068 qualifying segments and drop 81 segments below 2073600 pixels from the upload; remux without conversion",
+        "segmentCount": 1149,
+        "expectedOutputSeconds": 2142.1450000000377,
+        "streamerUrl": "https://stripchat.com/121821402",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-06-29 143246 akaneppi_",
+        "name": "2026-06-29 143246 akaneppi_",
+        "provider": "sc",
+        "sourceFingerprint": "2fe69b34f47388ca78732141d2fc180a8df7060e33653ad527142ea058254819",
+        "seconds": 5001.394000000159,
+        "resolutions": "1280x720:75,1920x1080:2421",
+        "policy": "retain1080",
+        "policyReason": "native >=2073600 pixels duration 4851.098000s / 5001.394000s (96.994918%); keep 2421 qualifying segments and drop 75 segments below 2073600 pixels from the upload; remux without conversion",
+        "segmentCount": 2496,
+        "expectedOutputSeconds": 4851.098000000154,
+        "streamerUrl": "https://stripchat.com/121821402",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-05-02 084606 Yukinyan_xoxo",
+        "name": "2026-05-02 084606 Yukinyan_xoxo",
+        "provider": "sc",
+        "sourceFingerprint": "d8e32960cedeff50f217a0d421c2fcf7924b99a4c91e3510b67c9e38806b57c8",
+        "seconds": 2988.0240000000654,
+        "resolutions": "1280x720:183,1920x1080:1306",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 2620.640000s / 2988.024000s (87.704784%); below 90%, convert the complete recording to 1080p with no segments dropped (1280x720:183,1920x1080:1306)",
+        "segmentCount": 1489,
+        "expectedOutputSeconds": 2988.0240000000654,
+        "streamerUrl": "https://stripchat.com/246946390",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-06-15 115702 kanata_mu_ch",
+        "name": "2026-06-15 115702 kanata_mu_ch",
+        "provider": "sc",
+        "sourceFingerprint": "245cc319b2e28dfa7a2b419d858b4051ca915eeead36f2f80fcdc3ef862f347f",
+        "seconds": 3911.112000000105,
+        "resolutions": "1920x1080:804,854x480:1146",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 1613.926000s / 3911.112000s (41.265144%); below 90%, convert the complete recording to 1080p with no segments dropped (1920x1080:804,854x480:1146)",
+        "segmentCount": 1950,
+        "expectedOutputSeconds": 3911.112000000105,
+        "streamerUrl": "https://stripchat.com/203929450",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-06-01 180624 kanata_mu_ch",
+        "name": "2026-06-01 180624 kanata_mu_ch",
+        "provider": "sc",
+        "sourceFingerprint": "cbdb2b208f0e7726067dd9577e749f18c1ab0247ebdef0d1bca5ede2b5f4cd57",
+        "seconds": 808.900999999999,
+        "resolutions": "1280x720:188,1920x1080:215",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 431.881000s / 808.901000s (53.391082%); below 90%, convert the complete recording to 1080p with no segments dropped (1280x720:188,1920x1080:215)",
+        "segmentCount": 403,
+        "expectedOutputSeconds": 808.900999999999,
+        "streamerUrl": "https://stripchat.com/203929450",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-07-28 184346 RIN_RIN__",
+        "name": "2026-07-28 184346 RIN_RIN__",
+        "provider": "sc",
+        "sourceFingerprint": "3fde4f6f93839abafa3da78fcf521c87b8eb5bbe42212a18a681b19e5f8a007a",
+        "seconds": 4362.165000000135,
+        "resolutions": "1280x720:2170,1920x1080:7",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 14.025000s / 4362.165000s (0.321515%); below 90%, convert the complete recording to 1080p with no segments dropped (1280x720:2170,1920x1080:7)",
+        "segmentCount": 2177,
+        "expectedOutputSeconds": 4362.165000000135,
+        "streamerUrl": "https://stripchat.com/252465340",
+        "ok": true
+      },
+      {
+        "source": "/home/visar/Videos/downloads/sc/edited/2026-08-04 172611 baby__cherry__",
+        "name": "2026-08-04 172611 baby__cherry__",
+        "provider": "sc",
+        "sourceFingerprint": "599ce804e60fa7d5c3d1fc229892ea3cf882b72fb44144e915f7889209b014e2",
+        "seconds": 3833.7580000000335,
+        "resolutions": "1320x720:1743,1980x1080:11",
+        "policy": "convert1080",
+        "policyReason": "native >=2073600 pixels duration 22.040000s / 3833.758000s (0.574893%); below 90%, convert the complete recording to 1080p with no segments dropped (1320x720:1743,1980x1080:11)",
+        "segmentCount": 1754,
+        "expectedOutputSeconds": 3833.7580000000335,
+        "streamerUrl": "https://stripchat.com/250335846",
+        "ok": true
+      }
+    ]
+  },
+  "descriptor": [
+    {
+      "elapsedSeconds": 19.283,
+      "description": {
+        "title": "Colorful Abstract Vibes: Rainbow Lines and Bright Shapes",
+        "description": "This video has a vibrant, all-ages feel with no discernible background. It features large blocks of red, green, yellow, blue, and cyan, separated by a bright, rainbow-like line. Random, square-shaped confetti appears and moves across the screen, changing color and size throughout."
+      },
+      "evidencePath": "/tmp/video-v3-preflight.mxixEa/descriptions/manual/2026-09-09T09-42-34-506Z-34084ace/result.json"
+    },
+    {
+      "elapsedSeconds": 8.524,
+      "description": {
+        "title": "Two-Tone Body Blows and Colorful Light Trails",
+        "description": "A person with a two-tone body is seen against a bright blue and cyan background. The video features two main colors, red and green, that mix and change over time. A bright, glowing trail runs diagonally across the screen, connecting the two halves."
+      },
+      "evidencePath": "/tmp/video-v3-preflight.mxixEa/descriptions/manual/2026-09-09T09-42-54-313Z-01181d69/result.json"
+    }
+  ],
+  "upload": {
+    "authenticated": true,
+    "uploadsPageStatus": 200,
+    "url": "https://www.xvideos.com/account/uploads",
+    "uploadedNothing": true
+  },
+  "database": {
+    "backup": "/home/visar/.local/share/video-services/pipeline/history/production-v3/preflight-2026-09-09T09-42-32.083Z.sqlite",
+    "integrity": [
+      {
+        "quick_check": "ok"
+      }
+    ],
+    "state": "paused",
+    "recordings": 0,
+    "transferSafetyMigration": true
+  }
+}

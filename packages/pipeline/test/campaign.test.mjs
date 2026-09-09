@@ -63,7 +63,7 @@ async function campaignWorkerFixture(t) {
     assert.equal(inspection.status, "finalized");
     const recording = database.discover(inspection.recording);
     advanceToMetadataReady(database, recording, root);
-    const config = { ...pipelineConfig, finalizationDatabasePath: finalizationPath };
+    const config = { ...pipelineConfig, comparisonTrialOnly: false, finalizationDatabasePath: finalizationPath };
     const resolver = TargetCatalogResolver.load({ resolveIdentifier: async () => null });
     return { database, config, resolver, recording, sourcePath };
 }
@@ -100,7 +100,7 @@ test("production roots are edited-only while manual remux roots retain downloade
     assert(pipelineConfig.discoveryRoots.every((root) => root.path.endsWith("edited")));
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "downloader").length, 3);
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "edited").length, 3);
-    assert.equal(pipelineConfig.stagingRoot, path.join(pipelineConfig.artifactsRoot, "production-v2"));
+    assert.equal(pipelineConfig.stagingRoot, path.join(pipelineConfig.artifactsRoot, "production-v3"));
     assert.equal(pipelineConfig.manualStagingRoot, path.join(pipelineConfig.stagingRoot, "manual"));
 });
 
@@ -247,7 +247,7 @@ test("campaign intent and limits persist independently of worker lifetime", asyn
     }, { state: "running", provider: "sc", limit: 123_456_789 });
     reopened.setCampaignState("paused");
     reopened.close();
-    const configured = configureCampaign({ ...pipelineConfig, databasePath }, "all", undefined, 10);
+    const configured = configureCampaign({ ...pipelineConfig, comparisonTrialOnly: false, databasePath }, "all", undefined, 10);
     assert.equal(configured.monthlyUploadLimitBytes, 123_456_789);
     assert.equal(configured.state, "paused");
     assert.equal(configured.trialPerProvider, 10);
@@ -270,7 +270,7 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
     const databasePath = path.join(root, "pipeline.sqlite");
     let database = new PipelineDatabase(databasePath);
     t.after(() => database.close());
-    const config = { ...pipelineConfig, databasePath, finalizationDatabasePath, discoveryRoots: roots, cleanupEnabled: false };
+    const config = { ...pipelineConfig, comparisonTrialOnly: false, databasePath, finalizationDatabasePath, discoveryRoots: roots, cleanupEnabled: false };
     const resolver = { resolve: async (candidate) => ({
         observedIdentifier: candidate.provider, status: "resolved", streamerId: "streamer", alias: candidate.provider,
         streamerUrl: "https://example.com/streamer", aliasUrl: null, reason: null, updatedAt: new Date().toISOString(),
@@ -371,7 +371,7 @@ test("campaign resume performs a pending production rollover and archives retire
     t.after(() => rm(root, { recursive: true, force: true }));
     const databasePath = path.join(root, "pipeline.sqlite");
     const artifactsRoot = path.join(root, "artifacts");
-    const stagingRoot = path.join(artifactsRoot, "production-v2");
+    const stagingRoot = path.join(artifactsRoot, "production-v3");
     await mkdir(artifactsRoot);
     const database = new PipelineDatabase(databasePath);
     const recording = database.discover(inputForRollover(root));
@@ -408,14 +408,14 @@ test("campaign resume performs a pending production rollover and archives retire
     raw.close();
 
     const config = {
-        ...pipelineConfig,
+        ...pipelineConfig, comparisonTrialOnly: false,
         databasePath,
         artifactsRoot,
         stagingRoot,
         manualStagingRoot: path.join(stagingRoot, "manual"),
     };
     const result = await setCampaignRunning(config, true);
-    assert.equal(result.productionVersion, "production-v2");
+    assert.equal(result.productionVersion, "production-v3");
     assert.equal(result.rollover.rolledOver, true);
     assert.equal(result.rollover.retiredRecordings, 1);
     assert.equal(path.dirname(result.rollover.historySnapshotPath), path.join(root, "history", "legacy-production-v1"));

@@ -10,6 +10,7 @@ import { cleanupArtifact } from "../stages/cleanupArtifact.js";
 export type UploadIdentityGuardOutcome =
     | { kind: "proceed" }
     | { kind: "verified_cleaned"; remoteId: string; remoteUrl: string | null }
+    | { kind: "verified_retained"; remoteId: string; remoteUrl: string | null }
     | { kind: "unverified_refused"; remoteId: string; verificationScheduled: boolean };
 
 export async function guardUploadIdentity(
@@ -20,12 +21,15 @@ export async function guardUploadIdentity(
     const identity = database.getUploadIdentity(recording.id);
     if (!identity) return { kind: "proceed" };
     if (identity.verified) {
+        if (!config.cleanupEnabled || database.getComparisonTrial()) {
+            return { kind: "verified_retained", remoteId: identity.remoteId, remoteUrl: identity.remoteUrl };
+        }
         // Verified online: nothing left to do but clean the staging artifact.
-        if (config.cleanupEnabled) {
+        if (config.cleanupEnabled && !database.getComparisonTrial()) {
             const artifact = database.getArtifact(recording.id);
             if (artifact) await cleanupArtifact(artifact.path);
         }
-        if (database.listQueuedProductionArtifacts(recording.id).length === 0) {
+        if (!database.getComparisonTrial() && database.listQueuedProductionArtifacts(recording.id).length === 0) {
             database.transitionToCleanupEligible(
                 recording.id,
                 `already verified online (${identity.remoteId}); no further processing`,

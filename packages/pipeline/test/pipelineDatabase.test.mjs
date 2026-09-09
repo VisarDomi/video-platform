@@ -75,7 +75,7 @@ test("schema initialization is idempotent and discovery deduplicates across rest
     const second = database.discover(input(directory));
     assert.equal(first.id, second.id);
     assert.equal(database.list().length, 1);
-    assert.equal(database.getProductionVersion(), "production-v2");
+    assert.equal(database.getProductionVersion(), "production-v3");
     assert.equal(database.integrityCheck(), "ok");
 
     database.close();
@@ -98,7 +98,7 @@ test("schema eight gains trial controls without changing generation, history, or
     old.close();
     const migrated = new PipelineDatabase(databasePath);
     t.after(() => migrated.close());
-    assert.equal(migrated.getProductionVersion(), "production-v2");
+    assert.equal(migrated.getProductionVersion(), "production-v3");
     assert.equal(migrated.get(recording.id).state, "server_ready");
     assert.equal(migrated.getCampaignControl().state, "paused");
     assert.equal(migrated.getCampaignControl().providerFilter, "sc");
@@ -137,7 +137,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 9);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 10);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));
@@ -190,7 +190,7 @@ test("production rollover retires workflow state while preserving quota, overrid
 
     const rollover = reopened.commitProductionRollover();
     assert.equal(rollover.rolledOver, true);
-    assert.equal(reopened.getProductionVersion(), "production-v2");
+    assert.equal(reopened.getProductionVersion(), "production-v3");
     assert.deepEqual(reopened.list(), []);
     assert.deepEqual(reopened.uploadUsage("2026-08"), { spent: 900, reserved: 0 });
     assert.equal(reopened.getProvenanceOverride("tango", "alias")?.streamerId, "manual-id");
@@ -203,7 +203,7 @@ test("production rollover retires workflow state while preserving quota, overrid
         retiredRemoteUploads: row.retiredRemoteUploads,
     })), [{
         fromVersion: "legacy-production-v1",
-        toVersion: "production-v2",
+        toVersion: "production-v3",
         retiredRecordings: 1,
         retiredRemoteUploads: 1,
     }]);
@@ -404,7 +404,7 @@ test("dry-run plans are deterministic and mutate neither state nor quota", async
         new Date("2026-08-12T08:00:00Z"),
         "Europe/Tirane",
         1_000,
-        path.join(directory, "production-v2"),
+        path.join(directory, "production-v3"),
     );
     assert.equal(wrongGeneration[0].reason, "artifact_generation_mismatch");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 0, reserved: 0 });
@@ -735,20 +735,20 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
 });
 
-test("restart recovery distinguishes interrupted transfer from possible metadata acceptance", async (t) => {
+test("restart recovery retries only before transfer starts, never after possible acceptance", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
     const firstNow = new Date("2026-08-12T08:00:00Z");
     const firstReservation = database.reserveUpload(recording.id, 550, firstNow);
     const firstAttempt = database.beginUpload(recording.id, firstReservation, firstNow);
-    database.updateUploadProgress(firstAttempt, "file_uploading", 500, firstNow);
+    // No file-upload progress was recorded: this is the only retryable case.
     assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T08:01:00Z")), [{
         recordingId: recording.id,
         disposition: "retryable",
     }]);
     assert.equal(database.get(recording.id)?.state, "metadata_ready");
-    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 500, reserved: 0 });
+    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 0, reserved: 0 });
 
     const secondNow = new Date("2026-08-12T09:00:00Z");
     const secondReservation = database.reserveUpload(recording.id, 550, secondNow);
@@ -762,8 +762,25 @@ test("restart recovery distinguishes interrupted transfer from possible metadata
     assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:00:59Z")).length, 0);
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:01:00Z")).length, 1);
-    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 1_000, reserved: 0 });
+    assert.deepEqual(database.uploadUsage("2026-08"), { spent: 500, reserved: 0 });
 });
+
+for (const bytes of [0, 500]) {
+test(`interrupted file-uploading phase cannot retry blindly (${bytes} bytes recorded)`, async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const now = new Date("2026-08-12T11:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 550, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.updateUploadProgress(attempt, "file_uploading", bytes, now);
+    assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T11:01:00Z")), [{
+        recordingId: recording.id, disposition: "confirmation_required",
+    }]);
+    assert.equal(database.get(recording.id).state, "xvideos_uncertain");
+    assert.throws(() => database.reserveUpload(recording.id, 550, now));
+});
+}
 
 test("interrupted upload after the file completed requires confirmation before retry", async (t) => {
     const { database, directory } = await databaseFixture(t);

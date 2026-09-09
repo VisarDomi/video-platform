@@ -23,7 +23,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
 interface RecordingRow {
@@ -407,6 +407,13 @@ export class PipelineDatabase {
                 provider TEXT NOT NULL CHECK (provider IN ('tango', 'fc2', 'sc')),
                 admitted_at TEXT NOT NULL
             ) STRICT;
+            CREATE TABLE IF NOT EXISTS comparison_trial (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                selection_json TEXT NOT NULL,
+                selection_errors_json TEXT NOT NULL DEFAULT '[]',
+                locked_at TEXT,
+                completed_at TEXT
+            ) STRICT;
             CREATE TABLE IF NOT EXISTS production_rollovers (
                 id INTEGER PRIMARY KEY,
                 from_version TEXT NOT NULL,
@@ -456,6 +463,10 @@ export class PipelineDatabase {
             ) STRICT;
         `);
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
+        const comparisonColumns = this.database.prepare("PRAGMA table_info(comparison_trial)").all() as unknown as Array<{ name: string }>;
+        if (!comparisonColumns.some((column) => column.name === "selection_errors_json")) {
+            this.database.exec("ALTER TABLE comparison_trial ADD COLUMN selection_errors_json TEXT NOT NULL DEFAULT '[]'");
+        }
         if (!controlColumns.some((column) => column.name === "antibot_failures")) {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN antibot_failures INTEGER NOT NULL DEFAULT 0");
         }
@@ -469,6 +480,9 @@ export class PipelineDatabase {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
         }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
+        if (!attemptColumns.some((column) => column.name === "transfer_started")) {
+            this.database.exec("ALTER TABLE upload_attempts ADD COLUMN transfer_started INTEGER NOT NULL DEFAULT 0");
+        }
         if (!attemptColumns.some((column) => column.name === "phase")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN phase TEXT NOT NULL DEFAULT 'started'");
         }
@@ -805,6 +819,7 @@ export class PipelineDatabase {
             }
             this.database.exec("DELETE FROM recordings");
             this.database.exec("DELETE FROM campaign_trial_recordings");
+            this.database.exec("DELETE FROM comparison_trial");
             this.database.exec("DELETE FROM worker_heartbeat");
             this.database.prepare(`
                 INSERT INTO production_rollovers (
@@ -841,6 +856,9 @@ export class PipelineDatabase {
     ): CampaignControl {
         if (!["all", "tango", "fc2", "sc"].includes(providerFilter)) {
             throw new Error("Campaign provider must be all, tango, fc2, or sc");
+        }
+        if (this.getComparisonTrial() && (providerFilter !== "all" || (trialPerProvider !== undefined && trialPerProvider !== null))) {
+            throw new Error("The comparison queue is controlled by selected paths, not provider quotas");
         }
         if (!Number.isSafeInteger(monthlyUploadLimitBytes) || monthlyUploadLimitBytes <= 0) {
             throw new Error("Campaign monthly upload limit must be a positive integer");
@@ -918,8 +936,98 @@ export class PipelineDatabase {
             .run(now.toISOString(), now.toISOString());
     }
 
+    getComparisonTrial(): { selection: RecordingInput[]; fileErrors: string[]; lockedAt: string | null; completedAt: string | null } | null {
+        const row = this.database.prepare("SELECT * FROM comparison_trial WHERE id = 1").get() as
+            { selection_json: string; selection_errors_json: string; locked_at: string | null; completed_at: string | null } | undefined;
+        return row ? { selection: JSON.parse(row.selection_json) as RecordingInput[], fileErrors: JSON.parse(row.selection_errors_json) as string[], lockedAt: row.locked_at, completedAt: row.completed_at } : null;
+    }
+
+    prepareComparisonTrial(): void {
+        if (this.getCampaignControl().state !== "paused") throw new Error("Comparison preparation requires a paused campaign");
+        this.database.exec("INSERT OR IGNORE INTO comparison_trial (id, selection_json) VALUES (1, '[]')");
+        this.database.exec("UPDATE campaign_control SET provider_filter = 'all', trial_per_provider = NULL, trial_finished_at = NULL, resume_at = NULL WHERE id = 1");
+    }
+
+    appendComparisonSelection(selection: readonly RecordingInput[]): void {
+        this.transaction(() => {
+            const trial = this.getComparisonTrial();
+            if (!trial) throw new Error("Prepare the comparison trial first");
+            const merged = [...trial.selection];
+            for (const recording of selection) {
+                if (merged.some((existing) => existing.sourcePath === recording.sourcePath)) continue;
+                if (merged.some((existing) => path.basename(existing.sourcePath) === path.basename(recording.sourcePath))) {
+                    throw new Error(`Recording name collision in comparison queue: ${recording.sourcePath}`);
+                }
+                merged.push(recording);
+            }
+            if (merged.length !== trial.selection.length) this.database.prepare("UPDATE comparison_trial SET selection_json = ?, completed_at = NULL WHERE id = 1").run(JSON.stringify(merged));
+        });
+    }
+
+    syncComparisonQueue(requested: readonly RecordingInput[]): { added: number; removed: number } {
+        let result = { added: 0, removed: 0 };
+        this.transaction(() => {
+            const trial = this.getComparisonTrial();
+            if (!trial) throw new Error("Prepare the comparison trial first");
+            // Admission/provenance alone is still queued. Once a local stage
+            // has been claimed, removal must not cancel work or erase evidence.
+            const protectedEntries = trial.selection.filter((source) => {
+                const row = this.getBySourcePath(source.sourcePath);
+                return row && (row.state !== "server_ready" || row.attemptCount > 0
+                    || row.leaseOwner !== null || this.getRemuxOutput(row.id) !== null);
+            });
+            const next = [...protectedEntries];
+            for (const source of requested) {
+                if (next.some((entry) => entry.sourcePath === source.sourcePath)) continue;
+                const existingRow = this.get(path.basename(source.sourcePath));
+                if (next.some((entry) => path.basename(entry.sourcePath) === path.basename(source.sourcePath))
+                    || (existingRow && existingRow.sourcePath !== source.sourcePath)) {
+                    throw new Error(`Recording name collision in comparison queue: ${source.sourcePath}`);
+                }
+                next.push(source);
+            }
+            result = {
+                added: next.filter((entry) => !trial.selection.some((old) => old.sourcePath === entry.sourcePath)).length,
+                removed: trial.selection.filter((old) => !next.some((entry) => old.sourcePath === entry.sourcePath)).length,
+            };
+            if (JSON.stringify(next) !== JSON.stringify(trial.selection)) {
+                this.database.prepare("UPDATE comparison_trial SET selection_json = ?, completed_at = NULL WHERE id = 1")
+                    .run(JSON.stringify(next));
+            }
+        });
+        return result;
+    }
+
+    setComparisonFileErrors(errors: readonly string[]): void {
+        this.database.prepare("UPDATE comparison_trial SET selection_errors_json = ? WHERE id = 1").run(JSON.stringify(errors));
+    }
+
+    comparisonAllows(recording: RecordingInput): boolean {
+        const trial = this.getComparisonTrial();
+        return trial !== null && trial.selection.some((item) => item.sourcePath === recording.sourcePath
+            && item.provider === recording.provider && item.sourceFingerprint === recording.sourceFingerprint);
+    }
+
+    finishComparisonTrial(expectedCount: number, now = new Date()): void {
+        this.transaction(() => {
+            // The file watcher may append while the worker checks artifacts.
+            if (this.getComparisonTrial()?.selection.length !== expectedCount) return;
+            this.database.prepare("UPDATE comparison_trial SET completed_at = COALESCE(completed_at, ?) WHERE id = 1").run(now.toISOString());
+        });
+    }
+
+    comparisonPolicyReason(id: string): string | null {
+        const row = this.database.prepare("SELECT reason FROM state_events WHERE recording_id = ? AND reason LIKE 'resolution-policy-%' ORDER BY id DESC LIMIT 1")
+            .get(id) as { reason: string } | undefined;
+        return row?.reason ?? null;
+    }
+
     setCampaignState(state: CampaignControl["state"], now = new Date()): CampaignControl {
         if (state !== "paused" && state !== "running") throw new Error("Campaign state must be paused or running");
+        const trial = this.getComparisonTrial();
+        if (state === "running" && trial) {
+            this.database.prepare("UPDATE comparison_trial SET locked_at = COALESCE(locked_at, ?) WHERE id = 1").run(now.toISOString());
+        }
         // A manual pause is indefinite; a manual resume starts a fresh streak.
         if (state === "paused") {
             this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, updated_at = ? WHERE id = 1")
@@ -1720,18 +1828,19 @@ export class PipelineDatabase {
         }
         const order = { started: 0, file_uploading: 1, file_uploaded: 2, metadata_submitting: 3 } as const;
         const row = this.database.prepare(`
-            SELECT phase, progress_bytes FROM upload_attempts WHERE id = ? AND status = 'started'
-        `).get(attemptId) as { phase: keyof typeof order; progress_bytes: number } | undefined;
+            SELECT phase, progress_bytes, transfer_started FROM upload_attempts WHERE id = ? AND status = 'started'
+        `).get(attemptId) as { phase: keyof typeof order; progress_bytes: number; transfer_started: number } | undefined;
         if (!row) throw new Error(`Upload attempt ${attemptId} is not active`);
         if (order[phase] < order[row.phase] || transmittedBytes < row.progress_bytes) {
             throw new Error("Upload progress cannot move backwards");
         }
         // Keep the persisted phase at `started` while bytes are in flight. Older
         // schema-v3 databases enforce the original three-value CHECK constraint;
-        // progress_bytes still makes interrupted partial/full transfers billable.
+        // A separate durable flag records the transfer boundary even with zero
+        // bytes, without rebuilding historical tables to change that CHECK.
         const persistedPhase = phase === "file_uploading" ? "started" : phase;
         this.database.prepare(`
-            UPDATE upload_attempts SET phase = ?, progress_bytes = ? WHERE id = ?
+            UPDATE upload_attempts SET phase = ?, progress_bytes = ?, transfer_started = 1 WHERE id = ?
         `).run(persistedPhase, transmittedBytes, attemptId);
         const recording = this.database.prepare("SELECT recording_id FROM upload_attempts WHERE id = ?")
             .get(attemptId) as { recording_id: string };
@@ -1744,19 +1853,21 @@ export class PipelineDatabase {
         transmittedBytes: number;
     } {
         const row = this.database.prepare(`
-            SELECT phase, progress_bytes FROM upload_attempts WHERE id = ? AND status = 'started'
+            SELECT phase, progress_bytes, transfer_started FROM upload_attempts WHERE id = ? AND status = 'started'
         `).get(attemptId) as {
             phase: "started" | "file_uploading" | "file_uploaded" | "metadata_submitting";
             progress_bytes: number;
+            transfer_started: number;
         } | undefined;
         if (!row) throw new Error(`Upload attempt ${attemptId} is not active`);
-        return { phase: row.phase, transmittedBytes: row.progress_bytes };
+        return { phase: row.phase === "started" && row.transfer_started ? "file_uploading" : row.phase,
+            transmittedBytes: row.progress_bytes };
     }
 
     recoverInterruptedUploads(now = new Date()): Array<{ recordingId: string; disposition: string }> {
         const timestamp = now.toISOString();
         const attempts = this.database.prepare(`
-            SELECT a.id, a.recording_id, a.reservation_id, a.phase, a.progress_bytes,
+            SELECT a.id, a.recording_id, a.reservation_id, a.phase, a.progress_bytes, a.transfer_started,
                 r.calendar_month
             FROM upload_attempts a
             JOIN upload_reservations r ON r.id = a.reservation_id
@@ -1769,12 +1880,13 @@ export class PipelineDatabase {
             reservation_id: string;
             phase: "started" | "file_uploading" | "file_uploaded" | "metadata_submitting";
             progress_bytes: number;
+            transfer_started: number;
             calendar_month: string;
         }>;
         const results: Array<{ recordingId: string; disposition: string }> = [];
         for (const attempt of attempts) {
             this.transaction(() => {
-                const uncertain = attempt.phase === "metadata_submitting" || attempt.phase === "file_uploaded";
+                const uncertain = !!attempt.transfer_started || attempt.phase !== "started" || attempt.progress_bytes > 0;
                 if (attempt.progress_bytes > 0) {
                     this.database.prepare(`
                         INSERT INTO bandwidth_events (
@@ -1800,7 +1912,7 @@ export class PipelineDatabase {
                     `).run(attempt.id, attempt.recording_id,
                         new Date(now.getTime() + 24 * 60 * 60_000).toISOString());
                     this.updateStateInTransaction(attempt.recording_id, "xvideos_uploading", "xvideos_uncertain",
-                        "interrupted while metadata submission may have been accepted", timestamp);
+                        "interrupted after upload may have started; acceptance requires confirmation", timestamp);
                 } else {
                     this.updateStateInTransaction(attempt.recording_id, "xvideos_uploading", "metadata_ready",
                         `interrupted during ${attempt.phase}; safe to retry`, timestamp);

@@ -10,6 +10,7 @@ import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { CampaignWorker } from "../campaign/campaignWorker.js";
 import { uploadOne } from "./uploadOne.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
+import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
 
 function assertVersionedStagingRoot(artifactsRoot: string, stagingRoot: string): void {
     const root = path.resolve(artifactsRoot);
@@ -121,16 +122,20 @@ async function archiveRetiredProductionFiles(
     return { moved, alreadyArchived, alreadyMissing, skippedOutsideArtifactsRoot };
 }
 
-export async function setCampaignRunning(config: PipelineConfig, running: boolean): Promise<unknown> {
+export async function setCampaignRunning(config: PipelineConfig, running: boolean, prepareOnly = false): Promise<unknown> {
     const database = new PipelineDatabase(config.databasePath);
     try {
-        if (!running) return {
+        if (!running && !prepareOnly) return {
             ...database.setCampaignState("paused"),
             productionVersion: database.getProductionVersion(),
             rollover: null,
         };
         assertVersionedStagingRoot(config.artifactsRoot, config.stagingRoot);
         const plan = database.planProductionRollover(CURRENT_PRODUCTION_VERSION);
+        if (config.comparisonTrialOnly && !prepareOnly && (plan.required || !database.getComparisonTrial())) {
+            throw new Error("Prepare v3 with campaign-prepare and select recordings before resuming");
+        }
+        if (prepareOnly && database.getCampaignControl().state !== "paused") throw new Error("Pause before preparation");
         if (plan.required && database.getCampaignControl().state !== "paused") {
             throw new Error("Pause the old production generation before resuming the new version");
         }
@@ -173,8 +178,9 @@ export async function setCampaignRunning(config: PipelineConfig, running: boolea
             : { moved: 0, alreadyArchived: 0, alreadyMissing: 0, skippedOutsideArtifactsRoot: 0 };
         const rollover = database.commitProductionRollover(CURRENT_PRODUCTION_VERSION);
         await mkdir(config.stagingRoot, { recursive: true });
+        if (prepareOnly) database.prepareComparisonTrial();
         return {
-            ...database.setCampaignState("running"),
+            ...database.setCampaignState(prepareOnly ? "paused" : "running"),
             productionVersion: database.getProductionVersion(),
             rollover: {
                 ...rollover,
@@ -184,6 +190,7 @@ export async function setCampaignRunning(config: PipelineConfig, running: boolea
         };
     } finally {
         database.close();
+        if (config.comparisonTrialOnly) await writeComparisonReport(config);
     }
 }
 
@@ -194,6 +201,7 @@ export function campaignStatus(config: PipelineConfig): unknown {
         return {
             ...control,
             trial: database.getCampaignTrialProgress(),
+            comparison: database.getComparisonTrial(),
             productionVersion: database.getProductionVersion(),
             productionRolloverRequired: database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION,
             productionRollovers: database.listProductionRollovers(),
@@ -201,7 +209,7 @@ export function campaignStatus(config: PipelineConfig): unknown {
             stagingRoot: config.stagingRoot,
             manualStagingRoot: config.manualStagingRoot,
             systemdUnitInstalled: true,
-            cleanupEnabled: config.cleanupEnabled,
+            cleanupEnabled: config.cleanupEnabled && !database.getComparisonTrial(),
             networkUploadsEnabled: config.networkUploadsEnabled,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),
@@ -214,6 +222,7 @@ export function campaignStatus(config: PipelineConfig): unknown {
 }
 
 export async function campaignStep(config: PipelineConfig): Promise<unknown> {
+    if (config.comparisonTrialOnly) await syncComparisonSelection(config);
     const database = new PipelineDatabase(config.databasePath);
     try {
         if (database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
@@ -258,5 +267,6 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
         return { recovery, step: await worker.step() };
     } finally {
         database.close();
+        if (config.comparisonTrialOnly) await writeComparisonReport(config);
     }
 }

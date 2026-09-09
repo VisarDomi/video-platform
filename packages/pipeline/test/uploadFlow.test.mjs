@@ -6,10 +6,12 @@ import test from "node:test";
 
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { guardUploadIdentity } from "../dist/commands/uploadIdentityGuard.js";
-import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js";
+import { composeUploadMetadata, hasDiagnosticUploadIdentity } from "../dist/metadata/composeUploadMetadata.js";
+import { ChromiumXvideosUploader, submittedUploadEditId } from "../dist/upload/chromiumXvideosUploader.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { filterXvideosEntries } from "../dist/upload/xvideosEntries.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
+import { PipelineOrchestrator } from "../dist/scheduler/orchestrator.js";
 
 async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
@@ -107,11 +109,85 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         updatedAt: "2026-08-13T08:00:00Z",
     });
     assert.deepEqual(metadata.tags, ["stripchat", "live"]);
-    assert(metadata.title.includes("[2026-08-13 101112 Minami_jjjj | production-v2 | full]"));
+    assert.equal(metadata.title, "Woman performs in a brightly lit bedroom");
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://stripchat.com/226494362"));
     assert(metadata.description.includes("Alias: https://stripchat.com/Minami_jjjj"));
     assert(metadata.description.length <= 1_000);
+});
+
+test("diagnostic title suffix is explicit, default campaign titles stay clean and bounded", () => {
+    const recording = { sourcePath: "/source/2026-09-09 120000 alias" };
+    const description = { output: { title: "A natural descriptive title", description: "Visible actions." } };
+    const provenance = { status: "resolved", streamerUrl: "https://example.test/source" };
+    const clean = composeUploadMetadata(recording, description, provenance);
+    const diagnostic = composeUploadMetadata(recording, description, provenance, "full", { diagnosticTitle: true });
+    assert.equal(clean.title, description.output.title);
+    const identity = "2026-09-09 120000 alias | production-v3 | full";
+    assert.equal(diagnostic.title, `${clean.title} [${identity}]`);
+    assert.equal(hasDiagnosticUploadIdentity(clean.title, identity), false);
+    assert.equal(hasDiagnosticUploadIdentity(diagnostic.title, identity), true);
+    assert.equal(hasDiagnosticUploadIdentity(diagnostic.title, identity.replace("v3", "v2")), false);
+    assert.equal(clean.description, diagnostic.description);
+    for (const diagnosticTitle of [false, true]) {
+        const long = composeUploadMetadata(recording, { output: { ...description.output, title: "Natural title ".repeat(100) } },
+            provenance, "full", { diagnosticTitle });
+        assert(long.title.length <= 255);
+        assert.equal(hasDiagnosticUploadIdentity(long.title, identity), diagnosticTitle);
+    }
+});
+
+test("orchestrator enables diagnostic titles only for a prepared comparison trial", async (t) => {
+    const { root } = await rootFixture(t);
+    for (const comparison of [false, true]) {
+        const db = new PipelineDatabase(path.join(root, `titles-${comparison}.sqlite`));
+        try {
+            if (comparison) db.prepareComparisonTrial();
+            const recording = db.discover(input(root, "fc2", "2026-09-09 120000 12345"));
+            db.saveProvenance(recording.id, { observedIdentifier: "12345", status: "resolved", streamerId: "12345",
+                alias: "12345", streamerUrl: "https://live.fc2.com/12345/", aliasUrl: null, reason: null,
+                updatedAt: new Date().toISOString() });
+            const artifactPath = path.join(root, "fixture.mp4");
+            const orchestrator = new PipelineOrchestrator(db, {
+                remux: async () => artifactPath,
+                validateArtifact: async () => ({ path: artifactPath, sizeBytes: 100, sha256: "a".repeat(64),
+                    validatedAt: new Date().toISOString() }),
+                describe: async () => ({ artifactSha256: "a".repeat(64), promptVersion: "test", fps: 1,
+                    output: { title: "Natural public title", description: "Factual description." }, evidencePath: "fixture.json" }),
+            }, "test-worker");
+            for (let i = 0; i < 4; i++) await orchestrator.processRecording(recording.id);
+            assert.equal(db.get(recording.id).state, "metadata_ready");
+            assert.equal(db.getUploadMetadata(recording.id).title, comparison
+                ? "Natural public title [2026-09-09 120000 12345 | production-v3 | full]" : "Natural public title");
+        } finally { db.close(); }
+    }
+});
+
+test("submitted provider ID is independent of title and refuses ambiguous/foreign edit links", () => {
+    const base = "https://www.xvideos.com/account/uploads/new";
+    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit"]), "123");
+    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit", "/account/uploads/123/edit"]), "123");
+    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit", "/account/uploads/456/edit"]), null);
+    assert.equal(submittedUploadEditId(base, ["https://other.test/account/uploads/123/edit"]), null);
+    assert.equal(submittedUploadEditId("https://www.xvideos.com/account/uploads/123/edit", ["/account/uploads/456/edit"]), "123");
+});
+
+test("clean-title missing-ID recovery never searches descriptive titles; diagnostic ambiguity is not adopted", async (t) => {
+    const uploader = new ChromiumXvideosUploader({});
+    let searches = 0;
+    uploader.findEntries = async () => { searches++; return [
+        { remoteId: "1", title: "Natural title [identity]" },
+        { remoteId: "2", title: "Another title [identity]" },
+    ]; };
+    // Jump past the panel polling deadline, without opening a browser or waiting.
+    let now = 0;
+    t.mock.method(Date, "now", () => { now += 400_000; return now; });
+    assert.equal(await uploader.captureSubmittedVideoId({}, null), null);
+    assert.equal(searches, 0);
+    assert.equal(await uploader.captureSubmittedVideoId({}, "identity"), null);
+    assert.equal(searches, 1);
+    uploader.findEntries = async () => [{ remoteId: "3", title: "Natural title [identity]" }];
+    assert.equal(await uploader.captureSubmittedVideoId({}, "identity"), "3");
 });
 
 test("uploads-list matching filters entries by title search term", () => {

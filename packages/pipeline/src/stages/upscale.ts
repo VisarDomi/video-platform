@@ -4,6 +4,8 @@ import { createInterface } from "node:readline";
 
 import type { ArtifactVariant } from "../domain/types.js";
 import { prepareAtomicRemuxPaths } from "./remux.js";
+import { preparePlaylistInput } from "./playlistInput.js";
+import { analyzeRecordingResolution, type RecordingResolutionAnalysis } from "./resolutionPolicy.js";
 
 export type UpscaleMode = ArtifactVariant;
 
@@ -246,6 +248,7 @@ export function buildUpscaleTranscodeArgs(
     inputPath: string,
     temporaryOutput: string,
     plan: UpscalePlan,
+    inputArgs: readonly string[] = ["-i", inputPath],
 ): string[] {
     const filters = [];
     if (plan.selectExpression !== null) filters.push(`select='${plan.selectExpression}'`);
@@ -256,7 +259,7 @@ export function buildUpscaleTranscodeArgs(
         "-hide_banner",
         "-v", "error",
         "-fflags", "+genpts",
-        "-i", inputPath,
+        ...inputArgs,
         "-map", "0:v:0",
         "-map", "0:a?",
         "-vf", filters.join(","),
@@ -288,6 +291,8 @@ async function runUpscaleTranscode(
     recordingId: string,
     plan: UpscalePlan,
     artifactSuffix?: string,
+    normalizePlaylist = false,
+    analysis?: RecordingResolutionAnalysis,
 ): Promise<UpscaleTranscodeResult> {
     const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
         stagingRoot,
@@ -297,9 +302,16 @@ async function runUpscaleTranscode(
     const existing = await fs.lstat(finalPath).catch(() => null);
     if (existing?.isFile()) return { path: finalPath, plan };
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
+    // Reuse the policy scan: untagged geometry changes are input boundaries too.
+    // Standalone whole-recording callers get the same protection, without a
+    // second scan in the campaign path. Original playlists remain untouched.
+    const geometry = normalizePlaylist && inputPath.endsWith(".m3u8")
+        ? analysis ?? await analyzeRecordingResolution(inputPath) : undefined;
+    const prepared = normalizePlaylist
+        ? await preparePlaylistInput(inputPath, stagingRoot, geometry ? { analysis: geometry } : undefined) : null;
     try {
         await new Promise<void>((resolve, reject) => {
-            const child = spawn("ffmpeg", buildUpscaleTranscodeArgs(inputPath, temporaryPath, plan), {
+            const child = spawn("ffmpeg", buildUpscaleTranscodeArgs(inputPath, temporaryPath, plan, prepared?.args), {
                 stdio: ["ignore", "ignore", "pipe"],
             });
             let stderr = "";
@@ -323,6 +335,8 @@ async function runUpscaleTranscode(
     } catch (error) {
         await fs.unlink(temporaryPath).catch(() => undefined);
         throw error;
+    } finally {
+        await prepared?.cleanup();
     }
 }
 
@@ -332,6 +346,7 @@ export async function upscaleWholeRecordingTo1080(
     recordingId: string,
     source: FixedUpscaleSource,
     artifactSuffix = "production-upscale1080p",
+    analysis?: RecordingResolutionAnalysis,
 ): Promise<UpscaleTranscodeResult> {
     // Production conversion includes every segment, even for all-360p/480p
     // sources. The supervised comparison mode's 720p floor does not apply.
@@ -352,5 +367,7 @@ export async function upscaleWholeRecordingTo1080(
         recordingId,
         plan,
         artifactSuffix,
+        true,
+        analysis,
     );
 }
