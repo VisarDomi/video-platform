@@ -3,6 +3,7 @@ import { appendPages } from "../core/pagination";
 import type { Provider, Stream } from "../provider";
 import { streamLabel } from "./home";
 import { attachGestures } from "../ui/gestures";
+import { PositionSettlement } from "../core/position-settlement";
 
 interface Slot {
     element: HTMLElement;
@@ -69,7 +70,12 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     let navigating = false;
     let programmaticScroll = false;
     let touching = false;
-    let scrollFinished = true;
+    const positionSettlement = new PositionSettlement(() => {
+        const viewport = window.visualViewport;
+        return [window.scrollX, window.scrollY, viewport?.offsetLeft ?? 0,
+            viewport?.offsetTop ?? 0, viewport?.width ?? innerWidth,
+            viewport?.height ?? innerHeight, viewport?.scale ?? 1];
+    }, settleNavigation);
     let layoutOffset = 0;
     let lastScrollY = window.scrollY;
     let scrollDirection: -1 | 0 | 1 = 0;
@@ -298,8 +304,14 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         controls.classList.add("unsettled");
     }
 
+    function watchPosition(): void {
+        if (navigating && !touching && !programmaticScroll && stage.isConnected && !document.hidden) {
+            positionSettlement.watch();
+        }
+    }
+
     function settleNavigation(): void {
-        if (!navigating || touching || !scrollFinished || !stage.isConnected) return;
+        if (!navigating || touching || document.hidden || !stage.isConnected) return;
         // Keep a video already under the midpoint. A spacer landing advances
         // only one adjacent entry in the last scroll direction, never a jump
         // proportional to the distance travelled through the 10k runway.
@@ -318,7 +330,7 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         controls.classList.remove("unsettled");
         layoutOffset = 0;
         stage.style.removeProperty('transform');
-        // Momentum is now over. Rebase the virtual layout without moving the
+        // Sampled position is quiet. Rebase the virtual layout without moving the
         // visible video; only spacer landings are brought back to its center.
         correctScroll(slots[1].video.getBoundingClientRect().top - desiredTop);
     }
@@ -376,7 +388,8 @@ export async function openStream(provider: Provider, requestedStreamId: string):
     attachGestures(stage, {
         contact(active) {
             touching = active;
-            if (!active) settleNavigation();
+            if (active) positionSettlement.cancel();
+            else watchPosition();
         },
         verticalStart: beginNavigating,
         controls(visible) {
@@ -390,17 +403,13 @@ export async function openStream(provider: Provider, requestedStreamId: string):
         const delta = window.scrollY - lastScrollY;
         if (Math.abs(delta) >= 0.5) scrollDirection = delta > 0 ? 1 : -1;
         lastScrollY = window.scrollY;
-        scrollFinished = false;
         commitMidpointStream();
+        watchPosition();
     }, { passive: true });
-    window.addEventListener("scrollend", () => {
-        if (programmaticScroll) return;
-        scrollFinished = true;
-        settleNavigation();
-    });
 
     window.addEventListener('pagehide', () => {
         touching = false;
+        positionSettlement.cancel();
         stopPages();
     });
     window.addEventListener('pageshow', event => {
@@ -418,15 +427,19 @@ export async function openStream(provider: Provider, requestedStreamId: string):
             updateControls();
             resumePages();
         }
-        scrollFinished = true;
-        settleNavigation();
+        watchPosition();
     });
     window.addEventListener('storage', event => {
         if (event.key === MULTIPLE_VIDEOS_KEY || event.key === null) syncMultipleVideos();
     });
-    if (provider.fetchStreamPage) document.addEventListener('visibilitychange', () => {
-        if (document.hidden) stopPages();
-        else resumePages();
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            positionSettlement.cancel();
+            if (provider.fetchStreamPage) stopPages();
+        } else {
+            watchPosition();
+            if (provider.fetchStreamPage) resumePages();
+        }
     });
 
     controls.addEventListener("click", async event => {

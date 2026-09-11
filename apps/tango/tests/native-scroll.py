@@ -1,6 +1,6 @@
 """Observe physical Safari gestures for 45 seconds; never navigate or change data.
 
-Wrap scrollBy transparently to correlate app compensation with scrollend.
+Wrap scrollBy transparently to compare app compensation with scroll events.
 Restore it and remove all observers afterward. No stream URLs/media are logged.
 """
 import asyncio
