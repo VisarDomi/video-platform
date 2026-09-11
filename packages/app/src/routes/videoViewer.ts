@@ -10,6 +10,7 @@ import { calculateSegmentsToKeep, fetchPlaylist } from '../services/hls.js';
 import { GestureController } from '../player/GestureController.js';
 import { OverlayView, type OverlayActions, type OverlayTimeline } from '../player/OverlayView.js';
 import { PlayerUnit } from '../player/PlayerUnit.js';
+import { PositionSettlement } from '../player/PositionSettlement.js';
 import type { TimelineSnapshot } from '../player/PlaybackTimeline.js';
 import type { Video, VideoType } from '../types.js';
 
@@ -27,7 +28,15 @@ export class VideoViewerPage {
 	private unsettled = false;
 	private programmaticScroll = false;
 	private touching = false;
-	private scrollFinished = true;
+	private readonly positionSettlement = new PositionSettlement(
+		() => {
+			const viewport = window.visualViewport;
+			return [window.scrollX, window.scrollY, viewport?.offsetLeft ?? 0,
+				viewport?.offsetTop ?? 0, viewport?.width ?? innerWidth,
+				viewport?.height ?? innerHeight, viewport?.scale ?? 1];
+		},
+		() => this.settleNavigation()
+	);
 	private layoutOffset = 0;
 	private lastScrollY = window.scrollY;
 	private scrollDirection: -1 | 0 | 1 = 0;
@@ -67,7 +76,6 @@ export class VideoViewerPage {
 
 		new GestureController(this.stage, this.gestureCallbacks());
 		addEventListener('scroll', this.handleScroll, { passive: true });
-		addEventListener('scrollend', this.handleScrollEnd);
 		addEventListener('pagehide', this.handlePageHide);
 		addEventListener('pageshow', this.handlePageShow);
 		document.addEventListener('visibilitychange', this.handleVisibility);
@@ -174,7 +182,8 @@ export class VideoViewerPage {
 		return {
 			onContact: (active: boolean) => {
 				this.touching = active;
-				if (!active) this.settleNavigation();
+				if (active) this.positionSettlement.cancel();
+				else this.watchPosition();
 			},
 			getCurrentTime: () => this.activeUnit().getSnapshot().currentTime,
 			getSeekMax: () => this.activeUnit().getSnapshot().seekMax,
@@ -230,8 +239,8 @@ export class VideoViewerPage {
 		const delta = window.scrollY - this.lastScrollY;
 		if (Math.abs(delta) >= 0.5) this.scrollDirection = delta > 0 ? 1 : -1;
 		this.lastScrollY = window.scrollY;
-		this.scrollFinished = false;
 		this.commitMidpointVideo();
+		this.watchPosition();
 	};
 
 	private beginUnsettled(): void {
@@ -243,14 +252,13 @@ export class VideoViewerPage {
 		this.overlay.setInteractive(false);
 	}
 
-	private readonly handleScrollEnd = (): void => {
-		if (this.programmaticScroll) return;
-		this.scrollFinished = true;
-		this.settleNavigation();
-	};
+	private watchPosition(): void {
+		if (this.unsettled && !this.touching && !this.programmaticScroll &&
+			this.stage.isConnected && !document.hidden) this.positionSettlement.watch();
+	}
 
 	private settleNavigation(): void {
-		if (!this.unsettled || this.touching || !this.scrollFinished || !this.stage.isConnected) return;
+		if (!this.unsettled || this.touching || document.hidden || !this.stage.isConnected) return;
 		// Match Stream Viewer: a spacer landing advances only one adjacent entry
 		// in the scroll direction, regardless of distance through the 10k runway.
 		const midpoint = this.viewportMidpoint();
@@ -268,7 +276,7 @@ export class VideoViewerPage {
 		this.overlay.setInteractive(true);
 		this.layoutOffset = 0;
 		this.stage.style.removeProperty('transform');
-		// Normalize only after native momentum is over, with no extra delay.
+		// Normalize after sampled position stays quiet, independently of scrollend.
 		this.correctScroll(this.activeUnit().video.getBoundingClientRect().top - desiredTop);
 	}
 
@@ -311,7 +319,7 @@ export class VideoViewerPage {
 
 		const afterTop = this.activeUnit().video.getBoundingClientRect().top;
 		// Never write scroll position during iOS momentum. Keep the same playing
-		// element at its screen position by offsetting layout until scrollend.
+		// element at its screen position until position sampling reports quietness.
 		this.layoutOffset += beforeTop - afterTop;
 		this.stage.style.transform = `translateY(${this.layoutOffset}px)`;
 		this.loadEdgeUnits();
@@ -495,22 +503,24 @@ export class VideoViewerPage {
 
 	private readonly handlePageHide = (): void => {
 		this.touching = false;
+		this.positionSettlement.cancel();
 		this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		void this.releaseWakeLock();
 	};
 
 	private readonly handlePageShow = (event: PageTransitionEvent): void => {
 		if (!event.persisted) return;
-		this.scrollFinished = true;
-		this.settleNavigation();
+		this.watchPosition();
 		this.resumeAll();
 		void this.requestWakeLock();
 	};
 
 	private readonly handleVisibility = (): void => {
 		if (document.visibilityState === 'hidden') {
+			this.positionSettlement.cancel();
 			this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		} else {
+			this.watchPosition();
 			this.resumeAll();
 			void this.requestWakeLock();
 		}
