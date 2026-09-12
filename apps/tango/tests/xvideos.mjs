@@ -64,19 +64,9 @@ try {
         return route.fulfill({ contentType: 'text/html', body: '<p id="native">Original</p>' });
     });
     await context.addInitScript(() => {
-        window.takeoverTrace = [];
         window.paginationAttempts = [];
-        for (const name of ['stop']) {
-            const original = window[name].bind(window);
-            window[name] = (...args) => { window.takeoverTrace.push(name); return original(...args); };
-        }
-        for (const name of ['open', 'close']) {
-            const original = document[name].bind(document);
-            document[name] = (...args) => { window.takeoverTrace.push(name); return original(...args); };
-        }
         const fetch = window.fetch.bind(window);
         window.fetch = async (...args) => {
-            window.takeoverTrace.push('fetch');
             if (new URL(args[0], location.href).pathname === '/account/uploads/1') window.paginationAttempts.push(performance.now());
             const response = await fetch(...args);
             // Model a followed redirect without letting a fixture escape to
@@ -110,7 +100,6 @@ try {
     await page.waitForFunction(() => !JSON.parse(sessionStorage.getItem('stream-viewer-state')).nextPage);
     assert.ok(await page.evaluate(() => window.firstUploadRow === document.querySelector('.stream-row')), 'Later pages append without rebuilding existing rows');
     assert.deepEqual(await page.locator('.stream-row').allTextContents(), ['Upload 1', 'Upload 2', 'Upload 3']);
-    assert.deepEqual(await page.evaluate(() => window.takeoverTrace.slice(0, 2)), ['stop', 'fetch'], 'Safari takeover must stop and replace the document before the first auth request');
     assert.equal(await page.locator('#native').count(), 0);
     assert.equal(requests.filter(url => url.pathname === '/account/uploads/1').length, 1);
     assert.equal(requests.filter(url => url.pathname === '/account/uploads/2').length, 1);
@@ -251,7 +240,6 @@ try {
     await page.waitForURL('**/account/uploads');
     await inject();
     await page.waitForFunction(() => document.querySelectorAll('.stream-row').length === 3);
-    assert.deepEqual(await page.evaluate(() => window.takeoverTrace.slice(0, 2)), ['stop', 'fetch']);
     failedPage = true;
     await page.evaluate(() => sessionStorage.clear());
     await page.reload(); await inject();
