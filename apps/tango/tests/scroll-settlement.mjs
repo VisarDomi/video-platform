@@ -12,7 +12,8 @@ export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
             window.fixtureScrollWrites.push(args);
             originalScrollBy.apply(window, args);
         };
-        // No native scrollend is available to the viewer in this experiment.
+        // The test explicitly controls when momentum ends, not Chromium's own
+        // automatic scrollend after each individual test-driver scrollTo.
         window.addEventListener('scrollend', event => {
             if (event.isTrusted) event.stopImmediatePropagation();
         }, true);
@@ -50,12 +51,14 @@ export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
         window.fixtureScrollWrites.length = 0;
     });
     const end = async () => {
-        // Deliver queued movement before releasing contact. No scrollend signal.
+        // Deliver the browser's queued scroll before the explicit end boundary.
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        await page.evaluate(() => {
+        const settled = await page.evaluate(() => {
             window.fixtureTouch('touchend', 350);
+            window.dispatchEvent(new Event('scrollend'));
+            return !document.querySelector('.stream-stage').classList.contains('viewer-navigating');
         });
-        await page.waitForFunction(() => !document.querySelector('.stream-stage').classList.contains('viewer-navigating'));
+        assert.equal(settled, true, 'Scrollend must settle immediately, without a timer or frame delay');
     };
     const settle = async () => {
         await end();
@@ -115,17 +118,8 @@ export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
     await begin();
     await spacer(1);
     await page.evaluate(() => window.fixtureTouch('touchend', 350));
-    // Finger release is not the end of momentum; keep changing position.
-    await page.evaluate(() => new Promise(resolve => {
-        let frames = 0;
-        const move = () => {
-            window.fixtureScroll(window.scrollY + 10);
-            if (++frames < 12) requestAnimationFrame(move);
-            else resolve();
-        };
-        requestAnimationFrame(move);
-    }));
-    assert.equal((await read()).writes, 0, 'Changing position after release must not trigger a correction');
+    await page.waitForTimeout(150);
+    assert.equal((await read()).writes, 0, 'Releasing the finger during momentum must not snap before scrollend');
     assert.equal((await read()).navigating, true);
     assert.equal((await settle()).id, itemId(2));
 
@@ -135,8 +129,8 @@ export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
     assert.equal((await read()).writes, 0, 'A held finger prevents immediate settlement');
     await page.evaluate(() => window.fixtureScroll(window.scrollY + 100));
     await page.evaluate(() => window.fixtureTouch('touchend', 350));
-    await page.waitForTimeout(40);
-    assert.equal((await read()).writes, 0, 'An early scrollend must not bypass position settling');
+    await page.waitForTimeout(150);
+    assert.equal((await read()).writes, 0, 'Resumed scrolling must invalidate the previous scrollend');
     result = await settle();
     assert.equal(result.id, itemId(3));
     await begin();
@@ -150,5 +144,5 @@ export async function testScrollSettlement(page, itemId = n => `person-${n}`) {
         assert.equal((await read()).writes, 0, 'Every recycling step must leave native momentum alone');
     }
     assert.equal((await settle()).id, itemId(2));
-    console.log('PASS: settlement without scrollend; midpoint continuity without scroll writes; held touch and changing-position guards; video/spacer landings; next/previous, reversal and list limits.');
+    console.log('PASS: immediate scrollend settlement; midpoint continuity without scroll writes; held touch and momentum guards; video/spacer landings; next/previous, reversal and list limits.');
 }
