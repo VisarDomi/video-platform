@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { analyzeRecordingResolution, deriveResolutionPlaylist } from "../dist/stages/resolutionPolicy.js";
-import { upscaleWholeRecordingTo1080 } from "../dist/stages/upscale.js";
+import { upscaleWholeRecordingTo1080, productionTargetDimensions } from "../dist/stages/upscale.js";
 import { streamCopyRemux } from "../dist/stages/remux.js";
 import { createDefaultStages } from "../dist/stages/defaultStages.js";
 import { fixturePart, assemble, frameIds, audioPackets, videoTimes, videoSliceHashes, exec } from "./helpers/mediaFixture.mjs";
@@ -55,6 +55,30 @@ test("TS ownership uses packet positions with unequal GOP counts, repeated files
     await writeFile(path.join(root, "part-0.ts"), Buffer.concat([await readFile(low.input), await readFile(high.input)]));
     await assert.rejects(() => analyzeRecordingResolution(playlist), /inside segment/);
 });
+
+for (const size of ["640x480", "480x640", "960x768", "768x960"]) {
+    test(`v4 real conversion preserves unpadded ${size} frames/audio above Full-HD pixel budget`, async t => {
+        const root = await temporary(t);
+        const part = await fixturePart(root, "narrow", { size, frames: 4, fmp4: true });
+        const playlist = await assemble(root, [part]);
+        const [width,height] = size.split("x").map(Number);
+        const source = {width,height,sampleAspectRatio:"1:1"};
+        const out = await upscaleWholeRecordingTo1080(playlist,path.join(root,"out"),"narrow",source);
+        sameFrames(await frameIds(part.input),await frameIds(out.path));
+        await sameAudio([part],out.path);
+        await continuousVideo(out.path);
+        const {stdout} = await exec("ffprobe",["-v","error","-select_streams","v:0","-show_entries",
+            "stream=width,height,sample_aspect_ratio","-of","json",out.path]);
+        const stream = JSON.parse(stdout).streams[0];
+        const target = productionTargetDimensions(source);
+        assert.deepEqual(stream,{width:target.width,height:target.height,sample_aspect_ratio:"1:1"});
+        // The source has uniform luma per frame. Padding would introduce a
+        // dark border; inspect corners and centre of the actual encoded frame.
+        const {stdout:pixels} = await exec("ffmpeg",["-v","error","-i",out.path,"-frames:v","1",
+            "-vf","scale=3:3:flags=neighbor,format=gray","-f","rawvideo","pipe:1"],{encoding:"buffer"});
+        assert(Math.max(...pixels)-Math.min(...pixels)<=2,"no added border/padding");
+    });
+}
 
 for (const fmp4 of [false, true]) {
     test(`${fmp4 ? "fMP4" : "TS"} conversion preserves distinct frames and AAC across resolution resets`, async (t) => {

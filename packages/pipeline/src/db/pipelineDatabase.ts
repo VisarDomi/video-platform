@@ -480,6 +480,9 @@ export class PipelineDatabase {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
         }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
+        if (!attemptColumns.some((column) => column.name === "evidence_json")) {
+            this.database.exec("ALTER TABLE upload_attempts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]'");
+        }
         if (!attemptColumns.some((column) => column.name === "transfer_started")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN transfer_started INTEGER NOT NULL DEFAULT 0");
         }
@@ -2231,6 +2234,40 @@ export class PipelineDatabase {
             UPDATE upload_confirmations SET status = 'absent', checked_at = ?
             WHERE attempt_id = ? AND status = 'pending'
         `).run(now.toISOString(), attemptId);
+    }
+
+    recordUploadEvidence(attemptId: string, evidence: Record<string, unknown>, now = new Date()): void {
+        const row = this.database.prepare("SELECT evidence_json FROM upload_attempts WHERE id = ?")
+            .get(attemptId) as { evidence_json: string } | undefined;
+        if (!row) throw new Error(`Unknown upload attempt ${attemptId}`);
+        const history = JSON.parse(row.evidence_json) as unknown[];
+        history.push({ ...evidence, checkedAt: now.toISOString() });
+        this.database.prepare("UPDATE upload_attempts SET evidence_json = ? WHERE id = ?")
+            .run(JSON.stringify(history.slice(-16)), attemptId);
+    }
+
+    postponeConfirmation(attemptId: string, reason: string, now = new Date()): void {
+        const update = this.database.prepare(`UPDATE upload_confirmations SET confirm_after = ?, checked_at = ?
+            WHERE attempt_id = ? AND status = 'pending'`)
+            .run(new Date(now.getTime() + 24 * 60 * 60_000).toISOString(), now.toISOString(), attemptId);
+        if (!update.changes) return;
+        this.recordUploadEvidence(attemptId, { stage: "verification_wait", reason }, now);
+    }
+
+    attachUncertainRemote(attemptId: string, remoteId: string): void {
+        if (!/^\d+$/.test(remoteId)) throw new Error("Invalid recovered upload ID");
+        this.database.prepare("UPDATE upload_attempts SET remote_id = ? WHERE id = ? AND status = 'uncertain' AND remote_id IS NULL")
+            .run(remoteId, attemptId);
+    }
+
+    latestUploadDiagnostics(recordingId: string): unknown {
+        const row = this.database.prepare(`SELECT a.status, a.error, a.evidence_json, c.confirm_after, c.status AS confirmation_status
+            FROM upload_attempts a LEFT JOIN upload_confirmations c ON c.attempt_id = a.id
+            WHERE a.recording_id = ? ORDER BY a.started_at DESC LIMIT 1`).get(recordingId) as
+            { evidence_json: string; [key: string]: unknown } | undefined;
+        if (!row) return null;
+        const { evidence_json, ...rest } = row;
+        return { ...rest, evidence: JSON.parse(evidence_json) };
     }
 
     private validateProvenance(provenance: Omit<RecordingProvenance, "recordingId">): void {

@@ -94,11 +94,13 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             };
             console.log(JSON.stringify({ event: "campaign-step", result }));
             const disposition = result.step?.disposition;
-            if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown")
+            if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
                 && result.step?.resumeAt) {
                 const resumeAt = Date.parse(result.step.resumeAt);
                 if (Number.isFinite(resumeAt)) {
-                    await wait(Math.max(0, resumeAt - Date.now()), signal);
+                    // Keep verification and queue watching alive during an
+                    // upload cooldown; durable campaign state gates uploads.
+                    await wait(Math.min(IDLE_POLL_MILLISECONDS, Math.max(0, resumeAt - Date.now())), signal);
                     continue;
                 }
             }

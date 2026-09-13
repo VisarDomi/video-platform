@@ -51,6 +51,10 @@ export class UploadCoordinator {
         try {
             outcome = await this.uploader.upload({
                 ...request,
+                onEvidence: async (evidence) => {
+                    this.database.recordUploadEvidence(attemptId, evidence);
+                    await request.onEvidence?.(evidence);
+                },
                 onProgress: async (phase, transmittedBytes) => {
                     this.database.updateUploadProgress(attemptId, phase, transmittedBytes);
                     await request.onProgress?.(phase, transmittedBytes);
