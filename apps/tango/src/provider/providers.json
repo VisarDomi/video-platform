@@ -1,0 +1,24 @@
+{
+  "tango": {
+    "hosts": [
+      "tango.me",
+      "www.tango.me"
+    ],
+    "ios": {
+      "name": "Tango",
+      "bundleId": "com.visar.Tango.paid",
+      "login": true,
+      "extensions": [
+        "Login",
+        "Xvid"
+      ]
+    }
+  },
+  "xvideos": {
+    "hosts": [
+      "xvideos.com",
+      "www.xvideos.com"
+    ],
+    "ios": null
+  }
+}

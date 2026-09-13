@@ -15,16 +15,8 @@ export default defineConfig(({ mode }) => ({
         modulePreload: false,
         cssCodeSplit: false,
     },
-    plugins: mode === 'extension' ? [{
-        name: 'safari-document-takeover',
-        enforce: 'pre',
-        transform(source, id) {
-            if (!id.endsWith('/src/core/page.ts')) return;
-            const original = 'mode: "rewrite" | "replace" = "rewrite"';
-            if (!source.includes(original)) throw new Error('Stream takeover changed; inspect the Safari adapter');
-            return source.replace(original, 'mode: "rewrite" | "replace" = "replace"');
-        },
-    }] : [
+    // Preserve the shared SOP default; the extension guards close() reentry.
+    plugins: mode === 'extension' ? [] : [
         monkey({
             entry: "src/main.ts",
             userscript: {

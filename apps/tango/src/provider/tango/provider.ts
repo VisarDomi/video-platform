@@ -1,28 +1,10 @@
+import { request, fetchResponse, type XhrResult } from "../../core/request";
 import { Handler, type Provider, type Route, type Stream } from "../types";
 
 const GATEWAY = "https://gateway.tango.me";
 const PUBLIC = `${GATEWAY}/proxycador/api/public/v1`;
 const DOWNLOADS = "https://192.168.1.197:9999/api/tango";
 
-interface XhrResult {
-    status: number;
-    text: string;
-}
-
-function request(url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<XhrResult> {
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open(init.method ?? "GET", url);
-        xhr.withCredentials = true;
-        xhr.setRequestHeader("Accept", "application/json; charset=UTF-8");
-        for (const [name, value] of Object.entries(init.headers ?? {})) {
-            xhr.setRequestHeader(name, value);
-        }
-        xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
-        xhr.onerror = () => reject(new Error(`Request failed: ${url}`));
-        xhr.send(init.body ?? null);
-    });
-}
 
 async function ok(url: string, init?: Parameters<typeof request>[1]): Promise<XhrResult> {
     const response = await request(url, init);
@@ -280,14 +262,14 @@ export const tango: Provider = {
     },
 
     async fetchDownloadList(): Promise<Set<string>> {
-        const response = await fetch(`${DOWNLOADS}/list`);
+        const response = await fetchResponse(`${DOWNLOADS}/list`);
         if (!response.ok) throw new Error(`Download-list request failed: ${response.status}`);
         const body = await response.json() as unknown;
         return new Set(requiredStringArray(body, "Download-list response"));
     },
 
     async addToDownloadList(streamerId: string): Promise<void> {
-        const response = await fetch(`${DOWNLOADS}/add`, {
+        const response = await fetchResponse(`${DOWNLOADS}/add`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier: streamerId }),
@@ -296,7 +278,7 @@ export const tango: Provider = {
     },
 
     async removeFromDownloadList(streamerId: string): Promise<void> {
-        const response = await fetch(`${DOWNLOADS}/remove`, {
+        const response = await fetchResponse(`${DOWNLOADS}/remove`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier: streamerId }),

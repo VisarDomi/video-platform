@@ -9,7 +9,9 @@
     "tests:extension": "npm run build:extension && node tests/extension.mjs && node tests/xvideos.mjs && node tests/cookies.mjs",
     "tests": "node tests/ios/run.mjs",
     "tests:smoke": "node tests/ios/run.mjs --smoke",
-    "tests:actions": "node tests/ios/run.mjs --actions"
+    "tests:actions": "node tests/ios/run.mjs --actions",
+    "build:ios": "node scripts/build-ios.mjs",
+    "tests:ios": "node tests/native-app.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

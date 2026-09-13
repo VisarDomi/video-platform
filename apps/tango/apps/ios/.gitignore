@@ -1,0 +1,6 @@
+build/
+__pycache__/
+*.xcodeproj/
+App/Info.plist
+Login/Info.plist
+Login.entitlements

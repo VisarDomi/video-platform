@@ -1,0 +1,346 @@
+{
+  "date": "2026-09-13T09:15:07.273918+00:00",
+  "app": "Tango",
+  "build": "9",
+  "bundleId": "com.visar.Tango.paid",
+  "sourceRuntimeChanged": false,
+  "hostedXvidChanged": false,
+  "accountMutationsPerformed": false,
+  "confirmedRegressions": [
+    "Reader checkpoint remained on Home during delayed profile/geometry loading",
+    "Asynchronous source transitions were not checkpointed until another UI event",
+    "Cold reader and rebuilt Home Back lost list position",
+    "Cached HLS key/init registrations expired with old segments",
+    "HEAD incorrectly reported an empty representation"
+  ],
+  "fixes": [
+    "Native state adapter delegates to shared saveState and checkpoints its transitions",
+    "Checkpoint reader route before awaits; cold auto-navigation uses the shared Home row",
+    "Restore Home scroll before cold reader navigation and rebuilt Back",
+    "Retain cached playlist/key/init registrations for relay lifetime; continue expiring live segments/parts",
+    "HEAD reports representation length without response body"
+  ],
+  "automatedTests": {
+    "nativeBrowser": "passed delayed initial/cold reader restore, asynchronous removal, Home Back at saved position, Multi, foreground pause/mute, fixture Follow/Unfollow/Block",
+    "extensionBrowser": "passed Tango/XVideos source UI, scrollend, pagination, co-streamers, Multi, retry, auth and cookie fixtures",
+    "nativeLoginCookies": "3 passed",
+    "swiftOffline": "passed 20 simultaneous refresh callers, durable rotation, playback recovery, navigation reuse, 30-minute rotation, request content types, HLS rewriting, Range, cookie scoping, expiry/reuse and HEAD",
+    "nativeTypecheck": "passed"
+  },
+  "physical": [
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "home",
+        "rows": 131,
+        "loading": false,
+        "scrollY": 600,
+        "checkpoint": true,
+        "diagnostics": {
+          "playbackUpdates": 19,
+          "refreshes": 1,
+          "mediaHTTP": {
+            "200": 338,
+            "206": 4
+          }
+        },
+        "multi": "on",
+        "media": []
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "5450596916f6d19f02f613a010ba5e2351471eb3f835b8f6edb9b8c07157110b",
+      "check": "home-position"
+    },
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "reader",
+        "rows": 0,
+        "loading": false,
+        "scrollY": 9917,
+        "checkpoint": true,
+        "diagnostics": {
+          "refreshes": 1,
+          "playbackUpdates": 23,
+          "mediaHTTP": {
+            "200": 401,
+            "206": 8
+          }
+        },
+        "multi": "on",
+        "media": [
+          {
+            "ready": 0,
+            "error": null,
+            "time": 0,
+            "width": 0,
+            "height": 0,
+            "paused": true,
+            "muted": true,
+            "inline": true,
+            "host": null
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 13.65321230265974,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 13.546856668991452,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          }
+        ]
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "5450596916f6d19f02f613a010ba5e2351471eb3f835b8f6edb9b8c07157110b",
+      "check": "reader-before-kill"
+    },
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "reader",
+        "rows": 0,
+        "loading": false,
+        "scrollY": 9917,
+        "checkpoint": false,
+        "diagnostics": {
+          "refreshes": 1,
+          "playbackUpdates": 2,
+          "mediaHTTP": {
+            "200": 39,
+            "206": 4
+          }
+        },
+        "multi": "on",
+        "media": [
+          {
+            "ready": 0,
+            "error": null,
+            "time": 0,
+            "width": 0,
+            "height": 0,
+            "paused": true,
+            "muted": true,
+            "inline": true,
+            "host": null
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 7.23115596831671,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 7.4548297269794235,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          }
+        ]
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "df4e88e9c6133c45361ebae604d83af0152ebe000ca1b5b321c9e3a7f145416b",
+      "check": "cold-reader"
+    },
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "reader",
+        "rows": 0,
+        "loading": false,
+        "scrollY": 9917,
+        "checkpoint": false,
+        "diagnostics": {
+          "refreshes": 1,
+          "playbackUpdates": 4,
+          "mediaHTTP": {
+            "200": 80,
+            "206": 4
+          }
+        },
+        "multi": "on",
+        "media": [
+          {
+            "ready": 0,
+            "error": null,
+            "time": 0,
+            "width": 0,
+            "height": 0,
+            "paused": true,
+            "muted": true,
+            "inline": true,
+            "host": null
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 17.412074985984635,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 17.63562499998126,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          }
+        ]
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "df4e88e9c6133c45361ebae604d83af0152ebe000ca1b5b321c9e3a7f145416b",
+      "check": "playing-after-cold"
+    },
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "reader",
+        "rows": 0,
+        "loading": false,
+        "scrollY": 9917,
+        "checkpoint": false,
+        "diagnostics": {
+          "mediaHTTP": {
+            "200": 139,
+            "206": 4
+          },
+          "refreshes": 1,
+          "playbackUpdates": 7
+        },
+        "multi": "on",
+        "media": [
+          {
+            "ready": 0,
+            "error": null,
+            "time": 0,
+            "width": 0,
+            "height": 0,
+            "paused": true,
+            "muted": true,
+            "inline": true,
+            "host": null
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 27.57620171366758,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          },
+          {
+            "ready": 4,
+            "error": null,
+            "time": 26.579133495659764,
+            "width": 720,
+            "height": 1280,
+            "paused": false,
+            "muted": true,
+            "inline": true,
+            "host": "127.0.0.1"
+          }
+        ]
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "df4e88e9c6133c45361ebae604d83af0152ebe000ca1b5b321c9e3a7f145416b",
+      "check": "foreground-reader"
+    },
+    {
+      "bundle": "com.visar.Tango.paid",
+      "snapshot": {
+        "route": "home",
+        "rows": 129,
+        "loading": false,
+        "scrollY": 600,
+        "checkpoint": false,
+        "diagnostics": {
+          "mediaHTTP": {
+            "200": 183,
+            "206": 4
+          },
+          "refreshes": 1,
+          "playbackUpdates": 10
+        },
+        "multi": "on",
+        "media": []
+      },
+      "routeFingerprint": "81e5ed3366e01ebe4fdb0dde34d49dd9396959e89fdd13ce391d94e536a2b7a4",
+      "listFingerprint": "df4e88e9c6133c45361ebae604d83af0152ebe000ca1b5b321c9e3a7f145416b",
+      "check": "home-after-cold-back"
+    }
+  ],
+  "limitations": [
+    "The 120-second HLS retention check uses an injected clock and protocol fixture, not a long live background soak.",
+    "No repeat live account Follow/Block mutations; retained prior physical evidence and reran fixtures."
+  ],
+  "assets": {
+    "app.js": "f7d7d3485ed4e173be809ff44358d2b5fe8c8d7cff4a083eba00fe479d1dc660",
+    "index.html": "012d5d942c012c16424d9ee17dca413c1e65518292ebc2a27259522a1694d0de"
+  },
+  "renewal": {
+    "extensions": [
+      {
+        "bundleId": "com.visar.Tango.paid.Login",
+        "version": "9",
+        "profileExpires": "2027-09-13T09:14:44Z"
+      },
+      {
+        "bundleId": "com.visar.Tango.paid.Xvid",
+        "version": "9",
+        "profileExpires": "2027-09-13T09:14:44Z"
+      }
+    ],
+    "xvidContentSHA256": "fb73c7754f18fb24b76a3cb2014807a9ce569cef2a7b68606a07365c14725142",
+    "scheduler": "com.visar.installed-apps-refresh",
+    "active": true,
+    "lastExitStatus": 0,
+    "bundleId": "com.visar.Tango.paid",
+    "version": "9",
+    "iconDeclared": false,
+    "webAssetsSHA256": {
+      "app.js": "f7d7d3485ed4e173be809ff44358d2b5fe8c8d7cff4a083eba00fe479d1dc660",
+      "index.html": "012d5d942c012c16424d9ee17dca413c1e65518292ebc2a27259522a1694d0de"
+    },
+    "lastSuccess": 1789290938.2327318,
+    "nextDue": 1791882938.232732,
+    "lastError": null,
+    "inputHash": "7ea7866af61f9e2c8ed7cab86e7f21508a27d0b5ee5fac6959b272a622f7ef48",
+    "currentInputsMatch": true,
+    "profileExpires": "2027-09-13T09:14:44Z",
+    "retry": "First scheduled attempt failed because an Xcode provisioning profile disappeared; unchanged normal job succeeded on retry."
+  }
+}
