@@ -98,6 +98,21 @@ function targetDimensions(frame: SourceVideoFrame, targetShortEdge: number): {
     };
 }
 
+// A 1080 short edge alone undershoots Full HD for 4:3/5:4. Preserve aspect,
+// but meet BOTH oriented Full-HD edges (and therefore its pixel budget).
+// This also avoids gambling on whether provider admission uses total pixels
+// or the long edge. No padding/cropping; narrow content becomes taller.
+export function productionTargetDimensions(frame: SourceVideoFrame): {
+    width: number; height: number; displayAspectRatio: number;
+} {
+    const baseline = targetDimensions(frame, 1080);
+    const { displayAspectRatio } = baseline;
+    const scale = Math.max(1, 1920 / Math.max(baseline.width, baseline.height));
+    const width = Math.ceil(baseline.width * scale / 2) * 2;
+    const height = Math.ceil(baseline.height * scale / 2) * 2;
+    return { width, height, displayAspectRatio };
+}
+
 function droppedSelectionExpression(ranges: readonly FrameRange[]): string | null {
     if (ranges.length === 0) return null;
     const excluded = ranges.map((range) => range.start === range.end
@@ -350,7 +365,7 @@ export async function upscaleWholeRecordingTo1080(
 ): Promise<UpscaleTranscodeResult> {
     // Production conversion includes every segment, even for all-360p/480p
     // sources. The supervised comparison mode's 720p floor does not apply.
-    const dimensions = targetDimensions(source, 1080);
+    const dimensions = productionTargetDimensions(source);
     const plan: UpscalePlan = {
         specification: { mode: "upscale1080p", sourceShortEdgeFloor: 0, targetShortEdge: 1080 },
         sourceFrameCount: 1,

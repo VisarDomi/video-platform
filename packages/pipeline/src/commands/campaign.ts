@@ -133,7 +133,7 @@ export async function setCampaignRunning(config: PipelineConfig, running: boolea
         assertVersionedStagingRoot(config.artifactsRoot, config.stagingRoot);
         const plan = database.planProductionRollover(CURRENT_PRODUCTION_VERSION);
         if (config.comparisonTrialOnly && !prepareOnly && (plan.required || !database.getComparisonTrial())) {
-            throw new Error("Prepare v3 with campaign-prepare and select recordings before resuming");
+            throw new Error("Prepare v4 with campaign-prepare and select recordings before resuming");
         }
         if (prepareOnly && database.getCampaignControl().state !== "paused") throw new Error("Pause before preparation");
         if (plan.required && database.getCampaignControl().state !== "paused") {
