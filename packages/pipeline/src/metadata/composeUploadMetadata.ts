@@ -59,11 +59,14 @@ export function composeUploadMetadata(
         throw new Error("Cannot compose upload metadata with unresolved provenance");
     }
     const output = descriptorOutput(description.output);
-    // Public campaign titles are natural language. Only an explicitly prepared
-    // comparison trial exposes recording/version/part diagnostics in its title.
-    const folderSuffix = options.diagnosticTitle ? ` [${productionUploadIdentity(recording, part)}]` : "";
+    // Restore the v1 public format: model title [source recording basename].
+    // sourcePath is the recording directory, already without a media extension;
+    // never use the generated artifact's conversion/version suffix here.
+    // Only an explicitly prepared comparison adds version/part diagnostics.
+    const folderSuffix = ` [${options.diagnosticTitle
+        ? productionUploadIdentity(recording, part) : path.basename(recording.sourcePath)}]`;
     const titleRoom = TITLE_LIMIT - folderSuffix.length;
-    if (titleRoom < 1) throw new Error("Comparison identity leaves no room for a title");
+    if (titleRoom < 1) throw new Error("Recording identity leaves no room for a title");
     const title = `${shorten(output.title, titleRoom)}${folderSuffix}`;
 
     const suffix = [

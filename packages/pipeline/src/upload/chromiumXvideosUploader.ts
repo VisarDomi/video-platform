@@ -4,6 +4,7 @@ import { chromium, type BrowserContext, type Page, type Request } from "playwrig
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { hasFullHdPlayback, parsePlaybackRenditions, type PlaybackRendition } from "./playbackQuality.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
@@ -71,7 +72,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const page = context.pages()[0] ?? await context.newPage();
             const counter = new RequestByteCounter();
             page.on("request", (networkRequest) => { void counter.observe(networkRequest); });
-            await this.ensureAuthenticated(page);
+            await this.authenticateForUpload(page);
             // SQLite guards all production uploads. Only diagnostic titles can
             // support this extra remote search: natural titles are not unique.
             const titleIdentity = hasDiagnosticUploadIdentity(request.title, request.uploadIdentity)
@@ -102,6 +103,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             await page.getByText("The file upload was completed successfully.", { exact: false })
                 .waitFor({ state: "visible", timeout: 30 * 60_000 });
             await request.onProgress?.("file_uploaded", counter.transmitted(request.sizeBytes));
+            await this.saveSubmissionEvidence(page, request, "file_uploaded");
 
             await this.typeModelAlias(page, request.streamerAlias);
             const submittedAt = new Date();
@@ -111,9 +113,11 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 page.getByRole("button", { name: "Save modifications", exact: true }).click(),
             ]);
             await page.waitForTimeout(1_000);
+            await this.saveSubmissionEvidence(page, request, "metadata_submitted");
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
-            const submittedId = await this.captureSubmittedVideoId(page, titleIdentity);
+            const submittedId = await this.captureSubmittedVideoId(page, titleIdentity, request);
+            await this.saveSubmissionEvidence(page, request, "capture_complete");
             completed = true;
             return {
                 kind: "uploaded",
@@ -123,6 +127,10 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                     metadataSubmittedAt: submittedAt.toISOString(),
                 },
             };
+        } catch (error) {
+            const page = context.pages()[0];
+            if (page) await this.saveSubmissionEvidence(page, request, "submission_error").catch(() => undefined);
+            throw error;
         } finally {
             if (completed || this.config.leaveOpenOnFailure === false) {
                 await context.close();
@@ -157,6 +165,8 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     async probeUploadStatus(page: Page, uploadId: string): Promise<{
         outcome: "online" | "not_ready";
         remoteUrl: string | null;
+        renditions?: PlaybackRendition[];
+        reason?: string;
     }> {
         // Online check: the edit page shows the "Direct link to the video
         // page" anchor only once the video is published.
@@ -164,7 +174,21 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         if (!edit.title || !edit.directLink) {
             return { outcome: "not_ready", remoteUrl: null };
         }
-        return { outcome: "online", remoteUrl: edit.directLink };
+        const response = await page.request.get(edit.directLink, { timeout: 30_000 });
+        if (!response.ok()) return { outcome: "not_ready", remoteUrl: edit.directLink, reason: `Playback page HTTP ${response.status()}` };
+        const html = await response.text();
+        const master = html.match(/setVideoHLS\(['"]([^'"]+)['"]\)/)?.[1];
+        if (!master) return { outcome: "not_ready", remoteUrl: edit.directLink, reason: "No HLS master advertised yet" };
+        const url = new URL(master);
+        if (url.protocol !== "https:" || !/(^|\.)xvideos(?:-cdn)?\.com$/.test(url.hostname)) {
+            throw new Error("Unexpected provider playback manifest host");
+        }
+        const manifest = await page.request.get(url.href, { timeout: 30_000 });
+        if (!manifest.ok()) throw new Error(`Playback manifest HTTP ${manifest.status()}`);
+        const renditions = parsePlaybackRenditions(await manifest.text());
+        return { outcome: hasFullHdPlayback(renditions) ? "online" : "not_ready",
+            remoteUrl: edit.directLink, renditions,
+            reason: hasFullHdPlayback(renditions) ? "Full-HD pixel tier available" : "Published, but Full-HD playback tier is missing" };
     }
 
     // One login flow, then the callers run their specific work on the
@@ -184,7 +208,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         });
         try {
             const page = context.pages()[0] ?? await context.newPage();
-            await this.ensureAuthenticated(page);
+            await this.authenticateForUpload(page);
             return await run(page);
         } finally {
             await context.close();
@@ -201,6 +225,17 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         if (!stats.isFile() || stats.size !== request.sizeBytes) throw new Error("Upload artifact size no longer matches its ledger record");
         if (request.title.length > 255 || request.description.length > 1_000 || request.tags.length > 20) {
             throw new Error("Upload metadata exceeds XVideos limits");
+        }
+    }
+
+    private async authenticateForUpload(page: Page): Promise<void> {
+        try { await this.ensureAuthenticated(page); } catch (error) {
+            if (error instanceof HumanActionRequiredError) throw error;
+            // A vanished OAuth intermediate button is not permanent failure.
+            // Keep an authenticated-session check first for instant redirects.
+            const ready = await this.verifyAccountDashboard(page.context()).catch(() => false);
+            if (ready) return;
+            throw new HumanActionRequiredError("session_login", error instanceof Error ? error.message : String(error));
         }
     }
 
@@ -420,13 +455,29 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         await page.keyboard.type(alias);
     }
 
-    private async captureSubmittedVideoId(page: Page, titleIdentity: string | null): Promise<string | null> {
+    private async saveSubmissionEvidence(page: Page, request: UploadRequest, stage: string): Promise<void> {
+        if (!request.onEvidence) return;
+        // Only submission-page text, not login forms/cookies or signed media URLs.
+        if (!page.url().startsWith(UPLOADS_URL)) return;
+        const text = await page.locator("body").innerText().catch(() => "");
+        await request.onEvidence({ stage, page: new URL(page.url()).pathname,
+            text: text.slice(0, 16000),
+            duplicateReported: /duplicate|already (?:been )?uploaded|already exists/i.test(text),
+            rejectionReported: /upload failed|publication failed|video rejected|processing failed/i.test(text) });
+    }
+
+    private async captureSubmittedVideoId(page: Page, titleIdentity: string | null, request?: UploadRequest): Promise<string | null> {
         // After saving, XVideos first shows "Processing video 0% Publication:
         // pending" and only reveals the "edit it here" link once the panel
         // updates to "Video processed. Publication succeeded." (measured live:
         // ~20 seconds). Poll for the link instead of reading once.
         const deadline = Date.now() + 5 * 60_000;
+        let lastEvidence = 0;
         while (Date.now() < deadline) {
+            if (request && Date.now() - lastEvidence >= 30_000) {
+                await this.saveSubmissionEvidence(page, request, "publication_wait");
+                lastEvidence = Date.now();
+            }
             const links = await page.locator('a[href*="/account/uploads/"]')
                 .evaluateAll((elements) => elements.map((element) => element.getAttribute("href") ?? ""))
                 .catch(() => [] as string[]);
@@ -456,6 +507,9 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             waitUntil: "domcontentloaded",
             timeout: 30_000,
         });
+        if (!await page.getByText("My Content", { exact: true }).count()) {
+            throw new HumanActionRequiredError("session_login", "Uploads search is not authenticated; absence cannot be inferred");
+        }
         const candidates = await page.locator('[id^="listing-video-"]').evaluateAll((elements) => elements.map((element) => {
             const titleLink = [...element.querySelectorAll("a")].find((link) => {
                 const href = link.getAttribute("href") ?? "";
@@ -471,6 +525,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             ...candidate,
             remoteUrl: candidate.remoteUrl ? new URL(candidate.remoteUrl, UPLOADS_URL).href : "",
         })), searchTerm);
+    }
+
+    async recoverUploadId(page: Page, identity: string): Promise<string | null> {
+        // Search by folder, then require an exact current-generation suffix.
+        // Older generations and ambiguous matches are never adopted.
+        const entries = await this.findEntries(page, identity.split(" | ")[0]);
+        const matches = entries.filter((entry) => hasDiagnosticUploadIdentity(entry.title, identity));
+        return matches.length === 1 ? matches[0].remoteId : null;
     }
 
     // Admission-time existence check: the folder name is the local truth, the

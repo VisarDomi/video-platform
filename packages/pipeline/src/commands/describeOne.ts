@@ -47,7 +47,7 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
             database.getProvenanceOverride(recording.provider, resolution.observedIdentifier) ?? resolution);
         const orchestrator = new PipelineOrchestrator(
             database,
-            createDefaultStages(config.stagingRoot),
+            createDefaultStages(config.stagingRoot, config),
             `pipeline-describe-one-${process.pid}`,
         );
         let current = recording;

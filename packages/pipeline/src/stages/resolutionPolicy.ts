@@ -58,7 +58,7 @@ export type RecordingResolutionPolicy =
 
 type DimensionProbe = (inputPath: string) => Promise<VideoDimensions>;
 
-export const RESOLUTION_POLICY_VERSION = "resolution-policy-v3";
+export const RESOLUTION_POLICY_VERSION = "resolution-policy-v4";
 export const FULL_HD_PIXEL_COUNT = 1920 * 1080;
 
 export function resolutionPolicyReason(reason: string): string {

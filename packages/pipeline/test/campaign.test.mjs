@@ -46,7 +46,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.",
         tags: ["tango", "live"],
     });
-    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v3: test fixture");
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v4: test fixture");
 }
 
 async function campaignWorkerFixture(t) {
@@ -100,7 +100,7 @@ test("production roots are edited-only while manual remux roots retain downloade
     assert(pipelineConfig.discoveryRoots.every((root) => root.path.endsWith("edited")));
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "downloader").length, 3);
     assert.equal(pipelineConfig.manualRemuxRoots.filter((root) => root.sourceKind === "edited").length, 3);
-    assert.equal(pipelineConfig.stagingRoot, path.join(pipelineConfig.artifactsRoot, "production-v3"));
+    assert.equal(pipelineConfig.stagingRoot, path.join(pipelineConfig.artifactsRoot, "production-v6"));
     assert.equal(pipelineConfig.manualStagingRoot, path.join(pipelineConfig.stagingRoot, "manual"));
 });
 
@@ -174,6 +174,25 @@ test("antibot failure parks the campaign in a 60s cooldown instead of blocking",
     assert.equal(control.resumeAt, "2026-08-17T10:01:00.000Z");
     assert.equal(control.antibotFailures, 1);
     assert.equal(database.get(recording.id).state, "metadata_ready");
+});
+
+test("generic pre-transfer failure and login errors retry tomorrow without overriding manual pause", async (t) => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    for (const error of [new Error("locator timeout"), new HumanActionRequiredError("session_login", "OAuth timeout")]) {
+        database.setCampaignState("running");
+        let calls = 0;
+        const worker = new CampaignWorker(database, config, resolver, async () => {calls++; throw error;});
+        await worker.step(new Date("2026-10-01T00:00:00Z"));
+        assert.equal(database.getCampaignControl().resumeAt, "2026-10-02T00:00:00.000Z");
+        assert.equal(database.get(recording.id).state, "metadata_ready");
+        await worker.step(new Date("2026-10-01T12:00:00Z"));
+        assert.equal(calls,1);
+        await worker.step(new Date("2026-10-02T00:00:00Z"));
+        assert.equal(calls,2);
+        database.setCampaignState("paused");
+        await worker.step(new Date("2026-10-04T00:00:00Z"));
+        assert.equal(calls,2);
+    }
 });
 
 test("cooldown resumes the same recording at resume_at and doubles the wait per failure", async (t) => {
@@ -371,7 +390,7 @@ test("campaign resume performs a pending production rollover and archives retire
     t.after(() => rm(root, { recursive: true, force: true }));
     const databasePath = path.join(root, "pipeline.sqlite");
     const artifactsRoot = path.join(root, "artifacts");
-    const stagingRoot = path.join(artifactsRoot, "production-v3");
+    const stagingRoot = path.join(artifactsRoot, "production-v6");
     await mkdir(artifactsRoot);
     const database = new PipelineDatabase(databasePath);
     const recording = database.discover(inputForRollover(root));
@@ -415,7 +434,7 @@ test("campaign resume performs a pending production rollover and archives retire
         manualStagingRoot: path.join(stagingRoot, "manual"),
     };
     const result = await setCampaignRunning(config, true);
-    assert.equal(result.productionVersion, "production-v3");
+    assert.equal(result.productionVersion, "production-v6");
     assert.equal(result.rollover.rolledOver, true);
     assert.equal(result.rollover.retiredRecordings, 1);
     assert.equal(path.dirname(result.rollover.historySnapshotPath), path.join(root, "history", "legacy-production-v1"));

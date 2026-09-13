@@ -109,30 +109,32 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         updatedAt: "2026-08-13T08:00:00Z",
     });
     assert.deepEqual(metadata.tags, ["stripchat", "live"]);
-    assert.equal(metadata.title, "Woman performs in a brightly lit bedroom");
+    assert.equal(metadata.title, "Woman performs in a brightly lit bedroom [2026-08-13 101112 Minami_jjjj]");
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
     assert(metadata.description.includes("Source: https://stripchat.com/226494362"));
     assert(metadata.description.includes("Alias: https://stripchat.com/Minami_jjjj"));
     assert(metadata.description.length <= 1_000);
 });
 
-test("diagnostic title suffix is explicit, default campaign titles stay clean and bounded", () => {
+test("production restores v1 model title plus basename; only explicit trials add version/part", () => {
     const recording = { sourcePath: "/source/2026-09-09 120000 alias" };
     const description = { output: { title: "A natural descriptive title", description: "Visible actions." } };
     const provenance = { status: "resolved", streamerUrl: "https://example.test/source" };
     const clean = composeUploadMetadata(recording, description, provenance);
     const diagnostic = composeUploadMetadata(recording, description, provenance, "full", { diagnosticTitle: true });
-    assert.equal(clean.title, description.output.title);
-    const identity = "2026-09-09 120000 alias | production-v3 | full";
-    assert.equal(diagnostic.title, `${clean.title} [${identity}]`);
+    assert.equal(clean.title, `${description.output.title} [2026-09-09 120000 alias]`);
+    assert(!clean.title.includes("production-v"));
+    const identity = "2026-09-09 120000 alias | production-v6 | full";
+    assert.equal(diagnostic.title, `${description.output.title} [${identity}]`);
     assert.equal(hasDiagnosticUploadIdentity(clean.title, identity), false);
     assert.equal(hasDiagnosticUploadIdentity(diagnostic.title, identity), true);
-    assert.equal(hasDiagnosticUploadIdentity(diagnostic.title, identity.replace("v3", "v2")), false);
+    assert.equal(hasDiagnosticUploadIdentity(diagnostic.title, identity.replace("v6", "v2")), false);
     assert.equal(clean.description, diagnostic.description);
     for (const diagnosticTitle of [false, true]) {
         const long = composeUploadMetadata(recording, { output: { ...description.output, title: "Natural title ".repeat(100) } },
             provenance, "full", { diagnosticTitle });
         assert(long.title.length <= 255);
+        if (!diagnosticTitle) assert(long.title.endsWith(" [2026-09-09 120000 alias]"));
         assert.equal(hasDiagnosticUploadIdentity(long.title, identity), diagnosticTitle);
     }
 });
@@ -158,7 +160,8 @@ test("orchestrator enables diagnostic titles only for a prepared comparison tria
             for (let i = 0; i < 4; i++) await orchestrator.processRecording(recording.id);
             assert.equal(db.get(recording.id).state, "metadata_ready");
             assert.equal(db.getUploadMetadata(recording.id).title, comparison
-                ? "Natural public title [2026-09-09 120000 12345 | production-v3 | full]" : "Natural public title");
+                ? "Natural public title [2026-09-09 120000 12345 | production-v6 | full]"
+                : "Natural public title [2026-09-09 120000 12345]");
         } finally { db.close(); }
     }
 });

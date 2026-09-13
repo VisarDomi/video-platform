@@ -46,7 +46,7 @@ async function run(command: string, args: readonly string[]): Promise<string> {
     });
 }
 
-async function sha256(filePath: string): Promise<string> {
+export async function artifactSha256(filePath: string): Promise<string> {
     const hash = createHash("sha256");
     await new Promise<void>((resolve, reject) => {
         const stream = createReadStream(filePath);
@@ -86,7 +86,7 @@ export async function validateArtifact(artifactPath: string, now = new Date()): 
     return {
         path: resolvedPath,
         sizeBytes: stats.size,
-        sha256: await sha256(resolvedPath),
+        sha256: await artifactSha256(resolvedPath),
         durationSeconds,
         videoCodec,
         audioCodec,

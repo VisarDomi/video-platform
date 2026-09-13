@@ -27,9 +27,9 @@ async function setup(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-process-recovery-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const edited = path.join(root, "edited");
-    const config = { ...pipelineConfig, databasePath: path.join(root, "pipeline.sqlite"),
+    const config = { ...pipelineConfig, comparisonTrialOnly: true, databasePath: path.join(root, "pipeline.sqlite"),
         finalizationDatabasePath: path.join(root, "finalization.sqlite"),
-        artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v3"),
+        artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v6"),
         comparisonSelectionFile: path.join(root, "test-videos.txt"), networkUploadsEnabled: false,
         serverUrl: "https://127.0.0.1:1", credentialsFilePath: path.join(root, "no-credentials"),
         discoveryRoots: [{ provider: "tango", sourceKind: "edited", path: edited }] };

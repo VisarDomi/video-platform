@@ -31,6 +31,7 @@ export type CampaignStepResult =
     | { readonly disposition: "parked_existing_upload"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
     | { readonly disposition: "daily_limit_cooldown"; readonly recordingId: string; readonly resumeAt: string }
+    | { readonly disposition: "upload_retry_cooldown"; readonly recordingId: string; readonly resumeAt: string; readonly reason: string }
     | { readonly disposition: "upload_completed"; readonly recordingId: string; readonly result: unknown };
 
 function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
@@ -58,7 +59,7 @@ export class CampaignWorker {
     ) {
         this.orchestrator = new PipelineOrchestrator(
             database,
-            createDefaultStages(config.stagingRoot),
+            createDefaultStages(config.stagingRoot, config),
             workerId,
         );
     }
@@ -255,7 +256,8 @@ export class CampaignWorker {
                 if (error instanceof HumanActionRequiredError) {
                     const streak = control.antibotFailures + 1;
                     const exponent = Math.min(streak - 1, 40);
-                    const waitMilliseconds = 60_000 * (2 ** exponent);
+                    const waitMilliseconds = error.action === "session_login" ? 24 * 60 * 60_000
+                        : Math.min(24 * 60 * 60_000, 60_000 * (2 ** exponent));
                     const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
                     return {
                         disposition: "antibot_cooldown",
@@ -263,6 +265,19 @@ export class CampaignWorker {
                         streak,
                         resumeAt: after.resumeAt ?? "",
                     };
+                }
+                // Transport/login timeouts can arrive as ordinary Playwright
+                // errors. A failed pre-transfer attempt is safe to retry; an
+                // uncertain transfer is reconciled separately, never repeated.
+                const afterFailure = this.database.get(uploadReady.id);
+                if (afterFailure?.state === "metadata_ready") {
+                    const after = this.database.recordUploadLimitCooldown(now);
+                    return { disposition: "upload_retry_cooldown", recordingId: uploadReady.id,
+                        resumeAt: after.resumeAt ?? "", reason: error instanceof Error ? error.message : String(error) };
+                }
+                if (afterFailure?.state === "xvideos_uncertain") {
+                    return { disposition: "upload_completed", recordingId: uploadReady.id,
+                        result: { state: "xvideos_uncertain", reason: "Awaiting acceptance reconciliation; no re-upload" } };
                 }
                 if (comparison) this.database.setCampaignState("paused", now);
                 throw error;

@@ -34,9 +34,9 @@ const execFileAsync = promisify(execFile);
 test("artifact paths are contained and stream-copy remux leaves threading to ffmpeg", () => {
     const id = "d".repeat(64);
     assert.equal(containedArtifactPath("/tmp/staging", id), `/tmp/staging/${id}.mp4`);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/production-v3/${id}.mp4`), true);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/legacy-production-v1/${id}.mp4`), false);
-    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v3", `/tmp/artifacts/production-v3/manual/${id}.mp4`), false);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v5", `/tmp/artifacts/production-v5/${id}.mp4`), true);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v5", `/tmp/artifacts/legacy-production-v1/${id}.mp4`), false);
+    assert.equal(isDirectArtifactPath("/tmp/artifacts/production-v5", `/tmp/artifacts/production-v5/manual/${id}.mp4`), false);
     assert.throws(() => containedArtifactPath("/tmp/staging", "../escape"), /Invalid recording ID/);
     assert.equal(
         containedArtifactPath("/tmp/staging", id, "upscale1080p"),

@@ -68,7 +68,7 @@ export const pipelineConfig: PipelineConfig = {
         10,
     ),
     cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP === "1",
-    comparisonTrialOnly: true,
+    comparisonTrialOnly: false,
     comparisonSelectionFile: process.env.VIDEO_PIPELINE_SELECTION_FILE ?? path.join(dataRoot, "pipeline", "test-videos.txt"),
     networkUploadsEnabled: process.env.VIDEO_PIPELINE_NETWORK_UPLOADS === "1",
 };

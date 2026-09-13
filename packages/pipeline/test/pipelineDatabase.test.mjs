@@ -65,7 +65,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.\n\nRecorded: unknown\nSource: https://tango.me/streamer-id",
         tags: ["tango", "live", "room"],
     });
-    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v3: test fixture");
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v4: test fixture");
     return database.get(recording.id);
 }
 
@@ -75,7 +75,7 @@ test("schema initialization is idempotent and discovery deduplicates across rest
     const second = database.discover(input(directory));
     assert.equal(first.id, second.id);
     assert.equal(database.list().length, 1);
-    assert.equal(database.getProductionVersion(), "production-v3");
+    assert.equal(database.getProductionVersion(), "production-v6");
     assert.equal(database.integrityCheck(), "ok");
 
     database.close();
@@ -98,7 +98,7 @@ test("schema eight gains trial controls without changing generation, history, or
     old.close();
     const migrated = new PipelineDatabase(databasePath);
     t.after(() => migrated.close());
-    assert.equal(migrated.getProductionVersion(), "production-v3");
+    assert.equal(migrated.getProductionVersion(), "production-v6");
     assert.equal(migrated.get(recording.id).state, "server_ready");
     assert.equal(migrated.getCampaignControl().state, "paused");
     assert.equal(migrated.getCampaignControl().providerFilter, "sc");
@@ -190,7 +190,7 @@ test("production rollover retires workflow state while preserving quota, overrid
 
     const rollover = reopened.commitProductionRollover();
     assert.equal(rollover.rolledOver, true);
-    assert.equal(reopened.getProductionVersion(), "production-v3");
+    assert.equal(reopened.getProductionVersion(), "production-v6");
     assert.deepEqual(reopened.list(), []);
     assert.deepEqual(reopened.uploadUsage("2026-08"), { spent: 900, reserved: 0 });
     assert.equal(reopened.getProvenanceOverride("tango", "alias")?.streamerId, "manual-id");
@@ -203,7 +203,7 @@ test("production rollover retires workflow state while preserving quota, overrid
         retiredRemoteUploads: row.retiredRemoteUploads,
     })), [{
         fromVersion: "legacy-production-v1",
-        toVersion: "production-v3",
+        toVersion: "production-v6",
         retiredRecordings: 1,
         retiredRemoteUploads: 1,
     }]);
@@ -404,7 +404,7 @@ test("dry-run plans are deterministic and mutate neither state nor quota", async
         new Date("2026-08-12T08:00:00Z"),
         "Europe/Tirane",
         1_000,
-        path.join(directory, "production-v3"),
+        path.join(directory, "production-v6"),
     );
     assert.equal(wrongGeneration[0].reason, "artifact_generation_mismatch");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 0, reserved: 0 });

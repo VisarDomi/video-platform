@@ -222,7 +222,7 @@ async function main(): Promise<void> {
             requireApply(process.argv.slice(3));
             const orchestrator = new PipelineOrchestrator(
                 database,
-                createDefaultStages(pipelineConfig.stagingRoot),
+                createDefaultStages(pipelineConfig.stagingRoot, pipelineConfig),
                 `pipeline-cli-${process.pid}`,
             );
             console.log(JSON.stringify(await orchestrator.processOne(), null, 2));

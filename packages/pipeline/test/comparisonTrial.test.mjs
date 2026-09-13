@@ -20,7 +20,7 @@ async function fixture(t) {
     t.after(() => rm(root, { recursive: true, force: true }));
     const config = { ...pipelineConfig, comparisonTrialOnly: true,
         databasePath: path.join(root, "pipeline.sqlite"), finalizationDatabasePath: path.join(root, "finalization.sqlite"),
-        artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v3"),
+        artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v6"),
         comparisonSelectionFile: path.join(root, "test-videos.txt"), cleanupEnabled: true, networkUploadsEnabled: true,
         discoveryRoots: [{ provider: "tango", sourceKind: "edited", path: path.join(root, "edited") }] };
     const authority = new DatabaseSync(config.finalizationDatabasePath);
@@ -179,5 +179,5 @@ test("verification, identity guard and missing-source sweep retain comparison ev
 
 test("v3 resume fails closed when no comparison environment has been prepared", async (t) => {
     const { config, root } = await fixture(t);
-    await assert.rejects(() => setCampaignRunning({ ...config, databasePath: path.join(root, "unprepared.sqlite") }, true), /Prepare v3/);
+    await assert.rejects(() => setCampaignRunning({ ...config, databasePath: path.join(root, "unprepared.sqlite") }, true), /Prepare v4/);
 });

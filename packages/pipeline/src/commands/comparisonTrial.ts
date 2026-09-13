@@ -100,6 +100,7 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
                 uploadId: remote?.remoteId ?? null, uploadedUrl: remote?.remoteUrl ?? null,
                 uploadEditUrl: remote ? `https://www.xvideos.com/account/uploads/${remote.remoteId}/edit` : null,
                 verifiedOnline: remote?.verified ?? false,
+                uploadDiagnostics: recording ? database.latestUploadDiagnostics(recording.id) : null,
                 // Online verification is not an assertion of frame fidelity.
                 qualityApproved: false,
             };
@@ -111,7 +112,7 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
             automaticCleanup: false, recordings: rows };
         await mkdir(config.stagingRoot, { recursive: true });
         const escape = (value: string) => value.replaceAll("|", "\\|").replaceAll("\n", " ").replaceAll("[", "\\[").replaceAll("]", "\\]");
-        const markdown = ["# Selected v3 comparison trial", "", "Only the explicitly selected recordings below may run. Artifacts are retained until you explicitly request deletion. Online verification does not establish visual/frame fidelity.", "",
+        const markdown = [`# Selected ${CURRENT_PRODUCTION_VERSION} comparison trial`, "", "Only the explicitly selected recordings below may run. Artifacts are retained until you explicitly request deletion. Online verification checks the advertised playback pixel tier, not visual/frame fidelity.", "",
             `Queued so far: ${rows.length}. Campaign: ${report.state}. Queue drained: ${trial.completedAt ?? "not yet"}.`, "",
             ...trial.fileErrors.map((error) => `Selection-file error: ${escape(error)}`), "",
             "| Recording | State | Original | Converted/remuxed | Uploaded |", "| --- | --- | --- | --- | --- |",
