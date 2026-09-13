@@ -184,14 +184,19 @@ www.xvideos.com. The existing Safari login, cookie persistence, uploads list,
 player and scroll behavior remain unchanged. There is no native Xvid auth port,
 new Tango permission, credential transfer or shared Keychain access for Xvid.
 
-`reader-extensions/scripts/package-xvid.mjs` owns this relocation packaging.
-The normal native prepare command invokes it, copying the suite's delivered
-`dist/stream-viewer-extension` payload into `build/tango/Xvid`. Keep that staged
-payload for a fresh build. If rebuilding the runtime deliberately, use the
-existing Stream Viewer extension build/stage workflow first; do not silently
-substitute another historical artifact. Native renewal consumes the prepared
-Xvid resources and includes all three bundle identities from the provider
-registry. Both extension targets must be embedded and signed.
+The initial relocation used Reader Extensions' staged bundle. That build-time
+coupling has now been removed: `scripts/build-ios.mjs` runs this repository's
+`build-extension.mjs`, then packages its own `dist/extension` output into
+`build/tango/Xvid` with XVideos-only name/site scope. A fresh Tango build needs
+no Reader Extensions checkout or staged artifact. No duplicate Xvid provider or
+reader implementation is introduced. Native renewal consumes the prepared Xvid
+resources and includes all three bundle identities from the provider registry.
+Both extension targets must be embedded and signed.
+
+Verified standalone preparation in a temporary checkout with no sibling Reader
+Extensions repository, plus native UI/provider fixtures. The installed extension
+identity stays the same; this packaging correction requires no Safari re-enabling.
+The hash above records the earlier delivered build, not a fixed future payload.
 
 After installing the updated Tango app, Safari requires the user to enable the
 new **Xvid** extension and grant XVideos website access. Disable the old **Stream
