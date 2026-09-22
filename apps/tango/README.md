@@ -1,6 +1,6 @@
 # stream-viewer
 
-A Safari extension and Safari userscript for rehauling the ui of the providers supported by this repo.
+An iOS app, a Safari extension and a Safari userscript for rehauling the ui of the providers supported by this repo.
 
 ## What?
 This script changes the UI of the providers supported by this script so that's it easier to watch streams. Features:
