@@ -8,6 +8,7 @@ actor MediaRelay {
     private var startupContinuation: CheckedContinuation<Void,Error>?
     private var starting: Task<Void,Error>?
     private var listener: NWListener?
+    private var transfers: [ObjectIdentifier: Task<Void,Never>] = [:]
     private var base = ""
     private let secret = UUID().uuidString
     private var links: [String:(url:URL, used:Date)] = [:]
@@ -97,11 +98,30 @@ actor MediaRelay {
             var input = prefix; if let data { input.append(data) }
             guard input.count <= 8192, error == nil else { connection.cancel(); return }
             if let text = String(data:input,encoding:.utf8), text.contains("\r\n\r\n") {
-                Task { await self?.respond(connection,text) }
+                Task { await self?.startResponse(connection,text) }
             } else if complete { connection.cancel() }
             else { Task { await self?.receive(connection,prefix:input) } }
         }
     }
+    private func startResponse(_ connection: NWConnection, _ header: String) {
+        let id = ObjectIdentifier(connection)
+        transfers[id] = Task {
+            await respond(connection,header)
+            transfers[id] = nil
+        }
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed, .cancelled: Task { await self?.cancelTransfer(id) }
+            default: break
+            }
+        }
+        // A canceled WebKit media load closes its loopback connection. Stop its
+        // upstream retry too, including when offline or waiting in backoff.
+        connection.receive(minimumIncompleteLength:1,maximumLength:1) { [weak self] _,_,complete,error in
+            if complete || error != nil { Task { await self?.cancelTransfer(id) } }
+        }
+    }
+    private func cancelTransfer(_ id: ObjectIdentifier) { transfers.removeValue(forKey:id)?.cancel() }
     private func respond(_ connection: NWConnection, _ header: String) async {
         let first = header.components(separatedBy:"\r\n").first?.components(separatedBy:" ") ?? []
         guard first.count == 3, ["GET","HEAD"].contains(first[0]), first[1].hasPrefix("/\(secret)/"),

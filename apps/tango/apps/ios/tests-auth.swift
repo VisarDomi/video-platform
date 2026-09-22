@@ -6,6 +6,10 @@ final class Fixture {
     static var order: [String] = []
     static var jar: HTTPCookieStorage!
     static var failPlayback = true
+    static var failRefreshBody = false
+    static var failFollow = false
+    static var followAttempts = 0
+    static var listAttempts = 0
     static var now = Date()
     static func token(_ id: String) -> String {
         let data = try! JSONSerialization.data(withJSONObject:["accountId":"fixture-account","sessionId":id])
@@ -19,7 +23,14 @@ final class ProtocolFixture: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if request.url!.path.hasPrefix("/recommendator/") {
+            Fixture.listAttempts += 1
+            if Fixture.listAttempts == 1 { client?.urlProtocol(self,didFailWithError:URLError(.networkConnectionLost)); return }
+            complete(status:200,data:Data("{\"records\":[]}".utf8)); return
+        }
         if request.url!.path.contains("/follow/") {
+            Fixture.followAttempts += 1
+            if Fixture.failFollow { client?.urlProtocol(self,didFailWithError:URLError(.networkConnectionLost)); return }
             assert(request.value(forHTTPHeaderField:"Content-Type") == "text/plain;charset=UTF-8",
                    "Follow's string body must retain the browser XHR content type")
             assert(request.value(forHTTPHeaderField:"Accept") == "application/json; charset=UTF-8")
@@ -55,10 +66,16 @@ final class ProtocolFixture: URLProtocol {
             // successful refresh response replaces Tango-RT and Tango-ST.
             let rt = Fixture.cookie("Tango-RT",Fixture.token("rotated"))
             Fixture.jar.setCookie(HTTPCookie(properties:[.name:rt.name,.value:rt.value,.domain:rt.domain,.path:rt.path,.expires:Date(timeIntervalSince1970:rt.expirationDate),.secure:"TRUE"])!)
+            if Fixture.failRefreshBody {
+                Fixture.failRefreshBody = false
+                client?.urlProtocol(self,didReceive:HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:[:])!,cacheStoragePolicy:.notAllowed)
+                client?.urlProtocol(self,didFailWithError:URLError(.networkConnectionLost)); return
+            }
             status = 200
         } else {
             assert(Fixture.saved.session?["sessionId"] == "rotated", "Rotation must be durably saved BEFORE playback starts")
             status = Fixture.failPlayback ? 503 : 200
+            Fixture.failPlayback = false
             if status == 200 {
                 for name in ["tt","ttu","tte"] {
                     Fixture.jar.setCookie(HTTPCookie(properties:[.name:name,.value:"fixture",.domain:".tango.me",.path:"/",.expires:Date().addingTimeInterval(10),.secure:"TRUE"])!)
@@ -151,6 +168,24 @@ final class ProtocolFixture: URLProtocol {
             "method":"POST","headers":["Content-Type":"application/json"],
             "body":"{\"action\":\"BLOCK\",\"account_id\":[\"fixture-id\"]}"
         ]))
+        _ = try await auth.request(JSONSerialization.data(withJSONObject:["url":"https://gateway.tango.me/recommendator/social/v2/list/following", "method":"POST", "body":"{}", "headers":["Content-Type":"application/json"]]))
+        assert(Fixture.listAttempts == 2,"Read-only list POST recovers automatically")
+        Fixture.failFollow=true
+        let attempts=Fixture.followAttempts
+        do {
+            _ = try await auth.request(JSONSerialization.data(withJSONObject:["url":"https://gateway.tango.me/proxycador/api/public/v1/follow/add", "method":"POST", "body":"fixture-id"]))
+            assertionFailure("Mutation should return the ambiguous failure")
+        } catch is URLError { }
+        assert(Fixture.followAttempts == attempts+1,"Follow must not be replayed automatically")
+        Fixture.saved=TangoLogin(cookies:[Fixture.cookie("Tango-RT",Fixture.token("first"))],handoffComplete:true)
+        Fixture.failRefreshBody=true
+        let interrupted=TangoAuth(readLogin:{Fixture.saved},saveLogin:{Fixture.saved=$0},configuration:{
+            let config=URLSessionConfiguration.ephemeral;config.protocolClasses=[ProtocolFixture.self];Fixture.jar=config.httpCookieStorage!;return config
+        })
+        do { _ = try await interrupted.authenticate(); assertionFailure("Fixture body must fail") } catch is URLError { }
+        assert(Fixture.saved.session?["sessionId"] == "rotated","Replacement RT survives a disconnected response body")
+        _ = try await interrupted.authenticate()
+        print("PASS: list read POST recovers; mutation is single attempt; RT persists when refresh body disconnects")
         print("PASS: Follow/unfollow string content type and Block/explicit JSON request parity")
         print("PASS: cached playlist/key/init survive background expiry; segments retire; HEAD length matches GET")
         print("PASS: loopback HLS master/variant/key/init/segment transport, byte ranges and cookie scoping")

@@ -42,7 +42,7 @@ for name, kind in [(product+suffix,suffix) for suffix in config['extensions']] +
     bundle = config['bundleId'] + ('.'+kind if extension else '')
     product_ref = obj(name+'Product', 'PBXFileReference', explicitFileType='wrapper.app-extension' if extension else 'wrapper.application', includeInIndex=0, path=name+('.appex' if extension else '.app'), sourceTree='BUILT_PRODUCTS_DIR')
     products.append(product_ref)
-    settings = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='10', GENERATE_INFOPLIST_FILE='NO',
+    settings = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='11', GENERATE_INFOPLIST_FILE='NO',
         INFOPLIST_FILE=str(generated/(kind+'-Info.plist' if extension else 'Info.plist')), MARKETING_VERSION='1.0', PRODUCT_BUNDLE_IDENTIFIER=bundle,
         PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1',
         SWIFT_VERSION='5.0', IPHONEOS_DEPLOYMENT_TARGET='17.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos')

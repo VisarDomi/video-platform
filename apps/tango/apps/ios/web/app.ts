@@ -1,6 +1,9 @@
+import { installMediaRecovery } from './media-recovery';
 import { provider } from '@selected-provider';
 import { startViewer, showStartupError } from '../../../src/core/start';
 import { native } from './native';
+
+installMediaRecovery(true);
 
 const documentID = crypto.randomUUID();
 let ready = false;

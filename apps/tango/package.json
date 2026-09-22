@@ -11,7 +11,7 @@
     "tests:smoke": "node tests/ios/run.mjs --smoke",
     "tests:actions": "node tests/ios/run.mjs --actions",
     "build:ios": "node scripts/build-ios.mjs",
-    "tests:ios": "node tests/native-app.mjs"
+    "tests:ios": "node tests/native-app.mjs && node apps/ios/Tests/media-recovery.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

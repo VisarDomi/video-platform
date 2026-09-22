@@ -66,8 +66,8 @@ import WebKit
                     foreground = false
                 } catch {
                     if let failure = error as? AuthFailure {
-                        switch failure { case .login, .pending: showLogin(failure.localizedDescription); default: if !started { showLogin(failure.localizedDescription) } }
-                    } else if !started { showLogin("Could not connect to Tango. Retrying…") }
+                        switch failure { case .login, .pending: showLogin(failure.localizedDescription); default: break }
+                    }
                 }
                 do { try await Task.sleep(nanoseconds:5_000_000_000) } catch { break }
             }

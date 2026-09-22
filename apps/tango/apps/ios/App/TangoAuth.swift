@@ -50,6 +50,7 @@ actor TangoAuth {
             if needsLogin { throw AuthFailure.login }; return
         }
         let config = configuration()
+        config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 30
         let cookies = config.httpCookieStorage!
@@ -87,7 +88,11 @@ actor TangoAuth {
             request.setValue("https://www.tango.me/", forHTTPHeaderField:"Referer")
         }
         guard let client = isPC ? pc : session else { throw AuthFailure.login }
-        let (data,response) = try await client.data(for:request)
+        let (data,response) = try await recoverNetworkRead(enabled: !isPC && method == "GET") {
+            let result = try await client.data(for:request)
+            if !isPC && method == "GET" { try retryableResponse(result.1) }
+            return result
+        }
         guard let http = response as? HTTPURLResponse else { throw AuthFailure.invalid }
         return (data,http.statusCode)
     }
@@ -95,8 +100,18 @@ actor TangoAuth {
     private func refreshSession() async throws {
         guard let fields = currentLogin().session else { throw AuthFailure.login }
         let body = String(decoding:try JSONSerialization.data(withJSONObject:fields),as:UTF8.self)
-        let (_, code) = try await perform(URL(string:"https://gateway.tango.me/session-service/public/v2/session/web/refresh")!,
-            method:"POST",headers:["Content-Type":"application/json"],body:body)
+        let code: Int
+        do {
+            (_, code) = try await perform(URL(string:"https://gateway.tango.me/session-service/public/v2/session/web/refresh")!,
+                method:"POST",headers:["Content-Type":"application/json"],body:body)
+        } catch {
+            // Headers may rotate RT before the body fails. Retain that replacement
+            // before the next automatic attempt; never replay the discarded RT.
+            let login = currentLogin()
+            let token = login.cookies.first(where: { $0.name == "Tango-RT" })?.value ?? ""
+            if !token.isEmpty && token != loadedToken { try saveLogin(login); loadedToken = token }
+            throw error
+        }
         guard code == 200 else {
             if code == 401 || code == 403 { needsLogin = true; throw AuthFailure.login }
             throw AuthFailure.http(code)
@@ -150,6 +165,7 @@ actor TangoAuth {
     }
 
     func media(_ url: URL, range: String?) async throws -> (Data, HTTPURLResponse) {
+        return try await recoverNetworkRead {
         _ = try await authenticate()
         guard url.scheme == "https", let host = url.host, url.user == nil, url.password == nil else { throw AuthFailure.invalid }
         var request = URLRequest(url:url)
@@ -164,7 +180,9 @@ actor TangoAuth {
         guard let session else { throw AuthFailure.login }
         let (data,response) = try await session.data(for:request)
         guard let http = response as? HTTPURLResponse else { throw AuthFailure.invalid }
+        try retryableResponse(http)
         return (data,http)
+        }
     }
 
     func request(_ input: Data) async throws -> String {
@@ -174,10 +192,21 @@ actor TangoAuth {
               (url.host == "gateway.tango.me" && url.port == nil && !url.path.contains("session/") && !url.path.hasSuffix("/tokenData"))
                 || (url.host == "192.168.1.197" && url.port == 9999 && url.path.hasPrefix("/api/tango/"))
         else { throw AuthFailure.invalid }
-        if url.host == "gateway.tango.me" { try await ensureSession() }
-        let (data,code) = try await perform(url,method:args["method"] as? String ?? "GET",
-            headers:args["headers"] as? [String:String] ?? [:],body:args["body"] as? String)
-        return String(decoding:try JSONSerialization.data(withJSONObject:["status":code,"text":String(decoding:data,as:UTF8.self)]),as:UTF8.self)
+        let method = args["method"] as? String ?? "GET"
+        // Tango's list and batch-profile reads use POST. Account mutations and PC
+        // commands are deliberately excluded from automatic replay.
+        let read = method == "GET" || (method == "POST" && (
+            ["/recommendator/social/v2/list/following", "/recommendator/social/v2/list/following_recommendations"].contains(url.path) ||
+            url.path == "/proxycador/api/public/v1/profiles/v2/batch"))
+        return try await recoverNetworkRead(enabled: url.host == "gateway.tango.me" && read) {
+            if url.host == "gateway.tango.me" { try await ensureSession() }
+            let (data,code) = try await perform(url,method:method,
+                headers:args["headers"] as? [String:String] ?? [:],body:args["body"] as? String)
+            if read && url.host == "gateway.tango.me" {
+                try retryableResponse(HTTPURLResponse(url:url,statusCode:code,httpVersion:nil,headerFields:nil)!)
+            }
+            return String(decoding:try JSONSerialization.data(withJSONObject:["status":code,"text":String(decoding:data,as:UTF8.self)]),as:UTF8.self)
+        }
     }
 }
 
@@ -193,5 +222,39 @@ final class PlaybackRedirects: NSObject, URLSessionTaskDelegate {
             redirected.setValue(nil,forHTTPHeaderField:"Cookie")
         }
         completionHandler(redirected)
+    }
+}
+
+// Only idempotent public reads use this recovery policy. Cancellation terminates
+// connectivity waits and backoff immediately; permanent HTTP failures are returned.
+private struct RetryableResponse: Error { let after: Double? }
+func retryableResponse(_ response: URLResponse) throws {
+    guard let http = response as? HTTPURLResponse,
+          [408, 429, 500, 502, 503, 504].contains(http.statusCode) else { return }
+    let header = http.value(forHTTPHeaderField: "Retry-After")
+    var after = header.flatMap(Double.init)
+    if after == nil, let header {
+        let format = DateFormatter(); format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        after = format.date(from: header)?.timeIntervalSinceNow
+    }
+    throw RetryableResponse(after: after.flatMap { $0.isFinite ? max(0, $0) : nil })
+}
+func recoverNetworkRead<T>(enabled: Bool = true, isolation: isolated (any Actor)? = #isolation, _ operation: () async throws -> T) async throws -> T {
+    var delay = 1.0
+    while true {
+        try Task.checkCancellation()
+        do { return try await operation() }
+        catch {
+            try Task.checkCancellation()
+            let network = error as? URLError
+            let transient = network.map { [.notConnectedToInternet, .networkConnectionLost, .timedOut,
+                .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed].contains($0.code) } ?? false
+            let response = error as? RetryableResponse
+            guard enabled && (transient || response != nil) else { throw error }
+            let seconds = max(delay, response?.after ?? 0)
+            try await Task.sleep(for: .seconds(seconds))
+            delay = min(delay * 2, 30)
+        }
     }
 }
