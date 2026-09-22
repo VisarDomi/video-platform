@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {spawnSync} from 'node:child_process';
-import {chromium} from '../../../manga/gallery-downloader/node_modules/playwright-core/index.mjs';
+import {webkit} from '../../../manga/gallery-downloader/node_modules/playwright-core/index.mjs';
 import {testMultipleVideos} from './multiple-videos.mjs';
 for(const args of [[],['xvideos'],['invalid'],['tango','tango']]) {
     assert.notEqual(spawnSync('node',['scripts/build-ios.mjs',...args,'--prepare-only'],{encoding:'utf8'}).status,0);
@@ -15,10 +15,10 @@ assert.deepEqual(xvidManifest.host_permissions,['https://xvideos.com/*','https:/
 assert.equal(xvidManifest.name,'Xvid');
 assert.ok(!bundle.includes('document.open('),'No website takeover in native bundle');
 assert.ok(!bundle.includes('xvideos.com'),'Unselected provider is excluded');
-const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});
+const browser=await webkit.launch({headless:true});
 try {
     const context=await browser.newContext({viewport:{width:428,height:800}});
-    let checkpoint={},activeDocument='',cold=true;
+    let checkpoint={homeY:0},activeDocument='';
     const requests=[];
     const actions=[];
     let listRevision=0;
@@ -26,9 +26,9 @@ try {
     const records=()=>[1,2,3].map(n=>({isPublic:true,anchor:{encryptedAccountId:'person-'+n,firstName:'Person '+n},stream:{id:'stream-'+n+'-'+listRevision,masterListUrl:'https://media.invalid/'+n+'.m3u8',status:'LIVING'}}));
     await context.exposeBinding('nativeBridge',async(_,message)=>{
         const {command,args={}}=message;
-        if(command==='init') { activeDocument=args.document; const result={...checkpoint,cold};cold=false;return JSON.stringify(result); }
+        if(command==='init') { activeDocument=args.document; return JSON.stringify(checkpoint); }
         if(command==='activate') { activeDocument=args.document;return '{}'; }
-        if(command==='save') { if(activeDocument===args.document) checkpoint={...args};return '{}'; }
+        if(command==='save') { assert.deepEqual(Object.keys(args).sort(),['document','homeY']); if(activeDocument===args.document) checkpoint={homeY:args.homeY};return '{}'; }
         if(command==='authenticate') return '{}';
         if(command==='media')return JSON.stringify({url:args.url,quality:''});
         if(command!=='request')throw new Error('Unknown command '+command);
@@ -85,7 +85,7 @@ try {
     await page.locator('.stream-row').nth(1).click();
     await page.waitForFunction(()=>document.querySelector('.stream-stage.viewer-loading'));
     await page.evaluate(()=>window.streamViewerApp.save());
-    assert.equal(checkpoint.path,new URL(page.url()).pathname,'Reader destination survives a kill while profile/geometry is loading');
+    assert.deepEqual(Object.keys(checkpoint),['homeY'],'Only session list offset is sent to native');
     enrichGate=undefined; releaseEnrichment();
     await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
     assert.equal(listRequests(),initial,'Navigation retains the shared ordered list');
@@ -101,34 +101,28 @@ try {
     });
     assert.ok(playback.stopped);
     assert.deepEqual(playback.after,playback.before,'Foreground preserves pause and mute choices');
-    // Save selection before cold start; the refreshed session must resolve the
-    // same streamer even if Tango has assigned them a different live stream ID.
-    await page.evaluate(()=>window.streamViewerApp.save());
-    const selected=checkpoint.currentStreamerId;
+    const selected=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')).currentStreamerId);
     const savedHomeY=checkpoint.homeY;
     assert.ok(savedHomeY>0,'Fixture starts from a scrolled Home');
-    assert.ok(selected);
-    checkpoint={...checkpoint,path:'/stream/old-live-id'};
-    const saved={...checkpoint};
-    await page.close();checkpoint=saved;cold=true;listRevision++;
-    enrichGate=new Promise(resolve=>releaseEnrichment=resolve);
-    page=await context.newPage();await page.goto('https://app.invalid/');
-    await page.waitForURL('**/stream/*');
-    await page.waitForFunction(()=>document.querySelector('.stream-stage.viewer-loading'));
-    await page.evaluate(()=>window.streamViewerApp.save());
-    assert.equal(checkpoint.currentStreamerId,selected,'Cold auto-navigation selects through the shared row before profile loading');
-    enrichGate=undefined; releaseEnrichment();
-    await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
-    assert.equal(checkpoint.currentStreamerId,selected,'Cold launch reanchors selected streamer');
-    assert.match(page.url(),new RegExp('stream-'+selected.split('-')[1]+'-1$'));
+    const beforeBack=listRequests();
     await page.goBack();
     await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
     assert.equal(await page.locator('.stream-row.current').getAttribute('data-streamer-id'),selected);
     await page.waitForFunction(y=>Math.abs(scrollY-y)<2,savedHomeY);
-    assert.equal(checkpoint.homeY,savedHomeY,'Cold reader preserves the Home position beneath it');
+    assert.equal(listRequests(),beforeBack,'Back retains the session list');
+    await page.locator('.stream-row').nth(1).click();
+    await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
+    await page.close(); checkpoint={homeY:0}; activeDocument=''; listRevision++;
+    page=await context.newPage(); await page.goto('https://app.invalid/');
+    await page.waitForFunction(()=>document.querySelectorAll('.stream-row').length===3);
+    assert.equal(new URL(page.url()).pathname,'/','New process starts Home, never the old stream');
+    assert.equal(await page.evaluate(()=>scrollY),0,'New process starts at the top');
+    assert.equal(await page.locator('.stream-row.current').count(),0,'No old selection on new launch');
+    assert.ok(listRequests()>beforeBack,'New launch fetches a fresh list');
+    assert.ok((await page.locator('.stream-row').first().getAttribute('href')).endsWith('-1'),'Fresh stream revision is displayed');
     // A late pagehide from the old document must not replace the current state.
     const current={...checkpoint};
-    await page.evaluate(()=>window.nativeBridge({command:'save',args:{document:'stale',path:'/stream/stale'}}));
+    await page.evaluate(()=>window.nativeBridge({command:'save',args:{document:'stale',homeY:999}}));
     assert.deepEqual(checkpoint,current);
     await page.locator('.stream-row').nth(1).click();
     await page.waitForFunction(()=>document.querySelector('.stream-stage:not(.viewer-loading)'));
@@ -148,8 +142,8 @@ try {
     assert.ok(actions.every(a=>a.id===actions[0].id),'Actions must target the selected streamer');
     assert.ok(await page.evaluate(id=>!JSON.parse(sessionStorage.getItem('stream-viewer-state')).streams.some(s=>s.streamerId===id),actions[0].id));
     await page.waitForFunction(()=>!document.querySelector('.follow').classList.contains('remove'));
-    assert.equal(checkpoint.currentStreamerId,await page.evaluate(()=>JSON.parse(sessionStorage.getItem('stream-viewer-state')).currentStreamerId),'Async removal checkpoints the replacement without another gesture');
-    console.log('PASS: checkpoints during delayed initial/cold reader load, async replacement, scrolled Home Back, and foreground pause/mute preservation.');
+    assert.deepEqual(Object.keys(checkpoint),['homeY'],'No persistent stream checkpoint after asynchronous removal');
+    console.log('PASS: session-only state, scrolled Home Back, fresh Home after a new launch, and foreground pause/mute preservation.');
     console.log('PASS: Follow/unfollow UI, Block confirmation, unfollow before Block and removal from the reader.');
-    console.log('PASS: required provider, unchanged home/reader, native auth boundary, Multi, cold stream reanchor, native-style Back and stale-save rejection.');
+    console.log('PASS: required provider, unchanged home/reader, native auth boundary, Multi, fresh cold list, native-style Back and stale-save rejection.');
 } finally {await browser.close();}

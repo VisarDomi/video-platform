@@ -120,7 +120,7 @@ inspector at a time and reconnect after navigation. Never replay the live RT on 
 Mac/PC diagnostic client; it consumes a rotating credential.
 
 The native `diagnostics` bridge returns counters and HTTP status counts only.
-Device checkpoint: `Library/Application Support/StreamViewer/view.json`.
+Navigation state is session-only; there is no device view checkpoint (build 10 onward).
 Credentials remain in Keychain, not diagnostic JSON or backup files.
 
 ## Renewal and recovery
@@ -316,3 +316,32 @@ rows). Follow/block state was not mutated. The normal monthly job renewed build
 attempt referenced a missing Xcode provisioning profile; retrying the unchanged
 job succeeded. Scheduler is active/idle, last exit 0. The detailed evidence
 contains the new profile deadlines and next due time.
+
+## September 22: Tango cold launches start fresh (build 10)
+
+This supersedes the cold-stream restoration described in the historical build 9
+sections above. Every new app process opens Home at the top and fetches a fresh
+list. No `view.json` is read or written, and the native stream-state build adapter
+has been removed. Existing old checkpoint files are unused; no migration is needed.
+
+The shared userscript's sessionStorage still retains the list and selected stream
+for navigation within the running app. Native Home offset is held in memory only
+for reconstructed Back pages; WebKit handles cached Back pages. Login remains in
+Keychain and the Multi preference remains a setting. Authentication renewal, HLS
+relay and network recovery are unchanged by this request. Web content process
+termination opens a fresh Home instead of restoring the previous stream.
+
+The native-bundle fixture now uses WebKit and checks fresh cold Home, a new list
+revision, session Back position, pause/mute and the existing account-action fixtures.
+
+Build 10 physical check: Home had 143 rows; the selected stream decoded and played
+720×1280 video. Back returned to the same list at scrollY 600. Force-terminating
+from that stream and relaunching opened Home at scrollY 0, no selection, and a
+fresh 146-row list. Login stayed available. No live account actions were changed.
+Network interruption was not retested for this change; its existing implementation
+is untouched. See `fresh-launch-verification.json`.
+
+The existing monthly renewal installed build 10 and both helpers successfully;
+all profiles expire September 22, 2027. The first attempt hit the previously
+documented cached-profile replacement race; retrying unchanged succeeded. The
+normal scheduler is restored. No new LaunchAgent was created for this work.

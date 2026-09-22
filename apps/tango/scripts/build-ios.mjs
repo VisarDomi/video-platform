@@ -19,7 +19,6 @@ const plugin={name:'native-platform',setup(b) {
         const path=resolve(args.resolveDir,args.path);
         if(path===resolve(root,'src/provider')) return {path:resolve(root,'src/provider/types.ts')};
         if(path===resolve(root,'src/core/request')) return {path:resolve(app,'web/request.ts')};
-        if(path===resolve(root,'src/core/state') && args.importer!==resolve(app,'web/state.ts')) return {path:resolve(app,'web/state.ts')};
         // Preserve the shared status renderer; replace only document takeover.
         if(path===resolve(root,'src/core/page') && args.importer!==resolve(app,'web/page.ts')) return {path:resolve(app,'web/page.ts')};
         if(args.path.endsWith('?inline')) return {path:resolve(args.resolveDir,args.path.slice(0,-7)),namespace:'inline'};

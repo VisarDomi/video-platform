@@ -7,18 +7,16 @@ import WebKit
     private var webView: WKWebView!
     private var timer: Task<Void,Never>?
     private var activeDocument = ""
-    private var cold = true
     private var started = false
     private var loginView: UIStackView?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-    private let stateURL = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("StreamViewer/view.json")
-    private var checkpoint: [String:Any] = [:]
+    // Navigation state belongs to this running app session only.
+    private var homeY = 0.0
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override func viewDidLoad() {
         super.viewDidLoad()
-        if let data = try? Data(contentsOf:stateURL), let state = try? JSONSerialization.jsonObject(with:data) as? [String:Any] { checkpoint = state }
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(LocalFiles(),forURLScheme:"streamviewer")
         config.userContentController.addScriptMessageHandler(self,contentWorld:.page,name:"viewer")
@@ -114,18 +112,12 @@ import WebKit
                 switch command {
                 case "init":
                     activeDocument = document
-                    var state = checkpoint; state["cold"] = cold; cold = false
-                    replyHandler(String(decoding:try JSONSerialization.data(withJSONObject:state),as:UTF8.self),nil)
+                    replyHandler(String(decoding:try JSONSerialization.data(withJSONObject:["homeY":homeY]),as:UTF8.self),nil)
                 case "activate": activeDocument = document; replyHandler("{}",nil)
                 case "save":
                     guard activeDocument == document else { replyHandler("{}",nil); return }
-                    guard let path = args["path"] as? String, path == "/" || path.hasPrefix("/stream/"),
-                          let current = args["currentStreamerId"] as? String,
-                          let y = args["homeY"] as? Double, y.isFinite, y >= 0,
-                          let multi = args["multi"] as? String, ["on","off"].contains(multi) else { throw AuthFailure.invalid }
-                    checkpoint = ["path":path,"currentStreamerId":current,"homeY":y,"multi":multi]
-                    try FileManager.default.createDirectory(at:stateURL.deletingLastPathComponent(),withIntermediateDirectories:true)
-                    try JSONSerialization.data(withJSONObject:checkpoint).write(to:stateURL,options:.atomic)
+                    guard let y = args["homeY"] as? Double, y.isFinite, y >= 0 else { throw AuthFailure.invalid }
+                    homeY = y
                     replyHandler("{}",nil)
                 case "authenticate": try await authenticate(); replyHandler("{}",nil)
                 case "media":
@@ -148,7 +140,7 @@ import WebKit
         decisionHandler(url?.scheme == "streamviewer" && url?.host == "app" ? .allow : .cancel)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        cold = true; webView.load(URLRequest(url:URL(string:"streamviewer://app/")!))
+        homeY = 0; webView.load(URLRequest(url:URL(string:"streamviewer://app/")!))
     }
 }
 
