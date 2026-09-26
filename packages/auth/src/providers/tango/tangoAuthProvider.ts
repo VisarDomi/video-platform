@@ -23,20 +23,21 @@ export class TangoAuthProvider implements IAuthProvider {
 
     async refreshSession(tokenBag: TokenBag): Promise<RefreshResult> {
         const payload = authUtils.parseJwtPayload(tokenBag.refreshToken);
-        const username = payload?.username || payload?.sessionId;
-        if (!username) {
-            throw new Error("Could not extract username from refresh token.");
+        const accountId = payload?.accountId;
+        const sessionId = payload?.sessionId;
+        if (typeof accountId !== "string" || !accountId || typeof sessionId !== "string" || !sessionId) {
+            throw new Error("Refresh token is missing accountId or sessionId.");
         }
 
         const refreshHeaders: HeadersInit = {
             "User-Agent": constants.HEADERS.USER_AGENT,
             Accept: "application/json",
             "content-type": "application/json",
-            username: username,
-            Origin: constants.TANGO_URLS.HOME,
+            Origin: "https://www.tango.me",
+            Referer: "https://www.tango.me/",
             [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_RT_PREFIX}${tokenBag.refreshToken}`,
         };
-        const refreshOptions = { method: "POST", headers: refreshHeaders };
+        const refreshOptions = { method: "POST", headers: refreshHeaders, body: JSON.stringify({ accountId, sessionId }) };
 
         const response = await requestQueue.add<Response>(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
         if (!response.ok) {

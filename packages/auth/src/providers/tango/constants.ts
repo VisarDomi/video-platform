@@ -5,7 +5,7 @@ export const TANGO_SESSION_REFRESH_MS = (TANGO_SESSION_TOKEN_TTL_S / 2) * 1000;
 
 export const TANGO_URLS = {
     HOME: "https://tango.me",
-    SESSION_REFRESH: "https://gateway.tango.me/proxycador/api/session/refresh",
+    SESSION_REFRESH: "https://gateway.tango.me/session-service/public/v2/session/web/refresh",
     TOKEN_DATA: "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData",
     GOOGLE_LOGIN: "https://gateway.tango.me/google-login/auth-code/v1/login",
 };

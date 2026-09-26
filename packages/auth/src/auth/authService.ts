@@ -64,6 +64,7 @@ export class AuthService {
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
+        await this.authContext.saveTokenToFile();
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
         this.logTokenWrite("login");
@@ -100,6 +101,9 @@ export class AuthService {
 
         const result = await this.provider.refreshSession(tokenBag);
         const receivedNewRT = this.authContext.updateFromRefresh(result);
+        // The previous RT is consumed. Commit its replacement before requesting
+        // stream tokens, which can fail independently or be interrupted.
+        await this.authContext.saveTokenToFile();
 
         if (receivedNewRT) {
             logger.info(`Successfully refreshed session token and refresh token for ${this.account.email}.`);
