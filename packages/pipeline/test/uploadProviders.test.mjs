@@ -146,3 +146,21 @@ test("Porntrex upload form contract is exercised against a local fixture only", 
     assert.equal(requests, 1, "all browser traffic was intercepted; no real upload occurred");
     await assert.rejects(uploader.upload({ sizeBytes: 10_000_000_001, visibility: "public" }), /blocked_too_large/);
 });
+
+test("Porntrex lookup counts a just-uploaded 'Processing...' row by ID and title, and still refuses malformed rows", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    let rows = `<div class="video-item processing" data-item-id="3351302"><a class="thumb"></a><span class="line-processing">Processing...</span><p class="inf"><a href="" title="t">Alluring Woman [2025-10-02 141119 mmarianna]</a></p></div>`
+        + `<div class="video-item" data-item-id="3314558"><a href="https://www.porntrex.com/video/3314558/x" class="thumb"></a><p class="inf"><a href="https://www.porntrex.com/video/3314558/x">String panty 2026-07-13 162147 AI_channel</a></p></div>`;
+    await context.route("https://www.porntrex.com/**", route => route.fulfill({ contentType: "text/html",
+        body: `<div id="list_videos_my_uploaded_videos"><h2>My Videos (1)</h2>${rows}</div>` }));
+    const page = await context.newPage();
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
+    assert.deepEqual(await uploader.lookupUpload(page, "2025-10-02 141119 mmarianna"),
+        { kind: "found", remoteId: "3351302", title: "Alluring Woman [2025-10-02 141119 mmarianna]", remoteUrl: "https://www.porntrex.com/video/3351302/" });
+    assert.equal((await uploader.lookupUpload(page, "2026-07-13 162147 AI_channel")).remoteId, "3314558");
+    assert.equal((await uploader.lookupUpload(page, "2026-01-01 000000 nobody")).kind, "absent");
+    rows += `<div class="video-item" data-item-id="9"><p class="inf"><a href="">Broken [x]</a></p></div>`;
+    await assert.rejects(uploader.lookupUpload(page, "2026-01-01 000000 nobody"), /Incomplete Porntrex upload row/);
+});

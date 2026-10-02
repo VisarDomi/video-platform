@@ -114,6 +114,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         await page.goto(`${ORIGIN}/my/videos/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         await passPorntrexAgeGate(page);
         const entries = new Map<string, Entry>();
+        const processing = new Set<string>();
         const signatures = new Set<string>();
         let expected = -1;
         for (let pageNumber = 1; pageNumber <= 1000; pageNumber++) {
@@ -121,23 +122,29 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             const snapshot = await page.locator(LIST).evaluate(container => ({
                 heading: container.querySelector("h2")?.textContent ?? "",
                 rows: [...container.querySelectorAll("[data-item-id]")].map(row => {
-                    const title = row.querySelector('p.inf a[href*="/video/"]');
+                    const title = row.querySelector("p.inf a");
+                    // A just-uploaded video is listed as "Processing..." with an
+                    // empty link and is not yet part of the heading's count.
                     return { remoteId: row.getAttribute("data-item-id") ?? "", title: title?.textContent?.trim() ?? "",
-                        remoteUrl: title?.getAttribute("href") ?? "" };
+                        remoteUrl: title?.getAttribute("href") ?? "",
+                        processing: row.classList.contains("processing") || !!row.querySelector(".line-processing") };
                 }),
             }));
             expected = Number(snapshot.heading.match(/My Videos\s*\((\d+)\)/i)?.[1] ?? NaN);
             if (!Number.isSafeInteger(expected)) throw new Error("Porntrex uploads list has no recognized total; cannot infer absence");
             for (const row of snapshot.rows) {
-                if (!/^\d+$/.test(row.remoteId) || !row.title || !row.remoteUrl.startsWith(`${ORIGIN}/video/${row.remoteId}/`)) {
+                const published = row.remoteUrl.startsWith(`${ORIGIN}/video/${row.remoteId}/`);
+                if (!/^\d+$/.test(row.remoteId) || !row.title || (!published && !(row.processing && row.remoteUrl === ""))) {
                     throw new Error("Incomplete Porntrex upload row; cannot infer absence");
                 }
-                entries.set(row.remoteId, row);
+                if (row.processing) processing.add(row.remoteId);
+                entries.set(row.remoteId, { remoteId: row.remoteId, title: row.title,
+                    remoteUrl: published ? row.remoteUrl : `${ORIGIN}/video/${row.remoteId}/` });
             }
             const signature = snapshot.rows.map(row => row.remoteId).join(",");
             if (signatures.has(signature)) throw new Error("Porntrex pagination did not advance; cannot infer absence");
             signatures.add(signature);
-            if (entries.size === expected) break;
+            if (entries.size - processing.size === expected) break;
             const next = page.locator(`${LIST} .pagination`).getByRole("link", { name: /^(?:next(?:\s+page)?(?:\s*[›»>])?|[›»>])$/i });
             const numbered = page.locator(`${LIST} .pagination`).getByRole("link", { name: new RegExp(`^0*${pageNumber + 1}$`) });
             const control = await next.count() === 1 ? next : numbered;
@@ -146,7 +153,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await page.locator(`${LIST} [data-item-id="${snapshot.rows[0]?.remoteId}"]`)
                 .waitFor({ state: "detached", timeout: 15_000 });
         }
-        if (entries.size !== expected) throw new Error("Porntrex uploads list scan was incomplete");
+        if (entries.size - processing.size !== expected) throw new Error("Porntrex uploads list scan was incomplete");
         const matches = [...entries.values()].filter(row => matchesPorntrexIdentity(row.title, identity));
         return matches.length === 1 ? { kind: "found", ...matches[0] }
             : { kind: matches.length > 1 ? "ambiguous" : "absent" };
@@ -207,8 +214,14 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             const submittedAt = new Date();
             await metadata.locator('input[type="submit"]').click();
             // Do not equate a submit click with acceptance. Store uncertainty and verify later.
-            const recovered = await this.lookupUpload(page, identity);
-            const remoteId = recovered.kind === "found" ? recovered.remoteId : null;
+            // The new video is listed (as processing) within moments; give it a
+            // minute so its ID is captured now rather than recovered tomorrow.
+            let remoteId: string | null = null;
+            for (let attempt = 0; attempt < 5 && !remoteId; attempt++) {
+                if (attempt) await page.waitForTimeout(15_000);
+                const recovered = await this.lookupUpload(page, identity).catch(() => ({ kind: "absent" as const }));
+                remoteId = recovered.kind === "found" ? recovered.remoteId : null;
+            }
             if (remoteId) await request.onEvidence?.({ stage: "remote_identity_captured", remoteId });
             return { kind: "uploaded", receipt: { transmittedBytes: request.sizeBytes,
                 submittedVideoId: remoteId, metadataSubmittedAt: submittedAt.toISOString() } };

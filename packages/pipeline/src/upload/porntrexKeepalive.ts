@@ -1,4 +1,10 @@
+import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { readPorntrexSession, sessionFingerprint, writePorntrexSession, type StoredCookie } from "./porntrexSession.js";
+
+// Node tries each address family for only 250 ms by default. While an upload
+// fills the line, the IPv4 handshake takes longer and the (unavailable) IPv6
+// fallback then fails the whole request. Give a connection a realistic time.
+setDefaultAutoSelectFamilyAttemptTimeout(3_000);
 
 const ORIGIN = "https://www.porntrex.com";
 const USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
