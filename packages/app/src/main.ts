@@ -14,11 +14,6 @@ async function main(): Promise<void> {
 		location.replace(`/videos/${DEFAULT_PROVIDER}`);
 		return;
 	}
-	if (parts.length === 1 && isProvider(parts[0])) {
-		const { TextEditorPage } = await import('./routes/textEditor.js');
-		await new TextEditorPage(parts[0]).open();
-		return;
-	}
 	if (parts[0] === 'videos' && parts.length === 2 && isProvider(parts[1])) {
 		await openVideoList(parts[1]);
 		return;

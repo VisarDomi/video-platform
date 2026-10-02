@@ -12,7 +12,6 @@ export interface ListProviderAdapter {
     name: string;
     filePath: string;
     parseLine(line: string): ParsedEntry | null;
-    isResolved(line: string): boolean;
     resolveIdentifier(input: string): Promise<ParsedEntry | null>;
     beforeAdd?(entry: ParsedEntry): Promise<void> | void;
     formatEntry(entry: ParsedEntry): string;
@@ -23,17 +22,6 @@ export interface ListProviderAdapter {
 export function createListRoutes(adapter: ListProviderAdapter): Router {
     const router = Router();
     const prefix = `/api/${adapter.name}`;
-
-    router.get(prefix, async (_req, res) => {
-        try {
-            const content = await fs.readFile(adapter.filePath, "utf-8");
-            res.type("text/plain").send(content);
-        } catch (error: any) {
-            if (error.code === "ENOENT") return res.type("text/plain").send("");
-            logger.error(`Error reading ${adapter.name} file`, { error });
-            res.status(500).send("Error reading file");
-        }
-    });
 
     router.get(`${prefix}/list`, async (_req, res) => {
         try {
@@ -135,45 +123,6 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
         } catch (error) {
             logger.error(`Error resolving ${adapter.name} identifier`, { error });
             res.status(500).json({ error: "Failed to resolve identifier" });
-        }
-    });
-
-    router.post(prefix, async (req, res) => {
-        const { content } = req.body;
-        if (typeof content !== "string") {
-            return res.status(400).send("Invalid content");
-        }
-        try {
-            const lines = content.split("\n");
-            const resolved: string[] = [];
-
-            for (const raw of lines) {
-                const trimmed = raw.trim();
-                if (!trimmed || trimmed.startsWith("#")) {
-                    resolved.push(raw);
-                    continue;
-                }
-                if (adapter.isResolved(trimmed)) {
-                    resolved.push(raw);
-                    continue;
-                }
-                const result = await adapter.resolveIdentifier(trimmed);
-                if (!result) {
-                    logger.warn(`${adapter.name} save: could not resolve "${trimmed}", skipping`);
-                    continue;
-                }
-                if (adapter.beforeAdd) await adapter.beforeAdd(result);
-                const entry = adapter.formatEntry(result);
-                resolved.push(entry);
-                logger.info(`${adapter.name} save: resolved "${trimmed}" -> ${entry}`);
-            }
-
-            await fs.writeFile(adapter.filePath, cleanListContent(resolved.join("\n")), "utf-8");
-            logger.info(`${adapter.name} file updated via web editor (smart save)`);
-            res.sendStatus(200);
-        } catch (error) {
-            logger.error(`Error saving ${adapter.name} file`, { error });
-            res.status(500).send("Error saving file");
         }
     });
 
