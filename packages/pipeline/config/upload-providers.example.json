@@ -1,0 +1,8 @@
+{
+    "version": 1,
+    "activeProvider": "oldhost",
+    "providers": {
+        "oldhost": { "email": "", "password": "" },
+        "videohost": { "username": "", "password": "" }
+    }
+}

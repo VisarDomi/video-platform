@@ -14,6 +14,7 @@ export {
     SHARED_UPLOAD_POLICY,
     UPLOAD_PROVIDER_PLAN,
     deriveSharedUploadPolicy,
+    policyForUploadProvider,
 } from "./uploadPolicy.js";
 export type {
     ProviderUploadPolicy,
