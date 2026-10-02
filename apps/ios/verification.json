@@ -25,6 +25,17 @@
       "name": "Ptrex",
       "bundleId": "com.visar.Ptrex.paid",
       "url": "https://www.porntrex.com/my/videos/"
+    },
+    "tango-live": {
+      "name": "Tango",
+      "bundleId": "com.visar.Tango.paid",
+      "url": "https://tango.me/",
+      "build": 18,
+      "extensions": {
+        "com.visar.Tango.paid.Login": "Tango Login",
+        "com.visar.Tango.paid.FC2Live": "FC2 live",
+        "com.visar.Tango.paid.SCLive": "SC live"
+      }
     }
   },
   "build": 1,
@@ -127,5 +138,54 @@
     "Physical finger feel (swipes, momentum, pull-down reload, landscape) remains for the user to compare with Safari.",
     "Tango and FC2 recordings legitimately change resolution between segments."
   ],
-  "websiteChange": "Provider list editor pages and GET/POST /api/<provider> removed (commit 0fa6da7); website rebuilt and video-server restarted; /list, /add, /remove, /resolve unchanged"
+  "websiteChange": "Provider list editor pages and GET/POST /api/<provider> removed (commit 0fa6da7); website rebuilt and video-server restarted; /list, /add, /remove, /resolve unchanged",
+  "tango": {
+    "merge": "stream-viewer imported into apps/tango with full history (every commit rewritten under apps/tango); the stream-viewer repository was not modified",
+    "shellTest": "With the existing Keychain login moved into the web view (no new Google login), tango.me listed 146 live streams and a stream played at 720x1280 without the native media relay; kill and relaunch stayed signed in",
+    "sharedViewer": {
+      "rows": 145,
+      "playback": [
+        720,
+        1280
+      ],
+      "timeAdvanced": true,
+      "buttons": [
+        "🔇",
+        "❤️ (followed)",
+        "➕ (not in PC list)",
+        "🚫"
+      ],
+      "timelineHidden": true,
+      "backToList": true,
+      "relaunchSignedIn": true
+    },
+    "webkitFixture": "Tango live list (followed first, one per streamer, blocked hidden), Follow, +/- PC list by streamer, two-step Block, co-streamers at the bottom, ended stream replaced by the next, document-start takeover",
+    "liveExtensions": {
+      "fc2Live": "bar visible with '- Remove' on a streamer from the PC FC2 list (read-only)",
+      "scLive": "confirmed working by the user",
+      "enabledByUser": true
+    },
+    "noLiveMutations": "Follow, download-list and Block were not exercised on the real account; the fixture covers them"
+  },
+  "renewal": {
+    "approvedAndRenewedAt": "2026-10-02T21:39Z",
+    "profileExpiry": "2027-10-02T21:38:45+00:00",
+    "apps": [
+      "tango-live (4 identities)",
+      "tango-local",
+      "fc2-local",
+      "sc-local",
+      "xvideos",
+      "porntrex"
+    ],
+    "firstAttempt": "tango-live hit the known provisioning-cache race; the unchanged retry renewed all four Tango identities. The others renewed first time.",
+    "config": "tango-live added and the stream-viewer 'tango' entry retired (kept in the config backup); every Video Platform entry gained the Shared input; other apps' configs unchanged",
+    "afterRenewal": {
+      "tango": "signed in, 149 streams",
+      "xvideos": "signed in",
+      "porntrex": "signed in"
+    },
+    "scheduler": "com.visar.installed-apps-refresh resumed, ran once, idle, last exit 0, enumerated 16 installed apps",
+    "newBackgroundJobs": 0
+  }
 }
