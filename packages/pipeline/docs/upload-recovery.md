@@ -29,10 +29,13 @@ returned to verification, not to uploading. Unused reservations are released on 
 - Pre-transfer failures (no bytes/transfer-start evidence) do not consume a weekly reupload slot;
   existing login/provider cooldowns still apply.
 
-The `lookup_state`, `lookup_checked_at`, `retry_not_before` and `limited_visibility` attempt columns
-survive worker restarts. Limited-visibility warnings are sticky diagnostics, independent of the bounded
-submission-text history. They do not invalidate saved metadata, cause resubmission, or authorize reupload.
-An existing limited-visibility upload can still pass playback verification normally.
+The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility` and `metadata_rejection`
+attempt columns survive worker restarts, independent of the bounded submission-text history.
+`limited_visibility` is informational only: it never affects verification or retry eligibility.
+`metadata_rejection` records phrases the provider refused ("Sorry, 'X' is not allowed here"); the form was
+not validated, so no video exists. The phrases are learned in `rejected_phrases` (see the README section
+"Rejected metadata phrases"). Older rows that stored such refusals as limited visibility are split on open.
+An edit page answering HTTP 404 drops the stored ID; the attempt is then settled by filename lookup.
 
 ## Source references and artifacts
 

@@ -109,19 +109,23 @@ test("login/search errors and ambiguous matches never become absence even after 
     assert.equal(db.latestUploadDiagnostics(r.id).lookup_state, "ambiguous");
 });
 
-test("limited visibility survives evidence rotation/restart and never authorizes reupload", async t => {
+test("word rejections are learned apart from informational visibility labels, which never hold back a retry", async t => {
     const { db, config, r, attempt } = await fixture(t);
-    db.recordUploadEvidence(attempt, { text: "Sorry, 'net' is not allowed here." });
+    db.recordUploadEvidence(attempt, { text: "Description: Sorry, 'net' is not allowed here." });
+    db.recordUploadEvidence(attempt, { text: "Limited visibility : This video has limited visibility due to : logo/sponsor/flag. Ask for a review" });
     for (let i = 0; i < 30; i++) db.recordUploadEvidence(attempt, { stage: "later_check" });
     const reopened = new PipelineDatabase(config.databasePath);
-    assert.match(reopened.latestUploadDiagnostics(r.id).limited_visibility, /net/);
+    const diagnostics = reopened.latestUploadDiagnostics(r.id);
+    assert.equal(diagnostics.metadata_rejection, "net");
+    assert.equal(diagnostics.limited_visibility, "Provider reports limited visibility: logo/sponsor/flag");
+    assert.deepEqual(reopened.listRejectedPhrases("oldhost"), ["net"]);
+    assert.deepEqual(reopened.listRejectedPhrases("videohost"), []);
     reopened.close();
+    // A clean negative lookup after the weekly deadline requeues despite both flags.
     await reconcileDueUploads(config, day(30), browser(async () => ({ kind: "absent" })));
-    assert.equal(db.get(r.id).state, "oldhost_uncertain");
-    await reconcileDueUploads(config, day(31), browser(async () => ({ kind: "found", remoteId: "123", remoteUrl: "https://old-host.example/video.example/test" })));
-    assert.equal(db.get(r.id).state, "oldhost_verified");
-    assert.match(db.latestUploadDiagnostics(r.id).limited_visibility, /net/);
+    assert.equal(db.get(r.id).state, "metadata_ready");
     assert.equal(limitedVisibilityWarning("Account notice: 1 video is blocked until it is edited"), null);
+    assert.equal(limitedVisibilityWarning("Sorry, 'lob' is not allowed here."), null);
 });
 
 test("verification failure rolls back acceptance, confirmation and state as one transaction", async t => {
