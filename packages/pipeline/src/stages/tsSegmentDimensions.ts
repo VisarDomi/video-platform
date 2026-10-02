@@ -7,7 +7,9 @@ import type { VideoDimensions } from "./resolutionPolicy.js";
 // Feed the TS bytes in PLAYLIST order through one probe. Packet byte positions
 // identify the owning segment even when timestamps reset, filenames repeat, or
 // GOP/keyframe counts differ. Never infer ownership from frame-count division.
-export async function probeTsSegmentDimensions(paths: readonly string[]): Promise<VideoDimensions[]> {
+// A segment without any independently decodable keyframe yields null; the
+// resolution policy decides whether it can be dropped.
+export async function probeTsSegmentDimensions(paths: readonly string[]): Promise<Array<VideoDimensions | null>> {
     const boundaries: number[] = [0];
     for (const input of paths) {
         const stat = await fs.stat(input);
@@ -77,11 +79,7 @@ export async function probeTsSegmentDimensions(paths: readonly string[]): Promis
     try {
         await Promise.all([exited, pipeline(bytes(), child.stdin)]);
         if (parseError) throw parseError;
-        return paths.map((input, index) => {
-            const result = dimensions[index];
-            if (!result) throw new Error(`No independently decodable keyframe in MPEG-TS segment ${input}`);
-            return result;
-        });
+        return paths.map((_input, index) => dimensions[index] ?? null);
     } catch (error) {
         throw parseError ?? error;
     } finally {
