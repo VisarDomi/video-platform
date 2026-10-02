@@ -9,7 +9,7 @@ import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { readUploadProvidersFile, readProviderCredentials } from "../dist/config/uploadProviders.js";
 import { readXvideosCredentials } from "../dist/config/secrets.js";
 import { submitPasswordLogin } from "../dist/upload/passwordLogin.js";
-import { ChromiumPorntrexUploader, isPorntrexChunkRequest, matchesPorntrexIdentity, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
+import { ChromiumPorntrexUploader, isPorntrexChunkRequest, matchesPorntrexIdentity, orderPlaybackCandidates, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
 
 test("provider-keyed private credentials only; a legacy activeProvider field is ignored; no secret diagnostics", async t => {
     const root = await mkdtemp(path.join(os.tmpdir(), "upload-provider-config-"));
@@ -188,4 +188,15 @@ test("only the page's own chunk POSTs count as upload chunks, never pixels that 
     assert.equal(isPorntrexChunkRequest("GET", `https://www.google-analytics.com/g/collect?dl=${chunk}&en=page_view`), false);
     assert.equal(isPorntrexChunkRequest("POST", `https://www.porntrex.com/pixel.gif?ref=/upload-video/?mode=async`), false);
     assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/?mode=async&action=upload_files"), false);
+});
+
+test("Porntrex verification probes every MP4 link, highest label first, whatever the label calls a portrait tier", () => {
+    const ordered = orderPlaybackCandidates([
+        { url: "/get_file/a_480p.mp4", label: "MP4 480p, 120 Mb" },
+        { url: "/get_file/b_1920p.mp4", label: "MP4 1920p, 1.1 Gb" },
+        { url: "/get_file/c.mp4", label: "MP4" },
+        { url: "/get_file/d_720p.mp4", label: "MP4 720p, 400 Mb" },
+        { url: "/get_file/d_720p.mp4", label: "MP4 720p, 400 Mb" },
+    ]);
+    assert.deepEqual(ordered.map(row => row.url), ["/get_file/b_1920p.mp4", "/get_file/d_720p.mp4", "/get_file/a_480p.mp4", "/get_file/c.mp4"]);
 });

@@ -39,6 +39,15 @@ export async function passPorntrexAgeGate(page: Page): Promise<void> {
     await overlay.waitFor({ state: "hidden", timeout: 10_000 });
 }
 
+// Every MP4 download link, highest labelled tier first. The label is only an
+// ordering hint (portrait videos may be labelled by their long side); the
+// probed stream's pixels decide Full HD.
+export function orderPlaybackCandidates(rows: ReadonlyArray<{ url: string; label: string }>): Array<{ url: string; label: string }> {
+    const tier = (label: string) => Number(label.match(/(\d{3,4})p\b/)?.[1] ?? 0);
+    return [...new Map(rows.filter((row) => row.url).map((row) => [row.url, row])).values()]
+        .sort((left, right) => tier(right.label) - tier(left.label));
+}
+
 // Exactly the upload page's chunk POSTs. Analytics pixels and other requests
 // can carry the upload address inside their own query strings.
 export function isPorntrexChunkRequest(method: string, rawUrl: string): boolean {
@@ -332,9 +341,9 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const remoteUrl = await link.getAttribute("href");
         if (!remoteUrl) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet" };
         await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const candidates = await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
+        const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
             url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
-        }))).then(rows => rows.filter(row => /\b(?:1080|1440|2160)p\b/.test(row.label)));
+        }))));
         for (const candidate of candidates) {
             const url = new URL(candidate.url, ORIGIN);
             if (url.origin !== ORIGIN || !url.pathname.startsWith("/get_file/")) throw new Error("Unexpected Porntrex playback URL");
