@@ -306,7 +306,17 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
     async probeUploadStatus(page: Page, uploadId: string) {
         if (!/^\d+$/.test(uploadId)) throw new Error("Invalid Porntrex edit ID");
         const response = await page.goto(`${ORIGIN}/edit-video/${uploadId}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        if (response?.status() === 404) return { outcome: "missing" as const, remoteUrl: null, reason: "Porntrex edit page returned 404: the video does not exist" };
+        if (response?.status() === 404) {
+            // Porntrex also 404s the edit page while a new video is processing.
+            // Only an ID absent from the uploads list is really gone.
+            await page.goto(`${ORIGIN}/my/videos/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await passPorntrexAgeGate(page);
+            await page.locator(LIST).waitFor({ state: "visible", timeout: 15_000 });
+            if (await page.locator(`${LIST} [data-item-id="${uploadId}"]`).count()) {
+                return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex is still processing the video" };
+            }
+            return { outcome: "missing" as const, remoteUrl: null, reason: "Porntrex edit page returned 404 and the uploads list does not contain it" };
+        }
         if (!response?.ok()) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex edit page is not available" };
         const link = page.locator(`a[href^="${ORIGIN}/video/${uploadId}/"]`).first();
         const remoteUrl = await link.getAttribute("href");

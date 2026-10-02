@@ -164,3 +164,19 @@ test("Porntrex lookup counts a just-uploaded 'Processing...' row by ID and title
     rows += `<div class="video-item" data-item-id="9"><p class="inf"><a href="">Broken [x]</a></p></div>`;
     await assert.rejects(uploader.lookupUpload(page, "2026-01-01 000000 nobody"), /Incomplete Porntrex upload row/);
 });
+
+test("Porntrex edit-page 404 of a still-processing video is 'not ready', not 'missing'", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    await context.route("https://www.porntrex.com/**", route => {
+        const url = new URL(route.request().url());
+        if (url.pathname.startsWith("/edit-video/")) return route.fulfill({ status: 404, contentType: "text/html", body: "<p>not found</p>" });
+        return route.fulfill({ contentType: "text/html", body: `<div id="list_videos_my_uploaded_videos"><h2>My Videos (0)</h2>`
+            + `<div class="video-item processing" data-item-id="3351303"><span class="line-processing">Processing...</span><p class="inf"><a href="">T [x]</a></p></div></div>` });
+    });
+    const page = await context.newPage();
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
+    assert.deepEqual(await uploader.probeUploadStatus(page, "3351303"), { outcome: "not_ready", remoteUrl: null, reason: "Porntrex is still processing the video" });
+    assert.equal((await uploader.probeUploadStatus(page, "999")).outcome, "missing");
+});
