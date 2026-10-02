@@ -21,7 +21,7 @@ function getHttpsConfig() {
 }
 
 // Each Safari extension bundles exactly one online provider; the website keeps the local ones.
-const EXTENSIONS = ['xvideos', 'porntrex'];
+const EXTENSIONS = ['xvideos', 'porntrex', 'tango-live'];
 
 export default defineConfig(({ mode }) => ({
 	clearScreen: false,

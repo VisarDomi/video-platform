@@ -144,8 +144,9 @@ class VideoListPage {
 		row.element.classList.toggle('live', video.isLive === true);
 		row.element.classList.toggle('edited', video.type === VIDEO_TYPE.EDITED);
 		row.name.textContent = video.title ?? video.filename;
-		row.duration.textContent = formatDuration(video.duration);
-		row.size.textContent = formatSize(estimatedSize);
+		const liveStream = this.source.kind === 'online' && this.source.live !== undefined;
+		row.duration.textContent = liveStream ? 'LIVE' : formatDuration(video.duration);
+		row.size.textContent = liveStream ? '' : formatSize(estimatedSize);
 		row.size.classList.toggle('large', estimatedSize > 350 * 1024 * 1024);
 	}
 

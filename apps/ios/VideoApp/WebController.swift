@@ -140,6 +140,14 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        // The viewer asks for Tango's native login screen when the website says the session is gone.
+        if url.scheme == "videoapp", url.host == "login", Bundle.main.object(forInfoDictionaryKey: "TangoLogin") as? Bool == true {
+            decisionHandler(.cancel)
+            started = false
+            webView.configuration.userContentController.removeAllUserScripts()
+            showLogin("Tango login is required.")
+            return
+        }
         // Online sites embed frames (such as a login captcha); only the page itself is confined.
         if !hosts.isEmpty, navigationAction.targetFrame?.isMainFrame == false { decisionHandler(.allow); return }
         // Other sites (including ads) are blocked, never opened elsewhere.

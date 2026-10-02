@@ -77,6 +77,26 @@ export class VideoCatalog {
 		this.finishWait = undefined;
 	}
 
+	// Live lists change while open: co-streamers join at the bottom, ended or blocked streams
+	// leave, and follow state updates. Existing entries keep their order.
+	append(videos: Video[]): void {
+		const seen = new Set(this.state.videos.map(video => video.filename));
+		const added = videos.filter(video => !seen.has(video.filename) && seen.add(video.filename));
+		if (!added.length) return;
+		this.state = { ...this.state, videos: [...this.state.videos, ...added] };
+		this.publish();
+	}
+
+	remove(filename: string): void {
+		this.state = { ...this.state, videos: this.state.videos.filter(video => video.filename !== filename) };
+		this.publish();
+	}
+
+	update(video: Video): void {
+		this.state = { ...this.state, videos: this.state.videos.map(item => item.filename === video.filename ? video : item) };
+		this.publish();
+	}
+
 	private publish(): void {
 		if (this.source.kind === 'online') sessionStorage.setItem(this.key, JSON.stringify(this.state));
 		this.changed(this.state.videos);

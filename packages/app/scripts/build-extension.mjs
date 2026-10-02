@@ -3,10 +3,11 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-// XVideos keeps its background cookie worker; Porntrex's remember-me cookie needs none.
+// XVideos keeps its background cookie worker; Porntrex and Tango need none.
 const EXTENSIONS = {
     xvideos: { name: 'Xvid', site: 'XVideos', hosts: ['xvideos.com', 'www.xvideos.com'], worker: true },
     porntrex: { name: 'Ptrex', site: 'Porntrex', hosts: ['porntrex.com', 'www.porntrex.com'], worker: false },
+    'tango-live': { name: 'Tango', site: 'Tango', hosts: ['tango.me', 'www.tango.me'], worker: false },
 };
 const args = process.argv.slice(2);
 const extension = EXTENSIONS[args[0]];

@@ -20,12 +20,8 @@ if a.action=='sync':
     if config.get('hosts'):
         staged=APP/'build'/a.provider/'content.js'
         staged.parent.mkdir(parents=True,exist_ok=True)
-        if a.provider=='tango-live':
-            # TEMPORARY until tango-live runs in the shared viewer: the imported stream-viewer UI.
-            subprocess.run(['node',str(APP/'scripts/stage-stream-viewer.mjs')],cwd=ROOT,check=True)
-        else:
-            subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
-            shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
+        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
+        shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
         print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)

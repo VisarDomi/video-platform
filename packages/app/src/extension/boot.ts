@@ -35,8 +35,9 @@ export function startExtension(provider: OnlineVideoProvider, hosts: readonly st
     style.textContent = css;
     document.head.append(viewport, style);
     boot.shellAt = performance.now();
-    const task = route === 'list' ? openVideoList(provider.id)
-        : new VideoViewerPage(provider.id, location.pathname, null).open();
+    // Live providers renew their session and playback tokens before anything loads.
+    const task = (provider.live?.start() ?? Promise.resolve()).then(() => route === 'list' ? openVideoList(provider.id)
+        : new VideoViewerPage(provider.id, location.pathname, null).open());
     void task.then(() => { boot.readyAt = performance.now(); }).catch(error => {
         if (error instanceof AuthenticationRequiredError) { location.replace(provider.loginUrl); return; }
         boot.error = error instanceof Error ? error.message : 'Unable to open the video application.';

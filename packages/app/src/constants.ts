@@ -1,6 +1,6 @@
 export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'xvideos' | 'porntrex';
+export type Provider = LocalProvider | 'xvideos' | 'porntrex' | 'tango-live';
 export const DEFAULT_PROVIDER: Provider = 'tango';
 
 // Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
@@ -33,6 +33,9 @@ export const LIST_API = {
 	fc2: { list: '/api/fc2/list', add: '/api/fc2/add', remove: '/api/fc2/remove' },
 	sc: { list: '/api/sc/list', add: '/api/sc/add', remove: '/api/sc/remove' }
 } as const;
+
+// The PC's website, for online pages that use its download lists (they run on another origin).
+export const PC_SERVER = 'https://192.168.1.197:9999';
 
 export const BPS_ESTIMATE = (2300 * 1000) / 8;
 

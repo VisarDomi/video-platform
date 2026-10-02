@@ -10,5 +10,8 @@ export interface Video {
 	readonly duration: number;
 	readonly size: number;
 	readonly isLive?: boolean;
+	// Live providers: whether the streamer is followed, and the stream that revealed a co-streamer.
+	readonly following?: boolean;
+	readonly parent?: string;
 	readonly provider: Provider;
 }

@@ -205,6 +205,105 @@ try {
     console.log('PASS: Porntrex uploads, timestamp labels, durations, highest MP4 quality, Back, signed-out redirect to native login, document-start takeover.');
     await ptrex.close();
 
+    // Tango live: the gateway answers tango.me with credentialed CORS, like the real site.
+    const tango = await browser.newContext(options);
+    await mediaFixture(tango);
+    await tango.addInitScript(() => {
+        localStorage.setItem('latest_account_id', 'me'); sessionStorage.setItem('username', 'session-1');
+        // Fixture media cannot really play: media error listeners hear only the deliberately ended
+        // stream's (untrusted) error. Prototype patches survive the takeover's document.open().
+        const add = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, listener, options) {
+            if (type === 'error' && this instanceof HTMLMediaElement && typeof listener === 'function') {
+                const original = listener;
+                listener = function(event) { if (!event.isTrusted) return original.call(this, event); };
+            }
+            return add.call(this, type, listener, options);
+        };
+        const load = HTMLMediaElement.prototype.load;
+        HTMLMediaElement.prototype.load = function() {
+            if ((this.getAttribute('src') ?? '').includes('ended')) queueMicrotask(() => this.dispatchEvent(new Event('error')));
+            else load.call(this);
+        };
+    });
+    const calls = [];
+    let downloads = ['B'];
+    const record = (id, following, ended = false) => ({ isPublic: true, anchor: { encryptedAccountId: id, firstName: `First ${id}`, aliases: [{ alias: `alias${id}` }] },
+        stream: { id: `s${id}`, status: 'LIVING', masterListUrl: `https://media.invalid/${ended ? 'ended-' : ''}${id}.m3u8` } });
+    const cors = { 'Access-Control-Allow-Origin': 'https://tango.me', 'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Content-Type, Accept', 'Access-Control-Allow-Methods': 'GET, POST' };
+    await tango.route('**/*', async route => {
+        const request = route.request(), url = new URL(request.url());
+        if (url.hostname === 'tango.me') return route.fulfill({ contentType: 'text/html', body: '<p id="native">Tango</p>' });
+        if (url.hostname === 'media.invalid') return route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: '#EXTM3U\n' });
+        if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...cors, 'Access-Control-Allow-Origin': request.headers().origin } });
+        const body = request.postData() ?? '';
+        if (url.hostname === '192.168.1.197') {
+            const pc = { 'Access-Control-Allow-Origin': '*' };
+            calls.push(`pc ${url.pathname} ${body}`);
+            if (url.pathname === '/api/tango/list') return route.fulfill({ headers: pc, json: downloads });
+            const { identifier } = JSON.parse(body);
+            downloads = url.pathname.endsWith('/add') ? [...downloads, identifier] : downloads.filter(id => id !== identifier);
+            return route.fulfill({ headers: pc, json: { success: true } });
+        }
+        assert.equal(url.hostname, 'gateway.tango.me');
+        calls.push(`${request.method()} ${url.pathname} ${body}`);
+        const json = json => route.fulfill({ headers: cors, contentType: 'application/json', body: JSON.stringify(json) });
+        if (url.pathname.endsWith('/session/web/refresh') || url.pathname.endsWith('/tokenData')) return json({});
+        if (url.pathname === '/abregistrar/connection/v1/blocklist') return json(request.method() === 'POST' ? { error_code: 0 } : { users: ['D'] });
+        if (url.pathname.endsWith('/list/following')) return json({ records: [record('A', true), record('B', true)] });
+        if (url.pathname.endsWith('/following_recommendations')) return json({ records: [record('B', false), record('C', false, true), record('D', false)] });
+        if (url.pathname.endsWith('/profiles/v2/batch')) return json(Object.fromEntries(JSON.parse(body).map(id => [id, { basicProfile: { firstName: `First ${id}`, aliases: [{ alias: `alias${id}` }] } }])));
+        if (url.pathname.endsWith('/live/stream/v2/watch')) return json(body === 'sA' ? { multiBroadcast: { streams: ['A', 'E', 'C'].map(id =>
+            ({ stream: { mbDescriptor: { accountId: id, streamId: `s${id}` }, streamURL: `https://media.invalid/${id === 'C' ? 'ended-' : ''}${id}.m3u8` } })) } } : {});
+        if (url.pathname.includes('/follow/')) return json({});
+        throw new Error('Unexpected Tango request ' + url.pathname);
+    });
+    const tg = await tango.newPage();
+    const tgErrors = [];
+    tg.on('pageerror', error => tgErrors.push(error.message));
+    const tgInject = () => tg.addScriptTag({ content: fs.readFileSync('dist/extension/tango-live/content.js', 'utf8') });
+    const catalog = () => tg.evaluate(() => JSON.parse(sessionStorage.getItem('video-catalog:tango-live')).videos.map(video => video.filename));
+    await tg.goto('https://tango.me/'); await tgInject();
+    await tg.waitForSelector('a.video-row');
+    assert.ok(calls.some(call => call.includes('/session/web/refresh') && call.includes('"accountId":"me"') && call.includes('"sessionId":"session-1"')),
+        'The session refresh names the account and session the app supplied');
+    assert.deepEqual(await tg.locator('.video-name').allTextContents(), ['aliasA First A', 'aliasB First B', 'aliasC First C'],
+        'Followed first, one entry per streamer, blocked streamers hidden');
+    assert.deepEqual(await tg.locator('.video-meta > span:first-child').allTextContents(), ['LIVE', 'LIVE', 'LIVE']);
+    await tg.locator('a.video-row').first().click();
+    await tg.waitForURL('**/stream/sA'); await tgInject();
+    await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/A.m3u8'));
+    await tg.waitForFunction(() => document.querySelector('.buttons button[title="Follow or unfollow"]')?.textContent === '❤️');
+    assert.ok(await tg.locator('.progress-bar').isHidden(), 'Live streams have no timeline');
+    await tg.waitForFunction(() => [...document.querySelectorAll('.buttons button')].some(b => !b.hidden && b.textContent === '➕'));
+    await tg.waitForFunction(() => JSON.parse(sessionStorage.getItem('video-catalog:tango-live')).videos.length === 4);
+    assert.deepEqual(await catalog(), ['A', 'B', 'C', 'E'], 'A new co-streamer joins at the bottom; existing ones keep their place');
+    await tg.locator('.buttons button[title="Follow or unfollow"]').click();
+    await tg.waitForFunction(() => document.querySelector('.buttons button[title="Follow or unfollow"]').textContent === '🤍');
+    assert.ok(calls.includes('POST /proxycador/api/public/v1/follow/remove A'));
+    await tg.locator('.buttons button', { hasText: '➕' }).click();
+    await tg.waitForFunction(() => [...document.querySelectorAll('.buttons button')].some(b => !b.hidden && b.textContent === '➖'));
+    assert.ok(calls.includes('pc /api/tango/add {"identifier":"A"}'), 'The +/- button edits the PC Tango list by streamer');
+    await tg.locator('.buttons button[title="Block"]').click();
+    assert.equal(await tg.locator('.buttons button[title="Tap again to block"]').textContent(), '❓');
+    await tg.locator('.buttons button[title="Tap again to block"]').click();
+    await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/B.m3u8'));
+    assert.ok(calls.includes('POST /abregistrar/connection/v1/blocklist {"action":"BLOCK","account_id":["A"]}'));
+    assert.deepEqual(await catalog(), ['B', 'C', 'E'], 'A blocked streamer leaves; the next stream takes its place');
+    await tg.goto('https://tango.me/stream/sC'); await tgInject();
+    await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/E.m3u8'));
+    assert.deepEqual(await catalog(), ['B', 'E'], 'An ended stream leaves; the next one takes its place');
+    assert.ok(!calls.some(call => call.startsWith('pc ') && !call.includes('/api/tango/')), 'Only the Tango download list is used');
+    assert.deepEqual(tgErrors, []);
+    await tango.addInitScript({ content: fs.readFileSync('dist/extension/tango-live/content.js', 'utf8') });
+    const tgEarly = await tango.newPage();
+    await tgEarly.goto('https://tango.me/', { waitUntil: 'commit' });
+    await tgEarly.waitForSelector('a.video-row');
+    assert.equal(await tgEarly.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
+    console.log('PASS: Tango live list, Follow, +/- download list, two-step Block, co-streamers at the bottom, ended streams replaced by the next, document-start takeover.');
+    await tango.close();
+
     const local = await browser.newContext(options);
     await mediaFixture(local);
     const writes = [];
