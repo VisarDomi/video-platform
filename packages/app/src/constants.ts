@@ -1,6 +1,6 @@
 export const PROVIDERS = ['tslive', 'ladder', 'fmp4'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'oldhost' | 'videohost';
+export type Provider = LocalProvider | 'oldhost' | 'videohost' | 'tslive-live';
 export const DEFAULT_PROVIDER: Provider = 'tslive';
 
 // Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
@@ -33,6 +33,9 @@ export const LIST_API = {
 	ladder: { list: '/api/ladder/list', add: '/api/ladder/add', remove: '/api/ladder/remove' },
 	fmp4: { list: '/api/fmp4/list', add: '/api/fmp4/add', remove: '/api/fmp4/remove' }
 } as const;
+
+// The PC's website, for online pages that use its download lists (they run on another origin).
+export const PC_SERVER = 'https://192.168.1.197:9999';
 
 export const BPS_ESTIMATE = (2300 * 1000) / 8;
 

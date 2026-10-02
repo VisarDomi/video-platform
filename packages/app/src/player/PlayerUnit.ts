@@ -9,6 +9,8 @@ export interface PlayerUnitCallbacks {
 	onTime(unit: PlayerUnit, snapshot: TimelineSnapshot): void;
 	onLiveChanged(unit: PlayerUnit, isLive: boolean): void;
 	onMutedChanged(unit: PlayerUnit, muted: boolean): void;
+	// Live streams only: the stream ended or cannot play.
+	onUnavailable(unit: PlayerUnit): void;
 }
 
 export class PlayerUnit {
@@ -57,6 +59,7 @@ export class PlayerUnit {
 		this.video.addEventListener('volumechange', this.handleVolumeChange, { signal });
 		this.video.addEventListener('ended', this.handleEnded, { signal });
 		this.video.addEventListener('error', this.handleError, { signal });
+		this.video.addEventListener('playing', this.handlePlaying, { signal });
 		this.video.hidden = false;
 
 		try {
@@ -74,6 +77,7 @@ export class PlayerUnit {
 			if (token !== this.loadToken || signal.aborted) return;
 			const provider = getProvider(video.provider);
 			if (provider.kind === 'online' && error instanceof AuthenticationRequiredError) location.assign(provider.loginUrl);
+			else if (this.isLiveStream()) this.callbacks.onUnavailable(this);
 			else console.error('Video source resolution failed', error);
 		}
 	}
@@ -232,7 +236,19 @@ export class PlayerUnit {
 
 	private readonly handleError = (): void => {
 		console.error('Video element error', this.video.error);
+		if (this.isLiveStream()) this.callbacks.onUnavailable(this);
 	};
+
+	// As in Stream Viewer: a live stream that "plays" without any picture has ended.
+	private readonly handlePlaying = (): void => {
+		if (this.isLiveStream() && this.video.videoWidth === 0 && this.video.videoHeight === 0) this.callbacks.onUnavailable(this);
+	};
+
+	private isLiveStream(): boolean {
+		if (!this.currentVideo) return false;
+		const provider = getProvider(this.currentVideo.provider);
+		return provider.kind === 'online' && provider.live !== undefined;
+	}
 
 	private observe(): TimelineSnapshot {
 		this.timeline.observe(this.video);
