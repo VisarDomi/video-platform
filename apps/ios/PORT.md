@@ -11,9 +11,13 @@ generates that provider's project and Info.plist.
 | `sc` | SC local | `com.visar.SCLocal.paid` | `https://192.168.1.197:9999/videos/sc` |
 | `xvideos` | Xvid | `com.visar.Xvid.paid` | `https://www.xvideos.com/account/uploads` |
 | `porntrex` | Ptrex | `com.visar.Ptrex.paid` | `https://www.porntrex.com/my/videos/` |
+| `tango-live` | Tango | `com.visar.Tango.paid` | `https://tango.me/` |
 
-They are separate from the live **Tango** app (`com.visar.Tango.paid`, stream-viewer)
-and its Xvid/Ptrex Safari extensions, which remain until the apps replace them.
+**Tango** is the former Stream Viewer app (its repository was imported with history into
+`apps/tango`, which now keeps only its documentation and notes). It runs the shared viewer's
+`tango-live` provider on tango.me and hosts three Safari extensions: **Tango Login**
+(`.Login`, the Safari login handoff), **FC2 live** (`.FC2Live`) and **SC live** (`.SCLive`),
+the download-list bars from `packages/live-extensions`.
 
 ## Behavior: a full-screen Safari tab
 
@@ -53,6 +57,17 @@ and its Xvid/Ptrex Safari extensions, which remain until the apps replace them.
     ad-heavy home page instead of showing a page: from `/my/videos/` when signed
     out (Ptrex opens `/login/`) and from `/login/` when already signed in (Ptrex
     opens `/my/videos/`).
+- **Tango** signs in with Google, which a web view cannot do, so it keeps the original
+  handoff: sign in on tango.me in Safari, Import with the Tango Login extension, delete
+  Tango's Safari website data and confirm in the app ("Safari data cleared — continue").
+  `VideoApp/TangoSession.swift` then moves the imported cookies from the shared Keychain
+  inbox into the web view (emptying the inbox) and gives the page the account and session
+  IDs from the token; the website refreshes the session and the page renews 5-second
+  playback tokens itself, so there is no native auth owner or media relay any more.
+  SiteCookies keeps `Tango-RT`/`-DI`/`-DeviceId` durable. When Tango reports the session
+  gone, the viewer navigates to `videoapp://login` and the app shows the handoff screen.
+  FC2 live and SC live need enabling once in Safari's extension settings, with their sites
+  allowed; their background pages call the PC's `/api/fc2|sc/list|add|remove`.
 - Like a restored Safari tab, a killed app reopens the page you were on with its
   Back/Forward list (WebKit `interactionState`); only an app page becomes the restore
   point, and a blank restore falls back to the start page. Edge-swipe Back/Forward, pinch zoom,

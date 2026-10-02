@@ -50,6 +50,21 @@ stored. Sizes use the same 4 Mbps estimate as XVideos. The site's `kt_member`
 remember-me cookie (about 30 days) keeps the login, so Ptrex has no background
 worker and requests no cookie/webRequest permission.
 
+## Tango live
+
+`tango-live` (formerly Stream Viewer's Tango provider) is an online provider for live
+streams on tango.me: followed streams first, then recommendations, one per streamer, with
+blocked streamers hidden and names from profiles. Videos are streamers (`filename` is the
+streamer ID, `pageUrl` the `/stream/<id>` page); stream playlists are kept per tab in
+sessionStorage. Its `live` actions renew the session (refresh with the account/session IDs
+the Tango app supplies) and the 5-second playback tokens, follow/unfollow, block (after
+unfollowing) and look up co-streamers. The overlay shows Follow, the PC Tango download
+list (+/-, by streamer, at `https://192.168.1.197:9999`) and a two-step Block, without a
+timeline, seeking or Multi. As in Stream Viewer, co-streamers join the bottom of the list
+once per streamer, and a stream that errors or plays without a picture leaves the list with
+the next one taking its place (the first one if it was never listed). Otherwise it follows
+the shared viewer's behavior. It runs only in the Tango app (`apps/ios`).
+
 ## Build and verify
 
 From the video-platform root:
@@ -60,6 +75,7 @@ npm run check -w app
 npm run build:app
 npm run build:extension -- xvideos
 npm run build:extension -- porntrex
+npm run build:extension -- tango-live
 npm exec -w app -- playwright-core install webkit
 npm run test:app:webkit
 ```
