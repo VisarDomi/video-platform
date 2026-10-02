@@ -228,7 +228,7 @@ npm install
 ```
 
 Phone-harness setup is documented by
-[`userscript-ios-test`](../../userscript-ios-test/README.md). Disable the normal
+[`ios-tools`](../../../../ios-tools/README.md). Disable the normal
 stream-viewer userscript **and Safari extension** because this test runner injects
 the freshly built userscript itself. Sign in to Tango in Safari, and keep Safari unlocked and foregrounded
 while a run is active.
