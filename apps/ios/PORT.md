@@ -100,12 +100,12 @@ changing an approved baseline. Physical checks use
 
 ## Renewal
 
-Reader Extensions' `configure-refresh.py --video-root
-/Users/visar/Developer/video-platform/apps/ios` describes the monthly entries
+`scripts/renewal.py` lists the monthly entries for ios-app-renewal's
+`configure-refresh.py` (Mac mirror `/Users/visar/Developer/video-platform/apps/ios`):
 `<provider>-local` (local apps) and `<provider>` (online apps). Their inputs are
-`VideoApp`, `providers.json`, `scripts/project.py`, `scripts/build-provider.py` and,
-for online apps, the staged `build/<provider>/content.js`; the Mac needs no Node.
-On the Mac these configs were added to the existing index; do not regenerate the
-whole index, because the manga apps' deployed configs differ from the generator.
+`VideoApp`, `Shared`, `providers.json`, `scripts/project.py`, `scripts/build-provider.py`
+and, for online apps, the staged `build/<provider>/content.js`; Tango also lists `Login`,
+`Extension` and its staged web extensions. The Mac needs no Node. A new provider in
+`providers.json` needs no change in ios-app-renewal; rerun its generator.
 After a change: pause the idle scheduler, deploy, approve each changed app, verify
 renewal and resume. See `verification.json`.
