@@ -21,7 +21,7 @@ function getHttpsConfig() {
 }
 
 // Each Safari extension bundles exactly one online provider; the website keeps the local ones.
-const EXTENSIONS = ['oldhost', 'videohost'];
+const EXTENSIONS = ['oldhost', 'videohost', 'tslive-live'];
 
 export default defineConfig(({ mode }) => ({
 	clearScreen: false,

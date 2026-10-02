@@ -20,6 +20,8 @@ export interface OverlayActions {
 	onReturnOriginal(): void;
 	onSaveOrCut(playbackDuration: number): void;
 	onAddMarker(): void;
+	onToggleFollow(): void;
+	onBlock(): void;
 }
 
 export class OverlayView {
@@ -36,6 +38,10 @@ export class OverlayView {
 	private readonly returnOriginal = button('🔄');
 	private readonly saveCut = button();
 	private readonly addMarker = button('📍');
+	private readonly follow = button();
+	private readonly block = button();
+	private readonly timeContainer = element('div', 'time-display-container');
+	private blockConfirm = false;
 
 	private video: Video | null = null;
 	private timeline: OverlayTimeline = {
@@ -56,32 +62,41 @@ export class OverlayView {
 
 	constructor(private readonly actions: OverlayActions) {
 		this.element.className = 'player-overlay';
-		const timeContainer = element('div', 'time-display-container');
-		timeContainer.append(this.time, this.segmentName);
+		this.timeContainer.append(this.time, this.segmentName);
 		this.progress.setAttribute('role', 'slider');
 		this.progress.append(this.fill, this.markerLayer, this.segmentText);
 		const controls = element('div', 'controls');
 		const buttons = element('div', 'buttons');
 		buttons.append(
 			this.muteUndo,
+			this.follow,
 			this.membership,
+			this.block,
 			this.returnOriginal,
 			this.saveCut,
 			this.addMarker
 		);
 		controls.append(buttons);
-		this.element.append(this.name, timeContainer, this.progress, controls);
+		this.element.append(this.name, this.timeContainer, this.progress, controls);
 
 		this.muteUndo.addEventListener('click', actions.onToggleMuteOrUndo);
 		this.membership.addEventListener('click', actions.onToggleMembership);
 		this.returnOriginal.addEventListener('click', actions.onReturnOriginal);
 		this.saveCut.addEventListener('click', () => actions.onSaveOrCut(this.effectiveDuration()));
 		this.addMarker.addEventListener('click', actions.onAddMarker);
+		this.follow.addEventListener('click', actions.onToggleFollow);
+		// Blocking asks once more, as in Stream Viewer.
+		this.block.addEventListener('click', () => {
+			if (!this.blockConfirm) { this.blockConfirm = true; this.renderButtons(); return; }
+			this.blockConfirm = false;
+			actions.onBlock();
+		});
 		this.progress.addEventListener('pointerdown', this.handlePointerDown);
 		this.render();
 	}
 
 	setVideo(video: Video | null): void {
+		if (video?.filename !== this.video?.filename) this.blockConfirm = false;
 		this.video = video;
 		this.render();
 	}
@@ -128,6 +143,14 @@ export class OverlayView {
 	private renderVisibility(): void {
 		const visible = this.uiVisible && this.video !== null;
 		this.element.hidden = !visible;
+		// Live streams have no timeline to show or seek, as in Stream Viewer.
+		this.timeContainer.hidden = this.progress.hidden = this.isLiveStream();
+	}
+
+	private isLiveStream(): boolean {
+		if (!this.video) return false;
+		const source = getProvider(this.video.provider);
+		return source.kind === 'online' && source.live !== undefined;
 	}
 
 	private renderTimeline(): void {
@@ -165,7 +188,13 @@ export class OverlayView {
 
 	private renderButtons(): void {
 		const local = this.video !== null && getProvider(this.video.provider).kind === 'local';
-		this.membership.hidden = !local;
+		const live = this.isLiveStream();
+		this.membership.hidden = !local && !live;
+		this.follow.hidden = this.block.hidden = !live;
+		this.follow.textContent = this.video?.following ? '❤️' : '🤍';
+		this.follow.title = 'Follow or unfollow';
+		this.block.textContent = this.blockConfirm ? '❓' : '🚫';
+		this.block.title = this.blockConfirm ? 'Tap again to block' : 'Block';
 		const isOriginal = local && this.video?.type === VIDEO_TYPE.ORIGINAL && this.timeline.isLive === false;
 		const isEdited = local && this.video?.type === VIDEO_TYPE.EDITED;
 		const hasSegments = isOriginal && this.segments.length > 0;
@@ -207,6 +236,8 @@ export class OverlayView {
 		if (!this.interactive) {
 			for (const control of [
 				this.muteUndo,
+				this.follow,
+				this.block,
 				this.membership,
 				this.returnOriginal,
 				this.saveCut,

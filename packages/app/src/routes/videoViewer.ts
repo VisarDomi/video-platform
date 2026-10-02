@@ -4,8 +4,8 @@ import { STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
 import { ApiError, editVideo, fetchVideos, returnVideo, saveVideo } from '../services/api.js';
 import {
 	changeMembership,
-	extractIdentifier,
 	fetchMembership,
+	listIdentifier,
 	type MembershipState
 } from '../services/downloadList.js';
 import { calculateSegmentsToKeep, fetchPlaylist } from '../services/hls.js';
@@ -38,6 +38,9 @@ export class VideoViewerPage {
 	private lastProgressSave = 0;
 	private membership: MembershipState = { state: 'loading' };
 	private membershipToken = 0;
+	// Live lists: streamers whose co-streamers were looked up, and streams that left the list.
+	private readonly discovered = new Set<string>();
+	private readonly removed = new Set<string>();
 
 	constructor(
 		private readonly provider: Provider,
@@ -103,8 +106,18 @@ export class VideoViewerPage {
 		} else this.updateCanonicalList(await fetchVideos(this.provider));
 	}
 
-	private updateCanonicalList(videos: Video[]): void {
+	private updateCanonicalList(list: Video[]): void {
 		const current = this.activeUnit().currentVideo;
+		const videos = this.live() ? list.filter(item => !this.removed.has(item.filename)) : list;
+		// A live stream that ended before its list arrived: the next one takes its place (or the
+		// first one, when it was never in the list).
+		if (current && this.removed.has(current.filename) && this.live()) {
+			const position = list.findIndex(item => item.filename === current.filename);
+			this.videos = videos;
+			this.showAt(position < 0 ? 0 : list.slice(0, position).filter(item => !this.removed.has(item.filename)).length);
+			this.catalog.remove(current.filename);
+			return;
+		}
 		const index = videos.findIndex(video => current && (
 			(this.source.kind === 'local' && this.currentIndex < 0 && video.filename === this.requestedFilename
 				&& (this.requestedType === null || video.type === this.requestedType)) || sameVideo(video, current)
@@ -161,7 +174,9 @@ export class VideoViewerPage {
 			onToggleMembership: () => void this.toggleMembership(),
 			onReturnOriginal: () => void this.returnOriginal(),
 			onSaveOrCut: (duration) => void this.saveOrCut(duration),
-			onAddMarker: () => this.addMarker()
+			onAddMarker: () => this.addMarker(),
+			onToggleFollow: () => void this.toggleFollow(),
+			onBlock: () => void this.blockCurrent()
 		};
 	}
 
@@ -187,6 +202,9 @@ export class VideoViewerPage {
 			},
 			onMutedChanged: (unit: PlayerUnit, muted: boolean) => {
 				if (unit === this.activeUnit()) this.overlay.setMuted(muted);
+			},
+			onUnavailable: (unit: PlayerUnit) => {
+				if (unit === this.activeUnit()) this.removeCurrent();
 			}
 		};
 	}
@@ -198,7 +216,8 @@ export class VideoViewerPage {
 				if (!active) this.settleNavigation();
 			},
 			getCurrentTime: () => this.activeUnit().getSnapshot().currentTime,
-			getSeekMax: () => this.activeUnit().getSnapshot().seekMax,
+			// Live streams are not seekable, as in Stream Viewer.
+			getSeekMax: () => this.live() ? 0 : this.activeUnit().getSnapshot().seekMax,
 			seekDirect: (time: number) => this.activeUnit().seek(time, false),
 			finishSeek: () => void this.activeUnit().play(),
 			onVerticalStart: () => this.beginUnsettled(),
@@ -243,7 +262,82 @@ export class VideoViewerPage {
 		document.title = `${video.title ?? video.filename} - ${this.provider} - Video Editor`;
 		history.replaceState(null, '', videoUrl(video));
 		localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
-		if (this.source.kind === 'local') void this.loadMembership();
+		if (this.source.kind === 'local' || this.live()) void this.loadMembership();
+		void this.discover(video);
+	}
+
+	private live() {
+		return this.source.kind === 'online' ? this.source.live : undefined;
+	}
+
+	// As in Stream Viewer: once per streamer (not for co-streamers), co-streamers that are new
+	// to the list join at the bottom. Existing entries keep their place.
+	private async discover(video: Video): Promise<void> {
+		const live = this.live();
+		if (!live || video.parent || this.discovered.has(video.filename)) return;
+		this.discovered.add(video.filename);
+		try {
+			const fresh = (await live.related(video)).filter(item => !this.removed.has(item.filename));
+			if (fresh.length && this.videos.some(item => item.filename === video.filename)) this.catalog.append(fresh);
+		} catch (error) {
+			this.discovered.delete(video.filename);
+			console.warn(`Could not discover co-streamers for ${video.filename}`, error);
+		}
+	}
+
+	// Streams that end or are blocked leave the list and the next one takes their place, as in
+	// Stream Viewer. If the list has not arrived yet, updateCanonicalList finishes the removal.
+	private removeCurrent(): void {
+		const video = this.activeUnit().currentVideo;
+		if (!video || this.removed.has(video.filename)) return;
+		this.removed.add(video.filename);
+		if (this.currentIndex < 0) return;
+		const index = this.videos.findIndex(item => item.filename === video.filename);
+		if (index >= 0) this.videos.splice(index, 1);
+		this.showAt(Math.max(0, index));
+		this.catalog.remove(video.filename);
+	}
+
+	private showAt(index: number): void {
+		if (!this.videos.length) {
+			for (const unit of this.units) unit.clear();
+			const message = document.createElement('p');
+			message.className = 'status';
+			message.textContent = 'No live streams are available.';
+			document.body.replaceChildren(message);
+			return;
+		}
+		this.currentIndex = Math.min(index, this.videos.length - 1);
+		this.loadEdgeUnits();
+		this.activateCurrent();
+	}
+
+	private async toggleFollow(): Promise<void> {
+		const live = this.live();
+		const video = this.current();
+		if (!live) return;
+		try {
+			await live.follow(video, !video.following);
+			const updated = { ...video, following: !video.following };
+			const index = this.videos.findIndex(item => item.filename === video.filename);
+			if (index >= 0) this.videos[index] = updated;
+			if (this.activeUnit().currentVideo?.filename === video.filename) this.activeUnit().updateVideo(updated);
+			if (this.current().filename === video.filename) this.overlay.setVideo(updated);
+			this.catalog.update(updated);
+		} catch (error) {
+			console.error('Follow failed', error);
+		}
+	}
+
+	private async blockCurrent(): Promise<void> {
+		const live = this.live();
+		if (!live) return;
+		try {
+			await live.block(this.current());
+			this.removeCurrent();
+		} catch (error) {
+			console.error('Block failed', error);
+		}
 	}
 
 	private readonly handleScroll = (): void => {
@@ -458,10 +552,10 @@ export class VideoViewerPage {
 		this.setMembership({ state: 'loading' });
 		try {
 			const identifiers = await fetchMembership(this.provider);
-			if (token !== this.membershipToken || this.current() !== video) return;
+			if (token !== this.membershipToken || this.current().filename !== video.filename) return;
 			this.setMembership({
 				state: 'ready',
-				isMember: identifiers.has(extractIdentifier(video.filename))
+				isMember: identifiers.has(listIdentifier(video))
 			});
 		} catch (error) {
 			if (token !== this.membershipToken) return;
@@ -486,12 +580,12 @@ export class VideoViewerPage {
 				: { state: 'adding', confirmedMember: false }
 		);
 		try {
-			await changeMembership(this.provider, extractIdentifier(video.filename), !confirmed);
+			await changeMembership(this.provider, listIdentifier(video), !confirmed);
 			const identifiers = await fetchMembership(this.provider);
-			if (token !== this.membershipToken || this.current() !== video) return;
+			if (token !== this.membershipToken || this.current().filename !== video.filename) return;
 			this.setMembership({
 				state: 'ready',
-				isMember: identifiers.has(extractIdentifier(video.filename))
+				isMember: identifiers.has(listIdentifier(video))
 			});
 		} catch (error) {
 			if (token !== this.membershipToken) return;
@@ -510,7 +604,7 @@ export class VideoViewerPage {
 
 	private saveProgress(time: number): void {
 		const video = this.current();
-		if (!Number.isFinite(time)) return;
+		if (!Number.isFinite(time) || this.live()) return;
 		localStorage.setItem(STORAGE_KEYS.PROGRESS_PREFIX + video.filename, String(time));
 	}
 
