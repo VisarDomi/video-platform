@@ -1,0 +1,14 @@
+{
+    "name": "live-extensions",
+    "version": "3",
+    "description": "LADDER live and FMP4 live Safari extensions (hosted by TsLive): download-list controls for ladder and fmp4live",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "node scripts/build.mjs",
+        "check": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    }
+}
