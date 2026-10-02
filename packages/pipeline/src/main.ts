@@ -23,6 +23,8 @@ import { selectComparisonFile, writeComparisonReport } from "./commands/comparis
 import { syncOldHostInventory } from "./commands/syncProviderInventory.js";
 import { assertUploadProvider } from "./config/uploadProviders.js";
 import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
+import { connectVideoHostPhone } from "./commands/connectVideoHostPhone.js";
+import { videohostSessionReport } from "./commands/videohostSessionReport.js";
 
 function usage(): never {
     throw new Error([
@@ -37,6 +39,7 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider oldhost|videohost --apply] | oldhost-sync --apply",
         "  metadata-check [--provider oldhost|videohost]",
+        "  vhost-connect-iphone --apply | vhost-session-report",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -76,7 +79,16 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "oldhost-sync", "metadata-check"].includes(command ?? "")) usage();
+        "upload-provider", "oldhost-sync", "metadata-check", "vhost-connect-iphone", "vhost-session-report"].includes(command ?? "")) usage();
+    if (command === "vhost-connect-iphone") {
+        requireApply(process.argv.slice(3));
+        console.log(JSON.stringify(await connectVideoHostPhone(pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "vhost-session-report") {
+        console.log(JSON.stringify(await videohostSessionReport(pipelineConfig), null, 2));
+        return;
+    }
     if (command === "oldhost-sync") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);

@@ -12,6 +12,7 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
         executablePath: config.chromiumExecutablePath,
         profilePath: provider === "videohost" ? config.videohostBrowserProfilePath ?? config.browserProfilePath : config.browserProfilePath,
         leaveOpenOnFailure: process.env.VIDEO_PIPELINE_SERVICE_MODE !== "1",
+        sessionFilePath: provider === "videohost" ? config.videohostSessionPath : undefined,
         ...credentials,
     };
     return provider === "oldhost" ? new ChromiumOldHostUploader(browser) : new ChromiumVideoHostUploader(browser);

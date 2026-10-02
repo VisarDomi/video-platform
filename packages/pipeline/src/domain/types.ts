@@ -107,6 +107,7 @@ export interface CampaignControl {
     readonly trialPerProvider: number | null;
     readonly trialFinishedAt: string | null;
     readonly uploadProvider: "oldhost" | "videohost";
+    readonly attentionReason: string | null;
     readonly updatedAt: string;
 }
 

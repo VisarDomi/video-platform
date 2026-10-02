@@ -3,8 +3,41 @@ import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { reconcileDueUploads } from "./reconcileUploads.js";
 import { campaignStep } from "./campaign.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
+import { checkVideoHostSession } from "../upload/videohostKeepalive.js";
+import { SESSION_LOST_ADVICE } from "../upload/providerWarnings.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
+// Well inside common PHP session idle limits; one light request each time.
+const SESSION_KEEPALIVE_MILLISECONDS = 10 * 60_000;
+
+// Keeps the shared VideoHost session from idling out and records its health
+// (the history answers how long videohost keeps a session alive). A logged-out
+// session pauses the campaign with its reason instead of logging in again,
+// which would log the phone out.
+export async function keepVideoHostSessionAlive(config: PipelineConfig, now = new Date(),
+    check = checkVideoHostSession): Promise<void> {
+    if (!config.networkUploadsEnabled || !config.videohostSessionPath) return;
+    const database = new PipelineDatabase(config.databasePath);
+    try {
+        if ((config.uploadProvider ?? database.getActiveUploadProvider()) !== "videohost") return;
+        let result;
+        try {
+            result = await check(config.videohostSessionPath);
+        } catch (error) {
+            database.recordProviderSessionEvent({ provider: "videohost", kind: "keepalive_error",
+                note: error instanceof Error ? error.message : String(error) }, now);
+            return;
+        }
+        database.recordProviderSessionEvent({ provider: "videohost", kind: "keepalive", loggedIn: result.loggedIn,
+            fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
+        if (!result.loggedIn && database.getCampaignControl().state === "running") {
+            database.pauseForAttention(`VideoHost shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
+            console.log(JSON.stringify({ event: "videohost-session-lost", note: result.note, fingerprint: result.fingerprint }));
+        }
+    } finally {
+        database.close();
+    }
+}
 
 function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
@@ -64,6 +97,17 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         }
     }
     signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
+    let keepingAlive = false;
+    const keepalive = () => {
+        if (keepingAlive || signal.aborted) return;
+        keepingAlive = true;
+        void keepVideoHostSessionAlive(config).catch((error: unknown) => {
+            console.error(JSON.stringify({ event: "videohost-keepalive-error", error: String(error) }));
+        }).finally(() => { keepingAlive = false; });
+    };
+    keepalive();
+    const keepaliveTimer = setInterval(keepalive, SESSION_KEEPALIVE_MILLISECONDS);
+    signal.addEventListener("abort", () => clearInterval(keepaliveTimer), { once: true });
     // Queue ingestion is independent of long conversions and network cooldowns.
     // It never changes running/paused intent; pending removals follow the file.
     let importingSelection = false;
