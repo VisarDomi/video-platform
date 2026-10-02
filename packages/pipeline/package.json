@@ -27,6 +27,7 @@
         "metadata:check": "npm run build && node --no-warnings dist/main.js metadata-check",
         "vhost:connect-iphone": "npm run build && DISPLAY=:111 node --no-warnings dist/main.js vhost-connect-iphone --apply",
         "vhost:session-report": "npm run build && node --no-warnings dist/main.js vhost-session-report",
+        "vhost:uploads": "npm run build && node --no-warnings dist/main.js vhost-uploads",
         "campaign:configure": "npm run build && node --no-warnings dist/main.js campaign-configure",
         "campaign:resume": "npm run build && node --no-warnings dist/main.js campaign-resume --apply",
         "campaign:pause": "npm run build && node --no-warnings dist/main.js campaign-pause --apply",
