@@ -1,5 +1,7 @@
-import { BPS_ESTIMATE, STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
+import { STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
 import { fetchVideos } from '../services/api.js';
+import { getProvider, videoUrl } from '../providers/index.js';
+import { VideoCatalog } from '../services/catalog.js';
 import type { Video } from '../types.js';
 import { formatDuration, formatSize } from '../utils/format.js';
 
@@ -13,6 +15,8 @@ interface Row {
 }
 
 class VideoListPage {
+	private readonly source;
+	private readonly catalog;
 	private readonly list = document.createElement('main');
 	private readonly rows = new Map<string, Row>();
 	private videos: Video[] = [];
@@ -20,9 +24,13 @@ class VideoListPage {
 	private polling = false;
 	private pollController: AbortController | null = null;
 	private refreshToken = 0;
+	private refreshController: AbortController | null = null;
+	private lifecycleToken = 0;
 	private highlightedFilename: string | null = null;
 
 	constructor(private readonly provider: Provider) {
+		this.source = getProvider(provider);
+		this.catalog = new VideoCatalog(provider, videos => { this.videos = videos; this.reconcile(videos); });
 		this.list.className = 'video-list';
 		this.list.setAttribute('aria-label', `${provider} videos`);
 	}
@@ -31,12 +39,19 @@ class VideoListPage {
 		document.title = `${this.provider} - Video Editor`;
 		document.body.replaceChildren(status('Loading…'));
 		this.readHighlight();
-		await this.refresh();
+		if (this.source.kind === 'local') await this.refresh();
+		else await this.catalog.open(performance.getEntriesByType('navigation').some(entry => (entry as PerformanceNavigationTiming).type === 'back_forward'));
 		document.body.replaceChildren(this.list);
-		this.scrollToHighlight();
+		if (this.source.kind === 'online' && typeof history.state?.videoListY === 'number') window.scrollTo(0, history.state.videoListY);
+		else this.scrollToHighlight();
+		this.list.addEventListener('click', () => {
+			if (this.source.kind === 'online') history.replaceState({ ...history.state, videoListY: window.scrollY }, '');
+		});
 		this.startPolling();
 		addEventListener('pagehide', this.handlePageHide);
 		addEventListener('pageshow', this.handlePageShow);
+		document.addEventListener('visibilitychange', this.handleVisibility);
+		addEventListener('online', this.handleOnline);
 	}
 
 	private readHighlight(): void {
@@ -46,7 +61,17 @@ class VideoListPage {
 	}
 
 	private readonly handlePageHide = (): void => {
+		this.lifecycleToken++;
 		this.stopPolling();
+	};
+
+	private readonly handleVisibility = (): void => {
+		if (document.visibilityState === 'hidden') this.handlePageHide();
+		else void this.restore();
+	};
+
+	private readonly handleOnline = (): void => {
+		if (document.visibilityState === 'visible') void this.restore();
 	};
 
 	private readonly handlePageShow = (event: PageTransitionEvent): void => {
@@ -56,19 +81,25 @@ class VideoListPage {
 	};
 
 	private async restore(): Promise<void> {
+		const lifecycle = ++this.lifecycleToken;
+		this.stopPolling();
 		this.readHighlight();
 		try {
-			await this.refresh();
+			if (this.source.kind === 'local') await this.refresh();
+			else this.catalog.resume();
 		} catch (error) {
-			console.error('Unable to refresh restored video list', error);
+			if (lifecycle === this.lifecycleToken) console.error('Unable to refresh restored video list', error);
 		} finally {
-			this.startPolling();
+			if (lifecycle === this.lifecycleToken) this.startPolling();
 		}
 	}
 
 	private async refresh(): Promise<void> {
 		const token = ++this.refreshToken;
-		const videos = await fetchVideos(this.provider);
+		this.refreshController?.abort();
+		const controller = new AbortController();
+		this.refreshController = controller;
+		const videos = await fetchVideos(this.provider, undefined, controller.signal);
 		if (token !== this.refreshToken) return;
 		this.videos = videos;
 		this.reconcile(videos);
@@ -107,23 +138,28 @@ class VideoListPage {
 	}
 
 	private updateRow(row: Row, video: Video): void {
-		const estimatedSize = video.duration * BPS_ESTIMATE;
+		const estimatedSize = video.duration * this.source.estimatedBytesPerSecond;
 		row.element.href = videoUrl(video);
 		row.element.classList.toggle('current-video', video.filename === this.highlightedFilename);
 		row.element.classList.toggle('live', video.isLive === true);
 		row.element.classList.toggle('edited', video.type === VIDEO_TYPE.EDITED);
-		row.name.textContent = video.filename;
+		row.name.textContent = video.title ?? video.filename;
 		row.duration.textContent = formatDuration(video.duration);
 		row.size.textContent = formatSize(estimatedSize);
 		row.size.classList.toggle('large', estimatedSize > 350 * 1024 * 1024);
 	}
 
 	private startPolling(): void {
-		if (this.pollTimer !== null) return;
+		if (this.source.kind === 'online') { this.catalog.resume(); return; }
+		if (this.pollTimer !== null || document.visibilityState === 'hidden') return;
 		this.pollTimer = window.setInterval(() => void this.poll(), POLL_MS);
 	}
 
 	private stopPolling(): void {
+		this.catalog.stop();
+		this.refreshToken++;
+		this.refreshController?.abort();
+		this.refreshController = null;
 		if (this.pollTimer !== null) clearInterval(this.pollTimer);
 		this.pollTimer = null;
 		this.pollController?.abort();
@@ -132,9 +168,8 @@ class VideoListPage {
 	}
 
 	private async poll(): Promise<void> {
-		if (this.polling || this.videos.length === 0) return;
+		if (this.polling) return;
 		const latest = this.videos[this.videos.length - 1]?.filename;
-		if (!latest) return;
 		this.polling = true;
 		const controller = new AbortController();
 		this.pollController = controller;
@@ -178,10 +213,6 @@ function createRow(): Row {
 
 function videoKey(video: Video): string {
 	return `${video.filename}\u001f${video.type}`;
-}
-
-function videoUrl(video: Video): string {
-	return `/videos/${video.provider}/${encodeURIComponent(video.filename)}?type=${video.type}`;
 }
 
 function status(text: string): HTMLParagraphElement {

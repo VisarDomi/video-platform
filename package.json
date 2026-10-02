@@ -6,6 +6,8 @@
         "build": "npm run build:backend && npm run build:frontend",
         "build:shared": "npm run build -w shared",
         "build:app": "npm run build -w app",
+        "build:extension": "node packages/app/scripts/build-extension.mjs",
+        "test:app:webkit": "node packages/app/test/providers.mjs",
         "build:frontend": "npm run build:app",
         "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
         "build:auth": "npm run build:shared && npm run build -w auth",
