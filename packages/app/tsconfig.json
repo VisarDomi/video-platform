@@ -6,6 +6,7 @@
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"moduleResolution": "bundler",
 		"resolveJsonModule": true,
+		"paths": { "@providers": ["./src/providers/local-registry.ts"] },
 		"isolatedModules": true,
 		"noEmit": true,
 		"strict": true,

@@ -1,11 +1,11 @@
 import './style.css';
-import { DEFAULT_PROVIDER, PROVIDERS, type Provider } from './constants.js';
+import { DEFAULT_PROVIDER, PROVIDERS, type LocalProvider } from './constants.js';
 import { openVideoList } from './routes/videoList.js';
 import type { VideoType } from './types.js';
 import { VIDEO_TYPE } from './constants.js';
 
-function isProvider(value: string): value is Provider {
-	return PROVIDERS.includes(value as Provider);
+function isProvider(value: string): value is LocalProvider {
+	return PROVIDERS.includes(value as LocalProvider);
 }
 
 async function main(): Promise<void> {

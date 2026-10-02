@@ -4,6 +4,8 @@ export type VideoType = (typeof VIDEO_TYPE)[keyof typeof VIDEO_TYPE];
 
 export interface Video {
 	readonly filename: string;
+	readonly title?: string;
+	readonly pageUrl?: string;
 	readonly type: VideoType;
 	readonly duration: number;
 	readonly size: number;

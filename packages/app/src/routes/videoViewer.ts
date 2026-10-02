@@ -1,3 +1,5 @@
+import { getProvider, videoUrl } from '../providers/index.js';
+import { VideoCatalog, cachedVideo } from '../services/catalog.js';
 import { STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
 import { ApiError, editVideo, fetchVideos, returnVideo, saveVideo } from '../services/api.js';
 import {
@@ -17,6 +19,8 @@ const GEOMETRY_WAIT_MS = 8000;
 const PROGRESS_SAVE_MS = 3000;
 
 export class VideoViewerPage {
+	private readonly source;
+	private readonly catalog;
 	private readonly stage = document.createElement('main');
 	private readonly overlay: OverlayView;
 	private units: PlayerUnit[] = [];
@@ -40,6 +44,8 @@ export class VideoViewerPage {
 		private readonly requestedFilename: string,
 		private readonly requestedType: VideoType | null
 	) {
+		this.source = getProvider(provider);
+		this.catalog = new VideoCatalog(provider, videos => this.updateCanonicalList(videos));
 		this.stage.className = 'video-stage viewer-loading';
 		this.overlay = new OverlayView(this.actions());
 	}
@@ -75,7 +81,12 @@ export class VideoViewerPage {
 	}
 
 	private provisionalVideo(): Video {
+		if (this.source.kind === 'online') {
+			const saved = cachedVideo(this.provider, this.requestedFilename);
+			if (saved) return saved;
+		}
 		return {
+			pageUrl: this.source.kind === 'online' ? this.requestedFilename : undefined,
 			filename: this.requestedFilename,
 			type: this.requestedType ?? VIDEO_TYPE.ORIGINAL,
 			duration: 0,
@@ -86,19 +97,29 @@ export class VideoViewerPage {
 	}
 
 	private async loadCanonicalListAndNeighbors(): Promise<void> {
-		const videos = await fetchVideos(this.provider);
-		const index = videos.findIndex(
-			(video) =>
-				video.filename === this.requestedFilename &&
-				(this.requestedType === null || video.type === this.requestedType)
-		);
-		if (index < 0) throw new Error('Video not found.');
+		if (this.source.kind === 'online') {
+			await this.catalog.open(true);
+			this.catalog.resume();
+		} else this.updateCanonicalList(await fetchVideos(this.provider));
+	}
 
+	private updateCanonicalList(videos: Video[]): void {
+		const current = this.activeUnit().currentVideo;
+		const index = videos.findIndex(video => current && (
+			(this.source.kind === 'local' && this.currentIndex < 0 && video.filename === this.requestedFilename
+				&& (this.requestedType === null || video.type === this.requestedType)) || sameVideo(video, current)
+			|| (video.pageUrl && video.pageUrl === current.pageUrl)));
+		if (index < 0) {
+			if (this.source.kind === 'local') throw new Error('Video not found.');
+			return;
+		}
+		const first = this.currentIndex < 0;
 		this.videos = videos;
 		this.currentIndex = index;
 		this.activeUnit().updateVideo(this.current());
 		this.loadEdgeUnits();
-		this.activateCurrent();
+		if (first) this.activateCurrent();
+		else this.overlay.setVideo(this.current());
 	}
 
 	private async revealWhenCurrentGeometryIsReady(): Promise<void> {
@@ -219,10 +240,10 @@ export class VideoViewerPage {
 		this.overlay.setMembership(this.membership);
 		this.overlay.setUiVisible(this.controlsVisible);
 		this.overlay.setInteractive(!this.unsettled);
-		document.title = `${video.filename} - ${this.provider} - Video Editor`;
+		document.title = `${video.title ?? video.filename} - ${this.provider} - Video Editor`;
 		history.replaceState(null, '', videoUrl(video));
 		localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
-		void this.loadMembership();
+		if (this.source.kind === 'local') void this.loadMembership();
 	}
 
 	private readonly handleScroll = (): void => {
@@ -368,7 +389,7 @@ export class VideoViewerPage {
 
 	private addMarker(): void {
 		const video = this.current();
-		if (video.type !== VIDEO_TYPE.ORIGINAL || this.activeUnit().getSnapshot().isLive) return;
+		if (this.source.kind !== 'local' || video.type !== VIDEO_TYPE.ORIGINAL || this.activeUnit().getSnapshot().isLive) return;
 		this.segments = [...this.segments, this.activeUnit().getSnapshot().currentTime].sort(
 			(a, b) => a - b
 		);
@@ -495,6 +516,7 @@ export class VideoViewerPage {
 
 	private readonly handlePageHide = (): void => {
 		this.touching = false;
+		this.catalog.stop();
 		this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		void this.releaseWakeLock();
 	};
@@ -509,6 +531,7 @@ export class VideoViewerPage {
 
 	private readonly handleVisibility = (): void => {
 		if (document.visibilityState === 'hidden') {
+			this.catalog.stop();
 			this.saveProgress(this.activeUnit().getSnapshot().currentTime);
 		} else {
 			this.resumeAll();
@@ -521,6 +544,7 @@ export class VideoViewerPage {
 	};
 
 	private resumeAll(): void {
+		this.catalog.resume();
 		for (const unit of this.units) unit.resume();
 	}
 
@@ -549,10 +573,6 @@ function savedTime(video: Video): number {
 
 function sameVideo(first: Video, second: Video): boolean {
 	return first.filename === second.filename && first.type === second.type;
-}
-
-function videoUrl(video: Video): string {
-	return `/videos/${video.provider}/${encodeURIComponent(video.filename)}?type=${video.type}`;
 }
 
 function overlayTimeline(snapshot: TimelineSnapshot): OverlayTimeline {

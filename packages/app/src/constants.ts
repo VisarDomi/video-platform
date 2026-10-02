@@ -1,6 +1,13 @@
 export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
-export type Provider = (typeof PROVIDERS)[number];
+export type LocalProvider = (typeof PROVIDERS)[number];
+export type Provider = LocalProvider | 'xvideos';
 export const DEFAULT_PROVIDER: Provider = 'tango';
+
+// Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
+declare global {
+	interface Window { tangoNative?: { serverURL: string } }
+}
+const mediaOrigin = typeof window === 'undefined' ? '' : window.tangoNative?.serverURL ?? '';
 
 export const VIDEO_TYPE = {
 	ORIGINAL: 'original',
@@ -18,7 +25,7 @@ export const API = {
 	ORIGINAL: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/original`,
 	EDITED: (filename: string) => `/api/videos/${encodeURIComponent(filename)}/edited`,
 	HLS_PLAYLIST: (provider: string, filename: string) =>
-		`/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
+		`${mediaOrigin}/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
 } as const;
 
 export const LIST_API = {

@@ -1,4 +1,5 @@
 import { LIST_API, type Provider } from '../constants.js';
+import { localActions } from '../providers/index.js';
 
 export type MembershipState =
 	| { state: 'loading' }
@@ -9,7 +10,7 @@ export type MembershipState =
 	| { state: 'error'; confirmedMember: boolean; message: string };
 
 export async function fetchMembership(provider: Provider): Promise<Set<string>> {
-	const response = await fetch(LIST_API[provider].list);
+	const response = await fetch(LIST_API[localActions(provider).id].list);
 	if (!response.ok) throw new Error(`Download-list fetch failed: ${response.status}`);
 	const identifiers = (await response.json()) as unknown;
 	if (!Array.isArray(identifiers) || !identifiers.every(isString)) {
@@ -23,7 +24,7 @@ export async function changeMembership(
 	identifier: string,
 	add: boolean
 ): Promise<void> {
-	const endpoint = add ? LIST_API[provider].add : LIST_API[provider].remove;
+	const endpoint = add ? LIST_API[localActions(provider).id].add : LIST_API[localActions(provider).id].remove;
 	const response = await fetch(endpoint, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
