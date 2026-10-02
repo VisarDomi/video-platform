@@ -1,5 +1,6 @@
 import Hls from 'hls.js';
-import { API, USE_NATIVE_HLS } from '../constants.js';
+import { USE_NATIVE_HLS } from '../constants.js';
+import { AuthenticationRequiredError, getProvider, type MediaSource } from '../providers/index.js';
 import { fetchPlaylist } from '../services/hls.js';
 import type { Video } from '../types.js';
 import { PlaybackTimeline, type TimelineSnapshot } from './PlaybackTimeline.js';
@@ -17,6 +18,7 @@ export class PlayerUnit {
 	currentVideo: Video | null = null;
 
 	private hls: Hls | null = null;
+	private source: MediaSource | null = null;
 	private mediaEvents: AbortController | null = null;
 	private loadToken = 0;
 	private lastOverlayUpdate = 0;
@@ -57,13 +59,23 @@ export class PlayerUnit {
 		this.video.addEventListener('error', this.handleError, { signal });
 		this.video.hidden = false;
 
-		if (!USE_NATIVE_HLS && Hls.isSupported()) {
-			this.loadWithHlsJs(video, startTime, shouldPlay, token);
-		} else {
-			this.loadNative(video, startTime, shouldPlay, token);
+		try {
+			const provider = getProvider(video.provider);
+			const source = await provider.resolvePlayback(video, signal);
+			if (token !== this.loadToken) return;
+			this.source = source;
+			if (source.kind === 'hls' && !USE_NATIVE_HLS && Hls.isSupported()) {
+				this.loadWithHlsJs(source.url, startTime, shouldPlay, token);
+			} else {
+				this.loadNative(source.url, startTime, shouldPlay, token);
+			}
+			if (provider.kind === 'local') void this.refreshPlaylistTruth(video, token);
+		} catch (error) {
+			if (token !== this.loadToken || signal.aborted) return;
+			const provider = getProvider(video.provider);
+			if (provider.kind === 'online' && error instanceof AuthenticationRequiredError) location.assign(provider.loginUrl);
+			else console.error('Video source resolution failed', error);
 		}
-
-		void this.refreshPlaylistTruth(video, token);
 	}
 
 	clear(): void {
@@ -120,6 +132,15 @@ export class PlayerUnit {
 
 	resume(): void {
 		if (!this.currentVideo) return;
+		if (getProvider(this.currentVideo.provider).kind === 'online') {
+			if (this.video.error || !this.source) {
+				const video = this.currentVideo, time = this.video.currentTime;
+				this.source = null;
+				this.video.removeAttribute('src');
+				void this.load(video, time, true);
+			} else void this.play();
+			return;
+		}
 		if (this.hls) {
 			this.hls.startLoad();
 			void this.play();
@@ -138,7 +159,7 @@ export class PlayerUnit {
 		);
 	}
 
-	private loadNative(video: Video, startTime: number, shouldPlay: boolean, token: number): void {
+	private loadNative(url: string, startTime: number, shouldPlay: boolean, token: number): void {
 		this.video.addEventListener(
 			'loadedmetadata',
 			() => {
@@ -153,15 +174,15 @@ export class PlayerUnit {
 			},
 			{ once: true, signal: this.mediaEvents?.signal }
 		);
-		this.video.src = API.HLS_PLAYLIST(video.provider, video.filename);
+		this.video.src = url;
 		this.video.load();
 		if (shouldPlay) void this.play();
 	}
 
-	private loadWithHlsJs(video: Video, startTime: number, shouldPlay: boolean, token: number): void {
+	private loadWithHlsJs(url: string, startTime: number, shouldPlay: boolean, token: number): void {
 		const hls = new Hls({ startPosition: startTime > 0 ? startTime : -1 });
 		this.hls = hls;
-		hls.loadSource(API.HLS_PLAYLIST(video.provider, video.filename));
+		hls.loadSource(url);
 		hls.attachMedia(this.video);
 		hls.on(Hls.Events.MANIFEST_PARSED, () => {
 			if (token !== this.loadToken) return;
@@ -174,7 +195,7 @@ export class PlayerUnit {
 			const duration = data.details.totalduration;
 			this.timeline.setPlaylistTruth({ totalDuration: duration, isLive });
 			this.emitTime();
-			if (video.isLive !== isLive) this.callbacks.onLiveChanged(this, isLive);
+			if (this.currentVideo?.isLive !== isLive) this.callbacks.onLiveChanged(this, isLive);
 		});
 		hls.on(Hls.Events.ERROR, (_event, data) => {
 			if (!data.fatal) return;
@@ -223,7 +244,7 @@ export class PlayerUnit {
 	}
 
 	private reconcileNativeFinalization(): void {
-		if (!this.currentVideo || !Number.isFinite(this.video.duration)) return;
+		if (!this.currentVideo || getProvider(this.currentVideo.provider).kind !== 'local' || !Number.isFinite(this.video.duration)) return;
 		if (!this.timeline.snapshot().isLive) return;
 		void this.refreshPlaylistTruth(this.currentVideo, this.loadToken);
 	}
@@ -280,6 +301,7 @@ export class PlayerUnit {
 		this.playlistFetchPending = false;
 		this.mediaEvents?.abort();
 		this.mediaEvents = null;
+		this.source = null;
 		this.hls?.destroy();
 		this.hls = null;
 		this.video.pause();

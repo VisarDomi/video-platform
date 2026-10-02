@@ -20,10 +20,18 @@ function getHttpsConfig() {
 	return undefined;
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
 	clearScreen: false,
+	resolve: { alias: { '@providers': path.resolve(import.meta.dirname, mode === 'oldhost' ? 'src/providers/oldhost-registry.ts' : 'src/providers/local-registry.ts') } },
 	build: {
-		outDir: 'build'
+		outDir: 'build',
+		...(mode === 'oldhost' ? {
+			outDir: '../../dist/extension/oldhost',
+			emptyOutDir: true,
+			target: 'safari17',
+			lib: { entry: path.resolve(import.meta.dirname, 'src/extension/main.ts'), name: 'VideoPlatform', formats: ['iife' as const], fileName: () => 'content.js' },
+			rollupOptions: { output: { inlineDynamicImports: true } }
+		} : {})
 	},
 	server: {
 		host: '0.0.0.0',
@@ -34,4 +42,4 @@ export default defineConfig({
 			'/hls': 'http://localhost:9999'
 		}
 	}
-});
+}));

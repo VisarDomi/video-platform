@@ -1,3 +1,4 @@
+import { getProvider } from '../providers/index.js';
 import { VIDEO_TYPE } from '../constants.js';
 import type { MembershipState } from '../services/downloadList.js';
 import type { Video } from '../types.js';
@@ -118,7 +119,7 @@ export class OverlayView {
 	}
 
 	private render(): void {
-		this.name.textContent = this.video?.filename ?? '';
+		this.name.textContent = this.video?.title ?? this.video?.filename ?? '';
 		this.renderVisibility();
 		this.renderTimeline();
 		this.renderButtons();
@@ -163,8 +164,10 @@ export class OverlayView {
 	}
 
 	private renderButtons(): void {
-		const isOriginal = this.video?.type === VIDEO_TYPE.ORIGINAL && this.timeline.isLive === false;
-		const isEdited = this.video?.type === VIDEO_TYPE.EDITED;
+		const local = this.video !== null && getProvider(this.video.provider).kind === 'local';
+		this.membership.hidden = !local;
+		const isOriginal = local && this.video?.type === VIDEO_TYPE.ORIGINAL && this.timeline.isLive === false;
+		const isEdited = local && this.video?.type === VIDEO_TYPE.EDITED;
 		const hasSegments = isOriginal && this.segments.length > 0;
 		this.muteUndo.disabled = false;
 		this.returnOriginal.disabled = false;
