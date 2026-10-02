@@ -1,4 +1,4 @@
-import { pipelineConfig, type PipelineConfig } from "./config.js";
+import { pipelineConfig, activeUploadProvider, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
 import { applyDiscovery, planDiscovery } from "./discovery/discover.js";
@@ -327,6 +327,7 @@ async function main(): Promise<void> {
                 pipelineConfig.uploadTimeZone,
                 pipelineConfig.monthlyUploadLimitBytes,
                 pipelineConfig.stagingRoot,
+                activeUploadProvider(pipelineConfig),
             ),
         }, null, 2));
     } finally {
