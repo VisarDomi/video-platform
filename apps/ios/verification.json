@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-02",
+  "apps": {
+    "tango": { "name": "Tango local", "bundleId": "com.visar.TangoLocal.paid", "url": "https://192.168.1.197:9999/videos/tango" },
+    "fc2": { "name": "FC2 local", "bundleId": "com.visar.FC2Local.paid", "url": "https://192.168.1.197:9999/videos/fc2" },
+    "sc": { "name": "SC local", "bundleId": "com.visar.SCLocal.paid", "url": "https://192.168.1.197:9999/videos/sc" }
+  },
+  "build": 1,
+  "phoneTrustsPcCertificate": "Safari opened https://192.168.1.197:9999/videos/fc2 without a warning, 147 rows, HLS loadedmetadata",
+  "policyTests": "PASS on the Mac: each app allows only its start URL and subpaths; other providers, API root, other ports/hosts/schemes, credentials and dot segments are blocked",
+  "installChecks": "bundle ID, display name, start URL, icon absence, signature, paid team, phone provisioning and expiry verified before install over",
+  "iphoneChecks": {
+    "tango": { "rows": 3864, "rowsAfterBack": 3865, "playback": { "resolution": [720, 1280], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
+               "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
+               "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true } },
+    "fc2": { "rows": 147, "playback": { "resolution": [782, 626], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
+             "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
+             "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true },
+             "afterRenewalReinstall": { "reopenedViewer": true, "resumedSeconds": 108 } },
+    "sc": { "rows": 971, "playback": { "resolution": [1920, 1080], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
+            "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
+            "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true } }
+  },
+  "notes": [
+    "Tango recordings legitimately change resolution between segments (720x1280 then 360x640); FC2 likewise (568x454 then 782x626).",
+    "No local-network permission prompt blocked loading in this session.",
+    "Physical finger feel (swipes, momentum, pull-down reload, landscape) remains for the user to compare with Safari."
+  ],
+  "renewal": {
+    "approvedAndRenewedAt": "2026-10-02T18:13Z",
+    "profileExpiry": "2027-10-02T18:13:09+00:00",
+    "firstAttempt": "All three renewed on the first attempt.",
+    "nextDue": "2026-11-02",
+    "config": "tango-local, fc2-local, sc-local added to the Mac's existing index (15 entries); existing configs unchanged",
+    "scheduler": "com.visar.installed-apps-refresh resumed, ran once, idle, last exit 0, enumerated 14 installed apps",
+    "newBackgroundJobs": 0
+  },
+  "websiteChange": "Provider list editor pages and GET/POST /api/<provider> removed (commit 0fa6da7); website rebuilt and video-server restarted; /list, /add, /remove, /resolve unchanged"
+}

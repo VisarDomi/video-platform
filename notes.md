@@ -44,6 +44,13 @@ check package.json
 
 # setup
 
+## iPhone apps
+
+**Tango local**, **FC2 local** and **SC local** are the three provider tabs as iPhone
+apps (`apps/ios`); build, deploy and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
+
+## Provider files
+
 The live provider manifest files are private and stay local:
 
 - `packages/downloader/tango.txt`
