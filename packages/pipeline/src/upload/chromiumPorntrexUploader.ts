@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page, type Request } from "playwright";
 import { HumanActionRequiredError, type ChromiumUploaderConfig } from "./chromiumXvideosUploader.js";
 import { submitPasswordLogin } from "./passwordLogin.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
@@ -37,6 +37,15 @@ export async function passPorntrexAgeGate(page: Page): Promise<void> {
     }
     await confirm.click();
     await overlay.waitFor({ state: "hidden", timeout: 10_000 });
+}
+
+// Exactly the upload page's chunk POSTs. Analytics pixels and other requests
+// can carry the upload address inside their own query strings.
+export function isPorntrexChunkRequest(method: string, rawUrl: string): boolean {
+    if (method !== "POST") return false;
+    const url = new URL(rawUrl);
+    return url.origin === ORIGIN && url.pathname === "/upload-video/"
+        && url.searchParams.get("mode") === "async" && url.searchParams.get("action") === "upload_file";
 }
 
 export class ChromiumPorntrexUploader implements XvideosUploader {
@@ -239,14 +248,13 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         // The page retries a chunk silently on network errors, so keep what
         // its chunk requests actually got back: a stall must say why.
         const chunkProblems: string[] = [];
-        const isChunk = (url: string) => url.includes("/upload-video/?mode=async");
+        const isChunk = (request: Request) => isPorntrexChunkRequest(request.method(), request.url());
         page.on("requestfailed", (failed) => {
-            if (isChunk(failed.url())) chunkProblems.push(`failed: ${failed.failure()?.errorText ?? "unknown"}`);
+            if (isChunk(failed)) chunkProblems.push(`failed: ${failed.failure()?.errorText ?? "unknown"}`);
         });
         page.on("response", (response) => {
-            if (!isChunk(response.url())) return;
-            const type = response.headers()["content-type"] ?? "";
-            if (response.status() >= 300 || !type.includes("json")) chunkProblems.push(`HTTP ${response.status()} ${type}`);
+            if (!isChunk(response.request())) return;
+            if (response.status() >= 300) chunkProblems.push(`HTTP ${response.status()} ${response.headers()["content-type"] ?? ""}`);
         });
         // A chunk answered with anything but the site's success JSON (a login
         // redirect, an error page) ends the transfer: the page stops there.
@@ -254,12 +262,14 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         page.on("response", (response) => {
             let first = response.request();
             while (first.redirectedFrom()) first = first.redirectedFrom()!;
-            if (!isChunk(first.url())) return;
+            if (!isChunk(first)) return;
             if (first !== response.request()) { chunkRejected = `redirected to ${new URL(response.url()).pathname}`; return; }
             void response.text().then((body) => {
                 let status: unknown;
                 try { status = (JSON.parse(body) as { status?: unknown }).status; } catch { status = "not JSON"; }
-                if (status !== "success") chunkRejected = `chunk response ${String(status)}`;
+                if (status !== "success") {
+                    chunkRejected = `chunk response ${String(status)} (HTTP ${response.status()} ${response.headers()["content-type"] ?? ""})`;
+                }
             }).catch(() => undefined);
         });
         const stalled = async (message: string) => {

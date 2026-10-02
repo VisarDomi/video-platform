@@ -9,7 +9,7 @@ import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { readUploadProvidersFile, readProviderCredentials } from "../dist/config/uploadProviders.js";
 import { readXvideosCredentials } from "../dist/config/secrets.js";
 import { submitPasswordLogin } from "../dist/upload/passwordLogin.js";
-import { ChromiumPorntrexUploader, matchesPorntrexIdentity, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
+import { ChromiumPorntrexUploader, isPorntrexChunkRequest, matchesPorntrexIdentity, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
 
 test("provider-keyed private credentials only; a legacy activeProvider field is ignored; no secret diagnostics", async t => {
     const root = await mkdtemp(path.join(os.tmpdir(), "upload-provider-config-"));
@@ -179,4 +179,13 @@ test("Porntrex edit-page 404 of a still-processing video is 'not ready', not 'mi
     const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
     assert.deepEqual(await uploader.probeUploadStatus(page, "3351303"), { outcome: "not_ready", remoteUrl: null, reason: "Porntrex is still processing the video" });
     assert.equal((await uploader.probeUploadStatus(page, "999")).outcome, "missing");
+});
+
+test("only the page's own chunk POSTs count as upload chunks, never pixels that quote the upload URL", () => {
+    const chunk = "https://www.porntrex.com/upload-video/?mode=async&format=json&action=upload_file";
+    assert.equal(isPorntrexChunkRequest("POST", chunk), true);
+    assert.equal(isPorntrexChunkRequest("GET", chunk), false);
+    assert.equal(isPorntrexChunkRequest("GET", `https://www.google-analytics.com/g/collect?dl=${chunk}&en=page_view`), false);
+    assert.equal(isPorntrexChunkRequest("POST", `https://www.porntrex.com/pixel.gif?ref=/upload-video/?mode=async`), false);
+    assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/?mode=async&action=upload_files"), false);
 });
