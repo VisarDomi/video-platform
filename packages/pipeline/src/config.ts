@@ -3,7 +3,8 @@ import path from "node:path";
 import { providerFolders } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 import { CURRENT_PRODUCTION_VERSION } from "./domain/productionVersion.js";
-import { readUploadProvidersFile, type ActiveUploadProvider } from "./config/uploadProviders.js";
+import type { ActiveUploadProvider } from "./config/uploadProviders.js";
+import { PipelineDatabase } from "./db/pipelineDatabase.js";
 
 export interface PipelineConfig {
     readonly finalizationDatabasePath: string;
@@ -79,10 +80,11 @@ export const pipelineConfig: PipelineConfig = {
     networkUploadsEnabled: process.env.VIDEO_PIPELINE_NETWORK_UPLOADS === "1",
 };
 
-// Read at the operation boundary, not module load: editing this file takes
-// effect on the next queued upload without restarting a worker or logging secrets.
-export function activeUploadProvider(config: PipelineConfig): ActiveUploadProvider {
+// The active destination is campaign intent in SQLite (upload-provider
+// command), read at the operation boundary so a switch applies to the next
+// upload without restarting the worker. The credentials file holds secrets only.
+export function activeUploadProvider(config: Pick<PipelineConfig, "uploadProvider" | "databasePath">): ActiveUploadProvider {
     if (config.uploadProvider) return config.uploadProvider;
-    if (!config.credentialsFilePath.endsWith(".json")) return "xvideos";
-    return readUploadProvidersFile(config.credentialsFilePath).activeProvider;
+    const database = new PipelineDatabase(config.databasePath);
+    try { return database.getActiveUploadProvider(); } finally { database.close(); }
 }

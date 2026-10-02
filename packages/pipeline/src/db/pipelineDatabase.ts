@@ -4,10 +4,11 @@ import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
-import { limitedVisibilityWarning } from "../upload/providerWarnings.js";
+import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import { assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
 import type {
+    ProviderInventoryEntry,
     ArtifactRecord,
     ArtifactVariant,
     ArtifactVariantRecord,
@@ -465,6 +466,35 @@ export class PipelineDatabase {
                 retired_at TEXT NOT NULL,
                 PRIMARY KEY (production_version, recording_id, artifact_part)
             ) STRICT;
+            CREATE TABLE IF NOT EXISTS rejected_phrases (
+                provider TEXT NOT NULL,
+                phrase TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                attempt_id TEXT,
+                PRIMARY KEY (provider, phrase)
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS provider_inventory (
+                provider TEXT NOT NULL,
+                remote_id TEXT NOT NULL,
+                recording_id TEXT,
+                title TEXT NOT NULL,
+                remote_url TEXT,
+                status TEXT NOT NULL,
+                removal_pending INTEGER NOT NULL DEFAULT 0 CHECK (removal_pending IN (0, 1)),
+                observed_at TEXT NOT NULL,
+                PRIMARY KEY (provider, remote_id)
+            ) STRICT;
+            CREATE INDEX IF NOT EXISTS provider_inventory_recording_idx ON provider_inventory (recording_id);
+            CREATE TABLE IF NOT EXISTS provider_inventory_syncs (
+                provider TEXT PRIMARY KEY,
+                completed_at TEXT NOT NULL,
+                total INTEGER NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS upload_provider_events (
+                changed_at TEXT NOT NULL,
+                from_provider TEXT NOT NULL,
+                to_provider TEXT NOT NULL
+            ) STRICT;
         `);
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
         const comparisonColumns = this.database.prepare("PRAGMA table_info(comparison_trial)").all() as unknown as Array<{ name: string }>;
@@ -483,8 +513,20 @@ export class PipelineDatabase {
         if (!controlColumns.some((column) => column.name === "trial_finished_at")) {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
         }
+        if (!controlColumns.some((column) => column.name === "upload_provider")) {
+            // The one active destination is campaign intent, not a credential.
+            this.database.exec(`ALTER TABLE campaign_control ADD COLUMN upload_provider TEXT NOT NULL DEFAULT 'xvideos'
+                CHECK (upload_provider IN ('xvideos', 'porntrex'))`);
+        }
+        const inventoryColumns = this.database.prepare("PRAGMA table_info(provider_inventory)").all() as unknown as Array<{ name: string }>;
+        if (!inventoryColumns.some((column) => column.name === "removal_pending")) {
+            this.database.exec(`ALTER TABLE provider_inventory ADD COLUMN removal_pending INTEGER NOT NULL DEFAULT 0
+                CHECK (removal_pending IN (0, 1))`);
+        }
+        // Same rule as isRemovalPendingStatus, for rows stored before the column.
+        this.database.exec("UPDATE provider_inventory SET removal_pending = 1 WHERE removal_pending = 0 AND lower(status) LIKE '%delet%'");
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
-        for (const column of ["retry_not_before", "lookup_state", "lookup_checked_at", "limited_visibility"]) {
+        for (const column of ["retry_not_before", "lookup_state", "lookup_checked_at", "limited_visibility", "metadata_rejection"]) {
             if (!attemptColumns.some((existing) => existing.name === column)) {
                 this.database.exec(`ALTER TABLE upload_attempts ADD COLUMN ${column} TEXT`);
             }
@@ -499,13 +541,13 @@ export class PipelineDatabase {
         {
             // Idempotent even if power failed after adding the column but
             // before backfilling it. Only rows with possible warning text need parsing.
-            const rows = this.database.prepare(`SELECT id, evidence_json FROM upload_attempts WHERE limited_visibility IS NULL
+            const rows = this.database.prepare(`SELECT id, evidence_json FROM upload_attempts
+                WHERE limited_visibility IS NULL AND metadata_rejection IS NULL
                 AND (evidence_json LIKE '%not allowed here%' OR evidence_json LIKE '%limited visibility%')`)
                 .all() as unknown as Array<{ id: string; evidence_json: string }>;
             for (const row of rows) {
                 for (const evidence of JSON.parse(row.evidence_json) as Array<{ text?: string }>) {
-                    const warning = limitedVisibilityWarning(evidence.text ?? "");
-                    if (warning) this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(warning, row.id);
+                    this.recordProviderMessages(row.id, evidence.text ?? "", new Date());
                 }
             }
         }
@@ -560,6 +602,14 @@ export class PipelineDatabase {
         this.database.prepare(`UPDATE upload_attempts SET provider = 'xvideos'
             WHERE provider IN ('tango', 'fc2', 'sc') AND remote_id IS NOT NULL
                 AND (remote_url IS NULL OR remote_url LIKE 'https://www.xvideos.com/%')`).run();
+        // Older code stored metadata word rejections as a visibility warning,
+        // which also blocked their retry. Split them out once; learn the words.
+        for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
+            WHERE limited_visibility LIKE '%is not allowed here%'`).all() as unknown as Array<{ id: string; limited_visibility: string }>) {
+            const label = row.limited_visibility.replace(/Sorry, '[^'\n]+' is not allowed here\.?/g, "").trim();
+            this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(label || null, row.id);
+            this.recordProviderMessages(row.id, row.limited_visibility, new Date());
+        }
         this.database.prepare(`
             INSERT OR IGNORE INTO production_version (id, version, activated_at)
             VALUES (1, ?, ?)
@@ -665,6 +715,7 @@ export class PipelineDatabase {
             resume_at: string | null;
             trial_per_provider: number | null;
             trial_finished_at: string | null;
+            upload_provider: ActiveUploadProvider;
             updated_at: string;
         } | undefined;
         if (!row) throw new Error("Campaign control row is missing");
@@ -677,6 +728,7 @@ export class PipelineDatabase {
             resumeAt: row.resume_at,
             trialPerProvider: row.trial_per_provider,
             trialFinishedAt: row.trial_finished_at,
+            uploadProvider: row.upload_provider,
             updatedAt: row.updated_at,
         };
     }
@@ -2208,14 +2260,15 @@ export class PipelineDatabase {
     // visibility warnings are never reasons to upload the same video again.
     recordUploadLookup(attemptId: string, result: "absent" | "ambiguous" | "found", now = new Date()): boolean {
         return this.transaction(() => {
-            const a = this.database.prepare(`SELECT recording_id, remote_id, limited_visibility, retry_not_before
+            const a = this.database.prepare(`SELECT recording_id, remote_id, retry_not_before
                 FROM upload_attempts WHERE id = ? AND status = 'uncertain'`).get(attemptId) as {
-                    recording_id: string; remote_id: string | null; limited_visibility: string | null; retry_not_before: string;
+                    recording_id: string; remote_id: string | null; retry_not_before: string;
                 } | undefined;
             if (!a) return false;
             this.database.prepare(`UPDATE upload_attempts SET lookup_state = ?, lookup_checked_at = ? WHERE id = ?`)
                 .run(result, now.toISOString(), attemptId);
-            if (result !== "absent" || a.remote_id || a.limited_visibility || !a.retry_not_before
+            // Visibility labels are informational and never hold back a retry.
+            if (result !== "absent" || a.remote_id || !a.retry_not_before
                 || now.toISOString() < a.retry_not_before) return false;
             this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ? WHERE id = ?`)
                 .run("Authenticated filename lookup found no entry after weekly retry deadline", attemptId);
@@ -2383,14 +2436,179 @@ export class PipelineDatabase {
             history.push({ ...evidence, checkedAt: now.toISOString() });
             this.database.prepare("UPDATE upload_attempts SET evidence_json = ? WHERE id = ?")
                 .run(JSON.stringify(history.slice(-16)), attemptId);
-            const warning = typeof evidence.limitedVisibility === "string" ? evidence.limitedVisibility
-                : limitedVisibilityWarning(typeof evidence.text === "string" ? evidence.text : "");
-            if (warning) this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(warning, attemptId);
+            this.recordProviderMessages(attemptId, [evidence.text, evidence.limitedVisibility]
+                .filter((value): value is string => typeof value === "string").join("\n"), now);
             if (evidence.stage === "remote_identity_captured" && typeof evidence.remoteId === "string" && /^\d+$/.test(evidence.remoteId)) {
                 this.database.prepare(`UPDATE upload_attempts SET remote_id = ?
                     WHERE id = ? AND status IN ('started', 'uncertain') AND remote_id IS NULL`).run(evidence.remoteId, attemptId);
             }
         });
+    }
+
+    // Submission-page messages: a word rejection is learned per provider and
+    // marks the attempt; a visibility label is stored for information only.
+    private recordProviderMessages(attemptId: string, text: string, now: Date): void {
+        if (!text) return;
+        const phrases = rejectedPhrases(text);
+        const warning = limitedVisibilityWarning(text.replace(/Sorry, '[^'\n]+' is not allowed here\.?/g, ""));
+        if (warning) this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(warning, attemptId);
+        if (!phrases.length) return;
+        const attempt = this.database.prepare("SELECT provider, metadata_rejection FROM upload_attempts WHERE id = ?")
+            .get(attemptId) as { provider: string; metadata_rejection: string | null } | undefined;
+        if (!attempt) return;
+        const known = attempt.metadata_rejection?.split(", ").filter(Boolean) ?? [];
+        this.database.prepare("UPDATE upload_attempts SET metadata_rejection = ? WHERE id = ?")
+            .run([...new Set([...known, ...phrases])].join(", "), attemptId);
+        // Legacy manual-sync rows may still carry a source label; those are XVideos.
+        this.recordRejectedPhrases(attempt.provider === "porntrex" ? "porntrex" : "xvideos", phrases, attemptId, now);
+    }
+
+    recordRejectedPhrases(provider: ActiveUploadProvider, phrases: readonly string[], attemptId: string | null, now = new Date()): void {
+        assertUploadProvider(provider);
+        const insert = this.database.prepare(`INSERT OR IGNORE INTO rejected_phrases (provider, phrase, first_seen_at, attempt_id)
+            VALUES (?, ?, ?, ?)`);
+        for (const phrase of phrases) {
+            const normalized = phrase.trim().toLowerCase();
+            if (normalized) insert.run(provider, normalized, now.toISOString(), attemptId);
+        }
+    }
+
+    listRejectedPhrases(provider?: ActiveUploadProvider): string[] {
+        const rows = (provider
+            ? this.database.prepare("SELECT DISTINCT phrase FROM rejected_phrases WHERE provider = ? ORDER BY phrase").all(provider)
+            : this.database.prepare("SELECT DISTINCT phrase FROM rejected_phrases ORDER BY phrase").all()) as unknown as Array<{ phrase: string }>;
+        return rows.map((row) => row.phrase);
+    }
+
+    // Metadata that contains a phrase the destination rejects is described
+    // again with the learned phrases appended to the prompt.
+    returnForRedescription(id: string, reason: string, now = new Date()): Recording {
+        return this.transition(id, "metadata_ready", "artifact_valid", reason, now);
+    }
+
+    // A definitive provider refusal (no remote video exists) does not hold the
+    // weekly duplicate-safety slot; acceptance-unknown attempts still do.
+    releaseRetryDeadline(attemptId: string): void {
+        this.database.prepare("UPDATE upload_attempts SET retry_not_before = started_at WHERE id = ? AND status = 'failed'")
+            .run(attemptId);
+    }
+
+    // Remote IDs the ledger knows about in any generation.
+    knownRemoteIds(): Set<string> {
+        const rows = this.database.prepare(`SELECT remote_id FROM upload_attempts WHERE remote_id IS NOT NULL
+            UNION SELECT remote_id FROM remote_uploads UNION SELECT remote_id FROM retired_remote_uploads`)
+            .all() as unknown as Array<{ remote_id: string }>;
+        return new Set(rows.map((row) => row.remote_id));
+    }
+
+    listVerifiedRemoteUploads(provider: ActiveUploadProvider): Array<{ recordingId: string; remoteId: string }> {
+        return (this.database.prepare(`SELECT u.recording_id, u.remote_id FROM remote_uploads u
+            JOIN upload_attempts a ON a.id = u.attempt_id
+            WHERE (CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END) = ?
+            ORDER BY u.recording_id`).all(provider) as unknown as Array<{ recording_id: string; remote_id: string }>)
+            .map((row) => ({ recordingId: row.recording_id, remoteId: row.remote_id }));
+    }
+
+    // HTTP 404 on the provider's edit page: the ID does not exist (deleted or
+    // never created). Drop it so a filename lookup can settle the attempt.
+    detachMissingRemote(attemptId: string, remoteId: string, now = new Date()): boolean {
+        const result = this.database.prepare(`UPDATE upload_attempts SET remote_id = NULL, remote_url = NULL
+            WHERE id = ? AND status = 'uncertain' AND remote_id = ?`).run(attemptId, remoteId);
+        if (!result.changes) return false;
+        this.recordUploadEvidence(attemptId, { stage: "remote_missing", remoteId,
+            reason: "Provider edit page returned 404; the ID does not exist" }, now);
+        return true;
+    }
+
+    getActiveUploadProvider(): ActiveUploadProvider {
+        return this.getCampaignControl().uploadProvider;
+    }
+
+    // One destination at a time. The provider being left must be settled
+    // first: nothing in flight, no open confirmations and, for XVideos, an
+    // account inventory synchronized after its last upload attempt.
+    setActiveUploadProvider(provider: ActiveUploadProvider, now = new Date()): CampaignControl {
+        assertUploadProvider(provider);
+        return this.transaction(() => {
+            const control = this.getCampaignControl();
+            const leaving = control.uploadProvider;
+            if (leaving === provider) return control;
+            if (control.state !== "paused") throw new Error("Pause the campaign before switching the upload provider");
+            const inFlight = this.database.prepare(`SELECT
+                (SELECT count(*) FROM upload_reservations WHERE status = 'reserved')
+                + (SELECT count(*) FROM upload_attempts WHERE status = 'started') AS n`).get() as { n: number };
+            if (inFlight.n > 0) throw new Error("An upload reservation or attempt is still active; let it finish before switching");
+            // Same provider normalization as dueUploadConfirmations: legacy
+            // source labels on manual-sync rows are XVideos identities.
+            const pending = (this.database.prepare(`SELECT count(*) AS n FROM upload_confirmations c
+                JOIN upload_attempts a ON a.id = c.attempt_id
+                WHERE c.status = 'pending' AND (CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END) = ?`)
+                .get(leaving) as { n: number }).n;
+            if (pending > 0) {
+                throw new Error(`${leaving} still has ${pending} unresolved upload confirmation(s); settle them before switching`);
+            }
+            if (leaving === "xvideos") {
+                const sync = this.getProviderInventorySync("xvideos");
+                const last = (this.database.prepare("SELECT max(started_at) AS at FROM upload_attempts WHERE provider = 'xvideos'")
+                    .get() as { at: string | null }).at;
+                if (!sync || (last !== null && sync.completedAt < last)) {
+                    throw new Error("Synchronize the XVideos inventory (xvideos-sync --apply) after its last upload before switching away");
+                }
+            }
+            this.database.prepare("UPDATE campaign_control SET upload_provider = ?, updated_at = ? WHERE id = 1")
+                .run(provider, now.toISOString());
+            this.database.prepare("INSERT INTO upload_provider_events (changed_at, from_provider, to_provider) VALUES (?, ?, ?)")
+                .run(now.toISOString(), leaving, provider);
+            return this.getCampaignControl();
+        });
+    }
+
+    listUploadProviderEvents(): Array<{ changedAt: string; fromProvider: string; toProvider: string }> {
+        return (this.database.prepare("SELECT * FROM upload_provider_events ORDER BY changed_at").all() as unknown as Array<{
+            changed_at: string; from_provider: string; to_provider: string;
+        }>).map((row) => ({ changedAt: row.changed_at, fromProvider: row.from_provider, toProvider: row.to_provider }));
+    }
+
+    // A complete account listing replaces the previous one. It is the provider
+    // truth the other destination consults instead of logging in elsewhere.
+    replaceProviderInventory(provider: ActiveUploadProvider, entries: readonly ProviderInventoryEntry[], now = new Date()): void {
+        assertUploadProvider(provider);
+        this.transaction(() => {
+            this.database.prepare("DELETE FROM provider_inventory WHERE provider = ?").run(provider);
+            const insert = this.database.prepare(`INSERT INTO provider_inventory (
+                provider, remote_id, recording_id, title, remote_url, status, removal_pending, observed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+            for (const entry of entries) {
+                insert.run(provider, entry.remoteId, entry.recordingId, entry.title, entry.remoteUrl, entry.status,
+                    isRemovalPendingStatus(entry.status) ? 1 : 0, now.toISOString());
+            }
+            this.database.prepare(`INSERT INTO provider_inventory_syncs (provider, completed_at, total) VALUES (?, ?, ?)
+                ON CONFLICT(provider) DO UPDATE SET completed_at = excluded.completed_at, total = excluded.total`)
+                .run(provider, now.toISOString(), entries.length);
+        });
+    }
+
+    getProviderInventorySync(provider: ActiveUploadProvider): { completedAt: string; total: number } | null {
+        const row = this.database.prepare("SELECT completed_at, total FROM provider_inventory_syncs WHERE provider = ?")
+            .get(provider) as { completed_at: string; total: number } | undefined;
+        return row ? { completedAt: row.completed_at, total: row.total } : null;
+    }
+
+    listProviderInventory(provider: ActiveUploadProvider): ProviderInventoryEntry[] {
+        return (this.database.prepare(`SELECT remote_id, recording_id, title, remote_url, status, removal_pending FROM provider_inventory
+            WHERE provider = ? ORDER BY remote_id`).all(provider) as unknown as Array<{
+            remote_id: string; recording_id: string | null; title: string; remote_url: string | null; status: string; removal_pending: number;
+        }>).map((row) => ({ remoteId: row.remote_id, recordingId: row.recording_id, title: row.title,
+            remoteUrl: row.remote_url, status: row.status, removalPending: row.removal_pending === 1 }));
+    }
+
+    // Copies of this recording on any synchronized provider account. Videos
+    // being deleted do not count: they are on their way to 404.
+    findProviderInventoryCopies(recordingId: string): Array<{ provider: string; remoteId: string; status: string }> {
+        return (this.database.prepare(`SELECT provider, remote_id, status FROM provider_inventory
+            WHERE recording_id = ? AND removal_pending = 0 ORDER BY provider, remote_id`).all(recordingId) as unknown as Array<{
+            provider: string; remote_id: string; status: string;
+        }>).map((row) => ({ provider: row.provider, remoteId: row.remote_id, status: row.status }));
     }
 
     postponeConfirmation(attemptId: string, reason: string, now = new Date()): void {
@@ -2408,7 +2626,7 @@ export class PipelineDatabase {
     }
 
     latestUploadDiagnostics(recordingId: string): unknown {
-        const row = this.database.prepare(`SELECT a.provider AS upload_provider, a.status, a.error, a.evidence_json, a.limited_visibility,
+        const row = this.database.prepare(`SELECT a.provider AS upload_provider, a.status, a.error, a.evidence_json, a.limited_visibility, a.metadata_rejection,
             a.retry_not_before, a.lookup_state, a.lookup_checked_at, c.confirm_after, c.status AS confirmation_status
             FROM upload_attempts a LEFT JOIN upload_confirmations c ON c.attempt_id = a.id
             WHERE a.recording_id = ? ORDER BY a.started_at DESC LIMIT 1`).get(recordingId) as

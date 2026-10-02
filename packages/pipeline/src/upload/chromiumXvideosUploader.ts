@@ -4,7 +4,7 @@ import { chromium, type BrowserContext, type Page, type Request } from "playwrig
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
-import { limitedVisibilityWarning } from "./providerWarnings.js";
+import { limitedVisibilityWarning, MetadataRejectedError, rejectedPhrases } from "./providerWarnings.js";
 import { hasFullHdPlayback, parsePlaybackRenditions, type PlaybackRendition } from "./playbackQuality.js";
 import { submitPasswordLogin } from "./passwordLogin.js";
 
@@ -118,6 +118,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             ]);
             await page.waitForTimeout(1_000);
             await this.saveSubmissionEvidence(page, request, "metadata_submitted");
+            // "Sorry, 'X' is not allowed here." keeps the form unvalidated: the
+            // video is never created. Fail definitively instead of waiting.
+            const rejected = rejectedPhrases(await page.locator("body").innerText().catch(() => ""));
+            if (rejected.length) {
+                completed = true;
+                throw new MetadataRejectedError(rejected);
+            }
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
             const submittedId = await this.captureSubmittedVideoId(page, titleIdentity, request);
@@ -150,25 +157,27 @@ export class ChromiumXvideosUploader implements XvideosUploader {
 
     // One edit-page read serves both the online check (direct link) and the
     // existence check (title). No duplicated navigation or parsing.
-    private async readEditPage(page: Page, uploadId: string): Promise<{ title: string; directLink: string | null }> {
+    private async readEditPage(page: Page, uploadId: string): Promise<{ status: number; title: string; directLink: string | null }> {
         const response = await page.goto(`https://www.xvideos.com/account/uploads/${uploadId}/edit`, {
             waitUntil: "domcontentloaded",
             timeout: 30_000,
         });
-        if ((response?.status() ?? 0) >= 400) {
-            return { title: "", directLink: null };
+        const status = response?.status() ?? 0;
+        if (status >= 400) {
+            return { status, title: "", directLink: null };
         }
         const title = await page.title().catch(() => "");
         const href = await page.locator('a[href*="/video."]').first()
             .getAttribute("href").catch(() => null);
         return {
+            status,
             title,
             directLink: href ? new URL(href, "https://www.xvideos.com/").href : null,
         };
     }
 
     async probeUploadStatus(page: Page, uploadId: string): Promise<{
-        outcome: "online" | "not_ready";
+        outcome: "online" | "not_ready" | "missing";
         remoteUrl: string | null;
         renditions?: PlaybackRendition[];
         reason?: string;
@@ -176,6 +185,11 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         // Online check: the edit page shows the "Direct link to the video
         // page" anchor only once the video is published.
         const edit = await this.readEditPage(page, uploadId);
+        // "Sorry, this video does not exists or has been deleted." Not found
+        // is an answer, not a delay: the caller must stop waiting on this ID.
+        if (edit.status === 404) {
+            return { outcome: "missing", remoteUrl: null, reason: "Edit page returned 404: the video does not exist or was deleted" };
+        }
         if (!edit.title || !edit.directLink) {
             return { outcome: "not_ready", remoteUrl: null };
         }
@@ -463,6 +477,51 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             throw new Error("Uploads search has no recognized empty result; absence cannot be inferred");
         }
         return entries;
+    }
+
+    // Complete account listing for the inventory sync. Every row must parse
+    // and the collected count must equal the account's own total, otherwise
+    // nothing can be concluded from what is missing.
+    async listAccountUploads(page: Page): Promise<Array<{ remoteId: string; title: string; remoteUrl: string; status: string }>> {
+        const entries = new Map<string, { remoteId: string; title: string; remoteUrl: string; status: string }>();
+        let total: number | null = null;
+        for (let index = 0; index < 10_000; index++) {
+            const url = index === 0 ? UPLOADS_URL : `${UPLOADS_URL}/${index}`;
+            const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            if (!response?.ok()) throw new Error(`Uploads listing page ${index} returned HTTP ${response?.status() ?? 0}`);
+            if (!await page.getByText("My Content", { exact: true }).count()) {
+                throw new HumanActionRequiredError("session_login", "Uploads listing is not authenticated");
+            }
+            const pageTotal = Number((await page.locator("body").innerText())
+                .match(/My videos\s+([\d,]+)\s+videos/)?.[1]?.replace(/,/g, "") ?? NaN);
+            if (!Number.isSafeInteger(pageTotal)) throw new Error("Uploads listing has no recognized account total");
+            if (total !== null && pageTotal !== total) throw new Error("Uploads total changed during the sync; run it again");
+            total = pageTotal;
+            const rows = await page.locator('[id^="listing-video-"]').evaluateAll((elements) => elements.map((element) => {
+                const link = element.querySelector("p.title a");
+                return {
+                    remoteId: element.id.replace("listing-video-", ""),
+                    title: link?.textContent?.trim() ?? "",
+                    remoteUrl: link?.getAttribute("href") ?? "",
+                    status: element.querySelector(".video-status")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+                };
+            }));
+            const before = entries.size;
+            for (const row of rows) {
+                if (!/^\d+$/.test(row.remoteId) || !row.title || !row.remoteUrl.startsWith("/video.")) {
+                    throw new Error(`Incomplete uploads listing row on page ${index}; the inventory cannot be trusted`);
+                }
+                entries.set(row.remoteId, { ...row, remoteUrl: new URL(row.remoteUrl, UPLOADS_URL).href });
+            }
+            if (entries.size === total) break;
+            // Past the last page the site repeats it; no new rows means stop.
+            if (entries.size === before) break;
+            await page.waitForTimeout(1_000);
+        }
+        if (total === null || entries.size !== total) {
+            throw new Error(`Uploads listing collected ${entries.size} of ${total ?? "unknown"} videos; the inventory is incomplete`);
+        }
+        return [...entries.values()];
     }
 
     async lookupUpload(page: Page, identity: string): Promise<

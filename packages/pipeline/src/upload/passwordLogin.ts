@@ -17,9 +17,11 @@ export async function submitPasswordLogin(
     if (action && new URL(action, page.url()).origin !== origin) {
         throw new Error("Native login form submits to an unexpected origin");
     }
-    const passwords = form.locator('input[type="password"]');
-    let identifiers = form.locator('input:not([type="hidden"]):is([type="email"], [autocomplete="username"], [name="username"], [name*="email" i], [name="login"])');
-    if (!await identifiers.count()) identifiers = form.locator('input[type="text"]');
+    // Login forms can carry hidden reset/new-password inputs (XVideos does);
+    // only the fields a person could actually type into count.
+    const passwords = form.locator('input[type="password"]:visible');
+    let identifiers = form.locator('input:not([type="hidden"]):visible:is([type="email"], [autocomplete="username"], [name="username"], [name*="email" i], [name="login"], [name$="[login]"])');
+    if (!await identifiers.count()) identifiers = form.locator('input[type="text"]:visible');
     if (await passwords.count() !== 1 || await identifiers.count() !== 1) {
         throw new Error("Native login fields are ambiguous; manual login required");
     }
@@ -30,7 +32,7 @@ export async function submitPasswordLogin(
     await identifiers.fill(credentials.email);
     if (new URL(page.url()).origin !== origin) throw new Error("Native login origin changed before password entry");
     await passwords.fill(credentials.password);
-    const remember = form.locator('input[type="checkbox"][name="remember_me"]');
+    const remember = form.locator('input[type="checkbox"]:is([name="remember_me"], [name$="[rememberme]"])');
     if (await remember.count() === 1 && await remember.isVisible()) await remember.check();
     if (new URL(page.url()).origin !== origin) throw new Error("Native login origin changed before submission");
     await submit.click();

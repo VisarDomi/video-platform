@@ -1,4 +1,4 @@
-import { pipelineConfig, activeUploadProvider, type PipelineConfig } from "./config.js";
+import { pipelineConfig, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
 import { applyDiscovery, planDiscovery } from "./discovery/discover.js";
@@ -20,6 +20,9 @@ import type { CampaignProviderFilter } from "./domain/types.js";
 import { runCampaignWorker } from "./commands/runCampaignWorker.js";
 import { parseRemuxOneArguments } from "./commands/remuxOneArguments.js";
 import { selectComparisonFile, writeComparisonReport } from "./commands/comparisonTrial.js";
+import { syncXvideosInventory } from "./commands/syncProviderInventory.js";
+import { assertUploadProvider } from "./config/uploadProviders.js";
+import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
 
 function usage(): never {
     throw new Error([
@@ -32,6 +35,8 @@ function usage(): never {
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
+        "  upload-provider [--provider xvideos|porntrex --apply] | xvideos-sync --apply",
+        "  metadata-check [--provider xvideos|porntrex]",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -70,7 +75,14 @@ async function main(): Promise<void> {
     if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "provenance-refresh",
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
-        "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report"].includes(command ?? "")) usage();
+        "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
+        "upload-provider", "xvideos-sync", "metadata-check"].includes(command ?? "")) usage();
+    if (command === "xvideos-sync") {
+        requireApply(process.argv.slice(3));
+        assertCampaignIdle(pipelineConfig);
+        console.log(JSON.stringify(await syncXvideosInventory(pipelineConfig), null, 2));
+        return;
+    }
     if (command === "campaign-prepare") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);
@@ -305,6 +317,42 @@ async function main(): Promise<void> {
             console.log(JSON.stringify({ blocked, provenanceReview: provenance }, null, 2));
             return;
         }
+        if (command === "upload-provider") {
+            const args = process.argv.slice(3);
+            const requested = option(args, "--provider");
+            if (requested !== null) {
+                requireApply(args);
+                assertUploadProvider(requested);
+                if (database.campaignIsActive()) throw new Error("Stop the campaign worker before switching the upload provider");
+                database.setActiveUploadProvider(requested);
+            }
+            console.log(JSON.stringify({
+                activeUploadProvider: database.getActiveUploadProvider(),
+                history: database.listUploadProviderEvents(),
+                inventorySync: { xvideos: database.getProviderInventorySync("xvideos") },
+            }, null, 2));
+            return;
+        }
+        if (command === "metadata-check") {
+            // Read-only: composed metadata versus every phrase the provider
+            // rejected before. The campaign applies the same check before upload.
+            const requested = option(process.argv.slice(3), "--provider") ?? database.getActiveUploadProvider();
+            assertUploadProvider(requested);
+            const candidates = database.list().filter((recording) => !["xvideos_verified", "cleanup_eligible"].includes(recording.state)
+                && database.getUploadMetadata(recording.id));
+            const findings = [];
+            for (const recording of candidates) {
+                const verdict = await checkRejectedPhrases(database, recording.id, requested);
+                if (verdict.kind !== "clean") findings.push({ recordingId: recording.id, state: recording.state, ...verdict });
+            }
+            console.log(JSON.stringify({
+                provider: requested,
+                rejectedPhrases: database.listRejectedPhrases(requested),
+                checked: candidates.length,
+                findings,
+            }, null, 2));
+            return;
+        }
         if (command === "retry") {
             const recordingId = process.argv[3];
             if (!recordingId) throw new Error("retry requires a recording ID");
@@ -327,7 +375,7 @@ async function main(): Promise<void> {
                 pipelineConfig.uploadTimeZone,
                 pipelineConfig.monthlyUploadLimitBytes,
                 pipelineConfig.stagingRoot,
-                activeUploadProvider(pipelineConfig),
+                database.getActiveUploadProvider(),
             ),
         }, null, 2));
     } finally {

@@ -106,5 +106,17 @@ export interface CampaignControl {
     readonly resumeAt: string | null;
     readonly trialPerProvider: number | null;
     readonly trialFinishedAt: string | null;
+    readonly uploadProvider: "xvideos" | "porntrex";
     readonly updatedAt: string;
+}
+
+export interface ProviderInventoryEntry {
+    readonly remoteId: string;
+    // Recording (source folder) identity parsed from the title suffix, if any.
+    readonly recordingId: string | null;
+    readonly title: string;
+    readonly remoteUrl: string | null;
+    readonly status: string;
+    // Derived from status when stored: deleted by the owner, not yet 404.
+    readonly removalPending?: boolean;
 }

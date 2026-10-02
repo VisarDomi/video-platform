@@ -13,6 +13,7 @@ import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
+import { MetadataRejectedError } from "../upload/providerWarnings.js";
 import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
@@ -33,6 +34,7 @@ export type CampaignStepResult =
     | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
     | { readonly disposition: "daily_limit_cooldown"; readonly recordingId: string; readonly resumeAt: string }
     | { readonly disposition: "upload_retry_cooldown"; readonly recordingId: string; readonly resumeAt: string; readonly reason: string }
+    | { readonly disposition: "metadata_rejected"; readonly recordingId: string; readonly rejectedPhrases: readonly string[] }
     | { readonly disposition: "upload_completed"; readonly recordingId: string; readonly result: unknown };
 
 function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
@@ -243,6 +245,10 @@ export class CampaignWorker {
                     disposition: "attention_required", recordingId: uploadReady.id,
                     reason: afterUpload.blockReason ?? "Upload provider policy requires manual review",
                 };
+                // Rejected phrases found locally: nothing was sent, describe again.
+                if (afterUpload?.state === "artifact_valid") {
+                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
+                }
                 this.database.resetAntibotFailures(now);
                 return {
                     disposition: "upload_completed",
@@ -250,6 +256,11 @@ export class CampaignWorker {
                     result,
                 };
             } catch (error) {
+                if (error instanceof MetadataRejectedError) {
+                    // Definitive and already learned; the recording is back for
+                    // re-description. Not an anti-bot event, no cooldown.
+                    return { disposition: "metadata_rejected", recordingId: uploadReady.id, rejectedPhrases: [...error.phrases] };
+                }
                 if (error instanceof HumanActionRequiredError && error.action === "daily_limit") {
                     const after = this.database.recordUploadLimitCooldown(now);
                     return {

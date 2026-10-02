@@ -109,19 +109,23 @@ test("login/search errors and ambiguous matches never become absence even after 
     assert.equal(db.latestUploadDiagnostics(r.id).lookup_state, "ambiguous");
 });
 
-test("limited visibility survives evidence rotation/restart and never authorizes reupload", async t => {
+test("word rejections are learned apart from informational visibility labels, which never hold back a retry", async t => {
     const { db, config, r, attempt } = await fixture(t);
-    db.recordUploadEvidence(attempt, { text: "Sorry, 'waisted' is not allowed here." });
+    db.recordUploadEvidence(attempt, { text: "Please, enter a long description (Optional) : Sorry, 'waisted' is not allowed here." });
+    db.recordUploadEvidence(attempt, { text: "Limited visibility : This content has limited visibility due to : alcohol/gun/knife/alien. If you think" });
     for (let i = 0; i < 30; i++) db.recordUploadEvidence(attempt, { stage: "later_check" });
     const reopened = new PipelineDatabase(config.databasePath);
-    assert.match(reopened.latestUploadDiagnostics(r.id).limited_visibility, /waisted/);
+    const diagnostics = reopened.latestUploadDiagnostics(r.id);
+    assert.equal(diagnostics.metadata_rejection, "waisted");
+    assert.equal(diagnostics.limited_visibility, "Provider reports limited visibility: alcohol/gun/knife/alien");
+    assert.deepEqual(reopened.listRejectedPhrases("xvideos"), ["waisted"]);
+    assert.deepEqual(reopened.listRejectedPhrases("porntrex"), []);
     reopened.close();
+    // A clean negative lookup after the weekly deadline requeues despite both flags.
     await reconcileDueUploads(config, day(30), browser(async () => ({ kind: "absent" })));
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
-    await reconcileDueUploads(config, day(31), browser(async () => ({ kind: "found", remoteId: "123", remoteUrl: "https://www.xvideos.com/video.example/test" })));
-    assert.equal(db.get(r.id).state, "xvideos_verified");
-    assert.match(db.latestUploadDiagnostics(r.id).limited_visibility, /waisted/);
+    assert.equal(db.get(r.id).state, "metadata_ready");
     assert.equal(limitedVisibilityWarning("You have 1 video(s) currently blocked and requesting an edit"), null);
+    assert.equal(limitedVisibilityWarning("Sorry, 'breath' is not allowed here."), null);
 });
 
 test("verification failure rolls back acceptance, confirmation and state as one transaction", async t => {

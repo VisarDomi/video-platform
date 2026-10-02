@@ -8,29 +8,23 @@ import { chromium } from "playwright";
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { readUploadProvidersFile, readProviderCredentials } from "../dist/config/uploadProviders.js";
 import { readXvideosCredentials } from "../dist/config/secrets.js";
-import { activeUploadProvider } from "../dist/config.js";
 import { submitPasswordLogin } from "../dist/upload/passwordLogin.js";
 import { ChromiumPorntrexUploader, matchesPorntrexIdentity } from "../dist/upload/chromiumPorntrexUploader.js";
-import { checkXvideosBeforePorntrex } from "../dist/upload/crossProviderIdentityGuard.js";
 
-test("one active destination and provider-keyed private credentials; no secret diagnostics", async t => {
+test("provider-keyed private credentials only; a legacy activeProvider field is ignored; no secret diagnostics", async t => {
     const root = await mkdtemp(path.join(os.tmpdir(), "upload-provider-config-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const file = path.join(root, "upload-providers.json");
-    const data = { version: 1, activeProvider: "porntrex", providers: {
+    const data = { version: 1, providers: {
         xvideos: { email: "xv@example.invalid", password: "test-xv-only" },
         porntrex: { username: "px@example.invalid", password: "test-px-only" },
     } };
     await writeFile(file, JSON.stringify(data), { mode: 0o600 });
-    assert.equal(activeUploadProvider({ credentialsFilePath: file }), "porntrex");
     assert.equal(readProviderCredentials(file, "porntrex").email, "px@example.invalid");
     assert.equal((await readXvideosCredentials(file)).email, "xv@example.invalid");
-    data.activeProvider = "xvideos";
+    data.activeProvider = ["not", "a", "provider"];
     await writeFile(file, JSON.stringify(data));
-    assert.equal(activeUploadProvider({ credentialsFilePath: file }), "xvideos");
-    data.activeProvider = ["xvideos", "porntrex"];
-    await writeFile(file, JSON.stringify(data));
-    assert.throws(() => readUploadProvidersFile(file), /must be xvideos or porntrex/);
+    assert.equal(readUploadProvidersFile(file).version, 1);
     await writeFile(file, "test-secret-invalid-json");
     assert.throws(() => readUploadProvidersFile(file), error => !error.message.includes("test-secret"));
     await chmod(file, 0o644);
@@ -68,40 +62,25 @@ test("native password login uses only its same-origin, unique form and never a s
     await assert.rejects(submitPasswordLogin(page, "https://different.example.invalid", { email: "x", password: "x" }), /expected provider origin/);
 });
 
+test("native password login ignores hidden reset-password fields (XVideos sign-in form shape)", async t => {
+    const server = createServer((_request, response) => response.end(`<!doctype html><form id="signin-form" method="post"><input type="hidden" name="signin-form[csrf_token]"><input type="email" name="signin-form[login]"><input type="password" name="signin-form[password]"><button type="button"></button><div hidden><input type="password" name="signin-form[new_password]" autocomplete="new-password"><input type="password" name="signin-form[new_password_confirm]" autocomplete="new-password"></div><input type="checkbox" name="signin-form[rememberme]"><button type="submit">Sign in</button></form><script>document.querySelector('form').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);document.body.dataset.submitted=[f.get('signin-form[login]'),f.get('signin-form[password]'),f.get('signin-form[new_password]'),f.get('signin-form[rememberme]')].join('|')}</script>`));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await submitPasswordLogin(page, origin, { email: "local@example.invalid", password: "fake-local-only" });
+    assert.equal(await page.locator("body").getAttribute("data-submitted"), "local@example.invalid|fake-local-only||on");
+});
+
 test("Porntrex exact filename identity recognizes manual titles, never approximate aliases", () => {
     const filename = "2026-07-13 162147 AI_channel";
     assert(matchesPorntrexIdentity(`Natural model title [${filename}]`, filename));
     assert(matchesPorntrexIdentity(`String panty ${filename}`, filename));
     assert(!matchesPorntrexIdentity(`String panty ${filename} extra`, filename));
     assert(!matchesPorntrexIdentity(`String panty 2026-07-13 162148 AI_channel`, filename));
-});
-
-test("out-of-ledger XVideos matches are pinned and skipped before any Porntrex transfer", async () => {
-    const parked = [];
-    const database = { parkUploadedCopy: (...args) => parked.push(args) };
-    const factory = async (_config, provider) => {
-        assert.equal(provider, "xvideos");
-        return { findUploadedCopy: async identity => {
-            assert.equal(identity, "exact filename");
-            return { kind: "found", remoteId: "12345", remoteUrl: "https://www.xvideos.com/video.example" };
-        } };
-    };
-    const result = await checkXvideosBeforePorntrex(database, "source-id", "exact filename", {}, factory);
-    assert.equal(result.disposition, "skipped_existing_xvideos");
-    assert.equal(parked.length, 1);
-    assert.equal(parked[0][4], "xvideos");
-});
-
-test("unknown cross-provider lookup is not absence and cannot authorize Porntrex upload", async () => {
-    const database = { parkUploadedCopy: () => assert.fail("must not park an unknown identity") };
-    for (const kind of ["title_mismatch", "ambiguous"]) await assert.rejects(
-        checkXvideosBeforePorntrex(database, "source-id", "exact filename", {}, async () => ({ findUploadedCopy: async () => ({ kind }) })), /Ambiguous/);
-    await assert.rejects(checkXvideosBeforePorntrex(database, "source-id", "exact filename", {}, async () => {
-        throw Error("login unavailable");
-    }), /login unavailable/);
-    assert.equal(await checkXvideosBeforePorntrex(database, "source-id", "exact filename", {}, async () => ({
-        findUploadedCopy: async () => ({ kind: "not_found" }),
-    })), null);
 });
 
 test("Porntrex upload form contract is exercised against a local fixture only", async t => {

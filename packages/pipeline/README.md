@@ -113,7 +113,7 @@ Implemented:
 - Public campaign titles contain only the descriptive title. Prepared comparison
   trials explicitly append diagnostics. Provenance suffixes stay in descriptions;
   provider/live tags are unchanged.
-- Persistent-Chromium XVideos upload through Google OAuth, automated
+- Persistent-Chromium XVideos upload through native email/password login, automated
   Friendly Captcha completion with a manual fallback, streamer alias typed
   into the model search without selection, fixed metadata policy, and 24-hour
   edit-page verification.
@@ -339,7 +339,7 @@ uploader types into it with keyboard events instead of `fill()`.
 ## Persistent XVideos browser profile
 
 The uploader drives a real Chromium through a persistent user-data directory so
-the Google OAuth session and XVideos cookies survive between runs. The default
+the XVideos session cookies survive between runs. The default
 profile is the shared agent-control directory:
 
 ```text
@@ -357,10 +357,10 @@ Setting the profile up on a fresh clone:
 
 1. Create the profile by launching Chromium once:
    `/usr/bin/chromium --user-data-dir=/home/visar/.config/chromium-agent`
-2. Open `https://www.xvideos.com/account`, click the Google login icon and
-   then "Sign in with Google", and complete the Google flow with the account
-   from `packages/.env` (`EMAIL_XVIDEOS` / `PASSWORD_XVIDEOS`). Accept the
-   XVideos consent modal and resolve any Google challenge or captcha by hand.
+2. Put the account email/password in `~/.config/video-services/upload-providers.json`
+   (chmod 600, see `config/upload-providers.example.json`). The uploader signs in
+   through the native form itself; only visible login fields are used, so the
+   form's hidden reset-password inputs never make it ambiguous.
 3. Confirm the dashboard shows "My Content", then close the browser. Cookies,
    local storage, and anti-bot state persist on disk for the next run.
 
@@ -370,14 +370,11 @@ later) opens the authenticated edit page `/account/uploads/<id>/edit`. The
 presence of the "Direct link to the video page" anchor (`/video.<key>/<slug>`)
 is the online success signal; without it the confirmation stays pending.
 
-The uploader handles the remaining sign-in steps itself: the account chooser,
-identifier/password entry, the consent "Continue" button — whether the OAuth
-flow runs in the same tab or in a popup, and even when a saved Google session
-completes it instantly — and the upload page's Friendly Captcha. For the
+The uploader handles sign-in itself and the upload page's Friendly Captcha. For the
 captcha it clicks the widget's "I am human" checkbox,
 waits for the proof-of-work to complete, clicks the page's "Confirm that you
-are not a robot" button, and only then expects the file form. If the captcha or
-a Google challenge still demands human help, the upload command fails with a
+are not a robot" button, and only then expects the file form. If the captcha
+still demands human help, the upload command fails with a
 `HumanActionRequiredError` instead of retrying blindly. Once the file upload
 has started, the run uses patient five-minute action timeouts and never closes
 the browser on failure; any post-upload failure is recorded as
@@ -386,6 +383,63 @@ after submission), which checks the edit page for the direct video link,
 before the recording becomes retryable, so a retry cannot silently upload the
 same video twice. The canonical agent-profile notes live in
 `~/Documents/environment/browser/chromium-agent.md`.
+
+An edit page that returns HTTP 404 ("does not exists or has been deleted") is
+an answer, not a delay: the stored ID is dropped and the attempt is settled by
+filename lookup like any attempt without an ID.
+
+## Rejected metadata phrases
+
+XVideos refuses some words in titles/descriptions ("Sorry, 'ambien' is not
+allowed here.") and matches them as case-insensitive substrings, so innocent
+words trip it: "ambient" (ambien), "high-waisted" (waisted), "scrolling on"
+(rolling on), "breathing" (breath). Such a refusal means the form was never
+validated and no video exists. The pipeline therefore:
+
+- learns every refused phrase per provider in SQLite (`rejected_phrases`),
+- appends all learned phrases to the description prompt (the base prompt file is
+  unchanged; the appended text is part of the prompt version, so new
+  descriptions are generated with it),
+- checks composed metadata locally against the destination's phrases before any
+  reservation or byte is sent. Stale metadata is described again once; if the
+  phrase is still there it is blocked for manual review,
+- records a refusal during upload as a definitive failure (bytes still count,
+  no weekly duplicate hold, no reconcile) and returns the recording for
+  re-description.
+
+`npm run metadata:check -w pipeline [-- --provider xvideos]` is the read-only
+version of that check over every composed, not-yet-verified recording.
+Visibility labels on published videos ("limited visibility due to : alcohol…")
+are informational only and never affect retries.
+
+## One active upload provider
+
+The destination lives in SQLite (`campaign_control.upload_provider`), not in the
+credentials file. Show it, or switch while the campaign is paused and its
+worker stopped:
+
+```sh
+npm run upload-provider -w pipeline
+npm run upload-provider:set -w pipeline -- --provider porntrex
+```
+
+A switch is refused while any reservation/attempt is in flight or the provider
+being left still has open confirmations. Leaving XVideos also requires an
+account inventory synchronized after its last upload:
+
+```sh
+VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run xvideos:sync -w pipeline
+```
+
+The sync reads the complete uploads listing (its count must equal the account
+total), stores it in `provider_inventory`, settles every open XVideos
+confirmation from it (missing IDs dropped, absent recordings requeued after
+their deadline, existing copies made due for verification) and reports verified
+uploads missing from the account, account videos unknown to the ledger and
+duplicate copies without acting on them. Uploads to any provider then refuse
+recordings with a copy in a synchronized inventory; no other provider is ever
+logged into for that check. Confirmations always verify on the provider their
+attempt used.
 
 Preview upload admission without credentials, reservations, or network access:
 

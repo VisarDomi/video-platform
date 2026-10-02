@@ -20,6 +20,9 @@ export interface ArtifactDescriptionEvidence {
 
 export interface DescribeArtifactOptions {
     readonly server?: LlamaServer;
+    // Phrases an upload provider rejected in earlier metadata. Appended to the
+    // prompt so new descriptions avoid them; part of the prompt version.
+    readonly avoidPhrases?: readonly string[];
     readonly manageServer?: boolean;
     readonly now?: () => Date;
     readonly evidenceKey?: string;
@@ -34,6 +37,20 @@ interface StoredEvidence {
     description: DescriptionResult;
     usage: unknown;
     timings: unknown;
+}
+
+// The exact prompt the model receives. Providers match blocked words as
+// substrings, so the instruction covers words that merely contain a phrase.
+export function descriptionPrompt(basePrompt: string, avoidPhrases: readonly string[] = []): string {
+    const phrases = [...new Set(avoidPhrases.map((phrase) => phrase.trim().toLowerCase()).filter(Boolean))].sort();
+    if (!phrases.length) return basePrompt;
+    return `${basePrompt.trimEnd()}\n\nNever write any of these phrases anywhere in the title or description, not even inside a longer word: ${
+        phrases.map((phrase) => JSON.stringify(phrase)).join(", ")}. Choose different wording instead.\n`;
+}
+
+export async function descriptionPromptVersion(avoidPhrases: readonly string[] = []): Promise<string> {
+    const prompt = descriptionPrompt(await fs.readFile(descriptorConfig.promptPath, "utf8"), avoidPhrases);
+    return createHash("sha256").update(prompt).digest("hex");
 }
 
 function publicEvidence(evidence: StoredEvidence, evidencePath: string): ArtifactDescriptionEvidence {
@@ -57,7 +74,7 @@ export async function describeArtifact(
         descriptorConfig.tokensPerFrame,
         descriptorConfig.maximumFps,
     );
-    const prompt = await fs.readFile(descriptorConfig.promptPath, "utf8");
+    const prompt = descriptionPrompt(await fs.readFile(descriptorConfig.promptPath, "utf8"), options.avoidPhrases);
     const promptVersion = createHash("sha256").update(prompt).digest("hex");
     const now = options.now ?? (() => new Date());
     if (options.evidenceKey && !/^[a-f0-9]{64}$/.test(options.evidenceKey)) {

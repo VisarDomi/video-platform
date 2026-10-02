@@ -1,17 +1,16 @@
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import type { PipelineConfig } from "../config.js";
-import { activeUploadProvider } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { createProviderUploader } from "../upload/providerFactory.js";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
-import { productionUploadIdentity, uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
+import { productionUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
-import { checkXvideosBeforePorntrex } from "../upload/crossProviderIdentityGuard.js";
+import { settleRejectedPhrases } from "../metadata/rejectedPhraseCheck.js";
 
 export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 
@@ -22,9 +21,9 @@ export async function uploadOne(
     if (!config.networkUploadsEnabled) {
         throw new Error("Network uploads are disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
     }
-    const provider = activeUploadProvider(config);
     const database = new PipelineDatabase(config.databasePath);
     try {
+        const provider = config.uploadProvider ?? database.getActiveUploadProvider();
         if (database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
             throw new Error(`Upload requires active ${CURRENT_PRODUCTION_VERSION}; resume the campaign rollover first`);
         }
@@ -81,14 +80,20 @@ export async function uploadOne(
             database.transition(recordingId, "metadata_ready", "blocked", reason);
             return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };
         }
-        if (provider === "porntrex") {
-            // The local ledger covers managed uploads; this read-only guard
-            // also covers older/manual XVideos uploads not yet synchronized.
-            // An unavailable/ambiguous lookup is never treated as absence.
-            const identity = uploadLookupIdentity(recording, artifactPart, metadata.title);
-            if (!identity) throw new Error("Cross-provider duplicate check lacks a filename identity");
-            const existing = await checkXvideosBeforePorntrex(database, recordingId, identity, config);
-            if (existing) return existing;
+        const phrases = await settleRejectedPhrases(database, recordingId, provider);
+        if (phrases.kind !== "clean") {
+            return { recordingId, uploadProvider: provider, state: database.get(recordingId)?.state,
+                disposition: phrases.kind === "stale_description" ? "redescribe_rejected_phrases" : "manual_review",
+                rejectedPhrases: phrases.phrases };
+        }
+        // Copies on any synchronized provider account (including manual and
+        // older-generation uploads) come from the database, never a login.
+        const copies = database.findProviderInventoryCopies(recordingId);
+        if (copies.length) {
+            const reason = `already on ${copies.map((copy) => `${copy.provider} ${copy.remoteId} (${copy.status})`).join(", ")}`
+                + " per the synchronized provider inventory; not uploading again, manual review required";
+            database.transition(recordingId, "metadata_ready", "blocked", reason);
+            return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };
         }
         const uploader = await createProviderUploader(config, provider);
         const reservedBytes = artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES;

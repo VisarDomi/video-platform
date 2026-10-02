@@ -2,7 +2,6 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, rename } from "node:fs/promises";
 import type { PipelineConfig } from "../config.js";
-import { activeUploadProvider } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
@@ -210,7 +209,8 @@ export function campaignStatus(config: PipelineConfig): unknown {
             systemdUnitInstalled: true,
             cleanupEnabled: config.cleanupEnabled && !database.getComparisonTrial(),
             networkUploadsEnabled: config.networkUploadsEnabled,
-            activeUploadProvider: activeUploadProvider(config),
+            activeUploadProvider: config.uploadProvider ?? database.getActiveUploadProvider(),
+            providerInventorySync: { xvideos: database.getProviderInventorySync("xvideos") },
             uploadCredentialsFile: config.credentialsFilePath,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),

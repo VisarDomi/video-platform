@@ -23,7 +23,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState
     artifact_valid: ["described", "blocked", "failed", "cleanup_eligible", "xvideos_uncertain"],
     described: ["provenance_review_required", "metadata_ready", "blocked", "failed", "cleanup_eligible", "xvideos_uncertain"],
     provenance_review_required: ["described", "blocked", "failed", "cleanup_eligible", "xvideos_uncertain"],
-    metadata_ready: ["xvideos_admitted", "blocked", "failed", "cleanup_eligible", "xvideos_uncertain"],
+    metadata_ready: ["xvideos_admitted", "artifact_valid", "blocked", "failed", "cleanup_eligible", "xvideos_uncertain"],
     xvideos_admitted: ["xvideos_uploading", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     xvideos_uploading: ["xvideos_uploaded", "xvideos_uncertain", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     xvideos_uploaded: ["artifact_valid", "xvideos_verified", "xvideos_uncertain", "blocked", "failed", "cleanup_eligible"],

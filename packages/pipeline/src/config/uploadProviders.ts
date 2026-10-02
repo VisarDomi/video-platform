@@ -3,7 +3,8 @@ import { readFileSync, statSync } from "node:fs";
 export type ActiveUploadProvider = "xvideos" | "porntrex";
 export interface UploadProvidersFile {
     version: 1;
-    activeProvider: ActiveUploadProvider;
+    // Ignored: the active destination lives in the pipeline database.
+    activeProvider?: unknown;
     providers: Partial<Record<ActiveUploadProvider, { email?: string; username?: string; password: string }>>;
 }
 
@@ -26,7 +27,6 @@ export function readUploadProvidersFile(filePath: string): UploadProvidersFile {
     if (config.version !== 1 || !config.providers || typeof config.providers !== "object") {
         throw new Error("Upload provider configuration requires version 1 and providers");
     }
-    assertUploadProvider(config.activeProvider);
     return config;
 }
 
