@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { createInterface } from "node:readline";
+import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 
 import type { ArtifactVariant } from "../domain/types.js";
 import { prepareAtomicRemuxPaths } from "./remux.js";
 import { preparePlaylistInput } from "./playlistInput.js";
 import { analyzeRecordingResolution, type RecordingResolutionAnalysis } from "./resolutionPolicy.js";
+import { convertIndependentNativeRuns } from "./normalizeInputRuns.js";
 
 export type UpscaleMode = ArtifactVariant;
 
@@ -308,6 +310,7 @@ async function runUpscaleTranscode(
     artifactSuffix?: string,
     normalizePlaylist = false,
     analysis?: RecordingResolutionAnalysis,
+    keepIndexes?: ReadonlySet<number>,
 ): Promise<UpscaleTranscodeResult> {
     const { finalPath, temporaryPath } = await prepareAtomicRemuxPaths(
         stagingRoot,
@@ -315,7 +318,7 @@ async function runUpscaleTranscode(
         artifactSuffix,
     );
     const existing = await fs.lstat(finalPath).catch(() => null);
-    if (existing?.isFile()) return { path: finalPath, plan };
+    if (existing?.isFile()) { await syncPublishedArtifact(finalPath); return { path: finalPath, plan }; }
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
     // Reuse the policy scan: untagged geometry changes are input boundaries too.
     // Standalone whole-recording callers get the same protection, without a
@@ -323,9 +326,11 @@ async function runUpscaleTranscode(
     const geometry = normalizePlaylist && inputPath.endsWith(".m3u8")
         ? analysis ?? await analyzeRecordingResolution(inputPath) : undefined;
     const prepared = normalizePlaylist
-        ? await preparePlaylistInput(inputPath, stagingRoot, geometry ? { analysis: geometry } : undefined) : null;
+        ? await preparePlaylistInput(inputPath, stagingRoot, geometry ? { analysis: geometry, keepIndexes } : undefined) : null;
     try {
-        await new Promise<void>((resolve, reject) => {
+        if (prepared?.incompatibility && prepared.runs) {
+            await convertIndependentNativeRuns(prepared.runs, temporaryPath, plan);
+        } else await new Promise<void>((resolve, reject) => {
             const child = spawn("ffmpeg", buildUpscaleTranscodeArgs(inputPath, temporaryPath, plan, prepared?.args), {
                 stdio: ["ignore", "ignore", "pipe"],
             });
@@ -339,6 +344,7 @@ async function runUpscaleTranscode(
                 else reject(new Error(`ffmpeg upscale transcode failed (${code ?? "unknown"}): ${stderr.trim()}`));
             });
         });
+        await syncFile(temporaryPath);
         try {
             await fs.link(temporaryPath, finalPath);
         } catch (error) {
@@ -346,6 +352,7 @@ async function runUpscaleTranscode(
             if (!raced?.isFile()) throw error;
         }
         await fs.unlink(temporaryPath);
+        await syncPublishedArtifact(finalPath);
         return { path: finalPath, plan };
     } catch (error) {
         await fs.unlink(temporaryPath).catch(() => undefined);
@@ -362,6 +369,7 @@ export async function upscaleWholeRecordingTo1080(
     source: FixedUpscaleSource,
     artifactSuffix = "production-upscale1080p",
     analysis?: RecordingResolutionAnalysis,
+    keepIndexes?: ReadonlySet<number>,
 ): Promise<UpscaleTranscodeResult> {
     // Production conversion includes every segment, even for all-360p/480p
     // sources. The supervised comparison mode's 720p floor does not apply.
@@ -384,5 +392,6 @@ export async function upscaleWholeRecordingTo1080(
         artifactSuffix,
         true,
         analysis,
+        keepIndexes,
     );
 }

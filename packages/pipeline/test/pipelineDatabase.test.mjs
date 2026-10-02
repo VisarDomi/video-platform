@@ -137,7 +137,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 10);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 11);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));
@@ -331,7 +331,8 @@ test("monthly quota reserves atomically, counts retries, and rolls over by timez
         error: "connection reset",
     }, now);
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 250, reserved: 0 });
-    assert.throws(() => database.reserveUpload(first.id, 800, now, "Europe/Tirane", 1_000), /limit exceeded/);
+    assert.throws(() => database.reserveUpload(first.id, 800, now, "Europe/Tirane", 1_000), /Weekly upload retry/);
+    assert.throws(() => database.reserveUpload(first.id, 800, new Date("2026-08-19T08:00:00Z"), "Europe/Tirane", 1_000), /limit exceeded/);
     assert.equal(calendarMonth(new Date("2026-08-31T22:30:00Z"), "Europe/Tirane"), "2026-09");
     assert(database.canReserve(800, new Date("2026-09-01T08:00:00Z"), "Europe/Tirane", 1_000));
 });
