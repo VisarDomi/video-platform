@@ -438,3 +438,19 @@ bundle IDs and inputs, the build-14 baseline approved, renewal verified and the
 idle monthly scheduler resumed. The first renewal attempt hit the known
 provisioning-cache race; the unchanged retry renewed all four profiles to
 October 2, 2027. See `ptrex-verification.json`.
+
+## October 2: Xvid and Ptrex extensions removed (build 15)
+
+The user accepted the standalone **Xvid** and **Ptrex** apps (`video-platform/apps/ios`,
+`com.visar.Xvid.paid` / `com.visar.Ptrex.paid`), so Tango no longer embeds the
+`com.visar.Tango.paid.Xvid` and `.Ptrex` Safari extensions. The registry lists only
+the Login helper; `scripts/build-ios.mjs` no longer builds or stages Video Platform
+extensions, and their `Handler.swift` folders are gone. Updating Tango removes the
+two entries from Safari's extension settings. Native Tango, Login and the Web
+payload are unchanged.
+
+The Mac's `tango.json` renewal config now lists the host and Login identities and
+inputs only; the build-15 baseline was approved and renewed (first attempt hit the
+known provisioning-cache race; the unchanged retry renewed both profiles to
+October 2, 2027) and the monthly scheduler resumed. Physical check: the installed
+app embeds only `TangoLogin.appex`, and Home ("Streams") loaded without error.

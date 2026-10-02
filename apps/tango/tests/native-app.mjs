@@ -9,17 +9,10 @@ for(const args of [[],['xvideos'],['invalid'],['tango','tango']]) {
 }
 assert.equal(spawnSync('node',['scripts/build-ios.mjs','tango','--prepare-only'],{stdio:'inherit'}).status,0);
 const bundle=fs.readFileSync('apps/ios/build/tango/Web/app.js','utf8');
-for(const [name,provider,host] of [['Xvid','xvideos','xvideos.com'],['Ptrex','porntrex','porntrex.com']]) {
-    assert.equal(fs.readFileSync(`apps/ios/build/tango/${name}/content.js`,'utf8'),fs.readFileSync(`../video-platform/dist/extension/${provider}/content.js`,'utf8'),`${name} comes from video-platform’s shared frontend`);
-    const manifest=JSON.parse(fs.readFileSync(`apps/ios/build/tango/${name}/manifest.json`,'utf8'));
-    assert.deepEqual(manifest.host_permissions,[`https://${host}/*`,`https://www.${host}/*`]);
-    assert.deepEqual(manifest.content_scripts.map(script=>script.matches),[manifest.host_permissions]);
-    assert.equal(manifest.name,name);
-    assert.ok(!bundle.includes(host),'Unselected provider is excluded');
-}
-assert.deepEqual(JSON.parse(fs.readFileSync('apps/ios/build/tango/Ptrex/manifest.json','utf8')).permissions,undefined,'Ptrex needs no cookie/webRequest access');
 const project=fs.readFileSync('apps/ios/build/tango/Tango.xcodeproj/project.pbxproj','utf8');
-assert.ok(project.includes('"com.visar.Tango.paid.Ptrex"')&&project.includes('"TangoPtrex.appex"'),'Ptrex is an embedded Tango extension target');
+assert.ok(!/Xvid|Ptrex/.test(project),'Xvid and Ptrex are standalone apps now, not Tango extensions');
+assert.ok(project.includes('"com.visar.Tango.paid.Login"'),'Tango keeps its Login helper');
+for(const host of ['xvideos.com','porntrex.com']) assert.ok(!bundle.includes(host),'Unselected provider is excluded');
 assert.ok(!bundle.includes('document.open('),'No website takeover in native bundle');
 const browser=await webkit.launch({headless:true});
 try {

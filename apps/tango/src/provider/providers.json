@@ -9,9 +9,7 @@
       "bundleId": "com.visar.Tango.paid",
       "login": true,
       "extensions": [
-        "Login",
-        "Xvid",
-        "Ptrex"
+        "Login"
       ]
     }
   },

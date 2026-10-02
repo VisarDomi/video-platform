@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -29,29 +29,6 @@ const result=await build({entryPoints:[resolve(app,'web/app.ts')],outfile:resolv
 await writeFile(resolve(out,'index.html'),await readFile(resolve(app,'web/index.html')));
 await writeFile(resolve(app,'build',key,'inputs.json'),JSON.stringify(Object.keys(result.metafile.inputs),null,2)+'\n');
 await writeFile(resolve(app,'build/providers.json'),JSON.stringify(Object.fromEntries(Object.entries(registry).filter(([,v])=>v.ios).map(([k,v])=>[k,v.ios])),null,2)+'\n');
-// Online Safari extensions hosted by this app, each built by video-platform's shared frontend.
-const online={
-    Xvid:{provider:'xvideos',site:'XVideos',hosts:['xvideos.com','www.xvideos.com']},
-    Ptrex:{provider:'porntrex',site:'Porntrex',hosts:['porntrex.com','www.porntrex.com']},
-};
-for(const name of config.extensions??[]) {
-    if(!online[name]) continue;
-    const {provider,site,hosts}=online[name];
-    const videoPlatform=resolve(root,'../video-platform');
-    const extension=spawnSync(process.execPath,[resolve(videoPlatform,'packages/app/scripts/build-extension.mjs'),provider],{cwd:videoPlatform,stdio:'inherit'});
-    if(extension.status!==0) process.exit(extension.status??1);
-    const source=resolve(videoPlatform,'dist/extension',provider), destination=resolve(app,'build',key,name);
-    const manifest=JSON.parse(await readFile(resolve(source,'manifest.json'),'utf8'));
-    const matches=hosts.map(host=>`https://${host}/*`);
-    manifest.name=name;
-    manifest.description=`Video Platform for ${site}, hosted by Tango.`;
-    manifest.host_permissions=matches;
-    for(const content of manifest.content_scripts) content.matches=matches;
-    await mkdir(destination,{recursive:true});
-    await copyFile(resolve(source,'content.js'),resolve(destination,'content.js'));
-    await writeFile(resolve(destination,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
-    console.log(`Packaged ${name} from video-platform’s shared frontend.`);
-}
 const generated=spawnSync('python3',[resolve(app,'scripts/project.py'),key],{stdio:'inherit'});
 if(generated.status!==0) process.exit(generated.status??1);
 console.log(`Prepared ${config.name} with the shared Stream Viewer UI.`);

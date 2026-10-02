@@ -28,7 +28,7 @@ products = []
 targets = []
 for name, kind in [(product+suffix,suffix) for suffix in config['extensions']] + [(product,'App')]:
     extension = kind != 'App'
-    # Online extensions (Xvid, Ptrex) are prepared Safari web extensions without Keychain access.
+    # Any non-Login extension would be a prepared Safari web extension without Keychain access.
     online = extension and kind != 'Login'
     sources = (['Shared/Login.swift', 'Login/Handler.swift'] if kind == 'Login' else [kind+'/Handler.swift']) if extension else [str(p.relative_to(root)) for p in sorted((root/'App').glob('*.swift'))]+['Shared/Login.swift']
     resources = (['Login/Resources/' + file for file in ['manifest.json', 'popup.html', 'popup.js', 'cookies.js']] if kind == 'Login' else ['build/'+key+'/'+kind+'/'+file for file in ['manifest.json','content.js']]) if extension else ['build/'+key+'/Web', 'Resources/LocalCA.cer']
@@ -44,7 +44,7 @@ for name, kind in [(product+suffix,suffix) for suffix in config['extensions']] +
     bundle = config['bundleId'] + ('.'+kind if extension else '')
     product_ref = obj(name+'Product', 'PBXFileReference', explicitFileType='wrapper.app-extension' if extension else 'wrapper.application', includeInIndex=0, path=name+('.appex' if extension else '.app'), sourceTree='BUILT_PRODUCTS_DIR')
     products.append(product_ref)
-    settings = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='14', GENERATE_INFOPLIST_FILE='NO',
+    settings = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='15', GENERATE_INFOPLIST_FILE='NO',
         INFOPLIST_FILE=str(generated/(kind+'-Info.plist' if extension else 'Info.plist')), MARKETING_VERSION='1.0', PRODUCT_BUNDLE_IDENTIFIER=bundle,
         PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1',
         SWIFT_VERSION='5.0', IPHONEOS_DEPLOYMENT_TARGET='17.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos')
