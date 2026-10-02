@@ -1,6 +1,6 @@
 export const PROVIDERS = ['tslive', 'ladder', 'fmp4'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'oldhost';
+export type Provider = LocalProvider | 'oldhost' | 'videohost';
 export const DEFAULT_PROVIDER: Provider = 'tslive';
 
 // Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
