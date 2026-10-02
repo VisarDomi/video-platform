@@ -12,7 +12,7 @@ import { inventoryRecordingId, syncXvideosInventory } from "../dist/commands/syn
 import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js";
 import { checkRejectedPhrases, settleRejectedPhrases } from "../dist/metadata/rejectedPhraseCheck.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
-import { MetadataRejectedError, containedPhrases, rejectedPhrases } from "../dist/upload/providerWarnings.js";
+import { MetadataRejectedError, TransferAbortedBeforeSubmissionError, containedPhrases, rejectedPhrases } from "../dist/upload/providerWarnings.js";
 
 // Generated databases only; never the live ledger or a provider account.
 const start = new Date("2026-09-20T08:23:10.171Z");
@@ -101,6 +101,22 @@ test("a provider word rejection fails definitively, keeps byte accounting and re
     assert.equal(db.dueUploadConfirmations(day(30)).length, 0, "nothing to reconcile: no remote video exists");
     assert.equal(db.uploadUsage("2026-09").spent, 100);
     assert.equal(db.canAttemptUpload(r.id, day(0.01)), true, "a definitive refusal does not hold the weekly slot");
+});
+
+test("a transfer that stops before the provider's metadata form is a plain failure, not a week-long uncertainty", async t => {
+    const { db, r } = await fixture(t, { pending: false });
+    const reservation = db.reserveUpload(r.id, 120, start, "Europe/Tirane", 600_000_000_000, "porntrex");
+    const uploader = { provider: "porntrex", upload: async request => {
+        await request.onProgress("file_uploading", 100);
+        throw new TransferAbortedBeforeSubmissionError("Porntrex file transfer made no progress for 10 minutes (last 18%)");
+    } };
+    await assert.rejects(new UploadCoordinator(db, uploader).uploadAdmitted(r.id, reservation, {
+        recordingId: r.id, uploadIdentity: r.id, artifactPath: "/unused", sizeBytes: 100, title: "t", description: "d",
+        tags: [], visibility: "public" }, start), TransferAbortedBeforeSubmissionError);
+    assert.equal(db.get(r.id).state, "metadata_ready");
+    assert.equal(db.dueUploadConfirmations(day(30)).length, 0);
+    assert.equal(db.canAttemptUpload(r.id, day(0.01)), true);
+    assert.equal(db.uploadUsage("2026-09").spent, 100, "bytes still count against the monthly cap");
 });
 
 test("HTTP 404 on a stored ID is not found: the ID is dropped and a clean lookup requeues after the deadline", async t => {

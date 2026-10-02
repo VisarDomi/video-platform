@@ -1,6 +1,6 @@
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
-import { MetadataRejectedError } from "./providerWarnings.js";
+import { MetadataRejectedError, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 
 export class UploadTransportError extends Error {
     constructor(
@@ -74,6 +74,17 @@ export class UploadCoordinator {
                 }, new Date());
                 this.database.releaseRetryDeadline(attemptId);
                 this.database.returnForRedescription(recordingId, `${error.message}; describing again with the phrases avoided`);
+                throw error;
+            }
+            if (error instanceof TransferAbortedBeforeSubmissionError) {
+                // The metadata step never started, so no video was created:
+                // a plain failed attempt, retried after the usual cooldown.
+                this.database.finishUploadAttempt(attemptId, {
+                    status: "failed",
+                    transmittedBytes: this.database.getUploadProgress(attemptId).transmittedBytes,
+                    error: error.message,
+                }, new Date());
+                this.database.releaseRetryDeadline(attemptId);
                 throw error;
             }
             const transportError = error instanceof UploadTransportError ? error : null;

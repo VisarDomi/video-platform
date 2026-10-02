@@ -7,10 +7,14 @@ import { submitPasswordLogin } from "./passwordLogin.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { hasFullHdPlayback } from "./playbackQuality.js";
+import { TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 
 const ORIGIN = "https://www.porntrex.com";
 const LIST = "#list_videos_my_uploaded_videos";
 const run = promisify(execFile);
+// The page uploads in 9 MB chunks and shows a percentage. A transfer is only
+// given up when that percentage has not moved for this long.
+const TRANSFER_STALL_MILLISECONDS = 10 * 60_000;
 type Entry = { remoteId: string; remoteUrl: string; title: string };
 
 export function matchesPorntrexIdentity(title: string, identity: string): boolean {
@@ -120,7 +124,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await request.onProgress?.("file_uploading", request.sizeBytes);
             await upload.locator('input[name="content"]').setInputFiles(request.artifactPath);
             await upload.locator('input[type="submit"]').click();
-            await page.locator("#edit_video_title").waitFor({ state: "visible", timeout: 30 * 60_000 });
+            await this.waitForFileTransfer(page);
             await request.onProgress?.("file_uploaded", request.sizeBytes);
             const metadata = page.locator("form:has(#edit_video_title)");
             if (request.title.length > 300) throw new Error("Porntrex title exceeds 300 characters");
@@ -144,6 +148,40 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             return { kind: "uploaded", receipt: { transmittedBytes: request.sizeBytes,
                 submittedVideoId: remoteId, metadataSubmittedAt: submittedAt.toISOString() } };
         });
+    }
+
+    // Follow the page's own progress bar, like a person watching the upload:
+    // keep waiting while it moves, however slow the connection is, and stop
+    // only on a stall or a page error. The metadata form marks completion.
+    private async waitForFileTransfer(page: Page): Promise<void> {
+        const title = page.locator("#edit_video_title");
+        let percent = -1;
+        let movedAt = Date.now();
+        let logged = -10;
+        for (;;) {
+            if (await title.isVisible().catch(() => false)) {
+                console.log(JSON.stringify({ event: "porntrex-transfer-complete" }));
+                return;
+            }
+            const error = (await page.locator(".form-upload .generic-error:visible").first().textContent({ timeout: 1_000 })
+                .catch(() => null))?.trim();
+            if (error) throw new TransferAbortedBeforeSubmissionError(`Porntrex upload page error: ${error}`);
+            const text = await page.locator(".form-upload .progressbar .text").first().textContent({ timeout: 1_000 }).catch(() => null);
+            const current = text ? Number.parseInt(text, 10) : Number.NaN;
+            if (Number.isFinite(current) && current > percent) {
+                percent = current;
+                movedAt = Date.now();
+                if (percent >= logged + 10) {
+                    logged = percent;
+                    console.log(JSON.stringify({ event: "porntrex-transfer-progress", percent }));
+                }
+            }
+            if (Date.now() - movedAt > TRANSFER_STALL_MILLISECONDS) {
+                throw new TransferAbortedBeforeSubmissionError(
+                    `Porntrex file transfer made no progress for ${TRANSFER_STALL_MILLISECONDS / 60_000} minutes (last ${percent}%)`);
+            }
+            await page.waitForTimeout(15_000);
+        }
     }
 
     async probeUploadStatus(page: Page, uploadId: string) {

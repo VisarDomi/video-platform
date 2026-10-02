@@ -15,6 +15,16 @@ export class MetadataRejectedError extends Error {
     }
 }
 
+// The file transfer stopped before the provider offered its metadata form.
+// On a two-step provider (Porntrex) the video only exists after that form is
+// submitted, so nothing was published; the next attempt still looks up first.
+export class TransferAbortedBeforeSubmissionError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "TransferAbortedBeforeSubmissionError";
+    }
+}
+
 // Informational only: a published video whose reach the provider limited.
 // Never interpret the account-wide "N videos blocked" banner as this video's flag.
 export function limitedVisibilityWarning(text: string): string | null {
