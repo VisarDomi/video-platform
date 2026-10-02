@@ -1,0 +1,14 @@
+{
+    "name": "live-extensions",
+    "version": "3",
+    "description": "FC2 live and SC live Safari extensions (hosted by Tango): download-list controls for fc2 and stripchat",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "node scripts/build.mjs",
+        "check": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    }
+}

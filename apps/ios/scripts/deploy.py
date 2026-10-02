@@ -23,11 +23,19 @@ if a.action=='sync':
         subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
         shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
         print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
+    # Hosted Safari web extensions (Tango's FC2 live and SC live) are built and staged the same way.
+    for suffix,extension in config.get('webExtensions',{}).items():
+        subprocess.run(['node',str(ROOT/'packages/live-extensions/scripts/build.mjs'),extension['source']],cwd=ROOT,check=True)
+        target=APP/'build'/a.provider/suffix
+        target.mkdir(parents=True,exist_ok=True)
+        for name in ['manifest.json','content.js','background.js']: shutil.copyfile(ROOT/'dist/extension'/extension['source']/name,target/name)
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
     subprocess.run(['rsync','-az','--delete','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
     if config.get('hosts'):
         subprocess.run(['rsync','-az','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/'content.js'),SSH[-1]+':'+MAC+'/build/'+a.provider+'/content.js'],check=True)
+    for suffix in config.get('webExtensions',{}):
+        subprocess.run(['rsync','-az','--delete','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/suffix)+'/',SSH[-1]+':'+MAC+'/build/'+a.provider+'/'+suffix+'/'],check=True)
 elif a.action=='test':
     remote(f'''import subprocess
 subprocess.run(['mkdir','-p','build'],cwd={MAC!r},check=True)
@@ -87,6 +95,11 @@ if {bool(config.get('tangoLogin'))!r}:
     assert plistlib.loads((login/'Info.plist').read_bytes())['CFBundleIdentifier']=={(config['bundleId']+'.Login')!r}
     assert plistlib.loads(subprocess.check_output(['codesign','-d','--entitlements',':-',str(login)],stderr=subprocess.DEVNULL))['keychain-access-groups']==group
 assert profile['ExpirationDate']>datetime.datetime.utcnow()+datetime.timedelta(days=45)
+for suffix,extension in {config.get('webExtensions',{})!r}.items():
+    appex=app/'PlugIns'/({config['product']!r}+suffix+'.appex')
+    assert plistlib.loads((appex/'Info.plist').read_bytes())['CFBundleDisplayName']==extension['name']
+    for name in ['manifest.json','content.js','background.js']:
+        assert (appex/name).read_bytes()==(pathlib.Path({MAC!r})/'build'/{a.provider!r}/suffix/name).read_bytes(), suffix+' '+name
 print('Verified bundle, name, start URL, site scope, content script, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
 subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)

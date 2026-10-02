@@ -48,20 +48,29 @@ plist_base = dict(CFBundleDevelopmentRegion='en', CFBundleExecutable='$(EXECUTAB
 if login: plist_base['LoginKeychainGroup'] = '$(DEVELOPMENT_TEAM).'+config['bundleId']
 
 products, targets, embedded, dependencies = [], [], [], []
+web = config.get('webExtensions', {})
 for suffix in config.get('extensions', []):
-    if suffix != 'Login' or not login: raise SystemExit('Unsupported extension: ' + suffix)
     name = product + suffix
-    phases = [phase(name, 'Sources', ['Shared/Login.swift', 'Login/Handler.swift']),
-              phase(name, 'Resources', ['Login/Resources/' + f for f in ['manifest.json', 'popup.html', 'popup.js', 'cookies.js']]),
-              phase(name, 'Frameworks', [])]
+    if suffix == 'Login' and login:
+        sources = ['Shared/Login.swift', 'Login/Handler.swift']
+        resources = ['Login/Resources/' + f for f in ['manifest.json', 'popup.html', 'popup.js', 'cookies.js']]
+        display = config['name'] + ' Login'
+    elif suffix in web:
+        # Prepared Safari web extensions (staged by deploy.py sync) with a no-op native handler.
+        sources = ['Extension/Handler.swift']
+        resources = ['build/' + key + '/' + suffix + '/' + f for f in ['manifest.json', 'content.js', 'background.js']]
+        display = web[suffix]['name']
+    else: raise SystemExit('Unsupported extension: ' + suffix)
+    phases = [phase(name, 'Sources', sources), phase(name, 'Resources', resources), phase(name, 'Frameworks', [])]
     product_ref = obj(name+'Product', 'PBXFileReference', explicitFileType='wrapper.app-extension', includeInIndex=0,
                       path=name+'.appex', sourceTree='BUILT_PRODUCTS_DIR')
     products.append(product_ref)
     settings = dict(common, INFOPLIST_FILE=str(generated/(suffix+'-Info.plist')), PRODUCT_BUNDLE_IDENTIFIER=config['bundleId']+'.'+suffix,
-                    APPLICATION_EXTENSION_API_ONLY='YES', SKIP_INSTALL='YES', CODE_SIGN_ENTITLEMENTS=str(entitlements))
+                    APPLICATION_EXTENSION_API_ONLY='YES', SKIP_INSTALL='YES')
+    if suffix == 'Login': settings['CODE_SIGN_ENTITLEMENTS'] = str(entitlements)
     targets.append(obj(name+'Target', 'PBXNativeTarget', buildConfigurationList=config_list(name, settings), buildPhases=phases, buildRules=[],
         dependencies=[], name=name, productName=name, productReference=product_ref, productType='com.apple.product-type.app-extension'))
-    (generated/(suffix+'-Info.plist')).write_bytes(plistlib.dumps(dict(plist_base, CFBundleDisplayName=config['name']+' Login',
+    (generated/(suffix+'-Info.plist')).write_bytes(plistlib.dumps(dict(plist_base, CFBundleDisplayName=display,
         CFBundlePackageType='XPC!', NSExtension=dict(NSExtensionPointIdentifier='com.apple.Safari.web-extension',
                                                      NSExtensionPrincipalClass='$(PRODUCT_MODULE_NAME).Handler'))))
     embedded.append(obj('embed'+suffix, 'PBXBuildFile', fileRef=product_ref, settings={'ATTRIBUTES': ['CodeSignOnCopy', 'RemoveHeadersOnCopy']}))
