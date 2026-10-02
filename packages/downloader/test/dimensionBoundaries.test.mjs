@@ -58,7 +58,7 @@ test("rejected segments do not alter geometry baseline; sequence gap supplies on
     assert.deepEqual((await boundaries(root)).map((s) => s.tags), [0, 1]);
 });
 
-test("unknown LADDER dimensions retain the segment with boundaries before and after", async (t) => {
+test("unknown TS dimensions retain the segment with boundaries before and after", async (t) => {
     const { root, manager, segments } = await setup(t);
     for (const [i, dimension] of [dims(1280, 720), null, dims(1280, 720)].entries()) {
         segments[i].dimensions = dimension;
@@ -95,7 +95,7 @@ test("FMP4 init-map quality changes still retain fragments and publish one map b
     assert.match(await readFile(path.join(root, "playlist.m3u8"), "utf8"), /#EXT-X-MAP:URI="init.mp4"/);
 });
 
-test("real new-segment probes keep every LADDER resolution but preserve TsLive's 360p guard", async (t) => {
+test("real new-segment probes keep every LADDER and TsLive resolution", async (t) => {
     const { root } = await setup(t);
     // These methods need no account/session state; avoid starting LADDER's timer.
     for (const size of ["360x640", "640x360", "720x1280", "1280x720", "1920x1080"]) {
@@ -104,10 +104,11 @@ test("real new-segment probes keep every LADDER resolution but preserve TsLive's
         const tslive = await ApiClient.prototype.validateSegment.call({}, part.input);
         const [width, height] = size.split("x").map(Number);
         assert.deepEqual(ladder, { valid: true, dimensions: dims(width, height) });
-        assert.equal(tslive.valid, !["360x640", "640x360"].includes(size));
+        assert.equal(tslive.valid, true);
         if (tslive.valid) assert.deepEqual(tslive.dimensions, ladder.dimensions);
     }
     const unknown = path.join(root, "unknown.ts");
     await writeFile(unknown, "not media");
     assert.deepEqual(await LadderClient.prototype.validateSegment.call({}, unknown), { valid: true, dimensions: null });
+    assert.deepEqual(await ApiClient.prototype.validateSegment.call({}, unknown), { valid: true, dimensions: null });
 });
