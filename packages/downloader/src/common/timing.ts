@@ -12,6 +12,7 @@ export const INIT_RETRY_SLEEP_MS = 1_000;
 export const EDGE_RECOVERY_SLEEP_MS = 5_000;
 
 export const SESSION_RETRY_SLEEP_MS = 5_000;
+export const SEGMENT_RETRY_SLEEP_MS = 1_000;
 
 export const CDN_FETCH_TIMEOUT_MS = 30_000;
 

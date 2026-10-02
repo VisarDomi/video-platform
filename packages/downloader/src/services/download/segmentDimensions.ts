@@ -9,8 +9,7 @@ export interface SegmentDimensions {
 
 const execFileAsync = promisify(execFile);
 
-// Header inspection only; no full decode. Tango also uses this result for its
-// existing rejection guard, so boundary tracking does not add a second probe.
+// Header inspection for boundary tracking only; unknown dimensions do not reject media.
 export async function probeSegmentDimensions(filePath: string): Promise<SegmentDimensions | null> {
     try {
         const { stdout } = await execFileAsync("ffprobe", [

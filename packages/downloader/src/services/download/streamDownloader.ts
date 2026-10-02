@@ -5,15 +5,16 @@ import * as fs from "fs/promises";
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
-import type { PlaylistManager } from "./playlistManager.js";
+import type { PlaylistManager, SegmentInfo } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
-import { IDownloadSession, IStreamProvider, PlaylistFetchFailure } from "../core/interfaces.js";
+import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
-import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS } from "../../common/timing.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
+import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
-export type ExitReason = "aborted" | "remote-endlist" | "segment-failed" | "stale-timeout" | "fetch-failed";
+export type ExitReason = import("../core/interfaces.js").DownloadExitContext["exitReason"];
 
 export interface DownloadResult {
     segmentCount: number;
@@ -39,14 +40,81 @@ export class StreamDownloader {
         this._aborted = true;
     }
 
+    private prefetchSegments(
+        alias: string,
+        segments: SegmentInfo[],
+        session: IDownloadSession,
+        isStale: () => boolean,
+    ) {
+        let stopped = false;
+        let next = 0;
+        const cancelled: SegmentFetchResult = { data: null, retryable: true };
+        const jobs = segments.map(segment => {
+            let resolve!: (result: SegmentFetchResult) => void;
+            const result = new Promise<SegmentFetchResult>(done => { resolve = done; });
+            return { segment, result, resolve };
+        });
+        const shouldStop = () => stopped || this._aborted || isStale();
+        const worker = async () => {
+            while (next < jobs.length) {
+                const job = jobs[next++];
+                let result = cancelled;
+                try {
+                    while (!shouldStop()) {
+                        result = await session.fetchSegment(job.segment.remoteUrl);
+                        if (result.data || !result.retryable) break;
+                        logger.warn(`[StreamDownloader] ${alias} segment fetch failed — retrying`, {
+                            segment: job.segment.localName,
+                            error: result.error ?? "retryable-fetch-failure",
+                        });
+                        if (shouldStop()) break;
+                        await timersPromises.setTimeout(SEGMENT_RETRY_SLEEP_MS);
+                    }
+                } catch (error) {
+                    result = { data: null, retryable: false, error: String(error) };
+                }
+                job.resolve(result);
+            }
+        };
+        // Retries occupy one worker, not the entire download loop's segment batch.
+        const workers = Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
+        return {
+            results: jobs.map(job => job.result),
+            async close() { stopped = true; await workers; },
+        };
+    }
+
     public async run(
         masterUrl: string,
         playlistManager: PlaylistManager,
         initTracker: InitTracker,
         disk: DiskSession,
     ): Promise<DownloadResult> {
+        try {
+            return await this.runAttempt(masterUrl, playlistManager, initTracker, disk);
+        } catch (error) {
+            if (!(error instanceof PlaylistNotFoundError)) throw error;
+            logger.info(`[StreamDownloader] ${this.handle.state?.alias}: live playlist returned 404; ending recording`, { url: error.url });
+            return {
+                segmentCount: initTracker.count,
+                aborted: this._aborted,
+                exitReason: this._aborted ? "aborted" : "playlist-not-found",
+                lastLiveUrl: this.handle.state?.liveUrl ?? null,
+            };
+        }
+    }
+
+    private async runAttempt(
+        masterUrl: string,
+        playlistManager: PlaylistManager,
+        initTracker: InitTracker,
+        disk: DiskSession,
+    ): Promise<DownloadResult> {
         const alias = this.handle.state?.alias ?? "unknown";
-        const liveUrl = await this.provider.parseMasterPlaylist(masterUrl);
+        const retainedLiveUrl = this.provider.refreshMasterDuringDownload === false
+            ? this.handle.state?.liveUrl
+            : null;
+        const liveUrl = retainedLiveUrl ?? await this.provider.parseMasterPlaylist(masterUrl);
 
         if (!liveUrl) {
             logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
@@ -173,14 +241,15 @@ export class StreamDownloader {
         let lastQualityCheck = Date.now();
         const staleTimeout = STALE_STREAM_TIMEOUT_MS;
 
-        while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
+        downloadLoop: while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
             if (health === 'ok' && Date.now() - lastDownload > HEARTBEAT_INTERVAL_MS) {
                 health = 'stale';
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
                 logger.warn(`[StreamDownloader] STALE ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
             }
 
-            if (Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
+            if (this.provider.refreshMasterDuringDownload !== false
+                && Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
                 lastQualityCheck = Date.now();
                 const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
                 if (betterUrl) {
@@ -262,81 +331,77 @@ export class StreamDownloader {
                 }
             }
 
-            const segments = await playlistManager.identifyNewSegments(
+            const identifiedSegments = await playlistManager.identifyNewSegments(
                 content,
                 (line) => resolveSegmentUrl(liveUrl, line),
             );
+            const segments = identifiedSegments.filter(segment => !playlistManager.shouldSkipByTimeline(segment));
 
             let downloadedThisIteration = false;
 
-            for (const segment of segments) {
-                if (playlistManager.shouldSkipByTimeline(segment)) {
-                    continue;
-                }
+            const prefetch = this.prefetchSegments(alias, segments, session,
+                () => Date.now() - lastDownload >= staleTimeout);
+            try {
+                for (const [index, segment] of segments.entries()) {
+                    const fetchResult = await prefetch.results[index];
+                    if (this._aborted || (!fetchResult.data && fetchResult.retryable)) break downloadLoop;
 
-                const fetchResult = await session.fetchSegment(segment.remoteUrl);
-
-                if (!fetchResult.data) {
-                    if (fetchResult.retryable) {
-                        logger.warn(`[StreamDownloader] ${alias} segment skipped`, {
+                    if (!fetchResult.data) {
+                        if (fetchResult.status !== undefined) {
+                            await this.recordAccessFailure("segment", alias, masterUrl, liveUrl, {
+                                kind: "http",
+                                status: fetchResult.status,
+                            });
+                        }
+                        logger.warn(`[StreamDownloader] ${alias} segment download failed — stopping`, {
                             segment: segment.localName,
-                            error: fetchResult.error ?? "retryable-fetch-failure",
+                            providerSequence: segment.providerSequence,
+                            status: fetchResult.status ?? null,
+                            error: fetchResult.error ?? null,
                         });
+                        segmentFailed = true;
+                        break;
+                    }
+                    const tsBuffer = fetchResult.data;
+
+                    if (!await disk.materialize()) {
+                        logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
+                        segmentFailed = true;
+                        break;
+                    }
+
+                    const segmentPath = path.join(disk.dirPath, segment.localName);
+                    const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
+                    if (!writeSuccess) {
+                        logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
+                        segmentFailed = true;
+                        break;
+                    }
+
+                    const result = await this.provider.validateSegment(segmentPath);
+                    if (!result.valid) {
+                        await fs.unlink(segmentPath).catch(() => {});
                         playlistManager.addIgnoredSegment(segment.providerSequence);
-                        continue;
+                        this.rejectedCount++;
+                    } else {
+                        segment.dimensions = result.dimensions;
+                        if (result.duration !== undefined) {
+                            segment.accurateDuration = result.duration;
+                        }
+                        await playlistManager.appendSegmentToPlaylist(segment);
+                        playlistManager.recordDownloadedPDT(segment.programDateTime);
+                        if (health === 'stale') {
+                            health = 'ok';
+                            const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
+                            logger.info(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
+                        }
+                        lastDownload = Date.now();
+                        initTracker.incrementSegmentCount();
+                        downloadedThisIteration = true;
                     }
-                    if (fetchResult.status !== undefined) {
-                        await this.recordAccessFailure("segment", alias, masterUrl, liveUrl, {
-                            kind: "http",
-                            status: fetchResult.status,
-                        });
-                    }
-                    logger.warn(`[StreamDownloader] ${alias} segment download failed — stopping`, {
-                        segment: segment.localName,
-                        providerSequence: segment.providerSequence,
-                        status: fetchResult.status ?? null,
-                        error: fetchResult.error ?? null,
-                    });
-                    segmentFailed = true;
-                    break;
                 }
-                const tsBuffer = fetchResult.data;
-
-                if (!await disk.materialize()) {
-                    logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
-                    segmentFailed = true;
-                    break;
-                }
-
-                const segmentPath = path.join(disk.dirPath, segment.localName);
-                const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
-                if (!writeSuccess) {
-                    logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
-                    segmentFailed = true;
-                    break;
-                }
-
-                const result = await this.provider.validateSegment(segmentPath);
-                if (!result.valid) {
-                    await fs.unlink(segmentPath).catch(() => {});
-                    playlistManager.addIgnoredSegment(segment.providerSequence);
-                    this.rejectedCount++;
-                } else {
-                    segment.dimensions = result.dimensions;
-                    if (result.duration !== undefined) {
-                        segment.accurateDuration = result.duration;
-                    }
-                    await playlistManager.appendSegmentToPlaylist(segment);
-                    playlistManager.recordDownloadedPDT(segment.programDateTime);
-                    if (health === 'stale') {
-                        health = 'ok';
-                        const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                        logger.info(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
-                    }
-                    lastDownload = Date.now();
-                    initTracker.incrementSegmentCount();
-                    downloadedThisIteration = true;
-                }
+            } finally {
+                await prefetch.close();
             }
 
             if (segmentFailed) break;

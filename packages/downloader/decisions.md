@@ -4,7 +4,8 @@
 
 The downloader writes new recordings under
 `<provider>/downloader/.active/<timestamp alias>/`. Shutdown and transport/API
-failure leave the directory active without ENDLIST. Provider snapshots decide
+failure leave the directory active without ENDLIST, except Tango live
+playlist HTTP 404, which ends the recording and hands saved media to the server. Provider snapshots decide
 whether the recording resumes or ends: the same recording identity resumes,
 a different identity or upstream ENDLIST ends immediately, and successful
 absent/non-public observations must span 60 seconds with no media progress.
@@ -34,11 +35,13 @@ canonicalizer. URI percent escapes are not stored in media filenames.
 ## ENDLIST transfers finalized-media ownership to the server
 
 The downloader owns transport and active playlist append only. FC2 writes the
-received bytes and rejects only an empty/unreadable file. Tango additionally
-probes each downloaded segment and rejects `360x640`/`640x360` video before it
-can enter the local playlist; selecting the `1280x720` master variant is not
-enough because Tango can still serve 360p startup segments. Upstream EXTINF
-remains provisional while the stream is live.
+received bytes and rejects only an empty/unreadable file. Tango probes each
+downloaded segment for dimensions and retains all resolutions, including 360p.
+If dimension probing fails or times out, Tango keeps the nonempty segment with
+unknown dimensions; playlist boundary tracking handles the uncertainty as in FC2.
+It selects the highest available master variant, including portrait variants
+and low-resolution-only streams. Upstream EXTINF remains provisional while
+the stream is live.
 
 `PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST` before
 the `.active` directory is moved into the provider's hidden `.pending` root.
@@ -59,7 +62,13 @@ provider snapshot to resolve a fresh URL, but it does not infer completion from
 transport failure. Shared snapshot reconciliation owns the recording lifecycle:
 
 - **SC:** bulk public/live status plus `statusChangedAt` from the cam detail API.
-- **Tango:** bulk account lookup with `streamId`.
+- **Tango:** bulk account lookup with `streamId`, restricted to `tango.txt`.
+  No following-feed dependency. Atomic file replacements reload targets;
+  removed targets finalize their sessions, and new recording identities replace
+  even sessions with empty/missing folders. Live playlist HTTP 404 ends the session;
+  authentication, network, and server failures remain retryable. The master is
+  used only to select the initial live URL. Master failures never end a recording;
+  active polling and retries retain the selected live URL without master refresh.
 - **FC2:** the adult all-channel list with `start_time`, requested no more than once per 30 seconds.
 
 **Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content.
@@ -72,15 +81,26 @@ Provider discovery code owns only provider-specific knowledge: target parsing, s
 
 ## Download loop: no concurrent timers, no shared mutable state
 
-Quality checks are inline. The stale timeout (60s) is the exit condition. On variant 404/403, the loop asks `recoverVariant()` for an alternative. If no recovery, the loop sleeps and retries until stale timeout.
+Tango never checks the master during live capture or subsequent download attempts.
+A live playlist 404 ends its session immediately. Other providers keep inline
+quality checks and variant recovery. The stale timeout (60s) exits an attempt;
+non-terminal failures retain the recording for retry.
 
 **Why:** The concurrent `StreamQualityMonitor` timer was the root cause of the zombie download bug.
 
 ## SegmentFetchResult: timeout vs HTTP error
 
-`fetchSegment` returns `{ data, retryable }`. Timeouts are retryable (skip the segment, continue). HTTP errors are fatal (stop the download).
+`fetchSegment` returns `{ data, retryable }`. Up to four segment fetches run
+concurrently within each playlist batch. Network errors and timeouts retry the
+same segment after one second while other workers fetch later segments. Playlist
+appends remain in source order. Retries never mark the failed segment ignored.
+The existing 60-second inactivity limit still exits the
+attempt, after which the session retries from the live playlist. HTTP errors
+stop the attempt as before.
 
-**Why:** An 800-segment session was killed because one segment timed out (30s AbortSignal). The old code treated all null returns as fatal.
+**Why:** A transient network failure should neither end the recording nor advance
+the handled sequence past media that has not been downloaded. Shutdown and the
+existing inactivity handling still bound each attempt.
 
 ## No silent recovery — every transition is logged
 

@@ -5,10 +5,7 @@ import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from "../../core/interfaces.js";
 import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
-
-export function isRejectedTangoResolution(width: number, height: number): boolean {
-    return (width === 360 && height === 640) || (width === 640 && height === 360);
-}
+import { PlaylistNotFoundError } from "../../core/playlistNotFoundError.js";
 
 export interface TangoLiveStream {
     accountId: string;
@@ -38,9 +35,10 @@ function getStreamHeaders(tokens: Tokens): HeadersInit {
 
 export class ApiClient implements IStreamProvider {
     public readonly providerName = "tango";
+    public readonly refreshMasterDuringDownload = false;
     private latestLiveStreams = new Map<string, TangoLiveStream>();
 
-    public constructor() {
+    public constructor(private readonly tokenReader: () => Promise<Tokens> = readTokens) {
         logger.info("[Tango] ApiClient initialized.");
     }
 
@@ -94,29 +92,14 @@ export class ApiClient implements IStreamProvider {
         }
     }
 
-    public async getFollowingResponseBody(): Promise<any | null> {
-        try {
-            const tokens = await readTokens();
-            const headers = this._getApiHeaders(tokens);
-            return this._makeApiRequest<any>(
-                "https://gateway.tango.me/proxycador/api/public/v1/live/feeds/v1/following?pageCount=0&pageSize=200",
-                "GET",
-                headers,
-                "json"
-            );
-        } catch (error) {
-            logger.error(`[Tango] Unexpected error in getFollowingResponseBody`, { error: (error as Error).message });
-            return null;
-        }
-    }
-
     public async getLiveStreamsByAccountIds(accountIds: string[]): Promise<TangoAccountLookup | null> {
         if (accountIds.length === 0) {
+            this.latestLiveStreams.clear();
             return { live: new Map(), rejected: new Map() };
         }
 
         try {
-            const tokens = await readTokens();
+            const tokens = await this.tokenReader();
             const headers = this._getApiHeaders(tokens);
             const response = await this._makeApiRequest<any>(
                 `https://gateway.tango.me/stream/social/v2/list/byEncryptedAccountIds?pageSize=${accountIds.length}`,
@@ -130,11 +113,12 @@ export class ApiClient implements IStreamProvider {
                 },
             );
 
-            if (!response) return null;
+            if (!response || !Array.isArray(response.records)) return null;
 
             const live = new Map<string, TangoLiveStream>();
             const rejected = new Map<string, RejectedStreamInfo>();
-            const records = Array.isArray(response.records) ? response.records : [];
+            const records = response.records;
+            const requestedIds = new Set(accountIds);
 
             for (const record of records) {
                 const stream = record?.stream;
@@ -147,6 +131,7 @@ export class ApiClient implements IStreamProvider {
 
                 if (
                     typeof accountId !== "string" ||
+                    !requestedIds.has(accountId) ||
                     typeof masterPlaylistUrl !== "string"
                 ) {
                     continue;
@@ -181,9 +166,9 @@ export class ApiClient implements IStreamProvider {
 
     public async getMasterList(masterListUrl: string): Promise<string | null> {
         try {
-            const tokens = await readTokens();
+            const tokens = await this.tokenReader();
             const headers = getStreamHeaders(tokens);
-            return this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
+            return await this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
             return null;
@@ -191,34 +176,32 @@ export class ApiClient implements IStreamProvider {
     }
 
     public createDownloadSession(): IDownloadSession {
-        return new TangoDownloadSession();
+        return new TangoDownloadSession(this.tokenReader);
     }
 
     public async parseMasterPlaylist(masterUrl: string): Promise<string | null> {
         const masterListBody = await this.getMasterList(masterUrl);
         if (!masterListBody) return null;
 
-        const masterLines = masterListBody.split("\n").filter((line) => line.trim() !== "");
-        let relativeLiveUrl: string | undefined;
-
-        for (let i = 0; i < masterLines.length; i++) {
-            if (masterLines[i].includes("RESOLUTION=1280x720")) {
-                relativeLiveUrl = masterLines[i + 1];
-                break;
-            }
+        const lines = masterListBody.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const variants: { uri: string; pixels: number; bandwidth: number }[] = [];
+        for (let i = 0; i < lines.length; i++) {
+            if (!lines[i].startsWith("#EXT-X-STREAM-INF:")) continue;
+            const uri = lines[i + 1];
+            if (!uri || uri.startsWith("#")) continue;
+            const resolution = lines[i].match(/RESOLUTION=(\d+)x(\d+)/);
+            const bandwidth = lines[i].match(/(?:[:,])BANDWIDTH=(\d+)/);
+            variants.push({
+                uri,
+                pixels: resolution ? Number(resolution[1]) * Number(resolution[2]) : 0,
+                bandwidth: bandwidth ? Number(bandwidth[1]) : 0,
+            });
         }
-
-        if (!relativeLiveUrl) {
-            logger.warn(`[Tango] Could not find HD stream in master playlist: ${masterUrl}`);
-            return null;
-        }
-
-        const cinemaApiUrl = masterUrl.split("/v2/")[0];
-        let livePlaylistUrl = `${cinemaApiUrl}${relativeLiveUrl}`;
-        if (livePlaylistUrl.endsWith("&")) {
-            livePlaylistUrl = livePlaylistUrl.substring(0, livePlaylistUrl.length - 1);
-        }
-        return livePlaylistUrl;
+        variants.sort((a, b) => b.pixels - a.pixels || b.bandwidth - a.bandwidth);
+        if (variants[0]) return new URL(variants[0].uri.replace(/&$/, ""), masterUrl).href;
+        if (lines.some((line) => line.startsWith("#EXTINF:"))) return masterUrl;
+        logger.warn(`[Tango] No playable variant in master playlist: ${masterUrl}`);
+        return null;
     }
 
     public async validateSegment(filePath: string): Promise<SegmentValidationResult> {
@@ -231,12 +214,7 @@ export class ApiClient implements IStreamProvider {
 
         const dimensions = await probeSegmentDimensions(filePath);
         if (!dimensions) {
-            logger.warn(`[Tango] Could not probe downloaded segment; rejecting ${filePath}`);
-            return { valid: false };
-        }
-        if (isRejectedTangoResolution(dimensions.width, dimensions.height)) {
-            logger.warn(`[Tango] Rejected 360p segment ${filePath}`, dimensions);
-            return { valid: false };
+            logger.warn(`[Tango] Unknown segment dimensions; retaining with an input boundary: ${filePath}`);
         }
         return { valid: true, dimensions };
     }
@@ -257,16 +235,19 @@ export class ApiClient implements IStreamProvider {
 
 class TangoDownloadSession implements IDownloadSession {
     private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
+    constructor(private readonly tokenReader: () => Promise<Tokens>) {}
 
     public async fetchPlaylist(url: string): Promise<string | null> {
         try {
-            const tokens = await readTokens();
+            const tokens = await this.tokenReader();
             const headers = getStreamHeaders(tokens);
             const response = await fetch(url, {
                 method: "GET",
                 headers,
                 signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
             });
+
+            if (response.status === 404) throw new PlaylistNotFoundError(url);
 
             if (!response.ok) {
                 if (response.status === 401 && tokens.tte) {
@@ -279,6 +260,7 @@ class TangoDownloadSession implements IDownloadSession {
             }
             return await response.text();
         } catch (error) {
+            if (error instanceof PlaylistNotFoundError) throw error;
             logger.warn(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
             return null;
         }

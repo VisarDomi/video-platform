@@ -18,6 +18,7 @@ export class StreamDiscoveryService {
     private lastLookupSummary: string | null = null;
     private lastDecisionByTarget = new Map<string, string>();
     private readonly activeReconciler: ActiveRecordingReconciler;
+    private previousTargetIds = new Set<string>();
 
     constructor(apiClient: ApiClient, targetManager: TangoTargetManager, downloadsManager: DownloadsManager) {
         this.apiClient = apiClient;
@@ -45,6 +46,15 @@ export class StreamDiscoveryService {
 
         while (true) {
             const targets = this.targetManager.getTargets();
+            const targetIds = new Set(targets.map((target) => target.accountId));
+            // File removals apply even when the remote lookup is unavailable.
+            for (const id of this.previousTargetIds) {
+                if (!targetIds.has(id)) {
+                    await this.downloadsManager.finalizeStreamer(id);
+                    this.lastDecisionByTarget.delete(id);
+                }
+            }
+            this.previousTargetIds = targetIds;
             const result = await this.apiClient.getLiveStreamsByAccountIds(targets.map(target => target.accountId));
 
             const currentTotal = this.downloadsManager.size;
@@ -75,6 +85,8 @@ export class StreamDiscoveryService {
 
                 for (const target of targets) {
                     const streamerId = target.accountId;
+                    // The file may have changed while the lookup was in flight.
+                    if (!this.targetManager.hasTarget(streamerId)) continue;
                     const alias = target.alias;
                     const stream = result.live.get(streamerId);
 
@@ -92,6 +104,12 @@ export class StreamDiscoveryService {
                     if (!stream.streamId) {
                         this.logDecision(streamerId, alias, "public stream has no streamId; refusing unsafe capture");
                         continue;
+                    }
+                    const activeRecordingId = this.downloadsManager.getRecordingId(streamerId);
+                    if (activeRecordingId && activeRecordingId !== stream.streamId) {
+                        // Empty/missing folders are invisible to disk reconciliation.
+                        await this.downloadsManager.finalizeStreamer(streamerId);
+                        this.cooldown.clear(streamerId);
                     }
                     if (this.downloadsManager.has(masterPlaylistUrl)) {
                         this.logDecision(streamerId, alias, "already downloading this playlistUrl");

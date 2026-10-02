@@ -46,6 +46,8 @@ export interface IDownloadSession {
 
 export interface IStreamProvider {
     readonly providerName: string;
+    // False keeps the selected live URL for the recording, including retries.
+    readonly refreshMasterDuringDownload?: boolean;
     parseMasterPlaylist(masterUrl: string): Promise<string | null>;
     validateSegment(filePath: string): Promise<SegmentValidationResult>;
     createDownloadSession(): IDownloadSession;
@@ -62,7 +64,7 @@ export interface DownloadExitContext {
     streamerId: string;
     recordingId: string;
     lookupAlias?: string;
-    exitReason: "aborted" | "remote-endlist" | "segment-failed" | "stale-timeout" | "fetch-failed";
+    exitReason: "aborted" | "remote-endlist" | "playlist-not-found" | "segment-failed" | "stale-timeout" | "fetch-failed";
     lastMasterUrl: string;
     lastLiveUrl: string | null;
 }

@@ -19,15 +19,16 @@ export class TangoTargetManager {
     private targets: Map<string, TangoTarget> = new Map();
     private readonly filePath: string;
     private debounceTimer: NodeJS.Timeout | null = null;
+    private watcher: fs.FSWatcher | null = null;
 
-    private constructor() {
+    private constructor(filePath?: string) {
         const projectRoot = utils.findProjectRoot(__dirname);
-        this.filePath = path.join(projectRoot, "tango.txt");
+        this.filePath = filePath ?? path.join(projectRoot, "tango.txt");
         logger.info(`[Tango] TargetManager initialized. Watching: ${this.filePath}`);
     }
 
-    public static create(): TangoTargetManager {
-        const instance = new TangoTargetManager();
+    public static create(filePath?: string): TangoTargetManager {
+        const instance = new TangoTargetManager(filePath);
         instance.loadTargets();
         instance.watchFile();
         return instance;
@@ -53,7 +54,6 @@ export class TangoTargetManager {
         if (!fs.existsSync(this.filePath)) {
             logger.warn(`[Tango] tango.txt not found at ${this.filePath}. Creating empty file.`);
             fs.writeFileSync(this.filePath, "# Add Tango URLs here: https://tango.me/{accountId} {alias}\n");
-            return;
         }
 
         try {
@@ -65,12 +65,12 @@ export class TangoTargetManager {
                 const trimmed = line.trim();
                 if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(TANGO_URL_PREFIX)) continue;
 
-                const rest = trimmed.slice(TANGO_URL_PREFIX.length);
-                const spaceIdx = rest.indexOf(" ");
-                if (spaceIdx === -1) continue;
-
-                const accountId = rest.slice(0, spaceIdx);
-                const alias = rest.slice(spaceIdx + 1);
+                const match = trimmed.match(/^https:\/\/tango\.me\/([A-Za-z0-9_-]+)\/?\s+(.+)$/);
+                if (!match) {
+                    logger.warn(`[Tango] Invalid target line: ${trimmed}`);
+                    continue;
+                }
+                const [, accountId, alias] = match;
                 newTargets.set(accountId, { accountId, alias });
             }
 
@@ -97,17 +97,21 @@ export class TangoTargetManager {
         }
     }
 
+    public close(): void {
+        this.watcher?.close();
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    }
+
     private watchFile(): void {
-        fs.watch(this.filePath, (eventType) => {
-            logger.info(`[Tango] tango.txt watch event: ${eventType}`);
-            if (eventType === "change") {
-                if (this.debounceTimer) clearTimeout(this.debounceTimer);
-                this.debounceTimer = setTimeout(() => {
-                    logger.info(`[Tango] tango.txt changed. Reloading targets...`);
-                    this.loadTargets();
-                    this.debounceTimer = null;
-                }, FILE_WATCHER_DEBOUNCE_MS);
-            }
+        // Watch the directory so editor atomic-save renames don't orphan the watcher.
+        this.watcher = fs.watch(path.dirname(this.filePath), (_eventType, filename) => {
+            if (filename !== null && filename.toString() !== path.basename(this.filePath)) return;
+            if (this.debounceTimer) clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                logger.info(`[Tango] tango.txt changed. Reloading targets...`);
+                this.loadTargets();
+                this.debounceTimer = null;
+            }, FILE_WATCHER_DEBOUNCE_MS);
         });
     }
 }

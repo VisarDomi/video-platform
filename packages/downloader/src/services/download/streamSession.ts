@@ -79,7 +79,7 @@ export class StreamSession {
             this.activeDownloader = downloader;
             const result = await downloader.run(masterUrl, playlistManager, initTracker, disk);
             this.activeDownloader = null;
-            if (result.exitReason === "remote-endlist") {
+            if (result.exitReason === "remote-endlist" || result.exitReason === "playlist-not-found") {
                 endedByUpstream = true;
                 break;
             }
