@@ -81,11 +81,8 @@ runbook at `/home/visar/Documents/environment/mac-access.md`.
 
 ## iPhone packaging
 
-Keep `stream-viewer` and `video-platform` as sibling checkouts with dependencies
-installed. From stream-viewer, `npm run build:ios -- tango --prepare-only` invokes
-the video-platform builders and packages their output into Tango's
-`com.visar.Tango.paid.Xvid` and `com.visar.Tango.paid.Ptrex` extensions. Tango's native reader and Login helper stay
-owned by stream-viewer. See its `apps/ios/PORT.md` for signing/install/renewal.
-
-XVideos and Porntrex remain Safari extensions inside Tango. The five standalone
-provider apps and online native authentication are deferred.
+The XVideos and Porntrex builds run in the standalone **Xvid** and **Ptrex** apps
+(`apps/ios`, see its `PORT.md`): `apps/ios/scripts/deploy.py <provider> sync` runs
+`build-extension.mjs` and stages `content.js` for the app. They are no longer
+embedded in stream-viewer's Tango app (removed in its build 15). The manifest the
+builder writes is only used if the content script is loaded as a Safari extension.
