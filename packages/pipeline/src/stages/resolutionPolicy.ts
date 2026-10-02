@@ -32,6 +32,15 @@ export interface ResolutionSegment extends VideoDimensions {
     readonly mapUri: string | null;
 }
 
+// A segment with no independently decodable video keyframe (e.g. a capture
+// stub at a quality switch: P-slices referencing a missing PPS). No decoder can
+// show its picture, so it is excluded from classification and every artifact.
+export interface UndecodableSegment {
+    readonly index: number;
+    readonly name: string;
+    readonly durationSeconds: number;
+}
+
 type ParsedSegment = NativeMediaSegment;
 type ParsedPlaylist = NativeMediaPlaylist;
 
@@ -39,7 +48,10 @@ export interface RecordingResolutionAnalysis {
     readonly playlistPath: string;
     readonly sourceDirectory: string;
     readonly playlist: ParsedPlaylist;
+    // Decodable segments only, in playlist order. Look them up by `index`,
+    // never by array position: dropped segments leave gaps.
     readonly segments: readonly ResolutionSegment[];
+    readonly undecodableSegments: readonly UndecodableSegment[];
     readonly sourceDimensions: readonly string[];
     readonly resolutionSummary: string;
     readonly maxPixelCount: number;
@@ -65,6 +77,10 @@ type DimensionProbe = (inputPath: string) => Promise<VideoDimensions>;
 
 export const RESOLUTION_POLICY_VERSION = "resolution-policy-v4";
 export const FULL_HD_PIXEL_COUNT = 1920 * 1080;
+// Undecodable stubs are sub-second leftovers at quality switches. Even one per
+// 20 s of stream stays far below this share. Losing more means the scan or the
+// capture is systematically broken, so the recording fails closed instead.
+export const MAX_UNDECODABLE_DURATION_SHARE = 0.05;
 
 export function resolutionPolicyReason(reason: string): string {
     return `${RESOLUTION_POLICY_VERSION}: ${reason}`;
@@ -140,6 +156,27 @@ function dimensionKey(dimensions: VideoDimensions): string {
     return `${dimensions.width}x${dimensions.height}`;
 }
 
+export function undecodableSegmentsNote(analysis: Pick<RecordingResolutionAnalysis, "undecodableSegments">): string {
+    const dropped = analysis.undecodableSegments;
+    if (!dropped.length) return "";
+    const listed = dropped.slice(0, 20).map((segment) => `${segment.name} ${segment.durationSeconds.toFixed(6)}s`);
+    if (dropped.length > listed.length) listed.push(`+${dropped.length - listed.length} more`);
+    const total = dropped.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    return `; dropped ${dropped.length} segment(s) with no independently decodable video keyframe `
+        + `(${listed.join(", ")}; total ${total.toFixed(6)}s)`;
+}
+
+// Decodable playlist indexes, intersected with an optional policy selection.
+// Undefined only when nothing is dropped and no selection applies.
+export function effectiveKeepIndexes(
+    analysis: Pick<RecordingResolutionAnalysis, "segments" | "undecodableSegments">,
+    keepIndexes?: ReadonlySet<number>,
+): ReadonlySet<number> | undefined {
+    if (!analysis.undecodableSegments.length) return keepIndexes;
+    return new Set(analysis.segments.map((segment) => segment.index)
+        .filter((index) => !keepIndexes || keepIndexes.has(index)));
+}
+
 export async function analyzeRecordingResolution(
     playlistPath: string,
     probe: DimensionProbe = probeVideoDimensions,
@@ -172,18 +209,48 @@ function buildAnalysis(
     resolvedPlaylist: string,
     sourceDirectory: string,
     playlist: ParsedPlaylist,
-    dimensionsBySegment: readonly VideoDimensions[],
+    dimensionsBySegment: ReadonlyArray<VideoDimensions | null>,
 ): RecordingResolutionAnalysis {
     if (dimensionsBySegment.length !== playlist.segments.length) {
         throw new Error("Resolution analysis does not match the playlist segment count");
     }
-    const segments = playlist.segments.map((segment, index): ResolutionSegment => ({
-        ...dimensionsBySegment[index],
-        index: segment.index,
-        name: segment.name,
-        mapUri: segment.mapUri,
-        durationSeconds: segment.durationSeconds,
-    }));
+    const segments: ResolutionSegment[] = [];
+    const undecodableSegments: UndecodableSegment[] = [];
+    for (const [index, segment] of playlist.segments.entries()) {
+        const dimensions = dimensionsBySegment[index];
+        if (!dimensions) {
+            // Mid-run, the decoder still holds the previous segment's state, so
+            // a keyframe-less segment (long GOP) decodes in sequence: keep it.
+            // Only a run start (playlist start, discontinuity or new map) with
+            // no keyframe has nothing to decode from, like a quality-switch stub.
+            const prior = playlist.segments[index - 1];
+            const kept = segments.at(-1);
+            const startsRun = !prior || segment.metadata.includes("#EXT-X-DISCONTINUITY") || segment.mapUri !== prior.mapUri;
+            if (!startsRun && kept && kept.index === prior.index) {
+                segments.push({ width: kept.width, height: kept.height, sampleAspectRatio: kept.sampleAspectRatio,
+                    streamLayout: kept.streamLayout, index: segment.index, name: segment.name, mapUri: segment.mapUri,
+                    durationSeconds: segment.durationSeconds });
+                continue;
+            }
+            undecodableSegments.push({ index: segment.index, name: segment.name, durationSeconds: segment.durationSeconds });
+            continue;
+        }
+        segments.push({
+            ...dimensions,
+            index: segment.index,
+            name: segment.name,
+            mapUri: segment.mapUri,
+            durationSeconds: segment.durationSeconds,
+        });
+    }
+    if (!segments.length) throw new Error("No playlist segment has an independently decodable video keyframe");
+    const playlistDuration = playlist.segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    const droppedDuration = undecodableSegments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+    if (droppedDuration > playlistDuration * MAX_UNDECODABLE_DURATION_SHARE) {
+        throw new Error(`Undecodable segments cover ${droppedDuration.toFixed(6)}s of ${playlistDuration.toFixed(6)}s `
+            + `(above ${MAX_UNDECODABLE_DURATION_SHARE * 100}%); refusing to drop them`
+            + undecodableSegmentsNote({ undecodableSegments }));
+    }
     const counts = new Map<string, number>();
     for (const segment of segments) {
         const key = dimensionKey(segment);
@@ -199,6 +266,7 @@ function buildAnalysis(
         sourceDirectory,
         playlist,
         segments,
+        undecodableSegments,
         sourceDimensions,
         resolutionSummary,
         maxPixelCount: Math.max(...segments.map((segment) => segment.width * segment.height)),
@@ -239,25 +307,26 @@ export function chooseRecordingResolutionPolicy(
     const highDuration = high.reduce((sum, segment) => sum + segment.durationSeconds, 0);
     const share = highDuration / totalDuration;
     if (!Number.isFinite(share) || totalDuration <= 0) throw new Error("Cannot measure Full-HD-pixel-count duration share");
+    const dropped = undecodableSegmentsNote(analysis);
     const measured = `native >=${FULL_HD_PIXEL_COUNT} pixels duration ${highDuration.toFixed(6)}s / ${totalDuration.toFixed(6)}s (${(share * 100).toFixed(6)}%)`;
     if (low.length === 0) {
         return {
             disposition: "remuxNative",
-            reason: `all ${high.length} segments have >=${FULL_HD_PIXEL_COUNT} pixels; remux at native resolutions without conversion (${analysis.resolutionSummary})`,
+            reason: `all ${high.length} segments have >=${FULL_HD_PIXEL_COUNT} pixels; remux at native resolutions without conversion (${analysis.resolutionSummary})${dropped}`,
         };
     }
     if (share >= 0.9 - 1e-12) {
         return {
             disposition: "retain1080",
             retainedSegmentIndexes: new Set(high.map((segment) => segment.index)),
-            reason: `${measured}; keep ${high.length} qualifying segments and drop ${low.length} segments below ${FULL_HD_PIXEL_COUNT} pixels from the upload; remux without conversion`,
+            reason: `${measured}; keep ${high.length} qualifying segments and drop ${low.length} segments below ${FULL_HD_PIXEL_COUNT} pixels from the upload; remux without conversion${dropped}`,
         };
     }
     const source = conversionReferenceSource(analysis.segments);
     return {
         disposition: "convert1080",
         source,
-        reason: `${measured}; below 90%, convert the complete recording to 1080p with no segments dropped (${analysis.resolutionSummary})`,
+        reason: `${measured}; below 90%, convert the complete recording to 1080p with no ${dropped ? "decodable " : ""}segments dropped (${analysis.resolutionSummary})${dropped}`,
     };
 }
 
@@ -270,7 +339,8 @@ export function deriveResolutionPlaylist(
     analysis: RecordingResolutionAnalysis,
     keepIndexes: ReadonlySet<number>,
 ): string {
-    const kept = analysis.playlist.segments.filter((segment) => keepIndexes.has(segment.index));
+    const keep = effectiveKeepIndexes(analysis, keepIndexes) ?? keepIndexes;
+    const kept = analysis.playlist.segments.filter((segment) => keep.has(segment.index));
     if (kept.length === 0) throw new Error("Cannot derive an empty resolution playlist");
     const output = [...analysis.playlist.header];
     let previous: ParsedSegment | null = null;

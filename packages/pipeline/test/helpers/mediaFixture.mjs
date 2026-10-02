@@ -24,6 +24,19 @@ export async function fixturePart(root, name, { size = "320x180", offset = 0, fr
     return { input, folder, size, frames };
 }
 
+// A capture stub like the live quality-switch leftovers: the IDR slice, SPS
+// and PPS are stripped, so only P/B slices referencing a missing PPS remain.
+// AAC audio is kept. No decoder can produce a picture from it.
+export async function undecodableStub(root, name, options = {}) {
+    const source = await fixturePart(root, `${name}-source`, { frames: 3, gop: 60, ...options });
+    const folder = path.join(root, name);
+    await mkdir(folder, { recursive: true });
+    const input = path.join(folder, "segment.ts");
+    await exec("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-i", source.input,
+        "-map", "0", "-c", "copy", "-bsf:v", "filter_units=remove_types=5|7|8", "-f", "mpegts", input]);
+    return { input, folder, size: source.size, frames: source.frames };
+}
+
 export async function assemble(root, parts, durations = parts.map((p) => p.frames / 10)) {
     const lines = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:10"];
     for (const [i, part] of parts.entries()) {
