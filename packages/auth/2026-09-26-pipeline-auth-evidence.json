@@ -1,0 +1,76 @@
+{
+  "timezone": "Europe/Tirane (UTC+02:00)",
+  "windowLocal": [
+    "2026-09-26T15:00:00+02:00",
+    "2026-09-26T18:30:59+02:00"
+  ],
+  "passwordChangedAroundLocal": "15:00 (user estimate)",
+  "sourceDatabase": "/home/visar/.local/share/video-services/pipeline/pipeline.sqlite",
+  "readsOnly": true,
+  "uploads": [
+    {
+      "attemptId": "16f9683c-756a-4288-811e-c9908fc5f180",
+      "startedLocal": "2026-09-26T15:18:09+02:00",
+      "bytesTransferred": 1114351916,
+      "fileUploadedLocal": "2026-09-26T15:20:07+02:00",
+      "metadataSubmittedLocal": "2026-09-26T15:20:09+02:00",
+      "siteReportedPublicationSucceededLocal": "2026-09-26T15:20:49+02:00",
+      "ledgerStatus": "uncertain",
+      "ledgerReason": "metadata submitted; awaiting 24-hour edit-page verification",
+      "remoteIdCaptured": true
+    },
+    {
+      "attemptId": "3eec67bf-0dd8-4d91-b76e-240d755c7b87",
+      "startedLocal": "2026-09-26T15:54:57+02:00",
+      "bytesTransferred": 825278428,
+      "fileUploadedLocal": "2026-09-26T15:56:27+02:00",
+      "metadataSubmittedLocal": "2026-09-26T15:56:28+02:00",
+      "siteReportedPublicationSucceededLocal": "2026-09-26T15:57:31+02:00",
+      "ledgerStatus": "uncertain",
+      "ledgerReason": "metadata submitted; awaiting 24-hour edit-page verification",
+      "remoteIdCaptured": true
+    },
+    {
+      "attemptId": "f8ec789e-1d9c-4f40-9bae-67b6d854753c",
+      "startedLocal": "2026-09-26T16:33:51+02:00",
+      "bytesTransferred": 1119967748,
+      "fileUploadedLocal": "2026-09-26T16:35:51+02:00",
+      "metadataSubmittedLocal": "2026-09-26T16:35:52+02:00",
+      "siteReportedPublicationSucceededLocal": "2026-09-26T16:36:55+02:00",
+      "ledgerStatus": "uncertain",
+      "ledgerReason": "metadata submitted; awaiting 24-hour edit-page verification",
+      "remoteIdCaptured": true
+    },
+    {
+      "attemptId": "039a2316-a206-41f1-8981-5bea5b418758",
+      "startedLocal": "2026-09-26T17:24:05+02:00",
+      "bytesTransferred": 1593120881,
+      "fileUploadedLocal": "2026-09-26T17:27:00+02:00",
+      "metadataSubmittedLocal": "2026-09-26T17:27:01+02:00",
+      "siteReportedPublicationSucceededLocal": "2026-09-26T17:27:57+02:00",
+      "ledgerStatus": "uncertain",
+      "ledgerReason": "metadata submitted; awaiting 24-hour edit-page verification",
+      "remoteIdCaptured": true
+    },
+    {
+      "attemptId": "561d0a95-3436-4d02-a213-241ab9864c82",
+      "startedLocal": "2026-09-26T18:13:05+02:00",
+      "bytesTransferred": 1133046803,
+      "fileUploadedLocal": "2026-09-26T18:15:08+02:00",
+      "metadataSubmittedLocal": "2026-09-26T18:15:09+02:00",
+      "siteReportedPublicationSucceededLocal": "2026-09-26T18:16:22+02:00",
+      "ledgerStatus": "uncertain",
+      "ledgerReason": "metadata submitted; awaiting 24-hour edit-page verification",
+      "remoteIdCaptured": true
+    }
+  ],
+  "credentialFilesUpdatedLocal": {
+    "tango": "2026-09-26T18:13:38+02:00",
+    "xvideos": "2026-09-26T18:16:24+02:00"
+  },
+  "interpretation": "Five authenticated uploads after the estimated password-change time. Site publication messages are saved page evidence, not a new playback verification. These successes do not verify fresh Google password login. Ledger uncertain means the configured later edit-page check remains pending.",
+  "diagnosticPipelinePauseLocal": [
+    "18:17:36",
+    "18:23:26"
+  ]
+}
