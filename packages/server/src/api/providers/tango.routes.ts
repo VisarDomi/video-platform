@@ -63,10 +63,6 @@ export function createTangoAdapter(
             return parsed ? { id: parsed.id, label: parsed.label } : null;
         },
 
-        isResolved(line: string) {
-            return this.parseLine(line) !== null;
-        },
-
         async resolveIdentifier(input: string) {
             const trimmed = input.trim();
             const reverse = aliasLookup.getReverse();

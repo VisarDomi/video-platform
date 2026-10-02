@@ -11,10 +11,6 @@ const adapter: ListProviderAdapter = {
         return parsed ? { id: parsed.id, label: parsed.label } : null;
     },
 
-    isResolved(line: string) {
-        return this.parseLine(line) !== null;
-    },
-
     async resolveIdentifier(input: string) {
         const match = input.match(/(\d+)/);
         if (!match) return null;

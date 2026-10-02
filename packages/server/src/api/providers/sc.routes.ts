@@ -31,11 +31,6 @@ const adapter: ListProviderAdapter = {
         return parsed ? { id: parsed.id, label: parsed.label } : null;
     },
 
-    isResolved(line: string) {
-        const parsed = this.parseLine(line);
-        return parsed !== null && parsed.id !== parsed.label;
-    },
-
     async resolveIdentifier(input: string) {
         const username = parseUsername(input);
         const resolved = await resolveScUsername(username);
