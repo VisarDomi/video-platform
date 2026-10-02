@@ -2,12 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { moveToDesktopTrash } from "shared";
 
-import { repairFailedMediaIntegrity } from "./failedIntegrityRepair.js";
+import { repairFailedMediaIntegrity, type MediaRepairPlan } from "./failedIntegrityRepair.js";
 import {
     finalizeMediaIntegrity,
     type MediaIntegrityFinalizationResult,
     type MediaIntegrityFinalizerOptions,
     type MediaIntegrityReport,
+    validateNativeMediaPlaylist,
 } from "./mediaIntegrityFinalizer.js";
 import { playlistFingerprint } from "./finalizationCheckpointStore.js";
 import {
@@ -56,6 +57,19 @@ export async function processFinalizedRecording(
     options: MediaIntegrityFinalizerOptions = {},
     dependencies: FinalizedRecordingProcessorDependencies = {},
 ): Promise<MediaIntegrityFinalizationResult> {
+    // Do not let ordinary cleanup trash files from a half-committed repair,
+    // or let an already-ready checkpoint bypass its unfinished journal.
+    const pendingRepair = options.checkpointStore?.readRepair<MediaRepairPlan>(streamPath);
+    if (pendingRepair) {
+        const repaired = dependencies.repairFailed ? await dependencies.repairFailed(streamPath, pendingRepair.report)
+            : await repairFailedMediaIntegrity(streamPath, pendingRepair.report, {
+                checkpointStore: options.checkpointStore,
+                validateCandidate: async (target, content) =>
+                    (await validateNativeMediaPlaylist(target, content, options.validateMedia, { inspectFragment: options.inspectFragment })).valid,
+                revalidate: target => finalizeMediaIntegrity(target, { ...options, retryFailed: true, revalidate: true }),
+            });
+        return { kind: "processed", report: repaired.finalReport };
+    }
     if (options.checkpointStore && options.revalidate !== true) {
         const playlistPath = path.join(streamPath, "playlist.m3u8");
         const playlist = await fs.readFile(playlistPath, "utf8");
@@ -76,6 +90,9 @@ export async function processFinalizedRecording(
     const validate = dependencies.validate ?? finalizeMediaIntegrity;
     const repairFailed = dependencies.repairFailed
         ?? ((target: string, report: MediaIntegrityReport) => repairFailedMediaIntegrity(target, report, {
+            checkpointStore: options.checkpointStore,
+            validateCandidate: async (candidateTarget, content) =>
+                (await validateNativeMediaPlaylist(candidateTarget, content, options.validateMedia, { inspectFragment: options.inspectFragment })).valid,
             revalidate: (revalidationTarget) => finalizeMediaIntegrity(revalidationTarget, {
                 ...options,
                 retryFailed: true,

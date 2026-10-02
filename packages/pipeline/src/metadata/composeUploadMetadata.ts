@@ -7,6 +7,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
+import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 
 const TITLE_LIMIT = 255;
 const DESCRIPTION_LIMIT = 1_000;
@@ -18,6 +19,13 @@ export function productionUploadIdentity(recording: Recording, part: ProductionA
 
 export function hasDiagnosticUploadIdentity(title: string, identity: string): boolean {
     return title.trimEnd().endsWith(`[${identity}]`);
+}
+
+export function uploadLookupIdentity(recording: Recording, part: ProductionArtifactPart, title: string): string | null {
+    const diagnostic = productionUploadIdentity(recording, part);
+    if (hasDiagnosticUploadIdentity(title, diagnostic)) return diagnostic;
+    const basename = path.basename(recording.sourcePath);
+    return part === "full" && hasDiagnosticUploadIdentity(title, basename) ? basename : null;
 }
 
 interface DescriptorOutput {
@@ -55,7 +63,7 @@ export function composeUploadMetadata(
     part: ProductionArtifactPart = "full",
     options: { diagnosticTitle?: boolean } = {},
 ): Omit<UploadMetadataRecord, "recordingId" | "createdAt"> {
-    if (provenance.status === "review_required" || !provenance.streamerUrl) {
+    if (!allowsUpload(provenance)) {
         throw new Error("Cannot compose upload metadata with unresolved provenance");
     }
     const output = descriptorOutput(description.output);
@@ -71,7 +79,7 @@ export function composeUploadMetadata(
 
     const suffix = [
         `Recorded: ${recordingTime(recording.sourcePath)}`,
-        `Source: ${provenance.streamerUrl}`,
+        `Source: ${allowsPlaceholder(provenance) ? "TODO LATER" : provenance.streamerUrl}`,
         ...(provenance.aliasUrl ? [`Alias: ${provenance.aliasUrl}`] : []),
     ].join("\n");
     const descriptionRoom = DESCRIPTION_LIMIT - suffix.length - 2;

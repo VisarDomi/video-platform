@@ -5,6 +5,7 @@ import type {
     Recording,
 } from "../domain/types.js";
 import { composeUploadMetadata } from "../metadata/composeUploadMetadata.js";
+import { allowsUpload } from "../provenance/uploadPolicy.js";
 
 export interface DescriptionEvidence {
     readonly artifactSha256: string;
@@ -118,7 +119,7 @@ export class PipelineOrchestrator {
                     const description = this.database.getDescription(recording.id);
                     const provenance = this.database.getProvenance(recording.id);
                     if (!description) throw new Error("Described recording has no description evidence");
-                    if (!provenance || provenance.status === "review_required") {
+                    if (!provenance || !allowsUpload(provenance)) {
                         result = this.database.markProvenanceReviewRequired(
                             recording.id,
                             provenance?.reason ?? "recording provenance has not been resolved",

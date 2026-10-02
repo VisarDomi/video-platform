@@ -1,12 +1,28 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { parseNativeMediaPlaylist, type NativeMediaSegment, type NativeMediaPlaylist } from "shared";
 import { probeTsSegmentDimensions } from "./tsSegmentDimensions.js";
 
 export interface VideoDimensions {
     readonly width: number;
     readonly height: number;
     readonly sampleAspectRatio: string | null;
+    readonly streamLayout?: readonly NativeStreamLayout[];
+}
+
+export interface NativeStreamLayout {
+    readonly codec_type: string;
+    readonly codec_name: string;
+    readonly time_base: string;
+    readonly pix_fmt?: string;
+    readonly sample_rate?: string;
+    readonly channels?: number;
+    readonly channel_layout?: string;
+    readonly start_time?: string;
+    readonly width?: number;
+    readonly height?: number;
+    readonly profile?: string;
 }
 
 export interface ResolutionSegment extends VideoDimensions {
@@ -16,19 +32,8 @@ export interface ResolutionSegment extends VideoDimensions {
     readonly mapUri: string | null;
 }
 
-interface ParsedSegment {
-    readonly durationSeconds: number;
-    readonly index: number;
-    readonly name: string;
-    readonly metadata: readonly string[];
-    readonly mapLine: string | null;
-    readonly mapUri: string | null;
-}
-
-interface ParsedPlaylist {
-    readonly header: readonly string[];
-    readonly segments: readonly ParsedSegment[];
-}
+type ParsedSegment = NativeMediaSegment;
+type ParsedPlaylist = NativeMediaPlaylist;
 
 export interface RecordingResolutionAnalysis {
     readonly playlistPath: string;
@@ -65,74 +70,17 @@ export function resolutionPolicyReason(reason: string): string {
     return `${RESOLUTION_POLICY_VERSION}: ${reason}`;
 }
 
-function safeLocalName(name: string, kind: string): string {
-    if (name === "" || path.basename(name) !== name) {
-        throw new Error(`Unsafe ${kind} URI in playlist: ${name}`);
-    }
-    return name;
-}
-
-function parseMapUri(line: string): string {
-    const match = line.match(/\bURI="([^"]+)"/);
-    if (!match) throw new Error(`Unsupported #EXT-X-MAP without a quoted URI: ${line}`);
-    return safeLocalName(match[1], "map");
-}
-
 export function parseResolutionPlaylist(content: string): ParsedPlaylist {
-    const header: string[] = [];
-    const segments: ParsedSegment[] = [];
-    const metadata: string[] = [];
-    let currentMapLine: string | null = null;
-    let currentMapUri: string | null = null;
-
-    for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (line === "" || line === "#EXT-X-ENDLIST") continue;
-        if (
-            line === "#EXTM3U"
-            || line.startsWith("#EXT-X-VERSION:")
-            || line.startsWith("#EXT-X-TARGETDURATION:")
-            || line.startsWith("#EXT-X-MEDIA-SEQUENCE:")
-            || line.startsWith("#EXT-X-PLAYLIST-TYPE:")
-            || line === "#EXT-X-INDEPENDENT-SEGMENTS"
-        ) {
-            header.push(line);
-        } else if (line.startsWith("#EXT-X-MAP:")) {
-            currentMapLine = line;
-            currentMapUri = parseMapUri(line);
-        } else if (line.startsWith("#")) {
-            if (line.startsWith("#EXT-X-KEY:") || line.startsWith("#EXT-X-BYTERANGE:")) {
-                throw new Error(`Resolution policy does not support ${line.split(":", 1)[0]}`);
-            }
-            metadata.push(line);
-        } else {
-            const durations = metadata.filter((tag) => tag.startsWith("#EXTINF:"));
-            const rawDuration = durations[0]?.match(/^#EXTINF:(\d+(?:\.\d+)?)(?:,.*)?$/)?.[1];
-            const durationSeconds = Number(rawDuration);
-            if (durations.length !== 1 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-                throw new Error(`Segment ${line} requires one positive #EXTINF duration`);
-            }
-            segments.push({
-                durationSeconds,
-                index: segments.length,
-                name: safeLocalName(line, "segment"),
-                metadata: [...metadata],
-                mapLine: currentMapLine,
-                mapUri: currentMapUri,
-            });
-            metadata.length = 0;
-        }
-    }
-    if (segments.length === 0) throw new Error("Playlist contains no media segments");
-    return { header, segments };
+    const parsed = parseNativeMediaPlaylist(content);
+    if (!parsed.segments.length) throw new Error("Playlist contains no media segments");
+    return parsed;
 }
 
 async function probeVideoDimensions(inputPath: string): Promise<VideoDimensions> {
     return await new Promise((resolve, reject) => {
         const child = spawn("ffprobe", [
             "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,sample_aspect_ratio",
+            "-show_entries", "stream=codec_type,codec_name,time_base,pix_fmt,sample_rate,channels,channel_layout,width,height,sample_aspect_ratio,profile",
             "-of", "json",
             inputPath,
         ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -150,9 +98,9 @@ async function probeVideoDimensions(inputPath: string): Promise<VideoDimensions>
             }
             try {
                 const parsed = JSON.parse(stdout) as {
-                    streams?: Array<{ width?: number; height?: number; sample_aspect_ratio?: string }>;
+                    streams?: Array<NativeStreamLayout & { width?: number; height?: number; sample_aspect_ratio?: string }>;
                 };
-                const stream = parsed.streams?.[0];
+                const stream = parsed.streams?.find(stream => stream.codec_type === "video");
                 if (!stream || !Number.isSafeInteger(stream.width) || (stream.width ?? 0) <= 0
                     || !Number.isSafeInteger(stream.height) || (stream.height ?? 0) <= 0) {
                     throw new Error(`No usable video dimensions in ${inputPath}`);
@@ -161,6 +109,7 @@ async function probeVideoDimensions(inputPath: string): Promise<VideoDimensions>
                     width: stream.width as number,
                     height: stream.height as number,
                     sampleAspectRatio: stream.sample_aspect_ratio ?? null,
+                    streamLayout: parsed.streams?.filter(stream => ["video", "audio"].includes(stream.codec_type)),
                 });
             } catch (error) {
                 reject(error);
@@ -267,6 +216,18 @@ function displayAspectRatio(dimensions: VideoDimensions): number {
     return dimensions.width * sampleAspectRatio(dimensions.sampleAspectRatio) / dimensions.height;
 }
 
+export function conversionReferenceSource(segments: readonly ResolutionSegment[]): VideoDimensions {
+    const source = segments.reduce<ResolutionSegment | undefined>((largest, segment) =>
+        !largest || segment.width * segment.height > largest.width * largest.height ? segment : largest, undefined);
+    if (!source) throw new Error("Conversion policy has no reference source segment");
+    const referenceAspect = displayAspectRatio(source);
+    if (!Number.isFinite(referenceAspect) || !segments.every(segment => {
+        const aspect = displayAspectRatio(segment);
+        return Number.isFinite(aspect) && Math.abs(aspect / referenceAspect - 1) <= 0.01;
+    })) throw new Error("Recording changes display aspect ratio; cannot produce one unpadded 1080p artifact");
+    return source;
+}
+
 export function chooseRecordingResolutionPolicy(
     analysis: RecordingResolutionAnalysis,
 ): RecordingResolutionPolicy {
@@ -292,21 +253,7 @@ export function chooseRecordingResolutionPolicy(
             reason: `${measured}; keep ${high.length} qualifying segments and drop ${low.length} segments below ${FULL_HD_PIXEL_COUNT} pixels from the upload; remux without conversion`,
         };
     }
-    const source = analysis.segments.find(
-        (segment) => segment.width * segment.height === analysis.maxPixelCount,
-    );
-    if (!source) throw new Error("Conversion policy has no reference source segment");
-    const referenceAspect = displayAspectRatio(source);
-    const consistentAspect = Number.isFinite(referenceAspect) && analysis.segments.every((segment) => {
-        const aspect = displayAspectRatio(segment);
-        return Number.isFinite(aspect) && Math.abs(aspect / referenceAspect - 1) <= 0.01;
-    });
-    if (!consistentAspect) {
-        throw new Error(
-            `Recording changes display aspect ratio (${analysis.resolutionSummary}); `
-            + "cannot produce one unpadded 1080p artifact",
-        );
-    }
+    const source = conversionReferenceSource(analysis.segments);
     return {
         disposition: "convert1080",
         source,
