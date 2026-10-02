@@ -65,6 +65,17 @@ test("production filename recovery attaches existing ID and atomically verifies 
     assert.equal(db.uploadUsage("2026-09").spent, spent);
 });
 
+test("changing active destination still verifies historical attempts on their pinned provider", async t => {
+    const { db, config, r } = await fixture(t);
+    const providers = [];
+    await reconcileDueUploads({ ...config, uploadProvider: "porntrex" }, day(1), undefined, async (_config, provider) => {
+        providers.push(provider);
+        return browser(async () => ({ kind: "found", remoteId: "12345", remoteUrl: "https://www.xvideos.com/video.example/test" }));
+    });
+    assert.deepEqual(providers, ["xvideos"]);
+    assert.equal(db.get(r.id).state, "xvideos_verified");
+});
+
 test("clean absence waits seven days across reopen, then requeues once with a fresh weekly gate", async t => {
     const { db, config, r, attempt } = await fixture(t);
     const absent = browser(async () => ({ kind: "absent" }));

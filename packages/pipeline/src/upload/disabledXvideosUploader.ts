@@ -6,7 +6,7 @@ export interface UploadRequest {
     readonly title: string;
     readonly description: string;
     readonly tags: readonly string[];
-    readonly visibility: "private";
+    readonly visibility: "private" | "public";
     readonly streamerAlias?: string;
     readonly lookupBeforeUpload?: boolean;
     readonly onEvidence?: (evidence: Record<string, unknown>) => Promise<void> | void;
@@ -30,6 +30,7 @@ export type UploadOutcome =
     | { kind: "title_mismatch"; remoteId: string };
 
 export interface XvideosUploader {
+    readonly provider?: ActiveUploadProvider;
     upload(request: UploadRequest): Promise<UploadOutcome>;
 }
 
@@ -40,3 +41,4 @@ export class DisabledXvideosUploader implements XvideosUploader {
         );
     }
 }
+import type { ActiveUploadProvider } from "../config/uploadProviders.js";

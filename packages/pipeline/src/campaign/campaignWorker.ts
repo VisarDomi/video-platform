@@ -12,7 +12,7 @@ import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "
 import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
-import { HumanActionRequiredError, type ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
 import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
@@ -55,7 +55,6 @@ export class CampaignWorker {
         private readonly config: PipelineConfig,
         private readonly resolver: TargetCatalogResolver,
         private readonly upload?: (recordingId: string, monthlyLimitBytes: number) => Promise<unknown>,
-        _uploader?: ChromiumXvideosUploader,
         workerId = `pipeline-campaign-${process.pid}`,
     ) {
         this.orchestrator = new PipelineOrchestrator(
@@ -239,6 +238,11 @@ export class CampaignWorker {
             if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
             try {
                 const result = await this.upload(uploadReady.id, control.monthlyUploadLimitBytes);
+                const afterUpload = this.database.get(uploadReady.id);
+                if (afterUpload?.state === "blocked") return {
+                    disposition: "attention_required", recordingId: uploadReady.id,
+                    reason: afterUpload.blockReason ?? "Upload provider policy requires manual review",
+                };
                 this.database.resetAntibotFailures(now);
                 return {
                     disposition: "upload_completed",

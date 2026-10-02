@@ -144,7 +144,7 @@ export function assessFinalArtifact(
                 candidateId: artifact.id,
                 severity: "warning",
                 code: "too_large",
-                message: `Blocked ${artifact.path}: ${artifact.sizeBytes} bytes exceeds the shared ${policy.maximumFileBytes}-byte maximum.`,
+                message: `Blocked ${artifact.path}: ${artifact.sizeBytes} bytes exceeds the ${policy.providers.join("/")} ${policy.maximumFileBytes}-byte maximum.`,
                 requiresManualAction: true,
             },
         };

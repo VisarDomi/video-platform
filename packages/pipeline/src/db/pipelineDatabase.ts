@@ -6,6 +6,7 @@ import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { limitedVisibilityWarning } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
+import { assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
 import type {
     ArtifactRecord,
     ArtifactVariant,
@@ -554,6 +555,11 @@ export class PipelineDatabase {
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
         }
+        // Repair the old manual-sync label, without changing identity or retry
+        // state. Only known legacy source names and XVideos links qualify.
+        this.database.prepare(`UPDATE upload_attempts SET provider = 'xvideos'
+            WHERE provider IN ('tango', 'fc2', 'sc') AND remote_id IS NOT NULL
+                AND (remote_url IS NULL OR remote_url LIKE 'https://www.xvideos.com/%')`).run();
         this.database.prepare(`
             INSERT OR IGNORE INTO production_version (id, version, activated_at)
             VALUES (1, ?, ?)
@@ -1800,7 +1806,8 @@ export class PipelineDatabase {
         return Number.isSafeInteger(bytes) && bytes > 0 && usage.spent + usage.reserved + bytes <= limit;
     }
 
-    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES): string {
+    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = "xvideos"): string {
+        assertUploadProvider(provider);
         if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Upload reservation bytes must be a positive integer");
         const month = calendarMonth(now, timeZone);
         const timestamp = now.toISOString();
@@ -1808,6 +1815,10 @@ export class PipelineDatabase {
         this.transaction(() => {
             const recording = this.requireRecording(id);
             if (recording.state !== "metadata_ready") throw new Error(`Recording ${id} has no upload-ready metadata`);
+            if (this.getUploadIdentity(id) || this.database.prepare(`SELECT 1 FROM upload_confirmations
+                WHERE recording_id = ? AND status = 'pending' LIMIT 1`).get(id)) {
+                throw new Error("Recording already has a remote upload or unresolved acceptance; refusing another destination");
+            }
             if (!this.canAttemptUpload(id, now)) throw new Error("Weekly upload retry deadline has not elapsed");
             const artifactPart = this.getArtifactPart(id);
             if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
@@ -1817,30 +1828,32 @@ export class PipelineDatabase {
                 INSERT INTO upload_reservations (
                     id, recording_id, artifact_part, provider, calendar_month, reserved_bytes,
                     status, created_at, updated_at
-                ) VALUES (?, ?, ?, 'xvideos', ?, ?, 'reserved', ?, ?)
-            `).run(reservationId, id, artifactPart, month, bytes, timestamp, timestamp);
+                ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
+            `).run(reservationId, id, artifactPart, provider, month, bytes, timestamp, timestamp);
             this.updateStateInTransaction(id, "metadata_ready", "xvideos_admitted", "monthly bytes reserved", timestamp);
         });
         return reservationId;
     }
 
-    beginUpload(id: string, reservationId: string, now = new Date()): string {
+    beginUpload(id: string, reservationId: string, now = new Date(), provider: ActiveUploadProvider = "xvideos"): string {
+        assertUploadProvider(provider);
         const attemptId = randomUUID();
         const timestamp = now.toISOString();
         this.transaction(() => {
             const reservation = this.database.prepare(`
-                SELECT id, artifact_part FROM upload_reservations
+                SELECT id, artifact_part, provider FROM upload_reservations
                 WHERE id = ? AND recording_id = ? AND status = 'reserved'
-            `).get(reservationId, id) as { id: string; artifact_part: ProductionArtifactPart } | undefined;
+            `).get(reservationId, id) as { id: string; artifact_part: ProductionArtifactPart; provider: string } | undefined;
             if (!reservation) throw new Error(`No active reservation ${reservationId} for ${id}`);
+            if (reservation.provider !== provider) throw new Error("Uploader destination does not match the durable reservation");
             if (reservation.artifact_part !== this.getArtifactPart(id)) {
                 throw new Error(`Upload reservation ${reservationId} does not match the current artifact part`);
             }
             this.database.prepare(`
                 INSERT INTO upload_attempts (
                     id, reservation_id, recording_id, artifact_part, provider, status, started_at, retry_not_before
-                ) VALUES (?, ?, ?, ?, 'xvideos', 'started', ?, ?)
-            `).run(attemptId, reservationId, id, reservation.artifact_part, timestamp,
+                ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?)
+            `).run(attemptId, reservationId, id, reservation.artifact_part, reservation.provider, timestamp,
                 new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString());
             this.updateStateInTransaction(id, "xvideos_admitted", "xvideos_uploading", "upload attempt started", timestamp);
         });
@@ -1908,7 +1921,7 @@ export class PipelineDatabase {
             }
         });
         const attempts = this.database.prepare(`
-            SELECT a.id, a.recording_id, a.reservation_id, a.phase, a.progress_bytes, a.transfer_started,
+            SELECT a.id, a.provider, a.recording_id, a.reservation_id, a.phase, a.progress_bytes, a.transfer_started,
                 r.calendar_month
             FROM upload_attempts a
             JOIN upload_reservations r ON r.id = a.reservation_id
@@ -1917,6 +1930,7 @@ export class PipelineDatabase {
             ORDER BY a.started_at, a.id
         `).all() as unknown as Array<{
             id: string;
+            provider: string;
             recording_id: string;
             reservation_id: string;
             phase: "started" | "file_uploading" | "file_uploaded" | "metadata_submitting";
@@ -1933,8 +1947,8 @@ export class PipelineDatabase {
                         INSERT INTO bandwidth_events (
                             recording_id, attempt_id, provider, calendar_month,
                             transmitted_bytes, created_at
-                        ) VALUES (?, ?, 'xvideos', ?, ?, ?)
-                    `).run(attempt.recording_id, attempt.id, attempt.calendar_month,
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    `).run(attempt.recording_id, attempt.id, attempt.provider, attempt.calendar_month,
                         attempt.progress_bytes, timestamp);
                 }
                 this.database.prepare(`
@@ -1982,12 +1996,13 @@ export class PipelineDatabase {
         let recordingId = "";
         this.transaction(() => {
             const attempt = this.database.prepare(`
-                SELECT a.recording_id, a.reservation_id, a.progress_bytes,
+                SELECT a.recording_id, a.provider, a.reservation_id, a.progress_bytes,
                     r.reserved_bytes, r.calendar_month
                 FROM upload_attempts a JOIN upload_reservations r ON r.id = a.reservation_id
                 WHERE a.id = ? AND a.status = 'started'
             `).get(attemptId) as {
                 recording_id: string;
+                provider: string;
                 reservation_id: string;
                 reserved_bytes: number;
                 calendar_month: string;
@@ -2016,8 +2031,8 @@ export class PipelineDatabase {
                 INSERT INTO bandwidth_events (
                     recording_id, attempt_id, provider, calendar_month,
                     transmitted_bytes, created_at
-                ) VALUES (?, ?, 'xvideos', ?, ?, ?)
-            `).run(recordingId, attemptId, attempt.calendar_month, outcome.transmittedBytes, timestamp);
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            `).run(recordingId, attemptId, attempt.provider, attempt.calendar_month, outcome.transmittedBytes, timestamp);
             this.database.prepare(`
                 UPDATE upload_reservations SET status = ?, updated_at = ? WHERE id = ?
             `).run(outcome.status === "accepted" ? "consumed" : "released", timestamp, attempt.reservation_id);
@@ -2039,8 +2054,7 @@ export class PipelineDatabase {
     }
 
     getUploadIdentity(id: string): { remoteId: string; remoteUrl: string | null; verified: boolean } | null {
-        const artifactPart = this.getArtifactPart(id);
-        if (!artifactPart) return null;
+        const artifactPart = this.getArtifactPart(id) ?? "full";
         const verified = this.database.prepare(`
             SELECT remote_id, remote_url FROM remote_uploads
             WHERE recording_id = ? AND artifact_part = ? ORDER BY verified_at DESC LIMIT 1
@@ -2131,7 +2145,9 @@ export class PipelineDatabase {
 
     // The folder's video already exists on XVideos: park it as uncertain with
     // the known edit ID and let the daily reconcile confirm it online.
-    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date()): Recording {
+    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = "xvideos"): Recording {
+        assertUploadProvider(provider);
+        if (!remoteId.trim()) throw new Error("Existing upload requires a remote identity");
         const timestamp = now.toISOString();
         this.transaction(() => {
             const recording = this.requireRecording(id);
@@ -2141,15 +2157,15 @@ export class PipelineDatabase {
                     id, reservation_id, recording_id, provider, status, phase,
                     progress_bytes, transmitted_bytes, remote_id, remote_url, error, started_at, completed_at
                 ) VALUES (?, NULL, ?, ?, 'uncertain', 'metadata_submitting', 0, 0, ?, ?, ?, ?, ?)
-            `).run(attemptId, id, recording.provider, remoteId, remoteUrl,
-                "parked: already uploaded on XVideos", timestamp, timestamp);
+            `).run(attemptId, id, provider, remoteId, remoteUrl,
+                `parked: already uploaded on ${provider}`, timestamp, timestamp);
             this.database.prepare(`
                 INSERT INTO upload_confirmations (
                     attempt_id, recording_id, confirm_after, status, checked_at
                 ) VALUES (?, ?, ?, 'pending', NULL)
             `).run(attemptId, id, timestamp);
             this.updateStateInTransaction(id, recording.state, "xvideos_uncertain",
-                "already uploaded on XVideos; parked for verification", timestamp);
+                `already uploaded on ${provider}; parked for verification`, timestamp);
         });
         return this.requireRecording(id);
     }
@@ -2274,20 +2290,22 @@ export class PipelineDatabase {
     ): Recording {
         const timestamp = now.toISOString();
         this.transaction(() => {
-            const current = this.database.prepare(`
+            const currentArtifact = this.database.prepare(`
                 SELECT part FROM artifacts WHERE recording_id = ?
             `).get(id) as { part: ProductionArtifactPart } | undefined;
-            if (!current) throw new Error("Verification has no current production artifact");
+            const current = currentArtifact ?? { part: "full" as const };
             const attempt = this.database.prepare(`
-                SELECT id, artifact_part FROM upload_attempts
+                SELECT id, artifact_part, reservation_id FROM upload_attempts
                 WHERE recording_id = ? AND artifact_part = ? AND status = 'accepted'
                     AND remote_id = ? AND remote_url = ?
                 ORDER BY completed_at DESC LIMIT 1
             `).get(id, current.part, remoteId, remoteUrl) as {
                 id: string;
                 artifact_part: ProductionArtifactPart;
+                reservation_id: string | null;
             } | undefined;
             if (!attempt) throw new Error("Verification does not match an accepted upload attempt");
+            if (!currentArtifact && attempt.reservation_id !== null) throw new Error("Verification has no current production artifact");
             this.database.prepare(`
                 INSERT INTO remote_uploads (
                     recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at
@@ -2325,18 +2343,22 @@ export class PipelineDatabase {
 
     dueUploadConfirmations(now = new Date()): UploadConfirmation[] {
         const rows = this.database.prepare(`
-            SELECT c.*, a.recording_id
+            SELECT c.*, a.recording_id, a.provider
             FROM upload_confirmations c JOIN upload_attempts a ON a.id = c.attempt_id
             WHERE c.status = 'pending' AND c.confirm_after <= ?
             ORDER BY c.confirm_after, c.attempt_id
         `).all(now.toISOString()) as unknown as Array<{
             attempt_id: string;
+            provider: string;
             recording_id: string;
             confirm_after: string;
             status: UploadConfirmation["status"];
             checked_at: string | null;
         }>;
         return rows.map((row) => ({
+            // Legacy manual sync mistakenly stored the origin (tango/fc2/sc).
+            // Those predate Porntrex support and are all XVideos identities.
+            uploadProvider: row.provider === "porntrex" ? "porntrex" : "xvideos",
             attemptId: row.attempt_id,
             recordingId: row.recording_id,
             confirmAfter: row.confirm_after,
@@ -2386,7 +2408,7 @@ export class PipelineDatabase {
     }
 
     latestUploadDiagnostics(recordingId: string): unknown {
-        const row = this.database.prepare(`SELECT a.status, a.error, a.evidence_json, a.limited_visibility,
+        const row = this.database.prepare(`SELECT a.provider AS upload_provider, a.status, a.error, a.evidence_json, a.limited_visibility,
             a.retry_not_before, a.lookup_state, a.lookup_checked_at, c.confirm_after, c.status AS confirmation_status
             FROM upload_attempts a LEFT JOIN upload_confirmations c ON c.attempt_id = a.id
             WHERE a.recording_id = ? ORDER BY a.started_at DESC LIMIT 1`).get(recordingId) as

@@ -161,7 +161,7 @@ export async function applySync(plan, config = pipelineConfig) {
                     reason: 'Existing upload imported; no conversion or transfer; current playback quality unverified' };
                 db.prepare(`INSERT INTO upload_attempts (id,recording_id,provider,status,phase,remote_id,remote_url,
                     error,started_at,completed_at,evidence_json) VALUES (?,?,?,'uncertain','metadata_submitting',?,?,?,?,?,?)`)
-                    .run(attemptId, item.recordingId, item.source.provider, item.remoteId, item.remoteUrl,
+                    .run(attemptId, item.recordingId, 'xvideos', item.remoteId, item.remoteUrl,
                         'Imported existing upload from user listing; awaiting playback verification', timestamp, timestamp, JSON.stringify([evidence]));
                 db.prepare(`INSERT INTO upload_confirmations (attempt_id,recording_id,confirm_after,status) VALUES (?,?,?,'pending')`)
                     .run(attemptId, item.recordingId, timestamp);

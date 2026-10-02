@@ -1,4 +1,5 @@
-import { assessFinalArtifact } from "shared";
+import { assessFinalArtifact, policyForUploadProvider } from "shared";
+import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import { calendarMonth, type PipelineDatabase } from "../db/pipelineDatabase.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
@@ -18,6 +19,7 @@ export function createDryRunUploadPlan(
     timeZone = "Europe/Tirane",
     monthlyLimitBytes = 600_000_000_000,
     stagingRoot?: string,
+    provider: ActiveUploadProvider = "xvideos",
 ): DryRunUploadItem[] {
     let simulatedReserved = 0;
     return database.list("metadata_ready").map((recording) => {
@@ -70,14 +72,14 @@ export function createDryRunUploadPlan(
             path: artifact.path,
             durationSeconds: recording.durationSeconds,
             sizeBytes: artifact.sizeBytes,
-        });
+        }, policyForUploadProvider(provider));
         if (assessment.disposition !== "ready_for_upload") {
             return {
                 recordingId: recording.id,
                 artifactPath: artifact.path,
                 sizeBytes: artifact.sizeBytes,
                 disposition: "blocked" as const,
-                reason: assessment.disposition,
+                reason: `${provider}: ${assessment.disposition}; ${assessment.notification?.message ?? "manual review required"}`,
             };
         }
         const usage = database.uploadUsage(calendarMonth(now, timeZone));

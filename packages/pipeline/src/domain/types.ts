@@ -87,6 +87,7 @@ export interface UploadMetadataRecord {
 }
 
 export interface UploadConfirmation {
+    readonly uploadProvider: "xvideos" | "porntrex";
     readonly attemptId: string;
     readonly recordingId: string;
     readonly confirmAfter: string;

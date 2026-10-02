@@ -2,11 +2,10 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, rename } from "node:fs/promises";
 import type { PipelineConfig } from "../config.js";
-import { readXvideosCredentials } from "../config/secrets.js";
+import { activeUploadProvider } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
-import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { CampaignWorker } from "../campaign/campaignWorker.js";
 import { uploadOne } from "./uploadOne.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
@@ -211,6 +210,8 @@ export function campaignStatus(config: PipelineConfig): unknown {
             systemdUnitInstalled: true,
             cleanupEnabled: config.cleanupEnabled && !database.getComparisonTrial(),
             networkUploadsEnabled: config.networkUploadsEnabled,
+            activeUploadProvider: activeUploadProvider(config),
+            uploadCredentialsFile: config.credentialsFilePath,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),
             provenanceReviewRequired: database.listProvenanceReview().length,
@@ -242,16 +243,6 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
         }
         const recovery = database.recoverInterruptedUploads();
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
-        let uploader: ChromiumXvideosUploader | undefined;
-        if (config.networkUploadsEnabled) {
-            const credentials = await readXvideosCredentials(config.credentialsFilePath);
-            uploader = new ChromiumXvideosUploader({
-                executablePath: config.chromiumExecutablePath,
-                profilePath: config.browserProfilePath,
-                leaveOpenOnFailure: false,
-                ...credentials,
-            });
-        }
         const worker = new CampaignWorker(
             database,
             config,
@@ -262,7 +253,6 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
                     monthlyUploadLimitBytes,
                 })
                 : undefined,
-            uploader,
         );
         return { recovery, step: await worker.step() };
     } finally {

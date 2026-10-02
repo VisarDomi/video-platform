@@ -2,12 +2,11 @@ import { spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { PipelineConfig } from "../config.js";
-import { readXvideosCredentials } from "../config/secrets.js";
+import { activeUploadProvider, type PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import { readRecordingFinalization } from "../discovery/recordingFinalization.js";
-import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { createProviderUploader } from "../upload/providerFactory.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
 import { remuxOne } from "./remuxOne.js";
 import type { UpscaleMode } from "../stages/upscale.js";
@@ -87,12 +86,8 @@ export async function ensureFinalizedRemuxOne(
     // Admission-time remote check: the folder name is the local truth, the
     // edit-page title is the XVideos truth.
     if (upscaleMode === null && config.networkUploadsEnabled) {
-        const credentials = await readXvideosCredentials(config.credentialsFilePath);
-        const uploader = new ChromiumXvideosUploader({
-            executablePath: config.chromiumExecutablePath,
-            profilePath: config.browserProfilePath,
-            ...credentials,
-        });
+        const provider = activeUploadProvider(config);
+        const uploader = await createProviderUploader(config, provider);
         const folderName = path.basename(recordingPath);
         const copy = await uploader.findUploadedCopy(folderName);
         if (copy.kind === "found" || copy.kind === "title_mismatch") {
@@ -104,7 +99,7 @@ export async function ensureFinalizedRemuxOne(
                 }
                 const recording = database.discover(inspection.recording);
                 if (copy.kind === "found") {
-                    database.parkUploadedCopy(recording.id, copy.remoteId, copy.remoteUrl);
+                    database.parkUploadedCopy(recording.id, copy.remoteId, copy.remoteUrl, new Date(), provider);
                     return {
                         mode: "single-recording-remux",
                         recordingId: recording.id,
@@ -115,7 +110,7 @@ export async function ensureFinalizedRemuxOne(
                     };
                 }
                 database.transition(recording.id, recording.state, "blocked",
-                    `XVideos entry ${copy.remoteId} title does not match the folder identity; manual review required`);
+                    `${provider} entry ${copy.remoteId} title does not match the folder identity; manual review required`);
                 return {
                     mode: "single-recording-remux",
                     recordingId: recording.id,

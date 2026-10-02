@@ -6,6 +6,7 @@ import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } f
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import { limitedVisibilityWarning } from "./providerWarnings.js";
 import { hasFullHdPlayback, parsePlaybackRenditions, type PlaybackRendition } from "./playbackQuality.js";
+import { submitPasswordLogin } from "./passwordLogin.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
 const UPLOAD_URL = "https://www.xvideos.com/account/uploads/new";
@@ -25,7 +26,7 @@ export interface ChromiumUploaderConfig {
 }
 
 export class HumanActionRequiredError extends Error {
-    constructor(readonly action: "captcha" | "google_challenge" | "session_login" | "daily_limit", message: string) {
+    constructor(readonly action: "captcha" | "session_login" | "daily_limit", message: string) {
         super(message);
         this.name = "HumanActionRequiredError";
     }
@@ -53,6 +54,7 @@ class RequestByteCounter {
 }
 
 export class ChromiumXvideosUploader implements XvideosUploader {
+    readonly provider = "xvideos" as const;
     constructor(private readonly config: ChromiumUploaderConfig) {}
 
     async upload(request: UploadRequest): Promise<UploadOutcome> {
@@ -62,7 +64,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             headless: this.config.headless ?? false,
             viewport: null,
             args: ["--disable-blink-features=AutomationControlled", "--remote-debugging-port=9222"],
-            ignoreDefaultArgs: ["--enable-automation"],
+            ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
         }).catch((error: unknown) => {
             throw new HumanActionRequiredError("session_login",
                 "Could not launch the XVideos browser profile. If an earlier run left a browser open, close it manually first. "
@@ -203,7 +205,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             headless: this.config.headless ?? false,
             viewport: null,
             args: ["--disable-blink-features=AutomationControlled", "--remote-debugging-port=9222"],
-            ignoreDefaultArgs: ["--enable-automation"],
+            ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
         }).catch((error: unknown) => {
             throw new HumanActionRequiredError("session_login",
                 "Could not launch the XVideos browser profile. If an earlier run left a browser open, close it manually first. "
@@ -234,8 +236,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     private async authenticateForUpload(page: Page): Promise<void> {
         try { await this.ensureAuthenticated(page); } catch (error) {
             if (error instanceof HumanActionRequiredError) throw error;
-            // A vanished OAuth intermediate button is not permanent failure.
-            // Keep an authenticated-session check first for instant redirects.
+            // A redirect can remove the login form before an action completes.
             const ready = await this.verifyAccountDashboard(page.context()).catch(() => false);
             if (ready) return;
             throw new HumanActionRequiredError("session_login", error instanceof Error ? error.message : String(error));
@@ -245,93 +246,13 @@ export class ChromiumXvideosUploader implements XvideosUploader {
     private async ensureAuthenticated(page: Page): Promise<void> {
         await page.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
         if (await page.getByText("My Content", { exact: true }).count()) return;
-        const google = page.locator("a.social-login-icon[data-name=Google][data-method=signin]");
-        if (!await google.count()) throw new HumanActionRequiredError("session_login", "XVideos login form changed");
-        await google.click();
-        const signInWithGoogle = page.getByRole("button", { name: "Sign in with Google", exact: true });
-        await signInWithGoogle.waitFor({ state: "visible", timeout: 15_000 });
-        await signInWithGoogle.click();
-
-        // Drive the Google OAuth flow across every page of the context: it
-        // may run in the same tab or in a popup, and with a saved Google
-        // session it can complete instantly without ever showing a Google
-        // page. Completion is therefore verified by probing the XVideos
-        // dashboard in a spare tab instead of watching URLs. Possible steps
-        // are the account chooser, the identifier page, the password page,
-        // and the consent "Continue" button. A persistent manual challenge
-        // (2FA, recovery, unusual activity) is reported as a human action
-        // instead of being retried blindly.
-        const context = page.context();
-        const startedAt = Date.now();
-        const deadline = startedAt + 180_000;
-        let stepsTaken = 0;
-        let challengeStreak = 0;
-        let lastProbeAt = 0;
-        let verified = false;
-        while (Date.now() < deadline && !verified) {
-            let sawGooglePage = false;
-            let acted = false;
-            for (const candidate of context.pages()) {
-                try {
-                    const url = candidate.url();
-                    if (url.startsWith("https://accounts.google.com")) sawGooglePage = true;
-                    const accountRow = candidate.locator(
-                        `[data-identifier="${this.config.email}"], [data-email="${this.config.email}"]`,
-                    ).first();
-                    if (await accountRow.count()) {
-                        await accountRow.click();
-                        acted = true;
-                        stepsTaken++;
-                        continue;
-                    }
-                    if (await candidate.locator("#identifierId").count()) {
-                        await candidate.locator("#identifierId").fill(this.config.email);
-                        await candidate.getByRole("button", { name: "Next", exact: true }).click();
-                        acted = true;
-                        stepsTaken++;
-                        continue;
-                    }
-                    if (await candidate.locator('input[type="password"]').count()) {
-                        await candidate.locator('input[type="password"]').fill(this.config.password);
-                        await candidate.getByRole("button", { name: "Next", exact: true }).click();
-                        acted = true;
-                        stepsTaken++;
-                        continue;
-                    }
-                    const continueButton = candidate.getByRole("button", { name: "Continue", exact: true });
-                    if (await continueButton.count()) {
-                        await continueButton.click();
-                        acted = true;
-                        stepsTaken++;
-                        continue;
-                    }
-                    const text = await candidate.locator("body").innerText().catch(() => "");
-                    if (sawGooglePage && /confirm it.s you|verify it.s you|2-step verification|two-step verification|try another way|recover your account|unusual activity/i.test(text)) {
-                        challengeStreak++;
-                        if (challengeStreak >= 2) {
-                            throw new HumanActionRequiredError("google_challenge",
-                                "Google requires manual account verification: " + text.slice(0, 200));
-                        }
-                    }
-                } catch {
-                    // page closed or navigating; retry next iteration
-                }
-            }
-            if (acted) challengeStreak = 0;
-            if (!sawGooglePage && !acted && (stepsTaken > 0 || Date.now() - startedAt > 3_000)) {
-                if (Date.now() - lastProbeAt > 8_000) {
-                    lastProbeAt = Date.now();
-                    verified = await this.verifyAccountDashboard(context);
-                }
-            }
-            await page.waitForTimeout(750);
+        if (!await page.locator('form:has(input[type="password"])').isVisible().catch(() => false)) {
+            const login = page.getByRole("link", { name: /^(?:log in|sign in)$/i });
+            if (await login.count() === 1) await login.click();
         }
-        if (!verified) {
-            await page.goto(ACCOUNT_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
-            if (!await page.getByText("My Content", { exact: true }).count()) {
-                throw new HumanActionRequiredError("google_challenge", "Google login did not reach the XVideos account dashboard");
-            }
-        }
+        await submitPasswordLogin(page, "https://www.xvideos.com", this.config);
+        if (!await this.verifyAccountDashboard(page.context())) throw new HumanActionRequiredError(
+            "session_login", "Native XVideos login did not reach the account dashboard; manual verification required");
     }
 
     private async verifyAccountDashboard(context: BrowserContext): Promise<boolean> {

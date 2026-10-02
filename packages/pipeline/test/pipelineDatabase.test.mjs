@@ -799,3 +799,64 @@ test("interrupted upload after the file completed requires confirmation before r
     assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T11:01:00Z")).length, 1);
 });
+
+test("destination is pinned through reservation, interruption and confirmation; switch cannot duplicate", async t => {
+    const { database, databasePath, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const now = new Date("2026-10-02T08:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 550, now, "Europe/Tirane", 600_000_000_000, "porntrex");
+    assert.throws(() => database.beginUpload(recording.id, reservation, now, "xvideos"), /destination/);
+    const attempt = database.beginUpload(recording.id, reservation, now, "porntrex");
+    database.updateUploadProgress(attempt, "file_uploading", 500, now);
+    database.close();
+    const restarted = new PipelineDatabase(databasePath);
+    t.after(() => restarted.close());
+    restarted.recoverInterruptedUploads(now);
+    const dueAt = new Date(now.getTime() + 24 * 3600_000);
+    assert.equal(restarted.dueUploadConfirmations(dueAt)[0].uploadProvider, "porntrex");
+    const raw = new DatabaseSync(databasePath);
+    assert.equal(raw.prepare("SELECT provider FROM bandwidth_events WHERE attempt_id = ?").get(attempt).provider, "porntrex");
+    raw.close();
+    assert.throws(() => restarted.reserveUpload(recording.id, 550, dueAt, "Europe/Tirane", 600_000_000_000, "xvideos"));
+});
+
+test("manual XVideos adoption records destination, not recording origin", async t => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    database.parkUploadedCopy(recording.id, "123456", null);
+    assert.equal(database.dueUploadConfirmations(new Date(Date.now() + 1000))[0].uploadProvider, "xvideos");
+});
+
+test("already uploaded recording can be adopted and verified without preparing another artifact", async t => {
+    const { database, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    const now = new Date("2026-10-02T08:00:00Z");
+    database.parkUploadedCopy(recording.id, "3314558", "https://www.porntrex.com/video/3314558/example", now, "porntrex");
+    const confirmation = database.dueUploadConfirmations(now)[0];
+    assert.equal(confirmation.uploadProvider, "porntrex");
+    assert.equal(database.getUploadIdentity(recording.id).remoteId, "3314558");
+    database.verifyUpload(confirmation.attemptId, "3314558", "https://www.porntrex.com/video/3314558/example", now);
+    assert.equal(database.get(recording.id).state, "xvideos_verified");
+    assert.equal(database.getUploadIdentity(recording.id).verified, true);
+    assert.equal(database.getArtifact(recording.id), null);
+});
+
+test("existing XVideos upload is refused even when state is reset and Porntrex is selected", async t => {
+    const { database, databasePath, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const now = new Date("2026-10-02T08:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 550, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.finishUploadAttempt(attempt, { status: "accepted", transmittedBytes: 500,
+        remoteId: "123456", remoteUrl: "https://www.xvideos.com/video.example" }, now);
+    database.recoverAcceptedVerifications(now);
+    database.verifyUpload(attempt, "123456", "https://www.xvideos.com/video.example", now);
+    // Simulate an incorrect retry/reset by another caller. Admission still guards remote identity.
+    const raw = new DatabaseSync(databasePath);
+    raw.prepare("UPDATE recordings SET state = 'metadata_ready' WHERE id = ?").run(recording.id);
+    raw.close();
+    assert.throws(() => database.reserveUpload(recording.id, 550, new Date("2026-11-02"), "Europe/Tirane", 600_000_000_000, "porntrex"), /remote upload/);
+});

@@ -3,6 +3,7 @@ import path from "node:path";
 import { providerFolders } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 import { CURRENT_PRODUCTION_VERSION } from "./domain/productionVersion.js";
+import { readUploadProvidersFile, type ActiveUploadProvider } from "./config/uploadProviders.js";
 
 export interface PipelineConfig {
     readonly finalizationDatabasePath: string;
@@ -18,6 +19,8 @@ export interface PipelineConfig {
     readonly browserProfilePath: string;
     readonly chromiumExecutablePath: string;
     readonly credentialsFilePath: string;
+    readonly uploadProvider?: ActiveUploadProvider;
+    readonly porntrexBrowserProfilePath?: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
     readonly comparisonTrialOnly?: boolean;
@@ -60,8 +63,11 @@ export const pipelineConfig: PipelineConfig = {
     browserProfilePath: process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
-    credentialsFilePath: process.env.VIDEO_XVIDEOS_ENV_FILE
-        ?? path.resolve(import.meta.dirname, "..", "..", ".env"),
+    credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE ?? process.env.VIDEO_XVIDEOS_ENV_FILE
+        ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
+    porntrexBrowserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
+        ?? process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
+        ?? path.join(os.homedir(), ".config", "chromium-agent"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
     monthlyUploadLimitBytes: Number.parseInt(
         process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? "600000000000",
@@ -72,3 +78,11 @@ export const pipelineConfig: PipelineConfig = {
     comparisonSelectionFile: process.env.VIDEO_PIPELINE_SELECTION_FILE ?? path.join(dataRoot, "pipeline", "test-videos.txt"),
     networkUploadsEnabled: process.env.VIDEO_PIPELINE_NETWORK_UPLOADS === "1",
 };
+
+// Read at the operation boundary, not module load: editing this file takes
+// effect on the next queued upload without restarting a worker or logging secrets.
+export function activeUploadProvider(config: PipelineConfig): ActiveUploadProvider {
+    if (config.uploadProvider) return config.uploadProvider;
+    if (!config.credentialsFilePath.endsWith(".json")) return "xvideos";
+    return readUploadProvidersFile(config.credentialsFilePath).activeProvider;
+}

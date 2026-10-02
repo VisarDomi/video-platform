@@ -1,4 +1,4 @@
-export type UploadProvider = "xvideos" | "bunkr";
+export type UploadProvider = "xvideos" | "porntrex" | "bunkr";
 
 export interface UploadPolicyEvidence {
     readonly url: string;
@@ -8,7 +8,7 @@ export interface UploadPolicyEvidence {
 
 export interface ProviderUploadPolicy {
     readonly provider: UploadProvider;
-    readonly uploadVisibility: "private" | null;
+    readonly uploadVisibility: "private" | "public" | null;
     readonly minimumDurationSeconds: number | null;
     readonly maximumDurationSeconds: number | null;
     readonly maximumFileBytes: number | null;
@@ -51,6 +51,21 @@ export const UPLOAD_PROVIDER_PLAN: UploadProviderPlan = {
 };
 
 export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderUploadPolicy>> = {
+    porntrex: {
+        provider: "porntrex",
+        uploadVisibility: "public",
+        minimumDurationSeconds: null,
+        maximumDurationSeconds: null,
+        maximumFileBytes: 10_000_000_000,
+        inactiveDeletionDays: null,
+        maintenanceVisitIntervalDays: null,
+        unresolvedConstraints: ["acceptedContainersAndCodecsBeyondH264AacMp4"],
+        evidence: [{
+            url: "https://www.porntrex.com/upload-video/",
+            verifiedAt: "2026-10-02",
+            note: "Authenticated upload form states up to 10GB per file. Existing H.264/AAC MP4 uploads were accepted. User approved public uploads; no duration limit is imposed by this provider policy.",
+        }],
+    },
     xvideos: {
         provider: "xvideos",
         uploadVisibility: "private",
@@ -127,3 +142,7 @@ export const SHARED_UPLOAD_POLICY = deriveSharedUploadPolicy([
     PROVIDER_UPLOAD_POLICIES[UPLOAD_PROVIDER_PLAN.primary],
     ...UPLOAD_PROVIDER_PLAN.backups.map((provider) => PROVIDER_UPLOAD_POLICIES[provider]),
 ]);
+
+export function policyForUploadProvider(provider: UploadProvider): SharedUploadPolicy {
+    return deriveSharedUploadPolicy([PROVIDER_UPLOAD_POLICIES[provider]]);
+}

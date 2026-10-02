@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { readProviderCredentials } from "./uploadProviders.js";
 
 function unquote(value: string): string {
     if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"'))
@@ -20,6 +21,7 @@ export async function readSecretFile(filePath: string): Promise<Record<string, s
 }
 
 export async function readXvideosCredentials(filePath: string): Promise<{ email: string; password: string }> {
+    if (filePath.endsWith(".json")) return readProviderCredentials(filePath, "xvideos");
     const values = await readSecretFile(filePath);
     const email = values.EMAIL_XVIDEOS?.trim();
     const password = values.PASSWORD_XVIDEOS;

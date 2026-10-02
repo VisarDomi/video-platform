@@ -79,6 +79,23 @@ function failingUpload() {
     };
 }
 
+test("provider policy block is manual review, not reported as an upload or retried next step", async t => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    database.setCampaignState("running");
+    let calls = 0;
+    const worker = new CampaignWorker(database, config, resolver, async id => {
+        calls++;
+        database.transition(id, "metadata_ready", "blocked", "porntrex: blocked_too_large; 10000000000-byte maximum");
+        return { state: "blocked" };
+    });
+    const first = await worker.step();
+    assert.equal(first.disposition, "attention_required");
+    assert.match(first.reason, /porntrex: blocked_too_large/);
+    assert.equal(database.get(recording.id).state, "blocked");
+    await worker.step();
+    assert.equal(calls, 1);
+});
+
 async function addFinalized(authority, root, folderName) {
     const recordingPath = path.join(root, folderName);
     await mkdir(recordingPath, { recursive: true });

@@ -46,7 +46,8 @@ export class UploadCoordinator {
         now = new Date(),
     ): Promise<UploadOutcome> {
         if (request.recordingId !== recordingId) throw new Error("Upload request recording identity mismatch");
-        const attemptId = this.database.beginUpload(recordingId, reservationId, now);
+        const provider = this.uploader.provider ?? "xvideos";
+        const attemptId = this.database.beginUpload(recordingId, reservationId, now, provider);
         let outcome: UploadOutcome;
         try {
             outcome = await this.uploader.upload({
@@ -88,7 +89,7 @@ export class UploadCoordinator {
                 transmittedBytes: 0,
                 remoteId: outcome.remoteId,
                 remoteUrl: outcome.remoteUrl,
-                error: "skipped re-upload; matching XVideos entry already exists",
+                error: `skipped re-upload; matching ${provider} entry already exists`,
                 confirmation: { confirmAfter: new Date() },
             }, new Date());
             return outcome;
@@ -97,10 +98,10 @@ export class UploadCoordinator {
             this.database.finishUploadAttempt(attemptId, {
                 status: "failed",
                 transmittedBytes: 0,
-                error: `XVideos entry ${outcome.remoteId} title does not match the folder identity`,
+                error: `${provider} entry ${outcome.remoteId} title does not match the folder identity`,
             }, new Date());
             this.database.transition(recordingId, "metadata_ready", "blocked",
-                `XVideos entry ${outcome.remoteId} title does not match the folder identity; manual review required`, new Date());
+                `${provider} entry ${outcome.remoteId} title does not match the folder identity; manual review required`, new Date());
             return outcome;
         }
         const receipt = outcome.receipt;

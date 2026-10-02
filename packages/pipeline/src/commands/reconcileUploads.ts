@@ -1,8 +1,8 @@
 import type { PipelineConfig } from "../config.js";
-import { readXvideosCredentials } from "../config/secrets.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { cleanupArtifact } from "../stages/cleanupArtifact.js";
-import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import type { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
@@ -10,6 +10,7 @@ import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
     browserOverride?: Pick<ChromiumXvideosUploader, "withAuthenticatedPage" | "probeUploadStatus">
         & Partial<Pick<ChromiumXvideosUploader, "recoverUploadId" | "lookupUpload">>,
+    providerFactory = createProviderUploader,
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network reconciliation is disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
@@ -26,14 +27,14 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         // authenticated page.
         const due = database.dueUploadConfirmations(now);
         if (due.length === 0) return { checkedAt: now.toISOString(), results };
+        // Destination is pinned to the attempt, not today's active provider.
+        // Old XVideos confirmations remain XVideos checks after selecting Porntrex.
+        for (const provider of new Set(due.map(confirmation => confirmation.uploadProvider))) {
+        const providerDue = due.filter(confirmation => confirmation.uploadProvider === provider);
         try {
-        const browser = browserOverride ?? new ChromiumXvideosUploader({
-            executablePath: config.chromiumExecutablePath,
-            profilePath: config.browserProfilePath,
-            ...await readXvideosCredentials(config.credentialsFilePath),
-        });
+        const browser: NonNullable<typeof browserOverride> = browserOverride ?? await providerFactory(config, provider);
         await browser.withAuthenticatedPage(async (page) => {
-            for (const confirmation of database.dueUploadConfirmations(now)) {
+            for (const confirmation of providerDue) {
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
                 if (!remoteId) {
@@ -118,8 +119,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
             const reason = error instanceof Error ? error.message : String(error);
             // Authentication failure must not cause a new browser/login attempt
             // every 30 seconds, nor erase the uncertain acceptance state.
-            for (const confirmation of due) database.postponeConfirmation(confirmation.attemptId, reason, now);
-            results.push({ disposition: "verification_login_retry_scheduled", reason });
+            for (const confirmation of providerDue) database.postponeConfirmation(confirmation.attemptId, reason, now);
+            results.push({ disposition: "verification_login_retry_scheduled", uploadProvider: provider, reason });
+        }
         }
         // Contradictory recordings (upload states without any remote identity
         // and without a pending confirmation) go to manual review.

@@ -1,16 +1,17 @@
-import { assessFinalArtifact } from "shared";
+import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import type { PipelineConfig } from "../config.js";
-import { readXvideosCredentials } from "../config/secrets.js";
+import { activeUploadProvider } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
-import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import { createProviderUploader } from "../upload/providerFactory.js";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
-import { productionUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { productionUploadIdentity, uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
+import { checkXvideosBeforePorntrex } from "../upload/crossProviderIdentityGuard.js";
 
 export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 
@@ -21,6 +22,7 @@ export async function uploadOne(
     if (!config.networkUploadsEnabled) {
         throw new Error("Network uploads are disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
     }
+    const provider = activeUploadProvider(config);
     const database = new PipelineDatabase(config.databasePath);
     try {
         if (database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION) {
@@ -51,16 +53,6 @@ export async function uploadOne(
         if (identityOutcome.kind === "unverified_refused") {
             throw new Error(refusalMessage(identityOutcome));
         }
-        const credentials = await readXvideosCredentials(config.credentialsFilePath);
-        // Interactive manual runs keep the browser open on failure so a
-        // human can finish the job; the unattended campaign closes it so it
-        // can never hold the profile lock against the next step.
-        const uploader = new ChromiumXvideosUploader({
-            executablePath: config.chromiumExecutablePath,
-            profilePath: config.browserProfilePath,
-            leaveOpenOnFailure: process.env.VIDEO_PIPELINE_SERVICE_MODE !== "1",
-            ...credentials,
-        });
         if (recording.state !== "metadata_ready") {
             throw new Error(`Recording ${recordingId} is not metadata_ready`);
         }
@@ -83,10 +75,22 @@ export async function uploadOne(
             path: artifact.path,
             durationSeconds: recording.durationSeconds,
             sizeBytes: artifact.sizeBytes,
-        });
+        }, policyForUploadProvider(provider));
         if (assessment.disposition !== "ready_for_upload") {
-            throw new Error(`XVideos policy blocks artifact: ${assessment.disposition}`);
+            const reason = `${provider}: ${assessment.disposition}; ${assessment.notification?.message ?? "manual review required"}`;
+            database.transition(recordingId, "metadata_ready", "blocked", reason);
+            return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };
         }
+        if (provider === "porntrex") {
+            // The local ledger covers managed uploads; this read-only guard
+            // also covers older/manual XVideos uploads not yet synchronized.
+            // An unavailable/ambiguous lookup is never treated as absence.
+            const identity = uploadLookupIdentity(recording, artifactPart, metadata.title);
+            if (!identity) throw new Error("Cross-provider duplicate check lacks a filename identity");
+            const existing = await checkXvideosBeforePorntrex(database, recordingId, identity, config);
+            if (existing) return existing;
+        }
+        const uploader = await createProviderUploader(config, provider);
         const reservedBytes = artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES;
         const reservationId = database.reserveUpload(
             recordingId,
@@ -94,6 +98,7 @@ export async function uploadOne(
             new Date(),
             config.uploadTimeZone,
             config.monthlyUploadLimitBytes,
+            provider,
         );
         const outcome = await new UploadCoordinator(database, uploader).uploadAdmitted(
             recordingId,
@@ -106,7 +111,7 @@ export async function uploadOne(
                 title: metadata.title,
                 description: metadata.description,
                 tags: metadata.tags,
-                visibility: "private",
+                visibility: provider === "porntrex" ? "public" : "private",
                 lookupBeforeUpload: database.hasUploadAttempt(recordingId),
                 streamerAlias: provenance.alias ?? provenance.streamerId ?? undefined,
             },
@@ -120,11 +125,12 @@ export async function uploadOne(
             };
         }
         if (outcome.kind === "title_mismatch") {
-            throw new Error(`XVideos entry ${outcome.remoteId} title does not match the folder identity; manual review required`);
+            throw new Error(`${provider} entry ${outcome.remoteId} title does not match the folder identity; manual review required`);
         }
         const receipt = outcome.receipt;
         return {
             recordingId,
+            uploadProvider: provider,
             state: database.get(recordingId)?.state,
             transmittedBytes: receipt.transmittedBytes,
             confirmAfter: new Date(
