@@ -1,0 +1,225 @@
+:root {
+    color-scheme: dark;
+    font-family: system-ui, sans-serif;
+    background: #000;
+    color: #fff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #000;
+}
+
+.stream-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 15px 16px;
+    border-top: 1px solid #242424;
+    color: inherit;
+    text-decoration: none;
+}
+
+.stream-row.following {
+    color: #39d353;
+}
+
+.stream-row.current {
+    background: #242424;
+}
+
+.status {
+    margin: 30vh 20px 0;
+    text-align: center;
+    color: #aaa;
+}
+
+.status-error {
+    color: #ff8a8a;
+}
+
+.status a {
+    display: inline-block;
+    padding: 12px;
+    color: #fff;
+}
+
+.stream-page {
+    min-height: 100%;
+    overflow: visible;
+}
+
+.stream-stage {
+    position: relative;
+    width: 100%;
+    overflow: visible;
+    background: #000;
+    overflow-anchor: none;
+    touch-action: pan-y pinch-zoom;
+    transition: opacity 120ms ease;
+}
+
+.stream-stage.viewer-loading {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.stream-slot {
+    position: relative;
+    display: flex;
+    width: 100%;
+    overflow: visible;
+    flex-direction: column;
+    background: #000;
+    overflow-anchor: none;
+}
+
+.stream-slot.previous-scope,
+.stream-slot.next-scope {
+    height: 10000px;
+}
+
+.stream-slot.previous-scope {
+    justify-content: flex-start;
+}
+
+.stream-slot.next-scope {
+    justify-content: flex-end;
+}
+
+.stream-slot.current-scope,
+.stream-stage.viewer-navigating .stream-slot.next-scope {
+    justify-content: flex-start;
+}
+
+.stream-stage.viewer-navigating .stream-slot.previous-scope {
+    justify-content: flex-end;
+}
+
+.stream-slot video {
+    position: relative;
+    display: block;
+    flex: none;
+    width: 100%;
+    height: auto;
+    border: 0;
+    background: #000;
+    transform-origin: center;
+}
+
+.stream-controls {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    padding:
+        calc(env(safe-area-inset-top, 0px) + 15px)
+        max(15px, env(safe-area-inset-right))
+        15px
+        max(15px, env(safe-area-inset-left));
+    pointer-events: none;
+    transition: opacity 300ms ease;
+}
+
+.stream-controls button {
+    pointer-events: auto;
+}
+
+.stream-controls.unsettled button {
+    pointer-events: none;
+}
+
+.stream-controls.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.stream-name {
+    margin: 0 0 10px;
+    font-size: 1.2em;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px #000;
+    word-break: break-all;
+}
+
+.stream-progress {
+    width: 100%;
+    height: 100px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    background: rgb(255 255 255 / 30%);
+}
+
+.stream-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.stream-controls button {
+    min-width: 70px;
+    padding: 12px 18px;
+    border: 1px solid #fff;
+    border-radius: 8px;
+    background: rgb(0 0 0 / 60%);
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    text-align: center;
+}
+
+.stream-controls button.add {
+    border-color: #34c759;
+}
+
+.stream-controls button.remove {
+    border-color: #ff5e3a;
+}
+
+.stream-controls button.error {
+    box-shadow: 0 0 0 2px #ffd166;
+}
+
+.stream-controls button:disabled {
+    color: #888;
+    opacity: 0.6;
+}
+
+.stream-controls .multiple-videos {
+    font-size: 14px;
+}
+
+.stream-controls .multiple-videos[aria-pressed="true"] {
+    border-color: #34c759;
+}
+
+.stream-controls button:active {
+    border-color: #ff5e3a;
+    background: #ff5e3a;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.playback-status {
+    text-shadow: 1px 1px 2px #000;
+}
+
+.seek {
+    width: 100%;
+    margin: 0 0 16px;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+.stream-controls.hidden .seek,
+.stream-controls.unsettled .seek {
+    pointer-events: none;
+}
+
+.stream-buttons {
+    flex-wrap: wrap;
+}

@@ -1,0 +1,26 @@
+{
+  "build": 8,
+  "cause": "URLSession implicit form content type differed from browser string-body content type",
+  "beforeFollowHTTP": 500,
+  "headerOnlyRetryHTTP": 200,
+  "installedFollowHTTP": 200,
+  "installedUnfollowHTTP": 200,
+  "blockHTTP": 200,
+  "blockErrorCode": 0,
+  "blockMembershipObserved": true,
+  "cleanupUnblockHTTP": 200,
+  "cleanupUnblockErrorCode": 0,
+  "cleanupBlocked": false,
+  "restoreFollowHTTP": 200,
+  "webUnchangedSHA256": "af6234ff1b84306336fbc8bd5251210c374e6d39fe3a82dd1081a24ae39f840e",
+  "tests": [
+    "Swift regression fails before fix and passes after",
+    "Swift Block JSON content type",
+    "browser Follow/Unfollow state, Block confirmation and removal",
+    "existing Swift auth and media relay suite"
+  ],
+  "finalAccountState": {
+    "blocked": false,
+    "followed": true
+  }
+}

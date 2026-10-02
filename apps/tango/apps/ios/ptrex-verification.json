@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-02",
+  "build": 14,
+  "source": "video-platform/packages/app/src",
+  "hostBundleId": "com.visar.Tango.paid",
+  "extensionBundleId": "com.visar.Tango.paid.Ptrex",
+  "ptrexPayloadSHA256": "0f35d74d12e862dbd540c8a4636a01492909f128b392c740a60fc2c7efe06b6d",
+  "ptrexManifestSHA256": "89fdfa824d342aecabb4d3e7dc170aaef043d582b5e8a22597a357197f68020e",
+  "xvidPayloadSHA256": "301fa9330c3583e8ace2c11965c9d66df179555fba2fd171efe7850506d3e0a5",
+  "tangoWebSHA256": "aeab1cfca6f1a64e306e2ecbe6c0f79d42a7f5e9e21c024dfa485b138c4f6fea",
+  "nativeTangoWebUnchanged": true,
+  "ptrexPermissions": "host access to porntrex.com and www.porntrex.com only; no cookies/webRequest, no background worker",
+  "webkitChecks": [
+    "Porntrex /my/videos/ rows, timestamp labels (bracketed and unbracketed), clock durations",
+    "highest labelled MP4 source selected regardless of flashvars key order",
+    "no source URLs in the session catalog; single uploads page",
+    "shared scrollend settlement and Back to the highlighted row",
+    "signed-out list returns to the native /login/ page, which returns to the list after login",
+    "document-start takeover runs once",
+    "XVideos and all three local providers unchanged"
+  ],
+  "iphoneChecks": {
+    "preInstallRealAccount": {
+      "uploadsHeading": "My Videos (2)",
+      "rows": 2,
+      "durations": ["61:22", "60:05"],
+      "sourceLabels": ["1080p FHD", "720p HD", "480p"],
+      "encodedSources": false,
+      "highestMp4Metadata": { "resolution": [1920, 1080], "durationSeconds": 3682, "loadedAfterMs": 5380 }
+    },
+    "installedPtrex": {
+      "bootEntries": 1,
+      "rows": 2,
+      "firstDuration": "1:01:22",
+      "firstSize": "1755.7 MiB",
+      "error": null,
+      "loginCookie": "kt_member persistent until 2026-11-01; PHPSESSID session-only"
+    },
+    "installedXvidAfterSharedBootRefactor": {
+      "bootEntries": 1,
+      "rows": 406,
+      "readyAfterStartMs": 870,
+      "error": null
+    },
+    "ptrexActiveAfterRenewalReinstall": true,
+    "userAcceptance": "User tested the installed Ptrex extension and accepted it."
+  },
+  "limitations": [
+    "Porntrex pagination is not implemented; the account has two uploads, so the paginated format is unknown.",
+    "Signed-out redirect handling was exercised against the real site's redirect only before install; the WebKit fixture uses a login form at the same URL.",
+    "File size is a 4 Mbps estimate, not a reported content length.",
+    "Login persistence for Xvid and Ptrex is deferred to a later pass by the user."
+  ],
+  "renewal": {
+    "successfulAt": "2026-10-02T17:29:14.394211+00:00",
+    "nextDue": "2026-11-02T17:29:14.394211+00:00",
+    "allFourProfileExpiry": "2027-10-02T17:28:41+00:00",
+    "transport": "wired",
+    "firstAttempt": "Existing Xcode provisioning-cache replacement race (missing cached mobileprovision for TangoXvid/TangoLogin); unchanged retry succeeded.",
+    "configChange": "tango.json bundleIds and inputs now include Ptrex; generated from the provider registry by configure-refresh.py",
+    "scheduler": "com.visar.installed-apps-refresh resumed, ran once, idle, last exit 0, enumerated 11 apps",
+    "newBackgroundJobs": 0
+  }
+}

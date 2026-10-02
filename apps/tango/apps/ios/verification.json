@@ -1,0 +1,53 @@
+{
+  "bundleIds": [
+    "65U58U86DD.com.visar.Tango.paid",
+    "65U58U86DD.com.visar.Tango.paid.Login"
+  ],
+  "lastSuccess": "2026-09-12T22:29:31.915726+00:00",
+  "nextDue": "2026-10-12T22:29:31.915726+00:00",
+  "transport": "wired",
+  "profilesExpire": {
+    "65U58U86DD.com.visar.Tango.paid": "2027-09-12T22:27:53+00:00",
+    "65U58U86DD.com.visar.Tango.paid.Login": "2027-09-12T22:27:53+00:00"
+  },
+  "lastError": null,
+  "appBuild": "6",
+  "manualScrollAccepted": true,
+  "nativeLiveVideo": {
+    "width": 720,
+    "height": 1280,
+    "advancing": true,
+    "httpStatuses": [
+      200,
+      206
+    ]
+  },
+  "backgroundResume": "same stream resumed playback",
+  "offlineTests": [
+    "single-flight rotating refresh",
+    "persist before playback failure",
+    "30-minute session expiry",
+    "HLS master/variant/key/init/segments",
+    "byte ranges",
+    "playback cookie domain scoping"
+  ],
+  "browserTests": [
+    "required provider build",
+    "shared home/reader UI",
+    "Multi",
+    "cold launch fresh list and streamer reanchor",
+    "Back",
+    "stale document checkpoint rejection"
+  ],
+  "realAccountMutationsTested": false,
+  "webSHA256": "af6234ff1b84306336fbc8bd5251210c374e6d39fe3a82dd1081a24ae39f840e",
+  "physicalColdLaunch": {
+    "readerRestored": true,
+    "sameStreamer": true,
+    "multiPreserved": true,
+    "livePlaybackAdvancing": true,
+    "backReturnsHome": true
+  },
+  "schedulerEnabled": true,
+  "registeredPaidApps": 12
+}
