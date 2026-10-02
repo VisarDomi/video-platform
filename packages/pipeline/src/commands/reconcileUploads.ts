@@ -23,6 +23,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         }
         results.push(...database.recoverInterruptedUploads(now));
         database.recoverAcceptedVerifications(now);
+        results.push(...database.settleUnsubmittedAttempts("porntrex", now)
+            .map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" })));
         // One login flow, then every due confirmation is checked on that same
         // authenticated page.
         const due = database.dueUploadConfirmations(now);

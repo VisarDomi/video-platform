@@ -41,9 +41,15 @@ and its Xvid/Ptrex Safari extensions, which remain until the apps replace them.
     session-only cookie on responses, so this re-runs every 3 seconds while open
     and at resign/background. With "remember me" ticked XVideos itself sets a
     30-day sliding login cookie.
-  - Ptrex relies on Porntrex's 30-day `kt_member` cookie, which signs a lost session
-    back in. Twice during heavy testing Porntrex itself deleted that cookie after a
-    reinstall (not reproducible on demand); Ptrex then shows the login page. Porntrex redirects to its
+  - Porntrex keeps **one active session per account; the newest login wins** (verified
+    2026-10-02). A password login, or signing back in with the 30-day `kt_member` cookie,
+    logs every other device out, which is why `kt_member` "disappeared" during testing.
+    Ptrex therefore shares the pipeline's session instead of logging in:
+    `npm run ptrex:connect-iphone` (phone unlocked, attached to the Mac) copies the
+    pipeline's `PHPSESSID` into Ptrex, pinned for 400 days, and removes `kt_member`.
+    Ptrex keeps `PHPSESSID` among its login cookies so a kill does not lose it. Do not
+    log in on the phone (or in the Ptrex Safari extension): it stops the pipeline; run
+    the command again instead. Porntrex redirects to its
     ad-heavy home page instead of showing a page: from `/my/videos/` when signed
     out (Ptrex opens `/login/`) and from `/login/` when already signed in (Ptrex
     opens `/my/videos/`).

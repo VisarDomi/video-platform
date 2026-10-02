@@ -117,12 +117,12 @@ test("Porntrex upload form contract is exercised against a local fixture only", 
     t.after(() => browser.close());
     const context = await browser.newContext();
     const page = await context.newPage();
-    const metadataForm = `<form id="metadata"><input id="edit_video_title" name="title"><textarea id="edit_video_description"></textarea><input id="edit_video_tags"><input id="edit_video_categories" readonly onclick="document.getElementById('category').hidden=false"><label id="category" hidden><input type="checkbox" value="21" onchange="document.getElementById('category_id').value=this.checked?'21':''">Webcam</label><input id="category_id" type="hidden" name="category_ids[]"><input type="submit" value="Save"></form>`;
+    const metadataForm = `<form id="metadata"><p class="section-title">Video Info</p><input id="edit_video_title" name="title"><textarea id="edit_video_description"></textarea><input id="edit_video_tags"><div class="list-selector"><input id="edit_video_categories" readonly onclick="document.getElementById('popup').hidden=false"><input id="category_id" type="hidden" name="category_ids[]"><div id="popup" hidden><input type="checkbox" id="category_21" value="21" style="display:none" onchange="document.getElementById('category_id').value=this.checked?'21':''"><label for="category_21">Webcam</label></div></div><input type="submit" value="Save"></form>`;
     let requests = 0;
     await page.route("**/*", async route => {
         requests++;
         assert.equal(route.request().url(), "https://www.porntrex.com/upload-video/");
-        await route.fulfill({ contentType: "text/html", body: `<!doctype html><form id="file"><input id="edit_video_upload_option_file" type="radio" checked><input type="file" name="content"><input type="submit" value="Continue..."></form><script>document.getElementById('file').onsubmit=e=>{e.preventDefault();document.body.innerHTML=${JSON.stringify(metadataForm)};document.getElementById('metadata').onsubmit=e=>{e.preventDefault();document.body.dataset.saved='true';}}</script>` });
+        await route.fulfill({ contentType: "text/html", body: `<!doctype html><form id="file"><input id="edit_video_upload_option_file" type="radio" checked><input type="file" name="content"><input type="submit" value="Continue..."></form><script>document.getElementById('file').onsubmit=e=>{e.preventDefault();document.body.innerHTML=${JSON.stringify(metadataForm)};document.getElementById('metadata').onsubmit=e=>{e.preventDefault();document.body.dataset.saved='true';};document.addEventListener('click',e=>{const p=document.getElementById('popup');if(p&&!p.contains(e.target)&&e.target.id!=='edit_video_categories')p.hidden=true})}</script>` });
     });
     const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
     uploader.withAuthenticatedPage = async action => action(page);

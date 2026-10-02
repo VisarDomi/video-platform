@@ -490,6 +490,17 @@ export class PipelineDatabase {
                 completed_at TEXT NOT NULL,
                 total INTEGER NOT NULL
             ) STRICT;
+            CREATE TABLE IF NOT EXISTS provider_session_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                logged_in INTEGER,
+                fingerprint TEXT,
+                password_login_at TEXT,
+                note TEXT
+            ) STRICT;
+            CREATE INDEX IF NOT EXISTS provider_session_events_idx ON provider_session_events (provider, occurred_at);
             CREATE TABLE IF NOT EXISTS upload_provider_events (
                 changed_at TEXT NOT NULL,
                 from_provider TEXT NOT NULL,
@@ -512,6 +523,9 @@ export class PipelineDatabase {
         }
         if (!controlColumns.some((column) => column.name === "trial_finished_at")) {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
+        }
+        if (!controlColumns.some((column) => column.name === "attention_reason")) {
+            this.database.exec("ALTER TABLE campaign_control ADD COLUMN attention_reason TEXT");
         }
         if (!controlColumns.some((column) => column.name === "upload_provider")) {
             // The one active destination is campaign intent, not a credential.
@@ -716,6 +730,7 @@ export class PipelineDatabase {
             trial_per_provider: number | null;
             trial_finished_at: string | null;
             upload_provider: ActiveUploadProvider;
+            attention_reason: string | null;
             updated_at: string;
         } | undefined;
         if (!row) throw new Error("Campaign control row is missing");
@@ -729,6 +744,7 @@ export class PipelineDatabase {
             trialPerProvider: row.trial_per_provider,
             trialFinishedAt: row.trial_finished_at,
             uploadProvider: row.upload_provider,
+            attentionReason: row.attention_reason,
             updatedAt: row.updated_at,
         };
     }
@@ -1119,7 +1135,7 @@ export class PipelineDatabase {
             this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, updated_at = ? WHERE id = 1")
                 .run(now.toISOString());
         } else {
-            this.database.prepare(`UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0,
+            this.database.prepare(`UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0, attention_reason = NULL,
                 trial_per_provider = CASE WHEN trial_finished_at IS NOT NULL THEN NULL ELSE trial_per_provider END,
                 trial_finished_at = NULL, updated_at = ? WHERE id = 1`)
                 .run(now.toISOString());
@@ -2493,6 +2509,30 @@ export class PipelineDatabase {
             .run(attemptId);
     }
 
+    // Porntrex creates the video only when its metadata form is submitted.
+    // Uncertain attempts that never reached that click published nothing:
+    // settle them as plain failures, without the weekly duplicate hold.
+    settleUnsubmittedAttempts(provider: ActiveUploadProvider, now = new Date()): string[] {
+        assertUploadProvider(provider);
+        if (provider !== "porntrex") return [];
+        return this.transaction(() => {
+            const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
+                JOIN recordings r ON r.id = a.recording_id
+                WHERE a.provider = ? AND a.status = 'uncertain' AND a.phase <> 'metadata_submitting'
+                    AND a.remote_id IS NULL AND r.state = 'xvideos_uncertain'`).all(provider) as unknown as Array<{ id: string; recording_id: string }>;
+            const timestamp = now.toISOString();
+            for (const row of rows) {
+                this.database.prepare(`UPDATE upload_attempts SET status = 'failed', retry_not_before = started_at,
+                    error = COALESCE(error || '; ', '') || 'settled: metadata form never submitted, no video exists' WHERE id = ?`).run(row.id);
+                this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ?
+                    WHERE attempt_id = ? AND status = 'pending'`).run(timestamp, row.id);
+                this.updateStateInTransaction(row.recording_id, "xvideos_uncertain", "metadata_ready",
+                    `${provider} metadata form never submitted; no video exists`, timestamp);
+            }
+            return rows.map((row) => row.recording_id);
+        });
+    }
+
     // Remote IDs the ledger knows about in any generation.
     knownRemoteIds(): Set<string> {
         const rows = this.database.prepare(`SELECT remote_id FROM upload_attempts WHERE remote_id IS NOT NULL
@@ -2518,6 +2558,41 @@ export class PipelineDatabase {
         this.recordUploadEvidence(attemptId, { stage: "remote_missing", remoteId,
             reason: "Provider edit page returned 404; the ID does not exist" }, now);
         return true;
+    }
+
+    // Indefinite pause that names its reason, for problems only a person can
+    // fix (such as the provider login moving to another device).
+    pauseForAttention(reason: string, now = new Date()): CampaignControl {
+        this.database.prepare(`UPDATE campaign_control SET state = 'paused', resume_at = NULL, attention_reason = ?, updated_at = ?
+            WHERE id = 1`).run(reason, now.toISOString());
+        return this.getCampaignControl();
+    }
+
+    recordProviderSessionEvent(event: {
+        provider: ActiveUploadProvider; kind: string; loggedIn?: boolean | null; fingerprint?: string | null;
+        passwordLoginAt?: string | null; note?: string | null;
+    }, now = new Date()): void {
+        assertUploadProvider(event.provider);
+        this.database.prepare(`INSERT INTO provider_session_events (provider, occurred_at, kind, logged_in, fingerprint, password_login_at, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(event.provider, now.toISOString(), event.kind,
+            event.loggedIn === undefined || event.loggedIn === null ? null : event.loggedIn ? 1 : 0,
+            event.fingerprint ?? null, event.passwordLoginAt ?? null, event.note ?? null);
+    }
+
+    listProviderSessionEvents(provider: ActiveUploadProvider, sinceIso = "0000"): Array<{
+        occurredAt: string; kind: string; loggedIn: boolean | null; fingerprint: string | null; passwordLoginAt: string | null; note: string | null;
+    }> {
+        return (this.database.prepare(`SELECT * FROM provider_session_events WHERE provider = ? AND occurred_at >= ?
+            ORDER BY occurred_at, id`).all(provider, sinceIso) as unknown as Array<{
+            occurred_at: string; kind: string; logged_in: number | null; fingerprint: string | null; password_login_at: string | null; note: string | null;
+        }>).map((row) => ({ occurredAt: row.occurred_at, kind: row.kind, loggedIn: row.logged_in === null ? null : row.logged_in === 1,
+            fingerprint: row.fingerprint, passwordLoginAt: row.password_login_at, note: row.note }));
+    }
+
+    listActiveUploadAttempts(): Array<{ id: string; recordingId: string; provider: string }> {
+        return (this.database.prepare("SELECT id, recording_id, provider FROM upload_attempts WHERE status = 'started'")
+            .all() as unknown as Array<{ id: string; recording_id: string; provider: string }>)
+            .map((row) => ({ id: row.id, recordingId: row.recording_id, provider: row.provider }));
     }
 
     getActiveUploadProvider(): ActiveUploadProvider {

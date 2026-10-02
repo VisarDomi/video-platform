@@ -89,6 +89,18 @@ export class UploadCoordinator {
             }
             const transportError = error instanceof UploadTransportError ? error : null;
             const progress = this.database.getUploadProgress(attemptId);
+            if (provider === "porntrex" && progress.phase !== "metadata_submitting") {
+                // Porntrex creates the video only when its metadata form is
+                // submitted, and that phase is recorded just before the click.
+                // Failing earlier published nothing: no weekly uncertainty.
+                this.database.finishUploadAttempt(attemptId, {
+                    status: "failed",
+                    transmittedBytes: Math.max(transportError?.transmittedBytes ?? 0, progress.transmittedBytes),
+                    error: `${error instanceof Error ? error.message : String(error)} (before metadata submission; no video exists)`,
+                }, new Date());
+                this.database.releaseRetryDeadline(attemptId);
+                throw error;
+            }
             // Any failure once the file upload started is acceptance-unknown:
             // the file may still land on XVideos (or already have), so the
             // attempt must be confirmed against the uploads list instead of

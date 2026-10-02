@@ -45,7 +45,8 @@
     ],
     "loginUrl": "https://www.porntrex.com/login/",
     "keepCookies": [
-      "kt_member"
+      "kt_member",
+      "PHPSESSID"
     ]
   }
 }

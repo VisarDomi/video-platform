@@ -13,7 +13,7 @@ import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
-import { MetadataRejectedError } from "../upload/providerWarnings.js";
+import { MetadataRejectedError, ProviderSessionLostError } from "../upload/providerWarnings.js";
 import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
@@ -256,6 +256,12 @@ export class CampaignWorker {
                     result,
                 };
             } catch (error) {
+                if (error instanceof ProviderSessionLostError) {
+                    // Logging in again would log the phone out: stop and say why.
+                    this.database.pauseForAttention(error.message, now);
+                    this.database.recordProviderSessionEvent({ provider: "porntrex", kind: "lost", loggedIn: false, note: error.message }, now);
+                    return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
+                }
                 if (error instanceof MetadataRejectedError) {
                     // Definitive and already learned; the recording is back for
                     // re-description. Not an anti-bot event, no cooldown.

@@ -25,6 +25,18 @@ export class TransferAbortedBeforeSubmissionError extends Error {
     }
 }
 
+// The provider account's single login moved to another device (or ended).
+// Raised before any metadata submission, so it is a plain failure; the
+// campaign pauses until `npm run ptrex:connect-iphone` restores the shared session.
+export class ProviderSessionLostError extends TransferAbortedBeforeSubmissionError {
+    constructor(message: string) {
+        super(message);
+        this.name = "ProviderSessionLostError";
+    }
+}
+
+export const SESSION_LOST_ADVICE = "run `npm run ptrex:connect-iphone` to restore the shared session";
+
 // Informational only: a published video whose reach the provider limited.
 // Never interpret the account-wide "N videos blocked" banner as this video's flag.
 export function limitedVisibilityWarning(text: string): string | null {

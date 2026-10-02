@@ -1,13 +1,17 @@
 import { stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chromium, type Page } from "playwright";
+import { chromium, type BrowserContext, type Page } from "playwright";
 import { HumanActionRequiredError, type ChromiumUploaderConfig } from "./chromiumXvideosUploader.js";
 import { submitPasswordLogin } from "./passwordLogin.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { hasFullHdPlayback } from "./playbackQuality.js";
-import { TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
+import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
+import {
+    PORNTREX_LOGIN_TOKEN, pinCookies, readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession,
+    type PorntrexSession,
+} from "./porntrexSession.js";
 
 const ORIGIN = "https://www.porntrex.com";
 const LIST = "#list_videos_my_uploaded_videos";
@@ -39,7 +43,10 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
     readonly provider = "porntrex" as const;
     constructor(private readonly config: ChromiumUploaderConfig) {}
 
-    async withAuthenticatedPage<T>(action: (page: Page) => Promise<T>): Promise<T> {
+    // Opens the shared session. A password login happens only when explicitly
+    // allowed (the connect command): it would log the phone out. Otherwise a
+    // missing login means another device took it, and the run stops.
+    async withAuthenticatedPage<T>(action: (page: Page) => Promise<T>, options: { allowPasswordLogin?: boolean } = {}): Promise<T> {
         const context = await chromium.launchPersistentContext(this.config.profilePath, {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
@@ -48,21 +55,57 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
         }).catch(() => { throw new HumanActionRequiredError("session_login", "Could not open the Porntrex browser profile; close its manual browser first"); });
         try {
+            const stored = this.config.sessionFilePath ? await readPorntrexSession(this.config.sessionFilePath) : null;
+            // kt_member would sign in a new session and log the phone out; the
+            // shared PHP session is the only login the pipeline may present.
+            await context.clearCookies({ name: PORNTREX_LOGIN_TOKEN });
+            if (stored) await context.addCookies(pinCookies(stored.cookies));
             const page = context.pages()[0] ?? await context.newPage();
             await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
             await passPorntrexAgeGate(page);
             const file = page.locator('input[type="file"][name="content"]');
+            let passwordLoginAt: string | null = null;
             if (!await file.count()) {
+                if (!options.allowPasswordLogin) {
+                    throw new ProviderSessionLostError(`Porntrex is not logged in with the shared session (another device logged in, or it ended); ${SESSION_LOST_ADVICE}`);
+                }
                 await page.goto(`${ORIGIN}/login/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
                 await passPorntrexAgeGate(page);
                 await page.locator('form input[name="pass"]').last().waitFor({ state: "visible", timeout: 15_000 });
                 await submitPasswordLogin(page, ORIGIN, this.config);
                 await page.getByRole("link", { name: /Hello,/ }).first().waitFor({ state: "visible", timeout: 30_000 });
+                passwordLoginAt = new Date().toISOString();
+                await context.clearCookies({ name: PORNTREX_LOGIN_TOKEN });
                 await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
             }
             await file.waitFor({ state: "attached", timeout: 15_000 });
+            await this.saveSharedSession(context, stored, passwordLoginAt);
             return await action(page);
         } finally { await context.close(); }
+    }
+
+    // Pin the session in the profile and the file so no later launch starts a
+    // new one. A changed PHP session ID (server rotation) is recorded as is.
+    private async saveSharedSession(context: BrowserContext, stored: PorntrexSession | null, passwordLoginAt: string | null): Promise<void> {
+        if (!this.config.sessionFilePath) return;
+        const now = new Date();
+        const cookies = pinCookies(sharedSessionCookies((await context.cookies(ORIGIN)) as never), now);
+        if (!sessionFingerprint(cookies)) throw new Error("Porntrex is logged in without a PHP session cookie; refusing to guess");
+        await context.addCookies(cookies);
+        await writePorntrexSession(this.config.sessionFilePath, {
+            version: 1,
+            cookies,
+            passwordLoginAt: passwordLoginAt ?? stored?.passwordLoginAt ?? now.toISOString(),
+            savedAt: now.toISOString(),
+        });
+    }
+
+    // Same-session request from inside the page: is the login still ours?
+    private async stillLoggedIn(page: Page): Promise<boolean> {
+        return await page.evaluate(async () => {
+            const response = await fetch("/upload-video/", { credentials: "include" });
+            return /name="content"/.test(await response.text());
+        }).catch(() => true);
     }
 
     async lookupUpload(page: Page, identity: string): Promise<
@@ -138,7 +181,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await request.onProgress?.("file_uploading", request.sizeBytes);
             await upload.locator('input[name="content"]').setInputFiles(request.artifactPath);
             await upload.locator('input[type="submit"]').click();
-            await this.waitForFileTransfer(page);
+            await this.waitForFileTransfer(page, request);
             await request.onProgress?.("file_uploaded", request.sizeBytes);
             const metadata = page.locator("form:has(#edit_video_title)");
             if (request.title.length > 300) throw new Error("Porntrex title exceeds 300 characters");
@@ -146,8 +189,16 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await page.locator("#edit_video_description").fill(request.description);
             await page.locator("#edit_video_tags").fill(request.tags.join(", "));
             await page.locator("#edit_video_categories").click();
-            await page.locator('input[type="checkbox"][value="21"]').check(); // Observed Webcam category.
-            await page.locator("#edit_video_title").click();
+            // Categories open in a popup whose checkboxes are styled hidden;
+            // the labels are the clickable part. A click outside closes it, and
+            // until then it covers the form fields below it.
+            const webcam = page.locator('label[for="category_21"]'); // Observed Webcam category.
+            await webcam.waitFor({ state: "visible", timeout: 15_000 });
+            if (!await page.locator("#category_21").isChecked()) await webcam.click();
+            // Only a real click outside closes it (verified on the live form): the
+            // inert "Video Info" heading, or the page corner if that is covered.
+            await page.locator("p.section-title").first().click({ timeout: 5_000 }).catch(() => page.mouse.click(5, 5));
+            await webcam.waitFor({ state: "hidden", timeout: 10_000 });
             if (!await metadata.locator('input[name="category_ids[]"][value="21"]').count()) {
                 throw new Error("Porntrex Webcam category was not applied; metadata not submitted");
             }
@@ -167,11 +218,43 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
     // Follow the page's own progress bar, like a person watching the upload:
     // keep waiting while it moves, however slow the connection is, and stop
     // only on a stall or a page error. The metadata form marks completion.
-    private async waitForFileTransfer(page: Page): Promise<void> {
+    private async waitForFileTransfer(page: Page, request: UploadRequest): Promise<void> {
         const title = page.locator("#edit_video_title");
         let percent = -1;
         let movedAt = Date.now();
         let logged = -10;
+        // The page retries a chunk silently on network errors, so keep what
+        // its chunk requests actually got back: a stall must say why.
+        const chunkProblems: string[] = [];
+        const isChunk = (url: string) => url.includes("/upload-video/?mode=async");
+        page.on("requestfailed", (failed) => {
+            if (isChunk(failed.url())) chunkProblems.push(`failed: ${failed.failure()?.errorText ?? "unknown"}`);
+        });
+        page.on("response", (response) => {
+            if (!isChunk(response.url())) return;
+            const type = response.headers()["content-type"] ?? "";
+            if (response.status() >= 300 || !type.includes("json")) chunkProblems.push(`HTTP ${response.status()} ${type}`);
+        });
+        // A chunk answered with anything but the site's success JSON (a login
+        // redirect, an error page) ends the transfer: the page stops there.
+        let chunkRejected: string | null = null;
+        page.on("response", (response) => {
+            let first = response.request();
+            while (first.redirectedFrom()) first = first.redirectedFrom()!;
+            if (!isChunk(first.url())) return;
+            if (first !== response.request()) { chunkRejected = `redirected to ${new URL(response.url()).pathname}`; return; }
+            void response.text().then((body) => {
+                let status: unknown;
+                try { status = (JSON.parse(body) as { status?: unknown }).status; } catch { status = "not JSON"; }
+                if (status !== "success") chunkRejected = `chunk response ${String(status)}`;
+            }).catch(() => undefined);
+        });
+        const stalled = async (message: string) => {
+            await request.onEvidence?.({ stage: "transfer_stall", percent, chunkProblems: chunkProblems.slice(-10),
+                page: new URL(page.url()).pathname, loggedIn: await page.getByRole("link", { name: /Hello,/ }).count() > 0 });
+            return new TransferAbortedBeforeSubmissionError(
+                `${message}${chunkProblems.length ? `; chunk responses: ${chunkProblems.slice(-3).join(" | ")}` : ""}`);
+        };
         for (;;) {
             if (await title.isVisible().catch(() => false)) {
                 console.log(JSON.stringify({ event: "porntrex-transfer-complete" }));
@@ -179,7 +262,13 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             }
             const error = (await page.locator(".form-upload .generic-error:visible").first().textContent({ timeout: 1_000 })
                 .catch(() => null))?.trim();
-            if (error) throw new TransferAbortedBeforeSubmissionError(`Porntrex upload page error: ${error}`);
+            if (error || chunkRejected) {
+                if (!await this.stillLoggedIn(page)) {
+                    await stalled("session lost");
+                    throw new ProviderSessionLostError(`Porntrex logged this session out during the upload (another device logged in); ${SESSION_LOST_ADVICE}`);
+                }
+                throw await stalled(`Porntrex upload ${error ? `page error: ${error}` : chunkRejected}`);
+            }
             const text = await page.locator(".form-upload .progressbar .text").first().textContent({ timeout: 1_000 }).catch(() => null);
             const current = text ? Number.parseInt(text, 10) : Number.NaN;
             if (Number.isFinite(current) && current > percent) {
@@ -191,8 +280,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
                 }
             }
             if (Date.now() - movedAt > TRANSFER_STALL_MILLISECONDS) {
-                throw new TransferAbortedBeforeSubmissionError(
-                    `Porntrex file transfer made no progress for ${TRANSFER_STALL_MILLISECONDS / 60_000} minutes (last ${percent}%)`);
+                if (!await this.stillLoggedIn(page)) {
+                    await stalled("session lost");
+                    throw new ProviderSessionLostError(`Porntrex logged this session out during the upload (another device logged in); ${SESSION_LOST_ADVICE}`);
+                }
+                throw await stalled(`Porntrex file transfer made no progress for ${TRANSFER_STALL_MILLISECONDS / 60_000} minutes (last ${percent}%)`);
             }
             await page.waitForTimeout(15_000);
         }

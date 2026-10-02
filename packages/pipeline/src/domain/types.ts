@@ -107,6 +107,7 @@ export interface CampaignControl {
     readonly trialPerProvider: number | null;
     readonly trialFinishedAt: string | null;
     readonly uploadProvider: "xvideos" | "porntrex";
+    readonly attentionReason: string | null;
     readonly updatedAt: string;
 }
 

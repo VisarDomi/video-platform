@@ -22,6 +22,7 @@ export interface PipelineConfig {
     readonly credentialsFilePath: string;
     readonly uploadProvider?: ActiveUploadProvider;
     readonly porntrexBrowserProfilePath?: string;
+    readonly porntrexSessionPath?: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
     readonly comparisonTrialOnly?: boolean;
@@ -69,6 +70,8 @@ export const pipelineConfig: PipelineConfig = {
     porntrexBrowserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
         ?? process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
+    porntrexSessionPath: process.env.VIDEO_PORNTREX_SESSION_FILE
+        ?? path.join(os.homedir(), ".config", "video-services", "porntrex-session.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
     monthlyUploadLimitBytes: Number.parseInt(
         process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? "600000000000",

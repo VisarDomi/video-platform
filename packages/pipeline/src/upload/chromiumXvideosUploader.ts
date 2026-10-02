@@ -23,6 +23,8 @@ export interface ChromiumUploaderConfig {
     // this to false: every failure closes the browser so it never holds the
     // profile lock against the next step.
     readonly leaveOpenOnFailure?: boolean;
+    // Porntrex only: the shared-session file (see porntrexSession.ts).
+    readonly sessionFilePath?: string;
 }
 
 export class HumanActionRequiredError extends Error {

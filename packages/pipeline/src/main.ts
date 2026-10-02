@@ -23,6 +23,8 @@ import { selectComparisonFile, writeComparisonReport } from "./commands/comparis
 import { syncXvideosInventory } from "./commands/syncProviderInventory.js";
 import { assertUploadProvider } from "./config/uploadProviders.js";
 import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
+import { connectPorntrexPhone } from "./commands/connectPorntrexPhone.js";
+import { porntrexSessionReport } from "./commands/porntrexSessionReport.js";
 
 function usage(): never {
     throw new Error([
@@ -37,6 +39,7 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider xvideos|porntrex --apply] | xvideos-sync --apply",
         "  metadata-check [--provider xvideos|porntrex]",
+        "  ptrex-connect-iphone --apply | ptrex-session-report",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -76,7 +79,16 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "xvideos-sync", "metadata-check"].includes(command ?? "")) usage();
+        "upload-provider", "xvideos-sync", "metadata-check", "ptrex-connect-iphone", "ptrex-session-report"].includes(command ?? "")) usage();
+    if (command === "ptrex-connect-iphone") {
+        requireApply(process.argv.slice(3));
+        console.log(JSON.stringify(await connectPorntrexPhone(pipelineConfig), null, 2));
+        return;
+    }
+    if (command === "ptrex-session-report") {
+        console.log(JSON.stringify(await porntrexSessionReport(pipelineConfig), null, 2));
+        return;
+    }
     if (command === "xvideos-sync") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);

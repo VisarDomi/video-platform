@@ -12,6 +12,7 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
         executablePath: config.chromiumExecutablePath,
         profilePath: provider === "porntrex" ? config.porntrexBrowserProfilePath ?? config.browserProfilePath : config.browserProfilePath,
         leaveOpenOnFailure: process.env.VIDEO_PIPELINE_SERVICE_MODE !== "1",
+        sessionFilePath: provider === "porntrex" ? config.porntrexSessionPath : undefined,
         ...credentials,
     };
     return provider === "xvideos" ? new ChromiumXvideosUploader(browser) : new ChromiumPorntrexUploader(browser);

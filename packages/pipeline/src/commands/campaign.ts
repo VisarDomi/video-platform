@@ -241,7 +241,9 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
                 `Pipeline database is waiting for ${CURRENT_PRODUCTION_VERSION} rollover; run campaign-resume --apply`,
             );
         }
-        const recovery = database.recoverInterruptedUploads();
+        const recovery = [...database.recoverInterruptedUploads(),
+            // Never-submitted Porntrex attempts published nothing: back in the queue now.
+            ...database.settleUnsubmittedAttempts("porntrex").map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const worker = new CampaignWorker(
             database,
