@@ -9,7 +9,7 @@ for(const args of [[],['xvideos'],['invalid'],['tango','tango']]) {
 }
 assert.equal(spawnSync('node',['scripts/build-ios.mjs','tango','--prepare-only'],{stdio:'inherit'}).status,0);
 const bundle=fs.readFileSync('apps/ios/build/tango/Web/app.js','utf8');
-assert.equal(fs.readFileSync('apps/ios/build/tango/Xvid/content.js','utf8'),fs.readFileSync('dist/extension/content.js','utf8'),'Xvid comes from this repository’s current source');
+assert.equal(fs.readFileSync('apps/ios/build/tango/Xvid/content.js','utf8'),fs.readFileSync('../video-platform/dist/extension/xvideos/content.js','utf8'),'Xvid comes from video-platform’s shared frontend');
 const xvidManifest=JSON.parse(fs.readFileSync('apps/ios/build/tango/Xvid/manifest.json','utf8'));
 assert.deepEqual(xvidManifest.host_permissions,['https://xvideos.com/*','https://www.xvideos.com/*']);
 assert.equal(xvidManifest.name,'Xvid');

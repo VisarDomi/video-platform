@@ -11,8 +11,6 @@ def remote(code):
     return subprocess.run(SSH+['/usr/bin/python3 -'],input=code,text=True,check=True)
 p=argparse.ArgumentParser();p.add_argument('provider', choices=['tango']);p.add_argument('action',choices=['sync','build','status','install','finish']);a=p.parse_args()
 config=json.loads((APP/'build/providers.json').read_text())[a.provider]
-label='com.visar.stream-viewer-build'
-plist='/Users/visar/Library/LaunchAgents/'+label+'.plist'
 log=MAC+'/build/'+a.provider+'/xcode.log'
 if a.action=='sync':
     # Preserve previous build evidence during incremental synchronization.
@@ -21,25 +19,28 @@ if a.action=='sync':
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build')],check=True)
     subprocess.run(['rsync','-az','--exclude=native/','--exclude=DerivedData/','--exclude=*.xcodeproj/','--exclude=*-Info.plist','--exclude=Info.plist','--exclude=Login.entitlements','-e',shlex.join(SSH[:-1]),str(APP/'build')+'/',SSH[-1]+':'+MAC+'/build'+'/'],check=True)
 elif a.action=='build':
-    remote(f'''import plistlib,pathlib,subprocess
-path=pathlib.Path({plist!r})
-status=subprocess.run(['launchctl','list',{label!r}],capture_output=True,text=True)
-if '"PID"' in status.stdout: raise SystemExit('Build is still running')
-job={{'Label':{label!r},'ProgramArguments':['/usr/bin/python3','scripts/build-native.py',{a.provider!r}],'WorkingDirectory':{MAC!r},'EnvironmentVariables':{{'DEVELOPMENT_TEAM':{TEAM!r},'SIGNING_DEVICE':{DEVICE!r}}},'RunAtLoad':True,'StandardOutPath':{log!r},'StandardErrorPath':{log!r}}}
-subprocess.run(['launchctl','bootout','gui/501',str(path)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-path.write_bytes(plistlib.dumps(job))
-subprocess.run(['launchctl','bootstrap','gui/501',str(path)],check=True)
+    remote(f'''import pathlib,subprocess,json
+state=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
+state.write_text(json.dumps({{'running':True,'exit':None}}))
+command=['sudo','-n','launchctl','asuser','501','sudo','-n','-H','-u','visar','/usr/bin/env',
+         'DEVELOPMENT_TEAM='+{TEAM!r},'SIGNING_DEVICE='+{DEVICE!r},'/usr/bin/caffeinate','-i',
+         '/usr/bin/python3',{MAC!r}+'/scripts/build-native.py',{a.provider!r}]
+with pathlib.Path({log!r}).open('w') as output:
+    result=subprocess.run(command,cwd={MAC!r},stdout=output,stderr=subprocess.STDOUT)
+state.write_text(json.dumps({{'running':False,'exit':result.returncode}}))
+raise SystemExit(result.returncode)
 ''')
 elif a.action=='status':
-    remote(f'''import subprocess,pathlib
-subprocess.run(['launchctl','list',{label!r}])
+    remote(f'''import pathlib,json
+p=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
+print(p.read_text() if p.exists() else 'No attached build started')
 p=pathlib.Path({log!r})
 print('\\n'.join(p.read_text().splitlines()[-14:]) if p.exists() else 'Waiting for log')
 ''')
 elif a.action=='install':
     remote(f'''import subprocess,plistlib,pathlib,datetime,fnmatch,hashlib
-status=subprocess.run(['launchctl','list',{label!r}],capture_output=True,text=True)
-if '"PID"' in status.stdout or '"LastExitStatus" = 0;' not in status.stdout: raise SystemExit('Wait for the build to finish successfully')
+state=__import__('json').loads((pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json').read_text())
+if state.get('running') or state.get('exit')!=0: raise SystemExit('Wait for the build to finish successfully')
 app=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'native/Release-iphoneos'/{(config['name']+'.app')!r}
 info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info['CFBundleIdentifier']=={config['bundleId']!r}
@@ -75,6 +76,4 @@ assert entitlements['keychain-access-groups']==[{(TEAM+'.'+config['bundleId'])!r
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
 subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
 ''')
-else: remote(f'''import subprocess
-subprocess.run(['launchctl','bootout','gui/501',{plist!r}],check=True)
-''')
+else: print('Attached build complete; no temporary background job was created.')

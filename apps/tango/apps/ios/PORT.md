@@ -345,3 +345,70 @@ The existing monthly renewal installed build 10 and both helpers successfully;
 all profiles expire September 22, 2027. The first attempt hit the previously
 documented cached-profile replacement race; retrying unchanged succeeded. The
 normal scheduler is restored. No new LaunchAgent was created for this work.
+
+## October 2: Xvid uses Video Platform's shared frontend (build 12)
+
+This supersedes the Xvid source/packaging statements in the build 7 section.
+Xvid remains `com.visar.Tango.paid.Xvid` inside the same paid Tango app. Its UI now
+comes from the sibling `video-platform/packages/app/src` codebase, sharing the
+website's actual list, CSS, player, overlay, timeline and gestures. Local providers
+retain save/cut/return/download-list operations; XVideos is an online consumer and
+hides those controls. Its Safari session/cookie persistence, uploads pagination,
+native account/management pages and highest-quality extraction are preserved.
+Duration is read from uploads metadata; file size is estimated at 4 Mbps.
+
+Keep the repositories as siblings and install dependencies in both. Prepare from
+stream-viewer:
+
+```sh
+npm run build:ios -- tango --prepare-only
+npm run tests:ios
+python3 apps/ios/scripts/deploy.py tango sync
+python3 apps/ios/scripts/deploy.py tango build
+python3 apps/ios/scripts/deploy.py tango status
+python3 apps/ios/scripts/deploy.py tango install
+python3 apps/ios/scripts/deploy.py tango finish
+```
+
+The preparation invokes `video-platform/packages/app/scripts/build-extension.mjs
+xvideos`, then stages `video-platform/dist/extension/xvideos`. Reader Extensions
+is not involved. The native Tango Web payload is unchanged. Tests check that the
+staged Xvid payload exactly matches Video Platform's output. Source ownership and
+WebKit checks are documented in `video-platform/packages/app/PROVIDERS.md`.
+
+The deploy helper now builds in an attached GUI-session command using the shared
+signing lock, not a temporary LaunchAgent. Wait for build completion before install.
+Its status JSON records the exit result, and install verifies identity, paid team,
+phone/profile expiry, signature, icon absence and extension resource hashes.
+`finish` has no background job to remove. Do not add Allow in Background items.
+Use the current trusted Mac address 192.168.1.198 from the shared access runbook.
+
+Pause only the idle existing monthly scheduler before synchronization. After
+physical acceptance, approve the delivered Tango baseline with the existing
+Reader Extensions `scripts/refresh.py approve --config
+build/installed-refresh/config/tango.json`, verify its monthly renewal, and resume
+the same scheduler. The monthly runner needs only the staged payload, not Node or
+a Video Platform checkout on the Mac. Preserve native login and Safari website
+data; do not uninstall the host or clear cookies.
+
+Porntrex is deferred to its own second pass. Both online providers will remain
+extensions of Tango; five standalone apps await future online authentication work.
+
+The physical check loaded the first 20 uploads in about one second and completed
+all 406 rows incrementally. The supplied upload played at 1080×1920; shared
+timeline seek, mute and Back to scrollY 400 passed. Document-start takeover must
+create its head/body explicitly, as the old extension did. WebKit tests now cover
+that early startup as well as the shared UI and local provider boundaries.
+Physical finger/momentum feel remains for the user to compare.
+
+Renewal passed with all three profiles expiring October 2, 2027. Its first attempt
+hit the existing Xcode provisioning-cache replacement race; an unchanged retry
+succeeded. The existing monthly job is restored, idle and exits 0, with no new
+background item. See `xvid-video-platform-verification.json`; the shared
+environment recovery copy includes that evidence and the build 12 project script.
+
+Build 13 adjusts Xvid display names only. Bracketed text containing the upload's
+`YYYY-MM-DD HHMMSS` timestamp becomes its list/player label without brackets;
+titles without that timestamp keep their full text. Upload IDs, progress and
+navigation URLs retain their existing meanings. The shared provider parser
+applies this rule once for both the list and player.
