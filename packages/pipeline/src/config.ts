@@ -22,6 +22,7 @@ export interface PipelineConfig {
     readonly credentialsFilePath: string;
     readonly uploadProvider?: ActiveUploadProvider;
     readonly videohostBrowserProfilePath?: string;
+    readonly videohostSessionPath?: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
     readonly comparisonTrialOnly?: boolean;
@@ -69,6 +70,8 @@ export const pipelineConfig: PipelineConfig = {
     videohostBrowserProfilePath: process.env.VIDEO_VIDEOHOST_BROWSER_PROFILE
         ?? process.env.VIDEO_OLDHOST_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
+    videohostSessionPath: process.env.VIDEO_VIDEOHOST_SESSION_FILE
+        ?? path.join(os.homedir(), ".config", "video-services", "videohost-session.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
     monthlyUploadLimitBytes: Number.parseInt(
         process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? "600000000000",
