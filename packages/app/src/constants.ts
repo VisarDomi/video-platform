@@ -1,6 +1,6 @@
 export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'xvideos';
+export type Provider = LocalProvider | 'xvideos' | 'porntrex';
 export const DEFAULT_PROVIDER: Provider = 'tango';
 
 // Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.

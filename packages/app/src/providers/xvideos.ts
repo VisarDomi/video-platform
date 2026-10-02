@@ -1,6 +1,7 @@
 import { VIDEO_TYPE } from '../constants.js';
 import type { Video } from '../types.js';
 import { AuthenticationRequiredError, type OnlineVideoProvider, type MediaSource } from './types.js';
+import { uploadLabel } from './uploadTitle.js';
 
 const UPLOADS = "/account/uploads";
 const VIDEO_PATH = /^\/video(?:\.[a-z0-9]+|[0-9]+|-[a-z0-9]+)\/[^/]+\/?$/i;
@@ -41,13 +42,12 @@ export function parseUploads(document: Document): Video[] {
         if (!id || !link) continue;
         const url = siteUrl(link.getAttribute("href")!);
         const title = link.textContent?.trim() || `Video ${id}`;
-        const identifier = title.match(/\[([^\]]*\b\d{4}-\d{2}-\d{2}\s+\d{6}\b[^\]]*)\]/)?.[1].trim();
         videos.push({
             // Identity is per video, so different uploads from one owner remain distinct.
             filename: id,
             provider: "xvideos", type: VIDEO_TYPE.ORIGINAL, duration: uploadDuration(row.querySelector(".title + p")?.textContent ?? ""), size: 0, isLive: false,
             pageUrl: url.pathname,
-            title: identifier || title,
+            title: uploadLabel(title),
         });
     }
     return videos;

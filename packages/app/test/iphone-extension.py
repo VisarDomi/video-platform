@@ -1,4 +1,4 @@
-"""Inspect the installed XVideos extension on the paired iPhone through its Mac.
+"""Inspect an installed online-provider extension (Xvid/Ptrex) on the paired iPhone through its Mac.
 
 No production-code injection, storage replacement, session export, screenshots,
 or media URLs. Optional diagnostic JS can operate the existing page controls.
@@ -13,6 +13,9 @@ from urllib.parse import urlparse
 from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.services.webinspector import WebinspectorService
 
+HOSTS = {'xvideos': ('xvideos.com', 'www.xvideos.com'), 'porntrex': ('porntrex.com', 'www.porntrex.com')}
+AUTH_COOKIES = {'xvideos': ('session_token', 'session_token_auth'), 'porntrex': ('kt_member', 'PHPSESSID')}
+
 SNAPSHOT = """JSON.stringify({
     host:location.hostname,route:location.pathname.startsWith('/video')?'video':location.pathname,
     ready:document.readyState,visible:document.visibilityState,
@@ -23,8 +26,8 @@ SNAPSHOT = """JSON.stringify({
     nativeLogin:!!document.querySelector('input[type="password"]'),
     error:document.querySelector('.status-error')?.textContent,
     controls:[...document.querySelectorAll('.buttons button')].filter(b=>!b.hidden).map(b=>b.textContent),
-    loading:!!document.querySelector('.viewer-loading'),current:localStorage.getItem('video-highlight:xvideos'),
-    pending:!!JSON.parse(sessionStorage.getItem('video-catalog:xvideos')||'null')?.nextPage,
+    loading:!!document.querySelector('.viewer-loading'),current:localStorage.getItem('video-highlight:PROVIDER'),
+    pending:!!JSON.parse(sessionStorage.getItem('video-catalog:PROVIDER')||'null')?.nextPage,
     viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale},
     slots:[...document.querySelectorAll('.player-scope')].map(s=>{const v=s.querySelector('video');return {
         role:s.className,ready:v.readyState,width:v.videoWidth,height:v.videoHeight,
@@ -41,7 +44,7 @@ LIST_PROGRESS = """(() => {
     const probe = window.__xvPaginationProbe;
     const first = document.querySelector('.video-row');
     if (first && !probe.first) probe.first = first;
-    const state = JSON.parse(sessionStorage.getItem('video-catalog:xvideos') || 'null');
+    const state = JSON.parse(sessionStorage.getItem('video-catalog:PROVIDER') || 'null');
     return JSON.stringify({
         route: location.pathname.startsWith('/video') ? 'video' : location.pathname,
         rows: document.querySelectorAll('.video-row').length,
@@ -55,6 +58,7 @@ LIST_PROGRESS = """(() => {
 
 async def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--provider', choices=sorted(HOSTS), default='xvideos')
     parser.add_argument('--native', action='store_true')
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--cookies', action='store_true', help='Read only authentication cookie flags/expiry, never values')
@@ -78,10 +82,11 @@ async def main():
         if args.inventory:
             print(json.dumps([{'id':p.page.id_, 'host':urlparse(p.page.web_url).hostname} for p in safari]), flush=True)
             return
-        candidates = [p for p in safari if urlparse(p.page.web_url).hostname in ('xvideos.com', 'www.xvideos.com')
+        candidates = [p for p in safari if urlparse(p.page.web_url).hostname in HOSTS[args.provider]
                       and (args.page_id is None or p.page.id_ == args.page_id)]
         if len(candidates) != 1:
-            raise RuntimeError('Need exactly one XVideos Safari tab; use --inventory and --page-id')
+            raise RuntimeError(f'Need exactly one {args.provider} Safari tab; use --inventory and --page-id')
+        snapshot, progress = (script.replace('PROVIDER', args.provider) for script in (SNAPSHOT, LIST_PROGRESS))
         pair = candidates[0]
         session = await asyncio.wait_for(inspector.inspector_session(pair.application, pair.page), 15)
         await asyncio.wait_for(session.runtime_enable(), 10)
@@ -91,7 +96,7 @@ async def main():
                 if isinstance(obj, dict):
                     if 'cookies' in obj:
                         return [{key: cookie.get(key) for key in ('name', 'domain', 'path', 'expires', 'httpOnly', 'secure', 'session', 'sameSite')}
-                                for cookie in obj['cookies'] if cookie.get('name') in ('session_token', 'session_token_auth')]
+                                for cookie in obj['cookies'] if cookie.get('name') in AUTH_COOKIES[args.provider]]
                     for key, value in obj.items():
                         if key == 'message' and isinstance(value, str):
                             try: value = json.loads(value)
@@ -100,7 +105,7 @@ async def main():
                         if result is not None: return result
                 return None
             print('COOKIE_METADATA', json.dumps(metadata(response)), flush=True)
-        print('BEFORE', await asyncio.wait_for(session.runtime_evaluate(SNAPSHOT), 15), flush=True)
+        print('BEFORE', await asyncio.wait_for(session.runtime_evaluate(snapshot), 15), flush=True)
         if args.evaluate_file:
             print('ACTION', await asyncio.wait_for(session.runtime_evaluate(Path(args.evaluate_file).read_text()), 15), flush=True)
         if args.sample_list:
@@ -108,7 +113,7 @@ async def main():
             last = None
             opened = returned = False
             while asyncio.get_running_loop().time() < deadline:
-                sample = await asyncio.wait_for(session.runtime_evaluate(LIST_PROGRESS), 10)
+                sample = await asyncio.wait_for(session.runtime_evaluate(progress), 10)
                 if sample != last:
                     print('LIST_PROGRESS', sample, flush=True)
                     last = sample
@@ -122,7 +127,7 @@ async def main():
                 await asyncio.sleep(0.15)
         else:
             await asyncio.sleep(min(45, max(0, args.observe_seconds)))
-        print('AFTER', await asyncio.wait_for(session.runtime_evaluate(SNAPSHOT), 15), flush=True)
+        print('AFTER', await asyncio.wait_for(session.runtime_evaluate(snapshot), 15), flush=True)
     finally:
         await inspector.close()
         await lockdown.close()

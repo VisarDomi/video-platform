@@ -8,6 +8,7 @@ import { testScrollSettlement } from './scroll-settlement.mjs';
 // Isolated WebKit fixtures exercise the built frontend. Real iPhone HLS and
 // trusted momentum are checked separately against the installed extension.
 const extension = fs.readFileSync('dist/extension/xvideos/content.js', 'utf8');
+const porntrexExtension = fs.readFileSync('dist/extension/porntrex/content.js', 'utf8');
 const web = 'packages/app/build';
 const listeners = [];
 const background = { navigator: {userAgent:'Safari', platform:'MacIntel'}, console, setTimeout, clearTimeout,
@@ -134,6 +135,75 @@ try {
     assert.equal(await early.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
     console.log('PASS: shared online UI, highest quality, incremental/recovering pagination, progress, Back/reload, no PC calls, native login/management.');
     await context.close();
+
+    const ptrex = await browser.newContext(options);
+    await mediaFixture(ptrex);
+    const ptReads = [];
+    let ptSignedIn = true;
+    const ptName = n => n === 3 ? 'Full title 2026-07-13 162147 no brackets' : `2026-01-20 14063${n} Upload ${n}`;
+    const ptRow = n => `<div class="video-item" data-item-id="${n}"><a class="thumb" href="https://www.porntrex.com/video/${n}/upload-${n}/"></a>`
+        + `<div class="durations"><i class="fa fa-clock-o"></i> ${['61:22', '1:02:03', '2:30'][n - 1]}</div>`
+        + `<p class="inf"><a href="https://www.porntrex.com/video/${n}/upload-${n}/">${n === 3 ? ptName(n) : `Ignored title [${ptName(n)}]`}</a></p></div>`;
+    await ptrex.route('**/*', async route => {
+        const request = route.request(), url = new URL(request.url());
+        ptReads.push(url.pathname);
+        assert.equal(request.method(), 'GET', 'Online provider must never mutate a PC or site');
+        assert.ok(!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/hls/'));
+        if (url.pathname === '/my/videos/') {
+            // Real signed-out requests redirect to the home page; Playwright cannot fake that redirect.
+            if (!ptSignedIn) return route.fulfill({ contentType: 'text/html', body: '<form><input name="username"><input type="password"></form>' });
+            return route.fulfill({ contentType: 'text/html', body: '<div id="list_videos_my_uploaded_videos"><h2>My Videos (3)</h2>'
+                + ptRow(1) + ptRow(2) + ptRow(3) + '</div>' });
+        }
+        if (/^\/video\/\d+\/[^/]+\/$/.test(url.pathname)) {
+            const id = url.pathname.split('/')[2], file = q => `https://www.porntrex.com/get_file/8/fixture${id}/${q}.mp4/`;
+            return route.fulfill({ contentType: 'text/html', body: `<script>var flashvars = { video_id: '${id}', `
+                + `video_url: '${file('480p')}', video_url_text: '480p', video_alt_url: '${file('720p')}', video_alt_url_text: '720p HD', `
+                + `video_alt_url2: '${file('2160p')}', video_alt_url2_text: '2160p 4K', video_alt_url3: '${file('1080p')}', video_alt_url3_text: '1080p FHD' };</script>` });
+        }
+        if (url.pathname.startsWith('/get_file/')) return route.fulfill({ contentType: 'video/mp4', body: '' });
+        return route.fulfill({ contentType: 'text/html', body: '<p id="native">Original</p><form><input type="password"></form>' });
+    });
+    const pt = await ptrex.newPage();
+    const ptErrors = [];
+    pt.on('pageerror', error => ptErrors.push(error.message));
+    const ptInject = () => pt.addScriptTag({ content: porntrexExtension });
+    await pt.goto('https://www.porntrex.com/my/videos/');
+    await ptInject();
+    await pt.waitForSelector('a.video-row');
+    assert.deepEqual(await pt.locator('.video-name').allTextContents(), [ptName(1), ptName(2), ptName(3)],
+        'Bracketed timestamps become the label; unbracketed titles stay whole');
+    assert.deepEqual(await pt.locator('.video-meta > span:first-child').allTextContents(), ['1:01:22', '1:02:03', '02:30']);
+    assert.equal(ptReads.filter(path => path.startsWith('/video/')).length, 0, 'Listing does not resolve every source');
+    await pt.locator('a.video-row').first().click();
+    await pt.waitForURL('**/video/1/upload-1/');
+    await ptInject();
+    await pt.waitForSelector('.video-stage:not(.viewer-loading)');
+    await pt.waitForFunction(() => document.querySelector('.current-scope video').src.endsWith('/fixture1/2160p.mp4/'));
+    assert.equal(await pt.locator('.streamer-name').textContent(), ptName(1));
+    assert.deepEqual(await pt.locator('.buttons button:visible').allTextContents(), ['🔇']);
+    const ptState = await pt.evaluate(() => sessionStorage.getItem('video-catalog:porntrex'));
+    assert.ok(!ptState.includes('get_file') && !JSON.parse(ptState).nextPage, 'Never persist sources; one uploads page');
+    await testScrollSettlement(pt, 'porntrex', '');
+    await pt.goBack(); await ptInject();
+    await pt.waitForFunction(() => document.querySelectorAll('.video-row').length === 3);
+    assert.equal(await pt.locator('.current-video').count(), 1);
+    assert.deepEqual(ptErrors, []);
+    ptSignedIn = false;
+    await pt.goto('https://www.porntrex.com/my/videos/'); await ptInject();
+    await pt.waitForURL('**/login/');
+    await ptInject();
+    assert.equal(await pt.locator('#native').count(), 1, 'Login stays native');
+    ptSignedIn = true;
+    await pt.waitForURL('**/my/videos/', { timeout: 10_000 });
+    await pt.close();
+    await ptrex.addInitScript({ content: porntrexExtension });
+    const ptEarly = await ptrex.newPage();
+    await ptEarly.goto('https://www.porntrex.com/my/videos/', { waitUntil: 'commit' });
+    await ptEarly.waitForSelector('a.video-row');
+    assert.equal(await ptEarly.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
+    console.log('PASS: Porntrex uploads, timestamp labels, durations, highest MP4 quality, Back, signed-out redirect to native login, document-start takeover.');
+    await ptrex.close();
 
     const local = await browser.newContext(options);
     await mediaFixture(local);
