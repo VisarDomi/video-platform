@@ -10,7 +10,8 @@
       "login": true,
       "extensions": [
         "Login",
-        "Xvid"
+        "Xvid",
+        "Ptrex"
       ]
     }
   },

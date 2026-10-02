@@ -29,21 +29,28 @@ const result=await build({entryPoints:[resolve(app,'web/app.ts')],outfile:resolv
 await writeFile(resolve(out,'index.html'),await readFile(resolve(app,'web/index.html')));
 await writeFile(resolve(app,'build',key,'inputs.json'),JSON.stringify(Object.keys(result.metafile.inputs),null,2)+'\n');
 await writeFile(resolve(app,'build/providers.json'),JSON.stringify(Object.fromEntries(Object.entries(registry).filter(([,v])=>v.ios).map(([k,v])=>[k,v.ios])),null,2)+'\n');
-if(config.extensions?.includes('Xvid')) {
+// Online Safari extensions hosted by this app, each built by video-platform's shared frontend.
+const online={
+    Xvid:{provider:'xvideos',site:'XVideos',hosts:['xvideos.com','www.xvideos.com']},
+    Ptrex:{provider:'porntrex',site:'Porntrex',hosts:['porntrex.com','www.porntrex.com']},
+};
+for(const name of config.extensions??[]) {
+    if(!online[name]) continue;
+    const {provider,site,hosts}=online[name];
     const videoPlatform=resolve(root,'../video-platform');
-    const extension=spawnSync(process.execPath,[resolve(videoPlatform,'packages/app/scripts/build-extension.mjs'),'xvideos'],{cwd:videoPlatform,stdio:'inherit'});
+    const extension=spawnSync(process.execPath,[resolve(videoPlatform,'packages/app/scripts/build-extension.mjs'),provider],{cwd:videoPlatform,stdio:'inherit'});
     if(extension.status!==0) process.exit(extension.status??1);
-    const source=resolve(videoPlatform,'dist/extension/xvideos'), destination=resolve(app,'build',key,'Xvid');
+    const source=resolve(videoPlatform,'dist/extension',provider), destination=resolve(app,'build',key,name);
     const manifest=JSON.parse(await readFile(resolve(source,'manifest.json'),'utf8'));
-    const matches=['https://xvideos.com/*','https://www.xvideos.com/*'];
-    manifest.name='Xvid';
-    manifest.description='Video Platform for XVideos, hosted by Tango.';
+    const matches=hosts.map(host=>`https://${host}/*`);
+    manifest.name=name;
+    manifest.description=`Video Platform for ${site}, hosted by Tango.`;
     manifest.host_permissions=matches;
     for(const content of manifest.content_scripts) content.matches=matches;
     await mkdir(destination,{recursive:true});
     await copyFile(resolve(source,'content.js'),resolve(destination,'content.js'));
     await writeFile(resolve(destination,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
-    console.log('Packaged Xvid from video-platform’s shared frontend.');
+    console.log(`Packaged ${name} from video-platform’s shared frontend.`);
 }
 const generated=spawnSync('python3',[resolve(app,'scripts/project.py'),key],{stdio:'inherit'});
 if(generated.status!==0) process.exit(generated.status??1);

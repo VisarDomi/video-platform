@@ -67,9 +67,9 @@ for extension in extensions:
     assert eprofile['TeamIdentifier']==[{TEAM!r}] and {DEVICE!r} in eprofile['ProvisionedDevices']
     ent=plistlib.loads(subprocess.check_output(['codesign','-d','--entitlements',':-',str(extension)],stderr=subprocess.DEVNULL))
     if suffix=='Login': assert ent['keychain-access-groups']==[{(TEAM+'.'+config['bundleId'])!r}]
-    if suffix=='Xvid':
-        assert einfo['CFBundleDisplayName']=='Xvid'
-        source=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'Xvid'
+    if suffix!='Login':
+        assert einfo['CFBundleDisplayName']==suffix
+        source=pathlib.Path({MAC!r})/'build'/{a.provider!r}/suffix
         for name in ['content.js','manifest.json']:
             assert hashlib.sha256((source/name).read_bytes()).digest()==hashlib.sha256((extension/name).read_bytes()).digest()
 assert entitlements['keychain-access-groups']==[{(TEAM+'.'+config['bundleId'])!r}]

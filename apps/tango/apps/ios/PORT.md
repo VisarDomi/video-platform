@@ -412,3 +412,29 @@ Build 13 adjusts Xvid display names only. Bracketed text containing the upload's
 titles without that timestamp keep their full text. Upload IDs, progress and
 navigation URLs retain their existing meanings. The shared provider parser
 applies this rule once for both the list and player.
+
+## October 2: Ptrex, the Porntrex extension (build 14)
+
+Tango now hosts a second online-provider Safari extension, **Ptrex**
+(`com.visar.Tango.paid.Ptrex`), beside Login and Xvid. Like Xvid, its UI and
+provider come from `video-platform/packages/app/src` (see `PROVIDERS.md` there):
+the signed-in `/my/videos/` list, the shared player/overlay/gestures, the same
+timestamp title rule and the highest labelled MP4 quality. It needs only website
+access to porntrex.com; the site's 30-day `kt_member` cookie keeps the login, so
+there is no background worker or cookie permission. Pagination waits until the
+account has enough uploads to show its format.
+
+`src/provider/providers.json` lists the extensions. `scripts/build-ios.mjs`
+packages every online extension from video-platform (`Xvid` → xvideos, `Ptrex` →
+porntrex); `project.py` and `deploy.py` treat any non-Login extension the same way,
+with its own `<Name>/Handler.swift` and `build/tango/<Name>` payload. The Tango Web
+payload is unchanged. Use the same prepare/test/sync/build/install commands as
+build 12. A newly added extension starts disabled: enable it in Settings → Apps →
+Safari → Extensions and allow its site. Reinstalls and renewals keep it enabled.
+
+Reader Extensions' `configure-refresh.py` now derives Tango's renewal inputs from
+the registry's extensions. The Mac's `tango.json` was updated to the same four
+bundle IDs and inputs, the build-14 baseline approved, renewal verified and the
+idle monthly scheduler resumed. The first renewal attempt hit the known
+provisioning-cache race; the unchanged retry renewed all four profiles to
+October 2, 2027. See `ptrex-verification.json`.
