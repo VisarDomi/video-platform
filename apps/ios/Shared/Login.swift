@@ -59,6 +59,12 @@ enum LoginStore {
         guard status == errSecSuccess else { throw failure("Keychain save", status) }
     }
 
+    // The app moves a confirmed import into its web view and then empties this inbox.
+    static func delete() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw failure("Keychain delete", status) }
+    }
+
     static func failure(_ operation: String, _ code: Int32) -> NSError {
         NSError(domain: "TangoLogin", code: Int(code), userInfo: [NSLocalizedDescriptionKey: "\(operation) (\(code))"])
     }

@@ -57,7 +57,7 @@ final class SiteCookies: NSObject, WKHTTPCookieStoreObserver {
     func keep(_ done: @escaping @MainActor () -> Void = {}) {
         guard restored else { return done() }
         store.getAllCookies { [self] cookies in
-            let site = cookies.filter { hosts.contains($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
+            let site = cookies.filter(onSite)
             let extended = extendedLogin(site)
             var login = site.filter { names.contains($0.name) && !$0.isSessionOnly }
             if let extended {
@@ -67,6 +67,12 @@ final class SiteCookies: NSObject, WKHTTPCookieStoreObserver {
             backUp(login)
             setAll(extended.map { [$0] } ?? [], done)
         }
+    }
+
+    // A site's cookies include its subdomains (Tango's login lives on gateway.tango.me).
+    private func onSite(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return hosts.contains { domain == $0 || domain.hasSuffix("." + $0) }
     }
 
     private func setAll(_ cookies: [HTTPCookie], _ done: @escaping @MainActor () -> Void) {

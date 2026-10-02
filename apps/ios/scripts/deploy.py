@@ -18,10 +18,14 @@ if a.action=='sync':
     # Online apps bundle their Safari extension's content script from this repository's
     # build, so the Mac (and monthly renewal) needs no Node or Video Platform checkout.
     if config.get('hosts'):
-        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
         staged=APP/'build'/a.provider/'content.js'
         staged.parent.mkdir(parents=True,exist_ok=True)
-        shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
+        if a.provider=='tango-live':
+            # TEMPORARY until tango-live runs in the shared viewer: the imported stream-viewer UI.
+            subprocess.run(['node',str(APP/'scripts/stage-stream-viewer.mjs')],cwd=ROOT,check=True)
+        else:
+            subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
+            shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
         print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
@@ -71,7 +75,8 @@ if {bool(config.get('hosts'))!r}:
     staged=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'content.js'
     assert (app/'content.js').read_bytes()==staged.read_bytes(), 'Bundled content script differs from the staged build'
 assert not any(k.startswith('CFBundleIcon') for k in info)
-assert not (app/'PlugIns').exists()
+extensions=sorted(p.name for p in (app/'PlugIns').glob('*.appex')) if (app/'PlugIns').exists() else []
+assert extensions==sorted({config['product']!r}+suffix+'.appex' for suffix in {config.get('extensions',[])!r}), extensions
 subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
 profile=plistlib.loads(subprocess.check_output(['security','cms','-D','-i',str(app/'embedded.mobileprovision')]))
 assert profile['TeamIdentifier']==[{TEAM!r}]
@@ -79,6 +84,12 @@ assert {DEVICE!r} in profile['ProvisionedDevices']
 assert fnmatch.fnmatchcase({(TEAM+'.'+config['bundleId'])!r},profile['Entitlements']['application-identifier'])
 entitlements=plistlib.loads(subprocess.check_output(['codesign','-d','--entitlements',':-',str(app)],stderr=subprocess.DEVNULL))
 assert entitlements['application-identifier']=={(TEAM+'.'+config['bundleId'])!r}
+if {bool(config.get('tangoLogin'))!r}:
+    group=[{(TEAM+'.'+config['bundleId'])!r}]
+    assert entitlements['keychain-access-groups']==group
+    login=app/'PlugIns'/{(config['product']+'Login.appex')!r}
+    assert plistlib.loads((login/'Info.plist').read_bytes())['CFBundleIdentifier']=={(config['bundleId']+'.Login')!r}
+    assert plistlib.loads(subprocess.check_output(['codesign','-d','--entitlements',':-',str(login)],stderr=subprocess.DEVNULL))['keychain-access-groups']==group
 assert profile['ExpirationDate']>datetime.datetime.utcnow()+datetime.timedelta(days=45)
 print('Verified bundle, name, start URL, site scope, content script, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)

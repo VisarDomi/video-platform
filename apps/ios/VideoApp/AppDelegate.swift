@@ -14,6 +14,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         window?.makeKeyAndVisible()
         return true
     }
+    func applicationDidBecomeActive(_ application: UIApplication) { browser.resume() }
     func applicationWillResignActive(_ application: UIApplication) { browser.saveSession() }
     // iOS evicts only backgrounded apps; give the login cookie time to be saved first.
     func applicationDidEnterBackground(_ application: UIApplication) {

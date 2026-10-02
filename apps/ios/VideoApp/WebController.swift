@@ -19,6 +19,8 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     private let failure = UIStackView()
     private let message = UILabel()
     private var failedURL: URL?
+    private var started = false
+    private var loginView: UIStackView?
 
     init(start: URL, hosts: [String]) {
         self.start = start
@@ -40,9 +42,6 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         if !hosts.isEmpty {
             // The sites see Safari, and the extension's script starts at document start in the page world.
             config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Mobile/15E148 Safari/604.1"
-            if let url = Bundle.main.url(forResource: "content", withExtension: "js"), let script = try? String(contentsOf: url, encoding: .utf8) {
-                config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-            }
         }
         webView = WKWebView(frame: .zero, configuration: config)
         if !hosts.isEmpty {
@@ -74,8 +73,33 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         view.addSubview(webView)
         buildFailureView()
         // Online apps put back their saved login before the first page loads.
-        if let cookies { cookies.restore { [weak self] in self?.open() } } else { open() }
+        if let cookies { cookies.restore { [weak self] in self?.signIn() } } else { open() }
     }
+    // Tango moves an imported Safari login into the web view first; other apps start directly.
+    private func signIn() {
+        guard Bundle.main.object(forInfoDictionaryKey: "TangoLogin") as? Bool == true else { return begin(scripts: []) }
+        TangoSession.prepare(store: webView.configuration.websiteDataStore.httpCookieStore) { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready(let session): hideLogin(); begin(scripts: [session])
+            case .pending: showLogin("Confirm that Tango’s Safari website data has been cleared.")
+            case .required: showLogin("Tango login is required.")
+            }
+        }
+    }
+    // The extension's content script runs at document start in the page world, after any session script.
+    private func begin(scripts: [String]) {
+        guard !started else { return }
+        started = true
+        let content = Bundle.main.url(forResource: "content", withExtension: "js").flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        for source in scripts + [content].compactMap({ $0 }) {
+            webView.configuration.userContentController.addUserScript(
+                WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        }
+        open()
+    }
+    // Returning from Safari after importing re-checks the login.
+    func resume() { if loginView != nil { signIn() } }
     // Like a restored Safari tab: reopen the last page with its Back/Forward list.
     private func open() {
         guard let state = try? Data(contentsOf: sessionURL) else { webView.load(URLRequest(url: start)); return }
@@ -175,6 +199,40 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         if webView.url == nil { webView.load(URLRequest(url: start)) } else { webView.reload() }
+    }
+
+    // Same steps and wording as the original Tango app's login handoff.
+    private func showLogin(_ message: String) {
+        hideLogin()
+        webView.isHidden = true
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.textColor = .lightGray
+        label.text = message + "\n\nSign in with Google on Tango in Safari. Enable Tango Login and choose Import login into Tango. Close Tango tabs, then delete only Tango in Safari’s Website Data settings."
+        let open = UIButton(type: .system)
+        open.setTitle("Open Tango in Safari", for: .normal)
+        open.addAction(UIAction { _ in UIApplication.shared.open(URL(string: "https://www.tango.me/")!) }, for: .touchUpInside)
+        let confirm = UIButton(type: .system)
+        confirm.setTitle("Safari data cleared — continue", for: .normal)
+        confirm.addAction(UIAction { [weak self] _ in
+            do { try TangoSession.confirm(); self?.signIn() } catch { label.text = error.localizedDescription }
+        }, for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [label, open, confirm])
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+        loginView = stack
+    }
+    private func hideLogin() {
+        loginView?.removeFromSuperview()
+        loginView = nil
+        webView.isHidden = false
     }
 
     // Safari shows its own page when a site is unreachable; this is the equivalent.

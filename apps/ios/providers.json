@@ -48,5 +48,25 @@
       "kt_member",
       "PHPSESSID"
     ]
+  },
+  "tango-live": {
+    "name": "Tango",
+    "product": "Tango",
+    "bundleId": "com.visar.Tango.paid",
+    "build": "16",
+    "url": "https://tango.me/",
+    "hosts": [
+      "tango.me",
+      "www.tango.me"
+    ],
+    "keepCookies": [
+      "Tango-RT",
+      "Tango-DI",
+      "Tango-DeviceId"
+    ],
+    "tangoLogin": true,
+    "extensions": [
+      "Login"
+    ]
   }
 }

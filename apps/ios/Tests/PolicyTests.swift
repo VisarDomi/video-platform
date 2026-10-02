@@ -28,6 +28,9 @@ struct PolicyTests {
                 for raw in blocked { check(!allows(raw), "\(provider) blocks \(raw)") }
             } else {
                 check(hosts.count == 2 && hosts.contains(start.host!), "\(provider) start URL is on its site")
+                if provider == "tango-live" {
+                    check(allows("https://tango.me/stream/abc") && !allows("https://gateway.tango.me/"), "tango-live pages stay on tango.me")
+                }
                 for host in hosts {
                     for path in ["/", "/account", "/login/", "/video.abc/x", "/video/1/x/", "/my/videos/", "/account/uploads/new"] {
                         check(allows("https://\(host)\(path)"), "\(provider) allows \(host)\(path)")
@@ -43,9 +46,9 @@ struct PolicyTests {
             }
         }
         let names = Set(registry.values.map { $0["name"] as! String }), ids = Set(registry.values.map { $0["bundleId"] as! String })
-        check(names == ["Tango local", "FC2 local", "SC local", "Xvid", "Ptrex"], "display names")
-        check(ids.count == 5 && ids.isDisjoint(with: ["com.visar.Tango.paid", "com.visar.Tango.paid.Xvid", "com.visar.Tango.paid.Ptrex"])
-              && ids.allSatisfy { $0.hasSuffix(".paid") }, "distinct paid bundle IDs, separate from Tango and its extensions")
+        check(names == ["Tango local", "FC2 local", "SC local", "Xvid", "Ptrex", "Tango"], "display names")
+        check(ids == ["com.visar.TangoLocal.paid", "com.visar.FC2Local.paid", "com.visar.SCLocal.paid", "com.visar.Xvid.paid",
+                      "com.visar.Ptrex.paid", "com.visar.Tango.paid"], "paid bundle IDs; Tango keeps its original identity")
         if failures > 0 { print("\(failures) policy check(s) failed"); exit(1) }
         print("PASS: local apps allow only their provider's pages on the PC; online apps only their own site")
     }
