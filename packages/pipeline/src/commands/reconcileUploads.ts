@@ -37,6 +37,14 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
             for (const confirmation of providerDue) {
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
+                let probe = remoteId ? await browser.probeUploadStatus(page, remoteId) : null;
+                if (remoteId && probe?.outcome === "missing") {
+                    // 404 means the ID does not exist. Forget it and settle the
+                    // attempt by filename, exactly as if no ID was ever captured.
+                    database.detachMissingRemote(confirmation.attemptId, remoteId, now);
+                    remoteId = null;
+                    probe = null;
+                }
                 if (!remoteId) {
                     const recording = database.get(confirmation.recordingId);
                     const metadata = database.getUploadMetadata(confirmation.recordingId);
@@ -62,7 +70,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 }
                 if (!remoteId) {
                     database.postponeConfirmation(confirmation.attemptId,
-                        "No unique filename match; daily lookup, no upload before a clean negative lookup and weekly deadline (visibility warnings never reupload)", now);
+                        "No unique filename match; daily lookup, no upload before a clean negative lookup and weekly deadline", now);
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "identity_recheck_scheduled",
@@ -70,7 +78,13 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     });
                     continue;
                 }
-                const probe = await browser.probeUploadStatus(page, remoteId);
+                probe ??= await browser.probeUploadStatus(page, remoteId);
+                if (probe.outcome === "missing") {
+                    database.detachMissingRemote(confirmation.attemptId, remoteId, now);
+                    database.postponeConfirmation(confirmation.attemptId, probe.reason ?? "Recovered ID returned 404", now);
+                    results.push({ recordingId: confirmation.recordingId, disposition: "identity_recheck_scheduled", reason: probe.reason });
+                    continue;
+                }
                 database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probe }, now);
                 if (probe.outcome === "online" && probe.remoteUrl) {
                     const verifiedArtifact = database.getArtifact(confirmation.recordingId);

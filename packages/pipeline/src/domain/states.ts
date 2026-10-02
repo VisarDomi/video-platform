@@ -23,7 +23,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<PipelineState, readonly PipelineState
     artifact_valid: ["described", "blocked", "failed", "cleanup_eligible", "oldhost_uncertain"],
     described: ["provenance_review_required", "metadata_ready", "blocked", "failed", "cleanup_eligible", "oldhost_uncertain"],
     provenance_review_required: ["described", "blocked", "failed", "cleanup_eligible", "oldhost_uncertain"],
-    metadata_ready: ["oldhost_admitted", "blocked", "failed", "cleanup_eligible", "oldhost_uncertain"],
+    metadata_ready: ["oldhost_admitted", "artifact_valid", "blocked", "failed", "cleanup_eligible", "oldhost_uncertain"],
     oldhost_admitted: ["oldhost_uploading", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     oldhost_uploading: ["oldhost_uploaded", "oldhost_uncertain", "metadata_ready", "blocked", "failed", "cleanup_eligible"],
     oldhost_uploaded: ["artifact_valid", "oldhost_verified", "oldhost_uncertain", "blocked", "failed", "cleanup_eligible"],

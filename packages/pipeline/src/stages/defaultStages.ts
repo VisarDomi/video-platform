@@ -63,6 +63,6 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
                 validatedAt: artifact.validatedAt,
             };
         },
-        describe: (_recording, artifact) => describeValidatedArtifact(artifact),
+        describe: (_recording, artifact, avoidPhrases) => describeValidatedArtifact(artifact, avoidPhrases),
     };
 }

@@ -35,7 +35,7 @@ export type RemuxStageResult = string | {
 export interface PipelineStages {
     remux(recording: Recording): Promise<RemuxStageResult>;
     validateArtifact(recording: Recording, artifactPath: string): Promise<Omit<ArtifactRecord, "recordingId">>;
-    describe(recording: Recording, artifact: ArtifactRecord): Promise<DescriptionEvidence>;
+    describe(recording: Recording, artifact: ArtifactRecord, avoidPhrases: readonly string[]): Promise<DescriptionEvidence>;
 }
 
 export class PipelineOrchestrator {
@@ -111,7 +111,8 @@ export class PipelineOrchestrator {
                 case "artifact_valid": {
                     const artifact = this.database.getArtifact(recording.id);
                     if (!artifact) throw new Error("Valid recording has no artifact metadata");
-                    const description = await this.stages.describe(recording, artifact);
+                    // Every provider's rejected phrases: avoiding them costs nothing elsewhere.
+                    const description = await this.stages.describe(recording, artifact, this.database.listRejectedPhrases());
                     result = this.database.saveDescription(recording.id, description);
                     break;
                 }
