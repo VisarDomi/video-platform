@@ -12,6 +12,7 @@ export interface PtrexPhoneConfig {
     readonly bundleId: string;
     readonly macAppDirectory: string;
     readonly inspectorPython: string;
+    readonly inspector: string;
 }
 
 export const DEFAULT_PTREX_PHONE: PtrexPhoneConfig = {
@@ -20,7 +21,8 @@ export const DEFAULT_PTREX_PHONE: PtrexPhoneConfig = {
     device: process.env.VIDEO_IPHONE_DEVICE ?? "00008101-000639912881401E",
     bundleId: "com.visar.Ptrex.paid",
     macAppDirectory: "/Users/visar/Developer/video-platform/apps/ios",
-    inspectorPython: "/Users/visar/Developer/gallery-reader-extension/inspector-venv/bin/python",
+    inspectorPython: "/Users/visar/Developer/ios-tools/inspector/.venv/bin/python",
+    inspector: "/Users/visar/Developer/ios-tools/inspector/app-inspector.py",
 };
 
 export interface PhoneSessionResult {
@@ -117,7 +119,7 @@ export class PtrexPhone {
         let last = "";
         for (let attempt = 1; attempt <= 8; attempt++) {
             await this.pause(3_000);
-            const run = await this.ssh(`cd ${quote(this.config.macAppDirectory)} && ${quote(this.config.inspectorPython)} scripts/app-inspector.py --bundle ${quote(this.config.bundleId)} --evaluate-file ${quote(file)}`);
+            const run = await this.ssh(`cd ${quote(this.config.macAppDirectory)} && ${quote(this.config.inspectorPython)} ${quote(this.config.inspector)} --device ${quote(this.config.device)} --bundle ${quote(this.config.bundleId)} --evaluate-file ${quote(file)}`);
             const line = run.stdout.split("\n").find((text) => text.startsWith("RESULT "));
             if (line) return JSON.parse(line.slice("RESULT ".length)) as PhoneSessionResult;
             last = `${run.stdout}\n${run.stderr}`.trim().split("\n").filter((text) => !/Warning|warnings\.warn/.test(text)).slice(-1)[0] ?? "";

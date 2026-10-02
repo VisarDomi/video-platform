@@ -2,7 +2,7 @@
 
 No production-code injection, storage replacement, session export, screenshots,
 or media URLs. Optional diagnostic JS can operate the existing page controls.
-Run with the Mac's existing gallery-reader-extension/inspector-venv Python.
+Run with ios-tools' inspector Python on the Mac.
 """
 import argparse
 import asyncio
