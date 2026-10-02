@@ -9,7 +9,7 @@ import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { readUploadProvidersFile, readProviderCredentials } from "../dist/config/uploadProviders.js";
 import { readXvideosCredentials } from "../dist/config/secrets.js";
 import { submitPasswordLogin } from "../dist/upload/passwordLogin.js";
-import { ChromiumPorntrexUploader, matchesPorntrexIdentity } from "../dist/upload/chromiumPorntrexUploader.js";
+import { ChromiumPorntrexUploader, matchesPorntrexIdentity, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
 
 test("provider-keyed private credentials only; a legacy activeProvider field is ignored; no secret diagnostics", async t => {
     const root = await mkdtemp(path.join(os.tmpdir(), "upload-provider-config-"));
@@ -73,6 +73,31 @@ test("native password login ignores hidden reset-password fields (XVideos sign-i
     await page.goto(origin);
     await submitPasswordLogin(page, origin, { email: "local@example.invalid", password: "fake-local-only" });
     assert.equal(await page.locator("body").getAttribute("data-submitted"), "local@example.invalid|fake-local-only||on");
+});
+
+test("Porntrex 18+ gate is answered only through its exact confirm button; other overlays need a person", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.setContent(`<div id="overlay"><p>This is an adult website</p><div id="okButton">Im 18 or older</div><div>LEAVE</div></div><script>document.getElementById('okButton').onclick=()=>document.getElementById('overlay').style.display='none'</script>`);
+    await passPorntrexAgeGate(page);
+    assert.equal(await page.locator("#overlay").isVisible(), false);
+    await passPorntrexAgeGate(page);
+    await page.setContent(`<div id="overlay"><p>Verify your phone number</p><div id="okButton">Continue</div></div>`);
+    await assert.rejects(passPorntrexAgeGate(page), /first-visit Porntrex prompts/);
+});
+
+test("native login ticks a styled-hidden remember-me box (Porntrex form shape)", async t => {
+    const server = createServer((_request, response) => response.end(`<!doctype html><form method="post"><input type="text" name="username"><input type="password" name="pass"><input type="checkbox" name="remember_me" style="display:none"><input type="hidden" name="action" value="login"><input type="submit"></form><script>document.querySelector('form').onsubmit=e=>{e.preventDefault();document.body.dataset.remember=String(new FormData(e.target).get('remember_me'))}</script>`));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.goto(origin);
+    await submitPasswordLogin(page, origin, { email: "local@example.invalid", password: "fake-local-only" });
+    assert.equal(await page.locator("body").getAttribute("data-remember"), "on");
 });
 
 test("Porntrex exact filename identity recognizes manual titles, never approximate aliases", () => {

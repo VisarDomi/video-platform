@@ -22,6 +22,19 @@ export function matchesPorntrexIdentity(title: string, identity: string): boolea
     return hasDiagnosticUploadIdentity(title, identity) || title.trimEnd().endsWith(` ${identity}`);
 }
 
+// The site's 18+ notice returns whenever its weekly "confirmed" cookie expires.
+// It is the only overlay answered automatically; anything else needs a person.
+export async function passPorntrexAgeGate(page: Page): Promise<void> {
+    const overlay = page.locator("#overlay");
+    if (!await overlay.isVisible().catch(() => false)) return;
+    const confirm = overlay.locator("#okButton");
+    if (await confirm.count() !== 1 || !/^\s*i'?m 18 or older\s*$/i.test(await confirm.textContent() ?? "")) {
+        throw new HumanActionRequiredError("session_login", "Complete the first-visit Porntrex prompts in the persistent browser profile");
+    }
+    await confirm.click();
+    await overlay.waitFor({ state: "hidden", timeout: 10_000 });
+}
+
 export class ChromiumPorntrexUploader implements XvideosUploader {
     readonly provider = "porntrex" as const;
     constructor(private readonly config: ChromiumUploaderConfig) {}
@@ -37,12 +50,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         try {
             const page = context.pages()[0] ?? await context.newPage();
             await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await passPorntrexAgeGate(page);
             const file = page.locator('input[type="file"][name="content"]');
             if (!await file.count()) {
                 await page.goto(`${ORIGIN}/login/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-                if (await page.locator("#overlay").isVisible().catch(() => false)) {
-                    throw new HumanActionRequiredError("session_login", "Complete the first-visit Porntrex prompts in the persistent browser profile");
-                }
+                await passPorntrexAgeGate(page);
                 await page.locator('form input[name="pass"]').last().waitFor({ state: "visible", timeout: 15_000 });
                 await submitPasswordLogin(page, ORIGIN, this.config);
                 await page.getByRole("link", { name: /Hello,/ }).first().waitFor({ state: "visible", timeout: 30_000 });
@@ -57,6 +69,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         { kind: "found"; remoteId: string; remoteUrl: string } | { kind: "absent" | "ambiguous" }
     > {
         await page.goto(`${ORIGIN}/my/videos/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await passPorntrexAgeGate(page);
         const entries = new Map<string, Entry>();
         const signatures = new Set<string>();
         let expected = -1;
@@ -117,6 +130,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             if (match.kind === "found") return { kind: "existing", remoteId: match.remoteId, remoteUrl: match.remoteUrl };
             if (match.kind !== "absent") throw new Error("Ambiguous Porntrex upload identity; refusing duplicate");
             await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            await passPorntrexAgeGate(page);
             const upload = page.locator('form:has(input[type="file"][name="content"])');
             await upload.waitFor({ state: "visible", timeout: 15_000 });
             await page.locator("#edit_video_upload_option_file").check();

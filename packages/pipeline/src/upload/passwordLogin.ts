@@ -32,8 +32,13 @@ export async function submitPasswordLogin(
     await identifiers.fill(credentials.email);
     if (new URL(page.url()).origin !== origin) throw new Error("Native login origin changed before password entry");
     await passwords.fill(credentials.password);
+    // Keep the session across browser restarts. Porntrex styles this box
+    // hidden behind a custom control, so tick the real input either way.
     const remember = form.locator('input[type="checkbox"]:is([name="remember_me"], [name$="[rememberme]"])');
-    if (await remember.count() === 1 && await remember.isVisible()) await remember.check();
+    if (await remember.count() === 1) await remember.evaluate((input) => {
+        const box = input as unknown as { checked: boolean; dispatchEvent(event: unknown): boolean };
+        if (!box.checked) { box.checked = true; box.dispatchEvent(new Event("change", { bubbles: true })); }
+    });
     if (new URL(page.url()).origin !== origin) throw new Error("Native login origin changed before submission");
     await submit.click();
 }
