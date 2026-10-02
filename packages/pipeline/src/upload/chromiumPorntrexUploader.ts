@@ -332,7 +332,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await passPorntrexAgeGate(page);
             await page.locator(LIST).waitFor({ state: "visible", timeout: 15_000 });
             if (await page.locator(`${LIST} [data-item-id="${uploadId}"]`).count()) {
-                return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex is still processing the video" };
+                return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex is still processing the video", processing: true };
             }
             return { outcome: "missing" as const, remoteUrl: null, reason: "Porntrex edit page returned 404 and the uploads list does not contain it" };
         }

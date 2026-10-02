@@ -68,3 +68,17 @@ function rotatedSession(response: Response, cookies: readonly StoredCookie[]): S
     if (!value || !current || value === current.value || value === "deleted") return null;
     return cookies.map((cookie) => cookie.name === "PHPSESSID" ? { ...cookie, value } : cookie);
 }
+
+// Read-only page request on the shared session (same cookies as the
+// keep-alive, never kt_member). For reports; it never logs in.
+export async function porntrexGet(sessionFilePath: string, pathname: string, fetchImpl: typeof fetch = fetch, origin = ORIGIN):
+    Promise<{ status: number; location: string | null; html: string }> {
+    const session = await readPorntrexSession(sessionFilePath);
+    if (!session) throw new Error("No shared Porntrex session stored; run `npm run ptrex:connect-iphone`");
+    const response = await fetchImpl(`${origin}${pathname}`, {
+        headers: { cookie: session.cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), "user-agent": USER_AGENT, accept: "text/html" },
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+    });
+    return { status: response.status, location: response.headers.get("location"), html: response.status === 200 ? await response.text() : "" };
+}

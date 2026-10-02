@@ -27,6 +27,7 @@
         "metadata:check": "npm run build && node --no-warnings dist/main.js metadata-check",
         "ptrex:connect-iphone": "npm run build && DISPLAY=:111 node --no-warnings dist/main.js ptrex-connect-iphone --apply",
         "ptrex:session-report": "npm run build && node --no-warnings dist/main.js ptrex-session-report",
+        "ptrex:uploads": "npm run build && node --no-warnings dist/main.js ptrex-uploads",
         "campaign:configure": "npm run build && node --no-warnings dist/main.js campaign-configure",
         "campaign:resume": "npm run build && node --no-warnings dist/main.js campaign-resume --apply",
         "campaign:pause": "npm run build && node --no-warnings dist/main.js campaign-pause --apply",

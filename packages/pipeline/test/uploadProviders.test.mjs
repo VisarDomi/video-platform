@@ -177,7 +177,7 @@ test("Porntrex edit-page 404 of a still-processing video is 'not ready', not 'mi
     });
     const page = await context.newPage();
     const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
-    assert.deepEqual(await uploader.probeUploadStatus(page, "3351303"), { outcome: "not_ready", remoteUrl: null, reason: "Porntrex is still processing the video" });
+    assert.deepEqual(await uploader.probeUploadStatus(page, "3351303"), { outcome: "not_ready", remoteUrl: null, reason: "Porntrex is still processing the video", processing: true });
     assert.equal((await uploader.probeUploadStatus(page, "999")).outcome, "missing");
 });
 

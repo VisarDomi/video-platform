@@ -117,8 +117,11 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         remoteUrl: probe.remoteUrl,
                     });
                 } else {
+                    // Porntrex publishes up to about a day after upload: while it is
+                    // still processing, look again in two hours instead of a day.
+                    const processing = (probe as { processing?: boolean }).processing === true;
                     database.postponeConfirmation(confirmation.attemptId,
-                        probe.reason ?? "Full-HD playback not yet confirmed", now);
+                        probe.reason ?? "Full-HD playback not yet confirmed", now, processing ? 2 * 60 * 60_000 : 24 * 60 * 60_000);
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "not_ready",

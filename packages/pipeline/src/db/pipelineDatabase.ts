@@ -2589,6 +2589,27 @@ export class PipelineDatabase {
             fingerprint: row.fingerprint, passwordLoginAt: row.password_login_at, note: row.note }));
     }
 
+    // Porntrex uploads that reached the provider, newest first, with what the
+    // pipeline submitted and where verification stands.
+    listPorntrexUploads(limit = 25): Array<{
+        recordingId: string; state: string; remoteId: string | null; startedAt: string; confirmAfter: string | null;
+        verifiedAt: string | null; metadata: { title: string; description: string; tags: string[] } | null;
+    }> {
+        return (this.database.prepare(`SELECT a.recording_id, r.state, COALESCE(u.remote_id, a.remote_id) AS remote_id, a.started_at,
+                c.confirm_after, u.verified_at, m.title, m.description, m.tags_json
+            FROM upload_attempts a JOIN recordings r ON r.id = a.recording_id
+            LEFT JOIN upload_confirmations c ON c.attempt_id = a.id AND c.status = 'pending'
+            LEFT JOIN remote_uploads u ON u.attempt_id = a.id
+            LEFT JOIN upload_metadata m ON m.recording_id = a.recording_id
+            WHERE a.provider = 'porntrex' AND a.status IN ('uncertain', 'accepted')
+            ORDER BY a.started_at DESC LIMIT ?`).all(limit) as unknown as Array<{
+            recording_id: string; state: string; remote_id: string | null; started_at: string; confirm_after: string | null;
+            verified_at: string | null; title: string | null; description: string | null; tags_json: string | null;
+        }>).map((row) => ({ recordingId: row.recording_id, state: row.state, remoteId: row.remote_id, startedAt: row.started_at,
+            confirmAfter: row.confirm_after, verifiedAt: row.verified_at,
+            metadata: row.title === null ? null : { title: row.title, description: row.description ?? "", tags: JSON.parse(row.tags_json ?? "[]") as string[] } }));
+    }
+
     listActiveUploadAttempts(): Array<{ id: string; recordingId: string; provider: string }> {
         return (this.database.prepare("SELECT id, recording_id, provider FROM upload_attempts WHERE status = 'started'")
             .all() as unknown as Array<{ id: string; recording_id: string; provider: string }>)
@@ -2686,10 +2707,10 @@ export class PipelineDatabase {
         }>).map((row) => ({ provider: row.provider, remoteId: row.remote_id, status: row.status }));
     }
 
-    postponeConfirmation(attemptId: string, reason: string, now = new Date()): void {
+    postponeConfirmation(attemptId: string, reason: string, now = new Date(), delayMilliseconds = 24 * 60 * 60_000): void {
         const update = this.database.prepare(`UPDATE upload_confirmations SET confirm_after = ?, checked_at = ?
             WHERE attempt_id = ? AND status = 'pending'`)
-            .run(new Date(now.getTime() + 24 * 60 * 60_000).toISOString(), now.toISOString(), attemptId);
+            .run(new Date(now.getTime() + delayMilliseconds).toISOString(), now.toISOString(), attemptId);
         if (!update.changes) return;
         this.recordUploadEvidence(attemptId, { stage: "verification_wait", reason }, now);
     }
