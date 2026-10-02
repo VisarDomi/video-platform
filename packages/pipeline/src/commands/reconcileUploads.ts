@@ -5,11 +5,11 @@ import { cleanupArtifact } from "../stages/cleanupArtifact.js";
 import { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
-import { productionUploadIdentity, hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
     browserOverride?: Pick<ChromiumXvideosUploader, "withAuthenticatedPage" | "probeUploadStatus">
-        & Partial<Pick<ChromiumXvideosUploader, "recoverUploadId">>,
+        & Partial<Pick<ChromiumXvideosUploader, "recoverUploadId" | "lookupUpload">>,
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network reconciliation is disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
@@ -21,6 +21,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
             throw new Error("Retired-version verification must not run in the v4 comparison worker");
         }
         results.push(...database.recoverInterruptedUploads(now));
+        database.recoverAcceptedVerifications(now);
         // One login flow, then every due confirmation is checked on that same
         // authenticated page.
         const due = database.dueUploadConfirmations(now);
@@ -38,16 +39,29 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 if (!remoteId) {
                     const recording = database.get(confirmation.recordingId);
                     const metadata = database.getUploadMetadata(confirmation.recordingId);
-                    const identity = recording ? productionUploadIdentity(recording,
-                        database.getArtifactPart(recording.id) ?? "full") : null;
-                    if (identity && metadata && hasDiagnosticUploadIdentity(metadata.title, identity) && browser.recoverUploadId) {
+                    const identity = recording && metadata ? uploadLookupIdentity(recording,
+                        database.getArtifactPart(recording.id) ?? "full", metadata.title) : null;
+                    if (identity && browser.lookupUpload) {
+                        const lookup = await browser.lookupUpload(page, identity);
+                        if (lookup.kind === "found") {
+                            remoteId = lookup.remoteId;
+                            database.attachUncertainRemote(confirmation.attemptId, remoteId);
+                        }
+                        const requeued = database.recordUploadLookup(confirmation.attemptId, lookup.kind, now);
+                        database.recordUploadEvidence(confirmation.attemptId, { stage: "filename_lookup", identity, ...lookup }, now);
+                        if (requeued) {
+                            results.push({ recordingId: confirmation.recordingId, disposition: "weekly_retry_eligible" });
+                            continue;
+                        }
+                    } else if (identity && browser.recoverUploadId) {
+                        // Legacy adapters can prove a positive ID, never absence.
                         remoteId = await browser.recoverUploadId(page, identity);
                         if (remoteId) database.attachUncertainRemote(confirmation.attemptId, remoteId);
                     }
                 }
                 if (!remoteId) {
                     database.postponeConfirmation(confirmation.attemptId,
-                        "No uniquely identified current-generation upload found; daily recheck, no automatic re-upload", now);
+                        "No unique filename match; daily lookup, no upload before a clean negative lookup and weekly deadline (visibility warnings never reupload)", now);
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "identity_recheck_scheduled",
@@ -59,9 +73,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probe }, now);
                 if (probe.outcome === "online" && probe.remoteUrl) {
                     const verifiedArtifact = database.getArtifact(confirmation.recordingId);
-                    database.reconcileUncertain(confirmation.attemptId, remoteId, probe.remoteUrl, now);
-                    const afterVerification = database.markRemoteVerified(
-                        confirmation.recordingId,
+                    const afterVerification = database.verifyUpload(
+                        confirmation.attemptId,
                         remoteId,
                         probe.remoteUrl,
                         now,

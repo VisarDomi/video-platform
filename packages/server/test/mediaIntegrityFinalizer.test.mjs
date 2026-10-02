@@ -94,6 +94,7 @@ test("failed fMP4 validation attributes an isolated fragment using clean neighbo
     ));
 
     const result = await finalizeMediaIntegrity(streamPath, {
+        inspectFragment: async () => null,
         validateMedia: async inputPath => {
             if (inputPath === path.join(streamPath, "playlist.m3u8")) {
                 return { valid: false, exitCode: 0, stderr: "missing reference picture" };
@@ -118,6 +119,7 @@ test("failed fMP4 validation attributes an isolated fragment using clean neighbo
 test("fMP4 validation blocks ambiguous adjacent fragment failures", async (t) => {
     const streamPath = await mkdtemp(path.join(tmpdir(), "fmp4-ambiguous-"));
     t.after(() => import("node:fs/promises").then(fs => fs.rm(streamPath, { recursive: true })));
+    await writeFile(path.join(streamPath, "init.mp4"), "initialization fixture");
     await writeFile(path.join(streamPath, "playlist.m3u8"), `${PLAYLIST_HEADER}#EXT-X-MAP:URI="init.mp4"
 #EXTINF:1,
 1.ts
@@ -127,6 +129,7 @@ test("fMP4 validation blocks ambiguous adjacent fragment failures", async (t) =>
 `);
 
     const result = await finalizeMediaIntegrity(streamPath, {
+        inspectFragment: async () => null,
         validateMedia: async () => ({ valid: false, exitCode: 0, stderr: "broken initialization context" }),
     });
 

@@ -14,9 +14,9 @@ export class FinalizationCheckpointStore {
         mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
         this.database = new DatabaseSync(databasePath);
         this.database.exec(`
+            PRAGMA busy_timeout = 5000;
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
-            PRAGMA busy_timeout = 5000;
             CREATE TABLE IF NOT EXISTS integrity_checkpoints (
                 recording_path TEXT PRIMARY KEY,
                 playlist_fingerprint TEXT NOT NULL,
@@ -26,6 +26,11 @@ export class FinalizationCheckpointStore {
             CREATE TABLE IF NOT EXISTS finalization_meta (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS media_repairs (
+                recording_path TEXT PRIMARY KEY,
+                plan_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             ) STRICT;
         `);
@@ -62,6 +67,22 @@ export class FinalizationCheckpointStore {
     clear(recordingPath: string): void {
         this.database.prepare("DELETE FROM integrity_checkpoints WHERE recording_path = ?")
             .run(path.resolve(recordingPath));
+    }
+
+    readRepair<T>(recordingPath: string): T | null {
+        const row = this.database.prepare("SELECT plan_json FROM media_repairs WHERE recording_path = ?")
+            .get(path.resolve(recordingPath)) as { plan_json: string } | undefined;
+        return row ? JSON.parse(row.plan_json) as T : null;
+    }
+
+    writeRepair(recordingPath: string, plan: unknown): void {
+        this.database.prepare(`INSERT INTO media_repairs VALUES (?, ?, ?)
+            ON CONFLICT(recording_path) DO UPDATE SET plan_json = excluded.plan_json, updated_at = excluded.updated_at`)
+            .run(path.resolve(recordingPath), JSON.stringify(plan), new Date().toISOString());
+    }
+
+    clearRepair(recordingPath: string): void {
+        this.database.prepare("DELETE FROM media_repairs WHERE recording_path = ?").run(path.resolve(recordingPath));
     }
 
     setMeta(key: string, value: unknown): void {

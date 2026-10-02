@@ -35,6 +35,8 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     {
         const database = new PipelineDatabase(config.databasePath);
         try {
+            database.recoverAcceptedVerifications();
+            database.releasePlaceholderReferences();
             const cleared = database.releaseAllLeases();
             if (cleared > 0) {
                 console.log(JSON.stringify({ event: "campaign-boot-clear-leases", cleared }));

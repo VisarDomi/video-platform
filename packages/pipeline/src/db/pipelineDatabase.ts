@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
+import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
+import { limitedVisibilityWarning } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type {
     ArtifactRecord,
@@ -23,7 +25,8 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
+const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
 interface RecordingRow {
@@ -480,8 +483,30 @@ export class PipelineDatabase {
             this.database.exec("ALTER TABLE campaign_control ADD COLUMN trial_finished_at TEXT");
         }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
+        for (const column of ["retry_not_before", "lookup_state", "lookup_checked_at", "limited_visibility"]) {
+            if (!attemptColumns.some((existing) => existing.name === column)) {
+                this.database.exec(`ALTER TABLE upload_attempts ADD COLUMN ${column} TEXT`);
+            }
+        }
+        this.database.exec(`UPDATE upload_attempts SET retry_not_before =
+            strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+7 days') WHERE retry_not_before IS NULL`);
         if (!attemptColumns.some((column) => column.name === "evidence_json")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '[]'");
+        }
+        // Preserve warning evidence from pre-upgrade attempts before daily
+        // checks rotate it out of the bounded diagnostic history.
+        {
+            // Idempotent even if power failed after adding the column but
+            // before backfilling it. Only rows with possible warning text need parsing.
+            const rows = this.database.prepare(`SELECT id, evidence_json FROM upload_attempts WHERE limited_visibility IS NULL
+                AND (evidence_json LIKE '%not allowed here%' OR evidence_json LIKE '%limited visibility%')`)
+                .all() as unknown as Array<{ id: string; evidence_json: string }>;
+            for (const row of rows) {
+                for (const evidence of JSON.parse(row.evidence_json) as Array<{ text?: string }>) {
+                    const warning = limitedVisibilityWarning(evidence.text ?? "");
+                    if (warning) this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(warning, row.id);
+                }
+            }
         }
         if (!attemptColumns.some((column) => column.name === "transfer_started")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN transfer_started INTEGER NOT NULL DEFAULT 0");
@@ -1708,7 +1733,7 @@ export class PipelineDatabase {
         const recording = this.requireRecording(id);
         const provenance = this.getProvenance(id);
         if (recording.state !== "described") throw new Error(`Recording ${id} is not described`);
-        if (!provenance || provenance.status === "review_required") {
+        if (!allowsUpload(provenance)) {
             throw new Error(`Recording ${id} has unresolved provenance`);
         }
         if (!metadata.title || metadata.title.length > 255) throw new Error("Upload title must contain at most 255 characters");
@@ -1783,6 +1808,7 @@ export class PipelineDatabase {
         this.transaction(() => {
             const recording = this.requireRecording(id);
             if (recording.state !== "metadata_ready") throw new Error(`Recording ${id} has no upload-ready metadata`);
+            if (!this.canAttemptUpload(id, now)) throw new Error("Weekly upload retry deadline has not elapsed");
             const artifactPart = this.getArtifactPart(id);
             if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
             const usage = this.uploadUsage(month);
@@ -1812,9 +1838,10 @@ export class PipelineDatabase {
             }
             this.database.prepare(`
                 INSERT INTO upload_attempts (
-                    id, reservation_id, recording_id, artifact_part, provider, status, started_at
-                ) VALUES (?, ?, ?, ?, 'xvideos', 'started', ?)
-            `).run(attemptId, reservationId, id, reservation.artifact_part, timestamp);
+                    id, reservation_id, recording_id, artifact_part, provider, status, started_at, retry_not_before
+                ) VALUES (?, ?, ?, ?, 'xvideos', 'started', ?, ?)
+            `).run(attemptId, reservationId, id, reservation.artifact_part, timestamp,
+                new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString());
             this.updateStateInTransaction(id, "xvideos_admitted", "xvideos_uploading", "upload attempt started", timestamp);
         });
         return attemptId;
@@ -1869,6 +1896,17 @@ export class PipelineDatabase {
 
     recoverInterruptedUploads(now = new Date()): Array<{ recordingId: string; disposition: string }> {
         const timestamp = now.toISOString();
+        // No attempt means no network operation was invoked after reservation.
+        this.transaction(() => {
+            const rows = this.database.prepare(`SELECT u.id, u.recording_id FROM upload_reservations u
+                JOIN recordings r ON r.id = u.recording_id WHERE u.status = 'reserved' AND r.state = 'xvideos_admitted'
+                AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.reservation_id = u.id)`)
+                .all() as unknown as Array<{ id: string; recording_id: string }>;
+            for (const row of rows) {
+                this.database.prepare(`UPDATE upload_reservations SET status = 'released', updated_at = ? WHERE id = ?`).run(timestamp, row.id);
+                this.updateStateInTransaction(row.recording_id, "xvideos_admitted", "metadata_ready", "restart released unused upload reservation", timestamp);
+            }
+        });
         const attempts = this.database.prepare(`
             SELECT a.id, a.recording_id, a.reservation_id, a.phase, a.progress_bytes, a.transfer_started,
                 r.calendar_month
@@ -1903,7 +1941,7 @@ export class PipelineDatabase {
                     UPDATE upload_attempts SET status = ?, transmitted_bytes = ?, error = ?, completed_at = ?
                     WHERE id = ? AND status = 'started'
                 `).run(uncertain ? "uncertain" : "failed", attempt.progress_bytes,
-                    `process interrupted during ${attempt.phase}`, timestamp, attempt.id);
+                    `process interrupted during ${attempt.phase === "started" && attempt.transfer_started ? "file_uploading" : attempt.phase}`, timestamp, attempt.id);
                 this.database.prepare(`
                     UPDATE upload_reservations SET status = 'released', updated_at = ? WHERE id = ?
                 `).run(timestamp, attempt.reservation_id);
@@ -1970,7 +2008,7 @@ export class PipelineDatabase {
             }
             recordingId = attempt.recording_id;
             this.database.prepare(`
-                UPDATE upload_attempts SET status = ?, transmitted_bytes = ?, remote_id = ?,
+                UPDATE upload_attempts SET status = ?, transmitted_bytes = ?, remote_id = COALESCE(?, remote_id),
                     remote_url = ?, error = ?, completed_at = ? WHERE id = ?
             `).run(outcome.status, outcome.transmittedBytes, outcome.remoteId ?? null,
                 outcome.remoteUrl ?? null, outcome.error ?? null, timestamp, attemptId);
@@ -2124,6 +2162,84 @@ export class PipelineDatabase {
         return { remoteId: row.remote_id, remoteUrl: row.remote_url };
     }
 
+    canAttemptUpload(id: string, now = new Date()): boolean {
+        const row = this.database.prepare(`SELECT MAX(retry_not_before) AS deadline FROM upload_attempts
+            WHERE recording_id = ? AND artifact_part = ? AND
+                (transfer_started = 1 OR progress_bytes > 0 OR transmitted_bytes > 0 OR status IN ('uncertain', 'accepted'))`)
+            .get(id, this.getArtifactPart(id) ?? "full") as { deadline: string | null };
+        return !row.deadline || row.deadline <= now.toISOString();
+    }
+
+    hasUploadAttempt(id: string): boolean {
+        return !!this.database.prepare(`SELECT 1 FROM upload_attempts WHERE recording_id = ? AND artifact_part = ? LIMIT 1`)
+            .get(id, this.getArtifactPart(id) ?? "full");
+    }
+
+    releasePlaceholderReferences(now = new Date()): number {
+        return this.transaction(() => {
+            let released = 0;
+            for (const r of this.list("provenance_review_required")) {
+                if (!allowsPlaceholder(this.getProvenance(r.id))) continue;
+                this.updateStateInTransaction(r.id, r.state, "described", "unresolved source reference allowed as TODO LATER", now.toISOString());
+                released++;
+            }
+            return released;
+        });
+    }
+
+    // A clean negative search is evidence, not proof that bytes never arrived.
+    // Requeue only after the persisted weekly deadline; known IDs and provider
+    // visibility warnings are never reasons to upload the same video again.
+    recordUploadLookup(attemptId: string, result: "absent" | "ambiguous" | "found", now = new Date()): boolean {
+        return this.transaction(() => {
+            const a = this.database.prepare(`SELECT recording_id, remote_id, limited_visibility, retry_not_before
+                FROM upload_attempts WHERE id = ? AND status = 'uncertain'`).get(attemptId) as {
+                    recording_id: string; remote_id: string | null; limited_visibility: string | null; retry_not_before: string;
+                } | undefined;
+            if (!a) return false;
+            this.database.prepare(`UPDATE upload_attempts SET lookup_state = ?, lookup_checked_at = ? WHERE id = ?`)
+                .run(result, now.toISOString(), attemptId);
+            if (result !== "absent" || a.remote_id || a.limited_visibility || !a.retry_not_before
+                || now.toISOString() < a.retry_not_before) return false;
+            this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ? WHERE id = ?`)
+                .run("Authenticated filename lookup found no entry after weekly retry deadline", attemptId);
+            this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ?`)
+                .run(now.toISOString(), attemptId);
+            this.updateStateInTransaction(a.recording_id, "xvideos_uncertain", "metadata_ready",
+                "not found after reconciliation; weekly retry eligible", now.toISOString());
+            return true;
+        });
+    }
+
+    verifyUpload(attemptId: string, remoteId: string, remoteUrl: string, now = new Date()): Recording {
+        return this.transaction(() => {
+            const r = this.reconcileUncertain(attemptId, remoteId, remoteUrl, now);
+            return this.markRemoteVerified(r.id, remoteId, remoteUrl, now);
+        });
+    }
+
+    // Repair the old crash window between acceptance and verification. This
+    // never sends bytes; it restores a pending check of the already known ID.
+    recoverAcceptedVerifications(now = new Date()): number {
+        return this.transaction(() => {
+            const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
+                JOIN recordings r ON r.id = a.recording_id JOIN artifacts p ON p.recording_id = r.id
+                WHERE r.state = 'xvideos_uploaded' AND a.status = 'accepted' AND a.artifact_part = p.part
+                    AND a.remote_id IS NOT NULL AND NOT EXISTS
+                    (SELECT 1 FROM remote_uploads u WHERE u.recording_id = r.id AND u.artifact_part = p.part)`)
+                .all() as unknown as Array<{ id: string; recording_id: string }>;
+            for (const row of rows) {
+                this.database.prepare(`UPDATE upload_attempts SET status = 'uncertain' WHERE id = ?`).run(row.id);
+                this.database.prepare(`INSERT INTO upload_confirmations (attempt_id, recording_id, confirm_after, status, checked_at)
+                    VALUES (?, ?, ?, 'pending', NULL) ON CONFLICT(attempt_id) DO UPDATE SET status = 'pending', confirm_after = excluded.confirm_after`)
+                    .run(row.id, row.recording_id, now.toISOString());
+                this.updateStateInTransaction(row.recording_id, "xvideos_uploaded", "xvideos_uncertain",
+                    "restore interrupted acceptance-to-verification check", now.toISOString());
+            }
+            return rows.length;
+        });
+    }
+
     reconcileUncertain(attemptId: string, remoteId: string, remoteUrl: string, now = new Date()): Recording {
         if (!remoteId || !remoteUrl) throw new Error("Reconciliation requires remote identity");
         const timestamp = now.toISOString();
@@ -2237,13 +2353,22 @@ export class PipelineDatabase {
     }
 
     recordUploadEvidence(attemptId: string, evidence: Record<string, unknown>, now = new Date()): void {
-        const row = this.database.prepare("SELECT evidence_json FROM upload_attempts WHERE id = ?")
-            .get(attemptId) as { evidence_json: string } | undefined;
-        if (!row) throw new Error(`Unknown upload attempt ${attemptId}`);
-        const history = JSON.parse(row.evidence_json) as unknown[];
-        history.push({ ...evidence, checkedAt: now.toISOString() });
-        this.database.prepare("UPDATE upload_attempts SET evidence_json = ? WHERE id = ?")
-            .run(JSON.stringify(history.slice(-16)), attemptId);
+        this.transaction(() => {
+            const row = this.database.prepare("SELECT evidence_json FROM upload_attempts WHERE id = ?")
+                .get(attemptId) as { evidence_json: string } | undefined;
+            if (!row) throw new Error(`Unknown upload attempt ${attemptId}`);
+            const history = JSON.parse(row.evidence_json) as unknown[];
+            history.push({ ...evidence, checkedAt: now.toISOString() });
+            this.database.prepare("UPDATE upload_attempts SET evidence_json = ? WHERE id = ?")
+                .run(JSON.stringify(history.slice(-16)), attemptId);
+            const warning = typeof evidence.limitedVisibility === "string" ? evidence.limitedVisibility
+                : limitedVisibilityWarning(typeof evidence.text === "string" ? evidence.text : "");
+            if (warning) this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(warning, attemptId);
+            if (evidence.stage === "remote_identity_captured" && typeof evidence.remoteId === "string" && /^\d+$/.test(evidence.remoteId)) {
+                this.database.prepare(`UPDATE upload_attempts SET remote_id = ?
+                    WHERE id = ? AND status IN ('started', 'uncertain') AND remote_id IS NULL`).run(evidence.remoteId, attemptId);
+            }
+        });
     }
 
     postponeConfirmation(attemptId: string, reason: string, now = new Date()): void {
@@ -2261,7 +2386,8 @@ export class PipelineDatabase {
     }
 
     latestUploadDiagnostics(recordingId: string): unknown {
-        const row = this.database.prepare(`SELECT a.status, a.error, a.evidence_json, c.confirm_after, c.status AS confirmation_status
+        const row = this.database.prepare(`SELECT a.status, a.error, a.evidence_json, a.limited_visibility,
+            a.retry_not_before, a.lookup_state, a.lookup_checked_at, c.confirm_after, c.status AS confirmation_status
             FROM upload_attempts a LEFT JOIN upload_confirmations c ON c.attempt_id = a.id
             WHERE a.recording_id = ? ORDER BY a.started_at DESC LIMIT 1`).get(recordingId) as
             { evidence_json: string; [key: string]: unknown } | undefined;
@@ -2307,7 +2433,11 @@ export class PipelineDatabase {
     }
 
     private transaction<T>(operation: () => T): T {
+        // Nested state-machine operations join their caller's transaction.
+        // Exceptions propagate to the outer rollback; no partial commits.
+        if (this.inTransaction) return operation();
         this.database.exec("BEGIN IMMEDIATE");
+        this.inTransaction = true;
         try {
             const result = operation();
             this.database.exec("COMMIT");
@@ -2315,6 +2445,9 @@ export class PipelineDatabase {
         } catch (error) {
             this.database.exec("ROLLBACK");
             throw error;
+        } finally {
+            this.inTransaction = false;
         }
     }
+    private inTransaction = false;
 }

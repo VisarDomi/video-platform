@@ -1,6 +1,9 @@
 export { downloadsRoot, providerFolder, providerFolders, VIDEO_FOLDER_KINDS } from "./providerLayout.js";
 export type { VideoFolderKind } from "./providerLayout.js";
 export { fixTargetDuration, selectLongestMediaDuration } from "./hlsUtils.js";
+export { parseNativeMediaPlaylist, nativeMediaBoundary, nativeMediaRuns, renderNativeMediaRun,
+    safeNativeMediaName } from "./nativeMedia.js";
+export type { NativeMediaSegment, NativeMediaPlaylist } from "./nativeMedia.js";
 export { readTokens } from "./tokenManager.js";
 export type { Tokens } from "./tokenManager.js";
 

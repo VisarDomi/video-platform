@@ -5,9 +5,11 @@ import { artifactRecipeReason, reuseCachedArtifact, type ArtifactCacheConfig } f
 import {
     analyzeRecordingResolution,
     chooseRecordingResolutionPolicy,
+    conversionReferenceSource,
 } from "./resolutionPolicy.js";
 import { upscaleWholeRecordingTo1080 } from "./upscale.js";
 import { validateArtifact } from "./validateArtifact.js";
+import { RemuxCompatibilityError } from "./mediaCompatibility.js";
 
 export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactCacheConfig): PipelineStages {
     return {
@@ -31,19 +33,26 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
                     eventReason: artifactRecipeReason(policy.reason),
                 };
             }
-            if (policy.disposition === "remuxNative") {
+            try {
                 return {
                     disposition: "artifact",
-                    path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id, undefined, { analysis }),
+                    path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id,
+                        policy.disposition === "retain1080" ? "retained1080p" : undefined, {
+                            analysis, keepIndexes: policy.disposition === "retain1080" ? policy.retainedSegmentIndexes : undefined,
+                        }),
                     eventReason: artifactRecipeReason(policy.reason),
                 };
+            } catch (error) {
+                if (!(error instanceof RemuxCompatibilityError)) throw error;
+                const keepIndexes = policy.disposition === "retain1080" ? policy.retainedSegmentIndexes : undefined;
+                const selected = analysis.segments.filter(segment => !keepIndexes || keepIndexes.has(segment.index));
+                // Reuse the normal conversion's no-stretch/no-padding aspect
+                // guard, while preserving the original 90% selection.
+                const transcoded = await upscaleWholeRecordingTo1080(recording.playlistPath, stagingRoot, recording.id,
+                    conversionReferenceSource(selected), "compatibility-upscale1080p", analysis, keepIndexes);
+                return { disposition: "artifact", path: transcoded.path,
+                    eventReason: artifactRecipeReason(`${policy.reason}; compatibility-conversion-v1: ${error.message}`) };
             }
-            return {
-                disposition: "artifact",
-                path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id, "retained1080p",
-                    { analysis, keepIndexes: policy.retainedSegmentIndexes }),
-                eventReason: artifactRecipeReason(policy.reason),
-            };
         },
         validateArtifact: async (_recording, artifactPath) => {
             const artifact = await validateArtifact(artifactPath);

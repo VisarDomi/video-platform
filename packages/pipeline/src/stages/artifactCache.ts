@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
+import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 import { DatabaseSync } from "node:sqlite";
 import type { ArtifactRecord, Recording } from "../domain/types.js";
 import { containedArtifactPath } from "./remux.js";
@@ -80,7 +81,7 @@ export async function findArtifactCacheCandidates(
                 && !row.reason.includes("[artifact-recipe-");
             if (!tagged && !legacy) continue;
             const root = path.resolve(config.artifactsRoot, version.version);
-            const allowedPaths = [undefined, "production-upscale1080p", "retained1080p"]
+            const allowedPaths = [undefined, "production-upscale1080p", "retained1080p", "compatibility-upscale1080p"]
                 .map((suffix) => containedArtifactPath(root, recording.id, suffix));
             if (!allowedPaths.includes(row.path) || !Number.isSafeInteger(row.sizeBytes) || row.sizeBytes <= 0
                 || !/^[a-f0-9]{64}$/.test(row.sha256) || !Number.isFinite(Date.parse(row.validatedAt))) continue;
@@ -132,12 +133,14 @@ export async function reuseCachedArtifact(
             // Verify bytes BEFORE publishing. Missing/corrupt cache = a miss,
             // never an excuse to adopt an unproven same-name MP4.
             if (!await matches(temporary, candidate)) continue;
+            await syncFile(temporary);
             try {
                 await fs.link(temporary, target);
             } catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
                 if (!await matches(target, candidate)) throw new Error(`Cache target conflicts with an existing artifact: ${target}`);
             }
+            await syncPublishedArtifact(target);
             return {
                 path: target,
                 eventReason: artifactRecipeReason(`artifact cache hit from ${candidate.generation}; sha256=${candidate.sha256}`),

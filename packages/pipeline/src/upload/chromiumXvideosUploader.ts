@@ -4,6 +4,7 @@ import { chromium, type BrowserContext, type Page, type Request } from "playwrig
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { filterXvideosEntries, type XvideosEntry, type XvideosEntryCandidate } from "./xvideosEntries.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { limitedVisibilityWarning } from "./providerWarnings.js";
 import { hasFullHdPlayback, parsePlaybackRenditions, type PlaybackRendition } from "./playbackQuality.js";
 
 const ACCOUNT_URL = "https://www.xvideos.com/account";
@@ -73,11 +74,12 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             const counter = new RequestByteCounter();
             page.on("request", (networkRequest) => { void counter.observe(networkRequest); });
             await this.authenticateForUpload(page);
-            // SQLite guards all production uploads. Only diagnostic titles can
-            // support this extra remote search: natural titles are not unique.
+            // Search the exact bracketed filename, never the model-written title.
             const titleIdentity = hasDiagnosticUploadIdentity(request.title, request.uploadIdentity)
-                ? request.uploadIdentity : null;
-            const existing = titleIdentity
+                ? request.uploadIdentity : hasDiagnosticUploadIdentity(request.title, request.recordingId)
+                    ? request.recordingId : null;
+            if (request.lookupBeforeUpload && !titleIdentity) throw new Error("Retry has no exact filename identity");
+            const existing = titleIdentity && (request.lookupBeforeUpload || titleIdentity === request.uploadIdentity)
                 ? await this.findUploadedCopyOnPage(page, titleIdentity) : { kind: "not_found" as const };
             if (existing.kind === "found") {
                 completed = true;
@@ -117,6 +119,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             // Success is NOT decided here: the attempt parks as uncertain and
             // the 24-hour reconcile verifies the edit page.
             const submittedId = await this.captureSubmittedVideoId(page, titleIdentity, request);
+            if (submittedId) await request.onEvidence?.({ stage: "remote_identity_captured", remoteId: submittedId });
             await this.saveSubmissionEvidence(page, request, "capture_complete");
             completed = true;
             return {
@@ -462,6 +465,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         const text = await page.locator("body").innerText().catch(() => "");
         await request.onEvidence({ stage, page: new URL(page.url()).pathname,
             text: text.slice(0, 16000),
+            limitedVisibility: limitedVisibilityWarning(text),
             duplicateReported: /duplicate|already (?:been )?uploaded|already exists/i.test(text),
             rejectionReported: /upload failed|publication failed|video rejected|processing failed/i.test(text) });
     }
@@ -485,8 +489,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
             if (currentId) return currentId;
             await page.waitForTimeout(2_000);
         }
-        // Never search a natural title to guess ownership. No captured ID means
-        // uncertain acceptance/manual review, not permission to upload again.
+        // The exact filename suffix is stable even when the descriptive title changes.
         if (!titleIdentity) return null;
         // Legacy/comparison titles still carry an exact diagnostic identity.
         try {
@@ -503,10 +506,14 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         // The uploads-list filter is a server-side search reachable directly
         // by URL (verified live: /account/uploads/f:t:<query>). One goto, no
         // selector dependencies.
-        await page.goto(`${UPLOADS_URL}/f:t:${encodeURIComponent(searchTerm)}`, {
+        const searchUrl = `${UPLOADS_URL}/f:t:${encodeURIComponent(searchTerm)}`;
+        const response = await page.goto(searchUrl, {
             waitUntil: "domcontentloaded",
             timeout: 30_000,
         });
+        if (!response?.ok() || new URL(page.url()).pathname !== new URL(searchUrl).pathname) {
+            throw new Error("Uploads search failed or redirected; absence cannot be inferred");
+        }
         if (!await page.getByText("My Content", { exact: true }).count()) {
             throw new HumanActionRequiredError("session_login", "Uploads search is not authenticated; absence cannot be inferred");
         }
@@ -521,18 +528,37 @@ export class ChromiumXvideosUploader implements XvideosUploader {
                 title: titleLink?.textContent?.trim() ?? "",
             } satisfies XvideosEntryCandidate;
         }));
-        return filterXvideosEntries(candidates.map((candidate) => ({
+        const entries = filterXvideosEntries(candidates.map((candidate) => ({
             ...candidate,
             remoteUrl: candidate.remoteUrl ? new URL(candidate.remoteUrl, UPLOADS_URL).href : "",
         })), searchTerm);
+        // Incomplete rows (e.g. still processing), pagination, or an unexpected
+        // page must never be turned into a negative lookup and duplicate upload.
+        if (entries.length !== candidates.length) throw new Error("Incomplete uploads search rows; absence cannot be inferred");
+        if (await page.locator('a[rel="next"], .pagination a, .pagination button').count()) {
+            throw new Error("Paginated uploads search requires manual review");
+        }
+        if (!entries.length && !/Your filters return no video\./i.test(await page.locator("body").innerText())) {
+            throw new Error("Uploads search has no recognized empty result; absence cannot be inferred");
+        }
+        return entries;
+    }
+
+    async lookupUpload(page: Page, identity: string): Promise<
+        { kind: "found"; remoteId: string; remoteUrl: string } | { kind: "absent" | "ambiguous" }
+    > {
+        const entries = await this.findEntries(page, identity.split(" | ")[0]);
+        const matches = entries.filter(entry => hasDiagnosticUploadIdentity(entry.title, identity));
+        if (matches.length === 1) return { kind: "found", ...matches[0] };
+        // A related old-generation/partial title is not evidence of absence.
+        return { kind: entries.length ? "ambiguous" : "absent" };
     }
 
     async recoverUploadId(page: Page, identity: string): Promise<string | null> {
         // Search by folder, then require an exact current-generation suffix.
         // Older generations and ambiguous matches are never adopted.
-        const entries = await this.findEntries(page, identity.split(" | ")[0]);
-        const matches = entries.filter((entry) => hasDiagnosticUploadIdentity(entry.title, identity));
-        return matches.length === 1 ? matches[0].remoteId : null;
+        const result = await this.lookupUpload(page, identity);
+        return result.kind === "found" ? result.remoteId : null;
     }
 
     // Admission-time existence check: the folder name is the local truth, the
@@ -551,16 +577,9 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         | { kind: "title_mismatch"; remoteId: string }
         | { kind: "not_found" }
     > {
-        const entries = await this.findEntries(page, uploadIdentity);
-        for (const entry of entries) {
-            const edit = await this.readEditPage(page, entry.remoteId);
-            if (edit.title.includes(`[${uploadIdentity}]`)) {
-                return { kind: "found", remoteId: entry.remoteId, remoteUrl: entry.remoteUrl };
-            }
-        }
-        if (entries.length > 0) {
-            return { kind: "title_mismatch", remoteId: entries[0].remoteId };
-        }
+        const result = await this.lookupUpload(page, uploadIdentity);
+        if (result.kind === "found") return result;
+        if (result.kind === "ambiguous") throw new Error("Ambiguous existing uploads; refusing to upload again");
         return { kind: "not_found" };
     }
 }

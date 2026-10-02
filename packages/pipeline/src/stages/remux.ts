@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 import { preparePlaylistInput, type PlaylistSelection } from "./playlistInput.js";
+import { RemuxCompatibilityError } from "./mediaCompatibility.js";
 
 export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput: string,
     inputArgs: readonly string[] = ["-i", inputPlaylist]): string[] {
@@ -72,10 +74,11 @@ export async function streamCopyRemux(
         artifactSuffix,
     );
     const existing = await fs.lstat(finalPath).catch(() => null);
-    if (existing?.isFile()) return finalPath;
+    if (existing?.isFile()) { await syncPublishedArtifact(finalPath); return finalPath; }
     if (existing) throw new Error(`Refusing to replace non-file artifact path ${finalPath}`);
     const prepared = selection ? await preparePlaylistInput(inputPlaylist, stagingRoot, selection) : null;
     try {
+        if (prepared?.incompatibility) throw new RemuxCompatibilityError(prepared.incompatibility);
         await new Promise<void>((resolve, reject) => {
             const child = spawn("ffmpeg", buildStreamCopyRemuxArgs(path.resolve(inputPlaylist), temporaryPath, prepared?.args), {
                 stdio: ["ignore", "ignore", "pipe"],
@@ -87,9 +90,16 @@ export async function streamCopyRemux(
             child.once("error", reject);
             child.once("close", (code) => {
                 if (code === 0) resolve();
-                else reject(new Error(`ffmpeg stream-copy remux failed (${code ?? "unknown"}): ${stderr.trim()}`));
+                else {
+                    const message = `ffmpeg stream-copy remux failed (${code ?? "unknown"}): ${stderr.trim()}`;
+                    // Only container/bitstream incompatibilities trigger a
+                    // conversion fallback, not disk/permission/process errors.
+                    const incompatible = /could not find tag for codec|codec.*not.*supported|tag .*incompatible|malformed.*(aac|h264)|invalid nal unit|error parsing adts/i.test(stderr);
+                    reject(incompatible ? new RemuxCompatibilityError(message) : new Error(message));
+                }
             });
         });
+        await syncFile(temporaryPath);
         try {
             await fs.link(temporaryPath, finalPath);
         } catch (error) {
@@ -97,6 +107,7 @@ export async function streamCopyRemux(
             if (!raced?.isFile()) throw error;
         }
         await fs.unlink(temporaryPath);
+        await syncPublishedArtifact(finalPath);
         return finalPath;
     } catch (error) {
         await fs.unlink(temporaryPath).catch(() => undefined);

@@ -56,6 +56,12 @@ test("failed integrity repair publishes the safe playlist before moving the exac
     const readyReport = report(streamPath, "ready");
 
     const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
+        validateCandidate: async (_target, content) => {
+            assert.equal(content.includes("2.ts"), false);
+            assert.equal((await stat(path.join(streamPath, "2.ts"))).isFile(), true);
+            observedOrder.push("candidate-validated");
+            return true;
+        },
         repairPlaylist: async () => {
             const playlist = await readFile(path.join(streamPath, "playlist.m3u8"), "utf8");
             assert.equal(playlist.includes("2.ts"), false);
@@ -63,13 +69,14 @@ test("failed integrity repair publishes the safe playlist before moving the exac
             observedOrder.push("playlist-repaired");
         },
         dropFile: async filePath => {
-            assert.deepEqual(observedOrder, ["playlist-repaired"]);
+            assert.deepEqual(observedOrder, ["candidate-validated", "playlist-repaired", "published-validated"]);
             assert.equal((await readFile(path.join(streamPath, "playlist.m3u8"), "utf8")).includes("2.ts"), false);
             await rename(filePath, path.join(trashPath, path.basename(filePath)));
             observedOrder.push("file-trashed");
         },
         revalidate: async () => {
-            assert.deepEqual(observedOrder, ["playlist-repaired", "file-trashed"]);
+            assert.deepEqual(observedOrder, ["candidate-validated", "playlist-repaired"]);
+            observedOrder.push("published-validated");
             return { kind: "processed", report: readyReport };
         },
     });
@@ -92,6 +99,7 @@ test("failed integrity repair safely resumes after playlist publication and file
     );
 
     const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
+        validateCandidate: async () => true,
         repairPlaylist: async () => {},
         dropFile: async () => assert.fail("an already absent source file must not be moved again"),
         revalidate: async () => ({ kind: "processed", report: report(streamPath, "ready") }),
@@ -129,6 +137,7 @@ test("failed fMP4 repair drops only the attributed fragment and republishes its 
     ]);
 
     const result = await repairFailedMediaIntegrity(streamPath, failedReport, {
+        validateCandidate: async () => true,
         repairPlaylist: async () => {},
         dropFile: async filePath => rename(filePath, path.join(trashPath, path.basename(filePath))),
         revalidate: async () => ({ kind: "processed", report: report(streamPath, "ready") }),

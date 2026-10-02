@@ -8,6 +8,7 @@ export interface UploadRequest {
     readonly tags: readonly string[];
     readonly visibility: "private";
     readonly streamerAlias?: string;
+    readonly lookupBeforeUpload?: boolean;
     readonly onEvidence?: (evidence: Record<string, unknown>) => Promise<void> | void;
     readonly onProgress?: (
         phase: "file_uploading" | "file_uploaded" | "metadata_submitting",

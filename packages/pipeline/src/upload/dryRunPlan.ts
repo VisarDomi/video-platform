@@ -21,6 +21,11 @@ export function createDryRunUploadPlan(
 ): DryRunUploadItem[] {
     let simulatedReserved = 0;
     return database.list("metadata_ready").map((recording) => {
+        if (!database.canAttemptUpload(recording.id, now)) {
+            return { recordingId: recording.id, artifactPath: database.getArtifact(recording.id)?.path ?? null,
+                sizeBytes: database.getArtifact(recording.id)?.sizeBytes ?? null,
+                disposition: "blocked" as const, reason: "weekly_upload_retry_wait" };
+        }
         if (recording.sourceKind !== "edited") {
             return {
                 recordingId: recording.id,

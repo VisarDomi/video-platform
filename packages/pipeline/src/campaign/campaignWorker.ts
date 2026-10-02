@@ -5,6 +5,7 @@ import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { Recording, RecordingInput } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
+import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { PipelineOrchestrator } from "../scheduler/orchestrator.js";
 import { createDefaultStages } from "../stages/defaultStages.js";
 import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "./selectCandidate.js";
@@ -200,7 +201,7 @@ export class CampaignWorker {
 
         const uploadReady = order(this.database.list("metadata_ready")
             .filter((recording) => (!trialNextId || recording.id === trialNextId)
-                && allows(recording)), control.providerFilter)[0];
+                && allows(recording) && this.database.canAttemptUpload(recording.id, now)), control.providerFilter)[0];
         if (uploadReady) {
             this.database.enrollCampaignTrial(uploadReady, now);
             try {
@@ -216,7 +217,7 @@ export class CampaignWorker {
                 };
             }
             const provenance = this.database.getProvenance(uploadReady.id);
-            if (!provenance?.streamerId) {
+            if (!allowsUpload(provenance)) {
                 if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",

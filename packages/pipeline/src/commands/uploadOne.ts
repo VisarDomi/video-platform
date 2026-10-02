@@ -10,6 +10,7 @@ import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
 import { productionUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
+import { allowsUpload } from "../provenance/uploadPolicy.js";
 
 export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 
@@ -71,7 +72,7 @@ export async function uploadOne(
         const artifactPart = database.getArtifactPart(recordingId) ?? "full";
         const metadata = database.getUploadMetadata(recordingId);
         const provenance = database.getProvenance(recordingId);
-        if (!artifact || !metadata || !provenance?.streamerId) throw new Error("Upload prerequisites are incomplete");
+        if (!artifact || !metadata || !provenance || !allowsUpload(provenance)) throw new Error("Upload prerequisites are incomplete");
         if (!isDirectArtifactPath(config.stagingRoot, artifact.path)) {
             throw new Error(
                 `Artifact ${artifact.path} does not belong to active ${CURRENT_PRODUCTION_VERSION} staging`,
@@ -106,7 +107,8 @@ export async function uploadOne(
                 description: metadata.description,
                 tags: metadata.tags,
                 visibility: "private",
-                streamerAlias: provenance.alias ?? provenance.streamerId,
+                lookupBeforeUpload: database.hasUploadAttempt(recordingId),
+                streamerAlias: provenance.alias ?? provenance.streamerId ?? undefined,
             },
         );
         if (outcome.kind === "existing") {

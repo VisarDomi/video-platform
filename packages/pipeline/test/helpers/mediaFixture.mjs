@@ -5,16 +5,19 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 
 export const exec = promisify(execFile);
-export async function fixturePart(root, name, { size = "320x180", offset = 0, frames = 6, gop = 6, fmp4 = false, timestampOffset = 0 } = {}) {
+export async function fixturePart(root, name, { size = "320x180", offset = 0, frames = 6, gop = 6, fmp4 = false,
+    timestampOffset = 0, codec = "libx264", audio = true, audioOffset = 0, audioRate = 48000 } = {}) {
     const folder = path.join(root, name);
     await mkdir(folder, { recursive: true });
     const input = path.join(folder, fmp4 ? "playlist.m3u8" : "segment.ts");
     // Each frame has a distinct luma ID. B-frames exercise delayed decoder output.
     await exec("ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error",
         "-f", "lavfi", "-i", `nullsrc=size=${size}:rate=10,geq=lum='30+${offset}+N*8':cb=128:cr=128`,
-        "-f", "lavfi", "-i", `sine=frequency=${440 + offset * 10}:sample_rate=48000`,
-        "-t", String(frames / 10), "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10",
-        "-bf", "2", "-g", String(gop), "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "aac",
+        ...(audio ? ["-itsoffset", String(audioOffset), "-f", "lavfi", "-i", `sine=frequency=${440 + offset * 10}:sample_rate=${audioRate}`] : []),
+        "-t", String(frames / 10), "-c:v", codec,
+        ...(codec === "libx264" ? ["-preset", "ultrafast", "-crf", "10", "-bf", "2", "-sc_threshold", "0"]
+            : ["-cpu-used", "8", "-crf", "20", "-b:v", "0"]),
+        "-g", String(gop), "-pix_fmt", "yuv420p", ...(audio ? ["-c:a", "aac"] : []),
         ...(fmp4 ? ["-f", "hls", "-hls_segment_type", "fmp4", "-hls_time", "100", "-hls_list_size", "0",
             "-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", path.join(folder, "segment%d.m4s")]
             : ["-f", "mpegts", "-output_ts_offset", String(timestampOffset)]), input]);
