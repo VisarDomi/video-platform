@@ -1,19 +1,28 @@
 import UIKit
 import WebKit
 
-// A full-screen Safari tab for one provider's videos on the PC. The page, API and
-// HLS come from the PC exactly as in Safari; the phone already trusts its certificate.
+// A full-screen Safari tab. Local apps show one provider's videos on the PC; the
+// page, API and HLS come from the PC exactly as in Safari, and the phone already
+// trusts its certificate. Online apps run their Safari extension's content script
+// on the provider's own site.
 @MainActor
-final class WebController: UIViewController, WKNavigationDelegate {
-    private let home: URL
+final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate {
+    private let start: URL
+    private let hosts: [String]
+    private let login = (Bundle.main.object(forInfoDictionaryKey: "LoginURL") as? String).flatMap(URL.init(string:))
+    private var provisional: URL?
+    private var redirectTarget: URL?
     private let sessionURL: URL
     private var webView: WKWebView!
+    private var cookies: SiteCookies?
+    private var cookieTimer: Timer?
     private let failure = UIStackView()
     private let message = UILabel()
     private var failedURL: URL?
 
-    init(home: URL) {
-        self.home = home
+    init(start: URL, hosts: [String]) {
+        self.start = start
+        self.hosts = hosts
         sessionURL = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/LocalVideos/interaction-state")
         super.init(nibName: nil, bundle: nil)
@@ -28,10 +37,31 @@ final class WebController: UIViewController, WKNavigationDelegate {
         config.ignoresViewportScaleLimits = true
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        if !hosts.isEmpty {
+            // The sites see Safari, and the extension's script starts at document start in the page world.
+            config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Mobile/15E148 Safari/604.1"
+            if let url = Bundle.main.url(forResource: "content", withExtension: "js"), let script = try? String(contentsOf: url, encoding: .utf8) {
+                config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+            }
+        }
         webView = WKWebView(frame: .zero, configuration: config)
+        if !hosts.isEmpty {
+            let durable = (Bundle.main.object(forInfoDictionaryKey: "DurableCookie") as? [String: String]).flatMap { rule in
+                rule["name"].flatMap { name in rule["lifetimeFrom"].map { SiteCookies.Durable(name: name, lifetimeFrom: $0) } }
+            }
+            cookies = SiteCookies(store: webView.configuration.websiteDataStore.httpCookieStore, hosts: hosts,
+                                  keep: Bundle.main.object(forInfoDictionaryKey: "KeepCookies") as? [String] ?? [], durable: durable,
+                                  backupURL: sessionURL.deletingLastPathComponent().appendingPathComponent("login-cookies.plist"))
+            // Sites re-send cookies on responses and cookie notifications are unreliable, so
+            // re-check every few seconds while open as well as at resign/background.
+            cookieTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.cookies?.keep() }
+            }
+        }
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.isOpaque = false
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
@@ -43,60 +73,111 @@ final class WebController: UIViewController, WKNavigationDelegate {
         view.backgroundColor = .black
         view.addSubview(webView)
         buildFailureView()
-        // Like a restored Safari tab: reopen the last page with its Back/Forward list.
-        if let state = try? Data(contentsOf: sessionURL) { webView.interactionState = state }
-        else { webView.load(URLRequest(url: home)) }
+        // Online apps put back their saved login before the first page loads.
+        if let cookies { cookies.restore { [weak self] in self?.open() } } else { open() }
+    }
+    // Like a restored Safari tab: reopen the last page with its Back/Forward list.
+    private func open() {
+        guard let state = try? Data(contentsOf: sessionURL) else { webView.load(URLRequest(url: start)); return }
+        webView.interactionState = state
+        // An old restore point can reopen a blank page without any navigation callback.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, !webView.isLoading, !(webView.url.map(allows) ?? false) else { return }
+            webView.load(URLRequest(url: start))
+        }
     }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         webView.frame = view.bounds
     }
 
-    func saveSession() {
-        guard let state = webView?.interactionState as? Data else { return }
+    func saveSession(_ done: @escaping @MainActor () -> Void = {}) {
+        if let cookies { cookies.keep(done) } else { done() }
+        // Only a page of this app becomes the restore point, never a blank or blocked one.
+        guard let url = webView?.url, allows(url), let state = webView?.interactionState as? Data else { return }
         do {
             try FileManager.default.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try state.write(to: sessionURL, options: .atomic)
         } catch { print("WebKit session checkpoint:", error) }
     }
 
+    private func allows(_ url: URL) -> Bool { AppPolicy.allows(url, start: start, hosts: hosts) }
+
     // Retry the page that failed, otherwise reload in place like Safari (no new Back entry).
     private func reload() {
         failure.isHidden = true
         let failed = failedURL
         failedURL = nil
-        if let failed, LocalPolicy.allows(failed, home: home) { webView.load(URLRequest(url: failed)) }
+        if let failed, allows(failed) { webView.load(URLRequest(url: failed)) }
         else if webView.url != nil { webView.reload() }
-        else { webView.load(URLRequest(url: home)) }
+        else { webView.load(URLRequest(url: start)) }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
-        decisionHandler(navigationAction.request.url.map { LocalPolicy.allows($0, home: home) } == true ? .allow : .cancel)
+        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        // Online sites embed frames (such as a login captcha); only the page itself is confined.
+        if !hosts.isEmpty, navigationAction.targetFrame?.isMainFrame == false { decisionHandler(.allow); return }
+        // Other sites (including ads) are blocked, never opened elsewhere.
+        guard allows(url) else { decisionHandler(.cancel); return }
+        // Porntrex redirects to its ad-heavy home page instead of showing the page: from the videos
+        // when signed out (open the login page), from the login page when already signed in (open
+        // the videos). The target loads once WebKit has finished cancelling the redirect.
+        if let login, url.path == "/", let previous = provisional {
+            redirectTarget = previous.path.hasPrefix(start.path) ? login : previous.path == login.path ? start : nil
+            if redirectTarget != nil {
+                provisional = nil
+                decisionHandler(.cancel)
+                return
+            }
+        }
+        if navigationAction.targetFrame?.isMainFrame != false { provisional = url }
+        decisionHandler(.allow)
     }
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { failure.isHidden = true }
+    // Links that ask for a new window stay in this tab when they belong to the app.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = navigationAction.request.url, allows(url) { webView.load(URLRequest(url: url)) }
+        return nil
+    }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        provisional = nil
+        failure.isHidden = true
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.scrollView.refreshControl?.endRefreshing()
+        // about:blank loads without a policy check (for example from an old restore point).
+        guard let url = webView.url, allows(url) else { webView.load(URLRequest(url: start)); return }
         saveSession()
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         webView.scrollView.refreshControl?.endRefreshing()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        provisional = nil
+        if let target = redirectTarget {
+            redirectTarget = nil
+            webView.load(URLRequest(url: target))
+            return
+        }
         webView.scrollView.refreshControl?.endRefreshing()
         let error = error as NSError
-        // A cancelled or policy-blocked navigation leaves the current page in place.
-        if (error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled)
-            || (error.domain == "WebKitErrorDomain" && error.code == 102) { return }
+        // A cancelled or policy-blocked navigation leaves the current page in place; if nothing of
+        // this app is showing (for example a restored page that is no longer allowed), open the start page.
+        if error.domain == "WebKitErrorDomain" && error.code == 102 {
+            if !(webView.url.map(allows) ?? false) { webView.load(URLRequest(url: start)) }
+            return
+        }
+        if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return }
         failedURL = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL
-        message.text = "Can't reach your PC.\n\(error.localizedDescription)"
+        message.text = (hosts.isEmpty ? "Can't reach your PC." : "Can't reach \(start.host ?? "the site").") + "\n\(error.localizedDescription)"
         failure.isHidden = false
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        if webView.url == nil { webView.load(URLRequest(url: home)) } else { webView.reload() }
+        if webView.url == nil { webView.load(URLRequest(url: start)) } else { webView.reload() }
     }
 
-    // Safari shows its own page when the PC is unreachable; this is the equivalent.
+    // Safari shows its own page when a site is unreachable; this is the equivalent.
     private func buildFailureView() {
         message.numberOfLines = 0
         message.textAlignment = .center

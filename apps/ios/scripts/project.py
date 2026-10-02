@@ -1,4 +1,4 @@
-"""Generate the shared LocalVideos host for exactly one provider from providers.json."""
+"""Generate the shared VideoApp host for exactly one provider from providers.json."""
 import hashlib
 import json
 import plistlib
@@ -26,12 +26,19 @@ def config_list(name, settings):
 
 files = []
 build_files = []
-for path in sorted(str(p.relative_to(root)) for p in (root/'LocalVideos').glob('*.swift')):
+for path in sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')):
     ref = obj(path, 'PBXFileReference', lastKnownFileType='sourcecode.swift', path=str(root/path), sourceTree='<group>')
     files.append(ref)
     build_files.append(obj('build'+path, 'PBXBuildFile', fileRef=ref))
+# Online apps bundle their Safari extension's content script, staged by deploy.py sync.
+resources = []
+if config.get('hosts'):
+    path = 'build/'+key+'/content.js'
+    ref = obj(path, 'PBXFileReference', lastKnownFileType='sourcecode.javascript', path=str(root/path), sourceTree='<group>')
+    files.append(ref)
+    resources.append(obj('build'+path, 'PBXBuildFile', fileRef=ref))
 phases = [obj('Sources', 'PBXSourcesBuildPhase', buildActionMask=2147483647, files=build_files, runOnlyForDeploymentPostprocessing=0),
-          obj('Resources', 'PBXResourcesBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0),
+          obj('Resources', 'PBXResourcesBuildPhase', buildActionMask=2147483647, files=resources, runOnlyForDeploymentPostprocessing=0),
           obj('Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647, files=[], runOnlyForDeploymentPostprocessing=0)]
 product_ref = obj('Product', 'PBXFileReference', explicitFileType='wrapper.application', includeInIndex=0, path=product+'.app', sourceTree='BUILT_PRODUCTS_DIR')
 settings = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION='1', MARKETING_VERSION='1.0', GENERATE_INFOPLIST_FILE='NO',
@@ -45,9 +52,15 @@ info = dict(CFBundleDevelopmentRegion='en', CFBundleDisplayName=config['name'], 
     CFBundlePackageType='APPL', CFBundleShortVersionString='$(MARKETING_VERSION)', CFBundleVersion='$(CURRENT_PROJECT_VERSION)',
     LSRequiresIPhoneOS=True, UILaunchScreen={}, UIRequiredDeviceCapabilities=['arm64'],
     UISupportedInterfaceOrientations=['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
-    UIViewControllerBasedStatusBarAppearance=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
-    NSLocalNetworkUsageDescription='Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.',
-    LocalVideosURL=config['url'])
+    UIViewControllerBasedStatusBarAppearance=True, StartURL=config['url'])
+if config.get('hosts'):
+    info['SiteHosts'] = config['hosts']
+    if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
+    if 'loginUrl' in config: info['LoginURL'] = config['loginUrl']
+    if 'keepCookies' in config: info['KeepCookies'] = config['keepCookies']
+else:
+    info.update(NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
+                NSLocalNetworkUsageDescription='Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.')
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=[product_ref], name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')

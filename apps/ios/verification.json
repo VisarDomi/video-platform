@@ -1,39 +1,131 @@
 {
   "date": "2026-10-02",
   "apps": {
-    "tango": { "name": "Tango local", "bundleId": "com.visar.TangoLocal.paid", "url": "https://192.168.1.197:9999/videos/tango" },
-    "fc2": { "name": "FC2 local", "bundleId": "com.visar.FC2Local.paid", "url": "https://192.168.1.197:9999/videos/fc2" },
-    "sc": { "name": "SC local", "bundleId": "com.visar.SCLocal.paid", "url": "https://192.168.1.197:9999/videos/sc" }
+    "tango": {
+      "name": "Tango local",
+      "bundleId": "com.visar.TangoLocal.paid",
+      "url": "https://192.168.1.197:9999/videos/tango"
+    },
+    "fc2": {
+      "name": "FC2 local",
+      "bundleId": "com.visar.FC2Local.paid",
+      "url": "https://192.168.1.197:9999/videos/fc2"
+    },
+    "sc": {
+      "name": "SC local",
+      "bundleId": "com.visar.SCLocal.paid",
+      "url": "https://192.168.1.197:9999/videos/sc"
+    },
+    "xvideos": {
+      "name": "Xvid",
+      "bundleId": "com.visar.Xvid.paid",
+      "url": "https://www.xvideos.com/account/uploads"
+    },
+    "porntrex": {
+      "name": "Ptrex",
+      "bundleId": "com.visar.Ptrex.paid",
+      "url": "https://www.porntrex.com/my/videos/"
+    }
   },
   "build": 1,
   "phoneTrustsPcCertificate": "Safari opened https://192.168.1.197:9999/videos/fc2 without a warning, 147 rows, HLS loadedmetadata",
-  "policyTests": "PASS on the Mac: each app allows only its start URL and subpaths; other providers, API root, other ports/hosts/schemes, credentials and dot segments are blocked",
-  "installChecks": "bundle ID, display name, start URL, icon absence, signature, paid team, phone provisioning and expiry verified before install over",
+  "policyTests": "PASS on the Mac: local apps allow only their start URL and subpaths; online apps only their site's hosts over HTTPS; other providers, hosts, ports, schemes, credentials and dot segments are blocked",
+  "installChecks": "bundle ID, display name, start URL, site scope, bundled content script, login URL, cookie rules, icon absence, signature, paid team, phone provisioning and expiry verified before install over",
   "iphoneChecks": {
-    "tango": { "rows": 3864, "rowsAfterBack": 3865, "playback": { "resolution": [720, 1280], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
-               "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
-               "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true } },
-    "fc2": { "rows": 147, "playback": { "resolution": [782, 626], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
-             "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
-             "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true },
-             "afterRenewalReinstall": { "reopenedViewer": true, "resumedSeconds": 108 } },
-    "sc": { "rows": 971, "playback": { "resolution": [1920, 1080], "secondsAdvancedBetweenSnapshots": 10.9, "error": null },
-            "backToList": true, "otherProviderBlocked": true, "progressResumed": true,
-            "killRelaunch": { "reopenedViewer": true, "backHistoryEntries": 2, "playing": true } }
+    "local": {
+      "tango": {
+        "rows": 3870,
+        "playback": [
+          720,
+          1280
+        ],
+        "backToList": true,
+        "otherProviderBlocked": true,
+        "killRelaunchReopensPlayingVideo": true
+      },
+      "fc2": {
+        "rows": 147,
+        "playback": [
+          782,
+          626
+        ],
+        "backToList": true,
+        "otherProviderBlocked": true,
+        "killRelaunchReopensPlayingVideo": true
+      },
+      "sc": {
+        "rows": 971,
+        "playback": [
+          1920,
+          1080
+        ],
+        "backToList": true,
+        "otherProviderBlocked": true,
+        "killRelaunchReopensPlayingVideo": true
+      }
+    },
+    "online": {
+      "xvideos": {
+        "loginWithStoredCredentials": true,
+        "rows": 402,
+        "playback": {
+          "kind": "HLS",
+          "resolution": [
+            1080,
+            1920
+          ]
+        },
+        "backToList": true,
+        "exampleComBlocked": true,
+        "killRelaunchSignedIn": true
+      },
+      "porntrex": {
+        "loginWithStoredCredentials": true,
+        "rows": 2,
+        "playback": {
+          "kind": "MP4",
+          "resolution": [
+            1920,
+            1080
+          ]
+        },
+        "backToList": true,
+        "exampleComBlocked": true,
+        "killRelaunchSignedIn": true,
+        "signedOutOpensLoginPage": true,
+        "signedInLoginPageOpensVideos": true
+      }
+    },
+    "durableLogin": {
+      "method": "Local sign-out (app cookies removed through Web Inspector, no server request), log in with stored credentials, then kill and relaunch",
+      "xvideosWithoutRememberMe": {
+        "loginCookie": "session-only version-1 session_token_auth extended to session_token's expiry (2027-01-02, sliding)",
+        "backgroundKillRelaunch": "signed in",
+        "foregroundKillWhileSettled": "signed in",
+        "foregroundKill5sAfterRelaunch": "signed in",
+        "foregroundKill8sAfterLogin": "signed in"
+      },
+      "xvideosWithRememberMe": "XVideos sets a persistent 30-day session_token_auth itself, renewed on each visit",
+      "porntrex": {
+        "loginCookie": "kt_member, 30 days, not rotated on use",
+        "foregroundKill8sAfterLogin": "signed in",
+        "coldStartAfter40s": "signed in",
+        "deletingOnlyPHPSESSID": "kt_member signed the app back in with a new session",
+        "reinstalls": "signed in after 5 of 7 reinstalls; twice, during a stretch of about a dozen test logins, Porntrex deleted kt_member after a reinstall (the same token had been accepted minutes earlier). Not reproduced on demand; cause unconfirmed. Ptrex then opens /login/; at worst this matches the accepted monthly login."
+      },
+      "rootCauses": [
+        "XVideos' login cookie is session-only and version 1; Foundation ignores Expires on version-1 cookies, so the extended copy is stored as version 0.",
+        "WKHTTPCookieStore change notifications did not fire for response cookies; the keeper also runs every 3 seconds and at resign/background.",
+        "WebKit wrote cookies to disk only on suspension; a foreground kill lost a fresh login until the app kept its own copy of the login cookies and restored missing ones before the first load.",
+        "A removed login (logout or local sign-out) clears that copy, so it is never resurrected."
+      ]
+    }
   },
   "notes": [
-    "Tango recordings legitimately change resolution between segments (720x1280 then 360x640); FC2 likewise (568x454 then 782x626).",
-    "No local-network permission prompt blocked loading in this session.",
-    "Physical finger feel (swipes, momentum, pull-down reload, landscape) remains for the user to compare with Safari."
+    "The online apps store the sites' login cookies (session tokens, not passwords) in their own container, beside WebKit's cookie file.",
+    "The monthly renewal reinstalls the apps; Xvid kept its login through every reinstall.",
+    "Physical finger feel (swipes, momentum, pull-down reload, landscape) remains for the user to compare with Safari.",
+    "Tango and FC2 recordings legitimately change resolution between segments."
   ],
-  "renewal": {
-    "approvedAndRenewedAt": "2026-10-02T18:13Z",
-    "profileExpiry": "2027-10-02T18:13:09+00:00",
-    "firstAttempt": "All three renewed on the first attempt.",
-    "nextDue": "2026-11-02",
-    "config": "tango-local, fc2-local, sc-local added to the Mac's existing index (15 entries); existing configs unchanged",
-    "scheduler": "com.visar.installed-apps-refresh resumed, ran once, idle, last exit 0, enumerated 14 installed apps",
-    "newBackgroundJobs": 0
-  },
   "websiteChange": "Provider list editor pages and GET/POST /api/<provider> removed (commit 0fa6da7); website rebuilt and video-server restarted; /list, /add, /remove, /resolve unchanged"
 }

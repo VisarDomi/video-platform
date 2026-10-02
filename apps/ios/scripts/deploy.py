@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Linux -> trusted Mac GUI build -> verified, non-destructive device update for one local-provider app."""
-import argparse,json,pathlib,subprocess,shlex
+"""Linux -> trusted Mac GUI build -> verified, non-destructive device update for one provider app."""
+import argparse,hashlib,json,pathlib,shutil,subprocess,shlex
 APP=pathlib.Path(__file__).resolve().parents[1]
+ROOT=APP.parents[1]
 MAC='/Users/visar/Developer/video-platform/apps/ios'
 SSH=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile=/home/visar/Documents/hackingtosh/validation/macos-known-hosts','visar@192.168.1.198']
 DEVICE='00008101-000639912881401E'
@@ -14,13 +15,23 @@ p.add_argument('action',choices=['sync','test','build','status','install','finis
 config=registry[a.provider]
 log=MAC+'/build/'+a.provider+'/xcode.log'
 if a.action=='sync':
+    # Online apps bundle their Safari extension's content script from this repository's
+    # build, so the Mac (and monthly renewal) needs no Node or Video Platform checkout.
+    if config.get('hosts'):
+        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
+        staged=APP/'build'/a.provider/'content.js'
+        staged.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
+        print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
     # Sources only; build evidence and DerivedData on the Mac are preserved.
-    subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC)],check=True)
-    subprocess.run(['rsync','-az','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
+    subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
+    subprocess.run(['rsync','-az','--delete','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
+    if config.get('hosts'):
+        subprocess.run(['rsync','-az','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/'content.js'),SSH[-1]+':'+MAC+'/build/'+a.provider+'/content.js'],check=True)
 elif a.action=='test':
     remote(f'''import subprocess
 subprocess.run(['mkdir','-p','build'],cwd={MAC!r},check=True)
-subprocess.run(['xcrun','swiftc','-parse-as-library','LocalVideos/Policy.swift','Tests/PolicyTests.swift','-o','build/policy-tests'],cwd={MAC!r},check=True)
+subprocess.run(['xcrun','swiftc','-parse-as-library','VideoApp/Policy.swift','Tests/PolicyTests.swift','-o','build/policy-tests'],cwd={MAC!r},check=True)
 subprocess.run(['build/policy-tests'],cwd={MAC!r},check=True)
 ''')
 elif a.action=='build':
@@ -51,7 +62,14 @@ app=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'native/Release-iphoneos'/{(con
 info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info['CFBundleIdentifier']=={config['bundleId']!r}
 assert info['CFBundleDisplayName']=={config['name']!r}
-assert info['LocalVideosURL']=={config['url']!r}
+assert info['StartURL']=={config['url']!r}
+assert info.get('SiteHosts')=={config.get('hosts')!r}
+assert info.get('DurableCookie')=={config.get('durableCookie')!r}
+assert info.get('LoginURL')=={config.get('loginUrl')!r}
+assert info.get('KeepCookies')=={config.get('keepCookies')!r}
+if {bool(config.get('hosts'))!r}:
+    staged=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'content.js'
+    assert (app/'content.js').read_bytes()==staged.read_bytes(), 'Bundled content script differs from the staged build'
 assert not any(k.startswith('CFBundleIcon') for k in info)
 assert not (app/'PlugIns').exists()
 subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)
@@ -62,7 +80,7 @@ assert fnmatch.fnmatchcase({(TEAM+'.'+config['bundleId'])!r},profile['Entitlemen
 entitlements=plistlib.loads(subprocess.check_output(['codesign','-d','--entitlements',':-',str(app)],stderr=subprocess.DEVNULL))
 assert entitlements['application-identifier']=={(TEAM+'.'+config['bundleId'])!r}
 assert profile['ExpirationDate']>datetime.datetime.utcnow()+datetime.timedelta(days=45)
-print('Verified bundle, name, start URL, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
+print('Verified bundle, name, start URL, site scope, content script, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
 subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
 ''')
