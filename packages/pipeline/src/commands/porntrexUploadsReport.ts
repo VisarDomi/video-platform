@@ -1,7 +1,7 @@
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { porntrexGet } from "../upload/porntrexKeepalive.js";
-import { comparePorntrexMetadata, parsePorntrexEditPage, parsePorntrexUploadsList } from "../upload/porntrexMetadata.js";
+import { comparePorntrexMetadata, parsePorntrexEditPage, parsePorntrexUploadsList, porntrexUploadsPagePath, type ListedPorntrexUpload } from "../upload/porntrexMetadata.js";
 import { matchesPorntrexIdentity } from "../upload/chromiumPorntrexUploader.js";
 import { readPorntrexSession, sessionFingerprint } from "../upload/porntrexSession.js";
 
@@ -20,7 +20,14 @@ export async function porntrexUploadsReport(config: PipelineConfig, limit = 25, 
         const uploads = database.listPorntrexUploads(limit);
         const list = await get(sessionFile, "/my/videos/");
         if (list.status !== 200) throw new Error(`The shared session is not logged in (My Videos answered ${list.status}); run \`npm run ptrex:connect-iphone\``);
-        const listed = parsePorntrexUploadsList(list.html);
+        const listed: ListedPorntrexUpload[] = parsePorntrexUploadsList(list.html);
+        // Every further page (30 per page) until the site has no more.
+        for (let pageNumber = 2; pageNumber <= 1000; pageNumber++) {
+            const next = await get(sessionFile, porntrexUploadsPagePath(pageNumber));
+            const rows = next.status === 200 ? parsePorntrexUploadsList(next.html).filter((row) => !listed.some((seen) => seen.remoteId === row.remoteId)) : [];
+            if (!rows.length) break;
+            listed.push(...rows);
+        }
         const rows: Array<{
             recording: string; remoteId: string | null; uploadedHoursAgo: number; porntrex: string;
             titleListed: boolean | null; metadata: unknown; pipeline: string;

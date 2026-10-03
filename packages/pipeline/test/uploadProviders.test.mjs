@@ -217,6 +217,29 @@ test("Porntrex lookup totals the Public/Private tabs (processing included), not 
     const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
     assert.equal((await uploader.lookupUpload(page, "2026-01-01 000003 c")).remoteId, "3");
     assert.equal((await uploader.lookupUpload(page, "2026-01-01 000009 z")).kind, "absent");
-    tabs = 4; // the site says one more video exists than the page shows: never infer absence
-    await assert.rejects(uploader.lookupUpload(page, "2026-01-01 000009 z"), /incomplete/);
+    tabs = 4; // the site says one more video exists than the pages show: never infer absence
+    await assert.rejects(uploader.lookupUpload(page, "2026-01-01 000009 z"), /incomplete|did not advance/);
+});
+
+test("Porntrex lookup reads every page of My Videos through the list's async block (30 per page)", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    const row = id => `<div class="video-item" data-item-id="${id}"><p class="inf"><a href="https://www.porntrex.com/video/${id}/x">T [2026-01-01 0000${String(id).padStart(2, "0")} r${id}]</a></p></div>`;
+    const ids = Array.from({ length: 31 }, (_, i) => i + 1);
+    const list = items => `<div id="list_videos_my_uploaded_videos"><h2>My Videos (2)</h2><a data-parameters="is_private:0">Public (31)</a><a data-parameters="is_private:1">Private (0)</a>${items.map(row).join("")}`
+        + `<div class="pagination"><a aria-label="pagination" href="#videos" data-action="ajax" data-parameters="sort_by:;from_my_videos:02">02</a></div></div>`;
+    const requested = [];
+    await context.route("https://www.porntrex.com/**", route => {
+        const url = new URL(route.request().url());
+        requested.push(url.pathname + url.search);
+        const pageNumber = Number(url.searchParams.get("from_my_videos") ?? 1);
+        if (pageNumber > 2) return route.fulfill({ status: 404, body: "" });
+        return route.fulfill({ contentType: "text/html", body: list(pageNumber === 1 ? ids.slice(0, 30) : ids.slice(30)) });
+    });
+    const page = await context.newPage();
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
+    assert.equal((await uploader.lookupUpload(page, "2026-01-01 000031 r31")).remoteId, "31");
+    assert.deepEqual(requested.slice(-2), ["/my/videos/", "/my/videos/?mode=async&function=get_block&block_id=list_videos_my_uploaded_videos&sort_by=&from_my_videos=2"]);
+    assert.equal((await uploader.lookupUpload(page, "2026-01-01 000099 nobody")).kind, "absent");
 });

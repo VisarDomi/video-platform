@@ -8,6 +8,7 @@ import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.j
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { hasFullHdPlayback } from "./playbackQuality.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
+import { porntrexUploadsPagePath } from "./porntrexMetadata.js";
 import {
     PORNTREX_LOGIN_TOKEN, pinCookies, readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession,
     type PorntrexSession,
@@ -171,13 +172,9 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             if (signatures.has(signature)) throw new Error("Porntrex pagination did not advance; cannot infer absence");
             signatures.add(signature);
             if (entries.size - (countsProcessing ? 0 : processing.size) === expected) break;
-            const next = page.locator(`${LIST} .pagination`).getByRole("link", { name: /^(?:next(?:\s+page)?(?:\s*[›»>])?|[›»>])$/i });
-            const numbered = page.locator(`${LIST} .pagination`).getByRole("link", { name: new RegExp(`^0*${pageNumber + 1}$`) });
-            const control = await next.count() === 1 ? next : numbered;
-            if (await control.count() !== 1) throw new Error("Porntrex uploads list is incomplete; cannot infer absence");
-            await control.click();
-            await page.locator(`${LIST} [data-item-id="${snapshot.rows[0]?.remoteId}"]`)
-                .waitFor({ state: "detached", timeout: 15_000 });
+            // Load the next page of the list directly (30 rows per page).
+            const nextPage = await page.goto(`${ORIGIN}${porntrexUploadsPagePath(pageNumber + 1)}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            if (!nextPage?.ok()) throw new Error("Porntrex uploads list is incomplete; cannot infer absence");
         }
         if (entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
         const matches = [...entries.values()].filter(row => matchesPorntrexIdentity(row.title, identity));

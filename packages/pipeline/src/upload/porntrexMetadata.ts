@@ -69,6 +69,12 @@ export function comparePorntrexMetadata(
     return { ok: problems.length === 0, problems };
 }
 
+// Page n of "My Videos" (30 per page) as the list's own async block. Its
+// pagination links are AJAX calls whose only accessible name is "pagination".
+export function porntrexUploadsPagePath(page: number): string {
+    return `/my/videos/?mode=async&function=get_block&block_id=list_videos_my_uploaded_videos&sort_by=&from_my_videos=${page}`;
+}
+
 export interface ListedPorntrexUpload { readonly remoteId: string; readonly title: string; readonly processing: boolean }
 
 // Rows of "My Videos" (first page holds the newest uploads).
