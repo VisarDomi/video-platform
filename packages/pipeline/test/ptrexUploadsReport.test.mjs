@@ -23,7 +23,10 @@ test("stored Porntrex metadata parses from the edit page; site-added tags are fi
     const expected = { title: "A & B [2025-10-02 183803 kaaysi]", description: "Line one.\nSource: x", tags: ["Tango", "live"] };
     assert.deepEqual(comparePorntrexMetadata(expected, stored), { ok: true, problems: [] });
     const wrong = parsePorntrexEditPage(editPage("Other", "Changed", "live", "Asian", ["6"]));
-    assert.deepEqual(comparePorntrexMetadata(expected, wrong).problems, ["title differs", "description differs", "missing tags: Tango", "Webcam category missing (has: Asian)"]);
+    assert.deepEqual(comparePorntrexMetadata(expected, wrong).problems, ["title differs", 'description differs: "Line one.\nSource: x" became "Changed"', "missing tags: Tango", "Webcam category missing (has: Asian)"]);
+    const swapped = { ...stored, description: "A white ruffled flowers and a bra." };
+    assert.deepEqual(comparePorntrexMetadata({ ...expected, description: "A white ruffled choker and a bra." }, swapped).problems,
+        ['description differs: "choker" became "flowers"']);
     assert.equal(parsePorntrexEditPage("<p>404</p>"), null);
 });
 

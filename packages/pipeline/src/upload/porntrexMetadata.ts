@@ -39,6 +39,18 @@ export function parsePorntrexEditPage(html: string): StoredPorntrexMetadata | nu
     };
 }
 
+// The differing middle of two texts, by whole words: Porntrex silently
+// replaces some words (seen: "choker" became "flowers") instead of refusing.
+export function changedText(expected: string, stored: string): { from: string; to: string } {
+    const left = expected.split(/(\s+)/);
+    const right = stored.split(/(\s+)/);
+    let start = 0;
+    while (start < left.length && start < right.length && left[start] === right[start]) start++;
+    let end = 0;
+    while (end < left.length - start && end < right.length - start && left[left.length - 1 - end] === right[right.length - 1 - end]) end++;
+    return { from: left.slice(start, left.length - end).join("").trim(), to: right.slice(start, right.length - end).join("").trim() };
+}
+
 export function comparePorntrexMetadata(
     expected: { readonly title: string; readonly description: string; readonly tags: readonly string[] },
     stored: StoredPorntrexMetadata,
@@ -46,7 +58,10 @@ export function comparePorntrexMetadata(
     const normalize = (text: string) => text.replace(/\r\n/g, "\n").trim();
     const problems: string[] = [];
     if (stored.title !== expected.title) problems.push("title differs");
-    if (normalize(stored.description) !== normalize(expected.description)) problems.push("description differs");
+    if (normalize(stored.description) !== normalize(expected.description)) {
+        const change = changedText(normalize(expected.description), normalize(stored.description));
+        problems.push(`description differs: "${change.from}" became "${change.to}"`);
+    }
     const have = new Set(stored.tags.map((tag) => tag.toLowerCase()));
     const missing = expected.tags.filter((tag) => !have.has(tag.toLowerCase()));
     if (missing.length) problems.push(`missing tags: ${missing.join(", ")}`);
