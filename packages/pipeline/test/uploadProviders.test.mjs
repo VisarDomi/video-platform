@@ -200,3 +200,23 @@ test("Porntrex verification probes every MP4 link, highest label first, whatever
     ]);
     assert.deepEqual(ordered.map(row => row.url), ["/get_file/b_1920p.mp4", "/get_file/d_720p.mp4", "/get_file/a_480p.mp4", "/get_file/c.mp4"]);
 });
+
+test("Porntrex lookup totals the Public/Private tabs (processing included), not the stale heading", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    const row = (id, processing, title) => processing
+        ? `<div class="video-item processing" data-item-id="${id}"><span class="line-processing">Processing...</span><p class="inf"><a href="">${title}</a></p></div>`
+        : `<div class="video-item" data-item-id="${id}"><p class="inf"><a href="https://www.porntrex.com/video/${id}/x">${title}</a></p></div>`;
+    let tabs = 3;
+    await context.route("https://www.porntrex.com/**", route => route.fulfill({ contentType: "text/html", body:
+        `<div id="list_videos_my_uploaded_videos"><h2>My Videos (2)</h2><ul><li><a data-action="ajax" data-parameters="is_private:0">Public (${tabs})</a></li>`
+        + `<li><a data-action="ajax" data-parameters="is_private:1">Private (0)</a></li></ul>`
+        + row("1", false, "A [2026-01-01 000001 a]") + row("2", false, "B [2026-01-01 000002 b]") + row("3", true, "C [2026-01-01 000003 c]") + `</div>` }));
+    const page = await context.newPage();
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused", email: "fake", password: "fake" });
+    assert.equal((await uploader.lookupUpload(page, "2026-01-01 000003 c")).remoteId, "3");
+    assert.equal((await uploader.lookupUpload(page, "2026-01-01 000009 z")).kind, "absent");
+    tabs = 4; // the site says one more video exists than the page shows: never infer absence
+    await assert.rejects(uploader.lookupUpload(page, "2026-01-01 000009 z"), /incomplete/);
+});

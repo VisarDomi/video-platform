@@ -133,12 +133,16 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         await passPorntrexAgeGate(page);
         const entries = new Map<string, Entry>();
         const processing = new Set<string>();
+        let countsProcessing = false;
         const signatures = new Set<string>();
         let expected = -1;
         for (let pageNumber = 1; pageNumber <= 1000; pageNumber++) {
             await page.locator(LIST).waitFor({ state: "visible", timeout: 15_000 });
             const snapshot = await page.locator(LIST).evaluate(container => ({
                 heading: container.querySelector("h2")?.textContent ?? "",
+                // "Public (N)" / "Private (M)": the real totals, processing rows
+                // included. The heading's count lags and was seen stuck at 2.
+                tabs: [...container.querySelectorAll('a[data-parameters^="is_private:"]')].map(tab => tab.textContent ?? ""),
                 rows: [...container.querySelectorAll("[data-item-id]")].map(row => {
                     const title = row.querySelector("p.inf a");
                     // A just-uploaded video is listed as "Processing..." with an
@@ -148,8 +152,12 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
                         processing: row.classList.contains("processing") || !!row.querySelector(".line-processing") };
                 }),
             }));
-            expected = Number(snapshot.heading.match(/My Videos\s*\((\d+)\)/i)?.[1] ?? NaN);
+            const tabTotals = snapshot.tabs.map(tab => Number(tab.match(/\((\d+)\)/)?.[1] ?? NaN));
+            const fromTabs = tabTotals.length > 0 && tabTotals.every(Number.isSafeInteger);
+            expected = fromTabs ? tabTotals.reduce((sum, count) => sum + count, 0)
+                : Number(snapshot.heading.match(/My Videos\s*\((\d+)\)/i)?.[1] ?? NaN);
             if (!Number.isSafeInteger(expected)) throw new Error("Porntrex uploads list has no recognized total; cannot infer absence");
+            countsProcessing = fromTabs;
             for (const row of snapshot.rows) {
                 const published = row.remoteUrl.startsWith(`${ORIGIN}/video/${row.remoteId}/`);
                 if (!/^\d+$/.test(row.remoteId) || !row.title || (!published && !(row.processing && row.remoteUrl === ""))) {
@@ -162,7 +170,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             const signature = snapshot.rows.map(row => row.remoteId).join(",");
             if (signatures.has(signature)) throw new Error("Porntrex pagination did not advance; cannot infer absence");
             signatures.add(signature);
-            if (entries.size - processing.size === expected) break;
+            if (entries.size - (countsProcessing ? 0 : processing.size) === expected) break;
             const next = page.locator(`${LIST} .pagination`).getByRole("link", { name: /^(?:next(?:\s+page)?(?:\s*[›»>])?|[›»>])$/i });
             const numbered = page.locator(`${LIST} .pagination`).getByRole("link", { name: new RegExp(`^0*${pageNumber + 1}$`) });
             const control = await next.count() === 1 ? next : numbered;
@@ -171,7 +179,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             await page.locator(`${LIST} [data-item-id="${snapshot.rows[0]?.remoteId}"]`)
                 .waitFor({ state: "detached", timeout: 15_000 });
         }
-        if (entries.size - processing.size !== expected) throw new Error("Porntrex uploads list scan was incomplete");
+        if (entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
         const matches = [...entries.values()].filter(row => matchesPorntrexIdentity(row.title, identity));
         return matches.length === 1 ? { kind: "found", ...matches[0] }
             : { kind: matches.length > 1 ? "ambiguous" : "absent" };
