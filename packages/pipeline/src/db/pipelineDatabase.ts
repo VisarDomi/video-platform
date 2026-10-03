@@ -2549,6 +2549,27 @@ export class PipelineDatabase {
             .map((row) => ({ recordingId: row.recording_id, remoteId: row.remote_id }));
     }
 
+    // The video existed on the provider (it had this ID) and now does not:
+    // the provider removed it, with or without notice. Never re-upload on our
+    // own. Blocked for a person; `retry` then re-uploads without a weekly wait.
+    markProviderRemoved(attemptId: string, remoteId: string, reason: string, now = new Date()): boolean {
+        return this.transaction(() => {
+            const attempt = this.database.prepare(`SELECT recording_id FROM upload_attempts WHERE id = ? AND status = 'uncertain'`)
+                .get(attemptId) as { recording_id: string } | undefined;
+            if (!attempt) return false;
+            this.recordUploadEvidence(attemptId, { stage: "provider_removed", remoteId, reason }, now);
+            const timestamp = now.toISOString();
+            this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ?, retry_not_before = started_at WHERE id = ?`)
+                .run(reason, attemptId);
+            this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ? AND status = 'pending'`)
+                .run(timestamp, attemptId);
+            this.updateStateInTransaction(attempt.recording_id, "xvideos_uncertain", "metadata_ready", reason, timestamp);
+            this.updateStateInTransaction(attempt.recording_id, "metadata_ready", "blocked", reason, timestamp);
+            this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, attempt.recording_id);
+            return true;
+        });
+    }
+
     // HTTP 404 on the provider's edit page: the ID does not exist (deleted or
     // never created). Drop it so a filename lookup can settle the attempt.
     detachMissingRemote(attemptId: string, remoteId: string, now = new Date()): boolean {

@@ -119,17 +119,23 @@ test("a transfer that stops before the provider's metadata form is a plain failu
     assert.equal(db.uploadUsage("2026-09").spent, 100, "bytes still count against the monthly cap");
 });
 
-test("HTTP 404 on a stored ID is not found: the ID is dropped and a clean lookup requeues after the deadline", async t => {
+test("a video that had an ID and is now 404 was removed by the provider: blocked for review, never re-uploaded alone", async t => {
     const { db, config, r, attempt } = await fixture(t);
-    db.attachUncertainRemote(attempt, "91753528");
+    db.attachUncertainRemote(attempt, "3351531");
     const probed = [];
     const browser = { withAuthenticatedPage: async run => run({}),
-        lookupUpload: async () => ({ kind: "absent" }),
-        probeUploadStatus: async (_page, id) => { probed.push(id); return { outcome: "missing", remoteUrl: null, reason: "404" }; } };
-    await reconcileDueUploads(config, day(8), browser);
-    assert.deepEqual(probed, ["91753528"]);
-    assert.equal(db.getUncertainUploadRemote(attempt), null);
+        lookupUpload: async () => assert.fail("no filename lookup: the ID was real"),
+        probeUploadStatus: async (_page, id) => { probed.push(id); return { outcome: "missing", remoteUrl: null, reason: "404 and unlisted" }; } };
+    await reconcileDueUploads(config, day(2), browser);
+    assert.deepEqual(probed, ["3351531"]);
+    const recording = db.get(r.id);
+    assert.equal(recording.state, "blocked");
+    assert.match(recording.blockReason, /removed video 3351531 after upload.*npm run retry/);
+    assert.equal(db.dueUploadConfirmations(day(30)).length, 0);
+    // A deliberate retry re-uploads at once: nothing exists to duplicate.
+    db.retryBlocked(r.id, day(2));
     assert.equal(db.get(r.id).state, "metadata_ready");
+    assert.equal(db.canAttemptUpload(r.id, day(2)), true);
 });
 
 test("inventory titles map to recording IDs only through an exact folder-name suffix", () => {
