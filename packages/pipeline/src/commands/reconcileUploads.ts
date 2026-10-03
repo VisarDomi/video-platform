@@ -40,12 +40,16 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
                 let probe = remoteId ? await browser.probeUploadStatus(page, remoteId) : null;
+                const removed = (id: string, reason: string | undefined) => {
+                    // The provider gave this video an ID, so it existed; now it is
+                    // gone (404 and unlisted). Do not re-upload by ourselves.
+                    database.markProviderRemoved(confirmation.attemptId, id,
+                        `${confirmation.uploadProvider} removed video ${id} after upload (${reason ?? "404"}); review it, then \`npm run retry -w pipeline -- "${confirmation.recordingId}"\` re-uploads`, now);
+                    results.push({ recordingId: confirmation.recordingId, disposition: "provider_removed", remoteId: id });
+                };
                 if (remoteId && probe?.outcome === "missing") {
-                    // 404 means the ID does not exist. Forget it and settle the
-                    // attempt by filename, exactly as if no ID was ever captured.
-                    database.detachMissingRemote(confirmation.attemptId, remoteId, now);
-                    remoteId = null;
-                    probe = null;
+                    removed(remoteId, probe.reason);
+                    continue;
                 }
                 if (!remoteId) {
                     const recording = database.get(confirmation.recordingId);
@@ -82,9 +86,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 }
                 probe ??= await browser.probeUploadStatus(page, remoteId);
                 if (probe.outcome === "missing") {
-                    database.detachMissingRemote(confirmation.attemptId, remoteId, now);
-                    database.postponeConfirmation(confirmation.attemptId, probe.reason ?? "Recovered ID returned 404", now);
-                    results.push({ recordingId: confirmation.recordingId, disposition: "identity_recheck_scheduled", reason: probe.reason });
+                    removed(remoteId, probe.reason);
                     continue;
                 }
                 database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probe }, now);
