@@ -45,7 +45,8 @@
         "systemd:sync": "node scripts/sync-systemd.mjs --apply",
         "vhost:connect-iphone": "npm run vhost:connect-iphone -w pipeline",
         "vhost:session-report": "npm run vhost:session-report -w pipeline",
-        "vhost:uploads": "npm run vhost:uploads -w pipeline"
+        "vhost:uploads": "npm run vhost:uploads -w pipeline",
+        "vhost:tiers": "npm run vhost:tiers -w pipeline"
     },
     "workspaces": [
         "packages/shared",
