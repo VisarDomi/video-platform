@@ -344,6 +344,8 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
             url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
         }))));
+        const renditions: Array<{ width: number; height: number; label: string }> = [];
+        let failures = 0;
         for (const candidate of candidates) {
             const url = new URL(candidate.url, ORIGIN);
             if (url.origin !== ORIGIN || !url.pathname.startsWith("/get_file/")) throw new Error("Unexpected Porntrex playback URL");
@@ -353,11 +355,19 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
                 output = await run("ffprobe", ["-v", "error", "-rw_timeout", "15000000", "-probesize", "2000000",
                     "-analyzeduration", "2000000", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", url.href],
                 { timeout: 25_000, maxBuffer: 64 * 1024 });
-            } catch { throw new Error("Porntrex playback dimension probe failed; retry verification, not upload"); }
+            } catch {
+                // One link failing (the CDN does this now and then) says nothing about the others.
+                failures++;
+                continue;
+            }
             const stream = (JSON.parse(output.stdout) as { streams: Array<{ width: number; height: number }> }).streams?.[0];
-            const renditions = stream ? [{ ...stream, label: candidate.label }] : [];
-            if (hasFullHdPlayback(renditions)) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD pixel tier verified from playback stream" };
+            if (!stream) continue;
+            renditions.push({ ...stream, label: candidate.label });
+            if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD pixel tier verified from playback stream" };
         }
-        return { outcome: "not_ready" as const, remoteUrl, reason: "Published, but Full-HD playback dimensions are not confirmed" };
+        if (!renditions.length && failures) throw new Error("Porntrex playback dimension probe failed; retry verification, not upload");
+        const best = [...renditions].sort((left, right) => right.width * right.height - left.width * left.height)[0];
+        return { outcome: "not_ready" as const, remoteUrl, renditions,
+            reason: best ? `Published; best stream ${best.width}x${best.height} (${best.label}), no Full-HD tier yet` : "Published, but no playback stream was found" };
     }
 }
