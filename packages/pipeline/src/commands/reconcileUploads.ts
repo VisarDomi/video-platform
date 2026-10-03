@@ -6,6 +6,7 @@ import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
+import { swappedWords, type StoredPorntrexMetadata } from "../upload/porntrexMetadata.js";
 
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
     browserOverride?: Pick<ChromiumXvideosUploader, "withAuthenticatedPage" | "probeUploadStatus">
@@ -89,7 +90,19 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     removed(remoteId, probe.reason);
                     continue;
                 }
-                database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probe }, now);
+                const { stored, ...probeEvidence } = probe as typeof probe & { stored?: StoredPorntrexMetadata | null };
+                database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probeEvidence }, now);
+                const sent = stored ? database.getUploadMetadata(confirmation.recordingId) : null;
+                if (stored && sent) {
+                    // Porntrex silently swaps filtered words: learn them so new
+                    // descriptions avoid them (the prompt appends every learned phrase).
+                    const learned = [...new Set([...swappedWords(sent.title, stored.title), ...swappedWords(sent.description, stored.description)])];
+                    if (learned.length) {
+                        database.recordRejectedPhrases(confirmation.uploadProvider, learned, confirmation.attemptId, now);
+                        database.recordUploadEvidence(confirmation.attemptId, { stage: "provider_swapped_words", learned }, now);
+                        results.push({ recordingId: confirmation.recordingId, disposition: "learned_swapped_words", learned });
+                    }
+                }
                 if (probe.outcome === "online" && probe.remoteUrl) {
                     const verifiedArtifact = database.getArtifact(confirmation.recordingId);
                     const afterVerification = database.verifyUpload(

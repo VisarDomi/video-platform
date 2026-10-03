@@ -15,7 +15,7 @@ interface ChatCompletionResponse {
     timings?: Record<string, unknown>;
 }
 
-function postJson(url: URL, body: unknown): Promise<{ status: number; body: ChatCompletionResponse }> {
+export function postJson(url: URL, body: unknown): Promise<{ status: number; body: ChatCompletionResponse }> {
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify(body);
         const transport = url.protocol === "https:" ? https : http;

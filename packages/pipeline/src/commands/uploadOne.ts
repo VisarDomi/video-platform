@@ -81,11 +81,13 @@ export async function uploadOne(
             return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };
         }
         const phrases = await settleRejectedPhrases(database, recordingId, provider);
-        if (phrases.kind !== "clean") {
+        if (phrases.kind === "stale_description" || phrases.kind === "manual_review") {
             return { recordingId, uploadProvider: provider, state: database.get(recordingId)?.state,
                 disposition: phrases.kind === "stale_description" ? "redescribe_rejected_phrases" : "manual_review",
                 rejectedPhrases: phrases.phrases };
         }
+        // A rewrite above replaced the composed text: send what is stored now.
+        const submitted = database.getUploadMetadata(recordingId) ?? metadata;
         // Copies on any synchronized provider account (including manual and
         // older-generation uploads) come from the database, never a login.
         const copies = database.findProviderInventoryCopies(recordingId);
@@ -113,9 +115,9 @@ export async function uploadOne(
                 uploadIdentity: productionUploadIdentity(recording, artifactPart),
                 artifactPath: artifact.path,
                 sizeBytes: artifact.sizeBytes,
-                title: metadata.title,
-                description: metadata.description,
-                tags: metadata.tags,
+                title: submitted.title,
+                description: submitted.description,
+                tags: submitted.tags,
                 visibility: provider === "porntrex" ? "public" : "private",
                 lookupBeforeUpload: database.hasUploadAttempt(recordingId),
                 streamerAlias: provenance.alias ?? provenance.streamerId ?? undefined,

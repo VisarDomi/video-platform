@@ -45,7 +45,8 @@
         "systemd:sync": "node scripts/sync-systemd.mjs --apply",
         "ptrex:connect-iphone": "npm run ptrex:connect-iphone -w pipeline",
         "ptrex:session-report": "npm run ptrex:session-report -w pipeline",
-        "ptrex:uploads": "npm run ptrex:uploads -w pipeline"
+        "ptrex:uploads": "npm run ptrex:uploads -w pipeline",
+        "ptrex:tiers": "npm run ptrex:tiers -w pipeline"
     },
     "workspaces": [
         "packages/shared",

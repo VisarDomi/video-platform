@@ -51,6 +51,25 @@ export function changedText(expected: string, stored: string): { from: string; t
     return { from: left.slice(start, left.length - end).join("").trim(), to: right.slice(start, right.length - end).join("").trim() };
 }
 
+// Words Porntrex replaced in our text (seen: "choker" became "flowers"), to
+// learn as phrases to avoid. Only word-for-word alignments or one short changed
+// span count, so a reworded or truncated text never teaches anything.
+export function swappedWords(expected: string, stored: string): string[] {
+    const words = (text: string) => text.trim().split(/\s+/).filter(Boolean);
+    const clean = (word: string) => word.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    const left = words(expected);
+    const right = words(stored);
+    let learned: string[];
+    if (left.length === right.length) {
+        learned = left.filter((word, index) => clean(word) !== clean(right[index])).map(clean);
+        if (learned.length > 3) return [];
+    } else {
+        const from = words(changedText(expected, stored).from);
+        learned = from.length <= 2 ? from.map(clean) : [];
+    }
+    return [...new Set(learned.filter((word) => word.length >= 3))];
+}
+
 export function comparePorntrexMetadata(
     expected: { readonly title: string; readonly description: string; readonly tags: readonly string[] },
     stored: StoredPorntrexMetadata,

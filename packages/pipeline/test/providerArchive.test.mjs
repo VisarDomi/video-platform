@@ -60,13 +60,13 @@ test("local sanity check re-describes stale metadata once, then blocks instead o
     assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "xvideos")).kind, "clean");
     stale.db.recordRejectedPhrases("xvideos", ["ambien"], null);
     assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "porntrex")).kind, "clean", "phrases are provider-specific");
-    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "xvideos");
+    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "xvideos", new Date(), null);
     assert.deepEqual(verdict, { kind: "stale_description", phrases: ["ambien"] });
     assert.equal(stale.db.get(stale.r.id).state, "artifact_valid");
 
     const current = await fixture(t, { pending: false, promptVersion: await descriptionPromptVersion(["ambien"]) });
     current.db.recordRejectedPhrases("xvideos", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "xvideos")).kind, "manual_review");
+    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "xvideos", new Date(), null)).kind, "manual_review");
     assert.equal(current.db.get(current.r.id).state, "blocked");
     assert.match(current.db.get(current.r.id).blockReason, /'ambien'.*manual review/);
 });
@@ -85,7 +85,7 @@ test("old rows that stored word rejections as limited visibility are split and l
     assert.deepEqual(reopened.listRejectedPhrases(), ["waisted"]);
 });
 
-test("a provider word rejection fails definitively, keeps byte accounting and returns for re-description", async t => {
+test("a provider word rejection fails definitively, keeps byte accounting and stays upload-ready for a rewrite", async t => {
     const { db, r } = await fixture(t, { pending: false });
     const reservation = db.reserveUpload(r.id, 120, start);
     const uploader = { provider: "xvideos", upload: async request => {
@@ -96,7 +96,7 @@ test("a provider word rejection fails definitively, keeps byte accounting and re
     await assert.rejects(new UploadCoordinator(db, uploader).uploadAdmitted(r.id, reservation, {
         recordingId: r.id, uploadIdentity: r.id, artifactPath: "/unused", sizeBytes: 100, title: "t", description: "d",
         tags: [], visibility: "private" }, start), MetadataRejectedError);
-    assert.equal(db.get(r.id).state, "artifact_valid");
+    assert.equal(db.get(r.id).state, "metadata_ready");
     assert.deepEqual(db.listRejectedPhrases("xvideos"), ["ambien"]);
     assert.equal(db.dueUploadConfirmations(day(30)).length, 0, "nothing to reconcile: no remote video exists");
     assert.equal(db.uploadUsage("2026-09").spent, 100);
@@ -207,4 +207,29 @@ test("one active provider in SQLite; leaving XVideos requires a settled, synchro
     assert.equal(activeUploadProvider({ databasePath: config.databasePath }), "porntrex");
     assert.deepEqual(db.listUploadProviderEvents().map(e => [e.fromProvider, e.toProvider]), [["xvideos", "porntrex"]]);
     assert.throws(() => db.setActiveUploadProvider("bunkr"), /xvideos or porntrex/);
+});
+
+test("the local model's rewrite is kept only when clean; otherwise the full re-description still runs", async t => {
+    const good = await fixture(t, { pending: false });
+    good.db.recordRejectedPhrases("xvideos", ["ambien"], null);
+    const seen = [];
+    const verdict = await settleRejectedPhrases(good.db, good.r.id, "xvideos", new Date(), async (text, phrases) => {
+        seen.push(phrases);
+        return { title: text.title, description: text.description.replace(/ambient/i, "soft") };
+    });
+    assert.deepEqual(verdict, { kind: "rewritten", phrases: ["ambien"] });
+    assert.equal(good.db.get(good.r.id).state, "metadata_ready");
+    assert.match(good.db.getUploadMetadata(good.r.id).description, /^Purple soft lighting in a bedroom/);
+    assert.match(good.db.getUploadMetadata(good.r.id).title, /\[2025-10-16 015701 example\]$/, "the folder identity suffix is recomposed, not lost");
+    assert.equal((await checkRejectedPhrases(good.db, good.r.id, "xvideos")).kind, "clean");
+    assert.deepEqual(seen, [["ambien"]]);
+
+    const stubborn = await fixture(t, { pending: false });
+    stubborn.db.recordRejectedPhrases("xvideos", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(stubborn.db, stubborn.r.id, "xvideos", new Date(), async text => text)).kind, "stale_description");
+    assert.equal(stubborn.db.get(stubborn.r.id).state, "artifact_valid");
+
+    const broken = await fixture(t, { pending: false });
+    broken.db.recordRejectedPhrases("xvideos", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "xvideos", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
 });

@@ -5,6 +5,7 @@ import { campaignStep } from "./campaign.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
 import { checkPorntrexSession } from "../upload/porntrexKeepalive.js";
 import { SESSION_LOST_ADVICE } from "../upload/providerWarnings.js";
+import { notifyDesktop, stepNotification } from "../notify.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -33,6 +34,7 @@ export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new
         if (!result.loggedIn && database.getCampaignControl().state === "running") {
             database.pauseForAttention(`Porntrex shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
             console.log(JSON.stringify({ event: "porntrex-session-lost", note: result.note, fingerprint: result.fingerprint }));
+            notifyDesktop("Porntrex session lost: pipeline paused", `${result.note}. Run: npm run ptrex:connect-iphone`, true);
         }
     } finally {
         database.close();
@@ -133,12 +135,19 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     while (!signal.aborted) {
         try {
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
-                console.log(JSON.stringify({ event: "campaign-reconcile", result: await reconcileDueUploads(config) }));
+                const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string }> };
+                console.log(JSON.stringify({ event: "campaign-reconcile", result: reconciled }));
+                for (const item of reconciled.results ?? []) {
+                    if (item.disposition === "provider_removed") notifyDesktop("Provider removed an upload",
+                        `${item.recordingId} (video ${item.remoteId}) is gone; blocked for your review`, true);
+                }
             }
             const result = await campaignStep(config) as {
                 step?: { disposition?: string; resumeAt?: string };
             };
             console.log(JSON.stringify({ event: "campaign-step", result }));
+            const notice = stepNotification(result.step as Parameters<typeof stepNotification>[0]);
+            if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
             const disposition = result.step?.disposition;
             if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
                 && result.step?.resumeAt) {
@@ -153,10 +162,9 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             if (disposition === "admitted" || disposition === "stage_completed"
                 || disposition === "upload_completed") continue;
         } catch (error) {
-            console.error(JSON.stringify({
-                event: "campaign-error",
-                error: error instanceof Error ? error.message : String(error),
-            }));
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(JSON.stringify({ event: "campaign-error", error: message }));
+            notifyDesktop("Pipeline error", message, true);
         }
         await wait(IDLE_POLL_MILLISECONDS, signal);
     }

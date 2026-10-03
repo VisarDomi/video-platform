@@ -5,7 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { pipelineConfig } from "../dist/config.js";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
-import { comparePorntrexMetadata, parsePorntrexEditPage, parsePorntrexUploadsList } from "../dist/upload/porntrexMetadata.js";
+import { comparePorntrexMetadata, parsePorntrexEditPage, parsePorntrexUploadsList, swappedWords } from "../dist/upload/porntrexMetadata.js";
+import { notifyDesktop, stepNotification } from "../dist/notify.js";
 import { porntrexUploadsReport } from "../dist/commands/porntrexUploadsReport.js";
 import { writePorntrexSession } from "../dist/upload/porntrexSession.js";
 import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js";
@@ -89,4 +90,20 @@ test("a video Porntrex is still processing is re-checked in two hours, not a day
     assert.equal(db.get(r.id).state, "xvideos_uncertain");
     assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 - 1000)).length, 0);
     assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 + 1000)).length, 1);
+});
+
+test("words Porntrex swapped are learned only from tight, word-for-word changes", () => {
+    assert.deepEqual(swappedWords("A white ruffled choker and a bra.", "A white ruffled flowers and a bra."), ["choker"]);
+    assert.deepEqual(swappedWords("Choker, lace and BREATHING.", "flowers, lace and smiling."), ["choker", "breathing"]);
+    assert.deepEqual(swappedWords("Same text here.", "same text here"), [], "case and punctuation are not swaps");
+    assert.deepEqual(swappedWords("one two three four five six", "uno dos tres cuatro cinco seis"), [], "a rewrite teaches nothing");
+    assert.deepEqual(swappedWords("Long description that porntrex cut short", "Long description that"), [], "truncation teaches nothing");
+    assert.deepEqual(swappedWords("a red choker here", "a red here"), ["choker"]);
+});
+
+test("notifications: which steps alert, and only from the managed worker", () => {
+    assert.equal(stepNotification({ disposition: "upload_completed" }), null);
+    assert.equal(stepNotification({ disposition: "upload_retry_cooldown", reason: "list incomplete", resumeAt: "x" }).title, "Pipeline in a cooldown");
+    assert.equal(stepNotification({ disposition: "attention_required", reason: "session lost" }).urgent, true);
+    assert.equal(notifyDesktop("t", "b"), false, "tests never pop desktop notifications");
 });

@@ -73,7 +73,8 @@ export class UploadCoordinator {
                     error: error.message,
                 }, new Date());
                 this.database.releaseRetryDeadline(attemptId);
-                this.database.returnForRedescription(recordingId, `${error.message}; describing again with the phrases avoided`);
+                // Back to upload-ready: the next attempt's phrase check rewrites
+                // the text (or, failing that, describes the video again).
                 throw error;
             }
             if (error instanceof TransferAbortedBeforeSubmissionError) {

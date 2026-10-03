@@ -8,7 +8,7 @@ import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.j
 import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
 import { hasFullHdPlayback } from "./playbackQuality.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
-import { porntrexUploadsPagePath } from "./porntrexMetadata.js";
+import { parsePorntrexEditPage, porntrexUploadsPagePath, type StoredPorntrexMetadata } from "./porntrexMetadata.js";
 import {
     PORNTREX_LOGIN_TOKEN, pinCookies, readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession,
     type PorntrexSession,
@@ -342,9 +342,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             return { outcome: "missing" as const, remoteUrl: null, reason: "Porntrex edit page returned 404 and the uploads list does not contain it" };
         }
         if (!response?.ok()) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex edit page is not available" };
+        // What Porntrex stored, for the caller to compare with what we sent.
+        const stored: StoredPorntrexMetadata | null = parsePorntrexEditPage(await page.content());
         const link = page.locator(`a[href^="${ORIGIN}/video/${uploadId}/"]`).first();
         const remoteUrl = await link.getAttribute("href");
-        if (!remoteUrl) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet" };
+        if (!remoteUrl) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet", stored };
         await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
         const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
             url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
@@ -368,11 +370,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             const stream = (JSON.parse(output.stdout) as { streams: Array<{ width: number; height: number }> }).streams?.[0];
             if (!stream) continue;
             renditions.push({ ...stream, label: candidate.label });
-            if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD pixel tier verified from playback stream" };
+            if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD pixel tier verified from playback stream", stored };
         }
         if (!renditions.length && failures) throw new Error("Porntrex playback dimension probe failed; retry verification, not upload");
         const best = [...renditions].sort((left, right) => right.width * right.height - left.width * left.height)[0];
-        return { outcome: "not_ready" as const, remoteUrl, renditions,
+        return { outcome: "not_ready" as const, remoteUrl, renditions, stored,
             reason: best ? `Published; best stream ${best.width}x${best.height} (${best.label}), no Full-HD tier yet` : "Published, but no playback stream was found" };
     }
 }
