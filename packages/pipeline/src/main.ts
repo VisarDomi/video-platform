@@ -26,6 +26,7 @@ import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
 import { connectVideoHostPhone } from "./commands/connectVideoHostPhone.js";
 import { videohostSessionReport } from "./commands/videohostSessionReport.js";
 import { videohostUploadsReport } from "./commands/videohostUploadsReport.js";
+import { videohostTiersReport } from "./commands/videohostTiersReport.js";
 
 function usage(): never {
     throw new Error([
@@ -40,7 +41,7 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider oldhost|videohost --apply] | oldhost-sync --apply",
         "  metadata-check [--provider oldhost|videohost]",
-        "  vhost-connect-iphone --apply | vhost-session-report | vhost-uploads [--limit N]",
+        "  vhost-connect-iphone --apply | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -80,7 +81,11 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "oldhost-sync", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-uploads"].includes(command ?? "")) usage();
+        "upload-provider", "oldhost-sync", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+    if (command === "vhost-tiers") {
+        console.log(JSON.stringify(await videohostTiersReport(pipelineConfig, option(process.argv.slice(3), "--record")), null, 2));
+        return;
+    }
     if (command === "vhost-uploads") {
         const limit = Number(option(process.argv.slice(3), "--limit") ?? 25);
         console.log(JSON.stringify(await videohostUploadsReport(pipelineConfig, Number.isSafeInteger(limit) && limit > 0 ? limit : 25), null, 2));

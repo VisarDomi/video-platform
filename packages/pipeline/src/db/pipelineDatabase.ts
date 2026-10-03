@@ -2496,6 +2496,26 @@ export class PipelineDatabase {
         return rows.map((row) => row.phrase);
     }
 
+    // The local model rewrote the description text to avoid rejected phrases:
+    // store the new text with the prompt version it now satisfies, and the
+    // metadata recomposed from it, together. The recording stays upload-ready.
+    replaceDescriptionText(id: string, output: { title: string; description: string }, promptVersion: string,
+        metadata: { title: string; description: string; tags: readonly string[] }, reason: string, now = new Date()): Recording {
+        const timestamp = now.toISOString();
+        this.transaction(() => {
+            const recording = this.requireRecording(id);
+            if (recording.state !== "metadata_ready") throw new Error(`Recording ${id} is not upload-ready`);
+            const current = this.getDescription(id);
+            if (!current) throw new Error(`Recording ${id} has no description`);
+            this.database.prepare("UPDATE descriptions SET output_json = ?, prompt_version = ? WHERE recording_id = ?")
+                .run(JSON.stringify({ ...(current.output as object), ...output }), promptVersion, id);
+            this.database.prepare("UPDATE upload_metadata SET title = ?, description = ?, tags_json = ?, created_at = ? WHERE recording_id = ?")
+                .run(metadata.title, metadata.description, JSON.stringify(metadata.tags), timestamp, id);
+            this.insertEvent(id, "metadata_ready", "metadata_ready", reason, timestamp);
+        });
+        return this.requireRecording(id);
+    }
+
     // Metadata that contains a phrase the destination rejects is described
     // again with the learned phrases appended to the prompt.
     returnForRedescription(id: string, reason: string, now = new Date()): Recording {
