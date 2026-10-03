@@ -131,6 +131,10 @@ try {
     const ptReads = [];
     let ptSignedIn = true;
     const ptName = n => n === 3 ? 'Full title 2026-07-13 162147 no brackets' : `2026-01-20 14063${n} Upload ${n}`;
+    // The real list shows 30 per page; page 2 is reachable only through its AJAX link.
+    const ptPager = '<div class="pagination"><ul><li class="page page-playlist" style="display:none"><a href="#videos" data-action="ajax" data-parameters="sort_by:;from_my_videos:"></a></li>'
+        + '<li class="page"><a aria-label="pagination" href="#videos" data-action="ajax" data-parameters="sort_by:;from_my_videos:02">02</a></li>'
+        + '<li class="next"><a aria-label="pagination" href="#videos" data-action="ajax" data-parameters="sort_by:;from_my_videos:2"></a></li></ul></div>';
     const ptRow = n => `<div class="video-item" data-item-id="${n}"><a class="thumb" href="https://www.porntrex.com/video/${n}/upload-${n}/"></a>`
         + `<div class="durations"><i class="fa fa-clock-o"></i> ${['61:22', '1:02:03', '2:30'][n - 1]}</div>`
         + `<p class="inf"><a href="https://www.porntrex.com/video/${n}/upload-${n}/">${n === 3 ? ptName(n) : `Ignored title [${ptName(n)}]`}</a></p></div>`;
@@ -142,8 +146,12 @@ try {
         if (url.pathname === '/my/videos/') {
             // Real signed-out requests redirect to the home page; Playwright cannot fake that redirect.
             if (!ptSignedIn) return route.fulfill({ contentType: 'text/html', body: '<form><input name="username"><input type="password"></form>' });
-            return route.fulfill({ contentType: 'text/html', body: '<div id="list_videos_my_uploaded_videos"><h2>My Videos (3)</h2>'
-                + ptRow(1) + ptRow(2) + ptRow(3) + '</div>' });
+            if (url.searchParams.get('from_my_videos') === '2') {
+                assert.equal(url.searchParams.get('block_id'), 'list_videos_my_uploaded_videos');
+                return route.fulfill({ contentType: 'text/html', body: '<div id="list_videos_my_uploaded_videos"><h2>My Videos (2)</h2>' + ptRow(3) + '</div>' });
+            }
+            return route.fulfill({ contentType: 'text/html', body: '<div id="list_videos_my_uploaded_videos"><h2>My Videos (2)</h2>'
+                + ptRow(1) + ptRow(2) + '</div>' + ptPager });
         }
         if (/^\/video\/\d+\/[^/]+\/$/.test(url.pathname)) {
             const id = url.pathname.split('/')[2], file = q => `https://www.porntrex.com/get_file/8/fixture${id}/${q}.mp4/`;
@@ -160,9 +168,9 @@ try {
     const ptInject = () => pt.addScriptTag({ content: porntrexScript });
     await pt.goto('https://www.porntrex.com/my/videos/');
     await ptInject();
-    await pt.waitForSelector('a.video-row');
+    await pt.waitForFunction(() => document.querySelectorAll('a.video-row').length === 3);
     assert.deepEqual(await pt.locator('.video-name').allTextContents(), [ptName(1), ptName(2), ptName(3)],
-        'Bracketed timestamps become the label; unbracketed titles stay whole');
+        'Bracketed timestamps become the label; unbracketed titles stay whole; page 2 follows the AJAX link');
     assert.deepEqual(await pt.locator('.video-meta > span:first-child').allTextContents(), ['1:01:22', '1:02:03', '02:30']);
     assert.equal(ptReads.filter(path => path.startsWith('/video/')).length, 0, 'Listing does not resolve every source');
     await pt.locator('a.video-row').first().click();
@@ -173,7 +181,7 @@ try {
     assert.equal(await pt.locator('.streamer-name').textContent(), ptName(1));
     assert.deepEqual(await pt.locator('.buttons button:visible').allTextContents(), ['🔇']);
     const ptState = await pt.evaluate(() => sessionStorage.getItem('video-catalog:porntrex'));
-    assert.ok(!ptState.includes('get_file') && !JSON.parse(ptState).nextPage, 'Never persist sources; one uploads page');
+    assert.ok(!ptState.includes('get_file') && !JSON.parse(ptState).nextPage, 'Never persist sources; every uploads page loaded');
     await testScrollSettlement(pt, 'porntrex', '');
     await pt.goBack(); await ptInject();
     await pt.waitForFunction(() => document.querySelectorAll('.video-row').length === 3);

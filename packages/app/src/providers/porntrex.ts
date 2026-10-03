@@ -62,14 +62,26 @@ export function parseUploads(document: Document): Video[] {
     return videos;
 }
 
+// "My Videos" shows 30 uploads per page. Its pagination links are AJAX calls
+// (data-parameters "from_my_videos:N"); page N is the list's own async block.
+function uploadsPagePath(page: number): string {
+    return page === 1 ? UPLOADS
+        : `${UPLOADS}?mode=async&function=get_block&block_id=list_videos_my_uploaded_videos&sort_by=&from_my_videos=${page}`;
+}
+
+// Follow the site's pagination: a next page exists only if this page links it.
+export function nextUploadsPage(document: Document, page: number): number | undefined {
+    const linked = Array.from(document.querySelectorAll("a[data-parameters*='from_my_videos:']"),
+        link => Number(link.getAttribute("data-parameters")?.match(/from_my_videos:0*(\d+)/)?.[1] ?? NaN));
+    return linked.includes(page + 1) ? page + 1 : undefined;
+}
+
 async function fetchPage(cursor?: string, signal?: AbortSignal): Promise<{ videos: Video[]; nextPage?: string }> {
-    if (cursor !== undefined) throw new Error("Invalid uploads page cursor.");
-    const document = await pageDocument(UPLOADS, signal);
-    const videos = parseUploads(document);
-    // Pagination is added once an account has enough uploads to show its format.
-    const total = Number(document.querySelector(`${LIST} h2`)?.textContent?.match(/\((\d+)\)/)?.[1] ?? NaN);
-    if (total > videos.length) console.warn(`Porntrex lists ${total} videos; only the first ${videos.length} are shown.`);
-    return { videos };
+    const page = cursor === undefined ? 1 : Number(cursor);
+    if (!Number.isSafeInteger(page) || page < (cursor === undefined ? 1 : 2)) throw new Error("Invalid uploads page cursor.");
+    const document = await pageDocument(uploadsPagePath(page), signal);
+    const next = nextUploadsPage(document, page);
+    return { videos: parseUploads(document), nextPage: next === undefined ? undefined : String(next) };
 }
 
 // Decode only JS string escapes; never execute scripts from fetched pages.
