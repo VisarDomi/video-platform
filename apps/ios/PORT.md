@@ -25,9 +25,9 @@ the download-list bars from `packages/live-extensions`.
   Safari. No website code is bundled; deploying the website updates them. The phone
   already trusts the PC's mkcert root. Navigation is limited to the start URL and
   its subpaths (`VideoApp/Policy.swift`).
-- **Online apps** load the provider's own site and run its Safari extension's
-  content script (`packages/app/scripts/build-extension.mjs <provider>`) at document
-  start in the page world: the same Video Platform list/player as the extensions.
+- **Online apps** load the provider's own site and run its content script
+  (`packages/app/scripts/build-content.mjs <provider>`) at document start in the page
+  world: the same Video Platform list/player as the website.
   Their page stays on the site's hosts over HTTPS; other sites (including ads) are
   blocked, and embedded frames (such as a captcha) are allowed. They identify as Safari.
   Login uses the site's own password form inside the app; the app stores no
@@ -40,7 +40,7 @@ the download-list bars from `packages/live-extensions`.
     site removes them (logout, revocation, expiry) the copy is cleared too.
   - XVideos keeps its login in a session-only, version-1 `session_token_auth`
     cookie. The app gives it `session_token`'s lifetime (about three months,
-    sliding), the Xvid extension's rule, stored as a version-0 cookie because
+    sliding), stored as a version-0 cookie because
     Foundation ignores Expires on version-1 cookies. XVideos re-sends the
     session-only cookie on responses, so this re-runs every 3 seconds while open
     and at resign/background. With "remember me" ticked XVideos itself sets a
@@ -52,7 +52,7 @@ the download-list bars from `packages/live-extensions`.
     `npm run ptrex:connect-iphone` (phone unlocked, attached to the Mac) copies the
     pipeline's `PHPSESSID` into Ptrex, pinned for 400 days, and removes `kt_member`.
     Ptrex keeps `PHPSESSID` among its login cookies so a kill does not lose it. Do not
-    log in on the phone (or in the Ptrex Safari extension): it stops the pipeline; run
+    log in on the phone: it stops the pipeline; run
     the command again instead. Porntrex redirects to its
     ad-heavy home page instead of showing a page: from `/my/videos/` when signed
     out (Ptrex opens `/login/`) and from `/login/` when already signed in (Ptrex

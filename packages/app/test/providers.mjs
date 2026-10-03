@@ -1,24 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import vm from 'node:vm';
 import { webkit } from 'playwright-core';
 import { testScrollSettlement } from './scroll-settlement.mjs';
 
-// Isolated WebKit fixtures exercise the built frontend. Real iPhone HLS and
-// trusted momentum are checked separately against the installed extension.
-const extension = fs.readFileSync('dist/extension/xvideos/content.js', 'utf8');
-const porntrexExtension = fs.readFileSync('dist/extension/porntrex/content.js', 'utf8');
+// Isolated WebKit fixtures exercise the built frontend and the apps' content scripts.
+// Real iPhone HLS and trusted momentum are checked separately in the installed apps.
+const xvideosScript = fs.readFileSync('dist/content/xvideos/content.js', 'utf8');
+const porntrexScript = fs.readFileSync('dist/content/porntrex/content.js', 'utf8');
 const web = 'packages/app/build';
-const listeners = [];
-const background = { navigator: {userAgent:'Safari', platform:'MacIntel'}, console, setTimeout, clearTimeout,
-    browser: {cookies: {getAllCookieStores:async()=>[], get:async()=>null,
-        onChanged:{addListener:()=>listeners.push('cookies')}},
-        runtime:{onInstalled:{addListener:()=>listeners.push('installed')},onStartup:{addListener:()=>listeners.push('startup')}},
-        webRequest:{onCompleted:{addListener:()=>listeners.push('requests')}}}};
-background.self = background;
-vm.runInNewContext(extension, background);
-assert.deepEqual(listeners, ['cookies','installed','startup','requests'], 'Cookie persistence must start in a worker without window/document');
 const browser = await webkit.launch({ headless: true });
 const options = { viewport: { width: 428, height: 800 }, hasTouch: true,
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1' };
@@ -76,7 +66,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    const inject = () => page.addScriptTag({ content: extension });
+    const inject = () => page.addScriptTag({ content: xvideosScript });
     await page.goto('https://www.xvideos.com/account/uploads');
     await inject();
     await page.waitForSelector('a.video-row');
@@ -126,13 +116,13 @@ try {
     await page.waitForURL('**/account');
     signedIn = true;
     await page.close();
-    await context.addInitScript({ content: extension });
+    await context.addInitScript({ content: xvideosScript });
     const early = await context.newPage();
     await early.goto('https://www.xvideos.com/account/uploads', { waitUntil: 'commit' });
     await early.waitForSelector('a.video-row');
-    assert.equal(await early.evaluate(() => !!document.head && !!document.body && !!window.__videoPlatformExtensionBoot.readyAt), true,
+    assert.equal(await early.evaluate(() => !!document.head && !!document.body && !!window.__videoPlatformBoot.readyAt), true,
         'Safari document-start takeover creates its own head/body before the site parser does');
-    assert.equal(await early.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
+    assert.equal(await early.evaluate(() => window.__videoPlatformBoot.entries), 1);
     console.log('PASS: shared online UI, highest quality, incremental/recovering pagination, progress, Back/reload, no PC calls, native login/management.');
     await context.close();
 
@@ -167,7 +157,7 @@ try {
     const pt = await ptrex.newPage();
     const ptErrors = [];
     pt.on('pageerror', error => ptErrors.push(error.message));
-    const ptInject = () => pt.addScriptTag({ content: porntrexExtension });
+    const ptInject = () => pt.addScriptTag({ content: porntrexScript });
     await pt.goto('https://www.porntrex.com/my/videos/');
     await ptInject();
     await pt.waitForSelector('a.video-row');
@@ -197,11 +187,11 @@ try {
     ptSignedIn = true;
     await pt.waitForURL('**/my/videos/', { timeout: 10_000 });
     await pt.close();
-    await ptrex.addInitScript({ content: porntrexExtension });
+    await ptrex.addInitScript({ content: porntrexScript });
     const ptEarly = await ptrex.newPage();
     await ptEarly.goto('https://www.porntrex.com/my/videos/', { waitUntil: 'commit' });
     await ptEarly.waitForSelector('a.video-row');
-    assert.equal(await ptEarly.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
+    assert.equal(await ptEarly.evaluate(() => window.__videoPlatformBoot.entries), 1);
     console.log('PASS: Porntrex uploads, timestamp labels, durations, highest MP4 quality, Back, signed-out redirect to native login, document-start takeover.');
     await ptrex.close();
 
@@ -262,7 +252,7 @@ try {
     const tg = await tango.newPage();
     const tgErrors = [];
     tg.on('pageerror', error => tgErrors.push(error.message));
-    const tgInject = () => tg.addScriptTag({ content: fs.readFileSync('dist/extension/tango-live/content.js', 'utf8') });
+    const tgInject = () => tg.addScriptTag({ content: fs.readFileSync('dist/content/tango-live/content.js', 'utf8') });
     const catalog = () => tg.evaluate(() => JSON.parse(sessionStorage.getItem('video-catalog:tango-live')).videos.map(video => video.filename));
     await tg.goto('https://tango.me/'); await tgInject();
     await tg.waitForSelector('a.video-row');
@@ -296,11 +286,11 @@ try {
     assert.deepEqual(await catalog(), ['B', 'E'], 'An ended stream leaves; the next one takes its place');
     assert.ok(!calls.some(call => call.startsWith('pc ') && !call.includes('/api/tango/')), 'Only the Tango download list is used');
     assert.deepEqual(tgErrors, []);
-    await tango.addInitScript({ content: fs.readFileSync('dist/extension/tango-live/content.js', 'utf8') });
+    await tango.addInitScript({ content: fs.readFileSync('dist/content/tango-live/content.js', 'utf8') });
     const tgEarly = await tango.newPage();
     await tgEarly.goto('https://tango.me/', { waitUntil: 'commit' });
     await tgEarly.waitForSelector('a.video-row');
-    assert.equal(await tgEarly.evaluate(() => window.__videoPlatformExtensionBoot.entries), 1);
+    assert.equal(await tgEarly.evaluate(() => window.__videoPlatformBoot.entries), 1);
     console.log('PASS: Tango live list, Follow, +/- download list, two-step Block, co-streamers at the bottom, ended streams replaced by the next, document-start takeover.');
     await tango.close();
 

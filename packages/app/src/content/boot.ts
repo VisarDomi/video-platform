@@ -5,20 +5,16 @@ import { VideoViewerPage } from '../routes/videoViewer.js';
 
 type Boot = { entries: number; startedAt: number; shellAt?: number; readyAt?: number; error?: string };
 
-// One online provider per extension. The same bundle runs as the content script
-// and, when the manifest declares one, as the background worker.
-export function startExtension(provider: OnlineVideoProvider, hosts: readonly string[], startWorker?: () => void): void {
-    if (typeof window === 'undefined' || location.protocol === 'safari-web-extension:' || location.protocol.endsWith('-extension:')) {
-        startWorker?.();
-        return;
-    }
+// One online provider per app: the app injects this script at document start and
+// replaces the site's page with the shared viewer.
+export function startContentScript(provider: OnlineVideoProvider, hosts: readonly string[]): void {
     if (!hosts.includes(location.hostname)) return;
-    const scope = window as typeof window & { __videoPlatformExtensionBoot?: Boot };
+    const scope = window as typeof window & { __videoPlatformBoot?: Boot };
     const route = provider.matchRoute(location.pathname);
     if (!route || window.opener) return;
-    if (scope.__videoPlatformExtensionBoot) { scope.__videoPlatformExtensionBoot.entries++; return; }
+    if (scope.__videoPlatformBoot) { scope.__videoPlatformBoot.entries++; return; }
     const boot: Boot = { entries: 1, startedAt: performance.now() };
-    Object.defineProperty(scope, '__videoPlatformExtensionBoot', { value: boot });
+    Object.defineProperty(scope, '__videoPlatformBoot', { value: boot });
     if (route === 'login') { void provider.waitForLogin(); return; }
     // Keep the existing stop/open/close takeover. The document marker
     // survives parser reentry and starts this runtime only once.

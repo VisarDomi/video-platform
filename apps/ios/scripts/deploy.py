@@ -20,8 +20,8 @@ if a.action=='sync':
     if config.get('hosts'):
         staged=APP/'build'/a.provider/'content.js'
         staged.parent.mkdir(parents=True,exist_ok=True)
-        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-extension.mjs'),a.provider],cwd=ROOT,check=True)
-        shutil.copyfile(ROOT/'dist/extension'/a.provider/'content.js',staged)
+        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-content.mjs'),a.provider],cwd=ROOT,check=True)
+        shutil.copyfile(ROOT/'dist/content'/a.provider/'content.js',staged)
         print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
     # Hosted Safari web extensions (Tango's FC2 live and SC live) are built and staged the same way.
     for suffix,extension in config.get('webExtensions',{}).items():

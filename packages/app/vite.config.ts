@@ -20,19 +20,19 @@ function getHttpsConfig() {
 	return undefined;
 }
 
-// Each Safari extension bundles exactly one online provider; the website keeps the local ones.
-const EXTENSIONS = ['xvideos', 'porntrex', 'tango-live'];
+// Each online app's content script bundles exactly one provider; the website keeps the local ones.
+const CONTENT_SCRIPTS = ['xvideos', 'porntrex', 'tango-live'];
 
 export default defineConfig(({ mode }) => ({
 	clearScreen: false,
-	resolve: { alias: { '@providers': path.resolve(import.meta.dirname, EXTENSIONS.includes(mode) ? `src/providers/${mode}-registry.ts` : 'src/providers/local-registry.ts') } },
+	resolve: { alias: { '@providers': path.resolve(import.meta.dirname, CONTENT_SCRIPTS.includes(mode) ? `src/providers/${mode}-registry.ts` : 'src/providers/local-registry.ts') } },
 	build: {
 		outDir: 'build',
-		...(EXTENSIONS.includes(mode) ? {
-			outDir: `../../dist/extension/${mode}`,
+		...(CONTENT_SCRIPTS.includes(mode) ? {
+			outDir: `../../dist/content/${mode}`,
 			emptyOutDir: true,
 			target: 'safari17',
-			lib: { entry: path.resolve(import.meta.dirname, `src/extension/${mode}.ts`), name: 'VideoPlatform', formats: ['iife' as const], fileName: () => 'content.js' },
+			lib: { entry: path.resolve(import.meta.dirname, `src/content/${mode}.ts`), name: 'VideoPlatform', formats: ['iife' as const], fileName: () => 'content.js' },
 			rollupOptions: { output: { inlineDynamicImports: true } }
 		} : {})
 	},

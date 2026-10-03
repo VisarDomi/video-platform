@@ -1,10 +1,10 @@
-# Shared video frontend and online-provider extensions
+# Shared video frontend and online-provider content scripts
 
 The list, stylesheet, overlay, player units, timeline and gestures in `src` are
-the implementation for the local website and the XVideos (Xvid) and Porntrex
-(Ptrex) Safari extensions. The extensions do not use Stream Viewer's list/player/CSS.
-Each extension bundles exactly one online provider: `src/extension/<provider>.ts`
-starts the shared `boot.ts` takeover with that provider and its hosts.
+the implementation for the local website and the online apps Xvid (XVideos), Ptrex
+(Porntrex) and Tango (tango-live). Each app injects a content script that bundles
+exactly one online provider: `src/content/<provider>.ts` starts the shared `boot.ts`
+takeover with that provider and its hosts.
 
 Provider adapters declare `kind: local | online`. Local adapters for Tango/fc2/sc
 retain PC HLS, save/cut/return and download-list APIs. Online adapters expose
@@ -73,32 +73,28 @@ From the video-platform root:
 npm ci
 npm run check -w app
 npm run build:app
-npm run build:extension -- xvideos
-npm run build:extension -- porntrex
-npm run build:extension -- tango-live
+npm run build:content -- xvideos
+npm run build:content -- porntrex
+npm run build:content -- tango-live
 npm exec -w app -- playwright-core install webkit
 npm run test:app:webkit
 ```
 
-The extension builder requires exactly one supported provider. Its output is
-`dist/extension/<provider>`, separate from the website's `packages/app/build`.
+The content-script builder requires exactly one supported provider. Its output is
+`dist/content/<provider>`, separate from the website's `packages/app/build`.
 The Vite provider-registry alias selects local adapters for the website and only
-the chosen online provider for each extension. No backend/downloader/pipeline build is needed.
+the chosen online provider for each content script. No backend/downloader/pipeline build is needed.
 
 WebKit fixtures cover Porntrex listing, labels, durations, highest MP4 quality,
 Back, signed-out login return and document-start takeover; for XVideos,
 incremental/recovering pagination, duration/size, highest
-quality, progress, Back/reload, native login/management, worker cookie persistence,
-absence of PC requests, all three local providers, and shared scroll settlement.
+quality, progress, Back/reload, native login/management, absence of PC requests, all three local providers, and shared scroll settlement.
 They do not establish physical iPhone momentum or native HLS playback.
-`test/iphone-extension.py --provider xvideos|porntrex` inspects an installed extension through the paired Mac
-without exposing authentication or signed source URLs. Use the shared Mac access
-runbook at `/home/visar/Documents/environment/mac-access.md`.
+Inspect the installed apps with ios-tools' inspector (see `apps/ios/PORT.md`); use
+the shared Mac access runbook at `/home/visar/Documents/environment/mac-access.md`.
 
 ## iPhone packaging
 
-The XVideos and Porntrex builds run in the standalone **Xvid** and **Ptrex** apps
-(`apps/ios`, see its `PORT.md`): `apps/ios/scripts/deploy.py <provider> sync` runs
-`build-extension.mjs` and stages `content.js` for the app. They are no longer
-embedded in stream-viewer's Tango app (removed in its build 15). The manifest the
-builder writes is only used if the content script is loaded as a Safari extension.
+The XVideos, Porntrex and tango-live content scripts run in the **Xvid**, **Ptrex**
+and **Tango** apps (`apps/ios`, see its `PORT.md`): `apps/ios/scripts/deploy.py
+<provider> sync` runs `build-content.mjs` and stages `content.js` for the app.
