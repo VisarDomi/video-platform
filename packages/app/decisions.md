@@ -98,6 +98,19 @@ The frontend does not post diagnostic events to the server. The old
 `POST /api/log` route, logging helpers, watchdog, and timer-drift sentinel are
 removed.
 
+## Video Vault lives on video-host.example (2026-10-04)
+
+One app (Video Vault, which replaced VHost) lists both upload sites. Its page is on
+video-host.example and reads OldHost pages through a hidden old-host.example web view in the app.
+
+**Why:** OldHost sends a Content-Security-Policy whose `default-src` lists only its own
+and ad hosts, so a page on old-host.example cannot load VideoHost media (tested on the phone:
+`play()` rejected, nothing loaded). VideoHost sends no policy, and OldHost' CDN serves its
+playlists to other origins, so OldHost HLS plays on video-host.example. Neither site's pages can
+be read from the other origin (no CORS), and a hidden iframe would get no cookies
+(third-party), hence the app's first-party web view. The page is VideoHost's 404 page,
+which loads whether or not either site is signed in.
+
 ## Rules
 
 - Verify frontend changes against the running app, not only static code.
