@@ -5,6 +5,9 @@ import {
     fetchAliasesInBatch,
     followAccount,
     fetchFollowingAccountIds,
+    fetchBlockedAccountIds,
+    unblockAccount,
+    aliasExists,
 } from "../../services/tango/apiClient.js";
 import type { ProfileData } from "../../services/tango/apiClient.js";
 import type { AliasSnapshot } from "../../services/aliasRegistry.js";
@@ -40,6 +43,9 @@ interface TangoApi {
     fetchAliasesInBatch(streamerIds: string[]): Promise<Record<string, ProfileData> | null>;
     fetchFollowingAccountIds(): Promise<string[] | null>;
     followAccount(streamerId: string): Promise<void>;
+    fetchBlockedAccountIds(): Promise<string[] | null>;
+    unblockAccount(streamerId: string): Promise<void>;
+    aliasExists(alias: string): Promise<boolean>;
 }
 
 const tangoApi: TangoApi = {
@@ -47,6 +53,9 @@ const tangoApi: TangoApi = {
     fetchAliasesInBatch,
     fetchFollowingAccountIds,
     followAccount,
+    fetchBlockedAccountIds,
+    unblockAccount,
+    aliasExists,
 };
 
 export function createTangoAdapter(
@@ -83,9 +92,17 @@ export function createTangoAdapter(
             return { id: accountId, label: profile.alias };
         },
 
+        // A streamer added to the list is unblocked (if blocked) and followed on Tango.
         async beforeAdd(entry) {
-            const followingIds = await api.fetchFollowingAccountIds();
+            const [blockedIds, followingIds] = await Promise.all([
+                api.fetchBlockedAccountIds(),
+                api.fetchFollowingAccountIds(),
+            ]);
+            if (!blockedIds) throw new Error("Could not verify Tango block state");
             if (!followingIds) throw new Error("Could not verify Tango follow state");
+            if (blockedIds.includes(entry.id)) {
+                await api.unblockAccount(entry.id);
+            }
             if (!followingIds.includes(entry.id)) {
                 await api.followAccount(entry.id);
             }
@@ -94,6 +111,8 @@ export function createTangoAdapter(
         formatEntry(entry) {
             return formatStreamerTarget({ provider: "tango", ...entry });
         },
+
+        exists: identifier => api.aliasExists(identifier),
 
         enrichList(parsed) {
             const allAliases = aliasLookup.getAllWithHistory();
@@ -125,7 +144,8 @@ export function createTangoAdapter(
             } catch {
             }
 
-            return identifier;
+            // A name the registry never saw: Tango still knows current and recent aliases.
+            return (await api.resolveAlias(identifier))?.accountId ?? identifier;
         },
     };
 

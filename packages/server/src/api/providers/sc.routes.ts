@@ -1,5 +1,5 @@
 import { SC_FILE_PATH } from "../../core/config.js";
-import { resolveScUsername } from "../../services/sc/apiClient.js";
+import { resolveScUsername, scUsernameExists } from "../../services/sc/apiClient.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
 import { formatStreamerTarget, parseStreamerTargetLine } from "shared";
 
@@ -41,6 +41,8 @@ const adapter: ListProviderAdapter = {
     formatEntry(entry) {
         return formatStreamerTarget({ provider: "sc", ...entry });
     },
+
+    exists: identifier => scUsernameExists(parseUsername(identifier)),
 
     async resolveForRemove(identifier: string) {
         const roomId = parseRoomId(identifier);

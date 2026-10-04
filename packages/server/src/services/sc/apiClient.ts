@@ -7,9 +7,11 @@ export interface ScResolvedUser {
     roomId: string;
 }
 
+const userIdsUrl = (username: string) => `https://stripchat.com/api/front/users/user-ids/${encodeURIComponent(username)}`;
+
 export async function resolveScUsername(username: string): Promise<ScResolvedUser | null> {
     const normalizedUsername = username.trim();
-    const url = `https://stripchat.com/api/front/users/user-ids/${encodeURIComponent(normalizedUsername)}`;
+    const url = userIdsUrl(normalizedUsername);
 
     try {
         const response = await fetch(url, {
@@ -28,9 +30,20 @@ export async function resolveScUsername(username: string): Promise<ScResolvedUse
             return null;
         }
 
-        return { username: normalizedUsername, roomId: String(data.id) };
+        // An old username still resolves, naming the current one.
+        return { username: typeof data.newUsername === "string" && data.newUsername.trim() || normalizedUsername, roomId: String(data.id) };
     } catch (error: any) {
         logger.error(`[SC] resolveScUsername error: ${username}`, { error: error.message });
         return null;
     }
+}
+
+// Whether Stripchat knows a model by this username (old usernames still resolve). Throws when
+// Stripchat cannot answer, so a failed lookup never reads as "no such streamer".
+export async function scUsernameExists(username: string): Promise<boolean> {
+    const response = await fetch(userIdsUrl(username.trim()), { headers: { "User-Agent": USER_AGENT } });
+    if (response.status === 404) return false;
+    if (!response.ok) throw new Error(`Stripchat lookup failed: ${response.status}`);
+    const data = await response.json() as { id?: unknown } | null;
+    return Boolean(data?.id);
 }

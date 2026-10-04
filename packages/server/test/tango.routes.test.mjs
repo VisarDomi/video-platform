@@ -77,6 +77,8 @@ test("POST /api/tango/add resolves registry history, follows the ID, and writes 
             return [];
         },
         followAccount: async id => calls.follow.push(id),
+        fetchBlockedAccountIds: async () => ["someone-else"],
+        unblockAccount: async () => { throw new Error("only blocked accounts are unblocked"); },
     };
     const app = express();
     app.use(express.json());
@@ -131,6 +133,8 @@ test("POST /api/tango/add does not write the target when following fails", async
         }),
         fetchFollowingAccountIds: async () => [],
         followAccount: async () => { throw new Error("follow unavailable"); },
+        fetchBlockedAccountIds: async () => [],
+        unblockAccount: async () => {},
     };
     const app = express();
     app.use(express.json());
@@ -168,10 +172,161 @@ test("Tango add skips follow/add when the account is already followed", async ()
         fetchAliasesInBatch: async () => null,
         fetchFollowingAccountIds: async () => [accountId],
         followAccount: async id => calls.push(id),
+        fetchBlockedAccountIds: async () => [],
+        unblockAccount: async id => calls.push(`unblock ${id}`),
     };
     const adapter = createTangoAdapter("unused", aliasLookup, api);
 
     await adapter.beforeAdd({ id: accountId, label: "alias" });
 
     assert.deepEqual(calls, []);
+});
+
+test("Tango add unblocks a blocked account before following it", async () => {
+    const accountId = "blocked-account";
+    const calls = [];
+    const aliasLookup = {
+        resolve: () => undefined,
+        getAllWithHistory: () => ({}),
+        getReverse: () => ({}),
+        mergeAliasSnapshot: async () => false,
+    };
+    const api = {
+        resolveAlias: async () => null,
+        fetchAliasesInBatch: async () => null,
+        fetchFollowingAccountIds: async () => [],
+        followAccount: async id => calls.push(`follow ${id}`),
+        fetchBlockedAccountIds: async () => [accountId],
+        unblockAccount: async id => calls.push(`unblock ${id}`),
+    };
+    const adapter = createTangoAdapter("unused", aliasLookup, api);
+
+    await adapter.beforeAdd({ id: accountId, label: "alias" });
+
+    assert.deepEqual(calls, [`unblock ${accountId}`, `follow ${accountId}`]);
+});
+
+test("Tango add fails before any change when the block state is unknown", async () => {
+    const calls = [];
+    const aliasLookup = {
+        resolve: () => undefined,
+        getAllWithHistory: () => ({}),
+        getReverse: () => ({}),
+        mergeAliasSnapshot: async () => false,
+    };
+    const api = {
+        resolveAlias: async () => null,
+        fetchAliasesInBatch: async () => null,
+        fetchFollowingAccountIds: async () => [],
+        followAccount: async id => calls.push(`follow ${id}`),
+        fetchBlockedAccountIds: async () => null,
+        unblockAccount: async id => calls.push(`unblock ${id}`),
+    };
+    const adapter = createTangoAdapter("unused", aliasLookup, api);
+
+    await assert.rejects(adapter.beforeAdd({ id: "account", label: "alias" }), /block state/);
+    assert.deepEqual(calls, []);
+});
+
+async function listServer(t, adapter) {
+    const app = express();
+    app.use(express.json());
+    app.use(createListRoutes(adapter));
+    const server = app.listen(0, "127.0.0.1");
+    t.after(() => new Promise(resolve => server.close(resolve)));
+    await new Promise(resolve => server.once("listening", resolve));
+    const address = server.address();
+    assert(address && typeof address === "object");
+    return `http://127.0.0.1:${address.port}/api/${adapter.name}`;
+}
+
+test("GET member finds a streamer by a listed name at once, and by an old name through the provider", async (t) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "member-route-"));
+    t.after(() => rm(dir, { recursive: true }));
+    const filePath = path.join(dir, "sc.txt");
+    await writeFile(filePath, "https://stripchat.com/MMMMMooooooooooo 167036615\n");
+    const resolved = [];
+    const base = await listServer(t, {
+        name: "sc",
+        filePath,
+        parseLine: line => {
+            const match = line.match(/^https:\/\/stripchat\.com\/(\S+) (\d+)$/);
+            return match ? { id: match[2], label: match[1] } : null;
+        },
+        resolveIdentifier: async () => null,
+        formatEntry: entry => `https://stripchat.com/${entry.label} ${entry.id}`,
+        resolveForRemove: async name => {
+            resolved.push(name);
+            return name === "momo_love_" ? "167036615" : name;
+        },
+    });
+    const member = async name => (await (await fetch(`${base}/member?identifier=${encodeURIComponent(name)}`)).json()).member;
+
+    assert.equal(await member("MMMMMooooooooooo"), true);
+    assert.equal(await member("167036615"), true);
+    assert.deepEqual(resolved, [], "A listed name or ID needs no provider lookup");
+    assert.equal(await member("momo_love_"), true, "A renamed streamer is still listed");
+    assert.equal(await member("someone_else"), false);
+    assert.equal((await fetch(`${base}/member`)).status, 400);
+});
+
+test("Tango membership resolves a name the registry never saw through Tango", async (t) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "member-route-"));
+    t.after(() => rm(dir, { recursive: true }));
+    const filePath = path.join(dir, "tango.txt");
+    const accountId = "A0X2eyW_FIBderJW6Znchg";
+    await writeFile(filePath, `https://tango.me/${accountId} rapidgiraffe-3402489\n`);
+    const aliasLookup = {
+        resolve: () => undefined,
+        getAllWithHistory: () => ({}),
+        getReverse: () => ({}),
+        mergeAliasSnapshot: async () => false,
+    };
+    const api = {
+        resolveAlias: async alias => alias === "rapidgiraffe-3402488" ? { accountId, firstName: "" } : null,
+        fetchAliasesInBatch: async () => null,
+        fetchFollowingAccountIds: async () => [],
+        followAccount: async () => {},
+        fetchBlockedAccountIds: async () => [],
+        unblockAccount: async () => {},
+    };
+    const base = await listServer(t, createTangoAdapter(filePath, aliasLookup, api));
+    const member = async name => (await (await fetch(`${base}/member?identifier=${encodeURIComponent(name)}`)).json()).member;
+
+    assert.equal(await member("rapidgiraffe-3402488"), true);
+    assert.equal(await member("unknown-alias"), false);
+});
+
+test("GET exists asks the provider; a lookup that fails is an error, never a miss", async (t) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "exists-route-"));
+    t.after(() => rm(dir, { recursive: true }));
+    const aliasLookup = {
+        resolve: () => undefined,
+        getAllWithHistory: () => ({}),
+        getReverse: () => ({}),
+        mergeAliasSnapshot: async () => false,
+    };
+    let tangoDown = false;
+    const api = {
+        resolveAlias: async () => null,
+        fetchAliasesInBatch: async () => null,
+        fetchFollowingAccountIds: async () => [],
+        followAccount: async () => {},
+        fetchBlockedAccountIds: async () => [],
+        unblockAccount: async () => {},
+        aliasExists: async alias => {
+            if (tangoDown) throw new Error("Tango authentication is unavailable");
+            return alias === "lo_vee9";
+        },
+    };
+    const base = await listServer(t, createTangoAdapter(path.join(dir, "tango.txt"), aliasLookup, api));
+    const exists = name => fetch(`${base}/exists?identifier=${encodeURIComponent(name)}`);
+
+    assert.deepEqual(await (await exists("lo_vee9")).json(), { exists: true });
+    assert.deepEqual(await (await exists("nobody")).json(), { exists: false });
+    tangoDown = true;
+    const failed = await exists("lo_vee9");
+    assert.equal(failed.status, 502);
+    assert.deepEqual(await failed.json(), { error: "Tango authentication is unavailable" });
+    assert.equal((await fetch(`${base}/exists`)).status, 400);
 });

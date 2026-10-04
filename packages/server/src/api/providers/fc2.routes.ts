@@ -1,5 +1,6 @@
 import { FC2_FILE_PATH } from "../../core/config.js";
 import { createListRoutes, ListProviderAdapter } from "./list-routes.js";
+import { fc2ChannelExists } from "../../services/fc2/apiClient.js";
 import { formatStreamerTarget, parseStreamerTargetLine } from "shared";
 
 const adapter: ListProviderAdapter = {
@@ -20,6 +21,8 @@ const adapter: ListProviderAdapter = {
     formatEntry(entry) {
         return formatStreamerTarget({ provider: "fc2", ...entry });
     },
+
+    exists: fc2ChannelExists,
 };
 
 export default createListRoutes(adapter);

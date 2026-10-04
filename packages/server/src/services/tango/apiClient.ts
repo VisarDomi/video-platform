@@ -5,6 +5,9 @@ import type { AliasSnapshot } from "../aliasRegistry.js";
 
 const API_BASE = "https://gateway.tango.me/proxycador/api/public/v1";
 const FOLLOWINGS_URL = "https://gateway.tango.me/discovery/v3/followings/me/list?size=5000";
+// The account's blocklist; the same endpoint blocks and unblocks. The older
+// DELETE /public/v1/blockList answered 200 without unblocking.
+const BLOCKLIST_URL = "https://gateway.tango.me/abregistrar/connection/v1/blocklist";
 
 export interface ProfileData {
     alias: string | null;
@@ -69,6 +72,41 @@ export async function followAccount(streamerId: string): Promise<void> {
     }
 }
 
+export async function fetchBlockedAccountIds(): Promise<string[] | null> {
+    const headers = await getApiHeaders();
+    if (!headers) return null;
+
+    try {
+        const response = await fetch(BLOCKLIST_URL, { headers });
+        if (!response.ok) return null;
+        const data: any = await response.json();
+        const users = Array.isArray(data) ? data : data?.users;
+        if (!Array.isArray(users)) return null;
+        return users.filter((accountId: unknown): accountId is string => typeof accountId === "string");
+    } catch (error) {
+        logger.error("[Tango] Failed to fetch the blocklist", { error: (error as Error).message });
+        return null;
+    }
+}
+
+export async function unblockAccount(streamerId: string): Promise<void> {
+    const headers = await getApiHeaders();
+    if (!headers) throw new Error("Tango authentication is unavailable");
+
+    const response = await fetch(BLOCKLIST_URL, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "UNBLOCK", account_id: [streamerId] }),
+    });
+    if (!response.ok) {
+        throw new Error(`Tango unblock failed: ${response.status}`);
+    }
+    const result: any = await response.json().catch(() => null);
+    if (result?.error_code !== 0) {
+        throw new Error(`Tango unblock failed: ${result?.error_message || "not confirmed"}`);
+    }
+}
+
 export async function fetchFollowingAccountIds(): Promise<string[] | null> {
     const headers = await getApiHeaders();
     if (!headers) return null;
@@ -85,6 +123,21 @@ export async function fetchFollowingAccountIds(): Promise<string[] | null> {
         logger.error("[Tango] Failed to fetch followings", { error: (error as Error).message });
         return null;
     }
+}
+
+// Whether Tango knows an account by this name now (its current or a recent alias). Throws when
+// Tango cannot answer, so a failed lookup never reads as "no such streamer".
+export async function aliasExists(alias: string): Promise<boolean> {
+    const headers = await getApiHeaders();
+    if (!headers) throw new Error("Tango authentication is unavailable");
+    const response = await fetch(`${API_BASE}/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify([alias]),
+    });
+    if (!response.ok) throw new Error(`Tango lookup failed: ${response.status}`);
+    const body: any = await response.json();
+    return Object.values(body ?? {}).some((profile: any) => profile?.basicProfile);
 }
 
 export async function resolveAlias(alias: string): Promise<{ accountId: string; firstName: string } | null> {
