@@ -1,16 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as url from "url";
-import * as utils from "../../common/utils.js";
 import logger from "../../common/logger.js";
 import { FILE_WATCHER_DEBOUNCE_MS } from "../../common/timing.js";
 
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 interface TargetManagerOptions {
     label: string;
-    fileName: string;
+    filePath: string;
     parseIdentifier: (line: string) => string | null;
     defaultComment: string;
 }
@@ -24,8 +19,8 @@ export class TargetManager {
     private debounceTimer: NodeJS.Timeout | null = null;
 
     private constructor(options: TargetManagerOptions) {
-        const projectRoot = utils.findProjectRoot(__dirname);
-        this.targetsFilePath = path.join(projectRoot, options.fileName);
+        this.targetsFilePath = options.filePath;
+        fs.mkdirSync(path.dirname(this.targetsFilePath), { recursive: true });
         this.label = options.label;
         this.parseIdentifier = options.parseIdentifier;
         this.defaultComment = options.defaultComment;

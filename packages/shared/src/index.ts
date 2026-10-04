@@ -1,4 +1,4 @@
-export { downloadsRoot, providerFolder, providerFolders, VIDEO_FOLDER_KINDS } from "./providerLayout.js";
+export { downloadListPath, downloadsRoot, providerFolder, providerFolders, servicesDataRoot, VIDEO_FOLDER_KINDS } from "./providerLayout.js";
 export type { VideoFolderKind } from "./providerLayout.js";
 export { fixTargetDuration, selectLongestMediaDuration } from "./hlsUtils.js";
 export { parseNativeMediaPlaylist, nativeMediaBoundary, nativeMediaRuns, renderNativeMediaRun,
