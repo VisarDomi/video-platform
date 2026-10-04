@@ -125,12 +125,11 @@ Credentials remain in Keychain, not diagnostic JSON or backup files.
 
 ## Renewal and recovery
 
-Register `--stream-root /Users/visar/Developer/stream-viewer/apps/ios` with the
-Reader Extensions `scripts/configure-refresh.py`, retaining all existing manga,
-gallery, gallery-reader and Ytb roots. The existing installed-app scheduler then
-uses the prepared provider registry/bundle and shared native builder monthly.
-There is no separate Tango scheduler. Pause only an idle scheduler, install/test
-the intended baseline, approve that baseline, verify renewal and resume it.
+Tango renews monthly as video-platform's `tango-live` and `tango-local` entries
+through `com.visar.renewal.video-platform` (see `apps/ios/PORT.md` and ios-tools
+renewal); there is no separate Tango scheduler. `apps/ios/scripts/deploy.py install`
+approves the installed build as its renewal baseline, keeping its renewal date, when
+neither its inputs nor the app changed since `build`. No scheduler pause is needed.
 Refresh `/home/visar/Documents/environment/mac-renewal` when configuration changes.
 
 See verification.json for measured device tests and remaining manual coverage.
@@ -383,11 +382,8 @@ phone/profile expiry, signature, icon absence and extension resource hashes.
 `finish` has no background job to remove. Do not add Allow in Background items.
 Use the current trusted Mac address 192.168.1.198 from the shared access runbook.
 
-Pause only the idle existing monthly scheduler before synchronization. After
-physical acceptance, approve the delivered Tango baseline with the existing
-Reader Extensions `scripts/refresh.py approve --config
-build/installed-refresh/config/tango.json`, verify its monthly renewal, and resume
-the same scheduler. The monthly runner needs only the staged payload, not Node or
+`install` approves the delivered Tango baseline for renewal, keeping its renewal
+date; no scheduler pause is needed. The monthly runner needs only the staged payload, not Node or
 a Video Platform checkout on the Mac. Preserve native login and Safari website
 data; do not uninstall the host or clear cookies.
 

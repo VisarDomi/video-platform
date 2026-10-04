@@ -14,6 +14,10 @@ p=argparse.ArgumentParser();p.add_argument('provider',choices=sorted(registry))
 p.add_argument('action',choices=['sync','test','build','status','install','finish']);a=p.parse_args()
 config=registry[a.provider]
 log=MAC+'/build/'+a.provider+'/xcode.log'
+# Approves the installed build as its renewal baseline only if it is exactly what was built (ios-tools renewal).
+# Renewal names local apps <provider>-local (see renewal.py).
+deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewal/scripts/deliver.py',step,'--repo','video-platform',
+                     '--app',a.provider if config.get('hosts') else a.provider+'-local','--bundle',config['bundleId']]
 if a.action=='sync':
     # Online apps bundle their Safari extension's content script from this repository's
     # build, so the Mac (and monthly renewal) needs no Node or Video Platform checkout.
@@ -43,6 +47,7 @@ subprocess.run(['xcrun','swiftc','-parse-as-library','VideoApp/Policy.swift','Te
 subprocess.run(['build/policy-tests'],cwd={MAC!r},check=True)
 ''')
 elif a.action=='build':
+    subprocess.run(SSH+[shlex.join(deliver('begin'))],check=True)
     remote(f'''import pathlib,subprocess,json
 state=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
 state.parent.mkdir(parents=True,exist_ok=True)
@@ -55,6 +60,7 @@ with pathlib.Path({log!r}).open('w') as output:
 state.write_text(json.dumps({{'running':False,'exit':result.returncode}}))
 raise SystemExit(result.returncode)
 ''')
+    subprocess.run(SSH+[shlex.join(deliver('built'))],check=True)
 elif a.action=='status':
     remote(f'''import pathlib
 p=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
@@ -102,6 +108,7 @@ for suffix,extension in {config.get('webExtensions',{})!r}.items():
         assert (appex/name).read_bytes()==(pathlib.Path({MAC!r})/'build'/{a.provider!r}/suffix/name).read_bytes(), suffix+' '+name
 print('Verified bundle, name, start URL, site scope, content script, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
+subprocess.run({deliver('installed')!r},check=True)
 subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
 ''')
 else: print('Attached build complete; no temporary background job was created.')

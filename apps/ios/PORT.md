@@ -93,8 +93,7 @@ python3 scripts/deploy.py <provider> install   # verifies, installs over, launch
 `install` checks bundle ID, display name, start URL, site scope, bundled content
 script, icon absence, signature, paid team, phone provisioning and expiry before
 replacing the same app. Never uninstall to update (that would sign the online apps
-out). No LaunchAgent is created; pause only this repository's idle renewal scheduler before
-changing an approved baseline. Physical checks use ios-tools' inspector on the Mac
+out). No LaunchAgent is created. Physical checks use ios-tools' inspector on the Mac
 (`~/Developer/ios-tools/inspector`, see its README) with `--bundle <bundle ID> --snapshot-file
 scripts/inspector-snapshot.js` while the app is in the foreground.
 
@@ -108,5 +107,6 @@ This repository renews its own apps with its Mac scheduler,
 and, for online apps, the staged `build/<provider>/content.js`; Tango also lists `Login`,
 `Extension` and its staged web extensions. The Mac needs no Node. A new provider in
 `providers.json` needs no change outside this repository; rerun `configure-refresh.py` for this mirror.
-After a change: pause the idle scheduler, deploy, approve each changed app, verify
-renewal and resume. See `verification.json`.
+`install` approves the installed build as that app's renewal baseline, keeping its
+renewal date, when neither its inputs nor the app changed since `build`; otherwise it
+prints why approval was skipped. No scheduler pause is needed. See `verification.json`.
