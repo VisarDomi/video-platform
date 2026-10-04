@@ -16,7 +16,11 @@ export interface ListProviderAdapter {
     beforeAdd?(entry: ParsedEntry): Promise<void> | void;
     formatEntry(entry: ParsedEntry): string;
     enrichList?(parsed: ParsedEntry[]): string[];
+    // The listed ID a name belongs to (for remove and membership); may ask the provider,
+    // so names a streamer had before a rename still find them.
     resolveForRemove?(identifier: string): Promise<string> | string;
+    // Whether the provider itself has a streamer by this name (listed or not); throws when it cannot say.
+    exists?(identifier: string): Promise<boolean>;
 }
 
 export function createListRoutes(adapter: ListProviderAdapter): Router {
@@ -77,6 +81,49 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
         } catch (error) {
             logger.error(`Error adding to ${adapter.name}`, { error });
             res.status(500).json({ error: "Failed to update file" });
+        }
+    });
+
+    // Whether a streamer is listed, by ID: a name it is listed under answers at once, any
+    // other name (such as one it recorded under before a rename) resolves through the provider.
+    router.get(`${prefix}/member`, async (req, res) => {
+        const identifier = typeof req.query.identifier === "string" ? req.query.identifier.trim() : "";
+        if (!identifier) {
+            return res.status(400).json({ error: "identifier required" });
+        }
+        try {
+            let content = "";
+            try { content = await fs.readFile(adapter.filePath, "utf-8"); } catch {}
+            const entries = content.split("\n")
+                .map(line => adapter.parseLine(line))
+                .filter((p): p is ParsedEntry => p !== null);
+            if (entries.some(entry => entry.id === identifier || entry.label === identifier)) {
+                return res.json({ member: true });
+            }
+            const id = adapter.resolveForRemove ? await adapter.resolveForRemove(identifier) : identifier;
+            res.json({ member: entries.some(entry => entry.id === id) });
+        } catch (error) {
+            logger.error(`Error checking ${adapter.name} membership`, { error });
+            res.status(500).json({ error: "Failed to check membership" });
+        }
+    });
+
+    // Whether the provider has a streamer by this name, listed or not: Video Vault's ➕ asks
+    // all three providers which one an upload's streamer is on. A failed lookup is an error.
+    router.get(`${prefix}/exists`, async (req, res) => {
+        const identifier = typeof req.query.identifier === "string" ? req.query.identifier.trim() : "";
+        if (!identifier) {
+            return res.status(400).json({ error: "identifier required" });
+        }
+        if (!adapter.exists) {
+            return res.status(501).json({ error: `${adapter.name} cannot look streamers up` });
+        }
+        try {
+            res.json({ exists: await adapter.exists(identifier) });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn(`${adapter.name} lookup failed for ${identifier}: ${message}`);
+            res.status(502).json({ error: message });
         }
     });
 
