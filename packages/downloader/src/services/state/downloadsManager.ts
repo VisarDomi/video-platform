@@ -14,6 +14,7 @@ interface Download {
 }
 
 interface ActiveDownloader {
+    provider: string;
     streamerId: string;
     abort: () => void;
     finalize: () => void;
@@ -91,15 +92,26 @@ export class DownloadsManager {
 
     public registerDownloader(
         masterPlaylistUrl: string,
+        provider: string,
         streamerId: string,
         abort: () => void,
         finalize: () => void,
         completion: Promise<void>,
     ): void {
-        this.activeDownloaders.set(masterPlaylistUrl, { streamerId, abort, finalize, completion });
+        this.activeDownloaders.set(masterPlaylistUrl, { provider, streamerId, abort, finalize, completion });
         completion.finally(() => {
             this.activeDownloaders.delete(masterPlaylistUrl);
         });
+    }
+
+    // A provider's running sessions, and whether each has a media folder yet.
+    public activeSessions(provider: string): { streamerId: string; hasMedia: boolean }[] {
+        return [...this.activeDownloaders]
+            .filter(([, download]) => download.provider === provider)
+            .map(([masterPlaylistUrl, download]) => ({
+                streamerId: download.streamerId,
+                hasMedia: Boolean(this.downloads.get(masterPlaylistUrl)?.segmentsDirPath),
+            }));
     }
 
     public async finalizeStreamer(streamerId: string): Promise<boolean> {

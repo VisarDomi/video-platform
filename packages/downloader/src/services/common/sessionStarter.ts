@@ -56,6 +56,7 @@ export function startStreamSession(
 
     downloadsManager.registerDownloader(
         candidate.masterPlaylistUrl,
+        provider.providerName,
         candidate.streamerId,
         () => session.abort(),
         () => session.finalize(),
