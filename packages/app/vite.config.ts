@@ -20,8 +20,8 @@ function getHttpsConfig() {
 	return undefined;
 }
 
-// Each online app's content script bundles exactly one provider; the website keeps the local ones.
-const CONTENT_SCRIPTS = ['oldhost', 'videohost', 'tslive-live'];
+// Each online app's content script bundles its provider (the uploads app: its two sites); the website keeps the local ones.
+const CONTENT_SCRIPTS = ['vault', 'tslive-live'];
 
 export default defineConfig(({ mode }) => ({
 	clearScreen: false,

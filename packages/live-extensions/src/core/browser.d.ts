@@ -7,3 +7,8 @@ declare const browser: {
 };
 // The provider's download-list API path, fixed per extension at build time.
 declare const __API_PATH__: string;
+// Stylesheets are bundled as text (scripts/build.mjs), such as the viewer's button styles.
+declare module "*.css" {
+    const css: string;
+    export default css;
+}

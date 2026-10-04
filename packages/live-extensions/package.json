@@ -8,6 +8,9 @@
         "build": "node scripts/build.mjs",
         "check": "tsc --noEmit"
     },
+    "dependencies": {
+        "app": "0.0.1"
+    },
     "devDependencies": {
         "typescript": "^5.9.3"
     }
