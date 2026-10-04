@@ -48,11 +48,9 @@ export class StreamDiscoveryService {
             const targets = this.targetManager.getTargets();
             const targetIds = new Set(targets.map((target) => target.accountId));
             // File removals apply even when the remote lookup is unavailable.
+            await this.activeReconciler.endRemovedSessions(targetIds);
             for (const id of this.previousTargetIds) {
-                if (!targetIds.has(id)) {
-                    await this.downloadsManager.finalizeStreamer(id);
-                    this.lastDecisionByTarget.delete(id);
-                }
+                if (!targetIds.has(id)) this.lastDecisionByTarget.delete(id);
             }
             this.previousTargetIds = targetIds;
             const result = await this.apiClient.getLiveStreamsByAccountIds(targets.map(target => target.accountId));

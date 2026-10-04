@@ -109,6 +109,7 @@ function discoveryFixture() {
         has: () => Boolean(recordingId),
         hasStreamer: () => Boolean(recordingId),
         async finalizeStreamer(id) { finalized.push(id); recordingId = null; return true; },
+        activeSessions: provider => provider === 'tango' && recordingId ? [{ streamerId: 'account', hasMedia: false }] : [],
         add(url, data) { starts.push(data); return null; },
     };
     const api = { getLiveStreamsByAccountIds: async () => ({
@@ -117,7 +118,13 @@ function discoveryFixture() {
     }) };
     const targetManager = { getTargets: () => [...targets], hasTarget: id => targets.some(t => t.accountId === id), getAlias: () => 'example' };
     const service = new StreamDiscoveryService(api, targetManager, manager);
-    service.activeReconciler = { recoverLocalState: async () => {}, reconcile: async () => ({ resumePaths: new Map() }) };
+    // The disk scan is stubbed; removals go through the real shared check.
+    const reconciler = service.activeReconciler;
+    service.activeReconciler = {
+        recoverLocalState: async () => {},
+        reconcile: async () => ({ resumePaths: new Map() }),
+        endRemovedSessions: listed => reconciler.endRemovedSessions(listed),
+    };
     return { service, api, targets, finalized, starts };
 }
 

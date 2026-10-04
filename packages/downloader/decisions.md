@@ -206,6 +206,22 @@ download entries with `pay == 0`.
 
 **Why:** A paid broadcast can be live while its HLS WebSocket handshake remains
 unavailable without payment.
+
+## Sessions end when their streamer is removed or offline without media (2026-10-04)
+
+A session retries until something ends it, and the disk reconciler only judges
+recording folders. Every provider poll now first ends the sessions of streamers
+no longer in the download list (`ActiveRecordingReconciler.endRemovedSessions`,
+also when the lookup fails or the list is empty; Tango's own loop uses it too),
+and ends a session that never recorded any media once the provider has reported
+its streamer offline for 60s over two observations. Sessions with a folder keep
+the folder rule.
+
+**Why:** SC `Milk_Sola` was removed 21s after her session started: the folder was
+finalized without a target, but the session retried for three days. SC
+`sana163` went private, then offline, while her playlist URL kept answering 200:
+her empty session looped for 4.8 days, invisible to the folder scan.
+
 ## Rule
 
 - Keep downloader concerns separate from server/API concerns.

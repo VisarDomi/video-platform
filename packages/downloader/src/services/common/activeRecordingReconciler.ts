@@ -101,6 +101,8 @@ async function inspectActiveRecording(recordingPath: string): Promise<ActiveReco
 export class ActiveRecordingReconciler {
     private readonly activeRoot: string;
     private readonly confirmations = new Map<string, TerminalConfirmation>();
+    // Sessions without media whose streamer the provider reports offline, by streamer.
+    private readonly sessionConfirmations = new Map<string, Omit<TerminalConfirmation, "playlistMtimeMs">>();
 
     constructor(
         private readonly providerName: string,
@@ -138,7 +140,21 @@ export class ActiveRecordingReconciler {
         }
     }
 
+    // A session whose streamer left the download list ends at once, recorded media handed off.
+    // The folder scan cannot do this: the folder no longer names a target, and only the session
+    // can stop itself. Called before each provider lookup, so it also applies while the lookup
+    // fails or the list is empty.
+    public async endRemovedSessions(listed: ReadonlySet<string>): Promise<void> {
+        for (const { streamerId } of this.downloadsManager.activeSessions(this.providerName)) {
+            if (listed.has(streamerId)) continue;
+            logger.info(`[${this.providerName}] Ending the session of ${streamerId}: removed from the download list`);
+            await this.downloadsManager.finalizeStreamer(streamerId);
+            this.sessionConfirmations.delete(streamerId);
+        }
+    }
+
     public async reconcile(snapshot: ProviderSnapshot): Promise<ReconcileResult> {
+        await this.endOfflineSessionsWithoutMedia(snapshot);
         const resumePaths = new Map<string, string>();
         let entries;
         try {
@@ -216,6 +232,31 @@ export class ActiveRecordingReconciler {
         }
 
         return { resumePaths };
+    }
+
+    // A session that never recorded anything has no folder for the scan below to judge, so it
+    // would retry forever after its streamer went offline (a playlist URL can keep answering).
+    // It ends after the same confirmation as a folder: offline for 60s over two observations.
+    private async endOfflineSessionsWithoutMedia(snapshot: ProviderSnapshot): Promise<void> {
+        const sessions = this.downloadsManager.activeSessions(this.providerName);
+        const waiting = new Set(sessions
+            .filter(({ streamerId, hasMedia }) => !hasMedia && snapshot.terminalTargetIds.has(streamerId))
+            .map(({ streamerId }) => streamerId));
+        for (const streamerId of this.sessionConfirmations.keys()) {
+            if (!waiting.has(streamerId)) this.sessionConfirmations.delete(streamerId);
+        }
+        for (const streamerId of waiting) {
+            const prior = this.sessionConfirmations.get(streamerId);
+            const confirmation = prior
+                ? { ...prior, observationCount: prior.observationCount + 1 }
+                : { firstObservedAt: snapshot.observedAt, observationCount: 1 };
+            this.sessionConfirmations.set(streamerId, confirmation);
+            if (confirmation.observationCount >= 2 && snapshot.observedAt - confirmation.firstObservedAt >= TERMINAL_CONFIRMATION_MS) {
+                logger.info(`[${this.providerName}] Ending the session of ${streamerId}: offline for 60s without any media`);
+                await this.downloadsManager.finalizeStreamer(streamerId);
+                this.sessionConfirmations.delete(streamerId);
+            }
+        }
     }
 
     private async finalize(targetId: string | null, recordingPath: string, reason: string): Promise<void> {

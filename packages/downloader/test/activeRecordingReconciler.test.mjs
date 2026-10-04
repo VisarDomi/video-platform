@@ -28,6 +28,7 @@ async function fixture(t) {
     const manager = {
         hasStreamer: () => false,
         finalizeStreamer: async () => false,
+        activeSessions: () => [],
     };
     return {
         finalizedRoot,
@@ -143,4 +144,63 @@ test("a first segment persisted before playlist creation remains resumable", asy
     });
     assert.equal(result.resumePaths.get("12345"), value.recordingPath);
     await stat(value.recordingPath);
+});
+
+// Running sessions as the downloads manager reports them, by provider; finalizing ends one.
+function runningSessions(sc) {
+    const finalized = [];
+    const manager = {
+        hasStreamer: () => false,
+        activeSessions: provider => provider === "sc"
+            ? sc.filter((session) => !finalized.includes(session.streamerId))
+            : [{ streamerId: "225716607", hasMedia: false }],
+        async finalizeStreamer(id) { finalized.push(id); return true; },
+    };
+    const reconciler = new ActiveRecordingReconciler("sc", manager, () => null, path.join(os.tmpdir(), "video-platform-no-active-root"));
+    return { reconciler, finalized };
+}
+
+test("a session whose streamer left the download list ends at once, media or not", async () => {
+    const { reconciler, finalized } = runningSessions([
+        { streamerId: "225716607", hasMedia: true },
+        { streamerId: "253467964", hasMedia: false },
+    ]);
+    await reconciler.endRemovedSessions(new Set(["253467964"]));
+    assert.deepEqual(finalized, ["225716607"], "Only the removed streamer, and only this provider's sessions");
+    await reconciler.endRemovedSessions(new Set());
+    assert.deepEqual(finalized, ["225716607", "253467964"], "An empty list ends every session");
+});
+
+test("a session without media ends once its streamer has been offline for sixty seconds", async () => {
+    const { reconciler, finalized } = runningSessions([
+        { streamerId: "253467964", hasMedia: false },
+        { streamerId: "recording", hasMedia: true },
+        { streamerId: "live", hasMedia: false },
+    ]);
+    const snapshot = (observedAt) => ({
+        observedAt,
+        live: new Map([["live", { targetId: "live", alias: "live", recordingId: "now", masterPlaylistUrl: "" }]]),
+        terminalTargetIds: new Set(["253467964", "recording"]),
+    });
+    await reconciler.reconcile(snapshot(0));
+    await reconciler.reconcile(snapshot(30_000));
+    assert.deepEqual(finalized, []);
+    await reconciler.reconcile(snapshot(60_000));
+    assert.deepEqual(finalized, ["253467964"], "A session with media keeps the folder rule; a live streamer keeps recording");
+});
+
+test("going live again restarts the offline confirmation", async () => {
+    const { reconciler, finalized } = runningSessions([{ streamerId: "253467964", hasMedia: false }]);
+    const snapshot = (observedAt, offline) => ({
+        observedAt,
+        live: new Map(),
+        terminalTargetIds: new Set(offline ? ["253467964"] : []),
+    });
+    await reconciler.reconcile(snapshot(0, true));
+    await reconciler.reconcile(snapshot(30_000, false));
+    await reconciler.reconcile(snapshot(60_000, true));
+    await reconciler.reconcile(snapshot(90_000, true));
+    assert.deepEqual(finalized, []);
+    await reconciler.reconcile(snapshot(120_000, true));
+    assert.deepEqual(finalized, ["253467964"]);
 });

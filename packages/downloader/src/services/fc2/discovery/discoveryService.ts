@@ -42,6 +42,7 @@ export class Fc2DiscoveryService {
 
     private async poll(): Promise<void> {
         const targets = this.targetManager.getTargets();
+        await this.activeReconciler.endRemovedSessions(new Set(targets));
 
         if (targets.length === 0) {
             return;

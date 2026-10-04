@@ -46,6 +46,7 @@ export class ScDiscoveryService {
 
     private async poll(): Promise<void> {
         const targets = this.targetManager.getTargets();
+        await this.activeReconciler.endRemovedSessions(new Set(targets.map((target) => target.roomId)));
         if (targets.length === 0) return;
 
         const roomIdMap = new Map<string, ScTarget>();
