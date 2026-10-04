@@ -101,7 +101,13 @@ if config.get('hosts'):
     if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
     if 'loginUrl' in config: info['LoginURL'] = config['loginUrl']
     if 'keepCookies' in config: info['KeepCookies'] = config['keepCookies']
+    # Video Vault reads its other upload site through hidden web views (VideoApp/SiteWorker.swift).
+    if 'workers' in config: info['SiteWorkers'] = config['workers']
     if login: info['TangoLogin'] = True
+    # Xvid and Video Vault reach the PC's download lists themselves (VideoApp/DownloadList.swift).
+    if config.get('downloadList') is True:
+        info.update(DownloadList=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
+                    NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
 else:
     info.update(NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
                 NSLocalNetworkUsageDescription='Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.')

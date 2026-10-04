@@ -2,6 +2,7 @@ import { STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
 import { fetchVideos } from '../services/api.js';
 import { getProvider, videoUrl } from '../providers/index.js';
 import { VideoCatalog } from '../services/catalog.js';
+import type { Notice } from '../providers/types.js';
 import type { Video } from '../types.js';
 import { formatDuration, formatSize } from '../utils/format.js';
 
@@ -11,6 +12,7 @@ interface Row {
 	element: HTMLAnchorElement;
 	name: HTMLSpanElement;
 	duration: HTMLSpanElement;
+	mark: HTMLSpanElement;
 	size: HTMLSpanElement;
 }
 
@@ -18,6 +20,7 @@ class VideoListPage {
 	private readonly source;
 	private readonly catalog;
 	private readonly list = document.createElement('main');
+	private readonly notices = document.createElement('div');
 	private readonly rows = new Map<string, Row>();
 	private videos: Video[] = [];
 	private pollTimer: number | null = null;
@@ -30,8 +33,13 @@ class VideoListPage {
 
 	constructor(private readonly provider: Provider) {
 		this.source = getProvider(provider);
-		this.catalog = new VideoCatalog(provider, videos => { this.videos = videos; this.reconcile(videos); });
+		this.catalog = new VideoCatalog(provider, (videos, notices) => {
+			this.videos = videos;
+			this.reconcile(videos);
+			this.showNotices(notices);
+		});
 		this.list.className = 'video-list';
+		this.notices.className = 'video-notices';
 		this.list.setAttribute('aria-label', `${provider} videos`);
 	}
 
@@ -41,7 +49,7 @@ class VideoListPage {
 		this.readHighlight();
 		if (this.source.kind === 'local') await this.refresh();
 		else await this.catalog.open(performance.getEntriesByType('navigation').some(entry => (entry as PerformanceNavigationTiming).type === 'back_forward'));
-		document.body.replaceChildren(this.list);
+		document.body.replaceChildren(this.notices, this.list);
 		if (this.source.kind === 'online' && typeof history.state?.videoListY === 'number') window.scrollTo(0, history.state.videoListY);
 		else this.scrollToHighlight();
 		this.list.addEventListener('click', () => {
@@ -125,6 +133,7 @@ class VideoListPage {
 			return;
 		}
 
+		const marks = this.source.kind === 'online' ? this.source.marks?.(videos) : undefined;
 		for (const video of videos) {
 			const key = videoKey(video);
 			let row = this.rows.get(key);
@@ -133,6 +142,7 @@ class VideoListPage {
 				this.rows.set(key, row);
 			}
 			this.updateRow(row, video);
+			row.mark.textContent = marks?.get(video.filename) ?? '';
 			this.list.append(row.element);
 		}
 	}
@@ -148,6 +158,17 @@ class VideoListPage {
 		row.duration.textContent = liveStream ? 'LIVE' : formatDuration(video.duration);
 		row.size.textContent = liveStream ? '' : formatSize(estimatedSize);
 		row.size.classList.toggle('large', estimatedSize > 350 * 1024 * 1024);
+	}
+
+	// Video Vault: a site that needs its login, linked to where it is fixed.
+	private showNotices(notices: readonly Notice[]): void {
+		this.notices.replaceChildren(...notices.map(notice => {
+			const element = document.createElement(notice.href ? 'a' : 'p');
+			element.className = 'video-notice';
+			element.textContent = notice.text;
+			if (element instanceof HTMLAnchorElement) element.href = notice.href!;
+			return element;
+		}));
 	}
 
 	private startPolling(): void {
@@ -205,11 +226,13 @@ function createRow(): Row {
 	const meta = document.createElement('span');
 	meta.className = 'video-meta';
 	const duration = document.createElement('span');
+	const mark = document.createElement('span');
+	mark.className = 'video-mark';
 	const size = document.createElement('span');
 	size.className = 'video-size';
-	meta.append(duration, size);
+	meta.append(duration, mark, size);
 	element.append(name, meta);
-	return { element, name, duration, size };
+	return { element, name, duration, mark, size };
 }
 
 function videoKey(video: Video): string {

@@ -17,12 +17,14 @@
     "bundleId": "com.visar.SCLocal.paid",
     "url": "https://192.168.1.197:9999/videos/sc"
   },
-  "xvideos": {
-    "name": "Xvid",
-    "product": "Xvid",
-    "bundleId": "com.visar.Xvid.paid",
-    "url": "https://www.xvideos.com/account/uploads",
+  "vault": {
+    "name": "Video Vault",
+    "product": "VideoVault",
+    "bundleId": "com.visar.Ptrex.paid",
+    "url": "https://www.porntrex.com/video-vault/",
     "hosts": [
+      "porntrex.com",
+      "www.porntrex.com",
       "xvideos.com",
       "www.xvideos.com"
     ],
@@ -31,29 +33,26 @@
       "lifetimeFrom": "session_token"
     },
     "keepCookies": [
-      "session_token"
-    ]
-  },
-  "porntrex": {
-    "name": "Ptrex",
-    "product": "Ptrex",
-    "bundleId": "com.visar.Ptrex.paid",
-    "url": "https://www.porntrex.com/my/videos/",
-    "hosts": [
-      "porntrex.com",
-      "www.porntrex.com"
-    ],
-    "loginUrl": "https://www.porntrex.com/login/",
-    "keepCookies": [
       "kt_member",
-      "PHPSESSID"
-    ]
+      "PHPSESSID",
+      "session_token"
+    ],
+    "workers": {
+      "xvideos": {
+        "url": "https://www.xvideos.com/robots.txt",
+        "hosts": [
+          "xvideos.com",
+          "www.xvideos.com"
+        ]
+      }
+    },
+    "downloadList": true
   },
   "tango-live": {
     "name": "Tango",
     "product": "Tango",
     "bundleId": "com.visar.Tango.paid",
-    "build": "18",
+    "build": "22",
     "url": "https://tango.me/",
     "hosts": [
       "tango.me",

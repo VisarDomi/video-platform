@@ -133,7 +133,7 @@ test("the phone script swaps in the shared session, drops kt_member and reports 
         route.fulfill({ contentType: "text/html", body: loggedIn && route.request().url().includes("/upload-video/") ? '<input type="file" name="content">' : "<p>home</p>" });
     });
     const page = await context.newPage();
-    await page.goto("https://www.porntrex.com/my/videos/");
+    await page.goto("https://www.porntrex.com/video-vault/");
     const script = phoneCookieScript([{ ...sessionCookies[0], value: shared }, sessionCookies[1]]);
     assert(!script.includes("stale"));
     const result = JSON.parse(await page.evaluate(script));
@@ -144,7 +144,7 @@ test("the phone script swaps in the shared session, drops kt_member and reports 
     assert.equal(jar.kt_member, undefined);
 });
 
-test("phone bridge launches Ptrex, inspects, verifies after reload, cleans up, and explains a locked phone", async () => {
+test("phone bridge launches Video Vault, inspects, verifies after reload, cleans up, and explains a locked phone", async () => {
     const commands = [];
     const results = ['RESULT {"loggedIn":true,"host":"www.porntrex.com","finalPath":"/upload-video/"}'];
     const ssh = async (command, input) => {

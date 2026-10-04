@@ -81,6 +81,8 @@ assert info.get('SiteHosts')=={config.get('hosts')!r}
 assert info.get('DurableCookie')=={config.get('durableCookie')!r}
 assert info.get('LoginURL')=={config.get('loginUrl')!r}
 assert info.get('KeepCookies')=={config.get('keepCookies')!r}
+assert info.get('SiteWorkers')=={config.get('workers')!r}
+assert info.get('DownloadList')=={(True if config.get('downloadList') else None)!r}
 if {bool(config.get('hosts'))!r}:
     staged=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'content.js'
     assert (app/'content.js').read_bytes()==staged.read_bytes(), 'Bundled content script differs from the staged build'

@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { StoredCookie } from "../upload/porntrexSession.js";
 
 // The paired iPhone is reached through the Mac (apps/ios/PORT.md): devicectl
-// launches the Ptrex app and the existing WebKit inspector runs a script in
-// its porntrex page. Same trusted SSH options as apps/ios/scripts/deploy.py.
+// launches the Video Vault app (formerly Ptrex) and the existing WebKit inspector
+// runs a script in its porntrex.com page. Same trusted SSH options as apps/ios/scripts/deploy.py.
 export interface PtrexPhoneConfig {
     readonly sshTarget: string;
     readonly knownHostsFile: string;
@@ -73,7 +73,7 @@ export function phoneCookieScript(cookies: readonly StoredCookie[], now = new Da
     request.open("GET", "/upload-video/?connected=" + Date.now(), false);
     request.send();
     const loggedIn = /name="content"/.test(request.responseText);
-    if (loggedIn) setTimeout(() => location.replace("/my/videos/"), 50);
+    if (loggedIn) setTimeout(() => location.replace("/video-vault/"), 50);
     return JSON.stringify({ loggedIn, host: location.hostname, finalPath: new URL(request.responseURL).pathname });
 })()`;
 }
@@ -101,7 +101,7 @@ export class PtrexPhone {
             if (launch.code !== 0) {
                 const detail = `${launch.stdout}\n${launch.stderr}`;
                 throw new Error(/lock/i.test(detail) ? "The iPhone is locked: unlock it and run the command again"
-                    : `Could not open Ptrex on the iPhone: ${detail.trim().split("\n").slice(-2).join(" ")}`);
+                    : `Could not open Video Vault on the iPhone: ${detail.trim().split("\n").slice(-2).join(" ")}`);
             }
             const result = await this.evaluate(file);
             if (!result.loggedIn) return result;
@@ -119,11 +119,11 @@ export class PtrexPhone {
         let last = "";
         for (let attempt = 1; attempt <= 8; attempt++) {
             await this.pause(3_000);
-            const run = await this.ssh(`cd ${quote(this.config.macAppDirectory)} && ${quote(this.config.inspectorPython)} ${quote(this.config.inspector)} --device ${quote(this.config.device)} --bundle ${quote(this.config.bundleId)} --evaluate-file ${quote(file)}`);
+            const run = await this.ssh(`cd ${quote(this.config.macAppDirectory)} && ${quote(this.config.inspectorPython)} ${quote(this.config.inspector)} --device ${quote(this.config.device)} --bundle ${quote(this.config.bundleId)} --url-prefix https://www.porntrex.com/ --evaluate-file ${quote(file)}`);
             const line = run.stdout.split("\n").find((text) => text.startsWith("RESULT "));
             if (line) return JSON.parse(line.slice("RESULT ".length)) as PhoneSessionResult;
             last = `${run.stdout}\n${run.stderr}`.trim().split("\n").filter((text) => !/Warning|warnings\.warn/.test(text)).slice(-1)[0] ?? "";
         }
-        throw new Error(`Ptrex's page could not be inspected (keep the iPhone unlocked with Ptrex open): ${last}`);
+        throw new Error(`Video Vault's page could not be inspected (keep the iPhone unlocked with Video Vault open on its list): ${last}`);
     }
 }

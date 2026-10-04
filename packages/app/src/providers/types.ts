@@ -10,6 +10,16 @@ export interface MediaSource {
 export interface VideoPage {
 	videos: Video[];
 	nextPage?: string;
+	// Video Vault: sites that need attention (such as a login), and sites whose uploads could
+	// not be listed, so their earlier rows stay.
+	notices?: Notice[];
+	incomplete?: Provider[];
+}
+
+// A message above the list, linking to where it can be fixed.
+export interface Notice {
+	readonly text: string;
+	readonly href?: string;
 }
 
 interface BaseProvider {
@@ -34,8 +44,24 @@ export interface OnlineVideoProvider extends BaseProvider {
 	readonly loginUrl: string;
 	matchRoute(path: string): 'list' | 'video' | 'login' | null;
 	fetchPage(cursor?: string, signal?: AbortSignal): Promise<VideoPage>;
-	waitForLogin(): Promise<void>;
+	// Back to the uploads once signed in, or to `home` (Video Vault's page).
+	waitForLogin(home?: string): Promise<void>;
 	readonly live?: LiveActions;
+	// Uploads of PC recordings: the streamer of the recording, if its label names one. Which
+	// download list it belongs in is the user's choice.
+	uploadStreamer?(video: Video): string | undefined;
+	// Video Vault lists several sites in one order (and keeps its last complete list to open
+	// with), marks rows by site where that is ambiguous, and names a viewer route's video
+	// before the list arrives.
+	order?(videos: Video[]): Video[];
+	marks?(videos: Video[]): Map<string, string>;
+	routeVideo?(path: string): Video | undefined;
+}
+
+// A streamer in one of the PC's download lists.
+export interface ListEntry {
+	readonly list: LocalProvider;
+	readonly identifier: string;
 }
 
 // Live streams: the streamer actions and list rules of Tango (formerly Stream Viewer).

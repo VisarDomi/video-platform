@@ -20,8 +20,8 @@ function getHttpsConfig() {
 	return undefined;
 }
 
-// Each online app's content script bundles exactly one provider; the website keeps the local ones.
-const CONTENT_SCRIPTS = ['xvideos', 'porntrex', 'tango-live'];
+// Each online app's content script bundles its provider (Video Vault: its two sites); the website keeps the local ones.
+const CONTENT_SCRIPTS = ['vault', 'tango-live'];
 
 export default defineConfig(({ mode }) => ({
 	clearScreen: false,

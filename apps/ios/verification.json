@@ -16,15 +16,11 @@
       "bundleId": "com.visar.SCLocal.paid",
       "url": "https://192.168.1.197:9999/videos/sc"
     },
-    "xvideos": {
-      "name": "Xvid",
-      "bundleId": "com.visar.Xvid.paid",
-      "url": "https://www.xvideos.com/account/uploads"
-    },
-    "porntrex": {
-      "name": "Ptrex",
+    "vault": {
+      "name": "Video Vault",
       "bundleId": "com.visar.Ptrex.paid",
-      "url": "https://www.porntrex.com/my/videos/"
+      "url": "https://www.porntrex.com/video-vault/",
+      "replaced": "Ptrex (porntrex), installed over it on 2026-10-04"
     },
     "tango-live": {
       "name": "Tango",
@@ -187,5 +183,30 @@
     },
     "scheduler": "com.visar.installed-apps-refresh resumed, ran once, idle, last exit 0, enumerated 16 installed apps",
     "newBackgroundJobs": 0
+  },
+  "vault": {
+    "date": "2026-10-04",
+    "whyPorntrex": "On the phone, a Porntrex 1080p MP4 did not load in Xvid's xvideos.com page (play() NotSupportedError): XVideos' Content-Security-Policy default-src lists only its own and ad hosts. The same URL played 1920x1080 in Ptrex. Porntrex sends no CSP; XVideos HLS loaded 1080x1920 in Ptrex's real player (metadata in 0.9 s) and XVideos' CDN answered its playlists to porntrex.com. Reading either site's pages from the other origin failed (TypeError: Load failed).",
+    "simulatorSpike": "iOS 26.3 simulator: a porntrex.com page asked native code for an XVideos path and a hidden xvideos.com web view answered {status, url, text} in 88 ms; it shares the cookie store both ways; off-site paths refused; the user script runs on Porntrex 404 and text pages; /video-vault/ is a secure context with storage.",
+    "porntrexPaths": "/video-vault/, /video-vault/xvideos/<video path> and /video-vault/porntrex/<video path> answer 404 (40986 bytes) without redirect or CSP",
+    "titles": "435 uploads (402 XVideos on 21 pages, 33 Porntrex on 2): 426 bracket labels, 9 with the timestamp outside brackets (7 XVideos titles start with it; 2 Porntrex \"String panty <timestamp> AI_channel\"), none without one; no recording on both sites.",
+    "policyTests": "PASS on the Mac, including vault hosts and the worker path rule (AppPolicy.workerURL)",
+    "install": "deploy.py vault install verified bundle, name, start URL, site scope, workers, content script (sha256 4cc78720…), signature, team, provisioning; installed over Ptrex",
+    "iphone": {
+      "openedFrom": "Ptrex's restored /my/videos/ opened /video-vault/",
+      "porntrexSession": "shared PHPSESSID kept (pinned until 2027-11)",
+      "rows": "33 Porntrex uploads, oldest first, the two String panty uploads last as 2026-07-13 162147 AI_channel and 2026-08-21 134847 AI_channel",
+      "xvideos": "new container without an XVideos login: orange notice linking https://www.xvideos.com/account; XVideos video pages answer 404 when signed out (private uploads)",
+      "bridge": "XVideos pages through the hidden web view in 273 ms; other hosts, protocol-relative paths and unknown sites refused (Unsupported site request.)",
+      "porntrexPlayback": "viewer /video-vault/porntrex/video/3314558/…: 1920x1080 MP4 with neighbours 405x720 and 1280x720 loaded and buffering; playback had not started because the phone connection was very slow that hour (about 0.5 Mbps to both CDNs, the same in Xvid and Ptrex)"
+    },
+    "renewal": "configure-refresh: porntrex.json removed, vault.json added (same bundle ID); all six apps re-approved because VideoApp/providers.json/project.py changed; forced refresh exit 0, lastSuccess 2026-10-04T09:55-09:57Z with no lastError; com.visar.renewal.video-platform bootstrapped again; afterwards Video Vault 33 rows with the XVideos notice, Xvid signed in, Tango 131 streams",
+    "pending": "User: log in to XVideos inside Video Vault (tap the notice), then XVideos rows, Xvid/Ptrex marks and XVideos HLS playback in the vault"
+  },
+  "xvidRemoved": {
+    "date": "2026-10-04",
+    "app": "Xvid (com.visar.Xvid.paid), deleted from the phone by the user",
+    "why": "Video Vault lists the XVideos uploads; the standalone app and its content script are no longer built",
+    "renewal": "xvideos removed from this repository's renewal registration (configure-refresh)"
   }
 }

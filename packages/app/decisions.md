@@ -98,6 +98,19 @@ The frontend does not post diagnostic events to the server. The old
 `POST /api/log` route, logging helpers, watchdog, and timer-drift sentinel are
 removed.
 
+## Video Vault lives on porntrex.com (2026-10-04)
+
+One app (Video Vault, which replaced Ptrex) lists both upload sites. Its page is on
+porntrex.com and reads XVideos pages through a hidden xvideos.com web view in the app.
+
+**Why:** XVideos sends a Content-Security-Policy whose `default-src` lists only its own
+and ad hosts, so a page on xvideos.com cannot load Porntrex media (tested on the phone:
+`play()` rejected, nothing loaded). Porntrex sends no policy, and XVideos' CDN serves its
+playlists to other origins, so XVideos HLS plays on porntrex.com. Neither site's pages can
+be read from the other origin (no CORS), and a hidden iframe would get no cookies
+(third-party), hence the app's first-party web view. The page is Porntrex's 404 page,
+which loads whether or not either site is signed in.
+
 ## Rules
 
 - Verify frontend changes against the running app, not only static code.

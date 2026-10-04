@@ -1,0 +1,46 @@
+/* The overlay buttons, including the download-list button the live extensions share. */
+.buttons {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+/* The download-list control's buttons sit in the row like the others. */
+.list-control {
+	display: contents;
+}
+
+.buttons button {
+	min-width: 70px;
+	padding: 12px 18px;
+	border: 1px solid #fff;
+	border-radius: 8px;
+	background: rgb(0 0 0 / 60%);
+	color: #fff;
+	font-size: 36px;
+	line-height: 1;
+}
+
+.buttons button:disabled {
+	border-color: #888;
+	color: #888;
+	opacity: 0.6;
+}
+
+.buttons button.list-add {
+	border-color: #34c759;
+}
+
+.buttons button.list-remove {
+	border-color: #ff5e3a;
+}
+
+.buttons button.list-error {
+	box-shadow: 0 0 0 2px #ffd166;
+}
+
+/* One per download list, while choosing where a streamer goes. */
+.buttons button.list-choice {
+	min-width: 0;
+	font-size: 22px;
+}

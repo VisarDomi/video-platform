@@ -1,11 +1,19 @@
 export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'xvideos' | 'porntrex' | 'tango-live';
+export type Provider = LocalProvider | 'xvideos' | 'porntrex' | 'tango-live' | 'vault';
 export const DEFAULT_PROVIDER: Provider = 'tango';
 
 // Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
 declare global {
-	interface Window { tangoNative?: { serverURL: string } }
+	interface Window {
+		tangoNative?: { serverURL: string };
+		// Video Vault: the app's PC download-list requests (apps/ios VideoApp/DownloadList.swift),
+		// and Video Vault's reads of its other upload site (VideoApp/SiteWorker.swift).
+		webkit?: { messageHandlers?: {
+			downloadList?: { postMessage(message: unknown): Promise<unknown> };
+			vaultSite?: { postMessage(message: unknown): Promise<unknown> };
+		} };
+	}
 }
 const mediaOrigin = typeof window === 'undefined' ? '' : window.tangoNative?.serverURL ?? '';
 
@@ -29,9 +37,9 @@ export const API = {
 } as const;
 
 export const LIST_API = {
-	tango: { list: '/api/tango/list', add: '/api/tango/add', remove: '/api/tango/remove' },
-	fc2: { list: '/api/fc2/list', add: '/api/fc2/add', remove: '/api/fc2/remove' },
-	sc: { list: '/api/sc/list', add: '/api/sc/add', remove: '/api/sc/remove' }
+	tango: { member: '/api/tango/member', exists: '/api/tango/exists', add: '/api/tango/add', remove: '/api/tango/remove' },
+	fc2: { member: '/api/fc2/member', exists: '/api/fc2/exists', add: '/api/fc2/add', remove: '/api/fc2/remove' },
+	sc: { member: '/api/sc/member', exists: '/api/sc/exists', add: '/api/sc/add', remove: '/api/sc/remove' }
 } as const;
 
 // The PC's website, for online pages that use its download lists (they run on another origin).

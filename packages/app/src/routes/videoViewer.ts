@@ -2,12 +2,7 @@ import { getProvider, videoUrl } from '../providers/index.js';
 import { VideoCatalog, cachedVideo } from '../services/catalog.js';
 import { STORAGE_KEYS, VIDEO_TYPE, type Provider } from '../constants.js';
 import { ApiError, editVideo, fetchVideos, returnVideo, saveVideo } from '../services/api.js';
-import {
-	changeMembership,
-	fetchMembership,
-	listIdentifier,
-	type MembershipState
-} from '../services/downloadList.js';
+import { videoMembership } from '../services/downloadList.js';
 import { calculateSegmentsToKeep, fetchPlaylist } from '../services/hls.js';
 import { GestureController } from '../player/GestureController.js';
 import { OverlayView, type OverlayActions, type OverlayTimeline } from '../player/OverlayView.js';
@@ -36,8 +31,6 @@ export class VideoViewerPage {
 	private lastScrollY = window.scrollY;
 	private scrollDirection: -1 | 0 | 1 = 0;
 	private lastProgressSave = 0;
-	private membership: MembershipState = { state: 'loading' };
-	private membershipToken = 0;
 	// Live lists: streamers whose co-streamers were looked up, and streams that left the list.
 	private readonly discovered = new Set<string>();
 	private readonly removed = new Set<string>();
@@ -85,7 +78,7 @@ export class VideoViewerPage {
 
 	private provisionalVideo(): Video {
 		if (this.source.kind === 'online') {
-			const saved = cachedVideo(this.provider, this.requestedFilename);
+			const saved = cachedVideo(this.provider, this.requestedFilename) ?? this.source.routeVideo?.(this.requestedFilename);
 			if (saved) return saved;
 		}
 		return {
@@ -171,7 +164,6 @@ export class VideoViewerPage {
 			onSeek: (time) => this.activeUnit().seek(time, true),
 			onSeekDirect: (time) => this.activeUnit().seek(time, false),
 			onToggleMuteOrUndo: () => this.toggleMuteOrUndo(),
-			onToggleMembership: () => void this.toggleMembership(),
 			onReturnOriginal: () => void this.returnOriginal(),
 			onSaveOrCut: (duration) => void this.saveOrCut(duration),
 			onAddMarker: () => this.addMarker(),
@@ -256,13 +248,12 @@ export class VideoViewerPage {
 		this.overlay.setTimeline(overlayTimeline(active.getSnapshot()));
 		this.overlay.setMuted(active.video.muted);
 		this.overlay.setSegments(this.segments);
-		this.overlay.setMembership(this.membership);
+		this.overlay.showMembership(videoMembership(video));
 		this.overlay.setUiVisible(this.controlsVisible);
 		this.overlay.setInteractive(!this.unsettled);
 		document.title = `${video.title ?? video.filename} - ${this.provider} - Video Editor`;
 		history.replaceState(null, '', videoUrl(video));
 		localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, video.filename);
-		if (this.source.kind === 'local' || this.live()) void this.loadMembership();
 		void this.discover(video);
 	}
 
@@ -544,62 +535,6 @@ export class VideoViewerPage {
 			this.loadEdgeUnits();
 			this.activateCurrent();
 		}
-	}
-
-	private async loadMembership(): Promise<void> {
-		const video = this.current();
-		const token = ++this.membershipToken;
-		this.setMembership({ state: 'loading' });
-		try {
-			const identifiers = await fetchMembership(this.provider);
-			if (token !== this.membershipToken || this.current().filename !== video.filename) return;
-			this.setMembership({
-				state: 'ready',
-				isMember: identifiers.has(listIdentifier(video))
-			});
-		} catch (error) {
-			if (token !== this.membershipToken) return;
-			this.setMembership({
-				state: 'unavailable',
-				message: error instanceof Error ? error.message : 'Membership fetch failed'
-			});
-		}
-	}
-
-	private async toggleMembership(): Promise<void> {
-		if (this.membership.state !== 'ready' && this.membership.state !== 'error') return;
-		const confirmed =
-			this.membership.state === 'ready'
-				? this.membership.isMember
-				: this.membership.confirmedMember;
-		const video = this.current();
-		const token = ++this.membershipToken;
-		this.setMembership(
-			confirmed
-				? { state: 'removing', confirmedMember: true }
-				: { state: 'adding', confirmedMember: false }
-		);
-		try {
-			await changeMembership(this.provider, listIdentifier(video), !confirmed);
-			const identifiers = await fetchMembership(this.provider);
-			if (token !== this.membershipToken || this.current().filename !== video.filename) return;
-			this.setMembership({
-				state: 'ready',
-				isMember: identifiers.has(listIdentifier(video))
-			});
-		} catch (error) {
-			if (token !== this.membershipToken) return;
-			this.setMembership({
-				state: 'error',
-				confirmedMember: confirmed,
-				message: error instanceof Error ? error.message : 'Membership update failed'
-			});
-		}
-	}
-
-	private setMembership(state: MembershipState): void {
-		this.membership = state;
-		this.overlay.setMembership(state);
 	}
 
 	private saveProgress(time: number): void {

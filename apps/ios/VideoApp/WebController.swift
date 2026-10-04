@@ -42,6 +42,17 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         if !hosts.isEmpty {
             // The sites see Safari, and the extension's script starts at document start in the page world.
             config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Mobile/15E148 Safari/604.1"
+            if Bundle.main.object(forInfoDictionaryKey: "DownloadList") as? Bool == true {
+                config.userContentController.addScriptMessageHandler(DownloadList(hosts: hosts), contentWorld: .page, name: DownloadList.name)
+            }
+            // Video Vault reads the other upload site's pages through hidden web views (SiteWorker.swift);
+            // only its own page (not those sites' login pages) may ask.
+            if let workers = Bundle.main.object(forInfoDictionaryKey: "SiteWorkers") as? [String: [String: Any]] {
+                let workerHosts = Set(workers.values.flatMap { $0["hosts"] as? [String] ?? [] })
+                let worker = SiteWorker(workers: workers, pageHosts: hosts.filter { !workerHosts.contains($0) }, store: config.websiteDataStore,
+                                        userAgent: config.applicationNameForUserAgent, container: view)
+                config.userContentController.addScriptMessageHandler(worker, contentWorld: .page, name: SiteWorker.name)
+            }
         }
         webView = WKWebView(frame: .zero, configuration: config)
         if !hosts.isEmpty {

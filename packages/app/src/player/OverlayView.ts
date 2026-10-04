@@ -1,6 +1,6 @@
 import { getProvider } from '../providers/index.js';
 import { VIDEO_TYPE } from '../constants.js';
-import type { MembershipState } from '../services/downloadList.js';
+import { DownloadListButton, type Membership } from './DownloadListButton.js';
 import type { Video } from '../types.js';
 import { formatTimePrecise } from '../utils/format.js';
 
@@ -16,7 +16,6 @@ export interface OverlayActions {
 	onSeek(time: number): void;
 	onSeekDirect(time: number): void;
 	onToggleMuteOrUndo(): void;
-	onToggleMembership(): void;
 	onReturnOriginal(): void;
 	onSaveOrCut(playbackDuration: number): void;
 	onAddMarker(): void;
@@ -34,7 +33,7 @@ export class OverlayView {
 	private readonly markerLayer = element('div', 'marker-layer');
 	private readonly segmentText = element('div', 'segment-text-container');
 	private readonly muteUndo = button();
-	private readonly membership = button();
+	private readonly membership = new DownloadListButton();
 	private readonly returnOriginal = button('🔄');
 	private readonly saveCut = button();
 	private readonly addMarker = button('📍');
@@ -52,7 +51,6 @@ export class OverlayView {
 		isLive: false
 	};
 	private segments: readonly number[] = [];
-	private membershipState: MembershipState = { state: 'loading' };
 	private muted = true;
 	private uiVisible = true;
 	private interactive = true;
@@ -70,7 +68,7 @@ export class OverlayView {
 		buttons.append(
 			this.muteUndo,
 			this.follow,
-			this.membership,
+			this.membership.element,
 			this.block,
 			this.returnOriginal,
 			this.saveCut,
@@ -80,7 +78,6 @@ export class OverlayView {
 		this.element.append(this.name, this.timeContainer, this.progress, controls);
 
 		this.muteUndo.addEventListener('click', actions.onToggleMuteOrUndo);
-		this.membership.addEventListener('click', actions.onToggleMembership);
 		this.returnOriginal.addEventListener('click', actions.onReturnOriginal);
 		this.saveCut.addEventListener('click', () => actions.onSaveOrCut(this.effectiveDuration()));
 		this.addMarker.addEventListener('click', actions.onAddMarker);
@@ -128,9 +125,9 @@ export class OverlayView {
 		this.renderButtons();
 	}
 
-	setMembership(state: MembershipState): void {
-		this.membershipState = state;
-		this.renderButtons();
+	// The video's streamer in its download list; null hides the button.
+	showMembership(membership: Promise<Membership | null>): void {
+		void this.membership.show(membership);
 	}
 
 	private render(): void {
@@ -189,7 +186,6 @@ export class OverlayView {
 	private renderButtons(): void {
 		const local = this.video !== null && getProvider(this.video.provider).kind === 'local';
 		const live = this.isLiveStream();
-		this.membership.hidden = !local && !live;
 		this.follow.hidden = this.block.hidden = !live;
 		this.follow.textContent = this.video?.following ? '❤️' : '🤍';
 		this.follow.title = 'Follow or unfollow';
@@ -208,37 +204,12 @@ export class OverlayView {
 		this.saveCut.textContent = hasSegments ? '✂️' : '✅';
 		this.saveCut.disabled = Boolean(hasSegments && this.segments.length % 2 !== 0);
 
-		this.membership.disabled = false;
-		this.membership.title = '';
-		this.membership.classList.remove('list-add', 'list-remove', 'list-error');
-		switch (this.membershipState.state) {
-			case 'loading':
-			case 'adding':
-			case 'removing':
-				this.membership.textContent = '⏳';
-				this.membership.disabled = true;
-				break;
-			case 'ready':
-				this.renderConfirmedMembership(this.membershipState.isMember);
-				break;
-			case 'unavailable':
-				this.membership.textContent = '⚠️';
-				this.membership.disabled = true;
-				this.membership.classList.add('list-error');
-				this.membership.title = this.membershipState.message;
-				break;
-			case 'error':
-				this.renderConfirmedMembership(this.membershipState.confirmedMember);
-				this.membership.classList.add('list-error');
-				this.membership.title = this.membershipState.message;
-				break;
-		}
+		this.membership.setEnabled(this.interactive);
 		if (!this.interactive) {
 			for (const control of [
 				this.muteUndo,
 				this.follow,
 				this.block,
-				this.membership,
 				this.returnOriginal,
 				this.saveCut,
 				this.addMarker
@@ -246,11 +217,6 @@ export class OverlayView {
 				control.disabled = true;
 			}
 		}
-	}
-
-	private renderConfirmedMembership(isMember: boolean): void {
-		this.membership.textContent = isMember ? '➖' : '➕';
-		this.membership.classList.add(isMember ? 'list-remove' : 'list-add');
 	}
 
 	private effectiveDuration(): number {

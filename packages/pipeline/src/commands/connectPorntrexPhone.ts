@@ -39,7 +39,7 @@ async function profileInUse(profilePath: string): Promise<boolean> {
 
 // `npm run ptrex:connect-iphone`: one Porntrex login shared by the pipeline and
 // the phone. Ensures the pipeline's session is logged in (logging in only if
-// it is not), copies that session into the Ptrex app, checks both, and resumes
+// it is not), copies that session into the Video Vault app, checks both, and resumes
 // the campaign if it was running or stopped for a lost session.
 export async function connectPorntrexPhone(config: PipelineConfig, dependencies = defaultDependencies(config)): Promise<unknown> {
     const sessionFile = config.porntrexSessionPath;
@@ -77,7 +77,7 @@ export async function connectPorntrexPhone(config: PipelineConfig, dependencies 
             fingerprint, passwordLoginAt: session.passwordLoginAt, note: "pipeline logged in for ptrex:connect-iphone" });
     } finally { database.close(); }
 
-    dependencies.log("Copying the pipeline's Porntrex session into Ptrex on the iPhone...");
+    dependencies.log("Copying the pipeline's Porntrex session into Video Vault on the iPhone...");
     const phone = await dependencies.connectPhone(sharedSessionCookies(session.cookies));
     const pipeline = await dependencies.checkSession(sessionFile);
     database = new PipelineDatabase(config.databasePath);

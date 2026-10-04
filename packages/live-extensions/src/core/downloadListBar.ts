@@ -1,3 +1,5 @@
+import buttonsCss from "app/src/player/buttons.css";
+import { DownloadListButton, type Membership } from "app/src/player/DownloadListButton";
 import type { ListReply, ListRequest } from "./messages";
 
 export interface DownloadListAdapter {
@@ -6,67 +8,29 @@ export interface DownloadListAdapter {
     identify(): string | null;
 }
 
-// One shared implementation for every provider: a fixed top bar with a
-// "+ Add / - Remove" toggle that drives the server's download list.
+// One shared implementation for every provider: a fixed top bar with the viewer's +/- button
+// (packages/app) for the server's download list. A shadow root keeps the viewer's button styles
+// and the site's own styles apart.
 export function mountDownloadListBar(adapter: DownloadListAdapter): void {
-    let inList = false;
+    const button = new DownloadListButton();
     let current: string | null = null;
     let bar: HTMLDivElement | null = null;
 
-    function request(message: ListRequest): Promise<ListReply> {
-        return browser.runtime.sendMessage(message) as Promise<ListReply>;
-    }
-
-    function updateButton(): void {
-        const btn = bar?.querySelector("button");
-        if (!btn) return;
-        if (inList) {
-            btn.textContent = "- Remove";
-            btn.style.backgroundColor = "#dc3545";
-        } else {
-            btn.textContent = "+ Add";
-            btn.style.backgroundColor = "#28a745";
-        }
-    }
-
-    async function checkList(identifier: string): Promise<void> {
-        try {
-            const reply = await request({ action: "list" });
-            inList = reply.ok && reply.list?.includes(identifier) === true;
-        } catch (error) {
-            console.error("Download list: failed to check list", error);
-            inList = false;
-        }
-        updateButton();
-    }
-
-    async function toggle(): Promise<void> {
-        if (!current) return;
-        try {
-            const reply = await request({ action: inList ? "remove" : "add", identifier: current });
-            if (reply.ok) {
-                inList = !inList;
-                updateButton();
-            }
-        } catch (error) {
-            console.error("Download list: toggle failed", error);
-        }
-    }
-
     function createBar(): HTMLDivElement {
-        const barElement = document.createElement("div");
-        barElement.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;background:#222;padding:8px 16px;display:flex;align-items:center;gap:12px;font-family:sans-serif;color:#fff;font-size:14px;";
+        const host = document.createElement("div");
+        host.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:999999;";
+        const style = document.createElement("style");
+        style.textContent = `${buttonsCss}\n.bar{background:#222;padding:8px 16px;font-family:sans-serif;color:#fff;font-size:14px;}`;
+        const row = document.createElement("div");
+        row.className = "bar buttons";
         const label = document.createElement("span");
         label.textContent = "Download List:";
-        const btn = document.createElement("button");
-        btn.style.cssText = "border:none;color:#fff;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:14px;font-weight:bold;";
-        btn.addEventListener("click", () => void toggle());
-        barElement.appendChild(label);
-        barElement.appendChild(btn);
-        document.body.insertBefore(barElement, document.body.firstChild);
-        document.body.style.marginTop = "40px";
-        updateButton();
-        return barElement;
+        row.append(label, button.element);
+        host.attachShadow({ mode: "open" }).append(style, row);
+        document.body.insertBefore(host, document.body.firstChild);
+        // The page starts below the bar, whose height follows the button's state.
+        new ResizeObserver(() => { document.body.style.marginTop = `${host.offsetHeight}px`; }).observe(host);
+        return host;
     }
 
     function init(): void {
@@ -74,10 +38,10 @@ export function mountDownloadListBar(adapter: DownloadListAdapter): void {
         if (identifier && identifier !== current) {
             current = identifier;
             bar ??= createBar();
-            bar.style.display = "flex";
-            void checkList(identifier);
+            bar.style.display = "block";
+            void button.show(membership(identifier));
         } else if (identifier && bar) {
-            bar.style.display = "flex";
+            bar.style.display = "block";
         } else if (bar) {
             current = null;
             bar.style.display = "none";
@@ -86,4 +50,24 @@ export function mountDownloadListBar(adapter: DownloadListAdapter): void {
 
     init();
     setInterval(init, 1000);
+}
+
+// The background page talks to the PC, so the site's own security policy never applies.
+function membership(identifier: string): Membership {
+    return {
+        async isMember() {
+            const { member } = await request({ action: "member", identifier });
+            if (member === undefined) throw new Error("Download-list membership was not answered");
+            return member;
+        },
+        async change(add) {
+            await request({ action: add ? "add" : "remove", identifier });
+        },
+    };
+}
+
+async function request(message: ListRequest): Promise<ListReply> {
+    const reply = await (browser.runtime.sendMessage(message) as Promise<ListReply>);
+    if (!reply.ok) throw new Error(reply.error ?? `Download-list ${message.action} failed: ${reply.status}`);
+    return reply;
 }

@@ -14,7 +14,7 @@ for (const key of names) {
     if (!extension) throw new Error(`Usage: node scripts/build.mjs [${Object.keys(EXTENSIONS).join('|')}]`);
     const out = resolve(root, '../../dist/extension', key);
     await mkdir(out, { recursive: true });
-    const common = { bundle: true, minify: true, format: 'iife', target: 'safari17', logLevel: 'warning' };
+    const common = { bundle: true, minify: true, format: 'iife', target: 'safari17', logLevel: 'warning', loader: { '.css': 'text' } };
     await build({ ...common, entryPoints: [resolve(root, 'src/extension', `${key}.ts`)], outfile: resolve(out, 'content.js') });
     await build({ ...common, entryPoints: [resolve(root, 'src/extension/background.ts')], outfile: resolve(out, 'background.js'),
         define: { __API_PATH__: JSON.stringify(extension.api) } });

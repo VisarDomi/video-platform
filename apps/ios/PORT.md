@@ -9,8 +9,7 @@ generates that provider's project and Info.plist.
 | `tango` | Tango local | `com.visar.TangoLocal.paid` | `https://192.168.1.197:9999/videos/tango` |
 | `fc2` | FC2 local | `com.visar.FC2Local.paid` | `https://192.168.1.197:9999/videos/fc2` |
 | `sc` | SC local | `com.visar.SCLocal.paid` | `https://192.168.1.197:9999/videos/sc` |
-| `xvideos` | Xvid | `com.visar.Xvid.paid` | `https://www.xvideos.com/account/uploads` |
-| `porntrex` | Ptrex | `com.visar.Ptrex.paid` | `https://www.porntrex.com/my/videos/` |
+| `vault` | Video Vault | `com.visar.Ptrex.paid` | `https://www.porntrex.com/video-vault/` |
 | `tango-live` | Tango | `com.visar.Tango.paid` | `https://tango.me/` |
 
 **Tango** is the former Stream Viewer app (its repository was imported with history into
@@ -18,6 +17,17 @@ generates that provider's project and Info.plist.
 `tango-live` provider on tango.me and hosts three Safari extensions: **Tango Login**
 (`.Login`, the Safari login handoff), **FC2 live** (`.FC2Live`) and **SC live** (`.SCLive`),
 the download-list bars from `packages/live-extensions`.
+
+**Video Vault** replaced Ptrex in place (same bundle ID, so Ptrex's Porntrex session and
+data stayed). It lists the XVideos and Porntrex uploads together (`vault` in
+`packages/app/PROVIDERS.md`) from porntrex.com: XVideos' security policy blocks Porntrex
+media on xvideos.com, while Porntrex sends none. XVideos pages come through
+`VideoApp/SiteWorker.swift` (`workers` in `providers.json`): a hidden web view on
+`https://www.xvideos.com/robots.txt` that shares the app's cookie store, so its requests are
+first-party, like a second Safari tab. The vault page asks it with
+`webkit.messageHandlers.vaultSite`; only the vault page (porntrex.com, main frame) may ask,
+and only for paths on XVideos (`AppPolicy.workerURL`). The page itself may open XVideos only
+to log in. Its login cookies cover both sites.
 
 ## Behavior: a full-screen Safari tab
 
@@ -48,15 +58,15 @@ the download-list bars from `packages/live-extensions`.
   - Porntrex keeps **one active session per account; the newest login wins** (verified
     2026-10-02). A password login, or signing back in with the 30-day `kt_member` cookie,
     logs every other device out, which is why `kt_member` "disappeared" during testing.
-    Ptrex therefore shares the pipeline's session instead of logging in:
-    `npm run ptrex:connect-iphone` (phone unlocked, attached to the Mac) copies the
-    pipeline's `PHPSESSID` into Ptrex, pinned for 400 days, and removes `kt_member`.
-    Ptrex keeps `PHPSESSID` among its login cookies so a kill does not lose it. Do not
-    log in on the phone: it stops the pipeline; run
-    the command again instead. Porntrex redirects to its
-    ad-heavy home page instead of showing a page: from `/my/videos/` when signed
-    out (Ptrex opens `/login/`) and from `/login/` when already signed in (Ptrex
-    opens `/my/videos/`).
+    Video Vault (formerly Ptrex) therefore shares the pipeline's session instead of logging
+    in: `npm run ptrex:connect-iphone` (phone unlocked, attached to the Mac) copies the
+    pipeline's `PHPSESSID` into Video Vault, pinned for 400 days, and removes `kt_member`.
+    It keeps `PHPSESSID` among its login cookies so a kill does not lose it. Do not
+    log in on the phone: it stops the pipeline; run the command again instead. The
+    vault's page is Porntrex's 404 page, which loads whether or not Porntrex is signed in;
+    signed out, the list keeps its Porntrex rows and says to run the command. Ptrex's
+    former login redirects (Porntrex sends signed-out member pages to its ad-heavy home
+    page) no longer apply.
 - **Tango** signs in with Google, which a web view cannot do, so it keeps the original
   handoff: sign in on tango.me in Safari, Import with the Tango Login extension, delete
   Tango's Safari website data and confirm in the app ("Safari data cleared — continue").
@@ -67,7 +77,12 @@ the download-list bars from `packages/live-extensions`.
   SiteCookies keeps `Tango-RT`/`-DI`/`-DeviceId` durable. When Tango reports the session
   gone, the viewer navigates to `videoapp://login` and the app shows the handoff screen.
   FC2 live and SC live need enabling once in Safari's extension settings, with their sites
-  allowed; their background pages call the PC's `/api/fc2|sc/list|add|remove`.
+  allowed; their background pages call the PC's `/api/fc2|sc/member|add|remove`.
+- **Video Vault** (`downloadList` in `providers.json`) edits the PC download lists for
+  the viewer's +/- button (`VideoApp/DownloadList.swift`), as the FC2/SC live extensions'
+  background pages do, so no site's security policy applies to the PC requests. Only the
+  site's main frame may ask, only `/api/tango|fc2|sc/member|exists|add|remove`. It asks once for
+  local network access.
 - Like a restored Safari tab, a killed app reopens the page you were on with its
   Back/Forward list (WebKit `interactionState`); only an app page becomes the restore
   point, and a blank restore falls back to the start page. Edge-swipe Back/Forward, pinch zoom,

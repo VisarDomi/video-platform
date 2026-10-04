@@ -27,7 +27,8 @@ struct PolicyTests {
                 blocked += local.filter { $0 != provider }.map { "https://192.168.1.197:9999/videos/\($0)" }
                 for raw in blocked { check(!allows(raw), "\(provider) blocks \(raw)") }
             } else {
-                check(hosts.count == 2 && hosts.contains(start.host!), "\(provider) start URL is on its site")
+                // Video Vault's page may also open XVideos (its login) beside its own site.
+                check(hosts.count == (product["workers"] == nil ? 2 : 4) && hosts.contains(start.host!), "\(provider) start URL is on its site")
                 if provider == "tango-live" {
                     check(allows("https://tango.me/stream/abc") && !allows("https://gateway.tango.me/"), "tango-live pages stay on tango.me")
                 }
@@ -39,6 +40,16 @@ struct PolicyTests {
                         check(!allows(raw), "\(provider) blocks \(raw)")
                     }
                 }
+                for (site, worker) in product["workers"] as? [String: [String: Any]] ?? [:] {
+                    let page = URL(string: worker["url"] as! String)!, workerHosts = worker["hosts"] as! [String]
+                    check(workerHosts.allSatisfy(hosts.contains) && !workerHosts.contains(start.host!), "\(provider) \(site) worker is another of its sites")
+                    for path in ["/account/uploads", "/account/uploads/2", "/video.abc/slug", "/robots.txt?x=1"] {
+                        check(AppPolicy.workerURL(path, page: page, hosts: workerHosts)?.host == page.host, "\(site) worker reads \(path)")
+                    }
+                    for path in ["account", "//evil.example/x", "https://evil.example/", "https://\(start.host!)/", "/a/../b", "/./a", "\\evil", ""] {
+                        check(AppPolicy.workerURL(path, page: page, hosts: workerHosts) == nil, "\(site) worker refuses \(path)")
+                    }
+                }
                 for raw in ["https://accounts.google.com/", "https://192.168.1.197:9999/videos/tango", "https://evil-\(hosts[0])/",
                             "https://\(hosts[0]).example.com/", "about:blank"] {
                     check(!allows(raw), "\(provider) blocks \(raw)")
@@ -46,9 +57,9 @@ struct PolicyTests {
             }
         }
         let names = Set(registry.values.map { $0["name"] as! String }), ids = Set(registry.values.map { $0["bundleId"] as! String })
-        check(names == ["Tango local", "FC2 local", "SC local", "Xvid", "Ptrex", "Tango"], "display names")
-        check(ids == ["com.visar.TangoLocal.paid", "com.visar.FC2Local.paid", "com.visar.SCLocal.paid", "com.visar.Xvid.paid",
-                      "com.visar.Ptrex.paid", "com.visar.Tango.paid"], "paid bundle IDs; Tango keeps its original identity")
+        check(names == ["Tango local", "FC2 local", "SC local", "Video Vault", "Tango"], "display names")
+        check(ids == ["com.visar.TangoLocal.paid", "com.visar.FC2Local.paid", "com.visar.SCLocal.paid",
+                      "com.visar.Ptrex.paid", "com.visar.Tango.paid"], "paid bundle IDs; Tango and Video Vault (formerly Ptrex) keep their original identities")
         if failures > 0 { print("\(failures) policy check(s) failed"); exit(1) }
         print("PASS: local apps allow only their provider's pages on the PC; online apps only their own site")
     }
