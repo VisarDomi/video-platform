@@ -1,12 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as url from "url";
-import * as utils from "../../../common/utils.js";
+import { downloadListPath } from "shared";
 import logger from "../../../common/logger.js";
 import { FILE_WATCHER_DEBOUNCE_MS } from "../../../common/timing.js";
-
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const TANGO_URL_PREFIX = "https://tango.me/";
 
@@ -22,8 +18,8 @@ export class TangoTargetManager {
     private watcher: fs.FSWatcher | null = null;
 
     private constructor(filePath?: string) {
-        const projectRoot = utils.findProjectRoot(__dirname);
-        this.filePath = filePath ?? path.join(projectRoot, "tango.txt");
+        this.filePath = filePath ?? downloadListPath("tango");
+        fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
         logger.info(`[Tango] TargetManager initialized. Watching: ${this.filePath}`);
     }
 

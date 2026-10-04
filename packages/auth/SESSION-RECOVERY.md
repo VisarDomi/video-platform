@@ -1,9 +1,11 @@
 # Tango PC session recovery — September 26, 2026
 
 PC and iPhone sessions are independent. Never copy a refresh token between them.
-The PC reads Google credentials from `packages/auth/credentials.json`; XVideos
-reads the same Google account's credentials separately from `packages/.env`.
-Both files are ignored by Git. Changing one does not update the other.
+The PC reads Google credentials from `~/.config/video-services/auth-accounts.json`
+(formerly `packages/auth/credentials.json`); XVideos reads the same Google account's
+credentials separately from `~/.config/video-services/upload-providers.json` (formerly
+also `packages/.env`). Both live outside the repository. Changing one does not update
+the other.
 
 The PC's old `/proxycador/api/session/refresh` request rejected a freshly acquired
 PC session. The working request is POST

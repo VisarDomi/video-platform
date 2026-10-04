@@ -1,3 +1,4 @@
+import { downloadListPath } from "shared";
 import { TargetManager } from "../../common/targetManager.js";
 
 function parseFc2Identifier(line: string): string | null {
@@ -14,7 +15,7 @@ function parseFc2Identifier(line: string): string | null {
 export function createFc2TargetManager(): TargetManager {
     return TargetManager.create({
         label: "FC2",
-        fileName: "fc2.txt",
+        filePath: downloadListPath("fc2"),
         parseIdentifier: parseFc2Identifier,
         defaultComment: "# Add FC2 Channel IDs here, one per line",
     });

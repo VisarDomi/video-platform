@@ -4,8 +4,6 @@ This subtree owns stream discovery, capture, disk sessions, and target-file watc
 
 ## Target files
 
-- `fc2.txt`
-- `sc.txt`
-- `tango.txt`
-
-These live in this package directory and are watched by the downloader services.
+`fc2.txt`, `sc.txt` and `tango.txt` are the download lists in
+`~/.local/share/video-services/download-lists/` (`downloadListPath` in `packages/shared`),
+outside the repository. The downloader watches them; the server edits them.

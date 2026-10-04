@@ -49,21 +49,26 @@ check package.json
 **Tango local**, **FC2 local** and **SC local** are the three provider tabs as iPhone
 apps (`apps/ios`); build, deploy and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
 
-## Provider files
+## Data outside the repository
 
-The live provider manifest files are private and stay local:
+Nothing the services need lives in the checkout, so deleting and re-cloning it loses
+nothing (only logs and diagnostic screenshots stay in package folders):
 
-- `packages/downloader/tango.txt`
-- `packages/downloader/fc2.txt`
-- `packages/downloader/sc.txt`
+- `~/.local/share/video-services/`: the download lists (below), Tango sessions
+  (`session/`), aliases, finalization and pipeline databases, live status.
+- `~/.config/video-services/` (private, mode 600): `auth-accounts.json` (the accounts
+  `video-auth` keeps signed in; `VIDEO_AUTH_ACCOUNTS_FILE` overrides),
+  `upload-providers.json` (XVideos/Porntrex upload logins) and `porntrex-session.json`.
+- `~/Videos/downloads/<provider>/`: recordings.
 
-To set them up:
+## Download lists
 
-1. Copy each example file and remove the `.example` suffix.
-2. Put whatever private content you want in the live files.
+The download lists (which streamers to record):
 
-Example:
+- `~/.local/share/video-services/download-lists/tango.txt`: `https://tango.me/<accountId> <alias>`
+- `~/.local/share/video-services/download-lists/fc2.txt`: `https://live.fc2.com/<channelId>/`
+- `~/.local/share/video-services/download-lists/sc.txt`: `https://stripchat.com/<username> <roomId>`
 
-- `packages/downloader/tango.txt.example` -> `packages/downloader/tango.txt`
-- `packages/downloader/fc2.txt.example` -> `packages/downloader/fc2.txt`
-- `packages/downloader/sc.txt.example` -> `packages/downloader/sc.txt`
+`VIDEO_SERVICES_DATA_ROOT` moves the whole data folder (`downloadListPath` in
+`packages/shared`). The server edits the lists (the +/- buttons, `POST /api/<provider>/add`);
+the downloader watches them and creates a missing one with a comment line.

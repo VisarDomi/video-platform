@@ -1,25 +1,23 @@
 import "dotenv/config";
 import * as fs from "fs";
-import * as path from "path";
 
 import { AuthService } from "./auth/authService.js";
 import { Account } from "./providers/interfaces.js";
 import { getProvider } from "./providers/registry.js";
 import logger from "./common/logger.js";
-import * as utils from "./common/utils.js";
+import { getConfig } from "./common/config.js";
 
 interface Credentials {
     accounts: (Omit<Account, "provider"> & { provider?: string })[];
 }
 
 function loadCredentials(): { accounts: Account[] } {
-    const projectRoot = utils.findProjectRoot();
-    const credentialsPath = path.join(projectRoot, "credentials.json");
-    const fileContent = fs.readFileSync(credentialsPath, "utf-8");
+    const { accountsPath } = getConfig();
+    const fileContent = fs.readFileSync(accountsPath, "utf-8");
     const credentials: Credentials = JSON.parse(fileContent);
 
     if (!credentials.accounts || !Array.isArray(credentials.accounts)) {
-        throw new Error("credentials.json is missing the 'accounts' array.");
+        throw new Error(`${accountsPath} is missing the 'accounts' array.`);
     }
 
     const accounts: Account[] = credentials.accounts.map((a) => ({
@@ -35,7 +33,7 @@ async function main() {
     const { accounts } = loadCredentials();
 
     if (accounts.length === 0) {
-        logger.warn("No accounts found in credentials.json. Exiting.");
+        logger.warn(`No accounts found in ${getConfig().accountsPath}. Exiting.`);
         return;
     }
 

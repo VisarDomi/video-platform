@@ -3,7 +3,7 @@ import * as path from "path";
 import * as os from "os";
 import * as utils from "./utils.js";
 import * as constants from "./constants.js";
-import { providerFolders } from "shared";
+import { downloadListPath, providerFolders } from "shared";
 
 const projectRoot = utils.findProjectRoot();
 
@@ -38,14 +38,16 @@ const config: IConfig = {
     },
     frontendDistPath: path.join(projectRoot, "..", "app", "build"),
     sharedStatePath: path.join(os.homedir(), constants.DIRECTORIES.SHARED_STATE_BASE),
-    fc2FilePath: path.join(projectRoot, "..", "downloader", "fc2.txt"),
-    scFilePath: path.join(projectRoot, "..", "downloader", "sc.txt"),
-    tangoFilePath: path.join(projectRoot, "..", "downloader", "tango.txt"),
+    fc2FilePath: downloadListPath("fc2"),
+    scFilePath: downloadListPath("sc"),
+    tangoFilePath: downloadListPath("tango"),
 };
 
 if (!fs.existsSync(config.frontendDistPath)) {
     fs.mkdirSync(config.frontendDistPath, { recursive: true });
 }
+
+fs.mkdirSync(path.dirname(config.tangoFilePath), { recursive: true });
 
 if (!fs.existsSync(config.sharedStatePath)) {
     fs.mkdirSync(config.sharedStatePath, { recursive: true });

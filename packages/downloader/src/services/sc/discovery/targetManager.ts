@@ -1,12 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as url from "url";
-import * as utils from "../../../common/utils.js";
+import { downloadListPath } from "shared";
 import logger from "../../../common/logger.js";
 import { FILE_WATCHER_DEBOUNCE_MS } from "../../../common/timing.js";
-
-const __filename = url.fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export interface ScTarget {
     roomId: string;
@@ -19,8 +15,8 @@ export class ScTargetManager {
     private debounceTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
-        const projectRoot = utils.findProjectRoot(__dirname);
-        this.filePath = path.join(projectRoot, "sc.txt");
+        this.filePath = downloadListPath("sc");
+        fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
         logger.info(`[SC] TargetManager initialized. Watching: ${this.filePath}`);
     }
 
