@@ -13,7 +13,7 @@ import { setCampaignRunning } from "../dist/commands/campaign.js";
 import { syncComparisonSelection } from "../dist/commands/comparisonTrial.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { fixturePart, assemble, frameIds } from "./helpers/mediaFixture.mjs";
-import { upscaleWholeRecordingTo1080 } from "../dist/stages/upscale.js";
+import { convertShapeGroup } from "../dist/stages/upscale.js";
 
 async function eventually(check, timeout = 10_000) {
     const deadline = Date.now() + timeout;
@@ -116,14 +116,14 @@ test("killing an actual encoder leaves no published artifact; worker restart cle
     await encoder.stop();
     assert.equal(database.get(recording.id).state, "server_ready");
     assert.equal(database.get(recording.id).leaseOwner, "crash-test");
-    const final = path.join(config.stagingRoot, `${recording.id}.production-upscale1080p.mp4`);
+    const final = path.join(config.stagingRoot, `${recording.id}.production-v5.mp4`);
     await assert.rejects(() => access(final));
     const restarted = worker(t, config);
     await eventually(() => restarted.output().includes("campaign-step"));
     assert.equal(database.get(recording.id).leaseOwner, null);
     await restarted.stop("SIGTERM");
-    const result = await upscaleWholeRecordingTo1080(playlist, config.stagingRoot, recording.id,
-        { width: 320, height: 180, sampleAspectRatio: "1:1" });
+    const result = await convertShapeGroup(playlist, config.stagingRoot, recording.id,
+        { output: { width: 1920, height: 1080, rotate: false } }, "production-v5");
     assert.equal(result.path, final);
     assert.equal((await frameIds(final)).length, 60);
     assert.equal(database.getCampaignControl().state, "paused");

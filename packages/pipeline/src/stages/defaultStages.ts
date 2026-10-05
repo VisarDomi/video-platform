@@ -1,58 +1,57 @@
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
-import { streamCopyRemux } from "./remux.js";
 import { artifactRecipeReason, reuseCachedArtifact, type ArtifactCacheConfig } from "./artifactCache.js";
-import {
-    analyzeRecordingResolution,
-    chooseRecordingResolutionPolicy,
-    conversionReferenceSource,
-} from "./resolutionPolicy.js";
-import { upscaleWholeRecordingTo1080 } from "./upscale.js";
+import { analyzeRecordingResolution, planRecordingShapes, type ShapeGroup } from "./resolutionPolicy.js";
+import { convertShapeGroup } from "./upscale.js";
 import { validateArtifact } from "./validateArtifact.js";
-import { RemuxCompatibilityError } from "./mediaCompatibility.js";
+import { productionArtifactSuffix } from "./artifactNaming.js";
+
+function manualPiece(group: ShapeGroup) {
+    return {
+        part: group.part,
+        segmentIndexes: [...group.indexes].sort((a, b) => a - b),
+        durationSeconds: group.durationSeconds,
+        sourceDimensions: group.sourceDimensions,
+    };
+}
 
 export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactCacheConfig): PipelineStages {
     return {
+        // Every recording is converted; no segment is dropped. One shape is one
+        // artifact; several shapes are one artifact each, uploaded one after
+        // another; a split's pieces under a minute wait for a person.
         remux: async (recording) => {
             const cached = cacheConfig ? await reuseCachedArtifact(recording, stagingRoot, cacheConfig) : null;
             if (cached) return { disposition: "artifact", ...cached };
             const analysis = await analyzeRecordingResolution(recording.playlistPath);
-            const policy = chooseRecordingResolutionPolicy(analysis);
-            if (policy.disposition === "convert1080") {
-                const transcoded = await upscaleWholeRecordingTo1080(
-                    recording.playlistPath,
-                    stagingRoot,
-                    recording.id,
-                    policy.source,
-                    undefined,
-                    analysis,
-                );
-                return {
-                    disposition: "artifact",
-                    path: transcoded.path,
-                    eventReason: artifactRecipeReason(policy.reason),
-                };
+            const plan = planRecordingShapes(analysis);
+            const reason = artifactRecipeReason(plan.reason);
+            const manualPieces = plan.manual.map(manualPiece);
+            if (plan.upload.length === 0) {
+                return { disposition: "manual", reason: `${reason}; no piece is long enough to upload`, manualPieces };
             }
-            try {
-                return {
-                    disposition: "artifact",
-                    path: await streamCopyRemux(recording.playlistPath, stagingRoot, recording.id,
-                        policy.disposition === "retain1080" ? "retained1080p" : undefined, {
-                            analysis, keepIndexes: policy.disposition === "retain1080" ? policy.retainedSegmentIndexes : undefined,
-                        }),
-                    eventReason: artifactRecipeReason(policy.reason),
-                };
-            } catch (error) {
-                if (!(error instanceof RemuxCompatibilityError)) throw error;
-                const keepIndexes = policy.disposition === "retain1080" ? policy.retainedSegmentIndexes : undefined;
-                const selected = analysis.segments.filter(segment => !keepIndexes || keepIndexes.has(segment.index));
-                // Reuse the normal conversion's no-stretch/no-padding aspect
-                // guard, while preserving the original 90% selection.
-                const transcoded = await upscaleWholeRecordingTo1080(recording.playlistPath, stagingRoot, recording.id,
-                    conversionReferenceSource(selected), "compatibility-upscale1080p", analysis, keepIndexes);
-                return { disposition: "artifact", path: transcoded.path,
-                    eventReason: artifactRecipeReason(`${policy.reason}; compatibility-conversion-v1: ${error.message}`) };
+            if (plan.upload.length === 1 && plan.upload[0].part === "full") {
+                const group = plan.upload[0];
+                const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
+                    productionArtifactSuffix(group.part, group.output.rotate), analysis);
+                return { disposition: "artifact", path: converted.path, eventReason: reason };
             }
+            const parts = [];
+            for (const group of plan.upload) {
+                const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
+                    productionArtifactSuffix(group.part, group.output.rotate), analysis, group.indexes);
+                const validated = await validateArtifact(converted.path);
+                parts.push({
+                    part: group.part as Exclude<typeof group.part, "full">,
+                    path: validated.path,
+                    sizeBytes: validated.sizeBytes,
+                    sha256: validated.sha256,
+                    validatedAt: validated.validatedAt,
+                    segmentCount: group.segmentCount,
+                    sourceDimensions: group.sourceDimensions,
+                });
+            }
+            return { disposition: "artifact_set", reason, primary: parts[0], queued: parts.slice(1), manualPieces };
         },
         validateArtifact: async (_recording, artifactPath) => {
             const artifact = await validateArtifact(artifactPath);

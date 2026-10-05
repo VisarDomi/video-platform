@@ -6,6 +6,7 @@ import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
+import type { ManualPiece } from "../scheduler/orchestrator.js";
 import { assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
 import type {
     ProviderInventoryEntry,
@@ -27,7 +28,22 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
+
+// Production artifact parts: the old 1080p split names, or "shapeN" (one upload
+// per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
+function partCheck(column: string): string {
+    return `${column} IN ('full', 'max1080p', 'nonmax1080p') OR (${column} GLOB 'shape[1-9]*' AND ${column} NOT GLOB 'shape*[^0-9]*')`;
+}
+function queuedPartCheck(column: string): string {
+    return `${column} IN ('max1080p', 'nonmax1080p') OR (${column} GLOB 'shape[1-9]*' AND ${column} NOT GLOB 'shape*[^0-9]*')`;
+}
+// Schema 11 text of the checks above, replaced when a table is rebuilt.
+const LEGACY_PART_CHECKS: ReadonlyArray<readonly [string, string]> = [
+    ["CHECK (part IN ('full', 'max1080p', 'nonmax1080p'))", `CHECK (${partCheck("part")})`],
+    ["CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p'))", `CHECK (${partCheck("artifact_part")})`],
+    ["CHECK (part IN ('max1080p', 'nonmax1080p'))", `CHECK (${queuedPartCheck("part")})`],
+];
 const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
 const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
 
@@ -237,7 +253,7 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS artifacts (
                 recording_id TEXT PRIMARY KEY REFERENCES recordings(id),
-                part TEXT NOT NULL DEFAULT 'full' CHECK (part IN ('full', 'max1080p', 'nonmax1080p')),
+                part TEXT NOT NULL DEFAULT 'full' CHECK (${partCheck("part")}),
                 path TEXT NOT NULL UNIQUE,
                 size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
                 sha256 TEXT NOT NULL,
@@ -245,7 +261,7 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS production_artifact_queue (
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
-                part TEXT NOT NULL CHECK (part IN ('max1080p', 'nonmax1080p')),
+                part TEXT NOT NULL CHECK (${queuedPartCheck("part")}),
                 queue_position INTEGER NOT NULL CHECK (queue_position >= 0),
                 path TEXT NOT NULL UNIQUE,
                 size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
@@ -297,7 +313,7 @@ export class PipelineDatabase {
             CREATE TABLE IF NOT EXISTS upload_reservations (
                 id TEXT PRIMARY KEY,
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
-                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (${partCheck("artifact_part")}),
                 provider TEXT NOT NULL,
                 calendar_month TEXT NOT NULL,
                 reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
@@ -311,7 +327,7 @@ export class PipelineDatabase {
                 id TEXT PRIMARY KEY,
                 reservation_id TEXT REFERENCES upload_reservations(id),
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
-                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (${partCheck("artifact_part")}),
                 provider TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (status IN ('started', 'failed', 'accepted', 'uncertain')),
                 phase TEXT NOT NULL DEFAULT 'started' CHECK (phase IN ('started', 'file_uploading', 'file_uploaded', 'metadata_submitting')),
@@ -334,7 +350,7 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS remote_uploads (
                 recording_id TEXT NOT NULL REFERENCES recordings(id),
-                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p')),
+                artifact_part TEXT NOT NULL DEFAULT 'full' CHECK (${partCheck("artifact_part")}),
                 attempt_id TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
                 remote_url TEXT NOT NULL,
@@ -506,6 +522,16 @@ export class PipelineDatabase {
                 from_provider TEXT NOT NULL,
                 to_provider TEXT NOT NULL
             ) STRICT;
+            CREATE TABLE IF NOT EXISTS manual_pieces (
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                part TEXT NOT NULL,
+                segment_indexes_json TEXT NOT NULL,
+                duration_seconds REAL NOT NULL CHECK (duration_seconds >= 0),
+                source_dimensions_json TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, part)
+            ) STRICT;
         `);
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
         const comparisonColumns = this.database.prepare("PRAGMA table_info(comparison_trial)").all() as unknown as Array<{ name: string }>;
@@ -607,6 +633,7 @@ export class PipelineDatabase {
                     ALTER TABLE remote_uploads_v7 RENAME TO remote_uploads;
                 `);
             }
+            this.rebuildLegacyPartChecks();
             this.database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
@@ -914,6 +941,7 @@ export class PipelineDatabase {
                 "artifact_variants",
                 "remux_outputs",
                 "artifacts",
+                "manual_pieces",
                 "recording_provenance",
                 "state_events",
             ]) {
@@ -1500,6 +1528,7 @@ export class PipelineDatabase {
                 "resolution_review_artifacts",
                 "artifacts",
                 "remux_outputs",
+                "manual_pieces",
             ]) {
                 this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
             }
@@ -2128,9 +2157,12 @@ export class PipelineDatabase {
             WHERE recording_id = ? AND artifact_part = ? ORDER BY verified_at DESC LIMIT 1
         `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
         if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url, verified: true };
+        // A failed attempt keeps its ID only when the provider (or its owner)
+        // removed the video: nothing exists to duplicate.
         const attempt = this.database.prepare(`
             SELECT remote_id, remote_url FROM upload_attempts
-            WHERE recording_id = ? AND artifact_part = ? AND remote_id IS NOT NULL ORDER BY started_at DESC LIMIT 1
+            WHERE recording_id = ? AND artifact_part = ? AND remote_id IS NOT NULL AND status <> 'failed'
+            ORDER BY started_at DESC LIMIT 1
         `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
         if (attempt) return { remoteId: attempt.remote_id, remoteUrl: attempt.remote_url, verified: false };
         return null;
@@ -2195,6 +2227,67 @@ export class PipelineDatabase {
         return rows;
     }
 
+    // Schema 12: SQLite cannot alter a CHECK, so a table whose part check
+    // predates "shapeN" is copied into a new table with the wider check.
+    private rebuildLegacyPartChecks(): void {
+        const tables = this.database.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table'")
+            .all() as unknown as Array<{ name: string; sql: string }>;
+        for (const table of tables) {
+            if (!LEGACY_PART_CHECKS.some(([legacy]) => table.sql.includes(legacy))) continue;
+            const referenced = tables.some((other) => other.name !== table.name
+                && new RegExp(`REFERENCES\\s+"?${table.name}"?\\s*\\(`).test(other.sql));
+            if (referenced) throw new Error(`Cannot rebuild ${table.name}: other tables reference it`);
+            const indexes = (this.database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL")
+                .all(table.name) as unknown as Array<{ sql: string }>).map((index) => index.sql);
+            let sql = table.sql;
+            for (const [legacy, wider] of LEGACY_PART_CHECKS) sql = sql.split(legacy).join(wider);
+            const rebuilt = `${table.name}_v12`;
+            sql = sql.replace(/^CREATE TABLE\s+("?)[A-Za-z_]+\1/, `CREATE TABLE ${rebuilt}`);
+            this.transaction(() => {
+                this.database.exec(`${sql};
+                    INSERT INTO ${rebuilt} SELECT * FROM "${table.name}";
+                    DROP TABLE "${table.name}";
+                    ALTER TABLE ${rebuilt} RENAME TO ${table.name};`);
+                for (const index of indexes) this.database.exec(index);
+            });
+        }
+    }
+
+    recordManualPieces(id: string, pieces: readonly ManualPiece[], reason: string, now = new Date()): void {
+        this.requireRecording(id);
+        const insert = this.database.prepare(`INSERT INTO manual_pieces (
+                recording_id, part, segment_indexes_json, duration_seconds, source_dimensions_json, reason, recorded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(recording_id, part) DO UPDATE SET segment_indexes_json = excluded.segment_indexes_json,
+                duration_seconds = excluded.duration_seconds, source_dimensions_json = excluded.source_dimensions_json,
+                reason = excluded.reason, recorded_at = excluded.recorded_at`);
+        this.transaction(() => {
+            for (const piece of pieces) {
+                insert.run(id, piece.part, JSON.stringify(piece.segmentIndexes), piece.durationSeconds,
+                    JSON.stringify(piece.sourceDimensions), reason, now.toISOString());
+            }
+        });
+    }
+
+    // Pieces of shape splits too short to upload, for a person to handle.
+    listManualPieces(id?: string): Array<ManualPiece & { recordingId: string; reason: string; recordedAt: string }> {
+        const rows = (id === undefined
+            ? this.database.prepare("SELECT * FROM manual_pieces ORDER BY recording_id, part").all()
+            : this.database.prepare("SELECT * FROM manual_pieces WHERE recording_id = ? ORDER BY part").all(id)) as unknown as Array<{
+                recording_id: string; part: ProductionArtifactPart; segment_indexes_json: string; duration_seconds: number;
+                source_dimensions_json: string; reason: string; recorded_at: string;
+            }>;
+        return rows.map((row) => ({
+            recordingId: row.recording_id,
+            part: row.part,
+            segmentIndexes: JSON.parse(row.segment_indexes_json) as number[],
+            durationSeconds: row.duration_seconds,
+            sourceDimensions: JSON.parse(row.source_dimensions_json) as string[],
+            reason: row.reason,
+            recordedAt: row.recorded_at,
+        }));
+    }
+
     // Disk is the source of truth: the source folder is gone, so forget the
     // recording entirely — except the ISP billing truth in bandwidth_events.
     deleteRecording(id: string): void {
@@ -2203,7 +2296,7 @@ export class PipelineDatabase {
                 "upload_confirmations", "upload_attempts", "upload_reservations",
                 "remote_uploads", "recording_provenance", "upload_metadata",
                 "descriptions", "production_artifact_queue", "resolution_review_artifacts", "artifact_variants",
-                "remux_outputs", "artifacts", "state_events",
+                "remux_outputs", "artifacts", "manual_pieces", "state_events",
             ]) {
                 this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
             }

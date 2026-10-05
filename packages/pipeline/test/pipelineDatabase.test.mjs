@@ -65,7 +65,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.\n\nRecorded: unknown\nSource: https://tango.me/streamer-id",
         tags: ["tango", "live", "room"],
     });
-    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v4: test fixture");
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v5: test fixture");
     return database.get(recording.id);
 }
 
@@ -108,6 +108,47 @@ test("schema eight gains trial controls without changing generation, history, or
     assert(migrated.getCampaignTrialProgress().every((provider) => provider.admitted === 0));
 });
 
+test("schema eleven widens the artifact part checks to shapes without losing rows", async (t) => {
+    const { database, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory));
+    const databasePath = path.join(directory, "pipeline.sqlite");
+    database.close();
+    // Recreate the schema-11 tables exactly as the live database has them.
+    const raw = new DatabaseSync(databasePath);
+    const legacy = (name) => raw.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name).sql
+        .replace(/CHECK \(part IN \('full', 'max1080p', 'nonmax1080p'\) OR \(part GLOB [^)]*\)\)/, "CHECK (part IN ('full', 'max1080p', 'nonmax1080p'))")
+        .replace(/CHECK \(part IN \('max1080p', 'nonmax1080p'\) OR \(part GLOB [^)]*\)\)/, "CHECK (part IN ('max1080p', 'nonmax1080p'))")
+        .replace(/CHECK \(artifact_part IN \('full', 'max1080p', 'nonmax1080p'\) OR \(artifact_part GLOB [^)]*\)\)/, "CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p'))");
+    for (const table of ["production_artifact_queue", "remote_uploads"]) {
+        const sql = legacy(table).replace(/^CREATE TABLE\s+"?[a-z_]+"?/, `CREATE TABLE ${table}_old`);
+        assert.match(sql, /CHECK \((artifact_)?part IN \(/);
+        assert.doesNotMatch(sql, /GLOB/);
+        raw.exec(`${sql}; INSERT INTO ${table}_old SELECT * FROM ${table}; DROP TABLE ${table}; ALTER TABLE ${table}_old RENAME TO ${table};`);
+    }
+    raw.prepare(`INSERT INTO remote_uploads (recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at)
+        VALUES (?, 'full', 'attempt-1', '123', 'https://example.invalid/123', '2026-10-05T00:00:00.000Z')`).run(recording.id);
+    raw.prepare("UPDATE schema_version SET version = 11").run();
+    assert.throws(() => raw.prepare(`INSERT INTO remote_uploads (recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at)
+        VALUES (?, 'shape2', 'attempt-2', '124', 'https://example.invalid/124', '2026-10-05T00:00:00.000Z')`).run(recording.id), /CHECK/);
+    raw.close();
+
+    const migrated = new PipelineDatabase(databasePath);
+    t.after(() => migrated.close());
+    assert.equal(migrated.integrityCheck(), "ok");
+    const inspection = new DatabaseSync(databasePath, { readOnly: true });
+    t.after(() => inspection.close());
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 12);
+    assert.equal(inspection.prepare("SELECT remote_id FROM remote_uploads WHERE attempt_id = 'attempt-1'").get().remote_id, "123");
+    const write = new DatabaseSync(databasePath);
+    t.after(() => write.close());
+    write.prepare(`INSERT INTO remote_uploads (recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at)
+        VALUES (?, 'shape2', 'attempt-2', '124', 'https://example.invalid/124', '2026-10-05T00:00:00.000Z')`).run(recording.id);
+    assert.throws(() => write.prepare(`INSERT INTO remote_uploads (recording_id, artifact_part, attempt_id, remote_id, remote_url, verified_at)
+        VALUES (?, 'shape2x', 'attempt-3', '125', 'https://example.invalid/125', '2026-10-05T00:00:00.000Z')`).run(recording.id), /CHECK/);
+    assert.throws(() => write.prepare(`INSERT INTO production_artifact_queue (recording_id, part, queue_position, path, size_bytes, sha256,
+        segment_count, source_dimensions_json, validated_at) VALUES (?, 'full', 0, '/x.mp4', 1, ?, 1, '[]', 'x')`).run(recording.id, "a".repeat(64)), /CHECK/);
+});
+
 test("schema six migrates remote uploads and marks the old production generation for rollover", async (t) => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "video-pipeline-v6-migration-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
@@ -137,7 +178,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 11);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 12);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));

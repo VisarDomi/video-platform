@@ -3,8 +3,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { analyzeRecordingResolution, deriveResolutionPlaylist } from "../dist/stages/resolutionPolicy.js";
-import { upscaleWholeRecordingTo1080, productionTargetDimensions } from "../dist/stages/upscale.js";
+import { analyzeRecordingResolution, deriveResolutionPlaylist, productionOutputDimensions } from "../dist/stages/resolutionPolicy.js";
+import { convertShapeGroup } from "../dist/stages/upscale.js";
 import { streamCopyRemux } from "../dist/stages/remux.js";
 import { createDefaultStages } from "../dist/stages/defaultStages.js";
 import { fixturePart, assemble, frameIds, audioPackets, videoTimes, videoSliceHashes, exec } from "./helpers/mediaFixture.mjs";
@@ -52,26 +52,28 @@ test("TS ownership uses packet positions with unequal GOP counts, repeated files
     // Same file appears twice; byte intervals refer to occurrences, not names.
     await writeFile(playlist, (await readFile(playlist, "utf8")).replace("part-2.ts", "part-1.ts"));
     assert.deepEqual((await analyzeRecordingResolution(playlist)).segments.map((s) => s.width), [320, 640, 640]);
+    // Two picture sizes inside one segment: reported, measured by the larger one, never refused.
     await writeFile(path.join(root, "part-0.ts"), Buffer.concat([await readFile(low.input), await readFile(high.input)]));
-    await assert.rejects(() => analyzeRecordingResolution(playlist), /inside segment/);
+    const mixed = await analyzeRecordingResolution(playlist);
+    assert.deepEqual(mixed.segments.map((s) => s.width), [640, 640, 640]);
+    assert.match(mixed.warnings.join("; "), /picture size changes inside segment .*part-0\.ts/);
 });
 
 for (const size of ["640x480", "480x640", "960x768", "768x960"]) {
-    test(`v4 real conversion preserves unpadded ${size} frames/audio above Full-HD pixel budget`, async t => {
+    test(`real conversion keeps every frame and AAC packet, unpadded, at the production size: ${size}`, async t => {
         const root = await temporary(t);
         const part = await fixturePart(root, "narrow", { size, frames: 4, fmp4: true });
         const playlist = await assemble(root, [part]);
         const [width,height] = size.split("x").map(Number);
-        const source = {width,height,sampleAspectRatio:"1:1"};
-        const out = await upscaleWholeRecordingTo1080(playlist,path.join(root,"out"),"narrow",source);
+        const output = productionOutputDimensions({width,height,sampleAspectRatio:"1:1"});
+        assert.equal(output.rotate, height > width);
+        const out = await convertShapeGroup(playlist,path.join(root,"out"),"narrow",{ output },"production-v5");
         sameFrames(await frameIds(part.input),await frameIds(out.path));
         await sameAudio([part],out.path);
         await continuousVideo(out.path);
         const {stdout} = await exec("ffprobe",["-v","error","-select_streams","v:0","-show_entries",
             "stream=width,height,sample_aspect_ratio","-of","json",out.path]);
-        const stream = JSON.parse(stdout).streams[0];
-        const target = productionTargetDimensions(source);
-        assert.deepEqual(stream,{width:target.width,height:target.height,sample_aspect_ratio:"1:1"});
+        assert.deepEqual(JSON.parse(stdout).streams[0],{width:output.width,height:output.height,sample_aspect_ratio:"1:1"});
         // The source has uniform luma per frame. Padding would introduce a
         // dark border; inspect corners and centre of the actual encoded frame.
         const {stdout:pixels} = await exec("ffmpeg",["-v","error","-i",out.path,"-frames:v","1",
@@ -89,9 +91,8 @@ for (const fmp4 of [false, true]) {
         }
         const playlist = await assemble(root, parts);
         const expected = (await Promise.all(parts.map((p) => frameIds(p.input)))).flat();
-        const result = await upscaleWholeRecordingTo1080(playlist, path.join(root, "out"), "mixed", {
-            width: 640, height: 360, sampleAspectRatio: "1:1",
-        });
+        const output = productionOutputDimensions({ width: 640, height: 360, sampleAspectRatio: "1:1" });
+        const result = await convertShapeGroup(playlist, path.join(root, "out"), "mixed", { output }, "production-v5");
         sameFrames(expected, await frameIds(result.path));
         await continuousVideo(result.path);
         await sameAudio(parts, result.path);
@@ -114,14 +115,14 @@ for (const resetTimestamps of [false, true]) {
         assert(!original.includes("#EXT-X-DISCONTINUITY"));
         const staging = path.join(root, "out");
         const result = await createDefaultStages(staging).remux({ id: "untagged", playlistPath: playlist });
-        assert.equal(path.basename(result.path), "untagged.production-upscale1080p.mp4");
+        assert.equal(path.basename(result.path), `untagged.production-v5${portrait ? "-ccw" : ""}.mp4`);
         sameFrames((await Promise.all(parts.map((p) => frameIds(p.input)))).flat(), await frameIds(result.path));
         await continuousVideo(result.path);
         await sameAudio(parts, result.path);
         const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries",
             "stream=width,height,sample_aspect_ratio", "-of", "json", result.path]);
-        assert.deepEqual(JSON.parse(stdout).streams[0], { width: portrait ? 1080 : 1920,
-            height: portrait ? 1920 : 1080, sample_aspect_ratio: "1:1" });
+        // Portrait is turned 90° counterclockwise: always a landscape Full HD frame.
+        assert.deepEqual(JSON.parse(stdout).streams[0], { width: 1920, height: 1080, sample_aspect_ratio: "1:1" });
         assert.equal(await readFile(playlist, "utf8"), original, "source playlist must remain byte-identical");
         assert.deepEqual(await readdir(staging), [path.basename(result.path)], "temporary input runs are cleaned up");
     });
@@ -146,47 +147,40 @@ test("fMP4 retained remux preserves exact decoded frames and AAC for prefix, suf
     }
 });
 
-test("production pure 1440p passes through the native remux branch unchanged", async (t) => {
+test("production pure 1440p is converted at its own size, never shrunk", async (t) => {
     const root = await temporary(t);
     const part = await fixturePart(root, "native", { size: "2560x1440", frames: 3, fmp4: true });
     const playlist = await assemble(root, [part]);
     const result = await createDefaultStages(path.join(root, "out")).remux({ id: "native", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "native.mp4");
-    const { stdout } = await (await import("./helpers/mediaFixture.mjs")).exec("ffprobe", ["-v", "error", "-select_streams", "v:0",
+    assert.equal(path.basename(result.path), "native.production-v5.mp4");
+    const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height", "-of", "json", result.path]);
     assert.deepEqual(JSON.parse(stdout).streams[0], { width: 2560, height: 1440 });
-    assert.deepEqual(await frameIds(result.path), await frameIds(part.input));
+    sameFrames(await frameIds(part.input), await frameIds(result.path));
     await sameAudio([part], result.path);
 });
 
 for (const fmp4 of [false, true]) {
-test(`${fmp4 ? "fMP4" : "TS"} production remux preserves mixed 1080p/1440p and removes only low-resolution content`, async (t) => {
+test(`${fmp4 ? "fMP4" : "TS"} production keeps mixed 1080p/720p/1440p content, all at the largest size`, async (t) => {
     const root = await temporary(t);
     const full = await fixturePart(root, "full", { size: "1920x1080", frames: 5, fmp4 });
-    const higher = await fixturePart(root, "higher", { size: "2560x1440", frames: 5, offset: 80, fmp4 });
     const low = await fixturePart(root, "low", { size: "1280x720", frames: 1, offset: 150, fmp4 });
-    for (const [name, parts, expectedFile] of [["native", [full, higher], "native.mp4"],
-        ["retained", [full, low, higher], "retained.retained1080p.mp4"]]) {
-        const playlist = await assemble(root, parts);
-        const result = await createDefaultStages(path.join(root, "out")).remux({ id: name, playlistPath: playlist });
-        assert.equal(path.basename(result.path), expectedFile);
-        const expectedIds = [...await frameIds(full.input), ...await frameIds(higher.input)];
-        assert.deepEqual(await frameIds(result.path), expectedIds);
-        const expectedSlices = [...await videoSliceHashes(full.input), ...await videoSliceHashes(higher.input)];
-        assert(expectedSlices.length > 0);
-        assert.deepEqual(await videoSliceHashes(result.path), expectedSlices, "encoded picture data is copied, not re-encoded");
-        await continuousVideo(result.path);
-        await sameAudio([full, higher], result.path);
-        const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_frames",
-            "-show_entries", "frame=width,height", "-of", "json", result.path]);
-        assert.deepEqual(JSON.parse(stdout).frames.map((f) => [f.width, f.height]),
-            [...Array.from({ length: 5 }, () => [1920, 1080]), ...Array.from({ length: 5 }, () => [2560, 1440])],
-            "native coded dimensions survive each frame without conversion");
-    }
+    const higher = await fixturePart(root, "higher", { size: "2560x1440", frames: 5, offset: 80, fmp4 });
+    const parts = [full, low, higher];
+    const playlist = await assemble(root, parts);
+    const result = await createDefaultStages(path.join(root, "out")).remux({ id: "mixed", playlistPath: playlist });
+    assert.equal(path.basename(result.path), "mixed.production-v5.mp4");
+    sameFrames((await Promise.all(parts.map((p) => frameIds(p.input)))).flat(), await frameIds(result.path));
+    await continuousVideo(result.path);
+    await sameAudio(parts, result.path);
+    const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_frames",
+        "-show_entries", "frame=width,height", "-of", "json", result.path]);
+    assert.deepEqual(JSON.parse(stdout).frames.map((f) => [f.width, f.height]),
+        Array.from({ length: 11 }, () => [2560, 1440]), "every frame, low ones included, at the largest size");
 });
 }
 
-test("below-threshold mixed 1440p/720p converts ALL frames to unpadded 1080p with non-16:9 aspect in both orientations", async (t) => {
+test("mixed 2640x1440/1320x720 keeps every frame at 2640x1440 in both orientations (never shrunk to 1080)", async (t) => {
     const root = await temporary(t);
     for (const portrait of [false, true]) {
         const dir = path.join(root, portrait ? "portrait" : "landscape");
@@ -194,31 +188,30 @@ test("below-threshold mixed 1440p/720p converts ALL frames to unpadded 1080p wit
         const low = await fixturePart(dir, "low", { size: portrait ? "720x1320" : "1320x720", offset: 60, frames: 4, fmp4: true });
         const playlist = await assemble(dir, [high, low]);
         const result = await createDefaultStages(path.join(dir, "out")).remux({ id: "converted", playlistPath: playlist });
-        assert.equal(path.basename(result.path), "converted.production-upscale1080p.mp4");
+        assert.equal(path.basename(result.path), `converted.production-v5${portrait ? "-ccw" : ""}.mp4`);
         sameFrames([...await frameIds(high.input), ...await frameIds(low.input)], await frameIds(result.path));
         await continuousVideo(result.path);
         await sameAudio([high, low], result.path);
         const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries",
             "stream=width,height,sample_aspect_ratio", "-of", "json", result.path]);
-        assert.deepEqual(JSON.parse(stdout).streams[0], { width: portrait ? 1080 : 1980,
-            height: portrait ? 1980 : 1080, sample_aspect_ratio: "1:1" });
+        assert.deepEqual(JSON.parse(stdout).streams[0], { width: 2640, height: 1440, sample_aspect_ratio: "1:1" });
     }
 });
 
-test("custom 2560x900 qualifies by pixel count and is remuxed without conversion or padding", async (t) => {
+test("a wide 2560x900 recording is scaled to 1080 tall (Porntrex tiers by height) with nothing dropped", async (t) => {
     const root = await temporary(t);
     const high = await fixturePart(root, "wide", { size: "2560x900", frames: 5, fmp4: true });
     const low = await fixturePart(root, "low", { size: "1280x450", frames: 1, offset: 100, fmp4: true });
-    for (const [id, parts, kept] of [["native", [high], [high]], ["retained", [high, low, high], [high, high]]]) {
-        const playlist = await assemble(root, parts);
-        const result = await createDefaultStages(path.join(root, "out")).remux({ id, playlistPath: playlist });
-        assert.equal(path.basename(result.path), id === "native" ? "native.mp4" : "retained.retained1080p.mp4");
-        assert.deepEqual(await videoSliceHashes(result.path), (await Promise.all(kept.map((p) => videoSliceHashes(p.input)))).flat());
-        assert.deepEqual(await frameIds(result.path), (await Promise.all(kept.map((p) => frameIds(p.input)))).flat());
-        await continuousVideo(result.path);
-        await sameAudio(kept, result.path);
-        const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries",
-            "stream=width,height", "-of", "json", result.path]);
-        assert.deepEqual(JSON.parse(stdout).streams[0], { width: 2560, height: 900 });
-    }
+    const parts = [high, low, high];
+    const playlist = await assemble(root, parts);
+    const result = await createDefaultStages(path.join(root, "out")).remux({ id: "wide", playlistPath: playlist });
+    assert.equal(path.basename(result.path), "wide.production-v5.mp4");
+    const expected = (await Promise.all(parts.map((p) => frameIds(p.input)))).flat();
+    const actual = await frameIds(result.path);
+    assert.equal(actual.length, expected.length, "every frame, the low one included");
+    await continuousVideo(result.path);
+    await sameAudio(parts, result.path);
+    const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries",
+        "stream=width,height", "-of", "json", result.path]);
+    assert.deepEqual(JSON.parse(stdout).streams[0], { width: 3072, height: 1080 });
 });

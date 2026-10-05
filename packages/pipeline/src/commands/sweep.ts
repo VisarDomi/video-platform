@@ -1,7 +1,9 @@
-import { access, unlink } from "node:fs/promises";
+import { access, readdir, unlink } from "node:fs/promises";
+import path from "node:path";
 import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { containedArtifactPath } from "../stages/remux.js";
+import { PRODUCTION_ARTIFACT_BASE } from "../stages/artifactNaming.js";
 
 const SWEEP_MIN_AGE_MILLISECONDS = 24 * 60 * 60_000;
 const IN_FLIGHT_STATES = ["xvideos_admitted", "xvideos_uploading"];
@@ -41,6 +43,16 @@ export async function sweepMissingRecordings(
         // so cover deterministic, not-yet-ledgered review outputs too.
         for (const suffix of ["max1080p", "nonmax", "nonmax-upscale1080p", "production-upscale1080p", "retained1080p"] as const) {
             await unlink(containedArtifactPath(config.stagingRoot, recording.id, suffix)).catch(() => undefined);
+        }
+        for (const queued of database.listQueuedProductionArtifacts(recording.id)) {
+            await unlink(queued.path).catch(() => undefined);
+        }
+        // Current production outputs, whole or one per shape, ledgered or not.
+        const prefix = `${recording.id}.${PRODUCTION_ARTIFACT_BASE}`;
+        for (const name of await readdir(config.stagingRoot).catch(() => [] as string[])) {
+            if (name.startsWith(prefix) && name.endsWith(".mp4")) {
+                await unlink(path.join(config.stagingRoot, name)).catch(() => undefined);
+            }
         }
         const remuxOutput = database.getRemuxOutput(recording.id);
         if (remuxOutput) await unlink(remuxOutput).catch(() => undefined);

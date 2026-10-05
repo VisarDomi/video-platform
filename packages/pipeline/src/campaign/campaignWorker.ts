@@ -14,12 +14,7 @@ import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
 import { MetadataRejectedError, ProviderSessionLostError } from "../upload/providerWarnings.js";
-import {
-    analyzeRecordingResolution,
-    chooseRecordingResolutionPolicy,
-    RESOLUTION_POLICY_VERSION,
-    resolutionPolicyReason,
-} from "../stages/resolutionPolicy.js";
+import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "../stages/resolutionPolicy.js";
 
 export type CampaignStepResult =
     | { readonly disposition: "comparison_finished" | "comparison_verification_wait" | "comparison_attention_required"; readonly reason?: string }
@@ -74,13 +69,9 @@ export class CampaignWorker {
             || this.database.hasResolutionPolicyAssessment(recording.id, RESOLUTION_POLICY_VERSION)) {
             return null;
         }
-        const analysis = await analyzeRecordingResolution(recording.playlistPath);
-        const policy = chooseRecordingResolutionPolicy(analysis);
-        const reason = resolutionPolicyReason(policy.reason);
-        if (policy.disposition === "remuxNative") {
-            this.database.recordResolutionPolicyAssessment(recording.id, reason, now);
-            return null;
-        }
+        // Local work from an older policy (unrotated, or with dropped segments)
+        // is never uploaded: convert the recording again under the current one.
+        const reason = resolutionPolicyReason("local work predates this policy; converting again");
         if (this.database.getComparisonTrial()) throw new Error("Comparison artifact policy changed; retain evidence and prepare a new version instead of deleting it");
         const reset = this.database.resetLocalWorkForResolutionPolicy(recording.id, reason, now);
         await Promise.all(reset.obsoletePaths.map((obsoletePath) => unlink(obsoletePath).catch(() => undefined)));

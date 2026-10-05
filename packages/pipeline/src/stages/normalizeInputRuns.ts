@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { probeNativeStreamLayout, type NativeInputRun } from "./mediaCompatibility.js";
+import { productionVideoFilters } from "./videoFilters.js";
 
 async function ffmpeg(args: string[]): Promise<void> {
     await new Promise<void>((resolve, reject) => {
@@ -21,7 +22,7 @@ async function ffmpeg(args: string[]): Promise<void> {
 // Missing audio becomes silence; existing A/V offsets are not independently
 // reset. Compatible conversions keep the existing copied-audio fast path.
 export async function convertIndependentNativeRuns(runs: readonly NativeInputRun[], output: string,
-    dimensions: { outputWidth: number; outputHeight: number }): Promise<void> {
+    dimensions: { outputWidth: number; outputHeight: number; rotate?: boolean }): Promise<void> {
     const temporary = await fs.mkdtemp(path.join(path.dirname(output), ".native-conversion-"));
     try {
         const concat = ["ffconcat version 1.0"];
@@ -32,21 +33,33 @@ export async function convertIndependentNativeRuns(runs: readonly NativeInputRun
                 || streams.filter(stream => stream.codec_type === "audio").length > 1) {
                 throw new Error("Independent conversion requires one video and at most one audio track");
             }
-            const videoStart = Number(streams.find(stream => stream.codec_type === "video")?.start_time);
-            if (!Number.isFinite(videoStart)) throw new Error("Cannot establish native video timeline origin");
             const audio = streams.find(stream => stream.codec_type === "audio");
+            const videoStart = Number(streams.find(stream => stream.codec_type === "video")?.start_time ?? audio?.start_time);
+            if (!Number.isFinite(videoStart)) throw new Error("Cannot establish native video timeline origin");
             const part = path.join(temporary, `${index}.nut`);
             const inputs = ["-fflags", "+genpts", "-copyts", "-i", run.path];
-            const filters = [`[0:v:0]setpts=PTS-${videoStart}/TB,`
-                + `zscale=w=${dimensions.outputWidth}:h=${dimensions.outputHeight}:filter=lanczos,setsar=1[v]`];
+            let filters: string[];
+            if (run.pictureless) {
+                // No decodable picture in this run: hold the previous run's last
+                // frame (black at the very start) for its length; keep its audio.
+                const still = path.join(temporary, `${index}.still.png`);
+                if (index > 0) await ffmpeg(["-sseof", "-1", "-i", path.join(temporary, `${index - 1}.nut`), "-map", "0:v:0", "-update", "1", still]);
+                inputs.push(...(index > 0
+                    ? ["-loop", "1", "-framerate", "10", "-t", run.durationSeconds.toFixed(6), "-i", still]
+                    : ["-f", "lavfi", "-i", `color=c=black:s=${dimensions.outputWidth}x${dimensions.outputHeight}:r=10:d=${run.durationSeconds.toFixed(6)}`]));
+                filters = ["[1:v:0]format=yuv420p,setsar=1[v]"];
+            } else {
+                filters = [`[0:v:0]setpts=PTS-${videoStart}/TB,${productionVideoFilters(dimensions).join(",")}[v]`];
+            }
             if (hasAudio) {
                 if (audio) {
                     filters.push(`[0:a:0]asetpts=PTS-${videoStart}/TB,`
                         + `aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,`
                         + `apad,atrim=duration=${run.durationSeconds}[a]`);
                 } else {
+                    const silence = run.pictureless ? 2 : 1;
                     inputs.push("-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo");
-                    filters.push(`[1:a:0]atrim=duration=${run.durationSeconds},asetpts=PTS-STARTPTS[a]`);
+                    filters.push(`[${silence}:a:0]atrim=duration=${run.durationSeconds},asetpts=PTS-STARTPTS[a]`);
                 }
             }
             await ffmpeg([...inputs, "-filter_complex", filters.join(";"), "-map", "[v]",

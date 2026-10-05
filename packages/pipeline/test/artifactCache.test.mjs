@@ -33,7 +33,7 @@ async function fixture(t, generation = "production-v5") {
     return { root, config, database, recording, oldRoot, newRoot };
 }
 
-async function seed(f, reason = "resolution-policy-v4: approved original v4/v5 recipe", suffix = ".production-upscale1080p") {
+async function seed(f, reason = artifactRecipeReason("approved recipe"), suffix = ".production-v5") {
     const artifactPath = path.join(f.oldRoot, `${f.recording.id}${suffix}.mp4`);
     const bytes = Buffer.from("synthetic validated artifact bytes");
     await fs.writeFile(artifactPath, bytes);
@@ -58,7 +58,7 @@ for (const generation of ["production-v4", "production-v5"]) {
         const current = await rollover(f);
         const hit = await reuseCachedArtifact(current, f.newRoot, f.config);
         assert.equal(path.dirname(hit.path), f.newRoot);
-        assert.match(hit.eventReason, /resolution-policy-v4: \[artifact-recipe-v1\] artifact cache hit/);
+        assert.match(hit.eventReason, /resolution-policy-v5: \[artifact-recipe-v2\] artifact cache hit/);
         assert.equal(await artifactSha256(hit.path), await artifactSha256(oldPath));
         assert.equal((await fs.stat(hit.path)).ino, (await fs.stat(oldPath)).ino, "same-filesystem hit does not duplicate storage");
         assert.equal(f.database.getArtifact(current.id), null, "no old pipeline state imported");
@@ -69,11 +69,11 @@ for (const generation of ["production-v4", "production-v5"]) {
     });
 }
 
-test("native and retained-high-resolution remux artifacts reuse without changing their filenames", async (t) => {
-    for (const suffix of ["", ".retained1080p"]) {
-        await t.test(suffix || "native", async (t) => {
+test("whole-recording artifacts, turned or not, reuse without changing their filenames", async (t) => {
+    for (const suffix of [".production-v5", ".production-v5-ccw"]) {
+        await t.test(suffix, async (t) => {
             const f = await fixture(t);
-            const oldPath = await seed(f, artifactRecipeReason("remux high-resolution source"), suffix);
+            const oldPath = await seed(f, artifactRecipeReason("convert"), suffix);
             const hit = await reuseCachedArtifact(f.recording, f.newRoot, f.config);
             assert.equal(path.basename(hit.path), path.basename(oldPath));
             assert.equal(await artifactSha256(hit.path), await artifactSha256(oldPath));
@@ -81,11 +81,11 @@ test("native and retained-high-resolution remux artifacts reuse without changing
     }
 });
 
-test("future generations require recipe evidence, not their generation number; older trials are excluded", async (t) => {
+test("reuse requires the current recipe tag, never a generation number or an older recipe", async (t) => {
     for (const generation of ["production-v3", "production-v6"]) {
         await t.test(generation, async (t) => {
             const f = await fixture(t, generation);
-            await seed(f);
+            await seed(f, "resolution-policy-v4: approved original v4/v5 recipe");
             assert.equal(await reuseCachedArtifact(f.recording, f.newRoot, f.config), null);
             if (generation === "production-v6") {
                 const raw = new DatabaseSync(f.config.databasePath);
@@ -109,7 +109,8 @@ test("cache refuses changed source/provider/path, old policy, different recipe, 
     }
     const raw = new DatabaseSync(f.config.databasePath);
     try {
-        for (const reason of ["resolution-policy-v3: old target", "resolution-policy-v4: [artifact-recipe-v2] other encoder"] ) {
+        for (const reason of ["resolution-policy-v3: old target", "resolution-policy-v4: [artifact-recipe-v2] other policy",
+            "resolution-policy-v5: [artifact-recipe-v1] older recipe"]) {
             raw.prepare("UPDATE state_events SET reason = ? WHERE to_state = 'remuxed'").run(reason);
             assert.equal(await reuseCachedArtifact(f.recording, f.newRoot, f.config), null);
         }
@@ -177,7 +178,7 @@ test("real cache miss converts; next generation reuses artifact + descriptor cac
     assert.equal((await worker.processRecording(f.recording.id)).state, "remuxed");
     assert.equal((await worker.processRecording(f.recording.id)).state, "artifact_valid");
     const artifact = f.database.getArtifact(f.recording.id);
-    assert.match(artifact.path, /production-upscale1080p.mp4$/);
+    assert.match(artifact.path, /\.production-v5\.mp4$/);
 
     // Seed actual descriptor evidence, then run the REAL descriptor cache path.
     // A miss must fail instead of ever starting the user's model/server.
@@ -230,7 +231,7 @@ test("real cache miss converts; next generation reuses artifact + descriptor cac
     await fs.rename(f.recording.playlistPath, `${f.recording.playlistPath}.test-hidden`);
     assert.equal((await worker.processRecording(f.recording.id)).state, "remuxed");
     await fs.rename(`${f.recording.playlistPath}.test-hidden`, f.recording.playlistPath);
-    assert(f.database.hasResolutionPolicyAssessment(f.recording.id, "resolution-policy-v4"));
+    assert(f.database.hasResolutionPolicyAssessment(f.recording.id, "resolution-policy-v5"));
     // Also exercise a process restart between reuse and artifact validation.
     worker = new PipelineOrchestrator(f.database, createDefaultStages(f.newRoot, f.config), "test-cache-restarted");
     assert.equal((await worker.processRecording(f.recording.id)).state, "artifact_valid");

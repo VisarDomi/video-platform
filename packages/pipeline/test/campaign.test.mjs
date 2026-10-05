@@ -46,7 +46,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.",
         tags: ["tango", "live"],
     });
-    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v4: test fixture");
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v5: test fixture");
 }
 
 async function campaignWorkerFixture(t) {

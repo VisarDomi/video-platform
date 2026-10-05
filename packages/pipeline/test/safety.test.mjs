@@ -13,15 +13,16 @@ import {
 } from "../dist/stages/remux.js";
 import {
     buildUpscaleTranscodeArgs,
+    convertShapeGroup,
     createUpscalePlan,
     upscaleTranscode,
-    upscaleWholeRecordingTo1080,
 } from "../dist/stages/upscale.js";
 import {
     analyzeRecordingResolution,
-    chooseRecordingResolutionPolicy,
     deriveResolutionPlaylist,
-    FULL_HD_PIXEL_COUNT,
+    MINIMUM_SPLIT_PIECE_SECONDS,
+    planRecordingShapes,
+    productionOutputDimensions,
 } from "../dist/stages/resolutionPolicy.js";
 import { parseRemuxOneArguments } from "../dist/commands/remuxOneArguments.js";
 import { validateArtifact } from "../dist/stages/validateArtifact.js";
@@ -139,7 +140,7 @@ test("upscale plans drop below-floor frames and refuse ambiguous inputs", () => 
     ], "upscale1080p"), /do not share one display aspect ratio/);
 });
 
-test("resolution policy classifies active segment maps by coded pixel count", async (t) => {
+test("shape planning reads each segment's active map and keeps every segment in one upload", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-resolution-policy-test-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlistPath = path.join(root, "playlist.m3u8");
@@ -172,61 +173,18 @@ test("resolution policy classifies active segment maps by coded pixel count", as
     });
     assert.deepEqual(probes.sort(), ["full-again.mp4", "full.mp4", "lower.mp4"]);
     assert.equal(analysis.resolutionSummary, "1280x720:1,1920x1080:2");
-    const policy = chooseRecordingResolutionPolicy(analysis);
-    assert.equal(policy.disposition, "retain1080");
-    assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2]);
+    const plan = planRecordingShapes(analysis);
+    assert.equal(plan.upload.length, 1);
+    assert.deepEqual(plan.manual, []);
+    assert.equal(plan.upload[0].part, "full");
+    assert.deepEqual([...plan.upload[0].indexes].sort(), [0, 1, 2], "the 720p segment is kept");
+    assert.deepEqual(plan.upload[0].output, { width: 1920, height: 1080, rotate: false });
 
-    const derived = deriveResolutionPlaylist(analysis, policy.retainedSegmentIndexes);
-    assert.match(derived, /#EXT-X-DISCONTINUITY/);
-    assert(derived.includes(path.join(root, "1.ts")));
-    assert(derived.includes(path.join(root, "3.ts")));
-    assert(!derived.includes(path.join(root, "2.ts")));
+    const derived = deriveResolutionPlaylist(analysis, plan.upload[0].indexes);
+    for (const name of ["1.ts", "2.ts", "3.ts"]) assert(derived.includes(path.join(root, name)));
     assert(!derived.includes("unused.mp4"));
 });
-
-test("custom resolutions use width times height, including the exact Full HD pixel boundary and swapped orientation", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-pixel-threshold-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
-    const playlist = path.join(root, "playlist.m3u8");
-    await writeFile(playlist, '#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:1,\na.ts\n#EXT-X-ENDLIST\n');
-    assert.equal(FULL_HD_PIXEL_COUNT, 2_073_600);
-    for (const [width, height, expected] of [[2560, 900, "remuxNative"], [1440, 1440, "remuxNative"],
-        [2304, 900, "remuxNative"], [2302, 900, "convert1080"], [2306, 900, "remuxNative"],
-        [1440, 1080, "convert1080"], [1280, 1280, "convert1080"]]) {
-        for (const pair of [[width, height], [height, width]]) {
-            const analysis = await analyzeRecordingResolution(playlist, async () => ({ width: pair[0], height: pair[1], sampleAspectRatio: "1:1" }));
-            assert.equal(analysis.maxPixelCount, width * height);
-            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, expected, `${pair.join("x")}`);
-        }
-    }
-    const anamorphic = await analyzeRecordingResolution(playlist, async () => ({ width: 1440, height: 1080, sampleAspectRatio: "4:3" }));
-    assert.equal(chooseRecordingResolutionPolicy(anamorphic).disposition, "convert1080", "display stretching does not add coded pixels");
-});
-
-test("custom pixel-qualified runs use the same duration threshold and retain every qualifying index", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-pixel-duration-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
-    const playlist = path.join(root, "playlist.m3u8");
-    // All these are 64:25. High runs have a short edge BELOW 1080 but enough pixels.
-    const sizes = [[2304, 900], [1536, 600], [2560, 1000]];
-    for (const portrait of [false, true]) {
-        for (const [duration, expected] of [[8.999, "convert1080"], [9, "retain1080"], [9.001, "retain1080"]]) {
-            const durations = [duration / 2, 10 - duration, duration / 2];
-            await writeFile(playlist, "#EXTM3U\n" + sizes.map((_, i) => `#EXT-X-MAP:URI="${i}.mp4"\n#EXTINF:${durations[i]},\n${i}.ts\n`).join("") + "#EXT-X-ENDLIST\n");
-            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
-                const pair = [...sizes[Number.parseInt(path.basename(input))]];
-                if (portrait) pair.reverse();
-                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
-            });
-            const policy = chooseRecordingResolutionPolicy(analysis);
-            assert.equal(policy.disposition, expected);
-            if (expected === "retain1080") assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2]);
-            else assert.equal(policy.source.width * policy.source.height, 2_560_000);
-        }
-    }
-});
-
-test("720p policy includes lower segments when the whole recording is transcoded", async (t) => {
+test("a lower picture of the same shape joins the larger one; portrait is turned counterclockwise", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-resolution-720-policy-test-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlistPath = path.join(root, "playlist.m3u8");
@@ -234,12 +192,12 @@ test("720p policy includes lower segments when the whole recording is transcoded
     const analysis = await analyzeRecordingResolution(playlistPath, async (inputPath) => path.basename(inputPath) === "max.ts"
         ? { width: 720, height: 960, sampleAspectRatio: "1:1" }
         : { width: 508, height: 678, sampleAspectRatio: "1:1" });
-    const policy = chooseRecordingResolutionPolicy(analysis);
-    assert.equal(policy.disposition, "convert1080");
-    assert.equal(policy.source.width, 720);
-    assert.equal(policy.source.height, 960);
+    const [group] = planRecordingShapes(analysis).upload;
+    assert.equal(group.reference.width, 720);
+    assert.equal(group.reference.height, 960);
+    assert.deepEqual([...group.indexes].sort(), [0, 1]);
+    assert.deepEqual(group.output, { width: 1664, height: 1248, rotate: true });
 });
-
 test("the XVideos adapter cannot perform network uploads", async () => {
     const uploader = new DisabledXvideosUploader();
     await assert.rejects(() => uploader.upload({
@@ -319,7 +277,7 @@ test("a synthetic 720p HLS recording is transcoded to a validated unpadded 1080p
     assert.equal(validated.audioCodec, "aac");
 });
 
-test("production 720p upscale converts lower-resolution segments instead of dropping them", async (t) => {
+test("production conversion converts lower-resolution segments instead of dropping them", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-pipeline-whole-upscale-test-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const source = path.join(root, "source");
@@ -346,25 +304,20 @@ test("production 720p upscale converts lower-resolution segments instead of drop
         "#EXT-X-ENDLIST",
         "",
     ].join("\n"));
-    const result = await upscaleWholeRecordingTo1080(playlist, staging, "whole", {
-        width: 1280,
-        height: 720,
-        sampleAspectRatio: "1:1",
-    });
+    const output = productionOutputDimensions({ width: 1280, height: 720, sampleAspectRatio: "1:1" });
+    const result = await convertShapeGroup(playlist, staging, "whole", { output }, "production-v5");
     assert.equal(result.plan.selectExpression, null);
     assert.equal(result.plan.droppedSourceFrames, 0);
     const validated = await validateArtifact(result.path);
     assert.equal(validated.videoWidth, 1920);
     assert.equal(validated.videoHeight, 1080);
     assert(validated.durationSeconds > 0.65);
-    const lowOnly = await upscaleWholeRecordingTo1080(path.join(source, "low.ts"), staging, "low-only", {
-        width: 640, height: 360, sampleAspectRatio: "1:1",
-    });
+    const lowOnly = await convertShapeGroup(path.join(source, "low.ts"), staging, "low-only",
+        { output: productionOutputDimensions({ width: 640, height: 360, sampleAspectRatio: "1:1" }) }, "production-v5");
     assert.equal(lowOnly.plan.selectExpression, null);
     assert.equal((await validateArtifact(lowOnly.path)).videoHeight, 1080);
 });
-
-test("production mixed 1080p policy produces one whole conversion or one retained remux", async (t) => {
+test("production keeps every segment: mixed 1080p/720p is one conversion at the larger size", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-pipeline-resolution-split-test-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const source = path.join(root, "source");
@@ -410,7 +363,7 @@ test("production mixed 1080p policy produces one whole conversion or one retaine
     const original = await readFile(playlistPath, "utf8");
     const result = await createDefaultStages(staging).remux(recording);
     assert.equal(result.disposition, "artifact");
-    assert.equal(path.basename(result.path), "mixed.production-upscale1080p.mp4");
+    assert.equal(path.basename(result.path), "mixed.production-v5.mp4");
     const converted = await validateArtifact(result.path);
     assert.equal(converted.videoWidth, 1920);
     assert.equal(converted.videoHeight, 1080);
@@ -423,85 +376,52 @@ test("production mixed 1080p policy produces one whole conversion or one retaine
     await writeFile(playlistPath, retainedPlaylist);
     const retained = await createDefaultStages(staging).remux({ ...recording, id: "retained", durationSeconds: 3 });
     assert.equal(retained.disposition, "artifact");
-    assert.equal(path.basename(retained.path), "retained.retained1080p.mp4");
+    assert.equal(path.basename(retained.path), "retained.production-v5.mp4");
     const validated = await validateArtifact(retained.path);
     assert.equal(validated.videoHeight, 1080);
-    assert(validated.durationSeconds >= 2.6 && validated.durationSeconds < 3);
+    assert(validated.durationSeconds >= 2.9, "the one 720p segment among ten is kept, not dropped");
     assert.equal(await readFile(playlistPath, "utf8"), retainedPlaylist);
-    assert.deepEqual((await readdir(staging)).sort(), ["mixed.production-upscale1080p.mp4", "retained.retained1080p.mp4"]);
+    assert.deepEqual((await readdir(staging)).sort(), ["mixed.production-v5.mp4", "retained.production-v5.mp4"]);
 });
 
-test("mixed threshold uses EXTINF duration, includes exactly 90%, and is orientation neutral", async (t) => {
+test("a playlist entry without a valid EXTINF duration is refused", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-resolution-threshold-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlist = path.join(root, "playlist.m3u8");
-    for (const portrait of [false, true]) {
-        for (const [full, low, expected] of [[9, 1, "retain1080"], [8.999, 1.001, "convert1080"], [9.001, 0.999, "retain1080"]]) {
-            await writeFile(playlist, `#EXTM3U\n#EXT-X-MAP:URI="full.mp4"\n#EXTINF:${full},\n1.ts\n#EXT-X-MAP:URI="low.mp4"\n#EXTINF:${low},\n2.ts\n#EXT-X-ENDLIST\n`);
-            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
-                const dimensions = path.basename(input) === "full.mp4" ? [1920, 1080] : [1280, 720];
-                if (portrait) dimensions.reverse();
-                return { width: dimensions[0], height: dimensions[1], sampleAspectRatio: "1:1" };
-            });
-            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, expected);
-        }
-    }
     for (const extinf of ["", "#EXTINF:0,\n", "#EXTINF:-1,\n", "#EXTINF:bad,\n"]) {
         await writeFile(playlist, `#EXTM3U\n${extinf}1.ts\n#EXT-X-ENDLIST\n`);
         await assert.rejects(() => analyzeRecordingResolution(playlist, async () => ({ width: 1920, height: 1080 })), /duration|EXTINF/);
     }
 });
-
-test("native/retained remux keeps native geometry changes without forcing a fixed output geometry", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-remux-geometry-"));
+test("different picture shapes become separate uploads; a split's pieces under a minute go to a person", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-shape-split-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlist = path.join(root, "playlist.m3u8");
-    for (const retained of [false, true]) {
-        await writeFile(playlist, `#EXTM3U\n#EXT-X-MAP:URI="a.mp4"\n#EXTINF:5,\na.ts\n#EXT-X-MAP:URI="b.mp4"\n#EXTINF:5,\nb.ts\n${retained ? '#EXT-X-MAP:URI="low.mp4"\n#EXTINF:0.5,\nlow.ts\n' : ''}#EXT-X-ENDLIST\n`);
-        for (const alternate of [{ width: 1080, height: 1920, sampleAspectRatio: "1:1" },
-            { width: 1980, height: 1080, sampleAspectRatio: "1:1" },
-            { width: 1920, height: 1080, sampleAspectRatio: "4:3" }]) {
-            const analysis = await analyzeRecordingResolution(playlist, async (input) => path.basename(input) === "b.mp4"
-                ? alternate : path.basename(input) === "low.mp4"
-                    ? { width: 1280, height: 720, sampleAspectRatio: "1:1" }
-                    : { width: 1920, height: 1080, sampleAspectRatio: "1:1" });
-            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, retained ? "retain1080" : "remuxNative");
-        }
-    }
+    const sizes = { "wide.mp4": [1920, 1080], "tall.mp4": [1080, 1920], "wide-low.mp4": [1278, 720], "square.mp4": [1440, 1080] };
+    const write = (entries) => writeFile(playlist, "#EXTM3U\n" + entries.map(([map, seconds], i) =>
+        `#EXT-X-MAP:URI="${map}"\n#EXTINF:${seconds},\n${i}.ts\n`).join("") + "#EXT-X-ENDLIST\n");
+    const probe = async (input) => { const [width, height] = sizes[path.basename(input)]; return { width, height, sampleAspectRatio: "1:1" }; };
+    // 16:9 (first seen), 9:16, 16:9 again (a 1278x720 rounding of 16:9 is the same shape), then 4:3.
+    await write([["wide.mp4", 40], ["tall.mp4", 65], ["wide-low.mp4", 30], ["square.mp4", 10]]);
+    const plan = planRecordingShapes(await analyzeRecordingResolution(playlist, probe));
+    assert.deepEqual(plan.upload.map((group) => group.part), ["shape1", "shape2"]);
+    assert.deepEqual([...plan.upload[0].indexes].sort(), [0, 2], "same shapes are joined in time order");
+    assert.deepEqual(plan.upload[0].output, { width: 1920, height: 1080, rotate: false });
+    assert.deepEqual([...plan.upload[1].indexes], [1]);
+    assert.deepEqual(plan.upload[1].output, { width: 1920, height: 1080, rotate: true });
+    assert.deepEqual(plan.manual.map((group) => [group.part, [...group.indexes]]), [["shape3", [3]]]);
+    assert(plan.manual[0].durationSeconds < MINIMUM_SPLIT_PIECE_SECONDS);
+    assert.match(plan.reason, /3 shapes, one upload each: .*shape3 .*manual handling, not uploaded/);
+    // Every piece too short: nothing to upload, all for a person.
+    await write([["wide.mp4", 30], ["tall.mp4", 20]]);
+    const short = planRecordingShapes(await analyzeRecordingResolution(playlist, probe));
+    assert.deepEqual(short.upload, []);
+    assert.deepEqual(short.manual.map((group) => group.part), ["shape1", "shape2"]);
+    // One shape is never a split: a short recording still uploads whole.
+    await write([["wide.mp4", 5]]);
+    assert.deepEqual(planRecordingShapes(await analyzeRecordingResolution(playlist, probe)).upload.map((group) => group.part), ["full"]);
 });
-
-test("1080p-plus threshold combines all higher resolutions by duration, with exact boundaries in both orientations", async (t) => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-high-quality-threshold-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
-    const playlist = path.join(root, "playlist.m3u8");
-    for (const portrait of [false, true]) {
-        for (const [highDuration, expected] of [[8.999, "convert1080"], [9, "retain1080"], [9.001, "retain1080"]]) {
-            const sizes = [[1920, 1080], [1280, 720], [2560, 1440], [3840, 2160]];
-            const durations = [highDuration / 3, 10 - highDuration, highDuration / 3, highDuration / 3];
-            await writeFile(playlist, "#EXTM3U\n" + sizes.map((_, i) => `#EXT-X-MAP:URI="${i}.mp4"\n#EXTINF:${durations[i]},\n${i}.ts\n`).join("") + "#EXT-X-ENDLIST\n");
-            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
-                const pair = [...sizes[Number.parseInt(path.basename(input))]];
-                if (portrait) pair.reverse();
-                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
-            });
-            const policy = chooseRecordingResolutionPolicy(analysis);
-            assert.equal(policy.disposition, expected);
-            if (expected === "retain1080") assert.deepEqual([...policy.retainedSegmentIndexes], [0, 2, 3]);
-        }
-        // No exact 1080p segment at all: 1440p + 720p still uses the same rule.
-        for (const [highDuration, expected] of [[9, "retain1080"], [1, "convert1080"]]) {
-            await writeFile(playlist, `#EXTM3U\n#EXT-X-MAP:URI="high.mp4"\n#EXTINF:${highDuration},\n1.ts\n#EXT-X-MAP:URI="low.mp4"\n#EXTINF:${10-highDuration},\n2.ts\n#EXT-X-ENDLIST\n`);
-            const analysis = await analyzeRecordingResolution(playlist, async (input) => {
-                const pair = path.basename(input) === "high.mp4" ? [2560, 1440] : [1280, 720];
-                if (portrait) pair.reverse();
-                return { width: pair[0], height: pair[1], sampleAspectRatio: "1:1" };
-            });
-            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, expected);
-        }
-    }
-});
-
-test("uniform 1080p, 1440p and 2160p remain native remux in both orientations", async (t) => {
+test("uniform 1080p, 1440p and 2160p keep their size in both orientations; portrait is turned", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-native-resolution-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const playlist = path.join(root, "playlist.m3u8");
@@ -510,7 +430,8 @@ test("uniform 1080p, 1440p and 2160p remain native remux in both orientations", 
         for (const dimensions of [size, [...size].reverse()]) {
             const analysis = await analyzeRecordingResolution(playlist, async () => ({ width: dimensions[0],
                 height: dimensions[1], sampleAspectRatio: "1:1" }));
-            assert.equal(chooseRecordingResolutionPolicy(analysis).disposition, "remuxNative");
+            const [group] = planRecordingShapes(analysis).upload;
+            assert.deepEqual(group.output, { width: size[0], height: size[1], rotate: dimensions[1] > dimensions[0] });
         }
     }
 });

@@ -55,7 +55,9 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         provider: "porntrex",
         uploadVisibility: "public",
         minimumDurationSeconds: null,
-        maximumDurationSeconds: null,
+        // Not a Porntrex limit: the operator's hard limit for every upload
+        // (2026-10-05). Longer artifacts go to manual review.
+        maximumDurationSeconds: 2 * 60 * 60,
         maximumFileBytes: 10_000_000_000,
         inactiveDeletionDays: null,
         maintenanceVisitIntervalDays: null,
@@ -63,7 +65,11 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         evidence: [{
             url: "https://www.porntrex.com/upload-video/",
             verifiedAt: "2026-10-02",
-            note: "Authenticated upload form states up to 10GB per file. Existing H.264/AAC MP4 uploads were accepted. User approved public uploads; no duration limit is imposed by this provider policy.",
+            note: "Authenticated upload form states up to 10GB per file. Existing H.264/AAC MP4 uploads were accepted. User approved public uploads.",
+        }, {
+            url: "https://www.porntrex.com/upload-video/",
+            verifiedAt: "2026-10-05",
+            note: "Operator decision: uploads over two hours or 10 GB go to manual review instead of being uploaded.",
         }],
     },
     xvideos: {

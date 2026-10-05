@@ -31,13 +31,14 @@ test("provider-keyed private credentials only; a legacy activeProvider field is 
     assert.throws(() => readUploadProvidersFile(file), /private file/);
 });
 
-test("Porntrex 10GB cap is inclusive and does not inherit XVideos duration or file cap", () => {
-    const artifact = { id: "one", path: "/tmp/fixture.mp4", durationSeconds: 3 * 3600, sizeBytes: 10_000_000_000 };
+test("Porntrex hard limits are inclusive: two hours and 10GB go to manual review, XVideos keeps its 50GB cap", () => {
+    const artifact = { id: "one", path: "/tmp/fixture.mp4", durationSeconds: 2 * 3600, sizeBytes: 10_000_000_000 };
     assert.equal(assessFinalArtifact(artifact, policyForUploadProvider("porntrex")).disposition, "ready_for_upload");
     const over = assessFinalArtifact({ ...artifact, sizeBytes: artifact.sizeBytes + 1 }, policyForUploadProvider("porntrex"));
     assert.equal(over.disposition, "blocked_too_large");
     assert.match(over.notification.message, /porntrex 10000000000-byte maximum/);
-    assert.equal(assessFinalArtifact(artifact, policyForUploadProvider("xvideos")).disposition, "blocked_too_long");
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 + 1 }, policyForUploadProvider("porntrex")).disposition, "blocked_too_long");
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 3 * 3600 }, policyForUploadProvider("xvideos")).disposition, "blocked_too_long");
     assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 11_000_000_000 }, policyForUploadProvider("xvideos")).disposition, "ready_for_upload");
 });
 

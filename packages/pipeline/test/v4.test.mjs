@@ -6,7 +6,7 @@ import path from "node:path";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
-import { productionTargetDimensions } from "../dist/stages/upscale.js";
+import { productionOutputDimensions } from "../dist/stages/resolutionPolicy.js";
 import { parsePlaybackRenditions, hasFullHdPlayback } from "../dist/upload/playbackQuality.js";
 import { ChromiumXvideosUploader, HumanActionRequiredError } from "../dist/upload/chromiumXvideosUploader.js";
 import { CURRENT_PRODUCTION_VERSION } from "../dist/domain/productionVersion.js";
@@ -36,21 +36,29 @@ async function fixture(t, remoteId) {
     return { config, db, r, attempt };
 }
 
-test("production Full-HD budget covers both orientations, custom aspects and non-square source pixels", () => {
+test("production size: Full HD pixel count AND 1080 tall, landscape, aspect kept, never smaller than the source", () => {
     for (const [width, height, sar] of [[640,480,"1:1"],[480,640,"1:1"],[960,768,"1:1"],
         [768,960,"1:1"],[852,640,"640:639"],[720,1280,"1:1"],[1280,720,"1:1"],[2640,1440,"1:1"],
-        [800,800,"1:1"]]) {
-        const out = productionTargetDimensions({ width, height, sampleAspectRatio: sar });
+        [800,800,"1:1"],[2000,1000,"1:1"],[3840,2160,"1:1"],[1440,1080,"4:3"],[360,640,"1:1"]]) {
+        const out = productionOutputDimensions({ width, height, sampleAspectRatio: sar });
         const [sn, sd] = sar.split(":").map(Number);
-        const dar = width * sn / sd / height;
-        assert(out.width * out.height >= 1920 * 1080);
-        assert(Math.max(out.width,out.height)>=1920);
-        assert(Math.min(out.width,out.height)>=1080);
+        const displayWidth = width * sn / sd;
+        const portrait = height > displayWidth;
+        assert.equal(out.rotate, portrait, `${width}x${height} turned only when portrait`);
+        assert(out.width >= out.height, "always landscape (or square) after the turn");
+        assert(out.width * out.height >= 1920 * 1080, `${width}x${height}: Full HD pixel count`);
+        assert(out.height >= 1080, `${width}x${height}: Porntrex names tiers by height`);
+        assert(out.width * out.height >= width * height, `${width}x${height}: never fewer pixels`);
+        assert(out.width >= Math.max(displayWidth, height) - 1 && out.height >= Math.min(displayWidth, height) - 1, "never smaller");
         assert.equal(out.width % 2, 0); assert.equal(out.height % 2, 0);
-        assert(Math.abs(out.width / out.height / dar - 1) < 0.002);
+        const aspect = portrait ? height / displayWidth : displayWidth / height;
+        assert(Math.abs(out.width / out.height / aspect - 1) < 0.002, `${width}x${height}: aspect kept`);
     }
-    assert.deepEqual(productionTargetDimensions({width:640,height:480,sampleAspectRatio:"1:1"}),
-        {width:1920,height:1440,displayAspectRatio:4/3});
+    assert.deepEqual(productionOutputDimensions({ width: 720, height: 1280, sampleAspectRatio: null }), { width: 1920, height: 1080, rotate: true });
+    assert.deepEqual(productionOutputDimensions({ width: 640, height: 480, sampleAspectRatio: "1:1" }), { width: 1664, height: 1248, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 2000, height: 1000, sampleAspectRatio: "1:1" }), { width: 2160, height: 1080, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 3840, height: 2160, sampleAspectRatio: "1:1" }), { width: 3840, height: 2160, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 1080, height: 1920, sampleAspectRatio: "1:1" }), { width: 1920, height: 1080, rotate: true });
 });
 
 test("actual v3 non-widescreen manifests fail Full-HD verification; portrait and landscape pass", () => {

@@ -5,12 +5,14 @@ import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 import { DatabaseSync } from "node:sqlite";
 import type { ArtifactRecord, Recording } from "../domain/types.js";
 import { containedArtifactPath } from "./remux.js";
+import { productionArtifactSuffix } from "./artifactNaming.js";
 import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "./resolutionPolicy.js";
 import { artifactSha256 } from "./validateArtifact.js";
 
 // Independent of the upload generation. Bump when encoder/filter/remux settings
 // change output semantics, even if the resolution-selection policy stays put.
-export const ARTIFACT_RECIPE_VERSION = "artifact-recipe-v1";
+// v2 (2026-10-05): always converted, portrait turned counterclockwise, shapes split.
+export const ARTIFACT_RECIPE_VERSION = "artifact-recipe-v2";
 
 export interface ArtifactCacheConfig {
     readonly databasePath: string;
@@ -72,16 +74,11 @@ export async function findArtifactCacheCandidates(
             `).get(recording.id, recording.provider, recording.sourceKind, path.resolve(recording.sourcePath),
                 path.resolve(recording.playlistPath), recording.sourceFingerprint) as Omit<Candidate, "generation"> | undefined;
             if (!row || typeof row.reason !== "string" || !row.reason.startsWith(`${RESOLUTION_POLICY_VERSION}:`)) continue;
-            const tagged = row.reason.startsWith(artifactRecipeReason(""));
-            // Before recipe tags existed, ONLY v4/v5 used these exact approved
-            // media settings. Never import an older trial or a different recipe.
-            const legacy = ["resolution-policy-v4/artifact-recipe-v1"]
-                .includes(`${RESOLUTION_POLICY_VERSION}/${ARTIFACT_RECIPE_VERSION}`)
-                && ["production-v4", "production-v5"].includes(version.version)
-                && !row.reason.includes("[artifact-recipe-");
-            if (!tagged && !legacy) continue;
+            // Only the current recipe's tag authorizes reuse; never an older recipe.
+            if (!row.reason.startsWith(artifactRecipeReason(""))) continue;
             const root = path.resolve(config.artifactsRoot, version.version);
-            const allowedPaths = [undefined, "production-upscale1080p", "retained1080p", "compatibility-upscale1080p"]
+            // Whole-recording artifacts of the current recipe only (split parts are never reused).
+            const allowedPaths = [productionArtifactSuffix("full", false), productionArtifactSuffix("full", true)]
                 .map((suffix) => containedArtifactPath(root, recording.id, suffix));
             if (!allowedPaths.includes(row.path) || !Number.isSafeInteger(row.sizeBytes) || row.sizeBytes <= 0
                 || !/^[a-f0-9]{64}$/.test(row.sha256) || !Number.isFinite(Date.parse(row.validatedAt))) continue;

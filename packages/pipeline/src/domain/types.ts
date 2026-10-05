@@ -30,7 +30,9 @@ export interface ArtifactRecord {
     readonly validatedAt: string;
 }
 
-export type ProductionArtifactPart = "full" | "max1080p" | "nonmax1080p";
+// "full": the whole recording. "shapeN": one upload per picture shape, in order
+// of first appearance (2026-10-05). max1080p/nonmax1080p: retired split, kept for old rows.
+export type ProductionArtifactPart = "full" | "max1080p" | "nonmax1080p" | `shape${number}`;
 
 export interface QueuedProductionArtifactRecord extends ArtifactRecord {
     readonly part: Exclude<ProductionArtifactPart, "full">;

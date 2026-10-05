@@ -1,4 +1,5 @@
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
+import { probeDuration } from "descriptor";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { guardUploadIdentity, refusalMessage } from "./uploadIdentityGuard.js";
@@ -69,10 +70,11 @@ export async function uploadOne(
                 `Artifact ${artifact.path} does not belong to active ${CURRENT_PRODUCTION_VERSION} staging`,
             );
         }
+        // The file's own length: one shape of a split is shorter than its recording.
         const assessment = assessFinalArtifact({
             id: recording.id,
             path: artifact.path,
-            durationSeconds: recording.durationSeconds,
+            durationSeconds: await probeDuration(artifact.path),
             sizeBytes: artifact.sizeBytes,
         }, policyForUploadProvider(provider));
         if (assessment.disposition !== "ready_for_upload") {

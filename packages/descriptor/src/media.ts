@@ -53,6 +53,28 @@ export function chooseVideoFps(
     return Math.min(maximumFps, durationCeiling, budgetedFps);
 }
 
+// The pipeline turns portrait recordings 90° counterclockwise for upload. The
+// model reads people lying on their side in those, so it gets a copy turned
+// back clockwise, sampled at the descriptor's maximum frame rate (it never
+// samples more densely, so it sees the same moments).
+export async function makeUprightCopy(mediaPath: string, mediaDirectory: string, fps: number) {
+    await fs.mkdir(mediaDirectory, { recursive: true });
+    const uprightPath = path.join(mediaDirectory, `${randomUUID()}.upright.mp4`);
+    const remove = async () => { await fs.unlink(uprightPath).catch(() => undefined); };
+    try {
+        await capture("ffmpeg", [
+            "-nostdin", "-hide_banner", "-v", "error", "-i", mediaPath,
+            "-map", "0:v:0", "-map", "0:a?", "-vf", `transpose=1,fps=${fps}`,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p",
+            "-c:a", "copy", "-movflags", "+faststart", "-f", "mp4", uprightPath,
+        ]);
+    } catch (error) {
+        await remove();
+        throw error;
+    }
+    return { path: uprightPath, remove };
+}
+
 export async function stageMedia(mediaPath: string, mediaDirectory: string) {
     await fs.mkdir(mediaDirectory, { recursive: true });
     const stagedName = `${randomUUID()}${path.extname(mediaPath).toLowerCase() || ".mp4"}`;
