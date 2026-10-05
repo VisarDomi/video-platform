@@ -48,11 +48,11 @@ test("TS dimension and SAR changes get one boundary; stable dimensions get none"
     assert.deepEqual((await boundaries(root)).map((s) => s.tags), [0, 0, 1, 1, 1, 0]);
 });
 
-test("rejected segments do not alter geometry baseline; sequence gap supplies one boundary", async (t) => {
+test("abandoned empty segments do not alter geometry baseline; sequence gap supplies one boundary", async (t) => {
     const { root, manager, segments } = await setup(t);
     segments[0].dimensions = dims(720, 1280);
     await manager.appendSegmentToPlaylist(segments[0]);
-    manager.addIgnoredSegment(segments[1].providerSequence);
+    manager.abandonRejectedSegment(segments[1].providerSequence);
     segments[2].dimensions = dims(1080, 1920);
     await manager.appendSegmentToPlaylist(segments[2]);
     assert.deepEqual((await boundaries(root)).map((s) => s.tags), [0, 1]);

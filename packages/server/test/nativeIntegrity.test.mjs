@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { spawn } from "node:child_process";
 import { fixturePart, assemble, frameIds } from "../../pipeline/test/helpers/mediaFixture.mjs";
 import { finalizeMediaIntegrity, MEDIA_INTEGRITY_VALIDATOR_REVISION } from "../dist/services/hls/mediaIntegrityFinalizer.js";
-import { repairFailedMediaIntegrity } from "../dist/services/hls/failedIntegrityRepair.js";
 import { processFinalizedRecording } from "../dist/services/hls/finalizedRecordingProcessor.js";
 import { FinalizationCheckpointStore, playlistFingerprint } from "../dist/services/hls/finalizationCheckpointStore.js";
 
@@ -20,6 +18,10 @@ async function ledger(t, root) {
     t.after(() => db.close());
     return db;
 }
+async function snapshot(root) {
+    const names = (await readdir(root)).filter(name => name.endsWith(".ts") || name.endsWith(".mp4")).sort();
+    return Object.fromEntries(await Promise.all(names.map(async name => [name, (await readFile(path.join(root, name))).toString("base64")])));
+}
 
 test("native AV1/H264 and absent/present audio validate without modifying or encoding the capture", async t => {
     const root = await temporary(t);
@@ -32,77 +34,88 @@ test("native AV1/H264 and absent/present audio validate without modifying or enc
     assert.equal(result.report.status, "ready");
     assert.equal(result.report.deepScannedSegmentCount, 0);
     assert.equal(result.report.nativeRunResults.length, 2);
+    assert.deepEqual(result.report.warnings, []);
     assert.equal(await readFile(playlist, "utf8"), original);
     assert.equal((await readdir(root)).filter(name => name.endsWith(".mp4")).length, 2, "only original init maps exist");
 });
 
-test("a missing initialization file blocks finalization without attributing healthy fragments", async t => {
+test("a missing initialization file publishes unvalidated with a warning; nothing is attributed or moved", async t => {
     const root = await temporary(t);
     const parts = [await fixturePart(root, "a", { fmp4: true }), await fixturePart(root, "b", { fmp4: true })];
     const playlist = await assemble(root, parts);
     const original = await readFile(playlist, "utf8");
-    const before = await readFile(path.join(root, "part-0.ts"));
     await rm(path.join(root, "part-0.mp4"));
+    const before = await snapshot(root);
     const result = await processFinalizedRecording(root, { checkpointStore: await ledger(t, root) });
-    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.status, "ready");
     assert.deepEqual(result.report.invalidSegments, []);
-    assert.match(result.report.error, /ENOENT/);
+    const warning = result.report.warnings.find(item => item.kind === "validation-incomplete");
+    assert.match(warning.message, /ENOENT/);
     assert.equal(await readFile(playlist, "utf8"), original);
-    assert.deepEqual(await readFile(path.join(root, "part-0.ts")), before);
+    assert.deepEqual(await snapshot(root), before);
 });
 
-test("unavailable decoders cannot authorize discarding an entire MPEG-TS recording", async t => {
+test("unavailable decoders are an environment failure: the recording stays pending and is retried", async t => {
     const root = await temporary(t), original = await dummyRecording(root);
-    const result = await finalizeMediaIntegrity(root, { validateMedia: async () => ({
+    const checkpointStore = await ledger(t, root);
+    const result = await finalizeMediaIntegrity(root, { checkpointStore, validateMedia: async () => ({
         valid: false, exitCode: 1, stderr: "Decoding requested, but no decoder found for: av1",
     }) });
     assert.equal(result.report.status, "failed");
     assert.deepEqual(result.report.invalidSegments, []);
     assert.match(result.report.error, /blocked/);
     assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8"), original);
+
+    // A failed (environment) checkpoint is never final.
+    const retried = await finalizeMediaIntegrity(root, { checkpointStore,
+        validateMedia: async () => ({ valid: true, exitCode: 0, stderr: "" }) });
+    assert.equal(retried.kind, "processed");
+    assert.equal(retried.report.status, "ready");
 });
 
-test("consecutive damaged fMP4 fragments are repaired without a percentage cap; retained media stays byte-identical", async t => {
+test("ffmpeg that cannot be started is an environment failure, not media damage", async t => {
+    const root = await temporary(t); await dummyRecording(root);
+    const result = await finalizeMediaIntegrity(root, { validateMedia: async () => {
+        throw Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT", syscall: "spawn ffmpeg" });
+    } });
+    assert.equal(result.report.status, "failed");
+    assert.match(result.report.error, /spawn ffmpeg/);
+});
+
+test("consecutive damaged fMP4 fragments are kept byte-identical and reported; the recording is ready", async t => {
     const root = await temporary(t);
     const parts = [];
     for (let i = 0; i < 5; i++) parts.push(await fixturePart(root, `p${i}`, { fmp4: true, frames: 3, offset: i * 35 }));
     const playlist = await assemble(root, parts, [0.3, 4, 4, 4, 0.3]);
-    // Same-map, contiguous cluster. Three damaged fragments outweigh the
-    // good content; this must not force a percentage-based review.
+    // Same-map, contiguous cluster. Three damaged fragments outweigh the good content.
     const content = (await readFile(playlist, "utf8")).replace(/#EXT-X-DISCONTINUITY\n/g, "")
         .replace(/#EXT-X-MAP:URI="part-[1-4]\.mp4"\n/g, "");
     await writeFile(playlist, content);
     for (const i of [1, 2, 3]) await writeFile(path.join(root, `part-${i}.ts`), Buffer.alloc(32));
-    const before = await readFile(path.join(root, "part-4.ts"));
-    const failed = await finalizeMediaIntegrity(root);
-    assert.equal(failed.report.status, "failed");
-    assert.deepEqual(failed.report.invalidSegments.map(segment => segment.name), ["part-1.ts", "part-2.ts", "part-3.ts"]);
-    assert.equal(failed.report.detectedInvalidSegments.length, 3);
-    const trash = path.join(root, "trash"); await mkdir(trash);
-    const repaired = await repairFailedMediaIntegrity(root, failed.report, {
-        checkpointStore: await ledger(t, root),
-        dropFile: file => rename(file, path.join(trash, path.basename(file))),
-    });
-    assert.equal(repaired.finalReport.status, "ready");
-    assert.equal(repaired.finalReport.segmentCount, 2);
-    assert.deepEqual(await readFile(path.join(root, "part-4.ts")), before);
-    assert.deepEqual((await readdir(trash)).sort(), ["part-1.ts", "part-2.ts", "part-3.ts"]);
+    const before = await snapshot(root);
+    const result = await finalizeMediaIntegrity(root);
+    assert.equal(result.report.status, "ready");
+    assert.equal(result.report.segmentCount, 5);
+    assert.deepEqual(result.report.invalidSegments.map(segment => segment.name), ["part-1.ts", "part-2.ts", "part-3.ts"]);
+    assert.deepEqual(result.report.warnings.find(item => item.kind === "damaged-segments").names,
+        ["part-1.ts", "part-2.ts", "part-3.ts"]);
+    assert.equal(await readFile(playlist, "utf8"), content);
+    assert.deepEqual(await snapshot(root), before);
     assert((await frameIds(parts[0].input)).length > 0);
 });
 
-test("a failing single-fragment native epoch can be dropped without discarding its good neighbors", async t => {
+test("a failing single-fragment native epoch is reported while it and its neighbors stay in the playlist", async t => {
     const root = await temporary(t);
     const parts = [];
     for (let i = 0; i < 3; i++) parts.push(await fixturePart(root, `p${i}`, { fmp4: true, offset: i * 60 }));
     const playlist = await assemble(root, parts);
     await writeFile(path.join(root, "part-1.ts"), Buffer.alloc(32));
+    const original = await readFile(playlist, "utf8");
     const report = (await finalizeMediaIntegrity(root)).report;
+    assert.equal(report.status, "ready");
     assert.deepEqual(report.invalidSegments.map(item => item.name), ["part-1.ts"]);
     assert.equal(report.nativeRunResults.filter(run => run.valid).length, 2);
-    const trash = path.join(root, "trash"); await mkdir(trash);
-    const repaired = await repairFailedMediaIntegrity(root, report, { dropFile: file => rename(file, path.join(trash, path.basename(file))) });
-    assert.equal(repaired.finalReport.status, "ready");
-    assert.equal((await readFile(playlist, "utf8")).includes("part-1.ts"), false);
+    assert.equal(await readFile(playlist, "utf8"), original);
 });
 
 function failedReport(root) {
@@ -119,114 +132,18 @@ async function dummyRecording(root) {
     return content;
 }
 
-test("failed candidate verification preserves the original playlist and every media file", async t => {
-    const root = await temporary(t), original = await dummyRecording(root);
-    const checkpointStore = await ledger(t, root);
-    await assert.rejects(repairFailedMediaIntegrity(root, failedReport(root), {
-        checkpointStore, validateCandidate: async () => false,
-        dropFile: async () => assert.fail("no deletion before candidate verification"),
-    }), /originals.*preserved/);
-    assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8"), original);
-    assert.equal((await stat(path.join(root, "1.ts"))).isFile(), true);
-    assert.equal(checkpointStore.readRepair(root).phase, "planned");
-});
-
-test("interrupted published repair resumes BEFORE ready-cache or unreferenced-file cleanup", async t => {
-    const root = await temporary(t); await dummyRecording(root);
-    const checkpointStore = await ledger(t, root);
-    const ready = { ...failedReport(root), status: "ready", segmentCount: 2, initialPlaylistValid: true, invalidSegments: [] };
-    await assert.rejects(repairFailedMediaIntegrity(root, failedReport(root), {
-        checkpointStore, validateCandidate: async () => true, repairPlaylist: async () => {},
-        revalidate: async () => ({ kind: "processed", report: ready }),
-        dropFile: async () => { throw new Error("simulated power loss at trash boundary"); },
-    }), /power loss/);
-    assert.equal(checkpointStore.readRepair(root).phase, "published");
-    assert.equal(checkpointStore.read(root, playlistFingerprint(await readFile(path.join(root, "playlist.m3u8"), "utf8"))), null);
-    // Persisted ready evidence must not bypass the unfinished file movement.
-    checkpointStore.write(root, playlistFingerprint(await readFile(path.join(root, "playlist.m3u8"), "utf8")), ready);
-    const trash = path.join(root, "trash"); await mkdir(trash);
-    const repaired = await repairFailedMediaIntegrity(root, failedReport(root), {
-        checkpointStore, validateCandidate: async () => assert.fail("verified candidate is not rescanned"),
-        repairPlaylist: async () => {}, revalidate: async () => ({ kind: "processed", report: ready }),
-        dropFile: file => rename(file, path.join(trash, path.basename(file))),
-    });
-    assert.equal(repaired.finalReport.status, "ready");
-    assert.equal(checkpointStore.readRepair(root), null);
-    const cached = await processFinalizedRecording(root, { checkpointStore }, {
-        cleanup: async () => assert.fail("ready source must not be rescanned"),
-    });
-    assert.equal(cached.kind, "already-processed");
-});
-
-test("all-bad fMP4 media becomes explicitly empty, preserving recoverable discarded files", async t => {
+test("all-bad fMP4 media is still published with every fragment kept", async t => {
     const root = await temporary(t);
     const parts = [await fixturePart(root, "a", { fmp4: true }), await fixturePart(root, "b", { fmp4: true })];
-    await assemble(root, parts);
+    const playlist = await assemble(root, parts);
     for (const name of ["part-0.ts", "part-1.ts"]) await writeFile(path.join(root, name), Buffer.alloc(32));
-    const failed = await finalizeMediaIntegrity(root);
-    assert.equal(failed.report.invalidSegments.length, 2);
-    const trash = path.join(root, "trash"); await mkdir(trash);
-    const repaired = await repairFailedMediaIntegrity(root, failed.report, { dropFile: file => rename(file, path.join(trash, path.basename(file))) });
-    assert.equal(repaired.finalReport.status, "empty");
-    assert.equal(repaired.finalReport.segmentCount, 0);
-    assert.equal((await readdir(trash)).length, 2);
+    const original = await readFile(playlist, "utf8");
+    const result = await finalizeMediaIntegrity(root);
+    assert.equal(result.report.status, "ready");
+    assert.equal(result.report.segmentCount, 2);
+    assert.equal(result.report.invalidSegments.length, 2);
+    assert.equal(await readFile(playlist, "utf8"), original);
 });
-
-for (const phase of ["planned", "verified", "published"]) {
-    test(`actual SIGKILL at the durable ${phase} boundary resumes the repair safely`, async t => {
-        const root = await temporary(t), original = await dummyRecording(root);
-        const databasePath = path.join(root, "finalization.sqlite");
-        const report = failedReport(root);
-        const checkpointModule = new URL("../dist/services/hls/finalizationCheckpointStore.js", import.meta.url).href;
-        const repairModule = new URL("../dist/services/hls/failedIntegrityRepair.js", import.meta.url).href;
-        const source = `
-            import {FinalizationCheckpointStore} from ${JSON.stringify(checkpointModule)};
-            import {repairFailedMediaIntegrity} from ${JSON.stringify(repairModule)};
-            const store = new FinalizationCheckpointStore(${JSON.stringify(databasePath)});
-            const write = store.writeRepair.bind(store);
-            store.writeRepair = (recording, plan) => {
-                write(recording, plan);
-                if (plan.phase === ${JSON.stringify(phase)}) {
-                    process.stdout.write('saved-boundary'); process.kill(process.pid, 'SIGSTOP');
-                }
-            };
-            const report = ${JSON.stringify(report)};
-            await repairFailedMediaIntegrity(${JSON.stringify(root)}, report, {checkpointStore:store,
-                validateCandidate:async()=>true,repairPlaylist:async()=>{},
-                revalidate:async()=>({kind:'processed',report:{...report,status:'ready',invalidSegments:[]}}),
-                dropFile:async()=>{throw Error('must be killed before trash');}});
-        `;
-        await new Promise((resolve, reject) => {
-            const child = spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", source]);
-            let output = "", stderr = "";
-            const timer = setTimeout(() => { child.kill("SIGKILL"); reject(Error("kill-boundary test timed out")); }, 10000);
-            child.stdout.on("data", chunk => { output += chunk; if (output.includes("saved-boundary")) child.kill("SIGKILL"); });
-            child.stderr.on("data", chunk => { stderr += chunk; });
-            child.once("error", reject);
-            child.once("close", (_code, signal) => {
-                clearTimeout(timer);
-                if (signal === "SIGKILL" && output.includes("saved-boundary")) resolve(); else reject(Error(stderr));
-            });
-        });
-        const checkpointStore = await ledger(t, root);
-        assert.equal(checkpointStore.readRepair(root).phase, phase);
-        assert.equal((await stat(path.join(root, "1.ts"))).isFile(), true);
-        assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8") === original, phase !== "published");
-        const trash = path.join(root, "trash"); await mkdir(trash);
-        const ready = { ...report, status: "ready", segmentCount: 2, initialPlaylistValid: true, invalidSegments: [] };
-        const result = await processFinalizedRecording(root, { checkpointStore }, {
-            cleanup: async () => assert.fail("unfinished repair owns excluded files"),
-            repairFailed: (target, failed) => repairFailedMediaIntegrity(target, failed, {
-                checkpointStore, validateCandidate: async () => true, repairPlaylist: async () => {},
-                revalidate: async () => ({ kind: "processed", report: ready }),
-                dropFile: file => rename(file, path.join(trash, path.basename(file))),
-            }),
-        });
-        assert.equal(result.report.status, "ready");
-        assert.equal(checkpointStore.readRepair(root), null);
-        assert.deepEqual(await readdir(trash), ["1.ts"]);
-    });
-}
 
 test("empty captures have an explicit disposition and never invoke ffmpeg", async t => {
     const root = await temporary(t);
@@ -234,6 +151,16 @@ test("empty captures have an explicit disposition and never invoke ffmpeg", asyn
     const result = await finalizeMediaIntegrity(root, { validateMedia: async () => assert.fail("empty is not decodable media") });
     assert.equal(result.report.status, "empty");
     assert.match(result.report.error, /empty capture/);
+});
+
+test("a playlist the validator cannot interpret is published unvalidated", async t => {
+    const root = await temporary(t);
+    await writeFile(path.join(root, "playlist.m3u8"), "#EXTM3U\n#EXTINF:0,\n0.ts\n#EXT-X-ENDLIST\n");
+    await writeFile(path.join(root, "0.ts"), "media");
+    const result = await finalizeMediaIntegrity(root, { validateMedia: async () => assert.fail("not decodable as listed") });
+    assert.equal(result.report.status, "ready");
+    assert.equal(result.report.segmentCount, 1);
+    assert.equal(result.report.warnings[0].kind, "validation-incomplete");
 });
 
 test("native-run validation resumes after the saved completed run without decoding it again", async t => {
@@ -265,7 +192,8 @@ test("MPEG-TS damage attribution does not decode segments from already-valid nat
         const bad = playlist ? playlist.includes("/1.ts") : path.basename(input) === "1.ts";
         return { valid: !bad, exitCode: bad ? 1 : 0, stderr: bad ? "corrupt decoded frame" : "" };
     } });
-    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.status, "ready");
     assert.deepEqual(individuallyDecoded, ["1.ts"]);
     assert.deepEqual(result.report.invalidSegments.map(item => item.name), ["1.ts"]);
+    assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8"), content);
 });
