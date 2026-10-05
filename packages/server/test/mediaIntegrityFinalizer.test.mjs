@@ -108,15 +108,20 @@ test("failed fMP4 validation attributes an isolated fragment using clean neighbo
     });
 
     assert.equal(result.kind, "processed");
-    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.status, "ready");
     assert.equal(result.report.deepScannedSegmentCount, 3);
     assert.deepEqual(result.report.invalidSegments, [
         { name: "2.ts", error: "missing reference picture" },
     ]);
-    assert.match(result.report.error, /1 isolated fMP4 fragment/);
+    assert.deepEqual(result.report.warnings, [{
+        kind: "damaged-segments",
+        message: "1 of 3 fMP4 fragments failed individual decoding; kept in the playlist",
+        names: ["2.ts"],
+    }]);
+    assert.equal(result.report.error, null);
 });
 
-test("fMP4 validation blocks ambiguous adjacent fragment failures", async (t) => {
+test("ambiguous adjacent fMP4 fragment failures are kept and reported as unattributed damage", async (t) => {
     const streamPath = await mkdtemp(path.join(tmpdir(), "fmp4-ambiguous-"));
     t.after(() => import("node:fs/promises").then(fs => fs.rm(streamPath, { recursive: true })));
     await writeFile(path.join(streamPath, "init.mp4"), "initialization fixture");
@@ -134,9 +139,12 @@ test("fMP4 validation blocks ambiguous adjacent fragment failures", async (t) =>
     });
 
     assert.equal(result.kind, "processed");
-    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.status, "ready");
     assert.deepEqual(result.report.invalidSegments, []);
-    assert.match(result.report.error, /no safe isolated repair boundary/);
+    const [warning] = result.report.warnings;
+    assert.equal(warning.kind, "unattributed-damage");
+    assert.deepEqual(warning.names, ["1.ts", "2.ts"]);
+    assert.match(warning.message, /broken initialization context/);
 });
 
 test("media-integrity queue deduplicates paths and runs one stream at a time", async () => {
@@ -229,7 +237,7 @@ test("finalized clean playlist uses whole-playlist validation without scanning e
     assert.deepEqual(validated, ["playlist.m3u8", "playlist.m3u8"]);
 });
 
-test("failed whole-playlist validation reports exact bad segments without changing media", async (t) => {
+test("failed whole-playlist validation reports exact bad segments, keeps them, and is ready", async (t) => {
     const originalPlaylist = `${PLAYLIST_HEADER}#EXTINF:1,
 1.ts
 #EXTINF:1,
@@ -259,11 +267,12 @@ test("failed whole-playlist validation reports exact bad segments without changi
     });
 
     assert.equal(result.kind, "processed");
-    assert.equal(result.report.status, "failed");
+    assert.equal(result.report.status, "ready");
     assert.equal(result.report.deepScannedSegmentCount, 3);
     assert.deepEqual(result.report.invalidSegments, [
         { name: "2.ts", error: "corrupt decoded frame" },
     ]);
+    assert.deepEqual(result.report.warnings.map(warning => warning.kind), ["damaged-segments"]);
     assert.equal(await readFile(path.join(streamPath, "playlist.m3u8"), "utf8"), originalPlaylist);
     assert.equal((await stat(path.join(streamPath, "2.ts"))).size, 188);
 
@@ -334,7 +343,7 @@ test("resuming a deep scan continues after the last checkpoint", async (t) => {
     assert.deepEqual(validated, ["3.ts"]);
 });
 
-test("a failed checkpoint from an older validator revision is retried once", async (t) => {
+test("a failed checkpoint (older revision or environment failure) is retried", async (t) => {
     const playlist = `${PLAYLIST_HEADER}#EXTINF:1,
 1.ts
 #EXT-X-ENDLIST

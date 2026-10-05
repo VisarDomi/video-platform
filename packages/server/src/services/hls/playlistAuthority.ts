@@ -78,17 +78,12 @@ interface ParsedPlaylist {
     hasMap: boolean;
 }
 
-export interface DroppedPlaylistSegments {
+export interface CompoundSequenceRestarts {
     readonly content: string;
-    readonly removedSegmentNames: readonly string[];
-    readonly missingSegmentNames: readonly string[];
+    // Entries whose provider sequence does not exceed the previous entry's.
+    readonly restartSegmentNames: readonly string[];
     readonly insertedDiscontinuityCount: number;
-}
-
-export interface CompoundSequenceRepair {
-    readonly content: string;
-    readonly removedSegmentNames: readonly string[];
-    readonly skippedReason: "fmp4-map" | "legacy-or-mixed-names" | null;
+    readonly skippedReason: "legacy-or-mixed-names" | null;
 }
 
 type PlaylistLine =
@@ -218,163 +213,46 @@ function serializePlaylist(parsed: ParsedPlaylist, targetDuration: number): stri
     return normalizeHeaderOrder(output).join(MISC.NEW_LINE) + MISC.NEW_LINE;
 }
 
-export function dropSegmentsFromPlaylist(
-    content: string,
-    requestedSegmentNames: ReadonlySet<string>,
-): DroppedPlaylistSegments {
-    const parsed = parsePlaylist(content);
-    if (parsed.hasMap) throw new Error("Dropping individual fMP4 fragments is not supported");
-
-    const presentNames = new Set(parsed.segments.map((segment) => segment.name));
-    const removedSegmentNames: string[] = [];
-    const missingSegmentNames = [...requestedSegmentNames].filter((name) => !presentNames.has(name));
-    const keptLines: PlaylistLine[] = [];
-    let gapBeforeNextSegment = false;
-    let insertedDiscontinuityCount = 0;
-
-    for (const line of parsed.lines) {
-        if (line.kind !== "segment") {
-            keptLines.push(line);
-            continue;
-        }
-        if (requestedSegmentNames.has(line.segment.name)) {
-            removedSegmentNames.push(line.segment.name);
-            gapBeforeNextSegment = true;
-            continue;
-        }
-        if (gapBeforeNextSegment) {
-            line.segment.metadata = [
-                HLS.DISCONTINUITY,
-                ...line.segment.metadata.filter((metadata) => metadata !== HLS.DISCONTINUITY),
-            ];
-            insertedDiscontinuityCount++;
-            gapBeforeNextSegment = false;
-        }
-        keptLines.push(line);
-    }
-
-    const targetDuration = parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION;
-    return {
-        content: serializePlaylist({
-            ...parsed,
-            lines: keptLines,
-            segments: parsed.segments.filter((segment) => !requestedSegmentNames.has(segment.name)),
-        }, targetDuration),
-        removedSegmentNames,
-        missingSegmentNames,
-        insertedDiscontinuityCount,
-    };
-}
-
-export function dropFmp4FragmentsFromPlaylist(
-    content: string,
-    requestedSegmentNames: ReadonlySet<string>,
-): DroppedPlaylistSegments {
-    const parsed = parsePlaylist(content);
-    if (!parsed.hasMap) throw new Error("Playlist is not fMP4");
-
-    const presentNames = new Set(parsed.segments.map((segment) => segment.name));
-    const removedSegmentNames: string[] = [];
-    const missingSegmentNames = [...requestedSegmentNames].filter((name) => !presentNames.has(name));
-    const keptLines: PlaylistLine[] = [];
-    let gapBeforeNextSegment = false;
-    let insertedDiscontinuityCount = 0;
-
-    for (const line of parsed.lines) {
-        if (line.kind !== "segment") {
-            keptLines.push(line);
-            continue;
-        }
-        if (requestedSegmentNames.has(line.segment.name)) {
-            removedSegmentNames.push(line.segment.name);
-            gapBeforeNextSegment = true;
-            continue;
-        }
-        if (gapBeforeNextSegment) {
-            if (line.segment.activeMapLine === null) {
-                throw new Error(`fMP4 fragment has no active EXT-X-MAP: ${line.segment.name}`);
-            }
-            line.segment.metadata = [
-                HLS.DISCONTINUITY,
-                line.segment.activeMapLine,
-                ...line.segment.metadata.filter((metadata) => (
-                    metadata !== HLS.DISCONTINUITY && !metadata.startsWith(HLS.MAP_PREFIX)
-                )),
-            ];
-            insertedDiscontinuityCount++;
-            gapBeforeNextSegment = false;
-        }
-        keptLines.push(line);
-    }
-
-    const removed = new Set(removedSegmentNames);
-    return {
-        content: serializePlaylist({
-            ...parsed,
-            lines: keptLines,
-            segments: parsed.segments.filter((segment) => !removed.has(segment.name)),
-        }, parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION),
-        removedSegmentNames,
-        missingSegmentNames,
-        insertedDiscontinuityCount,
-    };
-}
-
-export function dropRegressedCompoundSegments(content: string): CompoundSequenceRepair {
-    const parsed = parsePlaylist(content);
-    if (parsed.hasMap) {
-        return { content, removedSegmentNames: [], skippedReason: "fmp4-map" };
-    }
-
-    const identities = parsed.segments.map((segment) => {
-        const match = segment.name.match(/^(\d+)_(.+)_(-?\d+)\.ts$/);
-        if (!match) return null;
-        const localNumber = Number.parseInt(match[1], 10);
-        const providerSequence = Number.parseInt(match[3], 10);
-        if (!Number.isSafeInteger(localNumber) || !Number.isSafeInteger(providerSequence)) return null;
-        return { recordingId: match[2], providerSequence };
+// Provider numbering restarts (SC edges, Tango, FC2) are genuine new media and
+// are always KEPT. This only makes sure each restart point carries an
+// #EXT-X-DISCONTINUITY, so durations and decoding are not computed across it,
+// and reports where they are. No entry is removed, reordered, or reformatted.
+export function markCompoundSequenceRestarts(content: string): CompoundSequenceRestarts {
+    const lines = content.split("\n");
+    const uriIndexes = lines.flatMap((line, index) => {
+        const trimmed = line.trim();
+        return trimmed !== "" && !trimmed.startsWith("#") ? [index] : [];
     });
-    const recordingId = identities[0]?.recordingId;
-    if (
-        identities.some((identity) => identity === null)
-        || identities.some((identity) => identity?.recordingId !== recordingId)
-    ) {
-        return { content, removedSegmentNames: [], skippedReason: "legacy-or-mixed-names" };
+    const identities = uriIndexes.map((index) => {
+        const match = lines[index].trim().match(/^(\d+)_(.+)_(-?\d+)\.ts$/);
+        const providerSequence = match ? Number.parseInt(match[3], 10) : Number.NaN;
+        return match && Number.isSafeInteger(providerSequence)
+            ? { recordingId: match[2], providerSequence }
+            : null;
+    });
+    if (identities.some((identity) => identity === null)
+        || new Set(identities.map((identity) => identity!.recordingId)).size > 1) {
+        return { content, restartSegmentNames: [], insertedDiscontinuityCount: 0, skippedReason: "legacy-or-mixed-names" };
     }
 
-    let highestProviderSequence: number | null = null;
-    const removedSegmentNames: string[] = [];
-    const keptLines: PlaylistLine[] = [];
-    let segmentIndex = 0;
-    for (const line of parsed.lines) {
-        if (line.kind !== "segment") {
-            keptLines.push(line);
-            continue;
-        }
-        const identity = identities[segmentIndex++];
-        if (!identity) throw new Error(`Missing compound identity for ${line.segment.name}`);
-        if (
-            highestProviderSequence !== null
-            && identity.providerSequence <= highestProviderSequence
-        ) {
-            removedSegmentNames.push(line.segment.name);
-            continue;
-        }
-        highestProviderSequence = identity.providerSequence;
-        keptLines.push(line);
+    const restartSegmentNames: string[] = [];
+    const insertBefore: number[] = [];
+    for (let position = 1; position < uriIndexes.length; position++) {
+        if (identities[position]!.providerSequence > identities[position - 1]!.providerSequence) continue;
+        restartSegmentNames.push(lines[uriIndexes[position]].trim());
+        const blockStart = uriIndexes[position - 1] + 1;
+        const block = lines.slice(blockStart, uriIndexes[position]).map((line) => line.trim());
+        if (!block.includes(HLS.DISCONTINUITY)) insertBefore.push(blockStart);
     }
-
-    if (removedSegmentNames.length === 0) {
-        return { content, removedSegmentNames, skippedReason: null };
+    if (insertBefore.length === 0) {
+        return { content, restartSegmentNames, insertedDiscontinuityCount: 0, skippedReason: null };
     }
-    const removed = new Set(removedSegmentNames);
+    const output = [...lines];
+    for (const index of insertBefore.reverse()) output.splice(index, 0, HLS.DISCONTINUITY);
     return {
-        content: serializePlaylist({
-            ...parsed,
-            lines: keptLines,
-            segments: parsed.segments.filter((segment) => !removed.has(segment.name)),
-        }, parsed.targetDuration ?? HLS.DEFAULT_TARGET_DURATION),
-        removedSegmentNames,
+        content: output.join("\n"),
+        restartSegmentNames,
+        insertedDiscontinuityCount: insertBefore.length,
         skippedReason: null,
     };
 }
@@ -591,15 +469,18 @@ async function writeFileAtomic(filePath: string, content: string): Promise<void>
     }
 }
 
-export async function repairRegressedCompoundSegments(videoPath: string): Promise<CompoundSequenceRepair> {
+export async function annotateCompoundSequenceRestarts(videoPath: string): Promise<CompoundSequenceRestarts> {
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
     const originalContent = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
-    const result = dropRegressedCompoundSegments(originalContent);
-    if (result.removedSegmentNames.length > 0) {
+    const result = markCompoundSequenceRestarts(originalContent);
+    if (result.insertedDiscontinuityCount > 0) {
         await writeFileAtomic(playlistPath, result.content);
-        logger.warn("[PlaylistAuthority] removed regressed compound media sequences", {
+    }
+    if (result.restartSegmentNames.length > 0) {
+        logger.warn("[PlaylistAuthority] provider sequence restarts kept", {
             playlistPath,
-            removedSegmentCount: result.removedSegmentNames.length,
+            restartCount: result.restartSegmentNames.length,
+            insertedDiscontinuityCount: result.insertedDiscontinuityCount,
         });
     }
     return result;
