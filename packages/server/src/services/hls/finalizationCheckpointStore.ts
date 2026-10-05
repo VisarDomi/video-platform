@@ -69,16 +69,17 @@ export class FinalizationCheckpointStore {
             .run(path.resolve(recordingPath));
     }
 
+    // media_repairs holds journals of the retired destructive repair. Nothing
+    // writes them any more; finalization reads and clears leftovers.
     readRepair<T>(recordingPath: string): T | null {
         const row = this.database.prepare("SELECT plan_json FROM media_repairs WHERE recording_path = ?")
             .get(path.resolve(recordingPath)) as { plan_json: string } | undefined;
-        return row ? JSON.parse(row.plan_json) as T : null;
-    }
-
-    writeRepair(recordingPath: string, plan: unknown): void {
-        this.database.prepare(`INSERT INTO media_repairs VALUES (?, ?, ?)
-            ON CONFLICT(recording_path) DO UPDATE SET plan_json = excluded.plan_json, updated_at = excluded.updated_at`)
-            .run(path.resolve(recordingPath), JSON.stringify(plan), new Date().toISOString());
+        if (!row) return null;
+        try {
+            return JSON.parse(row.plan_json) as T;
+        } catch {
+            return {} as T;
+        }
     }
 
     clearRepair(recordingPath: string): void {

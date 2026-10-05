@@ -24,7 +24,13 @@ const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
 const SUPPORTED_PROVIDERS = ["tango", "fc2", "sc"];
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
-export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 3;
+// Revision 4: validation is non-destructive. Media damage never blocks
+// publication; it is reported as warnings on a "ready" report. "failed" is
+// reserved for validation-environment failures and is always retried.
+export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 4;
+const ENVIRONMENT_ERROR_CODES = new Set([
+    "EIO", "EACCES", "EPERM", "ENOSPC", "EDQUOT", "EROFS", "EMFILE", "ENFILE", "ENOMEM", "EAGAIN", "EBUSY", "ESTALE",
+]);
 
 interface PlaylistEntry extends NativeMediaSegment {
     continuityEpoch: number;
@@ -46,6 +52,35 @@ export interface InvalidSegment {
     error: string;
 }
 
+// Problems found while finalizing. None of them blocks publication and none
+// is ever repaired by removing media: every playlist entry and file is kept.
+export type MediaIntegrityWarningKind =
+    // Segments that failed individual decoding (attributed); kept in the playlist.
+    | "damaged-segments"
+    // The whole-recording decode failed but no single segment could be blamed.
+    | "unattributed-damage"
+    // The validator could not interpret the recording; published unvalidated.
+    | "validation-incomplete"
+    // Media files on disk that the playlist does not reference; left in place.
+    | "unreferenced-media"
+    // Entries whose provider sequence restarted (regressed); kept, with a discontinuity.
+    | "sequence-restart"
+    // A destructive repair journal from an older server was cleared; nothing was moved.
+    | "retired-repair-journal";
+
+export interface MediaIntegrityWarning {
+    kind: MediaIntegrityWarningKind;
+    message: string;
+    names?: string[];
+}
+
+// Checkpoint report. Consumers outside the server (pipeline) rely only on
+// `version === 2 && status === "ready"`. Since validator revision 4:
+// - "ready" means published; it may carry `warnings` and a non-empty
+//   `invalidSegments` (damaged segments that were KEPT).
+// - "failed" means the validation environment failed (ffmpeg could not run,
+//   I/O); the recording stays pending and is retried.
+// - "empty" means the playlist has no entries.
 export interface MediaIntegrityReport {
     version: 2;
     validatorRevision: number;
@@ -60,6 +95,7 @@ export interface MediaIntegrityReport {
     invalidSegments: InvalidSegment[];
     detectedInvalidSegments?: InvalidSegment[];
     nativeRunResults?: NativeRunValidation[];
+    warnings?: MediaIntegrityWarning[];
     error: string | null;
 }
 
@@ -71,10 +107,23 @@ export type MediaIntegrityFinalizationResult =
 export interface MediaIntegrityFinalizerOptions {
     validateMedia?: (inputPath: string) => Promise<MediaValidationResult>;
     now?: () => Date;
-    retryFailed?: boolean;
     revalidate?: boolean;
     checkpointStore?: FinalizationCheckpointStore;
     inspectFragment?: (inputPath: string) => Promise<string | null>;
+    // Findings from earlier finalization steps, recorded in the final report.
+    findings?: readonly MediaIntegrityWarning[];
+}
+
+class ValidationEnvironmentError extends Error {}
+
+// Only failures that may succeed later keep a recording pending: ffmpeg could
+// not be started, or the filesystem refused I/O. Everything else is a property
+// of the recording and is published as a warning.
+export function isValidationEnvironmentError(error: unknown): boolean {
+    if (error instanceof ValidationEnvironmentError) return true;
+    const candidate = error as { code?: unknown; syscall?: unknown } | null;
+    if (typeof candidate?.syscall === "string" && candidate.syscall.startsWith("spawn")) return true;
+    return typeof candidate?.code === "string" && ENVIRONMENT_ERROR_CODES.has(candidate.code);
 }
 
 function parseMediaPlaylist(content: string): ParsedMediaPlaylist {
@@ -263,7 +312,7 @@ async function attributeInvalidFmp4Fragments(
     initialFailures: ReadonlyMap<string, InvalidSegment>,
     checkpoint: (scanCount: number, failures: readonly InvalidSegment[]) => void,
     nativeResults: readonly NativeRunValidation[] = [],
-): Promise<{ scanCount: number; invalidSegments: InvalidSegment[]; detected: InvalidSegment[]; isolatedFailureCount: number }> {
+): Promise<{ scanCount: number; invalidSegments: InvalidSegment[]; detected: InvalidSegment[] }> {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "video-fmp4-integrity-"));
     const windowPath = path.join(temporaryRoot, "window.m3u8");
     const failedSingles = new Map(initialFailures);
@@ -305,7 +354,7 @@ async function attributeInvalidFmp4Fragments(
             while (index + 1 < entries.length && entries[index + 1].continuityEpoch === entry.continuityEpoch
                 && failedSingles.has(entries[index + 1].name)) group.push(entries[++index]);
             // An unavailable/unsupported initialization is not evidence that
-            // all its media is damaged. Preserve diagnostics and block safely.
+            // these fragments are damaged: report them as unattributed.
             if (group.some(item => isValidationEnvironmentFailure(failedSingles.get(item.name)!.error))) continue;
             const previous = entries[index - group.length];
             const next = entries[index + 1];
@@ -322,9 +371,9 @@ async function attributeInvalidFmp4Fragments(
                     break;
                 }
             }
-            // A one-fragment epoch has no same-epoch neighbor. Its native run
-            // already failed; the WHOLE retained candidate is verified before
-            // committing any deletion. No percentage-based discard limit.
+            // A one-fragment epoch has no same-epoch neighbor; its native run
+            // already failed alone. Attribution only labels warnings: nothing
+            // is ever removed, so no percentage-based limit applies.
             if (everyContextFails) attributable.push(...group.map(item => failedSingles.get(item.name)!));
         }
 
@@ -332,7 +381,6 @@ async function attributeInvalidFmp4Fragments(
             scanCount,
             invalidSegments: attributable,
             detected: [...failedSingles.values()],
-            isolatedFailureCount: failedSingles.size,
         };
     } finally {
         await fs.rm(temporaryRoot, { recursive: true, force: true });
@@ -344,12 +392,28 @@ function summarizeValidationFailure(result: MediaValidationResult): string {
     return `ffmpeg exited with code ${result.exitCode ?? "unknown"}`;
 }
 
+// Failures that cannot single out one fragment as damaged (shared init/map or
+// environment causes); such fragments are reported, never attributed.
 function isValidationEnvironmentFailure(error: string): boolean {
     return /initialization|moov atom|permission denied|input\/output error|no space left|unknown decoder|unsupported codec|decoder.*not found|no decoder found/i.test(error);
 }
 
+// Decoder messages that describe this host rather than the media.
+function isEnvironmentDecodeFailure(error: string): boolean {
+    return /permission denied|input\/output error|no space left|unknown decoder|unsupported codec|decoder.*not found|no decoder found/i.test(error);
+}
+
 function isSafeTsSegmentName(name: string): boolean {
     return path.basename(name) === name && name.endsWith(".ts");
+}
+
+function playlistUriCount(content: string): number {
+    return content.split(/\r?\n/).filter((line) => line.trim() !== "" && !line.trim().startsWith("#")).length;
+}
+
+function shortError(error: string | null): string {
+    const firstLine = (error ?? "unknown ffmpeg error").split("\n").find((line) => line.trim() !== "") ?? "unknown ffmpeg error";
+    return firstLine.length > 300 ? `${firstLine.slice(0, 300)}…` : firstLine;
 }
 
 export async function finalizeMediaIntegrity(
@@ -368,18 +432,42 @@ export async function finalizeMediaIntegrity(
 
     const fingerprint = playlistFingerprint(originalPlaylist);
     const existingReport = options.checkpointStore?.read<MediaIntegrityReport>(streamPath, fingerprint) ?? null;
-    if (
-        (existingReport?.status === "ready" && options.revalidate !== true) ||
-        (
-            existingReport?.status === "failed"
-            && existingReport.validatorRevision === MEDIA_INTEGRITY_VALIDATOR_REVISION
-            && options.retryFailed !== true
-        )
-    ) {
+    // Only a ready result is final. A failed result is an environment failure
+    // and is always retried from scratch.
+    if (existingReport?.status === "ready" && options.revalidate !== true) {
         return { kind: "already-processed", report: existingReport };
     }
+    const findings = [...(options.findings ?? [])];
 
-    const parsed = parseMediaPlaylist(originalPlaylist);
+    let parsed: ParsedMediaPlaylist;
+    try {
+        parsed = parseMediaPlaylist(originalPlaylist);
+    } catch (error: any) {
+        // The validator cannot interpret this playlist; that says nothing
+        // about the media, so the recording is published unvalidated.
+        const segmentCount = playlistUriCount(originalPlaylist);
+        const report: MediaIntegrityReport = {
+            version: 2,
+            validatorRevision: MEDIA_INTEGRITY_VALIDATOR_REVISION,
+            status: segmentCount === 0 ? "empty" : "ready",
+            startedAt: now().toISOString(),
+            completedAt: now().toISOString(),
+            playlistPath,
+            segmentCount,
+            initialPlaylistValid: null,
+            initialValidationError: null,
+            deepScannedSegmentCount: 0,
+            invalidSegments: [],
+            warnings: [...findings, {
+                kind: "validation-incomplete",
+                message: `playlist could not be interpreted for decoding; published unvalidated: ${error?.message ?? String(error)}`,
+            }],
+            error: segmentCount === 0 ? "empty capture: no retained media segments" : null,
+        };
+        options.checkpointStore?.write(streamPath, fingerprint, report);
+        logger.warn("[MediaIntegrity] playlist not interpretable; publishing unvalidated", { streamPath, error: error?.message });
+        return { kind: "processed", report };
+    }
     const resumableReport = existingReport?.version === 2
         && existingReport.validatorRevision === MEDIA_INTEGRITY_VALIDATOR_REVISION
         && existingReport.status === "processing"
@@ -428,7 +516,6 @@ export async function finalizeMediaIntegrity(
             for (const failure of run.structuralFailures ?? []) invalidByName.set(failure.name, failure);
         }
         let deepScannedSegmentCount = Math.min(processingReport.deepScannedSegmentCount, parsed.entries.length);
-        let isolatedFmp4FailureCount = 0;
 
         processingReport.initialPlaylistValid = initialPlaylistValid;
         processingReport.initialValidationError = initialValidationError;
@@ -437,19 +524,17 @@ export async function finalizeMediaIntegrity(
         if (!initialPlaylistValid && !parsed.hasMap) {
             for (let index = deepScannedSegmentCount; index < parsed.entries.length; index++) {
                 const entry = parsed.entries[index];
-                if (!isSafeTsSegmentName(entry.name)) {
-                    throw new Error(`Unsafe or unsupported MPEG-TS segment name: ${entry.name}`);
-                }
-                const validatedRun = processingReport.nativeRunResults?.some(run => run.valid
-                    && entry.index >= run.firstIndex && entry.index <= run.lastIndex);
-                const result = validatedRun ? null : await validateMedia(path.join(streamPath, entry.name));
                 deepScannedSegmentCount++;
-                if (result && !result.valid) {
-                    const error = summarizeValidationFailure(result);
-                    if (isValidationEnvironmentFailure(error)) {
-                        throw new Error(`Native validation blocked without attributing media damage: ${error}`);
+                if (!isSafeTsSegmentName(entry.name)) {
+                    invalidByName.set(entry.name, { name: entry.name,
+                        error: "not decoded individually: unsupported MPEG-TS segment name" });
+                } else {
+                    const validatedRun = processingReport.nativeRunResults?.some(run => run.valid
+                        && entry.index >= run.firstIndex && entry.index <= run.lastIndex);
+                    const result = validatedRun ? null : await validateMedia(path.join(streamPath, entry.name));
+                    if (result && !result.valid) {
+                        invalidByName.set(entry.name, { name: entry.name, error: summarizeValidationFailure(result) });
                     }
-                    invalidByName.set(entry.name, { name: entry.name, error });
                 }
 
                 if (
@@ -480,29 +565,57 @@ export async function finalizeMediaIntegrity(
                 processingReport.nativeRunResults,
             );
             deepScannedSegmentCount = attribution.scanCount;
-            isolatedFmp4FailureCount = attribution.isolatedFailureCount;
             processingReport.detectedInvalidSegments = attribution.detected;
             invalidByName.clear();
             for (const segment of attribution.invalidSegments) invalidByName.set(segment.name, segment);
         }
 
         const invalidSegments = [...invalidByName.values()];
-        const error = initialPlaylistValid
-            ? null
-            : parsed.hasMap
-                ? invalidSegments.length > 0
-                    ? `strict playlist validation failed; ${invalidSegments.length} ${invalidSegments.length === 1 ? "isolated " : ""}fMP4 fragments failed contextual validation; retained candidate requires verification`
-                    : `strict playlist validation failed; ${isolatedFmp4FailureCount} fMP4 fragments failed individual validation but no safe isolated repair boundary was established: ${initialValidationError ?? "unknown ffmpeg error"}`
-                : `strict playlist validation failed; ${invalidSegments.length} of ${parsed.entries.length} MPEG-TS segments failed individual validation`;
+        const detectedInvalidSegments = parsed.hasMap
+            ? processingReport.detectedInvalidSegments ?? invalidSegments
+            : invalidSegments;
+        // Nothing decoded and every failure names this host (missing decoder,
+        // permissions, I/O): the environment failed, not the media.
+        if (!initialPlaylistValid && parsed.entries.length > 0
+            && new Set(detectedInvalidSegments.map((segment) => segment.name)).size === parsed.entries.length
+            && detectedInvalidSegments.every((segment) => isEnvironmentDecodeFailure(segment.error))) {
+            processingReport.invalidSegments = [];
+            processingReport.detectedInvalidSegments = [];
+            throw new ValidationEnvironmentError(
+                `Native validation blocked without attributing media damage: ${shortError(detectedInvalidSegments[0]?.error ?? initialValidationError)}`,
+            );
+        }
+
+        const warnings: MediaIntegrityWarning[] = [...findings];
+        if (invalidSegments.length > 0) {
+            warnings.push({
+                kind: "damaged-segments",
+                message: `${invalidSegments.length} of ${parsed.entries.length} ${parsed.hasMap ? "fMP4 fragments" : "MPEG-TS segments"} failed individual decoding; kept in the playlist`,
+                names: invalidSegments.map((segment) => segment.name),
+            });
+        }
+        const attributed = new Set(invalidSegments.map((segment) => segment.name));
+        const unattributed = detectedInvalidSegments.filter((segment) => !attributed.has(segment.name));
+        if (!initialPlaylistValid && (invalidSegments.length === 0 || unattributed.length > 0)) {
+            warnings.push({
+                kind: "unattributed-damage",
+                message: unattributed.length > 0
+                    ? `${unattributed.length} fMP4 fragments failed individual decoding without an isolated cause; kept: ${shortError(unattributed[0].error)}`
+                    : `strict decoding failed but no single segment failed alone; everything kept: ${shortError(initialValidationError)}`,
+                ...(unattributed.length > 0 ? { names: unattributed.map((segment) => segment.name) } : {}),
+            });
+        }
         const report: MediaIntegrityReport = {
             ...processingReport,
-            status: parsed.entries.length === 0 ? "empty" : initialPlaylistValid ? "ready" : "failed",
+            status: parsed.entries.length === 0 ? "empty" : "ready",
             completedAt: now().toISOString(),
             initialPlaylistValid,
             initialValidationError,
             deepScannedSegmentCount,
             invalidSegments,
-            error: parsed.entries.length === 0 ? "empty capture: no retained media segments" : error,
+            detectedInvalidSegments,
+            warnings,
+            error: parsed.entries.length === 0 ? "empty capture: no retained media segments" : null,
         };
         options.checkpointStore?.write(streamPath, fingerprint, report);
         logger.info("[MediaIntegrity] validation finished", {
@@ -511,22 +624,60 @@ export async function finalizeMediaIntegrity(
             segmentCount: report.segmentCount,
             invalidSegmentCount: report.invalidSegments.length,
             deepScannedSegmentCount: report.deepScannedSegmentCount,
+            warningKinds: warnings.map((warning) => warning.kind),
         });
         return { kind: "processed", report };
     } catch (error: any) {
-        const failedReport: MediaIntegrityReport = {
+        const message = error?.message ?? String(error);
+        if (isValidationEnvironmentError(error)) {
+            const failedReport: MediaIntegrityReport = {
+                ...processingReport,
+                status: "failed",
+                completedAt: now().toISOString(),
+                error: message,
+            };
+            options.checkpointStore?.write(streamPath, fingerprint, failedReport);
+            logger.error("[MediaIntegrity] validation environment failed; recording stays pending for retry", {
+                streamPath,
+                error: message,
+            });
+            return { kind: "processed", report: failedReport };
+        }
+        // A property of the recording (missing init map, unsupported
+        // structure): publish it unvalidated rather than hold it forever.
+        const damagedSoFar = processingReport.invalidSegments;
+        const report: MediaIntegrityReport = {
             ...processingReport,
-            status: "failed",
+            status: "ready",
             completedAt: now().toISOString(),
-            error: error?.message ?? String(error),
+            warnings: [...findings, ...(damagedSoFar.length > 0 ? [{
+                kind: "damaged-segments" as const,
+                message: `${damagedSoFar.length} segments failed individual decoding before validation stopped; kept in the playlist`,
+                names: damagedSoFar.map((segment) => segment.name),
+            }] : []), {
+                kind: "validation-incomplete",
+                message: `validation could not complete; published unvalidated: ${message}`,
+            }],
+            error: null,
         };
-        options.checkpointStore?.write(streamPath, fingerprint, failedReport);
-        logger.error("[MediaIntegrity] stream finalization failed", {
-            streamPath,
-            error: failedReport.error,
-        });
-        return { kind: "processed", report: failedReport };
+        options.checkpointStore?.write(streamPath, fingerprint, report);
+        logger.warn("[MediaIntegrity] validation incomplete; publishing with a warning", { streamPath, error: message });
+        return { kind: "processed", report };
     }
+}
+
+// Disposition of a processed pending recording. Only a playlist without
+// entries and without any unreferenced media segment may be discarded.
+export function pendingRecordingDisposition(report: MediaIntegrityReport): "publish" | "discard-empty" | "retry" {
+    if (report.status === "ready") return "publish";
+    if (report.status === "empty") {
+        const unreferencedSegments = (report.warnings ?? [])
+            .filter((warning) => warning.kind === "unreferenced-media")
+            .flatMap((warning) => warning.names ?? [])
+            .filter((name) => !/^init(?:_\d+(?:_\d+)?)?\.mp4$/.test(name));
+        return unreferencedSegments.length > 0 ? "publish" : "discard-empty";
+    }
+    return "retry";
 }
 
 async function isPendingCandidate(streamPath: string): Promise<boolean> {
@@ -635,19 +786,18 @@ export function startMediaIntegrityFinalizer(): void {
             checkpointStore,
         });
         if (result.kind === "not-finalized") return;
-        if (result.report.status === "empty") {
-            // Empty/all-bad captures have an explicit terminal disposition,
-            // not an endlessly retried .pending directory. Recoverable only.
+        const disposition = pendingRecordingDisposition(result.report);
+        if (disposition === "discard-empty") {
+            // A playlist without entries and without unreferenced media
+            // segments holds nothing to keep. Recoverable from desktop Trash.
             await moveToDesktopTrash(streamPath);
-            logger.info("[Finalization] empty capture moved to desktop Trash", { streamPath,
-                discardedSegmentCount: result.report.detectedInvalidSegments?.length ?? 0 });
+            logger.info("[Finalization] empty capture moved to desktop Trash", { streamPath });
             return;
         }
-        if (result.report.status !== "ready") {
-            logger.error("[Finalization] pending recording remains unpublished", {
+        if (disposition === "retry") {
+            logger.error("[Finalization] validation environment failed; pending recording is retried on the next reconciliation", {
                 streamPath,
                 error: result.report.error,
-                invalidSegmentCount: result.report.invalidSegments.length,
             });
             return;
         }
@@ -656,11 +806,16 @@ export function startMediaIntegrityFinalizer(): void {
             playlistFingerprint(await fs.readFile(path.join(finalizedPath, FILE_NAMES.HLS_PLAYLIST), "utf8")),
             { ...result.report, playlistPath: path.join(finalizedPath, FILE_NAMES.HLS_PLAYLIST) });
         checkpointStore.clear(streamPath);
-        logger.info("[Finalization] atomically published validated recording", {
+        const warnings = result.report.warnings ?? [];
+        const details = {
             pendingPath: streamPath,
             finalizedPath,
+            status: result.report.status,
             segmentCount: result.report.segmentCount,
-        });
+            warnings: warnings.map((warning) => ({ kind: warning.kind, message: warning.message, count: warning.names?.length ?? 0 })),
+        };
+        if (warnings.length > 0) logger.warn("[Finalization] atomically published recording with warnings", details);
+        else logger.info("[Finalization] atomically published recording", details);
     });
 
     const enqueue = (streamPath: string) => {

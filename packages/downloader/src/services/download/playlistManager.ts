@@ -5,10 +5,45 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { DiskSession } from "./diskSession.js";
 import type { SegmentDimensions } from "./segmentDimensions.js";
+import type { SegmentValidationResult } from "../core/interfaces.js";
 import {
+    type CompoundSegmentIdentity,
     formatSegmentName,
     parseCompoundSegmentName,
 } from "./segmentIdentity.js";
+
+// Provider numbering restart rule. A fetched window is a restart when its
+// newest provider sequence lies more than (window length + this margin) below
+// the committed baseline.
+//
+// Within one numbering the live edge never moves backwards: a normal poll
+// re-lists already-saved segments, but its newest entry is at or above the
+// baseline. A window entirely below the baseline is either (a) a stale CDN
+// copy or lagging edge of the SAME numbering, whose newest entry lags by at
+// most about one window plus a few segments of cache age, or (b) a NEW
+// numbering (SC edges number independently, Tango restarts at 0, FC2 went
+// 1112 -> 1), which lands far below. One window plus 10 segments (10-20 s of
+// cache age at 1-2 s segments) covers (a); anything further below is (b) and
+// is accepted as new media. A restart that lands within the margin is still
+// deduplicated against the old numbering (bounded by the margin).
+export const SEQUENCE_RESTART_MARGIN_SEGMENTS = 10;
+
+// A segment re-listed after an edge switch is a duplicate only when its
+// program date-time is not newer than the last saved one AND within this
+// horizon of it. No live window re-lists media older than this, so a larger
+// difference is clock skew between edges, never overlap, and must not swallow
+// new media.
+export const EDGE_DEDUP_MAX_OVERLAP_MS = 60_000;
+
+export type SegmentInspector = (filePath: string) => Promise<SegmentValidationResult>;
+
+const INIT_FILE_NAME = /^init(?:_(\d+)(?:_(\d+))?)?\.mp4$/;
+
+function initFileOrder(name: string): [number, number] | null {
+    const match = name.match(INIT_FILE_NAME);
+    if (!match) return null;
+    return match[1] === undefined ? [-1, 0] : [Number(match[1]), Number(match[2] ?? 0)];
+}
 
 export interface SegmentInfo {
     remoteUrl: string;
@@ -33,7 +68,12 @@ export class PlaylistManager {
     private readonly disk: DiskSession;
     private lastProviderSequence: number | null = null;
     private lastDimensions: SegmentDimensions | null | undefined;
-    private highestHandledProviderSequence: number | null = null;
+    // Provider sequence of the last handled segment of the CURRENT numbering
+    // run (committed, or abandoned as empty). Only later sequences are new
+    // media unless the window proves a numbering restart. It is a baseline,
+    // not a maximum: a restart lowers it to the new run.
+    private baselineProviderSequence: number | null = null;
+    private readonly rejectedAttempts = new Map<number, number>();
     private nextLocalNumber = 0;
     private resumeDiscontinuityPending = false;
     private readonly recordingId: string;
@@ -66,15 +106,21 @@ export class PlaylistManager {
             return false;
         }
 
-        if (segment.programDateTime <= this.lastDownloadedPDT) {
+        // Compare instants, not strings: edges may format the same instant
+        // differently (+0000 vs Z, with or without milliseconds).
+        const lastDate = Date.parse(this.lastDownloadedPDT);
+        const segDate = Date.parse(segment.programDateTime);
+        if (!Number.isFinite(lastDate) || !Number.isFinite(segDate)) {
+            return false;
+        }
+        const gapMs = segDate - lastDate;
+        if (gapMs <= 0 && -gapMs <= EDGE_DEDUP_MAX_OVERLAP_MS) {
             logger.info(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
             return true;
         }
-
-        const lastDate = new Date(this.lastDownloadedPDT).getTime();
-        const segDate = new Date(segment.programDateTime).getTime();
-        const gapMs = segDate - lastDate;
-        if (gapMs > 4000) {
+        if (gapMs <= 0) {
+            logger.warn(`[PlaylistManager] EDGE-DEDUP bypassed: segment=${segment.localName} pdt=${segment.programDateTime} is ${(-gapMs / 1000).toFixed(1)}s before lastPDT=${this.lastDownloadedPDT}, beyond any live overlap; treating as new media (edge clock skew)`);
+        } else if (gapMs > 4000) {
             logger.warn(`[PlaylistManager] EDGE-GAP ${(gapMs / 1000).toFixed(1)}s between lastPDT=${this.lastDownloadedPDT} and newPDT=${segment.programDateTime}`);
         }
         this._edgeSwitchActive = false;
@@ -100,7 +146,7 @@ export class PlaylistManager {
         return this.nextLocalNumber;
     }
 
-    public async initializeFromExistingPlaylist(): Promise<void> {
+    public async initializeFromExistingPlaylist(inspectSegment?: SegmentInspector): Promise<void> {
         if (!this.disk.materialized) return;
         const content = await FileSystemManager.readFile(this.fullPlaylistPath);
         const diskNames = await fs.readdir(this.disk.dirPath);
@@ -115,7 +161,9 @@ export class PlaylistManager {
                 (maximum, identity) => Math.max(maximum, identity.localNumber + 1),
                 0,
             );
-            logger.warn(`[PlaylistManager] Resuming after a first-segment power loss recording=${this.recordingId} nextLocal=${this.nextLocalNumber} unreferencedMedia=${diskIdentities.length}`);
+            // Without a playlist header there is nowhere to append them; the
+            // files stay on disk and finalization lists them as unreferenced.
+            logger.warn(`[PlaylistManager] Resuming after a first-segment power loss recording=${this.recordingId} nextLocal=${this.nextLocalNumber} unreferencedMedia=${diskIdentities.length} (kept on disk)`);
             return;
         }
 
@@ -165,25 +213,104 @@ export class PlaylistManager {
             (maximum, identity) => Math.max(maximum, identity.localNumber + 1),
             parsed.reduce((maximum, identity) => Math.max(maximum, identity.localNumber + 1), 0),
         );
-        this.highestHandledProviderSequence = parsed.reduce<number | null>(
-            (maximum, identity) => maximum === null
-                ? identity.providerSequence
-                : Math.max(maximum, identity.providerSequence),
-            null,
-        );
+        // The baseline is the TAIL, not the maximum: a provider numbering
+        // restart committed before this process stopped must not make the
+        // continuing new run look like already-saved media again.
+        this.baselineProviderSequence = parsed.at(-1)?.providerSequence ?? null;
         this.lastProviderSequence = parsed.at(-1)?.providerSequence ?? null;
         this.resumeDiscontinuityPending = parsed.length > 0;
         this.pendingHeader = null;
 
         const targetDuration = recoveredContent.match(/^#EXT-X-TARGETDURATION:(\d+)$/m);
         this.currentTargetDuration = targetDuration ? Number.parseInt(targetDuration[1], 10) : 0;
-        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} highestProviderSequence=${this.highestHandledProviderSequence ?? "none"} unreferencedMedia=${Math.max(0, diskIdentities.length - parsed.length)}`);
+
+        const reappended = parsed.length > 0
+            ? await this.reappendUnreferencedTail(recoveredContent, diskNames, parsed.at(-1)!.localNumber, inspectSegment)
+            : [];
+        const referencedCount = parsed.length + reappended.length;
+        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} baselineProviderSequence=${this.baselineProviderSequence ?? "none"} reappendedMedia=${reappended.length} unreferencedMedia=${Math.max(0, diskIdentities.length - referencedCount)}`);
     }
 
-    private markProviderSequenceHandled(providerSequence: number): void {
-        this.highestHandledProviderSequence = this.highestHandledProviderSequence === null
-            ? providerSequence
-            : Math.max(this.highestHandledProviderSequence, providerSequence);
+    // A crash between writing a segment file and appending its playlist entry
+    // (or a torn append) leaves real media that the playlist does not
+    // reference. Files written AFTER the committed tail are re-appended in
+    // write (local-number) order before live capture resumes, so the live
+    // window then deduplicates against them. Anything else that is
+    // unreferenced stays on disk untouched for finalization to report.
+    private async reappendUnreferencedTail(
+        playlist: string,
+        diskNames: readonly string[],
+        tailLocalNumber: number,
+        inspectSegment?: SegmentInspector,
+    ): Promise<string[]> {
+        const referenced = new Set(playlist.split(/\r?\n/).map((line) => line.trim()));
+        const candidates = diskNames
+            .map((name) => ({ name, identity: parseCompoundSegmentName(name) }))
+            .filter((candidate): candidate is { name: string; identity: CompoundSegmentIdentity } =>
+                candidate.identity !== null
+                && candidate.identity.recordingId === this.recordingId
+                && candidate.identity.localNumber > tailLocalNumber
+                && !referenced.has(candidate.name))
+            .sort((left, right) => left.identity.localNumber - right.identity.localNumber);
+        if (candidates.length === 0) return [];
+
+        let activeMap = [...playlist.matchAll(/^#EXT-X-MAP:.*\bURI="([^"]+)"/gm)].at(-1)?.[1] ?? null;
+        const initFiles = diskNames
+            .map((name) => ({ name, order: initFileOrder(name) }))
+            .filter((file): file is { name: string; order: [number, number] } => file.order !== null)
+            .sort((left, right) => left.order[0] - right.order[0] || left.order[1] - right.order[1]);
+        const provisionalDuration = Number.parseFloat(
+            [...playlist.matchAll(/^#EXTINF:([\d.]+)/gm)].at(-1)?.[1] ?? "",
+        ) || this.currentTargetDuration || 1;
+
+        // These files continue the committed capture; ordinary sequence-gap,
+        // geometry, and map rules decide their boundaries.
+        this.resumeDiscontinuityPending = false;
+        const reappended: string[] = [];
+        for (const { name, identity } of candidates) {
+            const filePath = path.join(this.disk.dirPath, name);
+            const size = await fs.stat(filePath).then((stats) => stats.isFile() ? stats.size : 0, () => 0);
+            const inspection: SegmentValidationResult = size === 0
+                ? { valid: false }
+                : inspectSegment ? await inspectSegment(filePath) : { valid: true };
+            if (!inspection.valid) {
+                logger.warn(`[PlaylistManager] Unreferenced media after the tail is empty or unreadable; kept on disk, not re-appended: ${name}`);
+                continue;
+            }
+            if (identity.providerSequence === this.lastProviderSequence) {
+                logger.warn(`[PlaylistManager] Unreferenced media repeats the previous provider sequence; kept on disk, not re-appended: ${name}`);
+                continue;
+            }
+            if (activeMap !== null) {
+                // An init map applies to every segment identified after it was
+                // committed; init names carry the next local number at commit.
+                const applicable = initFiles.filter((file) => file.order[0] <= identity.localNumber).at(-1)?.name;
+                if (!applicable) {
+                    logger.warn(`[PlaylistManager] Unreferenced fragment has no initialization map on disk; kept on disk, not re-appended: ${name}`);
+                    continue;
+                }
+                if (applicable !== activeMap) {
+                    this.bufferQualityChange(applicable);
+                    activeMap = applicable;
+                }
+            }
+            const duration = inspection.duration !== undefined && inspection.duration > 0
+                ? inspection.duration
+                : provisionalDuration;
+            await this.appendSegmentToPlaylist({
+                remoteUrl: "",
+                localName: name,
+                providerSequence: identity.providerSequence,
+                metadata: [`#EXTINF:${duration.toFixed(3)},`],
+                accurateDuration: inspection.duration,
+                dimensions: inspection.dimensions,
+            });
+            reappended.push(name);
+            logger.warn(`[PlaylistManager] Re-appended media written after the playlist tail before an interruption: ${name}`);
+        }
+        // Live capture after the interruption still starts a new boundary.
+        this.resumeDiscontinuityPending = true;
+        return reappended;
     }
 
     private getExtinfDuration(metadata: string[]): number {
@@ -195,8 +322,21 @@ export class PlaylistManager {
         return 2;
     }
 
-    public addIgnoredSegment(providerSequence: number): void {
-        this.markProviderSequenceHandled(providerSequence);
+    // A rejected (empty or unreadable) download is NOT handled: the next poll
+    // fetches it again while the live window still lists it. Returns how many
+    // times this sequence was rejected since the last committed segment.
+    public noteRejectedSegment(providerSequence: number): number {
+        const attempts = (this.rejectedAttempts.get(providerSequence) ?? 0) + 1;
+        this.rejectedAttempts.set(providerSequence, attempts);
+        return attempts;
+    }
+
+    // Gives up on a sequence that kept arriving without media, so a window that
+    // no longer moves (ENDLIST, stalled edge) cannot block later segments. It
+    // carries no media; the next committed segment gets a sequence-gap boundary.
+    public abandonRejectedSegment(providerSequence: number): void {
+        this.rejectedAttempts.delete(providerSequence);
+        this.baselineProviderSequence = providerSequence;
     }
 
     public setEdge(variantUrl: string): void {
@@ -256,6 +396,16 @@ export class PlaylistManager {
             }
         }
 
+        const windowLength = liveLines.filter((line) => line.trim() !== "" && !line.trim().startsWith("#")).length;
+        const windowFirst = this._timeline.mediaSequence;
+        const windowLast = windowFirst + windowLength - 1;
+        const baseline = this.baselineProviderSequence;
+        const restartMargin = windowLength + SEQUENCE_RESTART_MARGIN_SEGMENTS;
+        const numberingRestarted = baseline !== null && windowLength > 0 && windowLast < baseline - restartMargin;
+        if (numberingRestarted) {
+            logger.warn(`[PlaylistManager] SEQUENCE-RESTART recording=${this.recordingId} edge=${this._timeline.edge ?? "unknown"} previous=${baseline} window=${windowFirst}-${windowLast} margin=${restartMargin}: provider restarted its numbering; accepting the window as new media after a discontinuity`);
+        }
+
         let currentPDT: string | null = null;
         let segmentOffset = 0;
 
@@ -276,8 +426,7 @@ export class PlaylistManager {
             const providerSequence = this._timeline.mediaSequence + segmentOffset;
             segmentOffset++;
 
-            if (this.highestHandledProviderSequence === null
-                || providerSequence > this.highestHandledProviderSequence) {
+            if (numberingRestarted || baseline === null || providerSequence > baseline) {
                 const segmentMetadata: string[] = [];
                 for (let j = i - 1; j >= 0; j--) {
                     const metaLine = liveLines[j].trim();
@@ -290,6 +439,10 @@ export class PlaylistManager {
                     } else {
                         break;
                     }
+                }
+                if (numberingRestarted && newSegments.length === 0
+                    && !segmentMetadata.includes("#EXT-X-DISCONTINUITY")) {
+                    segmentMetadata.unshift("#EXT-X-DISCONTINUITY");
                 }
                 newSegments.push({
                     remoteUrl: remoteTsUrl,
@@ -390,7 +543,10 @@ export class PlaylistManager {
         this.resumeDiscontinuityPending = false;
         this.lastProviderSequence = segment.providerSequence;
         this.lastDimensions = segment.dimensions;
-        this.markProviderSequenceHandled(segment.providerSequence);
+        // Set, not max: within one numbering run commits only increase, and
+        // the first commit after a numbering restart lowers the baseline.
+        this.baselineProviderSequence = segment.providerSequence;
+        this.rejectedAttempts.clear();
     }
 
     public async finalizePlaylist(): Promise<void> {

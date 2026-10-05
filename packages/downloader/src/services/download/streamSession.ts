@@ -66,7 +66,7 @@ export class StreamSession {
         const playlistManager = new PlaylistManager(disk, this.recordingId);
         const initTracker = new InitTracker(disk);
         if (this.existingDirPath) {
-            await playlistManager.initializeFromExistingPlaylist();
+            await playlistManager.initializeFromExistingPlaylist((filePath) => this.provider.validateSegment(filePath));
             initTracker.markResumeBoundary(playlistManager.nextSegmentNumber);
         }
 
