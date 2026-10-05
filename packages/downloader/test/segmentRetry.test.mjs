@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { StreamDownloader } from '../dist/services/download/streamDownloader.js';
+import { REJECTED_SEGMENT_MAX_ATTEMPTS, StreamDownloader } from '../dist/services/download/streamDownloader.js';
 import { PlaylistManager } from '../dist/services/download/playlistManager.js';
 import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
@@ -26,7 +26,7 @@ async function fixture(t, fetchSegment) {
         validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
     };
     const downloader = new StreamDownloader(handle, provider, new AccessIncidentTracker());
-    return { root, disk, manager, tracker, downloader,
+    return { root, disk, manager, tracker, downloader, provider,
         run: () => downloader.run('https://example.test/master.m3u8', manager, tracker, disk) };
 }
 
@@ -97,4 +97,48 @@ test('shutdown stops network retries without advancing to later media', async (t
     assert.equal((await f.run()).exitReason, 'aborted');
     assert.equal(calls, 1);
     assert.equal(f.disk.materialized, false);
+});
+
+const savedNames = async (root) => (await readFile(path.join(root, 'playlist.m3u8'), 'utf8'))
+    .split('\n').filter(line => line.endsWith('.ts'));
+
+test('an empty download is not handled: the next poll fetches it again and keeps playlist order', async (t) => {
+    let firstAttempts = 0;
+    const f = await fixture(t, async (url) => {
+        if (url.endsWith('/a.ts') && ++firstAttempts === 1) return { data: Buffer.alloc(0) };
+        return { data: Buffer.from(`media: ${url}`) };
+    });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(result.segmentCount, 2);
+    assert.equal(firstAttempts, 2);
+    assert.deepEqual(await savedNames(f.root), ['2_recording_10.ts', '3_recording_11.ts']);
+    // The empty body was never written; no zero-byte media exists.
+    assert.deepEqual((await readdir(f.root)).sort(), ['2_recording_10.ts', '3_recording_11.ts', 'playlist.m3u8']);
+});
+
+test('a segment that stays empty is bounded by attempts; later media is still saved', { timeout: 20000 }, async (t) => {
+    let emptyAttempts = 0;
+    const f = await fixture(t, async (url) => {
+        if (url.endsWith('/a.ts')) {
+            emptyAttempts++;
+            return { data: Buffer.alloc(0) };
+        }
+        return { data: Buffer.from(`media: ${url}`) };
+    });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(emptyAttempts, REJECTED_SEGMENT_MAX_ATTEMPTS);
+    assert.deepEqual(await savedNames(f.root), [`${2 * REJECTED_SEGMENT_MAX_ATTEMPTS - 1}_recording_11.ts`]);
+});
+
+test('a written segment the provider cannot read stays on disk and is fetched again', async (t) => {
+    let validations = 0;
+    const f = await fixture(t, async (url) => ({ data: Buffer.from(`media: ${url}`) }));
+    f.provider.validateSegment = async () => ({ valid: ++validations !== 1 });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.deepEqual(await savedNames(f.root), ['2_recording_10.ts', '3_recording_11.ts']);
+    assert.deepEqual((await readdir(f.root)).sort(),
+        ['0_recording_10.ts', '2_recording_10.ts', '3_recording_11.ts', 'playlist.m3u8']);
 });
