@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { guardUploadIdentity } from "../dist/commands/uploadIdentityGuard.js";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
@@ -136,6 +137,10 @@ test("a video that had an ID and is now 404 was removed by the provider: blocked
     db.retryBlocked(r.id, day(2));
     assert.equal(db.get(r.id).state, "metadata_ready");
     assert.equal(db.canAttemptUpload(r.id, day(2)), true);
+    // The removed video's ID no longer counts as an upload of this recording,
+    // so the duplicate guard lets the retry through.
+    assert.equal(db.getUploadIdentity(r.id), null);
+    assert.equal((await guardUploadIdentity(db, db.get(r.id), { cleanupEnabled: false })).kind, "proceed");
 });
 
 test("inventory titles map to recording IDs only through an exact folder-name suffix", () => {

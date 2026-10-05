@@ -21,11 +21,20 @@ export function hasDiagnosticUploadIdentity(title: string, identity: string): bo
     return title.trimEnd().endsWith(`[${identity}]`);
 }
 
+// The public title suffix: "[<recording folder>]", or "[<recording folder> | part N]"
+// for one shape of a recording split by picture shape.
+export function publicUploadIdentity(recording: Recording, part: ProductionArtifactPart): string | null {
+    const basename = path.basename(recording.sourcePath);
+    if (part === "full") return basename;
+    const shape = part.match(/^shape(\d+)$/)?.[1];
+    return shape ? `${basename} | part ${shape}` : null;
+}
+
 export function uploadLookupIdentity(recording: Recording, part: ProductionArtifactPart, title: string): string | null {
     const diagnostic = productionUploadIdentity(recording, part);
     if (hasDiagnosticUploadIdentity(title, diagnostic)) return diagnostic;
-    const basename = path.basename(recording.sourcePath);
-    return part === "full" && hasDiagnosticUploadIdentity(title, basename) ? basename : null;
+    const identity = publicUploadIdentity(recording, part);
+    return identity && hasDiagnosticUploadIdentity(title, identity) ? identity : null;
 }
 
 interface DescriptorOutput {
@@ -72,7 +81,7 @@ export function composeUploadMetadata(
     // never use the generated artifact's conversion/version suffix here.
     // Only an explicitly prepared comparison adds version/part diagnostics.
     const folderSuffix = ` [${options.diagnosticTitle
-        ? productionUploadIdentity(recording, part) : path.basename(recording.sourcePath)}]`;
+        ? productionUploadIdentity(recording, part) : publicUploadIdentity(recording, part) ?? path.basename(recording.sourcePath)}]`;
     const titleRoom = TITLE_LIMIT - folderSuffix.length;
     if (titleRoom < 1) throw new Error("Recording identity leaves no room for a title");
     const title = `${shorten(output.title, titleRoom)}${folderSuffix}`;

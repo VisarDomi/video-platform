@@ -21,6 +21,14 @@ export interface AutomaticProductionArtifact extends Omit<ArtifactRecord, "recor
     readonly sourceDimensions: readonly string[];
 }
 
+// A shape split's piece too short to upload; kept for a person to handle.
+export interface ManualPiece {
+    readonly part: ProductionArtifactPart;
+    readonly segmentIndexes: readonly number[];
+    readonly durationSeconds: number;
+    readonly sourceDimensions: readonly string[];
+}
+
 export type RemuxStageResult = string | {
     readonly disposition: "artifact";
     readonly path: string;
@@ -30,6 +38,12 @@ export type RemuxStageResult = string | {
     readonly reason: string;
     readonly primary: AutomaticProductionArtifact;
     readonly queued: readonly AutomaticProductionArtifact[];
+    readonly manualPieces?: readonly ManualPiece[];
+} | {
+    // Nothing long enough to upload: every piece waits for a person.
+    readonly disposition: "manual";
+    readonly reason: string;
+    readonly manualPieces: readonly ManualPiece[];
 };
 
 export interface PipelineStages {
@@ -43,10 +57,10 @@ export class PipelineOrchestrator {
         private readonly database: PipelineDatabase,
         private readonly stages: PipelineStages,
         private readonly workerId: string,
-        // A full-quality 720p -> 1080p encode can run substantially longer
-        // than source duration. Keep one recording exclusively owned through
-        // the longest supported local stage.
-        private readonly leaseMilliseconds = 6 * 60 * 60_000,
+        // Every recording is converted (slow preset, CRF 16): about 2.4x its
+        // duration, and a recording may be up to two hours. Keep it owned
+        // through the longest supported local stage.
+        private readonly leaseMilliseconds = 12 * 60 * 60_000,
     ) {}
 
     async processOne(now = new Date()): Promise<Recording | null> {
@@ -90,12 +104,16 @@ export class PipelineOrchestrator {
                             remux.eventReason,
                         );
                     } else if (remux.disposition === "artifact_set") {
+                        if (remux.manualPieces?.length) this.database.recordManualPieces(recording.id, remux.manualPieces, remux.reason);
                         result = this.database.saveProductionArtifactSet(
                             recording.id,
                             remux.primary,
                             remux.queued,
                             remux.reason,
                         );
+                    } else if (remux.disposition === "manual") {
+                        this.database.recordManualPieces(recording.id, remux.manualPieces, remux.reason);
+                        result = this.database.transition(recording.id, "server_ready", "blocked", remux.reason);
                     } else {
                         throw new Error("Unsupported remux stage result");
                     }

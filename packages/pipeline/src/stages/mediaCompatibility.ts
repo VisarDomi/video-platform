@@ -5,6 +5,8 @@ export interface NativeInputRun {
     readonly path: string;
     readonly durationSeconds: number;
     readonly layout: readonly NativeStreamLayout[];
+    // Every segment lacks a decodable keyframe: no picture, audio only.
+    readonly pictureless?: boolean;
 }
 
 export class RemuxCompatibilityError extends Error {}

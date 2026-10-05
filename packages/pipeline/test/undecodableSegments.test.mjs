@@ -5,12 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import {
     analyzeRecordingResolution,
-    chooseRecordingResolutionPolicy,
     deriveResolutionPlaylist,
+    planRecordingShapes,
 } from "../dist/stages/resolutionPolicy.js";
 import { createDefaultStages } from "../dist/stages/defaultStages.js";
 import { validateArtifact } from "../dist/stages/validateArtifact.js";
-import { fixturePart, undecodableStub, assemble, frameIds, audioPackets, videoSliceHashes } from "./helpers/mediaFixture.mjs";
+import { fixturePart, undecodableStub, assemble, frameIds, exec } from "./helpers/mediaFixture.mjs";
 
 async function temporary(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-undecodable-"));
@@ -22,11 +22,15 @@ async function concatenated(read, parts) {
     return (await Promise.all(parts.map((part) => read(part.input)))).flat();
 }
 
-// Live stubs are short; a 0.1 s EXTINF keeps the fixture inside the 5% bound.
-// Its content is never used once dropped, so the shorter tag is harmless.
+// Live stubs are short; a 0.1 s EXTINF is typical of quality-switch leftovers.
 const STUB_SECONDS = 0.1;
 const durations = (parts) => parts.map((part) => part.stub ? STUB_SECONDS : part.frames / 10);
-const dropNote = /dropped 1 segment\(s\) with no independently decodable video keyframe \(part-1\.ts 0\.100000s; total 0\.100000s\)/;
+const keptNote = /1 segment\(s\) start without a decodable keyframe and are converted with the picture that follows \(part-1\.ts 0\.100000s; total 0\.100000s\)/;
+
+async function audioSeconds(input) {
+    const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration", "-of", "csv=p=0", input]);
+    return Number(stdout.trim());
+}
 
 async function parts(root, size) {
     // Unique luma IDs across both decodable parts (30..118 and 130..218).
@@ -36,7 +40,7 @@ async function parts(root, size) {
     return { a, stub, b };
 }
 
-test("a TS stub without a decodable keyframe is dropped from classification with durable evidence", async (t) => {
+test("a TS stub without a decodable keyframe is kept, with the picture that follows it", async (t) => {
     const root = await temporary(t);
     const { a, stub, b } = await parts(root, "640x360");
     const playlist = await assemble(root, [a, stub, b], durations([a, stub, b]));
@@ -44,71 +48,54 @@ test("a TS stub without a decodable keyframe is dropped from classification with
     assert.deepEqual(analysis.segments.map((segment) => segment.index), [0, 2]);
     assert.deepEqual(analysis.undecodableSegments, [{ index: 1, name: "part-1.ts", durationSeconds: STUB_SECONDS }]);
     assert.equal(analysis.resolutionSummary, "640x360:2");
-    const policy = chooseRecordingResolutionPolicy(analysis);
-    assert.equal(policy.disposition, "convert1080");
-    assert.match(policy.reason, dropNote);
-    assert.match(policy.reason, /with no decodable segments dropped/);
-    // An explicit selection can never bring the stub back.
-    assert(!deriveResolutionPlaylist(analysis, new Set([0, 1, 2])).includes("part-1.ts"));
+    assert.match(analysis.warnings.join("; "), keptNote);
+    const plan = planRecordingShapes(analysis);
+    assert.equal(plan.upload.length, 1);
+    assert.equal(plan.upload[0].part, "full");
+    assert.deepEqual([...plan.upload[0].indexes].sort(), [0, 1, 2]);
+    assert.match(plan.reason, keptNote);
+    assert(deriveResolutionPlaylist(analysis, new Set([0, 1, 2])).includes("part-1.ts"));
 });
 
-test("undecodable segments still fail closed when nothing decodable remains or the share is implausible", async (t) => {
+test("a recording without any picture still fails; a large unmeasurable share is only a warning", async (t) => {
     const root = await temporary(t);
     const stub = await undecodableStub(root, "stub", { size: "640x360" });
     await assert.rejects(async () => analyzeRecordingResolution(await assemble(root, [stub, stub])),
         /No playlist segment has an independently decodable video keyframe/);
     const short = await fixturePart(root, "short", { size: "640x360", frames: 3 });
-    // 0.3 s of 0.6 s is far beyond capture stubs at quality switches.
-    await assert.rejects(async () => analyzeRecordingResolution(await assemble(root, [short, stub])),
-        /Undecodable segments cover 0\.300000s of 0\.600000s \(above 5%\); refusing to drop them/);
+    // 0.3 s of 0.6 s is far beyond capture stubs at quality switches: tell a person, keep it.
+    const analysis = await analyzeRecordingResolution(await assemble(root, [short, stub]));
+    assert.match(analysis.warnings.join("; "), /over 5% of the recording, check the capture/);
+    assert.deepEqual([...planRecordingShapes(analysis).upload[0].indexes].sort(), [0, 1]);
 });
 
-test("conversion drops the stub's picture and audio, keeps every decodable frame and validates", async (t) => {
+test("conversion keeps the stub: no garbage picture, every decodable frame once, the stub's audio time kept", async (t) => {
     const root = await temporary(t);
     const { a, stub, b } = await parts(root, "640x360");
     const playlist = await assemble(root, [a, stub, b], durations([a, stub, b]));
     const original = await readFile(playlist, "utf8");
     const staging = path.join(root, "out");
     const result = await createDefaultStages(staging).remux({ id: "stubbed", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "stubbed.production-upscale1080p.mp4");
-    assert.match(result.eventReason, dropNote);
-    const expected = await concatenated(frameIds, [a, b]);
+    assert.equal(path.basename(result.path), "stubbed.production-v5.mp4");
+    assert.match(result.eventReason, keptNote);
+    const [fromA, fromB] = [await frameIds(a.input), await frameIds(b.input)];
+    assert.equal(new Set([...fromA, ...fromB]).size, fromA.length + fromB.length, "fixture IDs must be unique");
+    // The stub's 0.1 s has no picture: the last picture before it is held (one
+    // frame at 10 fps), never garbage decoded against the wrong parameters.
+    const expected = [...fromA, fromA.at(-1), ...fromB];
     const actual = await frameIds(result.path);
-    assert.equal(new Set(expected).size, expected.length, "fixture IDs must be unique");
-    assert.equal(actual.length, expected.length, "every decodable frame survives exactly once");
+    assert.equal(actual.length, expected.length, "every decodable frame exactly once, plus the held frame");
     // Conversion is lossy: each decoded marker must be nearest to its own source ID.
-    actual.forEach((id, index) => {
-        const distances = expected.map((candidate) => Math.abs(candidate - id));
-        assert.equal(distances.indexOf(Math.min(...distances)), index, `frame ${index}: got luma ID ${id}`);
-    });
-    assert.deepEqual((await audioPackets(result.path)).map((packet) => packet.data_hash),
-        (await concatenated(audioPackets, [a, b])).map((packet) => packet.data_hash), "stub audio is dropped with its segment");
+    // Conversion is lossy: map each decoded marker to the nearest source ID.
+    const ids = [...fromA, ...fromB];
+    const nearest = (id) => ids.reduce((best, candidate) => Math.abs(candidate - id) < Math.abs(best - id) ? candidate : best);
+    assert.deepEqual(actual.map(nearest), expected);
+    const total = durations([a, stub, b]).reduce((sum, value) => sum + value, 0);
+    assert(Math.abs(await audioSeconds(result.path) - total) < 0.08, "the stub's second of audio is kept in place");
     const validated = await validateArtifact(result.path);
     assert.deepEqual([validated.videoWidth, validated.videoHeight], [1920, 1080]);
     assert.equal(await readFile(playlist, "utf8"), original, "source playlist must remain byte-identical");
     assert.deepEqual(await readdir(staging), [path.basename(result.path)], "temporary input runs are cleaned up");
-});
-
-test("native and retained stream-copy remuxes exclude the stub and copy all other picture data", async (t) => {
-    const root = await temporary(t);
-    const { a, stub, b } = await parts(root, "1920x1080");
-    const low = await fixturePart(root, "low", { size: "1280x720", frames: 1, offset: 60 });
-    for (const [id, selection, expectedFile, disposition] of [
-        ["native", [a, stub, b], "native.mp4", "remuxNative"],
-        ["retained", [a, stub, low, b], "retained.retained1080p.mp4", "retain1080"],
-    ]) {
-        const directory = path.join(root, id);
-        await mkdir(directory, { recursive: true });
-        const playlist = await assemble(directory, selection, durations(selection));
-        assert.equal(chooseRecordingResolutionPolicy(await analyzeRecordingResolution(playlist)).disposition, disposition);
-        const result = await createDefaultStages(path.join(directory, "out")).remux({ id, playlistPath: playlist });
-        assert.equal(path.basename(result.path), expectedFile);
-        assert.match(result.eventReason, dropNote);
-        assert.deepEqual(await videoSliceHashes(result.path), await concatenated(videoSliceHashes, [a, b]),
-            "encoded picture data is copied, not re-encoded");
-        assert.deepEqual(await frameIds(result.path), await concatenated(frameIds, [a, b]));
-        await validateArtifact(result.path);
-    }
 });
 
 test("a keyframe-less segment inside a continuous run decodes in sequence and is kept", async (t) => {
@@ -126,5 +113,5 @@ test("a keyframe-less segment inside a continuous run decodes in sequence and is
     assert.ok(analysis.segments.length >= 4);
     assert.deepEqual(analysis.undecodableSegments, []);
     assert.ok(analysis.segments.every((segment) => segment.width === 1280 && segment.height === 720));
-    assert.doesNotMatch(chooseRecordingResolutionPolicy(analysis).reason, /no independently decodable/);
+    assert.doesNotMatch(planRecordingShapes(analysis).reason, /without a decodable keyframe/);
 });

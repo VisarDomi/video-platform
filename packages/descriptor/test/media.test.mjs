@@ -52,3 +52,30 @@ test("FPS selection rejects invalid configuration instead of sending bad model r
         /tokensPerFrame must be a positive finite number/,
     );
 });
+
+test("the upright copy turns a counterclockwise-rotated picture back and keeps its duration", async (t) => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, rmSync, existsSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { makeUprightCopy } = await import("../dist/media.js");
+    const directory = mkdtempSync(path.join(os.tmpdir(), "descriptor-upright-"));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    // Portrait 90x160 with a white top band (the "head"), turned 90° counterclockwise
+    // the way the pipeline uploads it: 160x90 with the band on the LEFT edge.
+    const rotated = path.join(directory, "rotated.mp4");
+    execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=black:s=90x160:d=3:r=10",
+        "-vf", "drawbox=x=0:y=0:w=90:h=20:color=white:t=fill,transpose=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", rotated]);
+    const upright = await makeUprightCopy(rotated, directory, 4);
+    const probe = (file, entries) => execFileSync("ffprobe", ["-v", "error", "-select_streams", "v:0",
+        "-show_entries", entries, "-of", "csv=p=0", file]).toString().trim();
+    assert.equal(probe(upright.path, "stream=width,height"), "90,160");
+    assert.ok(Math.abs(Number(probe(upright.path, "format=duration")) - 3) < 0.3);
+    // The band is back at the top: the first rows are bright, the bottom rows dark.
+    const gray = (y) => Number(execFileSync("ffmpeg", ["-v", "error", "-i", upright.path, "-frames:v", "1",
+        "-vf", `crop=90:4:0:${y},scale=1:1,format=gray`, "-f", "rawvideo", "-"])[0]);
+    assert.ok(gray(4) > 200, `top is ${gray(4)}`);
+    assert.ok(gray(150) < 50, `bottom is ${gray(150)}`);
+    await upright.remove();
+    assert.equal(existsSync(upright.path), false);
+});
