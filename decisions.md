@@ -1,5 +1,49 @@
 # Monorepo Decisions
 
+## Convert everything; never drop or reject a segment (2026-10-05)
+
+Operator requirements, as implemented:
+
+- **Capture never discards media.** When a provider restarts its segment
+  numbering mid-stream (SC numbers each edge separately, Tango restarts at 0,
+  FC2 once went 1112 -> 1), a window lying more than (window + 10) segments
+  below the last saved one is new media: accepted after a discontinuity and
+  logged as `SEQUENCE-RESTART`. The downloader's baseline is the last saved
+  segment, not the maximum, also after a restart of the downloader. An empty
+  download is fetched again on later polls (up to 5 attempts) instead of being
+  marked done; an unreadable file stays on disk. Files a crash left after the
+  playlist tail are re-appended on resume.
+- **Finalization is non-destructive.** It may only rewrite `playlist.m3u8`
+  (durations, discontinuity tags). It never removes an entry and never moves or
+  deletes a media file. Damaged segments, unreferenced files and numbering
+  restarts become `warnings` on a `ready` report and the recording publishes.
+  `failed` means only an environment problem (ffmpeg or I/O), retried later.
+- **Every recording is converted** (pipeline `resolution-policy-v5`, see
+  `packages/pipeline/README.md`): at least 1920x1080 pixels and 1080 tall, never
+  smaller than the source; portrait turned 90° counterclockwise; one upload per
+  picture shape (`[<folder> | part N]`); a split's pieces under a minute go to
+  `manual_pieces` for a person. Uploads over two hours or 10 GB go to manual review.
+- **The descriptor sees rotated videos upright** (`rotation: "clockwise"`
+  describes a copy turned back; part of the evidence identity).
+
+Why, with evidence: Porntrex serves portrait uploads at 406x720 at most (it
+scales by height). The counterclockwise tests 3353010 / 3353057 (recordings
+`2026-01-22 090703 olgablackkity` and `2026-01-22 093644 olgablackkity`) reached a
+1920x1080 tier, kept their orientation, and were upright on the iPhone when it
+was turned counterclockwise. Shown the sideways frames, the model wrote "lying
+down"; with the upright copy it did not. Before this change finalization had
+moved 651 damaged (real) segments of 67 recordings to Trash, and SC numbering
+restarts were silently skipped (e.g. clara_6x9 2026-09-21 from 16:12), an
+estimated ≤8 h across 29 recordings since 2026-09-12.
+
+Existing uploads: Porntrex forbids owner deletion ("Please contact support to
+delete your videos"). The 33 older uploads were renamed to their plain
+`YYYY-MM-DD HHMMSS streamer` stamp (no brackets); the 31 pipeline recordings
+behind them were marked removed in the ledger and stay blocked until the new
+pipeline is deployed, then `retry` sends them through it. The two tests stay.
+
+Older entries contradicted by this one carry a "Superseded" line.
+
 ## V3 launch preflight hardens descriptor startup without revalidating capture (2026-09-09)
 
 V2 had eight descriptor failures at the fixed 120-second readiness deadline;
@@ -32,6 +76,8 @@ lost upload identity safely. Unrestricted production is still not authorized.
 
 ## Pipeline owns historical and new input geometry normalization (2026-09-09)
 
+> **Superseded in part (2026-10-05)** by "Convert everything; never drop or reject a segment": no segment is omitted any more (the >=90% remux branch is gone), and the Tango 360x640 rejection no longer exists (removed 2026-10-02).
+
 Do not invalidate catalog decode checkpoints. Production remux and
 whole-recording conversion reuse the segment
 dimension analysis to open independent temporary input runs at dimension/SAR
@@ -57,6 +103,8 @@ comparison in PlaylistManager. SC map-boundary handling dates to March 2026 and
 was retained through the d43a30b buffering refactor.
 
 ## V3 is a file-controlled pending queue with retained processing history (2026-09-09)
+
+> **Superseded in part (2026-10-05)**: the resolution-policy-v3 rules below (remux / keep >=90% Full HD / convert) are replaced by policy v5: every recording is converted, nothing is dropped.
 
 The operator is testing pipeline safety and image fidelity by comparing the
 original, locally converted/remuxed artifact, and uploaded provider copy.
@@ -177,6 +225,8 @@ session_login) transition the recording to `blocked` with the reason, where
 
 ## Validation happens once; .pending is capture-only (2026-08-17)
 
+> **Superseded in part (2026-10-05)**: validation is non-destructive; a `ready` recording may carry warnings (damaged segments are kept).
+
 Media validation runs exactly once per recording — at capture finalization.
 Edited recordings (segmentation) publish directly into `edited/`: their kept
 segments are the already-validated capture bytes, so the edit service records
@@ -295,6 +345,8 @@ the way:
 
 ## Active recording folders are the durable downloader/server boundary (2026-08-12)
 
+> **Superseded in part (2026-10-05)**: a lower provider sequence far below the last saved one is now accepted as a numbering restart, and finalization no longer removes "regressed" entries or moves unreferenced files to Trash.
+
 The downloader owns mutable `<provider>/downloader/.active/<recording>/`
 folders. After writing `#EXT-X-ENDLIST`, it atomically renames the directory to
 the hidden `.pending/` sibling. That rename is a durable handoff, not
@@ -363,6 +415,8 @@ while provider recording identity prevents a reconnect from joining two
 broadcasts or overwriting a reused provider sequence.
 
 ## Ownership: ENDLIST hands media integrity to the server (2026-08-11)
+
+> **Superseded in part (2026-10-05)**: the failed-segment repair (remove from the playlist, move to desktop Trash) is gone; damaged segments stay and are reported as warnings; unattributable fMP4 damage no longer blocks publication.
 
 The downloader owns a recording while its directory is under `.active`.
 Atomically writing `#EXT-X-ENDLIST` and renaming into `.pending` hands it to the
@@ -435,6 +489,8 @@ nondestructive; exact MPEG-TS attribution authorizes the idempotent repair step.
 
 ## Upload packaging is one recording per artifact and non-destructive (2026-08-11)
 
+> **Superseded in part (2026-10-05)**: a recording with several picture shapes is one artifact (and upload) per shape; stream copy is no longer used.
+
 The server owns upload eligibility and final-artifact validation. Provider facts
 live in `packages/shared/src/uploadPolicy.ts`; the server re-exports them and the
 pipeline consumes the same policy instead of copying limits into descriptor,
@@ -464,6 +520,8 @@ can be described, converted, and uploaded without taking that risk; exceptional
 short or oversized recordings should remain visible for manual handling.
 
 ## Backlog pipeline is quota-led and uses one heavy worker (2026-08-11)
+
+> **Superseded in part (2026-10-05)**: every artifact is a conversion now, not a stream-copy remux.
 
 The eligible downloader + edited library measures 1,230,560,053,106 bytes in
 3,372 recordings and 3,875,924 seconds (44.86 days) of playlist time. Trash is
@@ -955,6 +1013,8 @@ Remaining hardening:
 - Consider hls.js fragment events if exact decoded-fragment identity is needed at segment boundaries.
 
 ## Pipeline resolution policy is automatic and segment-owned (2026-08-30)
+
+> **Superseded (2026-10-05)** by resolution-policy-v5 ("Convert everything; never drop or reject a segment"). Kept as history.
 
 The production campaign classifies resolution at HLS segment boundaries using
 the coded pixel count (width * height), which makes the rule orientation-neutral. For fMP4, the

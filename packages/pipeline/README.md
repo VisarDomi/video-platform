@@ -133,39 +133,38 @@ commands remain gated behind `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
 `video-pipeline` campaign worker performs upload verification inline; there is
 no separate reconcile timer.
 
-## Production resolution policy
+## Production conversion policy (resolution-policy-v5, 2026-10-05)
 
-The campaign classifies every HLS segment by coded pixel count (`width * height`).
-High-quality means **at least 1920 * 1080 = 2,073,600 pixels**, independent of
-orientation or aspect ratio. SAR/display stretching does not add coded pixels.
-For example, 2560x900 qualifies; 1440x1080 does not. For fMP4, the last active
-`#EXT-X-MAP` attached to a segment owns its dimensions; unused consecutive map
-tags are ignored. MPEG-TS uses one whole-playlist keyframe scan rather than an
-`ffprobe` process per segment.
+Every recording is converted; nothing is stream-copied and **no segment is
+dropped**. Source folders and their playlists are never modified.
 
-- A recording whose segments all have fewer than 2,073,600 pixels is fully transcoded to a
-  1080-pixel short edge. Lower-resolution segments are included in that same
-  conversion, not dropped. The conversion preserves one consistent display
-  aspect ratio with no crop or padding, uses zscale Lanczos plus libx264
-  slow/CRF 16/yuv420p, stream-copies audio, and publishes a named
-  `.production-upscale1080p.mp4` artifact.
-- If every segment meets the pixel threshold, stream-copy remux them all at their native
-  resolutions, including mixtures such as 1080p/1440p. No upscaling or downscaling.
-- Otherwise measure the **pixel-qualified** share by summed playlist `EXTINF`
-  durations, not segment/frame counts. The trigger is total pixels, not a
-  short edge, exact dimensions, or the highest resolution present.
-  At **90% or more**, exclude the lower-resolution segments and stream-copy
-  remux all retained qualifying segments to `.retained1080p.mp4` (the suffix
-  refers to the Full HD pixel threshold, not fixed dimensions). Below 90%, convert the
-  **entire recording** to `.production-upscale1080p.mp4`, dropping nothing.
-  Both paths produce one upload, never two. Gaps and map changes are represented
-  by HLS discontinuities; source folders and their playlists are never modified.
-- Conversion requires one consistent display aspect ratio; incompatible aspect
-  changes fail safely rather than stretching/cropping or adding padding.
-  Native remux keeps the original encoded geometry. Independent init/geometry
-  runs are concatenated with their own decoder parameters and continuous timing.
-  This pixel-count change affects classification only; conversion still targets
-  a 1080-pixel short edge while preserving aspect ratio, not a fixed output pixel budget.
+- **Shapes.** Segments are grouped by display aspect ratio (SAR applied, 1%
+  tolerance; for fMP4 the last active `#EXT-X-MAP` owns a segment's size, MPEG-TS
+  uses one whole-playlist keyframe scan). One shape is one upload (`full`).
+  Several shapes are one upload each (`shape1`, `shape2`, … in order of first
+  appearance), titled `<title> [<recording folder> | part N]` and uploaded one
+  after another. Same shapes separated in time are joined in time order.
+- **Short pieces.** A split's piece shorter than a minute is not uploaded: it
+  is recorded in the `manual_pieces` table (listed by `review`). If no piece is
+  long enough, the recording is blocked for a person.
+- **Size.** Each shape is scaled to at least 1920×1080 pixels **and** 1080 tall
+  (Porntrex names quality tiers by height), keeping its aspect ratio, and never
+  smaller than its largest picture: 1440p/4K keep their size. No crop, no
+  padding; square pixels; zscale Lanczos, libx264 slow/CRF 16/yuv420p.
+- **Portrait** pictures are turned 90° counterclockwise (`transpose=2`, head to
+  the left) into a landscape frame. Artifacts are named
+  `<id>.production-v5[-shapeN][-ccw].mp4`; `-ccw` tells the describe stage to show
+  the model an upright copy (descriptor option `rotation: "clockwise"`).
+- **Imperfect input is kept.** A segment that starts a run without a decodable
+  keyframe joins the picture that follows it; such runs are decoded on their
+  own (a run with no picture at all holds the previous frame and keeps its
+  audio). Odd TS packet sizes and a size change inside a segment are warnings.
+  Only zero-byte files are left out of the encoder input (they hold no media).
+  Audio is stream-copied when the inputs allow it, else re-encoded once.
+- **Limits.** An upload over two hours (operator limit) or 10 GB (Porntrex) goes
+  to manual review, judged on the artifact's own duration.
+- Local work from an older policy is reset and converted again; uploaded
+  recordings are not touched. The local-stage lease is 12 hours.
 
 Only prepared comparison uploads carry the diagnostic title suffix
 `[recording ID | production-v3 | full]`. Normal campaign titles are clean by
@@ -174,8 +173,8 @@ Captured provider edit IDs drive verification; a missing ID or interrupted
 transfer is acceptance-unknown and cannot trigger an automatic re-upload.
 Clean titles are never searched to guess identity, including when two videos
 have identical descriptive titles. Keep the ledger/backups: clean public titles
-are not a substitute for lost identity records. Legacy split-part ledger support
-remains for existing data, but resolution-policy-v3 no longer creates split uploads.
+are not a substitute for lost identity records. Split uploads are one per picture
+shape (above); the old `max1080p`/`nonmax1080p` part names remain only for existing rows.
 
 Artifacts use the same generation boundary:
 `pipeline/artifacts/<production-version>/`. The first v2 rollover atomically

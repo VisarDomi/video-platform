@@ -19,6 +19,8 @@ it foreground weight; catalogue finalization remains
 
 ## Server promotion defines finalized recording integrity
 
+> **Superseded in part (2026-10-05)**: finalization never removes entries or moves files to Trash; damaged or unattributed segments are kept and reported as warnings on a `ready` report; `failed` means only an environment problem and is retried.
+
 For Tango, FC2, and SC, the downloader atomically writes `#EXT-X-ENDLIST` and
 hands the recording from `.active` to the hidden `.pending` sibling. The server
 watches `.pending`, processes the recording there, and alone promotes it into
@@ -88,6 +90,8 @@ provider path has been removed. The standalone pipeline owns any future artifact
 layout explicitly instead of exposing it as an HLS video provider.
 
 ## Pipeline trusts the server publication boundary
+
+> **Note (2026-10-05)**: publication now also covers recordings with damaged segments (listed in the report's warnings); the pipeline converts them like any other.
 
 The standalone pipeline reads only immediate visible downloader/edited entries.
 It ignores hidden `.active` and `.pending` roots and does not request redundant

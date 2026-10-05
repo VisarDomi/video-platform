@@ -2,6 +2,8 @@
 
 ## `.active` plus recording identity owns restart recovery
 
+> **Superseded in part (2026-10-05)**: the sequence baseline is the last saved segment (the playlist tail on resume), a window far below it is a numbering restart (accepted, discontinuity, `SEQUENCE-RESTART` log), and media written after the tail before a crash is re-appended on resume.
+
 The downloader writes new recordings under
 `<provider>/downloader/.active/<timestamp alias>/`. Shutdown and transport/API
 failure leave the directory active without ENDLIST, except Tango live
@@ -33,6 +35,8 @@ colons: `2026-08-12T09:08:47Z` is stored visibly as
 canonicalizer. URI percent escapes are not stored in media filenames.
 
 ## ENDLIST transfers finalized-media ownership to the server
+
+> **Superseded in part (2026-10-05)**: an empty or unreadable segment is no longer marked done: it is fetched again (up to 5 attempts); unreadable files stay on disk. Server finalization no longer repairs or trashes anything.
 
 The downloader owns transport and active playlist append only. FC2 writes the
 received bytes and rejects only an empty/unreadable file. Tango probes each
@@ -140,6 +144,8 @@ without ENDLIST so the next process can compare recording identity and resume.
 **Why:** Process shutdown is not evidence that the remote broadcast ended.
 
 ## Server serves active playlists and publishes validated recordings
+
+> **Superseded in part (2026-10-05)**: "validated" means published after a non-destructive check, possibly with warnings; there is no corruption repair.
 
 The HLS route reads the playlist file directly. No `ensurePlaylist`, no
 `generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns
