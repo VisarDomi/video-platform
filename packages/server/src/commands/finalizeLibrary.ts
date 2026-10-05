@@ -21,7 +21,6 @@ interface Options {
     recording: string | null;
     limit: number;
     apply: boolean;
-    retryFailed: boolean;
 }
 
 function parsePositiveInteger(value: string | undefined, name: string): number {
@@ -37,7 +36,6 @@ function parseArgs(argv: readonly string[]): Options {
         recording: null,
         limit: Number.POSITIVE_INFINITY,
         apply: false,
-        retryFailed: false,
     };
     let providerSpecified = false;
     let scopeSpecified = false;
@@ -46,7 +44,6 @@ function parseArgs(argv: readonly string[]): Options {
         const argument = argv[index];
         if (argument === "--apply") options.apply = true;
         else if (argument === "--dry-run") options.apply = false;
-        else if (argument === "--retry-failed") options.retryFailed = true;
         else if (argument === "--provider") {
             providerSpecified = true;
             options.provider = argv[++index] ?? "";
@@ -127,7 +124,6 @@ async function main(): Promise<void> {
         discovered: discovered.length,
         selected: selected.length,
         concurrency: workerCount,
-        retryFailed: options.retryFailed,
         checkpointPath: FINALIZATION_DB_PATH,
     }));
     if (!options.apply) return;
@@ -144,7 +140,6 @@ async function main(): Promise<void> {
             try {
                 const result = await processFinalizedRecording(target.recordingPath, {
                     checkpointStore: checkpoints,
-                    retryFailed: options.retryFailed,
                 });
                 let status: string;
                 let error: string | null = null;
@@ -172,6 +167,8 @@ async function main(): Promise<void> {
                     recordingPath: target.recordingPath,
                     status,
                     error,
+                    warnings: result.kind === "not-finalized" ? [] : (result.report.warnings ?? [])
+                        .map((warning) => ({ kind: warning.kind, count: warning.names?.length ?? 0 })),
                     elapsedSeconds: (Date.now() - startedAt) / 1000,
                 }));
             } catch (error: any) {

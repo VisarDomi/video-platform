@@ -1,6 +1,5 @@
 import * as timersPromises from "timers/promises";
 import * as path from "path";
-import * as fs from "fs/promises";
 
 import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
@@ -8,13 +7,18 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import type { PlaylistManager, SegmentInfo } from "./playlistManager.js";
 import type { InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
-import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult } from "../core/interfaces.js";
+import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
 import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
 export type ExitReason = import("../core/interfaces.js").DownloadExitContext["exitReason"];
+
+// An empty/unreadable segment is refetched on later polls while the window
+// lists it. A live window bounds this by itself; the attempt bound only keeps a
+// window that stops moving (ENDLIST, stalled edge) from blocking later media.
+export const REJECTED_SEGMENT_MAX_ATTEMPTS = 5;
 
 export interface DownloadResult {
     segmentCount: number;
@@ -338,6 +342,7 @@ export class StreamDownloader {
             const segments = identifiedSegments.filter(segment => !playlistManager.shouldSkipByTimeline(segment));
 
             let downloadedThisIteration = false;
+            let rejectedRetryPending = false;
 
             const prefetch = this.prefetchSegments(alias, segments, session,
                 () => Date.now() - lastDownload >= staleTimeout);
@@ -364,25 +369,50 @@ export class StreamDownloader {
                     }
                     const tsBuffer = fetchResult.data;
 
-                    if (!await disk.materialize()) {
-                        logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
-                        segmentFailed = true;
-                        break;
+                    // An empty body carries no media: nothing is written.
+                    let rejection: string | null = tsBuffer.length === 0 ? "empty-download" : null;
+                    let result: SegmentValidationResult = { valid: false };
+                    if (rejection === null) {
+                        if (!await disk.materialize()) {
+                            logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
+                            segmentFailed = true;
+                            break;
+                        }
+
+                        const segmentPath = path.join(disk.dirPath, segment.localName);
+                        const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
+                        if (!writeSuccess) {
+                            logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
+                            segmentFailed = true;
+                            break;
+                        }
+
+                        result = await this.provider.validateSegment(segmentPath);
+                        // Received bytes are never deleted; an unreadable file
+                        // stays on disk and finalization reports it.
+                        if (!result.valid) rejection = "unreadable-after-write";
                     }
 
-                    const segmentPath = path.join(disk.dirPath, segment.localName);
-                    const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
-                    if (!writeSuccess) {
-                        logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
-                        segmentFailed = true;
-                        break;
-                    }
-
-                    const result = await this.provider.validateSegment(segmentPath);
-                    if (!result.valid) {
-                        await fs.unlink(segmentPath).catch(() => {});
-                        playlistManager.addIgnoredSegment(segment.providerSequence);
+                    if (rejection !== null) {
+                        // Not handled: the sequence stays below the baseline so
+                        // the next poll fetches it again while the live window
+                        // lists it. Later segments wait to keep playlist order.
                         this.rejectedCount++;
+                        const attempts = playlistManager.noteRejectedSegment(segment.providerSequence);
+                        const details = {
+                            segment: segment.localName,
+                            providerSequence: segment.providerSequence,
+                            reason: rejection,
+                            attempt: attempts,
+                            maxAttempts: REJECTED_SEGMENT_MAX_ATTEMPTS,
+                        };
+                        if (attempts < REJECTED_SEGMENT_MAX_ATTEMPTS) {
+                            logger.warn(`[StreamDownloader] ${alias} segment rejected — refetching on the next poll`, details);
+                            rejectedRetryPending = true;
+                            break;
+                        }
+                        logger.warn(`[StreamDownloader] ${alias} segment still rejected — continuing without it`, details);
+                        playlistManager.abandonRejectedSegment(segment.providerSequence);
                     } else {
                         segment.dimensions = result.dimensions;
                         if (result.duration !== undefined) {
@@ -406,7 +436,9 @@ export class StreamDownloader {
 
             if (segmentFailed) break;
 
-            if (content.split(/\r?\n/).some((line) => line.trim() === "#EXT-X-ENDLIST")) {
+            // A final playlist still gets its rejected segment refetched (up
+            // to the attempt bound) and every later segment saved.
+            if (!rejectedRetryPending && content.split(/\r?\n/).some((line) => line.trim() === "#EXT-X-ENDLIST")) {
                 remoteEndlist = true;
                 logger.info(`[StreamDownloader] ${alias}: upstream playlist supplied ENDLIST`);
                 break;
