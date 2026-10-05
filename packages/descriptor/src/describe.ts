@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { descriptorConfig } from "./config.js";
 import { LlamaServer } from "./llama-server.js";
-import { chooseVideoFps, probeDuration, stageMedia } from "./media.js";
+import { chooseVideoFps, makeUprightCopy, probeDuration, stageMedia } from "./media.js";
 import { requestDescription, type DescriptionResult } from "./model-client.js";
 
 export interface ArtifactDescriptionEvidence {
@@ -16,9 +16,15 @@ export interface ArtifactDescriptionEvidence {
     readonly usage: unknown;
     readonly timings: unknown;
     readonly evidencePath: string;
+    readonly rotation: DescriptionRotation | null;
 }
 
+// "clockwise": the picture was turned 90° counterclockwise for upload; the
+// model is shown it turned back. Part of the evidence identity.
+export type DescriptionRotation = "clockwise";
+
 export interface DescribeArtifactOptions {
+    readonly rotation?: DescriptionRotation;
     readonly server?: LlamaServer;
     // Phrases an upload provider rejected in earlier metadata. Appended to the
     // prompt so new descriptions avoid them; part of the prompt version.
@@ -37,6 +43,8 @@ interface StoredEvidence {
     description: DescriptionResult;
     usage: unknown;
     timings: unknown;
+    // Absent in evidence written before rotation existed: none.
+    rotation?: DescriptionRotation | null;
 }
 
 // The exact prompt the model receives. Providers match blocked words as
@@ -54,7 +62,7 @@ export async function descriptionPromptVersion(avoidPhrases: readonly string[] =
 }
 
 function publicEvidence(evidence: StoredEvidence, evidencePath: string): ArtifactDescriptionEvidence {
-    return { ...evidence, evidencePath };
+    return { ...evidence, rotation: evidence.rotation ?? null, evidencePath };
 }
 
 export async function describeArtifact(
@@ -77,11 +85,14 @@ export async function describeArtifact(
     const prompt = descriptionPrompt(await fs.readFile(descriptorConfig.promptPath, "utf8"), options.avoidPhrases);
     const promptVersion = createHash("sha256").update(prompt).digest("hex");
     const now = options.now ?? (() => new Date());
+    const rotation = options.rotation ?? null;
+    if (rotation !== null && rotation !== "clockwise") throw new Error(`Unsupported description rotation ${rotation}`);
     if (options.evidenceKey && !/^[a-f0-9]{64}$/.test(options.evidenceKey)) {
         throw new Error("Descriptor evidenceKey must be a lowercase SHA-256");
     }
     const evidenceDirectory = options.evidenceKey
-        ? path.join(descriptorConfig.evidenceDirectory, "artifacts", options.evidenceKey, promptVersion)
+        ? path.join(descriptorConfig.evidenceDirectory, "artifacts", options.evidenceKey,
+            rotation ? `${promptVersion}-${rotation}` : promptVersion)
         : path.join(
             descriptorConfig.evidenceDirectory, "manual",
             `${now().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`,
@@ -94,6 +105,7 @@ export async function describeArtifact(
                 existing.promptVersion === promptVersion
                 && existing.fps === fps
                 && existing.durationSeconds === durationSeconds
+                && (existing.rotation ?? null) === rotation
                 && typeof existing.description?.title === "string"
             ) {
                 return publicEvidence(existing, evidencePath);
@@ -101,12 +113,15 @@ export async function describeArtifact(
         } catch {}
     }
 
-    const staged = await stageMedia(mediaPath, descriptorConfig.mediaDirectory);
+    const startedAt = Date.now();
+    const upright = rotation === "clockwise"
+        ? await makeUprightCopy(mediaPath, descriptorConfig.mediaDirectory, descriptorConfig.maximumFps) : null;
+    let staged: Awaited<ReturnType<typeof stageMedia>> | null = null;
     const server = options.server ?? new LlamaServer();
     const manageServer = options.manageServer ?? true;
-    const startedAt = Date.now();
 
     try {
+        staged = await stageMedia(upright?.path ?? mediaPath, descriptorConfig.mediaDirectory);
         if (manageServer) await server.start();
         const result = await requestDescription(staged.url, fps, prompt);
         await fs.mkdir(evidenceDirectory, { recursive: true });
@@ -115,6 +130,7 @@ export async function describeArtifact(
             durationSeconds,
             fps,
             promptVersion,
+            rotation,
             elapsedSeconds: (Date.now() - startedAt) / 1000,
             description: result.description,
             usage: result.usage,
@@ -127,7 +143,8 @@ export async function describeArtifact(
         await fs.rename(temporaryPath, evidencePath);
         return publicEvidence(evidence, evidencePath);
     } finally {
-        await staged.remove();
+        await staged?.remove();
+        await upright?.remove();
         if (manageServer) await server.stop();
     }
 }

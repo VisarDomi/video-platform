@@ -6,8 +6,9 @@ import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 import type { ArtifactVariant } from "../domain/types.js";
 import { prepareAtomicRemuxPaths } from "./remux.js";
 import { preparePlaylistInput } from "./playlistInput.js";
-import { analyzeRecordingResolution, type RecordingResolutionAnalysis } from "./resolutionPolicy.js";
+import { analyzeRecordingResolution, type RecordingResolutionAnalysis, type ShapeGroup } from "./resolutionPolicy.js";
 import { convertIndependentNativeRuns } from "./normalizeInputRuns.js";
+import { productionVideoFilters } from "./videoFilters.js";
 
 export type UpscaleMode = ArtifactVariant;
 
@@ -50,7 +51,11 @@ export interface UpscalePlan {
     readonly outputHeight: number;
     readonly outputDisplayAspectRatio: number;
     readonly selectExpression: string | null;
+    // Turn the picture 90° counterclockwise after scaling (portrait sources).
+    // outputWidth/outputHeight are the size after the turn.
+    readonly rotate?: boolean;
 }
+
 
 export interface UpscaleTranscodeResult {
     readonly path: string;
@@ -98,21 +103,6 @@ function targetDimensions(frame: SourceVideoFrame, targetShortEdge: number): {
         height: evenDimension(targetShortEdge / displayAspectRatio),
         displayAspectRatio,
     };
-}
-
-// A 1080 short edge alone undershoots Full HD for 4:3/5:4. Preserve aspect,
-// but meet BOTH oriented Full-HD edges (and therefore its pixel budget).
-// This also avoids gambling on whether provider admission uses total pixels
-// or the long edge. No padding/cropping; narrow content becomes taller.
-export function productionTargetDimensions(frame: SourceVideoFrame): {
-    width: number; height: number; displayAspectRatio: number;
-} {
-    const baseline = targetDimensions(frame, 1080);
-    const { displayAspectRatio } = baseline;
-    const scale = Math.max(1, 1920 / Math.max(baseline.width, baseline.height));
-    const width = Math.ceil(baseline.width * scale / 2) * 2;
-    const height = Math.ceil(baseline.height * scale / 2) * 2;
-    return { width, height, displayAspectRatio };
 }
 
 function droppedSelectionExpression(ranges: readonly FrameRange[]): string | null {
@@ -269,8 +259,7 @@ export function buildUpscaleTranscodeArgs(
 ): string[] {
     const filters = [];
     if (plan.selectExpression !== null) filters.push(`select='${plan.selectExpression}'`);
-    filters.push(`zscale=w=${plan.outputWidth}:h=${plan.outputHeight}:filter=lanczos`);
-    filters.push("setsar=1");
+    filters.push(...productionVideoFilters(plan));
     return [
         "-nostdin",
         "-hide_banner",
@@ -362,36 +351,29 @@ async function runUpscaleTranscode(
     }
 }
 
-export async function upscaleWholeRecordingTo1080(
+// One production artifact: the shape group's segments (or the whole recording)
+// scaled up to the shape's output size and, for portrait, turned 90°
+// counterclockwise. Never shrinks; no crop, no padding.
+export async function convertShapeGroup(
     inputPath: string,
     stagingRoot: string,
     recordingId: string,
-    source: FixedUpscaleSource,
-    artifactSuffix = "production-upscale1080p",
+    group: Pick<ShapeGroup, "output">,
+    artifactSuffix: string,
     analysis?: RecordingResolutionAnalysis,
     keepIndexes?: ReadonlySet<number>,
 ): Promise<UpscaleTranscodeResult> {
-    // Production conversion includes every segment, even for all-360p/480p
-    // sources. The supervised comparison mode's 720p floor does not apply.
-    const dimensions = productionTargetDimensions(source);
+    const { width, height, rotate } = group.output;
     const plan: UpscalePlan = {
-        specification: { mode: "upscale1080p", sourceShortEdgeFloor: 0, targetShortEdge: 1080 },
+        specification: { mode: "upscale1080p", sourceShortEdgeFloor: 0, targetShortEdge: Math.min(width, height) },
         sourceFrameCount: 1,
         droppedSourceFrames: 0,
         droppedFrameRanges: [],
-        outputWidth: dimensions.width,
-        outputHeight: dimensions.height,
-        outputDisplayAspectRatio: dimensions.width / dimensions.height,
+        outputWidth: width,
+        outputHeight: height,
+        outputDisplayAspectRatio: width / height,
         selectExpression: null,
+        rotate,
     };
-    return await runUpscaleTranscode(
-        inputPath,
-        stagingRoot,
-        recordingId,
-        plan,
-        artifactSuffix,
-        true,
-        analysis,
-        keepIndexes,
-    );
+    return await runUpscaleTranscode(inputPath, stagingRoot, recordingId, plan, artifactSuffix, true, analysis, keepIndexes);
 }

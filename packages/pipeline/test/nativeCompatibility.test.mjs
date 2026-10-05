@@ -35,7 +35,7 @@ test("compatibility distinguishes codec, audio presence/format and timebase with
 });
 
 for (const portrait of [false, true]) {
-    test(`high-pixel AV1/H264 falls back to ONE unpadded conversion: ${portrait ? "portrait" : "landscape"}`, async t => {
+    test(`an AV1/H264 codec change is still ONE unpadded conversion: ${portrait ? "portrait, turned" : "landscape"}`, async t => {
         const root = await temporary(t);
         const size = portrait ? "1080x1920" : "1920x1080";
         const parts = [await fixturePart(root, "av1", { size, frames: 3, fmp4: true, codec: "libaom-av1" }),
@@ -43,12 +43,13 @@ for (const portrait of [false, true]) {
         const playlist = await assemble(root, parts);
         const original = await readFile(playlist, "utf8");
         const result = await createDefaultStages(path.join(root, "out")).remux({ id: "mixed-codec", playlistPath: playlist });
-        assert.equal(path.basename(result.path), "mixed-codec.compatibility-upscale1080p.mp4");
-        assert.match(result.eventReason, /compatibility-conversion-v1/);
+        assert.equal(path.basename(result.path), `mixed-codec.production-v5${portrait ? "-ccw" : ""}.mp4`);
+        assert.match(result.eventReason, /^resolution-policy-v5: \[artifact-recipe-v2\] one shape/);
         await checkFrames(parts, result.path);
         const artifact = await validateArtifact(result.path);
-        assert.equal(artifact.videoWidth, portrait ? 1080 : 1920);
-        assert.equal(artifact.videoHeight, portrait ? 1920 : 1080);
+        // Portrait is turned 90° counterclockwise: always a landscape Full HD frame.
+        assert.equal(artifact.videoWidth, 1920);
+        assert.equal(artifact.videoHeight, 1080);
         assert.equal(await readFile(playlist, "utf8"), original);
         assert.deepEqual(await readdir(path.join(root, "out")), [path.basename(result.path)]);
     });
@@ -79,13 +80,13 @@ test("audio appears/disappears without shifting later audio, losing frames or tr
     assert(rms(0.95, 1.15) < 0.0001, "silent ending must remain silent");
 });
 
-test("90% selection precedes compatibility fallback; no excluded low-resolution content reappears", async t => {
+test("nothing is dropped: low-resolution content is converted with the rest across a codec change", async t => {
     const root = await temporary(t);
-    const high = [await fixturePart(root, "av1", { size: "1920x1080", frames: 3, fmp4: true, codec: "libaom-av1" }),
+    const parts = [await fixturePart(root, "av1", { size: "1920x1080", frames: 3, fmp4: true, codec: "libaom-av1" }),
+        await fixturePart(root, "low", { frames: 1, offset: 140, fmp4: true }),
         await fixturePart(root, "h264", { size: "1920x1080", frames: 3, offset: 70, fmp4: true })];
-    const low = await fixturePart(root, "low", { frames: 1, offset: 140, fmp4: true });
-    const playlist = await assemble(root, [high[0], low, high[1]], [0.3, 0.06, 0.3]);
-    const result = await createDefaultStages(path.join(root, "out")).remux({ id: "retained", playlistPath: playlist });
-    assert.match(result.eventReason, /keep 2 qualifying segments and drop 1/);
-    await checkFrames(high, result.path);
+    const playlist = await assemble(root, parts, [0.3, 0.1, 0.3]);
+    const result = await createDefaultStages(path.join(root, "out")).remux({ id: "kept", playlistPath: playlist });
+    assert.match(result.eventReason, /one shape: full .*1920x1080:2,320x180:1/);
+    await checkFrames(parts, result.path);
 });

@@ -337,7 +337,16 @@ async function main(): Promise<void> {
                     sourcePath: recording?.sourcePath ?? null,
                 };
             });
-            console.log(JSON.stringify({ blocked, provenanceReview: provenance }, null, 2));
+            // Shape-split pieces under a minute: not uploaded, waiting for a person.
+            const manualPieces = database.listManualPieces().map((piece) => ({
+                recordingId: piece.recordingId,
+                part: piece.part,
+                durationSeconds: piece.durationSeconds,
+                segmentIndexes: piece.segmentIndexes,
+                sourceDimensions: piece.sourceDimensions,
+                sourcePath: database.get(piece.recordingId)?.sourcePath ?? null,
+            }));
+            console.log(JSON.stringify({ blocked, provenanceReview: provenance, manualPieces }, null, 2));
             return;
         }
         if (command === "upload-provider") {
