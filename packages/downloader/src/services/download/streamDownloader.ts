@@ -9,7 +9,7 @@ import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
-import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS } from "../../common/timing.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
@@ -44,6 +44,8 @@ export class StreamDownloader {
         this._aborted = true;
     }
 
+    // Fetches segments four at a time; the consumer reads the results in order.
+    // add() queues segments listed by a poll made while the consumer waited.
     private prefetchSegments(
         alias: string,
         segments: SegmentInfo[],
@@ -52,12 +54,10 @@ export class StreamDownloader {
     ) {
         let stopped = false;
         let next = 0;
+        let active = 0;
         const cancelled: SegmentFetchResult = { data: null, retryable: true };
-        const jobs = segments.map(segment => {
-            let resolve!: (result: SegmentFetchResult) => void;
-            const result = new Promise<SegmentFetchResult>(done => { resolve = done; });
-            return { segment, result, resolve };
-        });
+        const jobs: { segment: SegmentInfo; result: Promise<SegmentFetchResult>; resolve: (result: SegmentFetchResult) => void }[] = [];
+        const workers: Promise<void>[] = [];
         const shouldStop = () => stopped || this._aborted || isStale();
         const worker = async () => {
             while (next < jobs.length) {
@@ -80,12 +80,46 @@ export class StreamDownloader {
                 job.resolve(result);
             }
         };
-        // Retries occupy one worker, not the entire download loop's segment batch.
-        const workers = Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
-        return {
-            results: jobs.map(job => job.result),
-            async close() { stopped = true; await workers; },
+        // A worker takes its first job synchronously; idle workers have exited.
+        const add = (more: readonly SegmentInfo[]) => {
+            if (stopped) return;
+            for (const segment of more) {
+                let resolve!: (result: SegmentFetchResult) => void;
+                const result = new Promise<SegmentFetchResult>(done => { resolve = done; });
+                jobs.push({ segment, result, resolve });
+            }
+            // Retries occupy one worker, not the entire download loop's segment batch.
+            while (active < 4 && next < jobs.length) {
+                active++;
+                workers.push(worker().finally(() => { active--; }));
+            }
         };
+        add(segments);
+        return {
+            result: (index: number) => jobs[index].result,
+            add,
+            async close() { stopped = true; await Promise.all(workers); },
+        };
+    }
+
+    // Waits for a segment's result, polling the live playlist every second
+    // meanwhile: a slow download must not keep the loop from listing segments
+    // that would leave the live window before the next regular poll. The poll
+    // runs only while waiting, never beside an append.
+    private async awaitPolling(
+        result: Promise<SegmentFetchResult>,
+        poll: () => Promise<void>,
+    ): Promise<SegmentFetchResult> {
+        while (true) {
+            const timer = new AbortController();
+            const settled = await Promise.race([
+                result.then(() => true),
+                timersPromises.setTimeout(POLL_WHILE_WAITING_MS, false, { signal: timer.signal }).catch(() => false),
+            ]);
+            timer.abort();
+            if (settled || this._aborted) return await result;
+            await poll();
+        }
     }
 
     public async run(
@@ -347,9 +381,30 @@ export class StreamDownloader {
 
             const prefetch = this.prefetchSegments(alias, segments, session,
                 () => Date.now() - lastDownload >= staleTimeout);
+            // Segments listed while waiting join this batch after the queued ones.
+            // A playlist change that needs the main loop (an unavailable or ended
+            // playlist, a new init map, a numbering restart) is left to the next
+            // regular poll, after this batch is saved.
+            const pollWhileWaiting = async () => {
+                const queuedThrough = segments.at(-1)?.providerSequence;
+                if (queuedThrough === undefined || Date.now() - lastDownload >= staleTimeout) return;
+                const latest = await session.fetchPlaylist(liveUrl).catch(() => null);
+                if (!latest) return;
+                const latestMap = latest.match(/#EXT-X-MAP:URI="([^"]+)"/)?.[1];
+                if (latestMap && initTracker.needsUpdate(latestMap)) return;
+                const more = (await playlistManager.identifyNewSegments(
+                    latest,
+                    (line) => resolveSegmentUrl(liveUrl, line),
+                    queuedThrough,
+                )).filter(segment => !playlistManager.shouldSkipByTimeline(segment));
+                if (more.length === 0) return;
+                segments.push(...more);
+                prefetch.add(more);
+            };
             try {
-                for (const [index, segment] of segments.entries()) {
-                    const fetchResult = await prefetch.results[index];
+                for (let index = 0; index < segments.length; index++) {
+                    const segment = segments[index];
+                    const fetchResult = await this.awaitPolling(prefetch.result(index), pollWhileWaiting);
                     if (this._aborted || (!fetchResult.data && fetchResult.retryable)) break downloadLoop;
 
                     if (!fetchResult.data) {

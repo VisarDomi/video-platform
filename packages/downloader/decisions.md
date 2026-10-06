@@ -172,8 +172,17 @@ when the live playlist fails. Sixty seconds without a saved segment exit the
 attempt (30 seconds logs `STALE`, a debug line); non-terminal exits retain the
 recording for retry.
 
+Segments of a poll are fetched four at a time and saved in playlist order. While
+the loop waits more than a second for a segment, it polls the live playlist again
+and queues what the window newly lists behind the batch (`POLL_WHILE_WAITING_MS`).
+That poll runs only while the loop waits, never beside an append; a playlist that
+fails, ends, changes its init map or restarts its numbering there is left to the
+next regular poll, after the batch is saved.
+
 **Why:** A timer running beside the loop can act on state the loop has already
-left; inline checks cannot.
+left; inline checks cannot. Tango and SC list about six seconds of media, so one
+slow segment download would otherwise let the segments after it leave the window
+before the loop polls again.
 
 ## Segment fetches: network errors retry, HTTP errors stop
 

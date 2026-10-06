@@ -9,6 +9,7 @@ import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
 import { AccessIncidentTracker } from '../dist/services/download/accessIncidentTracker.js';
 import { ApiClient } from '../dist/services/tango/api/apiClient.js';
+import { PlaylistNotFoundError } from '../dist/services/core/playlistNotFoundError.js';
 
 const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts\n#EXT-X-ENDLIST\n';
 
@@ -53,6 +54,68 @@ test('later media downloads while a failed segment retries; unknown dimensions s
     assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')), ['0_recording_10.ts', '1_recording_11.ts']);
     assert.match(await readFile(path.join(f.root, '0_recording_10.ts'), 'utf8'), /a\.ts$/);
     assert.match(await readFile(path.join(f.root, '1_recording_11.ts'), 'utf8'), /b\.ts$/);
+});
+
+test('a slow segment does not stop polling: media listed meanwhile is saved, not left to slide out', { timeout: 15000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    const tracker = new InitTracker(disk);
+    const started = Date.now();
+    const window = (first, ended = false) => `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
+        + [first, first + 1].map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('') + (ended ? '#EXT-X-ENDLIST\n' : '');
+    // A live window that moves on every second, and a first segment that takes 2.5 s.
+    const fetchPlaylist = async () => {
+        const elapsed = Date.now() - started;
+        return elapsed < 900 ? window(10) : elapsed < 1900 ? window(12) : window(14, true);
+    };
+    const fetchSegment = async url => {
+        if (url.endsWith('/s10.ts')) await new Promise(resolve => setTimeout(resolve, 2500));
+        return { data: Buffer.from(`unprobeable media: ${url}`) };
+    };
+    const provider = {
+        providerName: 'tango', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
+        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+    };
+    const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run('https://example.test/master.m3u8', manager, tracker, disk);
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(manager.missedSegmentCount, 0);
+    const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
+    assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)),
+        ['10.ts', '11.ts', '12.ts', '13.ts', '14.ts', '15.ts']);
+});
+
+test('a playlist that ends while a slow segment downloads still saves that segment', { timeout: 15000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    let calls = 0;
+    const fetchPlaylist = async () => {
+        if (calls++ === 0) return '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:1,\ns10.ts\n#EXTINF:1,\ns11.ts\n';
+        throw new PlaylistNotFoundError('https://example.test/live.m3u8');
+    };
+    const fetchSegment = async url => {
+        if (url.endsWith('/s11.ts')) await new Promise(resolve => setTimeout(resolve, 1500));
+        return { data: Buffer.from(`unprobeable media: ${url}`) };
+    };
+    const provider = {
+        providerName: 'tango', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
+        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+    };
+    const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk);
+    assert.equal(result.exitReason, 'playlist-not-found');
+    const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
+    assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)), ['10.ts', '11.ts']);
 });
 
 test('network retries preserve the 60-second attempt cutoff without marking the segment ignored', async (t) => {
