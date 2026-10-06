@@ -287,7 +287,8 @@ class TangoDownloadSession implements IDownloadSession {
                 return { data: Buffer.from(tsBuffer) };
             }
             logger.debug(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
-            return { data: null, retryable: false };
+            // 429 asks to retry later; any other HTTP error ends the attempt.
+            return { data: null, retryable: tsResponse.status === 429, status: tsResponse.status };
         } catch (error: any) {
             logger.debug(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
             return { data: null, retryable: true };

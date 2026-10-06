@@ -118,6 +118,52 @@ test('a playlist that ends while a slow segment downloads still saves that segme
     assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)), ['10.ts', '11.ts']);
 });
 
+test('HTTP 429 is retried like a network error; other HTTP errors end the attempt', async (t) => {
+    const { ScClient } = await import('../dist/services/sc/api/scClient.js');
+    let status = 429;
+    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status }));
+    const sc = new ScClient().createDownloadSession();
+    assert.deepEqual(await sc.fetchSegment('https://example.test/a.ts'), { data: null, retryable: true, status: 429 });
+    status = 404;
+    assert.deepEqual(await sc.fetchSegment('https://example.test/a.ts'), { data: null, retryable: false, status: 404 });
+    const tango = new ApiClient(async () => ({})).createDownloadSession();
+    status = 429;
+    assert.equal((await tango.fetchSegment('https://example.test/a.ts')).retryable, true);
+    status = 403;
+    assert.equal((await tango.fetchSegment('https://example.test/a.ts')).retryable, false);
+});
+
+test('a rate-limited playlist is polled again without variant recovery', { timeout: 15000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    let polls = 0;
+    let recoveries = 0;
+    let lastFailure = null;
+    const provider = {
+        providerName: 'sc', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        recoverVariant: async () => { recoveries++; return null; },
+        createDownloadSession: () => ({
+            fetchPlaylist: async () => {
+                if (polls++ === 0) { lastFailure = { kind: 'http', status: 429 }; return null; }
+                lastFailure = null;
+                return playlist;
+            },
+            getLastPlaylistFailure: () => lastFailure,
+            fetchSegment: async url => ({ data: Buffer.from(`unprobeable media: ${url}`) }),
+        }),
+        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+    };
+    const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk);
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(recoveries, 0);
+    assert.equal(result.segmentCount, 2);
+});
+
 test('network retries preserve the 60-second attempt cutoff without marking the segment ignored', async (t) => {
     let now = Date.now();
     t.mock.method(Date, 'now', () => now);

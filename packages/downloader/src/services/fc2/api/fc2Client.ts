@@ -393,7 +393,8 @@ class Fc2DownloadSession implements IDownloadSession {
                 return { data: Buffer.from(arr) };
             }
             logger.debug(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
-            return { data: null, retryable: false };
+            // 429 asks to retry later; any other HTTP error ends the attempt.
+            return { data: null, retryable: response.status === 429, status: response.status };
         } catch (error: any) {
             logger.debug(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
             return { data: null, retryable: true };

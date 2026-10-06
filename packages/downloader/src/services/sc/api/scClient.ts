@@ -525,7 +525,8 @@ class ScDownloadSession implements IDownloadSession {
                 const buf = await response.arrayBuffer();
                 return { data: Buffer.from(buf) };
             }
-            return { data: null, retryable: false, status: response.status };
+            // 429 asks to retry later; any other HTTP error ends the attempt.
+            return { data: null, retryable: response.status === 429, status: response.status };
         } catch (error: any) {
             return { data: null, retryable: true, error: error.name ?? "network-error" };
         }

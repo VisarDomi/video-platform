@@ -186,18 +186,21 @@ left; inline checks cannot. Tango and SC list about six seconds of media, so one
 slow segment download would otherwise let the segments after it leave the window
 before the loop polls again.
 
-## Segment fetches: network errors retry, HTTP errors stop
+## Segment fetches: network errors and 429 retry, other HTTP errors stop
 
 `fetchSegment` returns `{ data, retryable, status?, error? }`. Up to four
-segment fetches run concurrently within each playlist batch. Network errors and
-timeouts retry the same segment after one second while other workers fetch
-later segments; playlist appends stay in source order, and a retry never marks
-the segment handled. The 60-second inactivity limit and shutdown still end the
-attempt, after which the session retries from the live playlist. An HTTP error
-stops the attempt.
+segment fetches run concurrently within each playlist batch. Network errors,
+timeouts and HTTP 429 retry the same segment after one second while other
+workers fetch later segments; playlist appends stay in source order, and a retry
+never marks the segment handled. The 60-second inactivity limit and shutdown
+still end the attempt, after which the session retries from the live playlist.
+Any other HTTP error stops the attempt. A live playlist answering 429 is polled
+again after 2 seconds, without variant recovery.
 
 **Why:** A transient network failure should neither end the recording nor
-advance past media that has not been downloaded.
+advance past media that has not been downloaded. SC's CDN rate-limits in busy
+hours (several 429s most evenings); stopping the attempt then waited 5 seconds,
+long enough for the segment to leave its six-second window.
 
 ## No silent recovery: what changes the recording is a warning
 
