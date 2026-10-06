@@ -1,10 +1,10 @@
 # What
 
-A full video pipeline that saves the list of streamers to download, downloads their streams (local backup) views the downloads, edits the downloads, remuxes/converts the edited videos, describes them, uploads them (online backup)
+A full video pipeline that saves the list of streamers to download, downloads their streams (local backup), views the downloads, edits the downloads, converts the edited videos, describes them, uploads them (online backup)
 
 # Why
 
-The extension solutions either don't download correctly or are lower quality. Also this saves streams in the 1second .ts format that they come from the API, so that modifying the video is as simple as moving the right collection of .ts files instead of using ffmpeg with custom flags to try to retain as much information as possible. It's also minimal on cpu usage because there is no conversion or remuxing happenign.
+This project started out as a simple downloader, then it creeped on scope until a full pipeline was developed. 
 
 # How
 
