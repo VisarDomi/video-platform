@@ -1,3 +1,4 @@
+import { journalPriority } from "shared";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { reconcileDueUploads } from "./reconcileUploads.js";
@@ -33,7 +34,7 @@ export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new
             fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
         if (!result.loggedIn && database.getCampaignControl().state === "running") {
             database.pauseForAttention(`Porntrex shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
-            console.log(JSON.stringify({ event: "porntrex-session-lost", note: result.note, fingerprint: result.fingerprint }));
+            console.log(journalPriority("error") + JSON.stringify({ event: "porntrex-session-lost", note: result.note, fingerprint: result.fingerprint }));
             notifyDesktop("Porntrex session lost: pipeline paused", `${result.note}. Run: npm run ptrex:connect-iphone`, true);
         }
     } finally {
@@ -104,7 +105,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         if (keepingAlive || signal.aborted) return;
         keepingAlive = true;
         void keepPorntrexSessionAlive(config).catch((error: unknown) => {
-            console.error(JSON.stringify({ event: "porntrex-keepalive-error", error: String(error) }));
+            console.error(journalPriority("error", 2) + JSON.stringify({ event: "porntrex-keepalive-error", error: String(error) }));
         }).finally(() => { keepingAlive = false; });
     };
     keepalive();
@@ -127,16 +128,27 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 }
                 await writeComparisonReport(config);
             } catch (error) {
-                console.error(JSON.stringify({ event: "comparison-selection-error", error: String(error) }));
+                console.error(journalPriority("error", 2) + JSON.stringify({ event: "comparison-selection-error", error: String(error) }));
             } finally { importingSelection = false; }
         })();
     }, 30_000);
     signal.addEventListener("abort", () => clearInterval(selectionWatch), { once: true });
+    // A waiting step (paused, idle, a cooldown) repeats every 30 seconds and a
+    // pending verification is rechecked until it settles: each is logged when it
+    // changes, not on every repetition.
+    let lastStep = "";
+    const reconcileOutcomes = new Map<string, string>();
     while (!signal.aborted) {
         try {
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
-                const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string }> };
-                console.log(JSON.stringify({ event: "campaign-reconcile", result: reconciled }));
+                const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
+                const changed = (reconciled.results ?? []).filter((item) => {
+                    const outcome = `${item.disposition}\u0000${item.reason ?? ""}`;
+                    if (reconcileOutcomes.get(item.recordingId ?? "") === outcome) return false;
+                    reconcileOutcomes.set(item.recordingId ?? "", outcome);
+                    return true;
+                });
+                if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
                 for (const item of reconciled.results ?? []) {
                     if (item.disposition === "provider_removed") notifyDesktop("Provider removed an upload",
                         `${item.recordingId} (video ${item.remoteId}) is gone; blocked for your review`, true);
@@ -145,7 +157,9 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             const result = await campaignStep(config) as {
                 step?: { disposition?: string; resumeAt?: string };
             };
-            console.log(JSON.stringify({ event: "campaign-step", result }));
+            const step = JSON.stringify(result);
+            if (step !== lastStep) console.log(JSON.stringify({ event: "campaign-step", result }));
+            lastStep = step;
             const notice = stepNotification(result.step as Parameters<typeof stepNotification>[0]);
             if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
             const disposition = result.step?.disposition;
@@ -163,7 +177,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 || disposition === "upload_completed") continue;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            console.error(JSON.stringify({ event: "campaign-error", error: message }));
+            console.error(journalPriority("error", 2) + JSON.stringify({ event: "campaign-error", error: message }));
             notifyDesktop("Pipeline error", message, true);
         }
         await wait(IDLE_POLL_MILLISECONDS, signal);

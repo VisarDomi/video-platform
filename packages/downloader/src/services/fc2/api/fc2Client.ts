@@ -38,7 +38,7 @@ export class Fc2Client implements IStreamProvider {
     };
 
     constructor() {
-        logger.info("[FC2] Client initialized.");
+        logger.debug("[FC2] Client initialized.");
         this.cleanupInterval = setInterval(() => this._cleanupStaleSessions(), FC2_SESSION_CLEANUP_INTERVAL_MS);
     }
 
@@ -48,7 +48,7 @@ export class Fc2Client implements IStreamProvider {
 
         for (const [channelId, session] of this.sessions.entries()) {
             if (now - session.lastAccess > TIMEOUT_MS) {
-                logger.info(`[FC2] Session for ${channelId} timed out. Closing WebSocket.`);
+                logger.debug(`[FC2] Session for ${channelId} timed out. Closing WebSocket.`);
                 this._closeSession(channelId);
             }
         }
@@ -157,7 +157,7 @@ export class Fc2Client implements IStreamProvider {
                             const best = Fc2QualitySelector.selectBestPlaylist(msg.arguments);
 
                             if (best) {
-                                logger.info(`[FC2] Resolved HLS URL for ${channelId}: ${best.url}`);
+                                logger.debug(`[FC2] Resolved HLS URL for ${channelId}: ${best.url}`);
 
                                 const heartbeatInterval = setInterval(() => {
                                     try {
@@ -197,7 +197,7 @@ export class Fc2Client implements IStreamProvider {
 
             ws.onclose = () => {
                 if (this.sessions.has(channelId)) {
-                    logger.info(`[FC2] WebSocket closed remotely for ${channelId}`);
+                    logger.debug(`[FC2] WebSocket closed remotely for ${channelId}`);
                     this._closeSession(channelId);
                 } else if (!isResolved) {
                     logger.warn(`[FC2] WebSocket closed during handshake for ${channelId}`);
@@ -287,7 +287,7 @@ export class Fc2Client implements IStreamProvider {
         }
 
         if (content.includes("#EXT-X-STREAM-INF")) {
-            logger.info(`[FC2] Detected Master Playlist. Parsing for best variant...`);
+            logger.debug(`[FC2] Detected Master Playlist. Parsing for best variant...`);
             const lines = content.split("\n");
             let bestVariantUrl: string | null = null;
 
@@ -304,7 +304,7 @@ export class Fc2Client implements IStreamProvider {
             }
 
             if (bestVariantUrl) {
-                logger.info(`[FC2] Selected variant: ${bestVariantUrl}`);
+                logger.debug(`[FC2] Selected variant: ${bestVariantUrl}`);
                 return bestVariantUrl;
             } else {
                 logger.warn(`[FC2] Failed to parse variant from Master Playlist. Using original URL.`);
@@ -371,12 +371,12 @@ class Fc2DownloadSession implements IDownloadSession {
                 signal: AbortSignal.timeout(Fc2DownloadSession.FETCH_TIMEOUT_MS),
             });
             if (!response.ok) {
-                logger.warn(`[FC2] Playlist fetch failed: ${response.status} ${response.statusText} url=${url}`);
+                logger.debug(`[FC2] Playlist fetch failed: ${response.status} ${response.statusText} url=${url}`);
                 return null;
             }
             return await response.text();
         } catch (error: any) {
-            logger.error(`[FC2] Playlist fetch error: ${url}`, { error: error.message });
+            logger.debug(`[FC2] Playlist fetch error: ${url}`, { error: error.message });
             return null;
         }
     }
@@ -392,10 +392,10 @@ class Fc2DownloadSession implements IDownloadSession {
                 const arr = await response.arrayBuffer();
                 return { data: Buffer.from(arr) };
             }
-            logger.warn(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
+            logger.debug(`[FC2] Segment download failed: ${response.status} ${response.statusText}`, { tsUrl });
             return { data: null, retryable: false };
         } catch (error: any) {
-            logger.warn(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
+            logger.debug(`[FC2] Segment fetch error: ${error.message}`, { tsUrl });
             return { data: null, retryable: true };
         }
     }

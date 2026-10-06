@@ -11,13 +11,14 @@ export interface ScTarget {
 
 export class ScTargetManager {
     private targets: Map<string, ScTarget> = new Map();
+    private loaded = false;
     private readonly filePath: string;
     private debounceTimer: NodeJS.Timeout | null = null;
 
     private constructor() {
         this.filePath = downloadListPath("sc");
         fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-        logger.info(`[SC] TargetManager initialized. Watching: ${this.filePath}`);
+        logger.debug(`[SC] TargetManager initialized. Watching: ${this.filePath}`);
     }
 
     public static create(): ScTargetManager {
@@ -90,8 +91,20 @@ export class ScTargetManager {
                 }
             }
 
+            const describe = (target: ScTarget) => `${target.username} (${target.roomId})`;
+            const previous = new Set([...this.targets.values()].map(describe));
+            const next = new Set([...newTargets.values()].map(describe));
             this.targets = newTargets;
-            logger.info(`[SC] Loaded ${this.targets.size} targets: ${[...this.targets.values()].map((target) => `${target.username} (${target.roomId})`).join(", ")}`);
+            // The first load reports the count; a reload reports only what changed.
+            if (!this.loaded) {
+                this.loaded = true;
+                logger.info(`[SC] Loaded ${this.targets.size} targets`);
+                return;
+            }
+            const added = [...next].filter((entry) => !previous.has(entry));
+            const removed = [...previous].filter((entry) => !next.has(entry));
+            if (added.length > 0) logger.info(`[SC] Added targets: ${added.join(", ")}`);
+            if (removed.length > 0) logger.info(`[SC] Removed targets: ${removed.join(", ")}`);
         } catch (error: any) {
             logger.error(`[SC] Error reading sc.txt`, { error: error.message });
         }
@@ -102,7 +115,7 @@ export class ScTargetManager {
             if (eventType === "change") {
                 if (this.debounceTimer) clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(() => {
-                    logger.info(`[SC] sc.txt changed. Reloading targets...`);
+                    logger.debug(`[SC] sc.txt changed. Reloading targets...`);
                     this.loadTargets();
                     this.debounceTimer = null;
                 }, FILE_WATCHER_DEBOUNCE_MS);

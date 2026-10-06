@@ -107,7 +107,7 @@ export class ScDiscoveryService {
             if (this.cooldown.isActive(target.roomId)) continue;
 
             if (this.cooldown.wasRecentlyCleared(target.roomId)) {
-                logger.info(`[SC] ${target.username} (${target.roomId}): live again after cooldown`);
+                logger.debug(`[SC] ${target.username} (${target.roomId}): live again after cooldown`);
             }
 
             const refreshedTarget = resolvedTargets.get(target.roomId)
@@ -120,12 +120,12 @@ export class ScDiscoveryService {
                 continue;
             }
             if (!streamName) {
-                logger.info(`[SC] ${currentAlias}: cam metadata has no active stream name, falling back to roomId=${target.roomId}`);
+                logger.debug(`[SC] ${currentAlias}: cam metadata has no active stream name, falling back to roomId=${target.roomId}`);
             }
 
             const masterUrl = this.scClient.buildMasterUrl(streamName || target.roomId);
 
-            logger.info(`[SC] ${currentAlias} is PUBLIC. Starting download...`);
+            logger.debug(`[SC] ${currentAlias} is PUBLIC. Starting download...`);
 
             startStreamSession("SC", {
                 streamerId: target.roomId,

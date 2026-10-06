@@ -618,7 +618,7 @@ export async function finalizeMediaIntegrity(
             error: parsed.entries.length === 0 ? "empty capture: no retained media segments" : null,
         };
         options.checkpointStore?.write(streamPath, fingerprint, report);
-        logger.info("[MediaIntegrity] validation finished", {
+        logger.debug("[MediaIntegrity] validation finished", {
             streamPath,
             status: report.status,
             segmentCount: report.segmentCount,
@@ -778,7 +778,7 @@ export function startMediaIntegrityFinalizer(): void {
     const checkpointStore = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
     let catchUpRunning = false;
     const processingQueue = new MediaIntegrityQueue(async (streamPath) => {
-        logger.info("[Finalization] queue started pending recording", {
+        logger.debug("[Finalization] queue started pending recording", {
             streamPath,
             queueDepth: processingQueue.depth,
         });
@@ -807,21 +807,22 @@ export function startMediaIntegrityFinalizer(): void {
             { ...result.report, playlistPath: path.join(finalizedPath, FILE_NAMES.HLS_PLAYLIST) });
         checkpointStore.clear(streamPath);
         const warnings = result.report.warnings ?? [];
+        // The one line per finalized recording; warnings make it a warning.
         const details = {
-            pendingPath: streamPath,
             finalizedPath,
-            status: result.report.status,
             segmentCount: result.report.segmentCount,
-            warnings: warnings.map((warning) => ({ kind: warning.kind, message: warning.message, count: warning.names?.length ?? 0 })),
+            ...(warnings.length > 0
+                ? { warnings: warnings.map((warning) => ({ kind: warning.kind, message: warning.message, count: warning.names?.length ?? 0 })) }
+                : {}),
         };
-        if (warnings.length > 0) logger.warn("[Finalization] atomically published recording with warnings", details);
-        else logger.info("[Finalization] atomically published recording", details);
+        if (warnings.length > 0) logger.warn("[Finalization] published recording with warnings", details);
+        else logger.info("[Finalization] published recording", details);
     });
 
     const enqueue = (streamPath: string) => {
         if (!isOwnedPendingPath(streamPath, roots)) return;
         if (processingQueue.enqueue(streamPath)) {
-            logger.info("[Finalization] queued pending recording", {
+            logger.debug("[Finalization] queued pending recording", {
                 streamPath,
                 queueDepth: processingQueue.depth,
             });
@@ -866,7 +867,7 @@ export function startMediaIntegrityFinalizer(): void {
         );
         await observer.start();
         setInterval(() => void catchUp(), CATCH_UP_INTERVAL_MS);
-        logger.info("[Finalization] watching downloader/server handoff roots", {
+        logger.debug("[Finalization] watching downloader/server handoff roots", {
             completionSignal: HLS.ENDLIST,
             roots,
             workerCount: QUEUE_WORKER_COUNT,

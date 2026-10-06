@@ -80,7 +80,7 @@ export class Fc2DiscoveryService {
                 const masterUrl = await this.fc2Client.getHlsUrl(channelId);
 
                 if (masterUrl) {
-                    logger.info(`[FC2] Channel ${channelId} is LIVE. Starting download...`);
+                    logger.debug(`[FC2] Channel ${channelId} is LIVE. Starting download...`);
 
                     startStreamSession("FC2", {
                         streamerId: channelId,

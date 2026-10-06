@@ -13,6 +13,7 @@ export interface TangoTarget {
 
 export class TangoTargetManager {
     private targets: Map<string, TangoTarget> = new Map();
+    private loaded = false;
     private readonly filePath: string;
     private debounceTimer: NodeJS.Timeout | null = null;
     private watcher: fs.FSWatcher | null = null;
@@ -20,7 +21,7 @@ export class TangoTargetManager {
     private constructor(filePath?: string) {
         this.filePath = filePath ?? downloadListPath("tango");
         fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-        logger.info(`[Tango] TargetManager initialized. Watching: ${this.filePath}`);
+        logger.debug(`[Tango] TargetManager initialized. Watching: ${this.filePath}`);
     }
 
     public static create(filePath?: string): TangoTargetManager {
@@ -77,11 +78,12 @@ export class TangoTargetManager {
             const removed = [...previousTargets.values()]
                 .filter(target => !newTargets.has(target.accountId))
                 .map(target => `${target.alias} (${target.accountId})`);
-            const stats = fs.statSync(this.filePath);
-
-            logger.info(
-                `[Tango] Loaded ${this.targets.size} targets (added=${added.length}, removed=${removed.length}, mtime=${stats.mtime.toISOString()})`,
-            );
+            // The first load reports the count; a reload reports only what changed.
+            if (!this.loaded) {
+                this.loaded = true;
+                logger.info(`[Tango] Loaded ${this.targets.size} targets`);
+                return;
+            }
             if (added.length > 0) {
                 logger.info(`[Tango] Added targets: ${added.join(", ")}`);
             }
@@ -104,7 +106,7 @@ export class TangoTargetManager {
             if (filename !== null && filename.toString() !== path.basename(this.filePath)) return;
             if (this.debounceTimer) clearTimeout(this.debounceTimer);
             this.debounceTimer = setTimeout(() => {
-                logger.info(`[Tango] tango.txt changed. Reloading targets...`);
+                logger.debug(`[Tango] tango.txt changed. Reloading targets...`);
                 this.loadTargets();
                 this.debounceTimer = null;
             }, FILE_WATCHER_DEBOUNCE_MS);

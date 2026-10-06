@@ -39,7 +39,7 @@ export class ApiClient implements IStreamProvider {
     private latestLiveStreams = new Map<string, TangoLiveStream>();
 
     public constructor(private readonly tokenReader: () => Promise<Tokens> = readTokens) {
-        logger.info("[Tango] ApiClient initialized.");
+        logger.debug("[Tango] ApiClient initialized.");
     }
 
     private _getApiHeaders(tokens: Tokens): HeadersInit {
@@ -254,14 +254,14 @@ class TangoDownloadSession implements IDownloadSession {
                     const ttlNow = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
                     logger.error(`[Tango] Playlist 401 — ttlAtUse=${tokens.ttlAtReadSec}s ttlNow=${ttlNow}s tokenAge=${tokens.tokenAgeMs}ms url=${url}`);
                 } else {
-                    logger.warn(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
+                    logger.debug(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
                 }
                 return null;
             }
             return await response.text();
         } catch (error) {
             if (error instanceof PlaylistNotFoundError) throw error;
-            logger.warn(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
+            logger.debug(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
             return null;
         }
     }
@@ -275,10 +275,10 @@ class TangoDownloadSession implements IDownloadSession {
                 const tsBuffer = await tsResponse.arrayBuffer();
                 return { data: Buffer.from(tsBuffer) };
             }
-            logger.warn(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
+            logger.debug(`[Tango] Segment download failed: status=${tsResponse.status}`, { tsUrl });
             return { data: null, retryable: false };
         } catch (error: any) {
-            logger.warn(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
+            logger.debug(`[Tango] Segment fetch error: ${error.message}`, { tsUrl });
             return { data: null, retryable: true };
         }
     }

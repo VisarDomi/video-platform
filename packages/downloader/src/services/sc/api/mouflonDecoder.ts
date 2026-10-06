@@ -21,7 +21,7 @@ export async function loadMouflonKeys(): Promise<void> {
     const data = await FileSystemManager.readJsonFile<Record<string, string>>(KEYS_PATH);
     if (data) {
         mouflonKeys = data;
-        logger.info(`[SC] Loaded ${Object.keys(mouflonKeys).length} mouflon key(s)`);
+        logger.debug(`[SC] Loaded ${Object.keys(mouflonKeys).length} mouflon key(s)`);
     } else {
         logger.warn(`[SC] Could not load mouflon keys from ${KEYS_PATH}`);
     }

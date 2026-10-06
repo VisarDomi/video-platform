@@ -159,8 +159,8 @@ Quality checks and recovery run inline in the download loop. Tango never checks
 the master during capture. SC and FC2 re-check the master every 10 seconds and
 log a different selection as `VARIANT_CHANGE`; SC also tries variant recovery
 when the live playlist fails. Sixty seconds without a saved segment exit the
-attempt (30 seconds logs `STALE`); non-terminal exits retain the recording for
-retry.
+attempt (30 seconds logs `STALE`, a debug line); non-terminal exits retain the
+recording for retry.
 
 **Why:** A timer running beside the loop can act on state the loop has already
 left; inline checks cannot.
@@ -178,15 +178,22 @@ stops the attempt.
 **Why:** A transient network failure should neither end the recording nor
 advance past media that has not been downloaded.
 
-## No silent recovery: every transition is logged
+## No silent recovery: what changes the recording is a warning
 
-Recovery from CDN failures is allowed, but every state change is visible in the
-logs: `EDGE-SWITCH`, `EDGE-DEDUP`, `EDGE-GAP`, `SEQUENCE-RESTART`,
-`VARIANT_CHANGE`, segment rejections, and session retries with their reason.
+Recovery from CDN failures is allowed, and its effect on the media is never
+silent. At the default level a recording logs two info lines, `recording started
+in <folder>` and `recording ended (<reason>), <n> segments handed to the server
+in <folder>`, plus `VARIANT_CHANGE`. Warnings are what changed or risked the
+media: `EDGE-GAP`, `SEQUENCE-RESTART`, `EDGE-DEDUP bypassed`, segment
+rejections, re-appended media, unknown dimensions, a session without segments.
+Routine mechanics are debug lines (`LOG_LEVEL=debug`): discovery decisions,
+`START`, `STALE`/`RECOVERED`, `EDGE-SWITCH`, `EDGE-DEDUP` skips, `LOOP-EXIT`,
+session retries, per-fetch failures that a retry absorbs.
+
 Repeated HTTP failures are aggregated into one access incident spanning
-retry-created sessions: one `ACCESS_INCIDENT_OPEN`, one SC `ACCESS_EVIDENCE`
-snapshot, and one `ACCESS_INCIDENT_CLOSE` with duration and counts; recovery
-candidates that never work stay at debug level.
+retry-created sessions: one `ACCESS_INCIDENT_OPEN` warning carrying the SC
+evidence snapshot, and one `ACCESS_INCIDENT_CLOSE` with duration and counts;
+recovery candidates that never work stay at debug level.
 
 The SC evidence snapshot is observational and does not change download
 behavior. It records a fresh cam status, the complete master variant ranking,
@@ -219,8 +226,13 @@ created exclusively, never overwriting: `init.mp4`, then
 `init_<next local number>[_<n>].mp4` for each later map, and every resume writes
 a new init boundary.
 
+Only a taken name moves on to the next suffix. Any other write failure (the
+folder is gone, the disk is full) ends the attempt, and a session whose folder
+has disappeared ends with one error instead of retrying.
+
 **Why:** Advancing the map before a confirmed write would make a failed init
-write permanent.
+write permanent. A write into a missing folder can never succeed, so retrying it
+only floods the log.
 
 ## PlaylistManager buffers init-map changes
 

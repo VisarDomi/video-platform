@@ -5,7 +5,7 @@ import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import type { PlaylistManager, SegmentInfo } from "./playlistManager.js";
-import type { InitTracker } from "./initTracker.js";
+import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
@@ -67,7 +67,7 @@ export class StreamDownloader {
                     while (!shouldStop()) {
                         result = await session.fetchSegment(job.segment.remoteUrl);
                         if (result.data || !result.retryable) break;
-                        logger.warn(`[StreamDownloader] ${alias} segment fetch failed — retrying`, {
+                        logger.debug(`[StreamDownloader] ${alias} segment fetch failed — retrying`, {
                             segment: job.segment.localName,
                             error: result.error ?? "retryable-fetch-failure",
                         });
@@ -98,7 +98,7 @@ export class StreamDownloader {
             return await this.runAttempt(masterUrl, playlistManager, initTracker, disk);
         } catch (error) {
             if (!(error instanceof PlaylistNotFoundError)) throw error;
-            logger.info(`[StreamDownloader] ${this.handle.state?.alias}: live playlist returned 404; ending recording`, { url: error.url });
+            logger.debug(`[StreamDownloader] ${this.handle.state?.alias}: live playlist returned 404; ending recording`, { url: error.url });
             return {
                 segmentCount: initTracker.count,
                 aborted: this._aborted,
@@ -121,7 +121,7 @@ export class StreamDownloader {
         const liveUrl = retainedLiveUrl ?? await this.provider.parseMasterPlaylist(masterUrl);
 
         if (!liveUrl) {
-            logger.info(`[StreamDownloader] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
+            logger.debug(`[StreamDownloader] EARLY-EXIT ${alias} reason=parseMasterPlaylist-failed`);
             return { segmentCount: 0, aborted: false, exitReason: "fetch-failed", lastLiveUrl: null };
         }
 
@@ -129,7 +129,7 @@ export class StreamDownloader {
 
         const edgeMatch = liveUrl.match(/\/(b-hls-\d+)\//);
         const edge = edgeMatch ? edgeMatch[1] : "unknown";
-        logger.info(`[StreamDownloader] START ${alias} edge=${edge}`, {
+        logger.debug(`[StreamDownloader] START ${alias} edge=${edge}`, {
             variant: this.provider.describeVariant?.(liveUrl) ?? null,
             variantPath: new URL(liveUrl).pathname,
         });
@@ -158,35 +158,28 @@ export class StreamDownloader {
             alias,
             recordingId: state.recordingId,
         };
+        // One warning per incident, carrying the provider's diagnosis when it has one.
+        let evidence: object = {};
+        if (this.provider.diagnoseAccessFailure) {
+            try {
+                evidence = await this.provider.diagnoseAccessFailure({
+                    stage,
+                    ...identity,
+                    masterUrl,
+                    liveUrl,
+                    failure,
+                });
+            } catch (error: any) {
+                evidence = { evidenceUnavailable: error.name ?? "diagnostic-error" };
+            }
+        }
         logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_OPEN`, {
             ...identity,
             stage,
             failure,
             selected: this.provider.describeVariant?.(liveUrl) ?? null,
+            ...evidence,
         });
-
-        if (!this.provider.diagnoseAccessFailure) return;
-        try {
-            const evidence = await this.provider.diagnoseAccessFailure({
-                stage,
-                ...identity,
-                masterUrl,
-                liveUrl,
-                failure,
-            });
-            logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_EVIDENCE`, {
-                ...identity,
-                stage,
-                failure,
-                ...evidence,
-            });
-        } catch (error: any) {
-            logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_EVIDENCE_UNAVAILABLE`, {
-                ...identity,
-                stage,
-                error: error.name ?? "diagnostic-error",
-            });
-        }
     }
 
     private closeAccessIncident(alias: string, liveUrl: string, outcome: string): void {
@@ -249,7 +242,7 @@ export class StreamDownloader {
             if (health === 'ok' && Date.now() - lastDownload > HEARTBEAT_INTERVAL_MS) {
                 health = 'stale';
                 const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                logger.warn(`[StreamDownloader] STALE ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
+                logger.debug(`[StreamDownloader] STALE ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
             }
 
             if (this.provider.refreshMasterDuringDownload !== false
@@ -287,7 +280,7 @@ export class StreamDownloader {
                 if (newEdge && newEdge !== oldEdge) {
                     playlistManager.setEdge(recovered);
                     playlistManager.onEdgeSwitch(oldEdge, newEdge);
-                    logger.info(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge}`, {
+                    logger.debug(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge}`, {
                         variant: this.provider.describeVariant?.(recovered) ?? null,
                         variantPath: new URL(recovered).pathname,
                     });
@@ -315,14 +308,22 @@ export class StreamDownloader {
                 const mapUri = mapMatch[1];
                 if (initTracker.needsUpdate(mapUri)) {
                     const initUrl = resolveSegmentUrl(liveUrl, mapUri);
-                    const result = await initTracker.commitInit(
-                        mapUri,
-                        () => session.fetchSegment(initUrl),
-                        playlistManager.nextSegmentNumber,
-                    );
+                    let result;
+                    try {
+                        result = await initTracker.commitInit(
+                            mapUri,
+                            () => session.fetchSegment(initUrl),
+                            playlistManager.nextSegmentNumber,
+                        );
+                    } catch (error) {
+                        // Already logged by the write; the session decides what follows.
+                        if (!(error instanceof InitWriteError)) throw error;
+                        segmentFailed = true;
+                        break;
+                    }
 
                     if (!result) {
-                        logger.warn(`[StreamDownloader] ${alias} init segment failed — retrying`);
+                        logger.debug(`[StreamDownloader] ${alias} init segment failed — retrying`);
                         await timersPromises.setTimeout(INIT_RETRY_SLEEP_MS);
                         continue;
                     }
@@ -331,7 +332,7 @@ export class StreamDownloader {
                         playlistManager.bufferQualityChange(result.fileName);
                     }
 
-                    logger.info(`[StreamDownloader] Downloaded init segment for ${alias} (${result.fileName})`);
+                    logger.debug(`[StreamDownloader] Downloaded init segment for ${alias} (${result.fileName})`);
                 }
             }
 
@@ -380,8 +381,8 @@ export class StreamDownloader {
                         }
 
                         const segmentPath = path.join(disk.dirPath, segment.localName);
-                        const writeSuccess = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
-                        if (!writeSuccess) {
+                        const written = await FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array);
+                        if (written !== "written") {
                             logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
                             segmentFailed = true;
                             break;
@@ -423,7 +424,7 @@ export class StreamDownloader {
                         if (health === 'stale') {
                             health = 'ok';
                             const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
-                            logger.info(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
+                            logger.debug(`[StreamDownloader] RECOVERED ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
                         }
                         lastDownload = Date.now();
                         initTracker.incrementSegmentCount();
@@ -440,7 +441,7 @@ export class StreamDownloader {
             // to the attempt bound) and every later segment saved.
             if (!rejectedRetryPending && content.split(/\r?\n/).some((line) => line.trim() === "#EXT-X-ENDLIST")) {
                 remoteEndlist = true;
-                logger.info(`[StreamDownloader] ${alias}: upstream playlist supplied ENDLIST`);
+                logger.debug(`[StreamDownloader] ${alias}: upstream playlist supplied ENDLIST`);
                 break;
             }
 
@@ -468,7 +469,7 @@ export class StreamDownloader {
             ? ` edge=${timeline.edge} seq=${timeline.mediaSequence} firstPDT=${timeline.firstProgramDateTime ?? "none"} lastPDT=${timeline.lastProgramDateTime ?? "none"}`
             : "";
         const rejStr = this.rejectedCount > 0 ? ` rejected=${this.rejectedCount}` : "";
-        logger.info(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${rejStr}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${timelineDetails}`);
+        logger.debug(`[StreamDownloader] LOOP-EXIT ${alias} reason=${exitReason} staleSec=${staleSec} segments=${initTracker.count}${rejStr}${disk.materialized ? ` dir=${path.basename(disk.dirPath)}` : ""}${timelineDetails}`);
 
         return { segmentCount: initTracker.count, aborted: this._aborted, exitReason, lastLiveUrl: liveUrl };
     }

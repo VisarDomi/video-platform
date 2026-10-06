@@ -97,7 +97,7 @@ export class PlaylistManager {
     public onEdgeSwitch(oldEdge: string | null, newEdge: string): void {
         this._edgeSwitchActive = this.lastDownloadedPDT !== null;
         if (this._edgeSwitchActive) {
-            logger.info(`[PlaylistManager] Edge switch ${oldEdge ?? "none"} → ${newEdge}, PDT dedup active (lastPDT=${this.lastDownloadedPDT})`);
+            logger.debug(`[PlaylistManager] Edge switch ${oldEdge ?? "none"} → ${newEdge}, PDT dedup active (lastPDT=${this.lastDownloadedPDT})`);
         }
     }
 
@@ -115,7 +115,7 @@ export class PlaylistManager {
         }
         const gapMs = segDate - lastDate;
         if (gapMs <= 0 && -gapMs <= EDGE_DEDUP_MAX_OVERLAP_MS) {
-            logger.info(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
+            logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
             return true;
         }
         if (gapMs <= 0) {
@@ -228,7 +228,7 @@ export class PlaylistManager {
             ? await this.reappendUnreferencedTail(recoveredContent, diskNames, parsed.at(-1)!.localNumber, inspectSegment)
             : [];
         const referencedCount = parsed.length + reappended.length;
-        logger.info(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} baselineProviderSequence=${this.baselineProviderSequence ?? "none"} reappendedMedia=${reappended.length} unreferencedMedia=${Math.max(0, diskIdentities.length - referencedCount)}`);
+        logger.debug(`[PlaylistManager] Resume initialized recording=${this.recordingId} nextLocal=${this.nextLocalNumber} baselineProviderSequence=${this.baselineProviderSequence ?? "none"} reappendedMedia=${reappended.length} unreferencedMedia=${Math.max(0, diskIdentities.length - referencedCount)}`);
     }
 
     // A crash between writing a segment file and appending its playlist entry
@@ -550,7 +550,7 @@ export class PlaylistManager {
     }
 
     public async finalizePlaylist(): Promise<void> {
-        logger.info(`Finalizing playlist: ${this.fullPlaylistPath}`);
+        logger.debug(`Finalizing playlist: ${this.fullPlaylistPath}`);
         const content = await FileSystemManager.readFile(this.fullPlaylistPath);
         if (!content) throw new Error(`Cannot finalize recording without playlist: ${this.fullPlaylistPath}`);
         const withoutEndlist = content.split(/\r?\n/)
@@ -561,6 +561,6 @@ export class PlaylistManager {
         const { content: fixed, wasFixed } = fixTargetDuration(withEndlist);
         const written = await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, fixed);
         if (!written) throw new Error(`Could not atomically finalize ${this.fullPlaylistPath}`);
-        if (wasFixed) logger.info(`[PlaylistManager] Fixed TARGETDURATION in ${this.fullPlaylistPath}`);
+        if (wasFixed) logger.debug(`[PlaylistManager] Fixed TARGETDURATION in ${this.fullPlaylistPath}`);
     }
 }

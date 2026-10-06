@@ -88,12 +88,12 @@ export class AuthService {
         if (ttl < refreshCycleSec) {
             logger.warn(`[Tango] Token write — source=${source} tte=${tte} ttl=${ttl}s (below ${refreshCycleSec}s refresh cycle)`);
         } else {
-            logger.info(`[Tango] Token write — source=${source} tte=${tte} ttl=${ttl}s`);
+            logger.debug(`[Tango] Token write — source=${source} tte=${tte} ttl=${ttl}s`);
         }
     }
 
     private async refreshSession() {
-        logger.info(`Attempting to refresh session for ${this.account.email} using refresh token...`);
+        logger.debug(`Attempting to refresh session for ${this.account.email} using refresh token...`);
         const tokenBag = this.authContext.getTokenBag();
         if (!tokenBag) {
             throw new Error(`Refresh token not found for ${this.account.email}.`);
@@ -106,7 +106,7 @@ export class AuthService {
         await this.authContext.saveTokenToFile();
 
         if (receivedNewRT) {
-            logger.info(`Successfully refreshed session token and refresh token for ${this.account.email}.`);
+            logger.debug(`Successfully refreshed session token and refresh token for ${this.account.email}.`);
         } else {
             logger.warn(`Refreshed session token, but no new refresh token was provided for ${this.account.email}.`);
         }
@@ -160,7 +160,7 @@ export class AuthService {
         while (true) {
             try {
                 await this.ensureValidTokens("session-maintain");
-                logger.info(`Session successfully maintained for ${this.account.email}.`);
+                logger.debug(`Session successfully maintained for ${this.account.email}.`);
                 return;
             } catch (error) {
                 const errorMessage = (error as Error).message;

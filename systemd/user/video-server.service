@@ -5,6 +5,8 @@ After=network.target
 [Service]
 Type=simple
 ExecStart="{{HOME}}/.local/bin/video-server"
+# node:sqlite (the finalization checkpoints) prints an ExperimentalWarning at every start.
+Environment=NODE_OPTIONS=--disable-warning=ExperimentalWarning
 Restart=on-failure
 RestartSec=5
 

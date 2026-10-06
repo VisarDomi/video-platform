@@ -519,7 +519,7 @@ export async function repairPlaylistDurations(
             wrotePlaylist: false,
             writeSkippedReason: null,
         };
-        logger.info("[PlaylistAuthority] playlist-media-timeline-repair-skipped", summary);
+        logger.debug("[PlaylistAuthority] playlist-media-timeline-repair-skipped", summary);
         return summary;
     }
 
@@ -673,7 +673,8 @@ export async function repairPlaylistDurations(
         writeSkippedReason,
     };
 
-    logger.info("[PlaylistAuthority] playlist-media-timeline-repair", summary);
+    // Only a repair that rewrote the playlist is worth an info line.
+    logger.log(wrotePlaylist ? "info" : "debug", "[PlaylistAuthority] playlist-media-timeline-repair", summary);
     if (failedProbeCount > 0 || missingSegmentCount > 0) {
         logger.warn("[PlaylistAuthority] playlist-media-timeline-repair had probe issues", {
             playlistPath,

@@ -37,7 +37,7 @@ export class StreamDiscoveryService {
             return;
         }
         this.lastDecisionByTarget.set(targetId, decision);
-        logger.info(`[Tango] Target ${alias} (${targetId}): ${decision}`);
+        logger.debug(`[Tango] Target ${alias} (${targetId}): ${decision}`);
     }
 
     public async start(): Promise<void> {
@@ -57,7 +57,7 @@ export class StreamDiscoveryService {
 
             const currentTotal = this.downloadsManager.size;
             if (currentTotal !== lastKnownTotal) {
-                logger.info(`[Tango] Watching for streams... Total active/pending: ${currentTotal}`);
+                logger.debug(`[Tango] Watching for streams... Total active/pending: ${currentTotal}`);
                 lastKnownTotal = currentTotal;
             }
 
@@ -77,7 +77,7 @@ export class StreamDiscoveryService {
                 const { resumePaths } = await this.activeReconciler.reconcile(snapshot);
                 const lookupSummary = `configuredTargets=${targets.length} livePublicTargets=${result.live.size}`;
                 if (this.lastLookupSummary !== lookupSummary) {
-                    logger.info(`[Tango] Account lookup summary: ${lookupSummary}`);
+                    logger.debug(`[Tango] Account lookup summary: ${lookupSummary}`);
                     this.lastLookupSummary = lookupSummary;
                 }
 
@@ -106,7 +106,7 @@ export class StreamDiscoveryService {
                     const activeRecordingId = this.downloadsManager.getRecordingId(streamerId);
                     if (activeRecordingId && activeRecordingId !== stream.streamId) {
                         // Empty/missing folders are invisible to disk reconciliation.
-                        await this.downloadsManager.finalizeStreamer(streamerId);
+                        await this.downloadsManager.finalizeStreamer(streamerId, "a new stream replaced it");
                         this.cooldown.clear(streamerId);
                     }
                     if (this.downloadsManager.has(masterPlaylistUrl)) {
@@ -125,7 +125,7 @@ export class StreamDiscoveryService {
                         continue;
                     }
 
-                    logger.info(`[Tango] Discovered new stream from ${alias}.`);
+                    logger.debug(`[Tango] Discovered new stream from ${alias}.`);
                     this.logDecision(streamerId, alias, "public live stream found by account lookup; starting");
 
                     startStreamSession("Tango", {

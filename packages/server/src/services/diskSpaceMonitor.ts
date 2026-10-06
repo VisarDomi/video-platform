@@ -11,7 +11,7 @@ export function startDiskSpaceMonitor(): void {
     const storagePath = getProviderPaths("tango").downloaded;
 
     const run = async () => {
-        logger.info("[System] DiskSpaceMonitor started.");
+        logger.debug("[System] DiskSpaceMonitor started.");
         while (true) {
             try {
                 const stats = await fs.statfs(storagePath);

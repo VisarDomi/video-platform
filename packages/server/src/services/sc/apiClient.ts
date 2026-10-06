@@ -19,7 +19,8 @@ export async function resolveScUsername(username: string): Promise<ScResolvedUse
         });
 
         if (!response.ok) {
-            logger.warn(`[SC] resolveScUsername failed: status=${response.status} username=${username}`);
+            // 404 is Stripchat's "no such user", an ordinary answer to a lookup.
+            logger.log(response.status === 404 ? "debug" : "warn", `[SC] resolveScUsername failed: status=${response.status} username=${username}`);
             return null;
         }
 

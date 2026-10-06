@@ -1,4 +1,5 @@
 import { descriptionPromptVersion, rewriteAvoidingPhrases } from "descriptor";
+import { journalPriority } from "shared";
 import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { containedPhrases } from "../upload/providerWarnings.js";
@@ -74,7 +75,7 @@ export async function settleRejectedPhrases(
     if (verdict.kind === "clean") return verdict;
     if (rewrite) {
         const rewritten = await rewriteText(database, recordingId, rewrite, now).catch((error: unknown) => {
-            console.error(JSON.stringify({ event: "description-rewrite-failed", recordingId, error: String(error) }));
+            console.error(journalPriority("warn", 2) + JSON.stringify({ event: "description-rewrite-failed", recordingId, error: String(error) }));
             return false;
         });
         if (rewritten && (await checkRejectedPhrases(database, recordingId, provider)).kind === "clean") {

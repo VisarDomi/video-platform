@@ -20,6 +20,9 @@ reloads systemd but deliberately does not restart services.
 - Start debugging by checking the managed service logs.
 - Use direct `journalctl` for bounded reads:
   `journalctl --user -u video-server.service -u video-downloader.service -n 300 --no-pager`
+- Only warnings and errors: add `-p warning`. The routine detail is not logged by default;
+  run a service with `LOG_LEVEL=debug` (e.g. `systemctl --user set-environment LOG_LEVEL=debug`
+  before restarting it, `unset-environment` afterwards) to see per-poll and per-retry lines.
 - For a time window, usually the specific time after a build so that you get the logs from the user tests:
   `journalctl --user -u video-server.service -u video-downloader.service --since '2026-05-11 10:54:30' --until now --no-pager`
 

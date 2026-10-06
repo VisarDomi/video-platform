@@ -26,6 +26,7 @@ export class StreamSession {
     private _aborted = false;
     private activeDownloader: StreamDownloader | null = null;
     private _finalizeRequested = false;
+    private finalizeReason = "";
     private readonly recordingId: string;
     private readonly existingDirPath?: string;
 
@@ -50,8 +51,9 @@ export class StreamSession {
         this.activeDownloader?.abort();
     }
 
-    public finalize(): void {
+    public finalize(reason: string): void {
         this._finalizeRequested = true;
+        this.finalizeReason = reason;
         this._aborted = true;
         this.activeDownloader?.abort();
     }
@@ -72,6 +74,8 @@ export class StreamSession {
 
         let masterUrl = initialMasterUrl;
         let endedByUpstream = false;
+        let endReason = "";
+        let folderLost = false;
         const accessIncidents = new AccessIncidentTracker();
 
         while (!this._aborted) {
@@ -81,10 +85,18 @@ export class StreamSession {
             this.activeDownloader = null;
             if (result.exitReason === "remote-endlist" || result.exitReason === "playlist-not-found") {
                 endedByUpstream = true;
+                endReason = result.exitReason === "remote-endlist" ? "the provider ended the playlist" : "the live playlist is gone";
                 break;
             }
 
             if (result.aborted) break;
+            // Retrying into a folder that no longer exists fails forever; the next
+            // discovery starts a new recording if the streamer is still live.
+            if (result.exitReason === "segment-failed" && !await disk.present()) {
+                folderLost = true;
+                logger.error(`[StreamSession] ${this.alias}: recording folder ${path.basename(disk.dirPath)} disappeared; ending the session`);
+                break;
+            }
 
             const context: DownloadExitContext = {
                 streamerId: this.streamerId,
@@ -97,13 +109,13 @@ export class StreamSession {
 
             const retryUrl = await this.provider.shouldRetry(context);
             if (!retryUrl) {
-                logger.info(`[StreamSession] ${this.alias}: provider state not resumable yet; retaining active recording (reason=${result.exitReason})`);
+                logger.debug(`[StreamSession] ${this.alias}: provider state not resumable yet; retaining active recording (reason=${result.exitReason})`);
                 masterUrl = context.lastMasterUrl;
             } else {
                 masterUrl = retryUrl;
             }
 
-            logger.info(`[StreamSession] ${this.alias}: retrying (reason=${result.exitReason}, newMaster=${masterUrl !== context.lastMasterUrl})`);
+            logger.debug(`[StreamSession] ${this.alias}: retrying (reason=${result.exitReason}, newMaster=${masterUrl !== context.lastMasterUrl})`);
             await timersPromises.setTimeout(SESSION_RETRY_SLEEP_MS);
         }
 
@@ -132,11 +144,12 @@ export class StreamSession {
             });
         }
 
-        if (disk.materialized && (endedByUpstream || this._finalizeRequested)) {
+        if (disk.materialized && !folderLost && (endedByUpstream || this._finalizeRequested)) {
             await playlistManager.finalizePlaylist();
             const pendingPath = await handoffActiveRecording(disk.dirPath);
             this.handle.update({ segmentsDirPath: pendingPath });
-            logger.info(`[StreamSession] ${this.alias}: handed off to server dir=${path.basename(pendingPath)} totalSegments=${initTracker.count}`);
+            const reason = this._finalizeRequested ? this.finalizeReason : endReason;
+            logger.info(`[StreamSession] ${this.alias}: recording ended (${reason}), ${initTracker.count} segments handed to the server in ${path.basename(pendingPath)}`);
         }
 
         this.handle.remove();

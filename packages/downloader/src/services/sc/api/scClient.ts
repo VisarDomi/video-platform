@@ -75,7 +75,7 @@ export class ScClient implements IStreamProvider {
     private readonly selectedVariants = new Map<string, StreamVariantDescription>();
 
     constructor() {
-        logger.info("[SC] ScClient initialized.");
+        logger.debug("[SC] ScClient initialized.");
     }
 
     public async init(): Promise<void> {
@@ -206,7 +206,7 @@ export class ScClient implements IStreamProvider {
                     || previous.isLive !== next.isLive
                     || previous.statusChangedAt !== next.statusChangedAt
                 )) {
-                    logger.info("[SC] STATE_CHANGE", {
+                    logger.debug("[SC] STATE_CHANGE", {
                         streamerId: roomId,
                         alias: model.username ?? null,
                         fromStatus: previous.status,
@@ -312,7 +312,7 @@ export class ScClient implements IStreamProvider {
             const count = (this.masterFailCounts.get(key) ?? 0) + 1;
             this.masterFailCounts.set(key, count);
             if (count === 1) {
-                logger.warn(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl}`);
+                logger.debug(`[SC] Master playlist fetch failed: status=${result.status} url=${masterUrl}`);
             }
             return null;
         }

@@ -454,9 +454,13 @@ server follows the account first, but only if it is not already followed.
 - **Builds.** `npm run start:*` and `restart:*` build the core services and start
   them; they run prebuilt `dist/` through the `~/.local/bin/video-*` wrappers. The
   pipeline service rebuilds (`rm -rf dist && tsc`) on every start.
-- **Logs** go only to journald (winston console output or JSON lines). Read them
-  with `npm run logs:*` or `journalctl --user -u <unit>`. The code has no log
-  directory and no rotation.
+- **Logs** go only to journald (winston console output or JSON lines) with
+  journald priorities: `journalctl --user -u <unit> -p warning` lists only
+  problems. Info is one line per lifecycle event, routine mechanics are debug
+  lines (`LOG_LEVEL=debug`), and identical lines within a minute collapse into one
+  (`packages/shared/decisions.md`). The pipeline worker logs a step when its
+  result changes, not every waiting step. Read them with `npm run logs:*` or
+  `journalctl --user -u <unit>`. The code has no log directory and no rotation.
 - **Notifications.** The managed pipeline worker uses `notify-send` for attention,
   cooldowns, provider removals and lost sessions, never repeating a message within
   6 h; `VIDEO_PIPELINE_NOTIFY=0` silences it.

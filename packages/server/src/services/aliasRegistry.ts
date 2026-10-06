@@ -33,7 +33,7 @@ export class AliasRegistry {
     async load(): Promise<void> {
         const raw = await this.readDisk();
         this.state = raw;
-        logger.info(`Loaded ${this.state.size} aliases from disk`);
+        logger.debug(`Loaded ${this.state.size} aliases from disk`);
     }
 
     resolve(streamerId: string): string | undefined {
@@ -79,7 +79,7 @@ export class AliasRegistry {
         }
 
         await this.persistToDisk();
-        logger.info(`Refresh complete: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved, ${updated} updated`);
+        logger.debug(`Refresh complete: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved, ${updated} updated`);
     }
 
     async mergeAliasSnapshot(streamerId: string, aliases: AliasSnapshot): Promise<boolean> {

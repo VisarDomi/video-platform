@@ -29,7 +29,7 @@ export function startStreamSession(
         return false;
     }
 
-    logger.info(`[${providerLabel}] Initiating session for ${candidate.alias}...`);
+    logger.debug(`[${providerLabel}] Initiating session for ${candidate.alias}...`);
     const session = new StreamSession(
         candidate.streamerId,
         candidate.alias,
@@ -40,12 +40,12 @@ export function startStreamSession(
     );
     const completion = session.run(candidate.masterPlaylistUrl).then((result: SessionResult) => {
         if (result.aborted) {
-            logger.info(`[${providerLabel}] ${candidate.alias}: session paused for shutdown (${result.totalSegments} new segments)`);
+            logger.debug(`[${providerLabel}] ${candidate.alias}: session paused for shutdown (${result.totalSegments} new segments)`);
         } else if (result.totalSegments === 0) {
             logger.warn(`[${providerLabel}] ${candidate.alias}: session ended with 0 segments — cooldown`);
             cooldown.recordFailure(candidate.streamerId);
         } else if (result.totalSegments > 0) {
-            logger.info(`[${providerLabel}] ${candidate.alias}: session completed (${result.totalSegments} segments)`);
+            logger.debug(`[${providerLabel}] ${candidate.alias}: session completed (${result.totalSegments} segments)`);
             cooldown.clear(candidate.streamerId);
         }
     }).catch((err: Error) => {
@@ -59,7 +59,7 @@ export function startStreamSession(
         provider.providerName,
         candidate.streamerId,
         () => session.abort(),
-        () => session.finalize(),
+        (reason) => session.finalize(reason),
         completion,
     );
     return true;
