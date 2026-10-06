@@ -1,9 +1,9 @@
 # agent notes
 
-Monorepo. Packages: `app` (TypeScript frontend), `server` (Express, port `9999`), `downloader` (stream capture, port `7974`), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing foundation), and `userscripts` (browser download-list controls for fc2/sc; built with Vite + vite-plugin-monkey).
+Monorepo. Packages: `app` (TypeScript frontend, also the online iPhone apps' content scripts), `server` (Express, HTTPS port `9999`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (the FC2 live and SC live Safari extensions hosted by the Tango iPhone app: download-list controls for fc2/sc; built with esbuild).
 
-Providers: `tango`, `fc2`, `sc`.
-Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for pipeline Chromium). Upload verification runs inline in the campaign worker; the old `video-reconcile.timer` (daily 04:33) and the old `video-descriptor` unit were removed; do not recreate either.
+Recording providers: `tango`, `fc2`, `sc`.
+Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
 
 The monorepo owns its systemd user configuration under `systemd/user/`. Keep
 the installed copies synchronized with `npm run systemd:check` and
@@ -35,9 +35,15 @@ reloads systemd but deliberately does not restart services.
   `~/Documents/work/video/video-platform/packages/descriptor/`
 - Pipeline details:
   `~/Documents/work/video/video-platform/packages/pipeline/`
+- iPhone apps:
+  `~/Documents/work/video/video-platform/apps/ios/`
 
 ## Frontend - no restarting
 npm run build:app
+
+The server serves `packages/app/build` directly, so the website and the local iPhone
+apps pick up a build without a restart. Video Vault and Tango bundle their content
+script and need a deploy (`apps/ios/PORT.md`).
 
 ## others - depends
 check package.json
@@ -46,8 +52,11 @@ check package.json
 
 ## iPhone apps
 
-**Tango local**, **FC2 local** and **SC local** are the three provider tabs as iPhone
-apps (`apps/ios`); build, deploy and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
+Five iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
+**SC local** open the website's provider tabs; **Video Vault** lists the pipeline's
+XVideos and Porntrex uploads; **Tango** shows live streams on tango.me. They are built
+on the Mac (SSH from this PC); the phone is cabled to the Mac. Build, deploy, inspection
+and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
 
 ## Data outside the repository
 
@@ -55,11 +64,16 @@ Nothing the services need lives in the checkout, so deleting and re-cloning it l
 nothing (only logs and diagnostic screenshots stay in package folders):
 
 - `~/.local/share/video-services/`: the download lists (below), Tango sessions
-  (`session/`), aliases, finalization and pipeline databases, live status.
-- `~/.config/video-services/` (private, mode 600): `auth-accounts.json` (the accounts
+  (`session/`), aliases, finalization and pipeline databases, pipeline artifacts,
+  descriptor models and runtimes, live status.
+- `~/.config/video-services/` (files mode 600): `auth-accounts.json` (the accounts
   `video-auth` keeps signed in; `VIDEO_AUTH_ACCOUNTS_FILE` overrides),
   `upload-providers.json` (XVideos/Porntrex upload logins) and `porntrex-session.json`.
-- `~/Videos/downloads/<provider>/`: recordings.
+- `~/.config/chromium-agent/`: the pipeline's Chromium profile.
+- `~/.local/share/mkcert/pwa/`: the server's HTTPS certificate (without it the server
+  falls back to HTTP).
+- `~/Videos/downloads/<provider>/{downloaded,edited,trash}`: recordings
+  (`VIDEO_DOWNLOADS_ROOT` overrides).
 
 ## Download lists
 
@@ -69,6 +83,9 @@ The download lists (which streamers to record):
 - `~/.local/share/video-services/download-lists/fc2.txt`: `https://live.fc2.com/<channelId>/`
 - `~/.local/share/video-services/download-lists/sc.txt`: `https://stripchat.com/<username> <roomId>`
 
-`VIDEO_SERVICES_DATA_ROOT` moves the whole data folder (`downloadListPath` in
-`packages/shared`). The server edits the lists (the +/- buttons, `POST /api/<provider>/add`);
-the downloader watches them and creates a missing one with a comment line.
+`VIDEO_SERVICES_DATA_ROOT` moves the download lists (`downloadListPath` in
+`packages/shared`) and the pipeline's and descriptor's data; Tango sessions, aliases,
+live status and the server's finalization database stay in
+`~/.local/share/video-services/`. The server edits the lists (the +/- buttons,
+`POST /api/<provider>/add|remove`); the downloader watches them and creates a missing
+one with a comment line.

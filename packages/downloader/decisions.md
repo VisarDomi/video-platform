@@ -2,231 +2,301 @@
 
 ## `.active` plus recording identity owns restart recovery
 
-> **Superseded in part (2026-10-05)**: the sequence baseline is the last saved segment (the playlist tail on resume), a window far below it is a numbering restart (accepted, discontinuity, `SEQUENCE-RESTART` log), and media written after the tail before a crash is re-appended on resume.
+The downloader writes each recording under
+`<downloads root>/<provider>/downloaded/.active/<YYYY-MM-DD HHMMSS alias>/`
+(local time, chosen by the application). The recording identity is Tango
+`streamId`, FC2 `start_time`, or Stripchat `statusChangedAt`; a public stream
+without one is refused. Segment files are named
+`<local number>_<recording identity>_<provider sequence>.ts`. A UTC identity
+keeps the provider's `Z` but drops the colons (`2026-08-12T09:08:47Z` is stored
+as `2026-08-12T090847Z`); provider snapshots and parsed filenames use the same
+canonicalizer, and URI percent escapes are never stored in filenames. Legacy
+numeric filenames are readable but never guessed as a resumable identity.
 
-The downloader writes new recordings under
-`<provider>/downloader/.active/<timestamp alias>/`. Shutdown and transport/API
-failure leave the directory active without ENDLIST, except Tango live
-playlist HTTP 404, which ends the recording and hands saved media to the server. Provider snapshots decide
-whether the recording resumes or ends: the same recording identity resumes,
-a different identity or upstream ENDLIST ends immediately, and successful
-absent/non-public observations must span 60 seconds with no media progress.
-Unavailable provider responses never finalize media.
+Shutdown and transport/API failures leave the folder in `.active` without
+ENDLIST. Provider snapshots decide whether it resumes or ends: the same
+recording identity resumes, a different identity or an upstream ENDLIST ends
+it at once, a Tango live-playlist HTTP 404 ends it, and an absent/non-public
+streamer ends it only after two observations at least 60 seconds apart with no
+playlist progress. An unavailable provider response never ends a recording.
 
-After ENDLIST is atomically published, the directory is atomically moved to the
-provider's hidden `.pending` root for server ownership. `live-status.json` is
-only runtime display state. New segment names contain monotonic local number,
-provider recording identity, and HLS media sequence. Within one recording
-identity, the downloader accepts only a sequence above its constant-sized
-high-water mark, reconstructed from the playlist on restart. FC2 segment URI
-numbers may reset while their semantic HLS sequence continues by playlist
-position; URI resets therefore remain accepted without treating an overlapping
-old HLS window as new media. Legacy numeric filenames remain readable but are
-not guessed as resumable identities.
+At startup each `.active` folder is inspected: one that already has ENDLIST is
+handed off, one without any media goes to the desktop Trash, a legacy folder
+(no compound segment names) is finalized and handed off without guessing an
+identity, and a folder mixing identities is left untouched with a warning.
 
-FC2 discovery uses one adult all-channel-list request no more often than every
-30 seconds. Tango `streamId`, FC2 `start_time`, and Stripchat
-`statusChangedAt` are the respective recording identities.
+`live-status.json` is runtime display state only; lifecycle never reads it.
 
-Folder names retain local timestamps chosen by the application. UTC identities
-supplied by a provider retain the provider's `Z` standard while omitting time
-colons: `2026-08-12T09:08:47Z` is stored visibly as
-`2026-08-12T090847Z`. Provider snapshots and parsed filenames use the same UTC
-canonicalizer. URI percent escapes are not stored in media filenames.
+**Why:** Process restarts and CDN failures are not evidence that a broadcast
+ended; only the provider's own state is.
 
 ## ENDLIST transfers finalized-media ownership to the server
 
-> **Superseded in part (2026-10-05)**: an empty or unreadable segment is no longer marked done: it is fetched again (up to 5 attempts); unreadable files stay on disk. Server finalization no longer repairs or trashes anything.
+The downloader owns transport and the active playlist append only.
+`PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST`
+(correcting `#EXT-X-TARGETDURATION`), then the folder is renamed from
+`downloaded/.active/` to the hidden `downloaded/.pending/` and the directories
+are fsynced. That rename is the durable handoff. The server alone validates the
+media, marks numbering restarts, repairs durations, and publishes the recording
+into the visible `downloaded/` root.
 
-The downloader owns transport and active playlist append only. FC2 writes the
-received bytes and rejects only an empty/unreadable file. Tango probes each
-downloaded segment for dimensions and retains all resolutions, including 360p.
-If dimension probing fails or times out, Tango keeps the nonempty segment with
-unknown dimensions; playlist boundary tracking handles the uncertainty as in FC2.
-It selects the highest available master variant, including portrait variants
-and low-resolution-only streams. Upstream EXTINF remains provisional while
-the stream is live.
+**Why:** Transport success and media decodability are separate concerns, and
+full decoding belongs after the stream is complete.
 
-`PlaylistManager.finalizePlaylist()` atomically writes `#EXT-X-ENDLIST` before
-the `.active` directory is moved into the provider's hidden `.pending` root.
-That rename is the durable handoff to the server. The server owns publication,
-strict decoding, failed-segment repair, desktop-Trash discard, discontinuity
-insertion, and authoritative duration repair after capture.
+## Provider sequence baseline and numbering restarts
 
-**Why:** Transport success and media decodability are separate concerns.
-Metadata-only per-segment probing did not detect the corrupt packets that froze
-playback, and full decoding belongs after the stream is complete.
+A segment's provider sequence is `#EXT-X-MEDIA-SEQUENCE` plus its position in
+the window, not the number in its URI. The baseline is the sequence of the last
+saved (or abandoned) segment of the current numbering run; on resume it is the
+sequence of the playlist's last entry (the tail), not the maximum. A segment is
+new media when its sequence is above the baseline.
+
+A window whose newest sequence lies more than (window length + 10) below the
+baseline (`SEQUENCE_RESTART_MARGIN_SEGMENTS`) is a provider numbering restart:
+the whole window is accepted as new media, its first segment gets
+`#EXT-X-DISCONTINUITY`, a `SEQUENCE-RESTART` warning is logged, and the
+baseline drops to the new run. A window closer than that is a stale or lagging
+copy of the same numbering and is deduplicated.
+
+The appended entry also gets a discontinuity after any sequence gap, a change
+of TS dimensions/SAR (unknown dimensions count as a change), a new init map, or
+a resume.
+
+**Why:** Providers restart their numbering mid-recording (SC edges number
+independently, Tango restarts at 0, FC2 has gone from 1112 to 1). A baseline
+that only grows would skip every later segment until the counter passed the
+old maximum.
+
+## Received media is never deleted
+
+An empty response body is not written. A written file that the provider's
+validator cannot read stays on disk. Either way the segment is not handled: the
+batch stops (later segments wait, keeping playlist order) and the next poll
+fetches it again while the live window still lists it. After 5 rejections
+(`REJECTED_SEGMENT_MAX_ATTEMPTS`) it is abandoned with a warning, the baseline
+moves past it, and the next saved segment gets a sequence-gap discontinuity.
+An upstream ENDLIST is acted on only after a pending refetch is resolved.
+
+Validators: Tango and FC2 require a nonempty file and probe its dimensions with
+ffprobe; unknown dimensions keep the segment with an input boundary. SC requires
+a readable file and takes the duration from the fMP4 fragment.
+
+On resume, files written after the playlist tail before an interruption are
+re-appended in local-number order when they are nonempty, readable, do not
+repeat the tail's provider sequence, and (for fMP4) have their init map on disk;
+live capture then starts after a discontinuity. Every other unreferenced file
+stays on disk for the server to report. A torn line after the last valid entry
+is trimmed atomically; a playlist with legacy, mixed, or foreign names refuses
+to resume.
+
+**Why:** Bytes received from a live stream cannot be fetched again later. Any
+judgement about damaged media belongs to the server, which keeps it too.
+
+## Capture keeps every resolution
+
+Tango selects the master variant with the most pixels (then bandwidth),
+including portrait variants and low-resolution-only streams, and uses a media
+playlist served in place of a master directly. Every resolution is kept,
+including 360p. Upstream EXTINF stays provisional while the stream is live:
+Tango and FC2 keep it, SC uses the fragment duration. TARGETDURATION is raised
+whenever a segment needs it.
 
 ## StreamSession owns the recording lifecycle
 
-One session = one folder. StreamSession owns DiskSession, PlaylistManager, InitTracker, and the retry loop. StreamDownloader is a single download attempt that receives these as inputs — it doesn't create, finalize, or remove anything.
+One session = one folder. StreamSession owns DiskSession, PlaylistManager,
+InitTracker, and the retry loop. StreamDownloader is a single download attempt
+that receives these as inputs; it doesn't create, finalize, or remove anything.
 
-After each download attempt exits, the session may use the latest successful
-provider snapshot to resolve a fresh URL, but it does not infer completion from
+After each attempt exits, the session may use the latest successful provider
+snapshot to resolve a fresh URL, but it does not infer completion from
 transport failure. Shared snapshot reconciliation owns the recording lifecycle:
 
-- **SC:** bulk public/live status plus `statusChangedAt` from the cam detail API.
-- **Tango:** bulk account lookup with `streamId`, restricted to `tango.txt`.
-  No following-feed dependency. Atomic file replacements reload targets;
-  removed targets finalize their sessions, and new recording identities replace
-  even sessions with empty/missing folders. Live playlist HTTP 404 ends the session;
-  authentication, network, and server failures remain retryable. The master is
-  used only to select the initial live URL. Master failures never end a recording;
-  active polling and retries retain the selected live URL without master refresh.
-- **FC2:** the adult all-channel list with `start_time`, requested no more than once per 30 seconds.
+- **SC:** bulk status (`public` and `isLive`) every 5 seconds, plus
+  `statusChangedAt` from the cam detail API, re-read once a minute while a
+  streamer stays live.
+- **Tango:** bulk account lookup with `streamId`, restricted to `tango.txt`,
+  once a second. File replacements reload targets (the directory is watched),
+  and a new recording identity replaces even a session with an empty or missing
+  folder. A live-playlist HTTP 404 ends the session; authentication, network,
+  and server failures remain retryable. The master is used only to select the
+  initial live URL: master failures never end a recording, and polling and
+  retries keep the selected live URL without refreshing the master.
+- **FC2:** the adult all-channel list (`allchannellist.php`) with `start_time`,
+  requested at most once per 30 seconds.
 
-**Why:** The old architecture created a new folder for every download attempt. A single CDN edge rotation split one stream into 5+ folders with 30min of lost content.
+**Why:** A folder per download attempt would split one broadcast into many
+folders at every CDN edge rotation and lose the media between them.
+
+## Sessions end when their streamer is removed or offline without media
+
+Every provider poll first ends the sessions of streamers no longer in the
+download list (`ActiveRecordingReconciler.endRemovedSessions`), even when the
+provider lookup fails or the list is empty; recorded media is handed off. A
+session that has not recorded any media ends once the provider has reported its
+streamer offline over two observations at least 60 seconds apart. Sessions with
+a folder follow the folder rule above.
+
+**Why:** A session retries until something ends it, and the folder scan only
+judges folders: it cannot see a session without media, nor one whose streamer
+left the list. A playlist URL can keep answering 200 after its streamer goes
+offline.
 
 ## Discovery normalizes to session candidates
 
-Provider discovery code owns only provider-specific knowledge: target parsing, status APIs, public/paid rules, stream-name refresh, and master URL derivation. Once a provider has `{ streamerId, alias, masterPlaylistUrl }`, `startStreamSession` owns the common lifecycle: add to `DownloadsManager`, create `StreamSession`, register abort/completion, and update zero-segment cooldown state.
+Provider discovery code owns only provider-specific knowledge: target parsing,
+status APIs, public/paid rules, stream-name refresh, and master URL derivation.
+Once a provider has a candidate (`streamerId`, `alias`, `recordingId`,
+`masterPlaylistUrl`, optional resume folder), `startStreamSession` owns the
+common lifecycle: add to `DownloadsManager`, create `StreamSession`, register
+abort/finalize/completion, and update zero-segment cooldown state.
 
-**Why:** Tango, SC, and FC2 had repeated session-start code with subtly different logs. The shared helper keeps one writer for download lifecycle registration while preserving provider ownership of discovery decisions. Runtime proof after the change: Tango account lookup started public targets from `tango.txt`, FC2 started a live target after `fc2.txt` changed, and SC continued to start public active targets through its cam API path.
+**Why:** One writer for download lifecycle registration keeps logs and
+cooldowns consistent across providers.
 
 ## Download loop: no concurrent timers, no shared mutable state
 
-Tango never checks the master during live capture or subsequent download attempts.
-A live playlist 404 ends its session immediately. Other providers keep inline
-quality checks and variant recovery. The stale timeout (60s) exits an attempt;
-non-terminal failures retain the recording for retry.
+Quality checks and recovery run inline in the download loop. Tango never checks
+the master during capture. SC and FC2 re-check the master every 10 seconds and
+log a different selection as `VARIANT_CHANGE`; SC also tries variant recovery
+when the live playlist fails. Sixty seconds without a saved segment exit the
+attempt (30 seconds logs `STALE`); non-terminal exits retain the recording for
+retry.
 
-**Why:** The concurrent `StreamQualityMonitor` timer was the root cause of the zombie download bug.
+**Why:** A timer running beside the loop can act on state the loop has already
+left; inline checks cannot.
 
-## SegmentFetchResult: timeout vs HTTP error
+## Segment fetches: network errors retry, HTTP errors stop
 
-`fetchSegment` returns `{ data, retryable }`. Up to four segment fetches run
-concurrently within each playlist batch. Network errors and timeouts retry the
-same segment after one second while other workers fetch later segments. Playlist
-appends remain in source order. Retries never mark the failed segment ignored.
-The existing 60-second inactivity limit still exits the
-attempt, after which the session retries from the live playlist. HTTP errors
-stop the attempt as before.
+`fetchSegment` returns `{ data, retryable, status?, error? }`. Up to four
+segment fetches run concurrently within each playlist batch. Network errors and
+timeouts retry the same segment after one second while other workers fetch
+later segments; playlist appends stay in source order, and a retry never marks
+the segment handled. The 60-second inactivity limit and shutdown still end the
+attempt, after which the session retries from the live playlist. An HTTP error
+stops the attempt.
 
-**Why:** A transient network failure should neither end the recording nor advance
-the handled sequence past media that has not been downloaded. Shutdown and the
-existing inactivity handling still bound each attempt.
+**Why:** A transient network failure should neither end the recording nor
+advance past media that has not been downloaded.
 
-## No silent recovery — every transition is logged
+## No silent recovery: every transition is logged
 
-Recovery from CDN failures is allowed, but every state change must be visible in logs: EDGE-SWITCH, EDGE-DEDUP, EDGE-GAP, session retry with reason. Repeated HTTP attempts are aggregated into one access incident spanning retry-created HTTP sessions. The incident logs one opening failure, one SC evidence snapshot, and one close summary with duration and counts; recovery candidates that never work remain debug-only.
+Recovery from CDN failures is allowed, but every state change is visible in the
+logs: `EDGE-SWITCH`, `EDGE-DEDUP`, `EDGE-GAP`, `SEQUENCE-RESTART`,
+`VARIANT_CHANGE`, segment rejections, and session retries with their reason.
+Repeated HTTP failures are aggregated into one access incident spanning
+retry-created sessions: one `ACCESS_INCIDENT_OPEN`, one SC `ACCESS_EVIDENCE`
+snapshot, and one `ACCESS_INCIDENT_CLOSE` with duration and counts; recovery
+candidates that never work stay at debug level.
 
-For SC, the evidence snapshot is observational and does not change download behavior. It records a fresh cam status, the complete master variant ranking, the selected and next-lower resolutions, and bounded probes of the selected variant on two CDN TLDs plus the next-lower variant. Variant URLs are represented by paths and metadata; Mouflon query keys are not logged.
+The SC evidence snapshot is observational and does not change download
+behavior. It records a fresh cam status, the complete master variant ranking,
+the selected and next-lower variants, and bounded probes of the selected
+variant on two CDN TLDs plus the next-lower variant. Variant URLs are
+represented by paths and metadata; Mouflon query keys are not logged.
 
-**Why:** Three rounds of invisible self-healing masked root causes for weeks. Logging every five-second retry later created the opposite problem: hundreds of lines still could not prove whether a 403 happened while public, whether all qualities were denied in a paid state, or whether a lower variant worked. Transition-scoped evidence preserves that proof with low noise.
+After an edge switch, a re-listed segment is skipped as a duplicate only when
+its program date-time is not newer than the last saved one and within 60
+seconds of it (`EDGE_DEDUP_MAX_OVERLAP_MS`). Instants are compared, not
+strings; unparseable values never skip anything.
+
+**Why:** Invisible self-healing masks root causes, while logging every retry
+buries them. Transition-scoped evidence keeps the proof (public or not, which
+qualities were denied, whether a lower variant worked) with low noise.
 
 ## Nothing on disk until first byte write
 
-DiskSession defers dir creation to the moment the first segment or init byte is
-ready to be written. DiskSession owns the DownloadHandle; when the dir is
-created, the informational `live-status.json` view is updated. Lifecycle and
-completion never depend on that JSON file.
+DiskSession creates the folder only when the first segment or init byte is
+ready to be written; the informational `live-status.json` view is updated then.
+Lifecycle and completion never depend on that file.
 
-**Why:** The old code created dirs eagerly. If the variant URL was broken, an empty dir existed with no playlist. The frontend showed it as a video, tried to load the playlist, got a 500.
+**Why:** A folder created for a variant that never delivers is an empty
+recording without a playlist.
 
-## InitTracker owns mapUri-file atomicity
+## InitTracker owns init-file atomicity
 
-The `currentMapUri` state only advances after the init file is confirmed written to disk. The segment count lives in the tracker because it determines init filenames.
+`currentMapUri` advances only after the init file is written. Init files are
+created exclusively, never overwriting: `init.mp4`, then
+`init_<next local number>[_<n>].mp4` for each later map, and every resume writes
+a new init boundary.
 
-**Why:** The old code set `currentMapUri` unconditionally after `writeFile`. A silently failed init write permanently prevented retry.
+**Why:** Advancing the map before a confirmed write would make a failed init
+write permanent.
 
-## PlaylistManager buffers quality changes
+## PlaylistManager buffers init-map changes
 
-Quality changes are buffered via `bufferQualityChange()`, flushed atomically with the header when the first segment is appended.
+`bufferQualityChange()` holds `#EXT-X-DISCONTINUITY` + `#EXT-X-MAP` boundaries
+until the next segment is appended; on a new playlist they are written together
+with the header.
 
-**Why:** `insertQualityChange` used `appendFile` which created the playlist before the header existed. The header overwrite then destroyed the quality change entries.
+**Why:** Appending a boundary before the header exists would create the
+playlist without a header, and writing the header would then destroy the
+boundary.
 
 ## Graceful shutdown: abort without finalization
 
 On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions
-and awaits their completion promises. The folders remain under `.active`
-without ENDLIST so the next process can compare recording identity and resume.
+and awaits their completion. The folders remain under `.active` without ENDLIST
+so the next process can compare recording identity and resume.
 
 **Why:** Process shutdown is not evidence that the remote broadcast ended.
 
-## Server serves active playlists and publishes validated recordings
+## The server serves the playlist as written
 
-> **Superseded in part (2026-10-05)**: "validated" means published after a non-destructive check, possibly with warnings; there is no corruption repair.
+The server's HLS route returns the playlist file as it is on disk: no
+serve-time generation, healing, or TARGETDURATION repair. The downloader owns
+active append correctness; the server's finalizer owns everything after the
+`.pending` handoff.
 
-The HLS route reads the playlist file directly. No `ensurePlaylist`, no
-`generatePlaylist`, no `fixTargetDuration` at serve time. The downloader owns
-active append correctness. Once ENDLIST is written and the directory is handed
-to `.pending`, the server's idempotent finalized-recording processor owns crash
-recovery, validation, corruption repair, canonical playlist repair, and final
-publication.
-
-ENDLIST moves the directory only from `.active` to hidden `.pending`. This is a
-handoff, not final publication. The server alone moves a validated `.pending`
-recording into the visible downloader root.
-
-**Why:** `ensurePlaylist` was a healer masking bugs. `generatePlaylist` (the fallback for missing playlists) had a 2.0s duration fallback that broke iOS Safari. Both removed.
-
-## Finalized MPEG-TS duration includes the longest media stream
-
-The server's finalized-playlist repair uses `max(video duration, audio
-duration)` for playlist `#EXTINF` when adjacent video PTS cannot provide the
-timeline. Container duration is used only when neither media stream has a
-positive duration. During capture, Tango and FC2 retain upstream EXTINF without
-probing every segment.
-
-**Why:** Some botched segments contain almost no advancing video while audio
-continues. Safari presents that interval as frozen video with continuing audio.
-Using only video duration made the playlist timeline shorter than the media
-Safari actually presented and made time-based editing inaccurate.
+**Why:** A serve-time healer hides capture bugs, and invented durations break
+iOS Safari playback.
 
 ## SC bulk status uses `isLive`, not `isOnline`
 
-The bulk API returns both. `isOnline` returns `false` for some actively broadcasting streamers. `isLive` is the correct field.
+A streamer is recordable when the bulk API reports `status: "public"` and
+`isLive`. `isOnline` is `false` for some actively broadcasting streamers.
 
 ## SC selects the highest-bandwidth named variant, including source
 
-The SC master playlist's `NAME="source"` variant is the broadcaster's highest-quality feed and is downloadable with the same Mouflon parameters as transcoded variants. Include it in normal bandwidth-based selection rather than forcing recordings down to the highest transcoded resolution.
+Every master variant with a `RESOLUTION`, including `NAME="source"`, competes
+on bandwidth; the best unnamed (auto) variant is used only when no named one
+exists. `source` is the broadcaster's own feed and downloads with the same
+Mouflon parameters as the transcoded variants.
 
-Selection logs carry the master name, resolution, bandwidth, rank, and whether the choice is master-best. A different URL is logged as `VARIANT_CHANGE`, not assumed to be an upgrade, because edge moves and source-resolution changes can also change the URL or init map.
+Selection logs carry the variant name, resolution, bandwidth, and whether it is
+the master's best. A different URL is logged as `VARIANT_CHANGE`, not assumed to
+be an upgrade, because edge moves and source-resolution changes also change the
+URL or init map.
 
-## No token cache — read from disk on every request
+## FC2 skips paid streams
 
-TokenManager has no watcher, no cache. `getTokens()` reads the session file on every call.
+The adult channel list marks paid streams with `pay != 0`. Only entries with
+`pay == 0` are recorded; a paid or absent channel counts as not live.
 
-**Why:** The watcher cached tokens for up to 5s. With 10s TTL, a token read at 4.7s cache age had 0.3s remaining — not enough for network latency. Reading from disk costs ~15ms on SSD; the network fetch that follows takes 50-200ms.
+**Why:** A paid broadcast can be live while its HLS WebSocket handshake stays
+unavailable without payment.
 
-## Tango API timing: derive from TTL source of truth
+## No token cache: read from disk on every request
 
-`TANGO_STREAM_TOKEN_TTL_S=10` and `TANGO_SESSION_TOKEN_TTL_S=3600` are the external API constants. Refresh cadences derive as half the TTL. All other Tango timing thresholds derive from these.
+The Tango client reads tokens through `readTokens()` (`packages/shared`), which
+reads the session file on every call. There is no watcher and no cache.
 
-## All timing constants in one file
+**Why:** Stream tokens live 10 seconds and are refreshed every 5. Any cache age
+is subtracted from the time left for the request; a disk read is cheap next to
+the network fetch that follows.
 
-`common/timing.ts` contains every timing value as a named constant. No inline magic numbers.
+## Named timing constants
 
-**Why:** Timing values were scattered across 16 files as bare numbers.
+Loop and polling timings are named constants in `src/common/timing.ts`.
+Thresholds that belong to one rule are named next to it
+(`SEQUENCE_RESTART_MARGIN_SEGMENTS`, `EDGE_DEDUP_MAX_OVERLAP_MS`,
+`REJECTED_SEGMENT_MAX_ATTEMPTS`, the reconciler's `TERMINAL_CONFIRMATION_MS`).
 
 ## Flat cooldown, no exponential backoff
 
-20s cooldown after a 0-segment session.
+A session that ends with 0 segments puts its streamer in a 20-second cooldown.
 
-**Why:** Exponential backoff (30s-10min) meant a transient failure at 3am could escalate to 10-minute waits.
-
-## FC2 skip paid streams from the adult channel list
-
-The adult channel-list endpoint marks paid streams with `pay != 0`. Only
-download entries with `pay == 0`.
-
-**Why:** A paid broadcast can be live while its HLS WebSocket handshake remains
-unavailable without payment.
-
-## Sessions end when their streamer is removed or offline without media (2026-10-04)
-
-A session retries until something ends it, and the disk reconciler only judges
-recording folders. Every provider poll now first ends the sessions of streamers
-no longer in the download list (`ActiveRecordingReconciler.endRemovedSessions`,
-also when the lookup fails or the list is empty; Tango's own loop uses it too),
-and ends a session that never recorded any media once the provider has reported
-its streamer offline for 60s over two observations. Sessions with a folder keep
-the folder rule.
-
-**Why:** SC `Milk_Sola` was removed 21s after her session started: the folder was
-finalized without a target, but the session retried for three days. SC
-`sana163` went private, then offline, while her playlist URL kept answering 200:
-her empty session looped for 4.8 days, invisible to the folder scan.
+**Why:** Exponential backoff would let one transient failure grow into
+minutes-long gaps in a live recording.
 
 ## Rule
 

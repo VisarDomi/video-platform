@@ -1,1105 +1,466 @@
-# Monorepo Decisions
+# System decisions
 
-## Convert everything; never drop or reject a segment (2026-10-05)
+This file records the system-level rules that hold on `main` and why. It describes
+the current state only; how it came to be is in git history. Package detail lives
+next to the code: `packages/downloader/decisions.md`, `packages/server/decisions.md`,
+`packages/pipeline/README.md` (+ `docs/upload-recovery.md`),
+`packages/descriptor/README.md`, `packages/app/decisions.md`, `apps/ios/PORT.md`,
+`packages/auth/decisions.md`, `packages/shared/decisions.md`, `systemd/README.md`.
 
-Operator requirements, as implemented:
+## 1. Components and ownership boundaries
 
-- **Capture never discards media.** When a provider restarts its segment
-  numbering mid-stream (SC numbers each edge separately, Tango restarts at 0,
-  FC2 once went 1112 -> 1), a window lying more than (window + 10) segments
-  below the last saved one is new media: accepted after a discontinuity and
-  logged as `SEQUENCE-RESTART`. The downloader's baseline is the last saved
-  segment, not the maximum, also after a restart of the downloader. An empty
-  download is fetched again on later polls (up to 5 attempts) instead of being
-  marked done; an unreadable file stays on disk. Files a crash left after the
-  playlist tail are re-appended on resume.
-- **Finalization is non-destructive.** It may only rewrite `playlist.m3u8`
-  (durations, discontinuity tags). It never removes an entry and never moves or
-  deletes a media file. Damaged segments, unreferenced files and numbering
-  restarts become `warnings` on a `ready` report and the recording publishes.
-  `failed` means only an environment problem (ffmpeg or I/O), retried later.
-- **Every recording is converted** (pipeline `resolution-policy-v5`, see
-  `packages/pipeline/README.md`): at least 1920x1080 pixels and 1080 tall, never
-  smaller than the source; portrait turned 90° counterclockwise; one upload per
-  picture shape (`[<folder> | part N]`); a split's pieces under a minute go to
-  `manual_pieces` for a person. Uploads over two hours or 10 GB go to manual review.
-- **The descriptor sees rotated videos upright** (`rotation: "clockwise"`
-  describes a copy turned back; part of the evidence identity).
-
-Why, with evidence: Porntrex serves portrait uploads at 406x720 at most (it
-scales by height). The counterclockwise tests 3353010 / 3353057 (recordings
-`2026-01-22 090703 olgablackkity` and `2026-01-22 093644 olgablackkity`) reached a
-1920x1080 tier, kept their orientation, and were upright on the iPhone when it
-was turned counterclockwise. Shown the sideways frames, the model wrote "lying
-down"; with the upright copy it did not. Before this change finalization had
-moved 651 damaged (real) segments of 67 recordings to Trash, and SC numbering
-restarts were silently skipped (e.g. clara_6x9 2026-09-21 from 16:12), an
-estimated ≤8 h across 29 recordings since 2026-09-12.
-
-Existing uploads: Porntrex forbids owner deletion ("Please contact support to
-delete your videos"). The 33 older uploads were renamed to their plain
-`YYYY-MM-DD HHMMSS streamer` stamp (no brackets); the 31 pipeline recordings
-behind them were marked removed in the ledger and stay blocked until the new
-pipeline is deployed, then `retry` sends them through it. The two tests stay.
-
-Older entries contradicted by this one carry a "Superseded" line.
-
-## V3 launch preflight hardens descriptor startup without revalidating capture (2026-09-09)
-
-V2 had eight descriptor failures at the fixed 120-second readiness deadline;
-the saved logs show loading started but do not establish the underlying slow-load
-cause. Do not label those recordings corrupt. Descriptor startup now has a
-bounded 10-minute allowance (DESCRIPTOR_STARTUP_TIMEOUT_MS), bounded health
-requests, periodic progress, captured log tails on failure, immediate exit/signal/
-spawn-error reporting and cleanup of failed starts. Shutdown clears its kill
-timer and waits for child exit. Managed mode refuses an already-occupied health
-endpoint rather than adopting an unrelated process. Model, quality, context size,
-FPS policy and systemd resource allocation remain unchanged; no descriptor daemon
-is installed. Preflight uses generated media in /tmp for real inference, plus
-selected-recording metadata/geometry scans, never a catalog-wide decode pass.
-
-## Clean public titles; diagnostic suffixes belong only to comparison trials (2026-09-09)
-
-Normal campaign metadata uses only the descriptor's natural title. A prepared
-comparison trial explicitly appends recording/version/part for operator matching.
-The v3 test retains that suffix. Description provenance and provider/live tags
-are unchanged; no existing remote uploads or stored metadata are rewritten.
-Production identity remains in the versioned SQLite ledger, artifact hashes and
-captured provider edit IDs. Clean titles are never searched to infer ownership.
-Only diagnostic titles support the additional remote lookup. Missing edit IDs
-require review; interrupted file transfers are acceptance-unknown (even if no
-bytes were recorded yet), never automatically retried. Only interruption before
-the upload phase starts is retryable. This also corrects the prior restart path
-which could retry file_uploading attempts while the ordinary error path parked
-them for confirmation. Preserve ledger backups; descriptive titles cannot rebuild
-lost upload identity safely. Unrestricted production is still not authorized.
-
-## Pipeline owns historical and new input geometry normalization (2026-09-09)
-
-> **Superseded in part (2026-10-05)** by "Convert everything; never drop or reject a segment": no segment is omitted any more (the >=90% remux branch is gone), and the Tango 360x640 rejection no longer exists (removed 2026-10-02).
-
-Do not invalidate catalog decode checkpoints. Production remux and
-whole-recording conversion reuse the segment
-dimension analysis to open independent temporary input runs at dimension/SAR
-changes, including changes without EXT-X-DISCONTINUITY. Original playlists and
-media are unchanged. Conversion retains all runs; only the established >=90%
-high-pixel remux policy omits sub-threshold segments. Standalone whole-recording
-conversion obtains the same analysis when its caller has not supplied it.
-Generated TS regressions cover untagged 360p/720p/360p transitions in both
-orientations, with continuous and reset timestamps, checking ordered frame IDs,
-presentation timing, AAC payloads, output dimensions and source immutability.
-
-The downloader is the first line of boundary tagging, with pipeline normalization
-as backup for historical or untagged input. Tango reuses its segment header probe
-for width/height/SAR tracking and still rejects exactly 360x640 / 640x360. FC2
-inspects headers of newly fetched segments, retaining every resolution; unknown
-dimensions retain the segment with conservative boundaries before/after it.
-Only successful playlist appends advance the dimension baseline. Existing tags,
-sequence gaps and resume boundaries do not get duplicate geometry tags. SC's
-existing init-map-change discontinuity handling remains in place; no per-fragment
-dimension probe is added to SC. No historical capture playlists are rewritten.
-History: a2845ed (2026-08-12) removed Tango/FC2 media probing, not a dimension
-comparison in PlaylistManager. SC map-boundary handling dates to March 2026 and
-was retained through the d43a30b buffering refactor.
-
-## V3 is a file-controlled pending queue with retained processing history (2026-09-09)
-
-> **Superseded in part (2026-10-05)**: the resolution-policy-v3 rules below (remux / keep >=90% Full HD / convert) are replaced by policy v5: every recording is converted, nothing is dropped.
-
-The operator is testing pipeline safety and image fidelity by comparing the
-original, locally converted/remuxed artifact, and uploaded provider copy.
-Automatic deletion of v2 trial artifacts defeated that purpose. Production-v3
-therefore retains comparison artifacts unconditionally through verification,
-identity guards, source-removal sweeps, and policy changes. Cleanup defaults off
-and the managed unit pins it off. Unrestricted production remains unapproved.
-
-`pipeline/test-videos.txt` in the video-services data directory feeds a durable
-selected queue: absolute edited recording-folder paths, one per line, blank
-lines/comments ignored. A 30-second worker timer watches it even during long
-stages/cooldowns. Newly valid entries are checkpoint-checked and queued once.
-Removal cancels unstarted entries; reordering changes the pending order. A local
-stage claim marks processing as started: active/attempted/completed work and
-its evidence are retained even when removed from the file. Re-adding consumed
-paths does not repeat uploads. Missing files are errors, not empty selections.
-No automatic library discovery.
-Queue exhaustion waits only for file additions; manual pause remains authoritative.
-The worker is not started merely by saving the file. Failures pause for review.
-
-V3 uploads and artifact paths are generation-specific. Preparing v3 snapshots
-and retires v2 ledger history without deleting remaining v2 files. It stays
-paused with no inferred selections. `comparison.md` and `comparison.json` in
-the v3 artifact directory map original path/URL/fingerprint to exact local
-artifact/SHA-256 and upload identity/link. Online verification never means
-frame-accurate equivalence or operator quality approval. Resolution-policy-v3
-uses the Full HD pixel budget as a minimum: sum the duration of ALL segments
-with coded width * height >= 1920 * 1080 (2,073,600 pixels). Custom aspect ratios
-and either orientation qualify by area, not short edge or display/SAR stretching.
-If all qualify, remux everything natively. If at least 90% qualify, remux all
-qualifying segments and omit only content below that pixel threshold
-from the output. Otherwise convert the whole recording to 1080p. Higher native
-resolutions are not excluded, rejected, or downscaled on the remux branches.
-The pixel-count change is the classification trigger; existing aspect-preserving
-conversion output sizing (1080 short edge, no crop/pad) is unchanged.
-
-Controlled frame-ID tests exposed fMP4 conversion discarding later runs on
-timestamp resets (6 output frames for 18 expected). Production conversions now
-open discontinuity/map runs independently through a concat timeline. TS
-resolution ownership uses packet byte positions in one playlist-ordered scan,
-not an assumed equal number of keyframes per segment. Frame IDs, presentation
-times, AAC payloads, and real process interruption are tested on temporary
-synthetic media/databases; no library conversion or upload is implied by tests.
-
-## Supervised upscales are named artifact variants (2026-08-28)
-
-`remux-one` has two explicitly supervised comparison modes:
-`--upscale1080p` and `--upscale1440p`. They decode every source video frame,
-drop frames whose coded short edge is below 720 or 1080 pixels respectively,
-preserve display aspect ratio and orientation without crop or padding, resize
-with zscale Lanczos, and encode H.264/yuv420p with libx264 slow CRF 16 while
-stream-copying audio. The outputs are suffixed `.upscale1080p.mp4` or
-`.upscale1440p.mp4` and are recorded in `artifact_variants`; they never replace
-the canonical stream-copy artifact or advance/reset recording, description,
-quota, upload, or remote-identity state. The normal campaign remains
-separate and follows the segment-owned production resolution policy below.
-
-## Processing exposes parallel work; systemd owns allocation (2026-08-27)
-
-CPU-intensive application paths must expose enough runnable work to saturate
-the processing allowance, while `video-processing.slice` remains the sole
-authority for aggregate CPU and memory allocation. FFmpeg receives no thread,
-priority, or load-control flags. Finalization and fallback probe pools use
-`os.availableParallelism()` only as a bounded subprocess/worker ceiling. In
-the processing cgroup, the current Node runtime reports six available CPUs for
-the parent slice's `CPUQuota=600%`, while a shell outside the slice reports all
-12 host CPUs.
-
-The historical finalizer has no operator `--concurrency` control. The live
-finalization queue retains its established 15-second inter-recording cooldown
-until that behavior is changed with dedicated testing. Correctness
-serialization, retry backoff, and bounded process counts remain application
-logic; CPU quota, memory limits, and scheduling weight remain systemd policy.
-Transient commands only join the processing slice and inherit its aggregate
-limits. Exact operator-selected library finalization receives foreground
-`CPUWeight=1000` through a systemd scope drop-in; catalogue, remux, and
-descriptor scopes use the default weight of 100.
-
-## Antibot failures cooldown the campaign, never block it (2026-08-17)
-
-Captcha solving gets exactly 60 seconds. On timeout the browser closes, the
-campaign parks in a cooldown (`resume_at` on the control row) and the worker
-sleeps exactly until then — no polling. The wait doubles per consecutive
-antibot failure (1/2/4/8… minutes, no cap) using one shared streak counter
-that any successful upload resets. On resume the single-flight worker picks
-the same `metadata_ready` recording and re-enters the upload. Manual
-pause/resume clears the cooldown and the streak.
-
-## Verification is inline and single-flight; the daily timer is gone (2026-08-17)
-
-The pipeline is single-flight: the campaign worker processes exactly one
-recording at a time. Upload verification (`reconcileDueUploads`) runs
-INLINE in the worker loop as soon as confirmations come due — the separate
-`video-reconcile.timer` (daily 04:33) was removed because it duplicated the
-worker's job, launched a browser on the same profile outside the
-single-flight loop (the "Opening in existing browser session" failure
-class), and is structurally impossible to keep safe while a campaign is
-running.
-
-## .pending mailboxes are permanent; watches are direct and non-recursive (2026-08-17)
-
-The capture handoff roots (`<provider>/downloaded/.pending`) are permanent
-infrastructure, created eagerly at server boot, and watched DIRECTLY and
-non-recursively: one kernel inotify watch per mailbox, constant forever. The
-earlier "watch the parent recursively so the dir can come and go" workaround
-was reverted — recursive node watches grow one kernel watch per recording
-folder and exhaust the system inotify budget. The empty mailboxes are inboxes,
-not zombies; they are never rmdir'd.
-
-## Browser failures: human decisions go to review, never lock the loop (2026-08-17)
-
-Interactive `upload-one` keeps the browser open on failure (a human is
-present). The unattended campaign sets `leaveOpenOnFailure: false` — every
-failure closes the browser so it can never hold the profile lock against the
-next step — and `HumanActionRequiredError`s (captcha / google_challenge /
-session_login) transition the recording to `blocked` with the reason, where
-`review` picks it up instead of retrying forever.
-
-## Validation happens once; .pending is capture-only (2026-08-17)
-
-> **Superseded in part (2026-10-05)**: validation is non-destructive; a `ready` recording may carry warnings (damaged segments are kept).
-
-Media validation runs exactly once per recording — at capture finalization.
-Edited recordings (segmentation) publish directly into `edited/`: their kept
-segments are the already-validated capture bytes, so the edit service records
-a "ready" checkpoint by derivation (playlist fingerprint + report, no
-decoding) and atomically renames the build into place. The finalizer's
-`.pending` roots are `downloaded` only; `edited/.pending` no longer
-exists as a concept. The finalizer also runs parallel workers (cores/3, per
--worker budget cores/workers) instead of a single serial lane.
-
-### CPU belongs to systemd; the app asks, never throttles (2026-08-17, superseded 2026-08-27)
-
-The app makes no thread, budget, priority, or load decisions. ffmpeg is
-spawned with no thread flags (its own defaults), no re-nicing, no load
-guards. The single parallelism decision — how many recordings process at
-once — is `os.availableParallelism()`: the kernel/cgroup answer, which
-respects the `video-processing.slice` `CPUQuota=600%` (currently 6
-lanes). The slice is the only throttle; raising its quota raises the lanes
-with zero app changes.
-
-## Provider userscripts live in packages/userscripts (2026-08-16)
-
-The fc2 and stripchat download-list userscripts were ported into the monorepo
-as `packages/userscripts`: one Vite + vite-plugin-monkey bundle
-(`video-platform.user.js`) with provider modules inside (the manga-reader
-provider pattern). The shared bar logic lives once in
-`src/core/downloadListBar.ts`; providers only define route classification.
-The server URL is build-configurable via `VITE_VIDEO_SERVER_URL` (default
-`https://192.168.1.197:9999`). Tango's control remains in the separate
-stream-viewer repo and is not duplicated here.
-
-## The layout lives in shared (2026-08-16)
-
-The provider folder layout is now defined exactly once, in
-`packages/shared/src/providerLayout.ts`
-(`downloadsRoot`, `providerFolder(provider, kind)`,
-`providerFolders(provider)`, with the `VIDEO_DOWNLOADS_ROOT` override).
-The server, downloader, and pipeline derive every root from it — a layout
-rename is now a one-line change in that module. The server's
-`PathConfig` key was renamed `downloader` → `downloaded` to match.
-
-## Flat per-provider layout: downloaded / edited / trash (2026-08-16)
-
-The capture/processed layout is now `~/Videos/downloads/<provider>/{downloaded,edited,trash}`:
-`downloader` became `downloaded`, and `editor/edited` + `editor/trash` were
-flattened to `edited` + `trash`. The server, downloader, and pipeline path
-derivations were updated, the folders moved (same filesystem renames), and both
-`finalization.sqlite` (`integrity_checkpoints.recording_path`) and
-`pipeline.sqlite` (`recordings.source_path`/`playlist_path`) had their
-paths rewritten. The downloader-side `.pending` handoff lives under
-`downloaded`, the edit handoff under `edited`.
-
-## Folder names are the identity; disk is the truth; zombies are dead (2026-08-16)
-
-Follow-up decisions from the first controlled upload:
-
-- Recording IDs are the source folder names (datetime + alias) instead of
-  hashes; a cross-provider identical folder name goes to manual review.
-  Migrated the live ledger and renamed staging artifacts accordingly.
-- The disk is the source of truth: every campaign step sweeps recordings whose
-  source folder is missing — the ledger row, its confirmations and
-  verifications, and the pipeline-owned files are deleted (24-hour cooldown,
-  in-flight uploads and leased rows skipped). ISP billing in
-  `bandwidth_events` is never refunded or deleted, and the server-owned
-  `finalization.sqlite` is never touched.
-- A re-added folder is always fresh (full remux); the admission-time remote
-  check searches XVideos by folder name and verifies the edit-page title
-  carries `[datetime alias]` — a match parks the recording as uncertain with
-  that edit ID instead of processing it.
-- Zombie concepts removed: the matchKey column (folder name is derived from
-  the source path), the streamer-models table and model:set command,
-  remote_verifications/xvideos_entries merged into `remote_uploads`,
-  moderation status parsing, and every dead model helper.
-- Verification is the edit-page direct link; ID-less uncertain leftovers and
-  contradictory states go to manual review, listed by the new `review`
-  command.
-- The campaign worker (`video-pipeline.service`) sweeps every step even
-  while the campaign is paused.
-
-## First controlled XVideos upload verified end-to-end (2026-08-16)
-
-One controlled upload completed the full circle: remux, describe, upload,
-24-hour-style verification, and verified-online cleanup. Decisions made along
-the way:
-
-- Recording provenance is resolved by the SERVER's per-provider capability,
-  `GET /api/{provider}/resolve` (Tango alias registry + live API, FC2 numeric
-  IDs, Stripchat username lookup). The pipeline keeps no catalog-matching
-  logic of its own; unresolved identifiers stay in
-  `provenance_review_required` for manual `provenance:set`.
-- The metadata tags are fixed `[provider, live]`; descriptor tags are
-  ignored. The reconciliation match key is the source folder filename
-  (datetime + alias), e.g. `[2026-06-20 005838 boo_1234]`.
-- The XVideos model field is not required for submission: the uploader types
-  the streamer alias into the (zero-width typeahead) model search and saves
-  without selecting a model; XVideos never attaches the model to the video.
-- Friendly Captcha on the upload page is solved automatically (click the
-  widget checkbox only while unactivated, wait for completion, click the
-  page's "Confirm that you are not a robot" button). Tag and model inputs are
-  zero-width typeaheads, so they are typed via keyboard events, never
-  `fill()`.
-- A submitted upload is never accepted on submit alone: the attempt parks as
-  `uncertain` with the captured numeric upload ID and a 24-hour confirmation.
-  The online check opens the authenticated edit page
-  `/account/uploads/<id>/edit`; the presence of the "Direct link to the
-  video page" anchor (`/video.<key>/<slug>`) is the success signal.
-- Uploads never duplicate an existing XVideos entry: before uploading, the
-  uploads list is searched by match key, and an existing entry parks the
-  recording as uncertain for verification instead of re-uploading.
-- Cleanup runs only on verified-online uploads and deletes only the pipeline
-  staging artifact; original downloader/editor folders are never touched.
-- One login flow per browser session: `withAuthenticatedPage` launches and
-  logs in once, then callers run their specific work on that page.
-- The managed `video-pipeline.service` campaign worker is power-off robust,
-  idles while paused, and performs due upload verification inline. The old
-  `video-reconcile.timer` is removed.
-
-## Active recording folders are the durable downloader/server boundary (2026-08-12)
-
-> **Superseded in part (2026-10-05)**: a lower provider sequence far below the last saved one is now accepted as a numbering restart, and finalization no longer removes "regressed" entries or moves unreferenced files to Trash.
-
-The downloader owns mutable `<provider>/downloader/.active/<recording>/`
-folders. After writing `#EXT-X-ENDLIST`, it atomically renames the directory to
-the hidden `.pending/` sibling. That rename is a durable handoff, not
-publication. The server owns `.pending`, runs cleanup, canonical playlist
-repair, strict decode and attributable corrupt-segment repair there, and alone
-atomically renames a successful recording into the visible downloader root.
-Visible root membership therefore means server integrity passed.
-
-`live-status.json` remains informational and is not completion authority. No
-per-recording manifest or `.media-integrity.json` is required. Power-loss
-checkpoints and failed diagnostics live centrally in
-`~/.local/share/video-services/finalization.sqlite`; filesystem location remains
-the lifecycle authority.
-
-New media filenames are
-`{monotonic-local-number}_{recording-identity}_{provider-sequence}.ts`. Recording
-identity is Tango `streamId`, FC2 `start_time`, and Stripchat
-`statusChangedAt`. Within one recording identity, the downloader persists and
-resumes from the highest accepted HLS media-sequence number. It accepts only
-higher sequence numbers, so arbitrarily large overlapping live windows cannot
-redownload old media and the deduplication state remains constant-sized. FC2
-may reset the number embedded in a segment URI (for example `2555.ts` followed
-by `0.ts`), but that is not an HLS media-sequence reset: the semantic sequence
-continues by playlist position and is what the compound filename stores. A
-genuine regression of the HLS media sequence for the same broadcast identity
-is therefore rejected instead of guessed to be new media. Writes must never
-overwrite a media file. Historical numeric names remain valid and are never
-migrated.
-
-As a publication backstop for MPEG-TS recordings using compound names, server
-finalization removes any entry whose HLS media sequence does not exceed the
-highest earlier entry, then moves the newly unreferenced owned segment files to
-desktop Trash before strict validation. This repairs overlap accidentally
-accepted by a downloader defect; it does not sort media or reinterpret legacy
-numeric filenames.
-
-Folder timestamps use the operator's local clock. Provider-supplied UTC
-recording identities retain their `Z` standard but omit colon punctuation for
-safe visible filenames: `2026-08-12T09:08:47Z` becomes
-`2026-08-12T090847Z`, both when written and when compared during recovery. URI
-percent escapes must not be stored in disk filenames because HTTP clients and
-Express decode them at the request boundary.
-
-The provider snapshot loops, not HLS transport failures, decide lifecycle. An
-upstream ENDLIST or a different recording identity is immediately terminal. An
-absent/non-public result is terminal only after at least two successful
-observations span 60 seconds with no media progress. Provider/API unavailability
-does not start or advance terminal confirmation. FC2 uses exactly the adult
-channel-list endpoint and starts requests no more often than every 30 seconds.
-Shutdown and power loss leave `.active` recordings unfinished for restart
-reconciliation; they do not append ENDLIST.
-
-The server uses Linux-backed Node filesystem watches on the hidden downloader
-and edited `.pending` roots. It registers watches before a non-recursive
-startup reconciliation and performs a rare safety reconciliation for missed or
-coalesced events. No one-second tree scan or Rust/Go watcher is needed. One
-idempotent post-ENDLIST processor replaces orphan finalization and overlapping
-repair/finalization scripts while reusing PlaylistAuthority and the bounded
-media-integrity queue. Edited output is likewise built under a hidden path,
-handed to `.pending`, validated, and only then published into `editor/edited`.
-
-**Why:** Active capture, finalized local media, and postprocessing need explicit
-single-writer ownership that survives either process losing power. Filesystem
-state and atomic rename provide that boundary without another service protocol,
-while provider recording identity prevents a reconnect from joining two
-broadcasts or overwriting a reused provider sequence.
-
-## Ownership: ENDLIST hands media integrity to the server (2026-08-11)
-
-> **Superseded in part (2026-10-05)**: the failed-segment repair (remove from the playlist, move to desktop Trash) is gone; damaged segments stay and are reported as warnings; unattributable fMP4 damage no longer blocks publication.
-
-The downloader owns a recording while its directory is under `.active`.
-Atomically writing `#EXT-X-ENDLIST` and renaming into `.pending` hands it to the
-server. The server owns media integrity and canonical playlist repair and is the
-only component permitted to publish into a finalized root.
-
-Tango and FC2 no longer launch ffprobe for every downloaded segment. Their live
-loop performs only the transport-level nonempty-file check and preserves the
-upstream EXTINF while capture is active. The server observes completed folders,
-runs one strict whole-playlist ffmpeg decode, and performs the expensive
-per-segment decode only when that recording-level check fails. Failed MPEG-TS
-playlists with exact fragment attribution are repaired automatically: corrupt
-entries are removed, the playlist is made canonical, the files are moved to
-desktop Trash, and a strict decode must then pass. Failed fMP4 playlists are
-scanned with their active initialization map. A fragment is attributable only
-when it fails alone, its adjacent fragments pass alone, and every available
-overlapping two-fragment context still fails. Repair drops that exact fragment,
-renews both discontinuity and map before the next fragment, moves the dropped
-file to desktop Trash, and requires a clean full decode. Initialization damage,
-adjacent failures, and boundary-only failures remain blocked because they do
-not establish a uniquely safe discard.
-
-Completed recordings enter one deduplicating FIFO queue. Normal live operation
-and the historical catalogue expose affinity-bounded recording workers, while
-systemd governs their aggregate CPU allocation. FFmpeg uses its own thread and
-priority defaults. Fallback segment probing is bounded by the same affinity
-count so it cannot create an unlimited subprocess set. The live queue retains
-its established 15-second wait between recordings pending dedicated testing.
-The `video-processing.slice` shared by the server and manual/future pipeline
-workers has `CPUQuota=600%` on the current 12-CPU host, `MemoryHigh=70%`,
-`MemoryMax=80%`, and `MemorySwapMax=0`. The server and explicit single-recording
-finalization scopes have `CPUWeight=1000`, while backlog remux, descriptor, and
-all-library catalogue scopes use weight 100. Thus just-ended livestream
-finalization, its on-demand test equivalent, and API work win CPU time under
-contention without preventing background work from using otherwise idle
-capacity. Downloader and auth remain outside the processing slice. Segment scans checkpoint every 25
-segments in the central SQLite ledger, so service restarts resume from the last
-checkpoint. Harmless null-muxer DTS diagnostics are filtered before bounded
-stderr capture, and FFmpeg repeat compression is disabled. A legacy compressed
-`Last message repeated` summary is ignored only when it directly follows an
-ignored DTS line, preventing both truncation and repeat summaries from turning
-them into false corruption. Failed checkpoints carry a validator revision;
-after validation semantics change, older failures are retried once while
-current genuine failures remain durable and do not loop on hourly reconciliation.
-
-When an automatic or explicit failed-integrity repair is requested, attributable
-MPEG-TS segments or conservatively isolated fMP4 fragments are removed from the
-playlist, the required discontinuity (and fMP4 map) is inserted before the next
-good segment, canonical durations are recalculated where supported, and the
-exact corrupt files are moved to desktop Trash. A fresh strict decode must pass
-before the recording becomes pipeline-eligible. Desktop Trash and the video library are on
-the same filesystem on this host, so the move is atomic and the operator can
-recover files until intentionally emptying Trash. fMP4 failures without exact
-fragment attribution remain blocked.
-
-PlaylistAuthority prefers adjacent MPEG-TS video PTS and invokes ffprobe only
-for boundaries those timestamps cannot define, such as discontinuities and the
-final tail. It runs as part of the unified post-ENDLIST processor before strict
-validation and again after any corrupt entries are removed.
-
-**Why:** Metadata-only ffprobe accepted the corrupt MPEG-TS segments that later
-froze video during playback. Fully decoding every segment in the live loop
-wastes power and gives the downloader destructive semantic authority. A single
-post-ENDLIST validation is cheap for clean streams, while corrupt streams can
-be inspected precisely with the whole recording available. Earlier explicit
-quarantine used `/tmp` as the intentional discard destination. Corrupt-media
-discard now uses desktop Trash instead because it provides a visible recovery
-and deliberate emptying workflow without a copy. Detection itself remains
-nondestructive; exact MPEG-TS attribution authorizes the idempotent repair step.
-
-## Upload packaging is one recording per artifact and non-destructive (2026-08-11)
-
-> **Superseded in part (2026-10-05)**: a recording with several picture shapes is one artifact (and upload) per shape; stream copy is no longer used.
-
-The server owns upload eligibility and final-artifact validation. Provider facts
-live in `packages/shared/src/uploadPolicy.ts`; the server re-exports them and the
-pipeline consumes the same policy instead of copying limits into descriptor,
-converter, and uploader workers.
-
-XVideos private uploads are the only active destination. It contributes a
-7,200-second duration maximum and a 50,000,000,000-byte file maximum. Bunkr is
-recorded as unavailable because registrations are closed until further notice;
-it is not part of the active/shared policy and its 2 GB limit must not constrain
-XVideos artifacts. XVideos' minimum duration, accepted container/codecs, and
-metadata limits remain explicitly unresolved until manual authenticated tests.
-The upload page is not publicly indexed, so those authenticated observations
-cannot be independently confirmed by a public search.
-
-Every recording is planned independently. No minimum-duration skip is active
-while the XVideos minimum is unknown. Once manually verified, changing that one
-provider value derives the shared minimum; recordings below it will be marked
-`skipped_too_short` with a manual-action notification. Recordings over two hours
-are marked `blocked_too_long`, and oversized final artifacts are marked
-`blocked_too_large`. No decision moves, deletes, edits, or concatenates source
-files. Concatenation is intentionally not part of the fresh pipeline and must be
-a separate future decision if ever added.
-
-**Why:** The old uploader's 15-minute concatenation rule destroyed the
-one-recording boundary and moved source files after grouping. Most recordings
-can be described, converted, and uploaded without taking that risk; exceptional
-short or oversized recordings should remain visible for manual handling.
-
-## Backlog pipeline is quota-led and uses one heavy worker (2026-08-11)
-
-> **Superseded in part (2026-10-05)**: every artifact is a conversion now, not a stream-copy remux.
-
-The eligible downloader + edited library measures 1,230,560,053,106 bytes in
-3,372 recordings and 3,875,924 seconds (44.86 days) of playlist time. Trash is
-not eligible. At the observed 2.54 Mbps average media bitrate, the operator's
-rough 1.1 TB / 2,222 kbps estimate is about 46 days, not five days: stored bytes
-must be multiplied by eight before dividing by bits per second.
-
-The working monthly ledger is 1.0 TB download, 0.6 TB upload, and 0.4 TB held
-in reserve. New media is approximately 0.2 TB/month. With one XVideos upload per
-artifact, using the full allowance drains the measured 1.23 TB backlog at about
-0.4 TB/month, or roughly 3.1 months. The selected six-month pace processes the
-existing backlog plus approximately 1.2 TB of new media at about 0.405 TB/month
-(13.5 GB/day), leaving about 0.195 TB/month of upload headroom.
-
-The uploader must account actual transmitted bytes, including failed/retried
-transfers, and stop admitting jobs when the calendar-month upload ledger reaches
-600,000,000,000 bytes. Evenly spending the full allowance averages about 1.85
-Mbps; the six-month target averages about 1.25 Mbps. The hard byte ledger, not
-the rolling rate, remains authority.
-
-The durable per-recording state machine is:
-
-`server_ready -> remuxed -> artifact_valid -> described -> metadata_ready -> xvideos_admitted -> xvideos_uploading -> xvideos_uploaded -> xvideos_verified -> cleanup_eligible`
-
-An identifier that cannot be resolved after description branches to
-`provenance_review_required` and returns to `described` after a reusable manual
-override. An upload whose metadata submission may have succeeded branches to
-`xvideos_uncertain`; it is adopted when the authenticated uploads list contains
-the stable match key, or returns to `metadata_ready` only after the full
-24-hour absence window.
-
-Before the global historical-finalization contract is complete, an operator may
-prepare one explicitly selected historical recording only when the central
-server ledger has a matching successful checkpoint for its current playlist.
-`pipeline remux-one` stream-copies that source into the durable staging root,
-fully decodes the MP4, probes it, hashes it, and stops at `artifact_valid`; it
-does not invoke descriptor or upload. The source HLS folder is never modified.
-
-Blocked/failed states retain the source and the diagnostic. A stream-copy MP4
-remux is the default final artifact; transcode is destination-specific and only
-used when codecs or an active destination's size limit require it. Of the
-measured library, no folder exceeds XVideos' 50 GB limit. After manual trimming,
-none exceeds XVideos' two-hour limit; the current longest playlist is 6,983.065
-seconds (1:56:23). Descriptor runs on the exact validated artifact that will be
-uploaded. Future items over two hours are blocked and surfaced for manual
-trimming; the pipeline does not split or transcode them merely to satisfy
-duration policy.
-
-Local cleanup is per recording, never an end-of-migration sweep. With XVideos
-as the sole remote copy, source deletion is a separate risk decision and remains
-disabled until explicitly enabled. If enabled, eligibility requires completed
-XVideos processing/playback verification, persisted remote ID/URL, a stored
-local artifact hash, and a seven-day grace period. Cleanup must target exact
-manifest-owned source/artifact paths; no broad directory deletion is allowed.
-Without source cleanup the pipeline limits temporary staging to one artifact,
-but uploading alone does not reduce the existing local library.
-
-One orchestrator and one durable SQLite job/byte ledger own all providers. It
-uses one global artifact staging root, created only when the pipeline is
-enabled; provider config must not invent converter/uploader directory trees.
-There is one GPU descriptor request at a time and no concurrent CPU-heavy
-transcode. Light remux/upload work may overlap. The scheduler pauses new heavy
-work above the host CPU threshold and the eventual systemd processing slice
-must cap aggregate memory at 80% with swap denied. Resource utilization controls
-job admission and concurrency, not descriptor evidence quality.
-
-The descriptor uses duration-tiered quality ceilings: 4 FPS below seven
-minutes, 2 FPS from seven to below fifteen minutes, and 1 FPS thereafter. The
-115,000-token video budget may lower FPS inside any tier and remains
-authoritative. A live scan of 3,382 eligible finished recordings measured 44.79
-media-days. Using the successful near-two-hour benchmark as a conservative
-per-frame cost, the current library plus six months of projected new media is
-about 88.47 media-days and 45.42 full-speed descriptor-days: 25.2% duty across
-the 180-day schedule. At 50% duty the descriptor can process approximately
-0.803 TB/month, above the 0.6 TB/month upload ceiling, so description is not the
-pipeline bottleneck.
-
-At a 1:1 stream-copy artifact ratio, the six-month plan transfers 2.43056 TB,
-or 405.09 GB/month (1.25 Mbps average), leaving 194.91 GB/month below the upload
-cap. The byte ledger can absorb an aggregate 1.481x size/retry multiplier; with
-10% reserved for retries, final artifacts may average at most 1.346x source
-size. Stream-copy remux is therefore comfortably inside both compute and byte
-limits. If XVideos forces a full transcode, descriptor and transcode remain
-serialized heavy jobs: a converter only needs 0.657x real-time throughput to
-finish within six months at unrestricted duty, but approximately 1.984x
-real-time to keep their combined heavy-worker duty at 50%. A 1x real-time
-converter would finish but raise combined duty to about 74.4%.
-
-## Provider paths are declarative, not startup side effects (2026-08-11)
-
-Importing server config must not create provider storage trees.
-`getProviderPaths()` describes paths only. Write operations create their
-specific destination on demand. The unsupported flat-file `mp4` provider and
-its routes/services were removed; this does not affect fMP4 HLS playlists,
-`#EXT-X-MAP`, or `init.mp4` fragment serving. Converter and other undecided
-pipeline folders are not created merely because a provider is listed in
-configuration. Existing empty/legacy folders are left untouched.
-
-## Historical playlist repair was folded into finalization (2026-08-11, superseded 2026-08-12)
-
-The retired `npm run fix-playlists` command called the same canonical
-PlaylistAuthority used by the server instead of maintaining a second
-per-segment-duration rule.
-For MPEG-TS it reads adjacent video PTS from bytes and uses the longest positive
-audio/video stream duration only at discontinuities, tails, or failed byte
-probes; fMP4 is skipped. The CLI retains SQLite checkpoints, live-folder guards,
-CPU admission, dry-run, and power-loss-safe atomic writes. Rule version
-`media-timeline-v2` deliberately invalidates checkpoints made by the obsolete
-`max-av-v1` implementation.
-
-The applied playlist-only all-provider/all-scope migration completed on 2026-08-12 after
-11,565.628 seconds: 2,820 playlists processed, 1,940 written, 880 unchanged,
-2,318,421 segments inspected, and zero failures. This closes that historical
-batch only. The standalone fixer and failed-integrity CLI were then removed so
-there is only one production finalization engine. The server now owns canonical
-repair and strict integrity before publication. A bounded
-`npm run finalize-library -w server` migration
-uses that exact production processor to establish the same invariant across the
-historical roots and removes obsolete per-recording integrity sidecars only
-after each recording passes.
-
-## Descriptor uses duration-tiered FPS ceilings with token-budget adaptation (2026-08-12)
-
-Native-video description requests use up to 4 FPS below seven minutes, up to 2
-FPS from seven to below fifteen minutes, and up to 1 FPS thereafter. For any
-recording that would exceed the 115,000-token video budget, the descriptor
-lowers FPS as `budget / measuredTokensPerFrame / duration`. Full 4 FPS fits
-through 407.8 seconds (6:48), full 2 FPS through 815.6 seconds (13:36), and full
-1 FPS through 1,631.2 seconds (27:11). Longer videos receive approximately
-1,631 sampled frames regardless of duration: about 0.453 FPS at one hour and
-0.2266 FPS at two hours. A two-hour video therefore samples one frame every
-4.41 seconds while preserving room for instructions and output.
-
-Fixed 0.5/1/4 FPS comparisons on 12.35-second and 176.27-second recordings found
-that 1 FPS retained useful setting, clothing, and action specificity with about
-one quarter of the 4 FPS prompt tokens. Sampling at 0.5 FPS remained useful but
-lost some clothing/action specificity on the longer recording. Four FPS did not
-produce a consistent quality improvement. Invalid sampling inputs fail before
-a model request is sent.
-
-The spare descriptor capacity is deliberately spent on denser evidence for
-short recordings. The token budget safely tapers FPS near each tier boundary,
-so this quality increase cannot overflow the model context.
-
-**Why:** Frame rate is an evidence-quality and context-cost choice, not a model
-memory workaround. One FPS is the measured normal-quality point; duration-based
-reduction preserves support for long recordings without making short videos
-needlessly sparse.
-
-## Durable pipeline foundation is separate and network-disabled (2026-08-12)
-
-Months-long processing does not run inside the Express server. The standalone
-`packages/pipeline` package owns an isolated SQLite WAL/FULL ledger containing
-recordings, append-only state events, expiring worker leases, remux outputs,
-validated artifact hashes, description evidence, upload reservations/attempts,
-actual transmitted-byte events, and remote verification evidence. It is not a
-systemd service and is not started by the monorepo start command.
-
-Production discovery considers only immediate entries in `editor/edited` and
-never admits raw downloader recordings. Every candidate needs an exact current
-`ready` checkpoint in the server finalization ledger; root membership or an old
-whole-catalog contract does not authorize a changed edit. Hidden `.active` and
-`.pending` directories remain undiscoverable. A one-time bounded historical
-finalization pass must complete before the campaign is enabled.
-
-The local stages use non-overwriting stream-copy MP4 publication, then decode,
-probe, and SHA-256 the exact artifact before describing it. Descriptor is now a
-library entry point with a manual single-artifact command; it retains automatic
-duration and token-budget FPS selection and persists the prompt hash with every result.
-Artifact-hash/prompt-hash evidence paths allow a restarted worker to adopt a
-completed description rather than spend the model work twice. Stages commit one
-durable transition at a time, recover expired leases, and restore explicit
-manual retries to the exact failed stage.
-
-The 600,000,000,000-byte calendar-month ledger uses `Europe/Tirane` by default.
-Reservations include expected request overhead; actual bytes from failed and
-retried attempts are append-only. A lost response after sending a body enters
-`xvideos_uncertain` and requires reconciliation rather than a blind duplicate
-upload. Dry-run upload planning mutates neither quota nor state.
-
-At this foundation stage there was deliberately no real XVideos transport. The
-2026-08-13 decision below supersedes that implementation detail while retaining
-the separate-service, durable-ledger, disabled-cleanup, and default-off network
-boundaries.
-
-## XVideos browser uploader is implemented but production-disabled (2026-08-13)
-
-Authenticated discovery established the XVideos Google OAuth, Friendly Captcha,
-local-file upload, metadata, model, and uploads-list flows. The pipeline now has
-a visible persistent-Chromium adapter, but a real upload requires both an
-explicit `upload-one --apply` command and `VIDEO_PIPELINE_NETWORK_UPLOADS=1`.
-There is still no pipeline systemd service. Friendly Captcha and unexpected
-Google/account challenges fail closed and require operator action; the adapter
-does not click or bypass human verification.
-
-Recording provenance uses the same shared provider target parsing and membership
-identifiers as the server's `+ / -` download-list control. Tango may resolve an
-old folder alias through API-provided alias history. FC2 uses its channel ID.
-Stripchat uses only the current username/room-ID target relationship; no local
-Stripchat alias history is invented. Failed resolutions enter durable review.
-An operator override is keyed by `(provider, observed folder identifier)` and
-therefore resolves every matching recording instead of requiring per-recording
-decisions. The resolved ID, alias, and source URLs are snapshotted into pipeline
-SQLite, so later target-list removal cannot erase upload provenance.
-
-The descriptor remains responsible only for evidence-derived title,
-description, and tags. The pipeline metadata composer adds a stable per-recording
-title match key, recording time, streamer-ID URL, and alias URL when known. It
-enforces the authenticated form's limits: title 255, description 1000, and 20
-tags. Descriptor descriptions are capped at 750 characters to reserve suffix
-room. Default tags are the public provider name (`tango`, `fc2`, or
-`stripchat`) followed by `live`; normalized descriptor tags follow with stable
-deduplication. Fixed form choices are explicit, Straight + Solo Girls, XVideos
-only, Direct link, no translations, no blocked countries, and no commercial
-communication.
-
-Streamer models are a separate durable mapping keyed by `(provider,
-streamerId)`. `upload-one` always requires that mapping. The supervised browser
-searches the configured stage name but never chooses a suggestion by name:
-XVideos may return several ambiguous people and does not know the source
-provider ID. The operator manually selects the correct result or opens create.
-When create is opened, the adapter fills the configured stage name, gender,
-professional-model explanation, and profile picture, then waits for operator
-review/submission. A captured XVideos model ID is reused only by the future
-unattended campaign. Test environment values are never global defaults for an
-unrelated streamer.
-
-Remote success means the authenticated `/account/uploads` list contains the
-stable title match key and exposes a numeric XVideos ID and video URL. Public
-moderation states such as Online, Blocked, or Edit required are stored as
-informational observations and do not change upload success. The adapter uses
-the list's search control, so reconciliation does not depend on the entry being
-on the first page.
-
-Upload attempts checkpoint file-transfer progress, `file_uploaded`, and
-`metadata_submitting` boundaries in SQLite. Interrupted transfer or pre-submit
-work is charged to the byte ledger and becomes immediately retryable. Once
-metadata submission may have occurred, the job becomes uncertain, receives a
-durable `confirm_after = recovery/submission time + 24 hours`, and cannot retry
-during that interval. The due reconciliation searches the authenticated list;
-a found entry is adopted regardless of moderation status, while absence after
-the full grace period returns the recording to `metadata_ready`. Every transfer
-and retry consumes the calendar-month byte budget.
-
-Production activation still has three independent blockers: the historical
-server-finalization contract must be complete, descriptor model/prompt output
-must be approved, and one controlled upload must actually save metadata so the
-final submit response plus uploads-list reconciliation are validated. Source
-and artifact cleanup remain disabled.
-
-## Upload work is supervised first and a durable campaign later (2026-08-14)
-
-Descriptor output exists only for upload metadata. During development,
-`remux-one`, `describe-one`, and `upload-one` select one exact recording.
-Manual remux accepts either a managed downloader or edited folder and invokes
-the production single-recording server finalizer when its exact checkpoint is
-missing. Durable description metadata and production uploads are edited-only;
-the descriptor package retains a separate arbitrary-MP4 prompt experiment.
-
-The eventual campaign persists paused/running intent, an
-`all|tango|fc2|sc` filter, strict oldest-first ordering, and the monthly byte
-limit in SQLite. Eligibility comes from exact server checkpoints; capture order
-comes from the timestamp in the edited folder name, not finalizer scan time.
-The worker advances one durable stage at a time and rereads pause intent between
-stages. Missing provenance/models, stale edits, monthly quota exhaustion,
-authentication challenges, and uncertain uploads remain explicit recoverable
-boundaries.
-
-Systemd will own worker lifetime while SQLite owns intent and progress. The
-worker and controls are implemented, but no unit is installed or enabled until
-the catalog, descriptor, authenticated uploader verification, and temporary-MP4
-retention decisions are complete. All cleanup remains disabled.
-
-## The monorepo owns its systemd user configuration (2026-08-13)
-
-Versioned user units, the aggregate processing slice, and service drop-ins live
-under `systemd/user`. `npm run systemd:check` detects drift from installed files;
-`npm run systemd:sync` atomically installs only the declared video-platform
-files and reloads the user manager. Unit templates use a `{{HOME}}` parameter
-that the synchronizer expands for the invoking user, keeping machine-specific
-usernames out of version control. Synchronization never restarts, starts, stops,
-enables, or disables a service implicitly. Chezmoi must not maintain a second
-divergent copy of these units.
-
-**Why:** The resource hierarchy and CPU priority determine production behavior
-as directly as the queue implementation. Leaving them as unversioned machine
-state makes concurrency tests irreproducible and permits deployment drift.
-
-## Ownership: Video is a self-contained unit (2026-04-05)
-
-Every piece of state about a video belongs to the video itself. The `Video` type carries `provider` alongside `filename`, `type`, `duration`, `size`, `isLive`. Operations derive context from the video object — no threading `provider` through function args from external stores.
-
-**Backend:** `VideoRef` (`filename`, `provider`, `type`, `dirPath`) is resolved once at the API boundary via `resolveVideo(filename, provider)`. Services receive the ref, never re-resolve. No cross-provider directory search — `findVideoPath()` (global 12-dir search) was replaced with provider-scoped resolution.
-
-**Frontend:** `fetchVideos` stamps `provider` on each video at fetch time. `playerStore`, `videoActions`, `VideoEngine`, and `hls.ts` read provider from the video itself.
-
-**Why:** The old `findVideoPath()` searched all providers. A tango video could match an fc2 path. The frontend threaded `videoListStore.selectedProvider` through 5 layers of function calls — fragile and easy to desync.
-
-## Ownership: Shared settled-selection overlay (updated 2026-07-29)
-
-Each of the three `PlayerUnit`s owns its video, playback timeline, and media
-lifecycle. A single imperative `OverlayView` belongs to the settled viewer
-selection and remains stationary while the native document scrolls.
-
-The overlay disables mutations while unsettled and switches atomically when an
-adjacent video contains the visual viewport's exact midpoint pixel. On
-`scrollend`, with no finger down, the viewer immediately returns to its resting
-presentation (Stream Viewer port, 2026-09-08). Stage translation preserves
-position during midpoint recycling; scroll correction occurs only at settlement.
-Its fixed box is transparent and may touch the viewport boundaries. Only the
-controls paint pixels; a full-box background or backdrop makes Safari's browser
-chrome opaque.
-
-**Why:** Moving per-unit overlays require viewport-bound fixed/transformed player
-geometry, which makes Safari's top and bottom chrome opaque. Native scrolling
-keeps videos edge-to-edge while one stationary UI gives editing controls stable
-geometry.
-
-## Ownership: Only settled media feeds shared UI (updated 2026-07-29)
-
-Each unit maintains its own playback timeline. Only the current unit feeds the
-shared overlay and progress persistence. Adjacent videos remain playing muted
-and become current only when they contain the visual viewport midpoint.
-
-**Why:** The stationary overlay must continue to describe the last committed
-selection while videos move underneath it.
-
-## Ownership: No shadow state — derive from the slot (2026-04-05)
-
-`VideoEngine` has no `currentFilename` field. Whether a video changed is derived from `unit.video.dataset.loadedFilename` — the actual content loaded in the slot. The slot is the source of truth.
-
-**Why:** The old `currentFilename` shadow field diverged from reality after carousel rotation. Going back to list and re-opening the same video showed a different video because `currentFilename` matched but the slot had rotated to different content.
-
-## Frontend diagnostic logging removed (2026-07-29)
-
-The frontend `LogService`, watchdog/sentinel events, and server `/api/log`
-passthrough are removed. Recovery now responds directly to `pagehide`,
-`pageshow`, visibility, and connectivity events. Browser console errors remain
-available for development without maintaining a persistent application logging
-subsystem.
-
-## HLS routes include provider (2026-04-05)
-
-`/hls/:provider/:filename/playlist.m3u8` instead of `/hls/:filename/playlist.m3u8`. The server resolves within the provider's directories only.
-
-**Why:** The old route searched all providers. The frontend already knew the provider but threw it away at the API boundary.
-
-## Cross-process resource ownership
-
-Single writer per resource, no cross-process write contention.
-
-| Resource | Writer | Readers |
+| Package | Runs as | Owns |
 |---|---|---|
-| `aliases.json` | server (AliasRegistry.refresh, hourly) | server only (frontend via /api/tango/list) |
-| `tango.txt` | server (routes + AliasRegistry.syncTangoTxt) | downloader TangoTargetManager |
-| `live-status.json` | downloader (DownloadsManager) | informational/debug consumers only |
-| session tokens on disk | auth daemon | server + downloader (shared readTokens()) |
+| `packages/auth` | `video-auth.service` | Tango session tokens |
+| `packages/downloader` | `video-downloader.service` | live capture into `.active` folders |
+| `packages/server` | `video-server.service` (HTTPS :9999) | finalization, library/HLS API, edits, download lists, provider identity resolution, serving the `packages/app` build |
+| `packages/pipeline` | `video-pipeline.service` | conversion, description, upload, verification |
+| `packages/descriptor` | library (no unit) | local model titles and descriptions |
+| `packages/app` | served by the server; online builds for the iPhone | web UI, Video Vault, Tango live viewer |
+| `packages/live-extensions` | Safari extensions in the Tango iPhone app | FC2/SC download-list buttons |
+| `packages/shared` | library | layout, playlist parsing, upload policy, token reader, logger |
 
-Tango alias reconciliation belongs to the server. Its hourly refresh covers
-the union of followed account IDs and account IDs in `tango.txt`, merges the
-complete Tango alias snapshot into `aliases.json`, and rewrites stale labels in
-`tango.txt`. Adding a Tango download target checks the follow list and follows
-the resolved account only when needed, before the server writes the target. The
-downloader watches and consumes `tango.txt`; it never rewrites aliases or
-mutates the Tango follow list.
+A recording changes owner only by an atomic rename on one filesystem:
 
-## Frontend gestures preserve Safari navigation ownership (2026-07-29)
+```text
+<provider>/downloaded/.active/<rec>    downloader writes; ENDLIST, then rename
+<provider>/downloaded/.pending/<rec>   server finalizes; then rename
+<provider>/downloaded/<rec>            visible library
+<provider>/edited/<rec>                server edit output; the only pipeline input
+<provider>/trash/<rec>                 edited-away originals and manual trash moves
+```
 
-Safari owns leading-edge Back, tab/history navigation, vertical viewer
-scrolling, and pinch zoom. The viewer owns horizontal seek and controls.
+- **Filesystem location is the lifecycle authority.** No service protocol connects
+  capture, finalization and processing. Why: each process can lose power on its
+  own, and a rename is a single-writer handoff that survives that.
+- **The layout is defined once**, in `packages/shared/src/providerLayout.ts`
+  (`downloadsRoot`, `providerFolder()`, `providerFolders()`). The default root is
+  `~/Videos/downloads`, overridden by `VIDEO_DOWNLOADS_ROOT`. The providers are
+  `tango`, `fc2` and `sc` (Stripchat). Server, downloader and pipeline all derive
+  their roots from this module.
+- **Service data lives outside the checkout**, in `~/.local/share/video-services`:
+  `finalization.sqlite`, `pipeline/{pipeline.sqlite,artifacts,history,descriptions}`,
+  `download-lists/`, `session/`, `live-status.json`.
+  - `VIDEO_SERVICES_DATA_ROOT` is honoured by the shared layout module (download
+    lists), the pipeline and the descriptor. Downloader, server, auth and
+    `readTokens()` hardcode the default path.
+  - Secrets live in `~/.config/video-services/`. The pipeline refuses
+    `upload-providers.json` and `porntrex-session.json` unless they are `chmod 600`.
+- **A folder name is the recording's identity**: `YYYY-MM-DD HHMMSS <alias>`, in
+  local time. The pipeline's recording ID is that name. If two providers have the
+  same name, the recording is blocked for review.
 
-- Do not call `preventDefault()` for a touch beginning in the leading-edge zone.
-- Do not call `preventDefault()` or apply transforms for multi-touch sequences.
-- Call `preventDefault()` only after an application-owned axis is known.
-- Do not prevent native vertical touch movement.
-- At rest, park the previous video at the top of its 10k scope and the next
-  video at the bottom of its 10k scope so only the current video is visible.
-- On recognized vertical intent, bring both adjacent videos next to the current
-  scope and rotate roles immediately when one contains the viewport midpoint.
-- Park the adjacent videos again directly on `scrollend`, with no finger down.
-- A blank-spacer landing selects just the next/previous available video in the
-  scroll direction, or retains current at the list boundary; no distance-based
-  multi-entry jump.
-- Commit viewer-to-viewer navigation with `history.replaceState()`, preserving
-  the list as the previous history entry.
+| Shared resource | Single writer | Readers |
+|---|---|---|
+| `download-lists/tango.txt` | server routes, `AliasRegistry.syncTangoTxt` | downloader (`TangoTargetManager`) |
+| `download-lists/sc.txt` | server routes, hourly `syncScTxtAliases` | downloader |
+| `download-lists/fc2.txt` | server routes | downloader |
+| `aliases.json` | server `AliasRegistry` (hourly, and on Tango add/resolve) | server |
+| `session/<account>.json` | auth daemon | server, downloader (`readTokens()`) |
+| `live-status.json` | downloader `DownloadsManager` | nobody; informational only |
+| `finalization.sqlite` | server | pipeline (read-only) |
+| `pipeline/pipeline.sqlite` | pipeline | pipeline commands |
 
-**Why:** Browser navigation and bfcache restoration now replace the old custom
-edge-back and SPA view-state machinery.
+The downloader writes a list file only to create a missing one (comments only). It
+never touches aliases or the Tango follow list. When a Tango target is added, the
+server follows the account first, but only if it is not already followed.
 
-## Video lists use the full native document (2026-07-29)
+## 2. Capture (downloader)
 
-Render every provider-list row as an ordinary anchor in normal document flow.
-There is no virtualizer, spacer, fixed row-height calculation, filter, or scroll
-correction. Safari owns scrolling and bfcache scroll restoration.
+- **Ownership:** the downloader owns `<provider>/downloaded/.active/<rec>/`. At the
+  end of a recording it writes `#EXT-X-ENDLIST` atomically and renames the folder
+  to the sibling `.pending/`. Shutdown or power loss leaves `.active` unfinished
+  (no ENDLIST), and the next start resumes it.
+- **Filenames:** `{local-number}_{recording-identity}_{provider-sequence}.ts`, where
+  the identity is Tango `streamId`, FC2 `start_time` or Stripchat `statusChangedAt`.
+  UTC identities keep the `Z` but drop the colons (`2026-08-12T090847Z`), and
+  percent-escapes are never stored. Files are created with `wx`, so media is never
+  overwritten. Old numeric names stay valid and are never renamed.
+- **Capture never discards media.** Provider numbering restarts are new media: a
+  window more than `window + SEQUENCE_RESTART_MARGIN_SEGMENTS` (10) segments below
+  the last saved segment is accepted after a discontinuity and logged as
+  `SEQUENCE-RESTART`. The baseline is the last saved segment, not the maximum,
+  also after a restart. Why: providers do restart (SC per edge, Tango at 0, FC2
+  arbitrarily). An empty download is fetched again on later polls, up to
+  `REJECTED_SEGMENT_MAX_ATTEMPTS` (5) times; a file unreadable after writing stays
+  on disk; files a crash left after the playlist tail are re-appended on resume.
+- **Geometry is tagged at capture.** Tango and FC2 ffprobe each saved segment for
+  width, height and SAR (5 s timeout); a failed probe never rejects a segment, every
+  resolution is kept, and a changed or unknown size gets an `#EXT-X-DISCONTINUITY`.
+  They keep the upstream EXTINF until the server rewrites it. SC is fMP4: a new
+  init map gets a discontinuity plus `#EXT-X-MAP` (`init_<n>.mp4`), and EXTINF
+  comes from `sidx` parsing.
+- **End of a recording:** provider snapshots decide it, not HLS transport errors.
+  An upstream ENDLIST, a different recording identity or a Tango live-playlist 404
+  is immediately terminal. Absent or non-public is terminal only after at least two
+  successful observations 60 s apart with no media progress; a failed provider
+  lookup proves nothing. Removing a streamer from its download list ends the
+  session at once.
+- **Polling:** Tango every 1 s, SC every 5 s, FC2 every 30 s (FC2 uses only the
+  adult channel-list endpoint).
+- **Startup reconciliation of `.active`:** a folder without media goes to desktop
+  Trash; one with ENDLIST completes its handoff; a legacy folder is handed off
+  without guessing an identity; mixed identities are left untouched; anything else
+  resumes after a discontinuity.
+- **Disk guard:** the server checks every 60 s and stops `video-downloader` below
+  50 GiB free (`diskSpaceMonitor.ts`).
 
-On a bfcache `pageshow`, immediately refetch and reconcile the list without
-moving Safari's restored viewport, then resume exactly one poller. A normal
-list load or page refresh centers an existing highlight in the visual viewport.
-Polling does not move the viewport.
+## 3. Finalization and integrity (server)
 
-The last current filename is stored in `localStorage` per provider. It persists
-across tabs and Safari sessions, and every viewer selection updates it.
+- **Mailboxes.** Each `<provider>/downloaded/.pending` is permanent and created at
+  boot. It is watched directly and non-recursively, one `fs.watch` per mailbox,
+  registered before the startup reconciliation. A safety reconciliation runs
+  hourly (`CATCH_UP_INTERVAL_MS`). There is no `edited/.pending`. Why: a recursive
+  watch costs one inotify watch per recording folder and exhausts the system
+  budget.
+- **Steps for each recording:**
+  1. mark provider sequence restarts with discontinuities;
+  2. rewrite EXTINF (`PlaylistAuthority`);
+  3. list unreferenced files;
+  4. validate;
+  5. atomically rename into `<provider>/downloaded/`.
 
-## Edit cuts are audited as WYSIWYG marker mapping (2026-05-10)
+  The queue is one deduplicating FIFO with `os.availableParallelism()` workers. Each
+  worker waits 15 s between recordings (`QUEUE_COOLDOWN_MS`).
+- **Finalization is non-destructive.** It may rewrite only `playlist.m3u8`
+  (durations and discontinuity tags). It never removes an entry and never moves or
+  deletes a media file.
+  - Problems become `warnings` on a `ready` report and the recording still
+    publishes. The kinds are `damaged-segments`, `unattributed-damage`,
+    `validation-incomplete`, `unreferenced-media`, `sequence-restart` and
+    `retired-repair-journal`.
+  - `failed` means only that the environment failed (ffmpeg could not run, or I/O
+    failed). It is retried later.
+  - `empty` (no entries and no unreferenced media) moves the folder to desktop
+    Trash.
+  - Why: segments that fail a strict decode still hold real, mostly playable
+    media, and a numbering restart is new media. Removing either loses content.
+- **Validation:** ffmpeg decodes each native run (split at discontinuities, gaps
+  and map changes) to the null muxer. Per-segment decoding runs only after a run
+  fails, with a checkpoint every 25 segments so a restart resumes. The harmless
+  null-muxer non-monotonic-DTS message, and a repeat summary directly after it,
+  are filtered out. `MEDIA_INTEGRITY_VALIDATOR_REVISION` is 4.
+- **Checkpoints** are in `finalization.sqlite` (`integrity_checkpoints`, keyed by
+  path plus the playlist's SHA-256). The whole pipeline contract is a matching
+  fingerprint, `version === 2` and `status === "ready"`.
+- **Durations (`PlaylistAuthority`):** EXTINF is the difference between the first
+  video PTS of adjacent MPEG-TS segments, read from the bytes. ffprobe runs only
+  where bytes cannot answer (before a discontinuity, the tail, a failed byte
+  probe), falling back to `max(video, audio)` stream duration, then
+  `format.duration`. Writes are temp file, fsync, rename. fMP4 playlists
+  (`#EXT-X-MAP`) are skipped (`fmp4-map`). Why: Safari/iOS plays the media
+  timeline, not the MPEG-TS container span. One measured recording had 2247.68 s
+  of container time against 2127.75 s of video, which misplaces segment names and
+  edit cuts.
+- **`playlist.m3u8` is the only timeline artifact.** There is no sidecar duration
+  file, and HLS GET routes never repair a playlist.
+- **Backfill:** `npm run finalize-library -w server` runs the same processor. It is
+  a dry run unless given `--apply`; it also takes `--provider`, `--scope`,
+  `--recording` and `--limit`.
+- **Warnings are not shown in the UI.** They exist only in checkpoint JSON, the
+  journal and CLI output.
 
-Cut/edit behavior has two owners:
+## 4. Library, editing and playback
 
-- Frontend owns WYSIWYG marker intent. Markers are browser playback times from the visible player. When the browser's playable duration differs from playlist `#EXTINF` duration, the frontend maps marker times onto playlist time before choosing `.ts` segment names.
-- Backend owns file operations. It accepts explicit segment names, verifies they exist, moves exactly those files, and derives the edited playlist from the original playlist plus the requested segment set.
+- **Every video reference carries its provider.** HLS routes are
+  `/hls/:provider/:filename/playlist.m3u8` and `/hls/:provider/:filename/:segment`.
+  `resolveVideo(filename, provider)` returns a `VideoRef` and searches only that
+  provider's `downloaded/.active`, `downloaded` and `edited`. The frontend `Video`
+  carries `provider`. Why: a cross-provider search can match another provider's
+  folder.
+- **Edits.** The frontend turns markers into explicit segment names using the
+  playlist timeline. The backend then:
+  1. moves exactly the matching `.ts` files into `<provider>/edited/.building-<uuid>`
+     and copies the init files;
+  2. derives the playlist from the original plus the requested set;
+  3. writes a `ready` checkpoint by derivation
+     (`trustedDerivation: "edited-from-validated-recording"`, no decoding);
+  4. renames the build into `<provider>/edited/`;
+  5. moves the rest of the original to `<provider>/trash/`.
 
-Evidence from logs on 2026-05-10 showed browser duration can diverge from playlist duration near the tail. Examples:
+  Media is validated once, at capture finalization.
+- **Playlist repair breaks pipeline readiness.** `POST /api/videos/:filename/repair-playlist`
+  and `/api/videos/repair-playlists` rewrite published playlists. The new
+  fingerprint makes the pipeline treat the recording as unready until
+  `finalize-library` checkpoints it again.
+- **Frontend rules** (detail in `packages/app/decisions.md`):
+  - Three `PlayerUnit`s and one fixed `OverlayView`. The current video contains
+    the visual viewport's midpoint; only it feeds the overlay and saved progress.
+    Only the overlay's controls paint, because a full-box background makes
+    Safari's browser chrome opaque.
+  - Safari owns the leading-edge back gesture (28 px), multi-touch, vertical
+    scrolling and pinch; the viewer prevents default only for its horizontal seek.
+    Viewer-to-viewer navigation uses `history.replaceState()`.
+  - List rows are plain anchors. A bfcache `pageshow` refetches without moving the
+    restored scroll; one poller runs. The highlight is kept in `localStorage`
+    (`video-highlight:<provider>`).
+  - There is no frontend log service or server log route.
+- **Providers in the app.** Local providers (`tango`, `fc2`, `sc`) can save, edit
+  and return. Online ones (`xvideos`, `porntrex`, `vault`, `tango-live`) only
+  play.
+- **Video Vault** (the `vault` build, iPhone bundle `com.visar.Ptrex.paid`) lists
+  both upload sites. It shows only titles that carry the bracketed stamp
+  `[YYYY-MM-DD HHMMSS streamer]`, optionally with ` | part N` (`isPipelineUpload`
+  in `packages/app/src/providers/uploadSite.ts`). Manual uploads, and uploads
+  renamed to the bare stamp, stay on the sites but are not listed.
+- **iPhone apps** (`apps/ios`) are WKWebView shells generated from
+  `providers.json`. The local apps load `https://192.168.1.197:9999/videos/<provider>`,
+  the online apps inject the `packages/app` content build, and the Tango app hosts
+  the FC2/SC live extensions.
 
-- `2026-05-10 070628 elliiieeee`: playlist `497.87s`, browser ended at `481.529s`.
-- `2026-05-10 014252 nektarinka`: playlist `824.078s`, browser ended at `795.053s`.
-- `2026-05-09 235946 nektarinka`: playlist `480.314s`, observed ended positions varied around `476.884s` to `480.214s`.
+## 5. Pipeline output: conversion policy
 
-For historical cuts, backend execution matched the frontend request: frontend calculated segment count, API request count, backend matched count, and derived playlist kept count all agreed. The missing evidence was user intent: old logs had `timeMarkers` count, first/last kept segment, and count, but not the raw marker times. New `edit-segments-calculated` logs must include `markerTimes`, `playbackDuration`, `playbackToPlaylistScale`, and `scaledRanges` so future investigations can answer whether the frontend request matched what the user marked visually.
+| Constant | Value |
+|---|---|
+| `CURRENT_PRODUCTION_VERSION` (`domain/productionVersion.ts`) | `production-v6` |
+| `RESOLUTION_POLICY_VERSION` | `resolution-policy-v5` |
+| `ARTIFACT_RECIPE_VERSION` | `artifact-recipe-v2` |
+| artifact file names | `<id>.production-v5[-shapeN][-ccw].mp4` |
 
-Do not move WYSIWYG time interpretation into the backend unless the API contract changes to accept marker ranges plus playback duration. Under the current contract, backend should remain a segment-file executor, not a second timeline interpreter.
+- **Input:** edited recordings only, each with an exact `ready` checkpoint for its
+  current playlist. Admission records a source fingerprint (the playlist plus each
+  file's size and mtime). Every stage and upload checks it again, and a changed
+  source stops with "manual re-admission is required". Sources and their
+  playlists are never modified; derived playlists are temporary.
+- **Every recording is converted, and no segment is dropped.** Nothing is
+  stream-copied for upload.
+- **Shapes.** Segments are grouped by display aspect ratio (SAR applied, 1%
+  tolerance). For fMP4 the last active `#EXT-X-MAP` sets a segment's size; MPEG-TS
+  uses one keyframe scan in playlist order that assigns frames to segments by
+  packet byte position. One shape is one upload (`full`). Several shapes are one
+  upload each (`shape1`, `shape2`, … in order of first appearance), titled
+  `… [<folder> | part N]`, uploaded in sequence: the next part is promoted only
+  after the previous one verifies.
+- **Size.** Each shape is scaled to at least 1920×1080 pixels and at least 1080
+  tall, keeping its aspect ratio, and never smaller than its largest source
+  picture. No crop, no padding, square pixels; zscale Lanczos, libx264 `slow` CRF
+  16, yuv420p, VFR. Audio is copied when the inputs allow it, otherwise re-encoded
+  once (AAC 192k).
+- **Portrait** pictures are turned 90° counterclockwise (`transpose=2`, head to
+  the left) into a landscape frame, and the file name gets `-ccw`. Why: Porntrex
+  scales by height, so a portrait upload reaches at most 406×720. The
+  counterclockwise test uploads (3353010, 3353057) reached the 1920×1080 tier and
+  play upright on an iPhone turned counterclockwise.
+- **Imperfect input is kept.** A segment that starts a run without a decodable
+  keyframe joins the picture that follows it, and such runs are decoded on their
+  own; a run with no picture at all holds the previous frame and keeps its audio.
+  Odd TS packet sizes and size changes inside a segment are warnings. Only
+  zero-byte files are left out of the encoder input.
+- **Short split pieces.** A piece shorter than 60 s
+  (`MINIMUM_SPLIT_PIECE_SECONDS`) is not uploaded. It goes to `manual_pieces` and
+  is listed by `review`. If no piece is long enough, the recording is blocked.
+- **Limits.** An upload over two hours (an operator limit) or over 10 GB
+  (Porntrex's limit) is blocked for review. The test uses the artifact's own
+  probed duration.
+- **Local work without a v5 assessment** in its events is reset and converted
+  again. Uploaded and verified recordings are not touched.
+- **Artifact cache.** A whole-recording artifact of the current recipe, found in
+  an earlier generation's history snapshot, is reused only if its size and SHA-256
+  still match. It is hardlinked, or copied exclusively if that fails. Split parts
+  are never reused.
+- **`remux-one` is a supervised diagnostic.** It stream-copies, or with a flag
+  writes `--upscale1080p`/`--upscale1440p` variants to `artifact_variants`. Its
+  output has no v5 assessment, so the campaign converts the recording again and
+  `upload-one` refuses it.
 
-The visible current segment name belongs to the same timeline ownership boundary. Playlist parsing produces ordered segment metadata (`name`, `start`, `end`); `PlaybackTimeline` maps browser playback time to playlist time and current segment; `PlayerOverlay` only renders `currentSegmentName`. Do not make the overlay parse manifests or infer segment names from filename numbering.
+## 6. Pipeline ledger, campaign and verification
 
-## Ownership: Playlist timeline decides terminal playback state (2026-05-11)
+- **Ledger.** `pipeline/pipeline.sqlite` is SQLite in WAL mode with
+  `synchronous=FULL`, schema 12. Each state change is one durable transition,
+  appended to `state_events`. The `xvideos_*` state names are historical labels
+  and apply to every provider.
 
-For VOD playback, parsed `playlist.m3u8` duration and segment intervals are the frontend source of truth once available. Native media fields such as `duration` and `ended` are observations, not authority, because native HLS can collapse `media.duration` to the current playhead and fire `ended` while `seekableEnd` and the playlist still prove playable media remains.
+  ```text
+  server_ready → remuxed → artifact_valid → described → metadata_ready → xvideos_admitted
+    → xvideos_uploading → xvideos_uploaded → xvideos_verified → cleanup_eligible
+  side states: provenance_review_required, xvideos_uncertain, blocked, failed
+  ```
 
-`PlaybackTimeline` owns terminal classification through `assessNativeEnded()`. It compares the native ended event against playlist/seekable truth and returns an explicit verdict:
+- **One worker, one recording at a time.** `video-pipeline.service` runs
+  `campaign-worker`. Each step does the first of these that applies:
+  1. upload verification that is due (inline);
+  2. local stages (convert, validate, describe, compose) of the oldest admitted
+     recording;
+  3. upload of the oldest `metadata_ready` recording;
+  4. admission of the oldest `ready` edited recording not yet in the ledger.
 
-- `playback-ended-confirmed` when the playlist authority is exhausted, or when no playlist/seekable authority exists.
-- `native-ended-rejected` when native HLS reports ended but playlist/seekable truth still has remaining media.
+  "Oldest" means the folder-name timestamp, optionally filtered to one provider.
+  The worker polls every 30 s when idle and re-reads pause/run intent from
+  `campaign_control` at every step. The local-stage lease is 12 h because
+  conversion takes about 2.4× the duration and recordings run up to 2 h. All
+  leases are cleared at boot.
+- **Manual commands defer to the worker.** It writes a heartbeat every 30 s. These
+  commands refuse while the heartbeat is under 90 s old, so stop the service first:
+  `remux-one`, `describe-one`, `upload-one`, `process-one`, `xvideos-sync`,
+  `campaign-prepare`, `campaign-select` and the upload-provider switch.
+- **A stuck recording stays in front.** A changed source, a lost checkpoint or a
+  missing artifact returns `attention_required` and sends a desktop
+  notification. No other recording is substituted.
+- **Provenance.** Identifiers are resolved through the server
+  (`GET /api/{provider}/resolve`). One the server cannot resolve still uploads,
+  with `Source: TODO LATER` in the description. Other unresolved cases wait in
+  `provenance_review_required`. `provenance-set` overrides apply to every
+  recording with the same identifier.
+- **Cooldowns** pause the campaign with `resume_at` while verification keeps
+  running. A human-action error (captcha) waits 1, 2, 4 … minutes, capped at 24 h;
+  a successful upload or a manual resume resets that streak. `session_login`, the
+  XVideos daily limit, or an attempt that failed before submission waits 24 h. A
+  lost Porntrex session pauses indefinitely, with `attention_reason` set.
+- **Monthly budget.** Uploads are capped at 600,000,000,000 bytes per calendar
+  month in `Europe/Tirane`, the upload share of the ISP plan. Admission reserves
+  the artifact size plus 16 MiB. Every transmitted byte, including failed and
+  retried transfers, goes to `bandwidth_events`, which nothing ever deletes.
+- **Success is never decided at submit.** Once metadata may have been submitted,
+  the attempt is `xvideos_uncertain` with a confirmation due 24 h later. A failure
+  before submission is a plain failure (on Porntrex: before the
+  `metadata_submitting` phase, since the video exists only once its form is
+  submitted). A started transfer holds a 7-day duplicate-safety window
+  (`UPLOAD_RETRY_MILLISECONDS`); an uncertain attempt with no remote ID is requeued
+  only after a complete negative lookup past that deadline. A video whose ID
+  vanishes from the provider is blocked for review with a desktop notification and
+  is re-uploaded only by `retry`.
+- **Cleanup is off.** The managed unit sets `VIDEO_PIPELINE_CLEANUP=0`, so
+  verified artifacts stay on disk and the source-missing sweep (which needs
+  cleanup) does not run. No pipeline command touches source recordings.
+- **Review and retry.** `review` lists blocked recordings with reasons,
+  unresolved provenance and manual pieces. `retry <ID>` returns a failed or
+  blocked recording to the stage it left.
+- **Generations.** Each production version owns `pipeline/artifacts/<version>/`
+  (supervised variants in `manual/`). The first `campaign-resume --apply` after a
+  version change rolls over. It refuses while the campaign runs, a lease exists or
+  an upload is in flight. It snapshots the database (fsynced, owner-only) to
+  `pipeline/history/<old-version>/`, copies recordings and uploads into the
+  `retired_*` tables, clears the active workflow and moves that generation's files
+  into its version folder; discovery then restarts from the oldest source.
+  Bandwidth events, provenance overrides, rejected phrases, provider inventory and
+  campaign configuration survive.
+- **Bounded runs exist in code but are inactive** (`trial_per_provider` is null;
+  no `comparison_trial` row). `campaign-configure --trial-per-provider N` caps a run
+  at N recordings per provider. `campaign-prepare` plus
+  `campaign-select --file … --apply` restrict the campaign to listed paths, add version/part diagnostics to
+  titles and keep every artifact; the 30 s file watch stays off because
+  `comparisonTrialOnly` is hardcoded `false` in `config.ts`.
 
-`VideoEngine` only wires browser events into this authority and emits the verdict. It must not self-heal by nudging currentTime, auto-resuming, or masking the native failure. If native HLS rejects terminal state, the error is surfaced in logs with current segment, playlist time, terminal time, remaining time, media duration, and seekable end.
+## 7. Upload providers and sessions
 
-## Ownership: playlist.m3u8 is the HLS media timeline authority (2026-05-11)
+- **One active destination**, `campaign_control.upload_provider`: `porntrex`
+  (`xvideos` stays selectable via `upload-provider --provider … --apply`). A switch
+  needs a paused campaign, a stopped worker, nothing in flight, no open
+  confirmations on the provider being left and, when leaving XVideos, an
+  `xvideos-sync` inventory newer than its last upload. Each confirmation is
+  verified on the provider its attempt used.
+- **Limits** come from `packages/shared/src/uploadPolicy.ts`. The pipeline checks
+  each artifact against `policyForUploadProvider(<active>)`.
 
-`playlist.m3u8` is the canonical timeline artifact for HLS VOD folders. Do not add a sidecar timeline file for segment durations. If a playlist cannot be trusted, repair or reject the playlist itself and surface the reason in logs/API output.
+  | Provider | Visibility | Max duration | Max size |
+  |---|---|---|---|
+  | Porntrex | public | 2 h (operator limit) | 10 GB |
+  | XVideos | private | 2 h | 50 GB |
 
-The root bug was treating MPEG-TS container duration as playback truth. Safari/iOS follows the media timeline, not the TS container span. A global frontend scale between browser duration and playlist duration can align endpoints while still assigning intermediate frames to the wrong `.ts`; segment identity and edit cuts must be grounded in one canonical playlist timeline.
+  `SHARED_UPLOAD_POLICY` and `UPLOAD_PROVIDER_PLAN` (XVideos primary, Bunkr
+  unavailable) feed only the server re-export `services/upload/uploadPolicy.ts`,
+  which only its tests use.
+- **Metadata.** Title: the descriptor title plus ` [<folder>]`, or
+  ` [<folder> | part N]` for one shape of a split (max 255 characters).
+  Description: the descriptor text, then `Recorded:`, `Source:` and (if known)
+  `Alias:` lines (max 1,000). Tags: exactly `[tango|fc2|stripchat, live]`;
+  descriptor tags are ignored. Porntrex uploads also get the Webcam category.
+- **Remote identity is the bracketed suffix**, used by the duplicate lookup,
+  verification and Video Vault. The ledger and captured provider IDs are the
+  authority; descriptive titles are never searched. The Porntrex lookup also
+  accepts an unbracketed ` <stamp>` ending; a title renamed to the bare stamp is
+  outside the identity.
+- **No duplicates.** Every Porntrex upload first reads the complete uploads list;
+  if the row count does not equal the site's totals, absence is not inferred, and
+  any match means no upload. A recording with a copy in a synchronized
+  `provider_inventory` is blocked.
+- **Porntrex verification.** The edit page must show a published link, and
+  ffprobe must find a `/get_file/` rendition of at least 1920×1080×0.995 pixels. A
+  video still processing is checked again after 2 h, anything else after 24 h.
+  Words Porntrex swapped are learned as rejected phrases. A transfer is abandoned
+  only after 10 minutes without progress (`TRANSFER_STALL_MILLISECONDS`).
+- **The Porntrex session is shared with the phone**, because Porntrex keeps one
+  session per account and the newest login logs the others out. The pipeline
+  stores only `PHPSESSID` and `confirmed` in `porntrex-session.json`, pinned for 400
+  days, and never presents `kt_member`. The worker checks the session every 10
+  minutes without a browser; a logged-out session pauses the campaign with a
+  notification and is never logged in again automatically.
+  `npm run ptrex:connect-iphone` is the only path that may log in with the password; it
+  copies the session into Video Vault over SSH (the Mac runs `devicectl` and the
+  WebKit inspector) and resumes the campaign.
+- **XVideos:** email/password login in the persistent Chromium profile
+  (`~/.config/chromium-agent`); Friendly Captcha gets 60 s to solve automatically;
+  the alias is typed into the model search without selecting a model. Verification
+  uses the edit page plus a Full-HD rendition in the HLS master.
+- **Rejected phrases** are learned per provider (`rejected_phrases`) and appended
+  to the description prompt. Composed metadata is checked locally (case-insensitive
+  substring) before any byte is sent, and stale text is described again. A refusal
+  during upload is definitive and does not start the 7-day hold. `metadata-check`
+  is the read-only report.
+- **Network gating and browsers.** Real uploads and verification need
+  `VIDEO_PIPELINE_NETWORK_UPLOADS=1`, which the managed unit sets. Under
+  `VIDEO_PIPELINE_SERVICE_MODE=1` the browser always closes on failure, so it
+  never holds the profile lock; interactive commands leave it open.
 
-Safari/iOS mismatch evidence from `2026-05-10 235819 milkyway999` showed the old `#EXTINF` values matched ffprobe `format.duration`, but that was the wrong clock:
+## 8. Descriptor
 
-- Old playlist/format total: `2247.684252s`.
-- Video stream total: `2127.746011s`.
-- Audio stream total: `2123.703008s`.
-- Rewritten playlist total using video PTS advancement: `2127.729645s`.
-- The edit discontinuity `433.ts -> #EXT-X-DISCONTINUITY -> 438.ts` was preserved.
-- After rewrite, frontend logs showed `playlist-fetch totalDuration=2127.729645`, native duration/seekable end around `2127.729s`, playback reached `2137.ts`, and terminal verdict changed from rejected early-ended events with `9-12s` remaining to `playback-ended-confirmed`.
+- **A library, not a service.** Each `describeArtifact` call starts and stops
+  `llama-server` (the `VisarDomi/llama.cpp` CUDA fork) with
+  `gemma-4-E4B-OBLITERATED-Q8_0.gguf` and an F16 mmproj, context 131,072, port
+  7976. Startup may take `DESCRIPTOR_STARTUP_TIMEOUT_MS` (10 min), polled with 2 s
+  health requests; an occupied port is refused. `DESCRIPTOR_MODEL_URL` selects an
+  external server instead.
+- **Output** is a title (5–100 characters) and a description (20–750), for the
+  exact validated artifact that will be uploaded.
+- **Frame rate:** at most 4 FPS below 7 minutes, 2 FPS below 15 minutes, 1 FPS
+  beyond; a 115,000-token video budget at 70.5 tokens per frame lowers FPS further
+  for long videos. Why: in measured comparisons, 1 FPS kept the useful detail at
+  about a quarter of the tokens of 4 FPS, and 4 FPS showed no consistent gain.
+- **Upright copies.** For `-ccw` artifacts the pipeline passes
+  `rotation: "clockwise"`, so the model sees the picture upright. Why: shown
+  sideways frames, the model describes people as lying down.
+- **Evidence** is cached at
+  `pipeline/descriptions/artifacts/<artifact sha256>/<prompt hash>[-clockwise]/result.json`.
+  The prompt hash includes the learned phrases. The same artifact with the same
+  prompt is never described twice, even across generations; rollover leaves this
+  evidence in place.
 
-The correct duration source is the media timeline Safari plays, not the MPEG-TS container span. `PlaylistAuthority` repairs historical playlists by probing segments and writing `#EXTINF` from video PTS advancement within each continuity section, falling back to stream duration at discontinuities/tails. It recomputes `#EXT-X-TARGETDURATION` and publishes via temp file + rename.
+## 9. Operations
 
-For finalized recordings, Tango/FC2 duration repair must use the longest positive
-media-stream duration, `max(video duration, audio duration)`, when adjacent video
-PTS cannot provide the timeline; `format.duration` is only a fallback when
-neither media stream has a usable duration. The downloader no longer probes each
-live segment and therefore leaves upstream EXTINF provisional until ENDLIST
-hands the playlist to the server. This preserves audible presentation time when
-video ends early or freezes without paying the probe cost throughout capture.
-Edit playlists inherit canonical `#EXTINF` from the source playlist, so
-historical source playlists should be repaired before editing old recordings.
+- **Units** are versioned in `systemd/user`. `npm run systemd:sync` expands
+  `{{HOME}}`, writes changed files by temp file and rename, and runs
+  `daemon-reload`; it never starts, stops, enables or disables anything.
+  `npm run systemd:check` reports drift.
 
-For `.ts` historical repair, `PlaylistAuthority` should parse MPEG-TS bytes before spawning ffprobe. The common-case duration is `firstVideoPts(next segment) - firstVideoPts(current segment)`, read from PES PTS timestamps. This matched the ffprobe-derived good playlist for `2026-05-10 235819 milkyway999` exactly across `2126` adjacent segment boundaries and reduced that repair from thousands of ffprobe calls to byte probes plus two ffprobe fallbacks. ffprobe remains the fallback for boundaries that TS bytes cannot define alone, such as the segment before a discontinuity and the final tail segment.
+  | Unit | Settings |
+  |---|---|
+  | `video-processing.slice` | `CPUQuota=600%`, `MemoryHigh=70%`, `MemoryMax=80%`, `MemorySwapMax=0` |
+  | `video-server.service` | in the slice, `CPUWeight=1000` |
+  | `video-pipeline.service` | in the slice, `CPUWeight=100`; `DISPLAY=:111`, `NETWORK_UPLOADS=1`, `CLEANUP=0`, `SERVICE_MODE=1` |
+  | `video-finalize-library-single` scope | `CPUWeight=1000` |
+  | `video-auth.service`, `video-downloader.service` | outside the slice |
+  | `video-xvfb.service` | `Xvfb :111` for headful Chromium; others use only `After=`, so enable it explicitly |
 
-fMP4 is not part of the MPEG-TS repair. Playlists with `#EXT-X-MAP` are skipped with `skipped:true`, `skipReason:"fmp4-map"`, and zero byte/ffprobe probes. SC already writes fMP4 durations from `sidx` parsing, so the TS repairer must not touch it unless there is a separate SC-specific bug.
-
-Historical batch results:
-
-- FC2 `scope=all` ran on 2026-05-11 from `11:43:28` to `11:51:24`; repaired `120` playlists, processed `337823` segments, failed `0`, and removed about `9087.536333s` from playlists.
-- Tango `scope=all` ran on 2026-05-11 from `11:53:50` to `13:11:52`; repaired `3014` playlists plus one already-correct long sample, processed `2101775` segments, failed `0`, and removed about `81544.660632s` from playlists.
-- Active downloader folders live one level below `.active`, while the historical
-  fixer scans only immediate non-hidden finalized folders.
-
-Operational behavior:
-
-- Repair is idempotent: rerunning a fixed playlist should produce `changedDurationCount:0` and `wrotePlaylist:false`.
-- Repair is crash-safe per playlist: writes use temp file + rename, so power loss leaves either the old playlist or the complete repaired playlist.
-- Batch repair is not checkpointed. If interrupted, rerun is safe but starts scanning from the beginning.
-
-Ownership boundary:
-
-- Downloader owns `.active` playlist append for new live captures and retains upstream `#EXTINF` until completion.
-- ENDLIST plus `.active` to `.pending` handoff transfers ownership to the server; only the server may promote a validated recording into a visible finalized root.
-- HLS routes serve playlists read-only and must not silently heal on GET.
-- Frontend timeline code reads the playlist authority and logs mismatches; it must not hide native playback errors with auto-resume behavior.
-
-Remaining hardening:
-
-- Add tests for `PlaylistAuthority` parser/serializer, discontinuity handling, fMP4 skip behavior, and byte-derived PTS duration.
-- Consider a checkpointed background repair job if future migrations are large enough that rerunning from the beginning is wasteful.
-- Consider hls.js fragment events if exact decoded-fragment identity is needed at segment boundaries.
-
-## Pipeline resolution policy is automatic and segment-owned (2026-08-30)
-
-> **Superseded (2026-10-05)** by resolution-policy-v5 ("Convert everything; never drop or reject a segment"). Kept as history.
-
-The production campaign classifies resolution at HLS segment boundaries using
-the coded pixel count (width * height), which makes the rule orientation-neutral. For fMP4, the
-last active `#EXT-X-MAP` before a segment owns that segment's dimensions;
-consecutive map tags with no intervening segment do not create phantom
-resolution classes. MPEG-TS is inspected with one whole-playlist keyframe
-scan, not one `ffprobe` process per segment.
-
-- All segments below 2,073,600 coded pixels: transcode the complete recording to a 1080-pixel
-  short edge. Do not discard lower-resolution segments. Require one consistent
-  display aspect ratio, preserve that ratio without crop or padding, encode
-  H.264 with zscale Lanczos/libx264 slow/CRF 16/yuv420p, copy audio, and use a
-  `.production-upscale1080p.mp4` artifact name so old stream copies and
-  supervised comparison variants cannot be adopted accidentally.
-- All segments at least 2,073,600 coded pixels (clarified 2026-09-09): stream-copy remux at their
-  native resolutions, including mixed 1080p/1440p/2160p, without conversion.
-- Mixed with lower-resolution segments (resolution-policy-v3): sum playlist
-  EXTINF durations. If segments with >=2,073,600 pixels together make up at least 90%
-  of duration, retain ALL those whole segments and stream-copy remux
-  to `.retained1080p.mp4`. Otherwise transcode the complete recording to
-  `.production-upscale1080p.mp4`, including all lower-resolution segments.
-  Both branches create one video, not separate uploads. Dropped segments are
-  excluded only from the artifact; originals remain intact.
-- Full conversion requires a consistent display aspect ratio and adds no padding
-  or crop. Native remux retains encoded geometry; per-run concat inputs preserve
-  decoder parameter changes without re-encoding the picture slices.
-
-Derived playlists use absolute references to the already checkpointed source
-files and add discontinuities at source cuts, selection gaps, and map changes.
-They are temporary pipeline inputs only. The edited source folder and its
-authoritative `playlist.m3u8` are not changed.
-
-Local-stage leases are six hours because measured slow/CRF-16 upscales can
-take roughly twice the source duration. The lease prevents another worker from
-claiming a healthy long-running conversion.
-
-Production uploads use the versioned title identity
-`[recording ID | production-v2 | full]`. This prevents an upload made under the
-old policy from satisfying a new upload attempt. Split-part ledger support is
-retained for existing data but the current policy creates no split products.
-
-### One-time campaign trial (2026-09-07)
-
-`campaign-configure --provider all --trial-per-provider N --apply` arms a
-bounded trial while paused; it does not start processing. For N=10 it admits
-the oldest ten eligible recordings per provider, at most thirty recordings.
-Existing queued work is subject to the same cap and ordering. Durable slots
-survive retries, restarts, source removal, and manual/cooldown pauses. Existing
-bandwidth limits remain independent. Failed/uncertain slots are not replaced
-with additional recordings. After submission, wait for delayed inline
-verification without admitting extra recordings; confirmed absence may retry
-in the same slot. Only all thirty verified recordings complete the trial and
-pause indefinitely. Failed/blocked slots or an exhausted provider instead cause
-an attention pause that retains the cap on resume. Expose per-provider
-counts/states. The next explicit resume after a successful trial finish clears
-the one-time cap and uses normal oldest-first
-scheduling, without resetting uploads. A mid-trial resume retains the cap.
-Reconfiguration while paused can adjust the cap without forgetting consumed
-slots, or cancel it with `none`. Production rollover retains the configured
-trial size but clears old-generation trial memberships.
-
-Artifact storage is generation-owned as well:
-`pipeline/artifacts/<production-version>/`. The unversioned pre-v2 files are
-moved with same-filesystem renames to
-`pipeline/artifacts/legacy-production-v1/`; new production outputs go only to
-`pipeline/artifacts/production-v2/`, and supervised `remux-one` comparison
-variants go below that generation's `manual/` directory. Completed old
-generation directories are retained until an explicit pruning decision.
-
-The pipeline database carries the same active production version. The first
-explicit `campaign-resume --apply` after installing a newer production version
-performs a one-time rollover while the campaign is still paused: it archives
-the old recording and upload history under its production version, removes it
-from the active workflow, archives pipeline-owned staging files, records a
-rollover summary, and then changes the campaign to running.
-Discovery consequently starts again from the oldest finalized source. ISP
-bandwidth events, provenance overrides, provider filter, monthly limit, and
-campaign configuration survive the rollover. The finalization database and
-source recordings are outside this boundary. A status command exposes both the
-active version and whether a rollover is pending.
-The rollover aborts before moving files if the old generation is still marked
-running, any recording lease exists, or an upload attempt is in flight.
-Before retiring rows or moving artifacts, rollover now writes and fsyncs a full
-SQLite snapshot in `pipeline/history/<old-version>/` (2026-09-07). The snapshot
-has a unique filename and owner-only file permissions and preserves all prior
-descriptions, upload metadata, provenance and workflow data. It supplements the
-queryable retired upload ledger; it does not silently reuse descriptions for
-changed video artifacts. Existing exact-artifact/prompt cache rules remain.
+  There is no timer unit.
+- **systemd owns CPU allocation; the code only exposes parallel work.** FFmpeg
+  gets no thread, priority or load flags (tests enforce this). Parallelism comes
+  from the cgroup-aware `os.availableParallelism()`: 6 under the 600% quota on the
+  12-CPU host. Manual heavy commands join the slice as transient scopes
+  (`systemd-run --user --scope --slice=video-processing.slice`):
+  `video-finalize-library[-single]`, `video-pipeline-remux-one`,
+  `video-pipeline-describe-one`, `video-descriptor-<pid>`. Live finalization and
+  the API win under contention without keeping background work off idle CPU. The
+  slice does not bound the descriptor's GPU use.
+- **Builds.** `npm run start:*` and `restart:*` build the core services and start
+  them; they run prebuilt `dist/` through the `~/.local/bin/video-*` wrappers. The
+  pipeline service rebuilds (`rm -rf dist && tsc`) on every start.
+- **Logs** go only to journald (winston console output or JSON lines). Read them
+  with `npm run logs:*` or `journalctl --user -u <unit>`. The code has no log
+  directory and no rotation.
+- **Notifications.** The managed pipeline worker uses `notify-send` for attention,
+  cooldowns, provider removals and lost sessions, never repeating a message within
+  6 h; `VIDEO_PIPELINE_NOTIFY=0` silences it.
+- **Auth** serves Tango only. Stream tokens refresh every 5 s and the session
+  every 30 min. A Google OAuth login in headful Chromium on `:111` happens only
+  when the refresh token is missing or rejected. `readTokens()` reads one fixed
+  account file.

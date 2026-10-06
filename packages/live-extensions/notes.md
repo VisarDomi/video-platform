@@ -12,12 +12,10 @@ shadow root so the site's styles and the button's stay apart.
 
 - `src/core/downloadListBar.ts`: the one shared bar around the viewer's button; providers only classify routes
   (`src/provider/fc2-live.ts`: numeric ID; `sc-live.ts`: username, skipping
-  non-streamer pages).
+  non-streamer pages). The bar re-checks the route every second and hides on other pages.
 - `src/extension/<name>.ts` is each content script; `background.ts` performs the
   PC requests (`https://192.168.1.197:9999/api/<fc2|sc>/member|add|remove`), only
   for its own provider, so page security policies never apply.
 - `npm run build -w live-extensions` writes `dist/extension/fc2-live` and
-  `dist/extension/sc-live` (manifest, content.js, background.js); the Tango app's
-  `scripts/deploy.py tango-live sync` builds and stages them.
-
-These replaced the earlier Tampermonkey userscript (October 2026).
+  `dist/extension/sc-live` at the repository root (manifest, content.js, background.js);
+  the Tango app's `scripts/deploy.py tango-live sync` builds and stages them.

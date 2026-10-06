@@ -1,36 +1,35 @@
-# Tango PC session recovery — September 26, 2026
+# Tango PC session recovery
 
-PC and iPhone sessions are independent. Never copy a refresh token between them.
-The PC reads Google credentials from `~/.config/video-services/auth-accounts.json`
-(formerly `packages/auth/credentials.json`); XVideos reads the same Google account's
-credentials separately from `~/.config/video-services/upload-providers.json` (formerly
-also `packages/.env`). Both live outside the repository. Changing one does not update
-the other.
+The PC session (`video-auth`) and the iPhone's Tango app session are independent.
+Never copy a refresh token between them.
 
-The PC's old `/proxycador/api/session/refresh` request rejected a freshly acquired
-PC session. The working request is POST
-`/session-service/public/v2/session/web/refresh`, with the PC's own Tango-RT cookie
-and JSON `{accountId, sessionId}` decoded from that same token. No phone credential
-is involved. Persist replacement login/refresh credentials before requesting the
-short-lived stream tokens; a downstream failure must not lose the rotated RT.
+The PC reads its Google credentials from `~/.config/video-services/auth-accounts.json`
+(`VIDEO_AUTH_ACCOUNTS_FILE` overrides it). The pipeline reads the upload sites'
+credentials separately from `~/.config/video-services/upload-providers.json`
+(`VIDEO_UPLOAD_PROVIDERS_FILE`); when they use the same Google account, changing
+one file does not update the other. Both live outside the repository.
 
-Validation:
+## Refresh request
 
-- `npm run build --workspace=auth`
-- `node --test packages/auth/test/session-refresh.test.mjs`
-- Two sequential real PC refreshes: tokens rotated, persisted and reloaded;
-  stream-token retrieval passed and authenticated Tango reads returned HTTP 200.
-- Starting `video-auth` then refreshed the saved token successfully without Google
-  login. The server's download-list profile lookup passed.
-- XVideos' production browser profile reached the authenticated account dashboard.
-  A separate fresh-profile Google login test hit "Too many failed attempts" and
-  was stopped. That fresh-login path is not claimed verified; avoid repeated
-  password submissions while Google is blocking them. No uploads were performed
-  by these checks. The existing pipeline was resumed afterward.
+The session refresh is `POST https://gateway.tango.me/session-service/public/v2/session/web/refresh`
+with the PC's own `Tango-RT` cookie and the JSON body `{accountId, sessionId}`
+decoded from that same token. No phone credential is involved. The response's
+`Tango-ST` (and replacement `Tango-RT`) cookies are saved to
+`~/.local/share/video-services/session/<account email>.json` before the
+short-lived stream tokens are requested, so a downstream failure cannot lose the
+rotated refresh token. A 401/403 from the refresh starts a browser login (a
+headed Playwright Chromium on the Xvfb display `:111`).
 
-Temporary diagnostic profiles were separate from `~/.config/chromium-agent`.
-For future checks, pause competing token owners before consuming a rotating RT,
-save every received replacement immediately, and restart the original services
-when finished. A session-only dashboard check must not trigger fresh login when
-Google is already rate-limiting attempts. The auth, pipeline, downloader and server
-services were all active at completion.
+## Recovering
+
+- Check the refresh path without the network:
+  `npm run build -w auth && node --test packages/auth/test/session-refresh.test.mjs`.
+- Before consuming the rotating refresh token from anything other than
+  `video-auth`, stop the competing token owner
+  (`systemctl --user stop video-auth`), save every replacement token it returns
+  immediately, and restart the service when finished.
+- `systemctl --user restart video-auth` refreshes the saved token without a
+  Google login when the token is still valid.
+- When Google answers "Too many failed attempts", stop: repeated password
+  submissions keep the block in place, and a session-only check must not trigger
+  a fresh login.

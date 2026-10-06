@@ -1,115 +1,135 @@
 # App Decisions
 
-## Pure TypeScript and native Safari navigation (2026-07-29)
+## Pure TypeScript and native Safari navigation
 
-The frontend is a pure TypeScript/Vite application. The old Svelte implementation
-remains available in Git history and is not part of the build.
+The frontend is a TypeScript/Vite application without a UI framework; its only runtime
+dependency is hls.js.
 
-Provider lists and viewers are separate native documents. List rows are anchors.
-Safari owns tabs, history, scrolling, scroll restoration, edge-back, and viewer
-vertical movement. Viewer midpoint selection rotates three media scopes and uses
-`history.replaceState()`, so Back always returns to the list entry.
+Provider lists and viewers are separate native documents, and list rows are anchors, so
+Safari owns tabs, history, scrolling, edge-back and the viewer's vertical movement. The
+viewer changes videos with `history.replaceState()`: opening a video adds one history entry
+and Back always returns to the list.
 
-The list renders every row without virtualization or filtering. On `pagehide` it
-stops and aborts polling. On bfcache `pageshow` it immediately refetches the full
-list, reconciles the restored DOM without scrolling, then starts exactly one
-poller. Polling only discovers new videos while the list remains open.
+The list renders every row, without virtualization or filtering. A newly loaded list
+scrolls to the highlighted (last viewed) row; an online list reopened from history returns
+to its saved position (`videoListY` in `history.state`). The viewer sets
+`history.scrollRestoration = 'manual'` and positions its videos itself.
 
-PWA support, watchdog/sentinel timers, and the frontend `/api/log` pipeline were
-removed. Viewer recovery responds directly to browser lifecycle and connectivity
-events.
+## List lifecycle and reconciliation
 
-## Intrinsic three-scope viewer (2026-07-29)
+One reconciliation function writes the list rows for the initial load, polling, restores
+and online pages, reusing existing rows by filename and type.
 
-The viewer document always contains three media scopes: a 10,000px previous
-scope, a natural-height current scope, and a 10,000px next scope. At rest the
-previous/next videos park at their far edges. On vertical intent they align
-beside the current video so the videos touch directly.
+Local lists poll every second for videos after the last filename, only while visible;
+polling only adds videos. On `pagehide` or when the page is hidden, polling stops and
+in-flight requests are aborted. On bfcache `pageshow`, when the page becomes visible again,
+or on `online`, the list refetches the full list, reconciles it into the existing DOM
+without scrolling, then starts exactly one poller. Refreshes use an `AbortController` and a
+request token, so a stale response cannot overwrite a newer reconciliation.
 
-Videos use `width:100%; height:auto`; decoded media geometry is the layout
-authority. No stage or scope clips video overflow. All three videos play muted.
+Online lists page through `services/catalog.ts` instead (see `PROVIDERS.md`).
 
-As in Stream Viewer (ported 2026-09-08), a neighboring video becomes current
-when it contains the visual viewport midpoint. Scope roles rotate while a
-measured stage translation preserves the selected video's screen position;
-there is no scroll-position write during native momentum. Only the remote
-edge unit is recycled, and outgoing progress is saved before rotation.
+## No service worker or client logging
 
-On `scrollend`, with no finger down, normalize the translation immediately:
-there is no 100ms timer. Keep the visible current video's position. A landing
-in the blank 10k runway selects only the next entry when scrolling down or
-previous entry when scrolling up, then centers it. Missing neighbors retain
-the current real video. Finger release cannot settle ongoing momentum.
+The frontend registers no service worker and has no web manifest. It posts no diagnostic
+events to the server; errors go to the console. Viewer recovery is driven by `pageshow`,
+`visibilitychange` and `online` events, not by watchdog timers.
 
-The URL-selected HLS source is assigned before the full provider list or
-auxiliary requests. Current playback never waits for neighbor discovery.
+## Intrinsic three-scope viewer
 
-One shared overlay remains stationary and latches to the midpoint-selected video;
-its controls remain non-interactive until scrolling settles.
-It is a transparent fixed shell at the viewport edges. Only its controls paint
-pixels and receive pointer events. Do not add a full-shell background, gradient,
-backdrop filter, or blur: a painted fixed backdrop makes Safari's browser chrome
-opaque.
+The viewer document always holds three player units: a 10,000px previous scope, a
+natural-height current scope and a 10,000px next scope. At rest the previous and next videos
+sit at their scopes' far edges; during vertical navigation (`viewer-navigating`) they align
+beside the current video so the videos touch.
+
+Videos use `width: 100%; height: auto`: decoded media geometry is the layout authority, and
+no stage or scope clips video overflow. The stage stays hidden until the current video has
+dimensions (at most 8 s), then centers it.
+
+All three units play muted; the mute button unmutes only the current video, and a unit is
+muted again when it leaves the current scope.
+
+A neighbor becomes current when it contains the visual viewport midpoint. Scope roles rotate
+while a stage `translateY` preserves the selected video's screen position, so nothing writes
+the scroll position during native momentum. Only the unit at the far edge is recycled, and
+the outgoing video's progress is saved before rotation.
+
+Settlement happens on `scrollend` with no finger down, immediately and without a timer;
+releasing a finger cannot settle ongoing momentum. It removes the translation and keeps the
+current video's visible position. A landing in the blank 10k runway selects only the next
+entry when scrolling down or the previous entry when scrolling up, then centers it; at
+either end of the list the current video stays.
+
+The viewer starts loading the URL-selected video before anything else and never waits for
+the provider list, neighbors or co-streamer discovery to play it.
+
+## Transparent fixed overlay
+
+One fixed overlay stays still and follows the midpoint-selected video; its controls are
+disabled until scrolling settles. It is a transparent shell over the whole viewport, padded
+inside the top and side safe areas; only its controls paint pixels and receive pointer events. Do not add
+a full-shell background, gradient, backdrop filter or blur: a painted fixed backdrop makes
+Safari's browser chrome opaque.
 
 ## preventDefault only for application-owned gestures
 
-Safari owns vertical panning and leading-edge Back. The gesture handler calls
-`preventDefault` only for horizontal seek/control gestures or application zoom.
-Pinch zoom remains browser-owned.
+Safari owns vertical panning, pinch zoom and leading-edge Back: touches that start within
+28px of the left edge or use more than one finger are left alone, and the stage allows
+`touch-action: pan-y pinch-zoom`. The gesture handler calls `preventDefault` only for
+horizontal seek drags that start in the upper half of the screen. A horizontal swipe of more
+than 80px in the lower half shows (rightward) or hides (leftward) the controls.
 
-## localStorage debounce: 3s
+## Playback progress
 
-Video playback position saves to localStorage every 3s instead of on every timeupdate (12x/sec). Reduces write pressure.
+The current video's position is saved to `localStorage` (`video-progress-<filename>`) at most
+every 3 s during playback, and on scope rotation, `pagehide` and when the page is hidden.
+This keeps write pressure low. Live streams save no progress.
 
-## HLS reconnection: native vs HLS.js
+## Player recovery
 
-HLS.js: `startLoad()` from current position. Native HLS (iOS Safari): must reload the source entirely — there's no equivalent of startLoad.
+On bfcache `pageshow`, when the page becomes visible, or on `online`, every player unit
+resumes. HLS.js calls `startLoad()` and plays on. Native HLS (iOS Safari) has no equivalent,
+so the unit reloads the element and restores the position for VOD. Online videos resolve
+their source again only when the element has an error or no source; otherwise they just
+play.
 
 ## Native live finalization reconciliation
 
-Native Safari can change a playing stream from an infinite live duration to a
-finite duration before the server playlist request observes `#EXT-X-ENDLIST`.
-When native duration is finite but parsed playlist truth is still live, the
-owning player unit refetches playlist authority once per second. It stops as
-soon as the playlist becomes VOD or the unit loads different media. This retry
-is scoped to an observed authority disagreement; it is not general playlist
-polling.
-
-## List request generations
-
-List refreshes use an `AbortController` and request generation so stale
-responses cannot overwrite a newer reconciliation.
-
-## List reconciliation is the sole DOM writer
-
-Initial load, polling, and bfcache refresh all pass through one reconciliation
-function. On `pagehide`, polling stops and the in-flight request is aborted. On
-bfcache `pageshow`, a full refresh completes before exactly one poller resumes.
+Native Safari can change a playing stream from an infinite live duration to a finite
+duration before the server playlist request observes `#EXT-X-ENDLIST`. When a local video's
+native duration is finite but the parsed playlist is still live, the owning player unit
+refetches the playlist once per second. It stops as soon as the playlist becomes VOD or the
+unit loads different media. This retry is scoped to an observed authority disagreement; it
+is not general playlist polling.
 
 ## No frontend playlist cache
 
-`fetchAndParsePlaylist` reads from the server on every call. No Map cache.
+`fetchPlaylist` (`services/hls.ts`) requests the playlist from the server on every call and
+keeps no in-memory cache.
 
 **Why:** A cache can freeze `isLive` state and make a live stream appear as VOD.
 
-## No frontend passthrough logging
+## Video Vault lives on porntrex.com
 
-The frontend does not post diagnostic events to the server. The old
-`POST /api/log` route, logging helpers, watchdog, and timer-drift sentinel are
-removed.
+Video Vault lists both upload sites from a page on porntrex.com and reads XVideos pages
+through the app's hidden xvideos.com web view.
 
-## Video Vault lives on porntrex.com (2026-10-04)
+**Why:** XVideos sends a Content-Security-Policy whose `default-src` lists only its own and
+ad hosts, so a page on xvideos.com cannot load Porntrex media. Porntrex sends no policy, and
+XVideos' CDN serves its playlists to other origins, so XVideos HLS plays on porntrex.com.
+Neither site's pages can be read from the other origin (no CORS), and a hidden iframe would
+get no cookies (third-party), hence the app's first-party web view. The vault's URLs are
+Porntrex 404 pages, which load whether or not either site is signed in.
 
-One app (Video Vault, which replaced Ptrex) lists both upload sites. Its page is on
-porntrex.com and reads XVideos pages through a hidden xvideos.com web view in the app.
+## Video Vault lists only the pipeline's uploads
 
-**Why:** XVideos sends a Content-Security-Policy whose `default-src` lists only its own
-and ad hosts, so a page on xvideos.com cannot load Porntrex media (tested on the phone:
-`play()` rejected, nothing loaded). Porntrex sends no policy, and XVideos' CDN serves its
-playlists to other origins, so XVideos HLS plays on porntrex.com. Neither site's pages can
-be read from the other origin (no CORS), and a hidden iframe would get no cookies
-(third-party), hence the app's first-party web view. The page is Porntrex's 404 page,
-which loads whether or not either site is signed in.
+An upload is listed only when its title carries the recording in brackets,
+`[YYYY-MM-DD HHMMSS streamer]` (`isPipelineUpload` in `providers/uploadSite.ts`). Older manual
+uploads and uploads renamed to the bare `YYYY-MM-DD HHMMSS streamer` stay on the sites but are
+not listed.
+
+**Why:** The vault shows the pipeline's archive; an upload renamed to the bare stamp has been
+taken out of it.
 
 ## Rules
 
@@ -118,17 +138,22 @@ which loads whether or not either site is signed in.
   ownership.
 - The viewer is a native scrolling 10k/natural/10k three-scope document.
   Videos use intrinsic `width: 100%; height: auto` geometry without clipping.
-- Player units own video, timeline, and media lifecycle. One fixed overlay,
-  inset from Safari's top and bottom boundaries, latches to the settled scope.
+- Player units own video, timeline, and media lifecycle. One transparent fixed overlay
+  follows the midpoint-selected video.
 
-## Scroll regression check
+## Regression checks
 
-After `npm run build:app`, run `node packages/app/test/viewer.mjs` from the repo
-root. It loads the deployed frontend (default `https://192.168.1.197:9999`,
-override with `VIDEO_TEST_ORIGIN`) with isolated API/media fixtures. Cases cover
-midpoint continuity without scroll writes, immediate settlement, held fingers,
-continued momentum, directional spacer landings, reversal and list boundaries,
-native URL history, progress persistence, marker reset, mute, and seeking.
-Non-GET requests are blocked; no real edits or download-list changes occur.
-This is a behavioral regression test, not proof of physical iPhone momentum
-or native HLS playback; those still need an on-phone check.
+`npm run test:app:webkit` drives the built website and both content scripts in WebKit with
+isolated fixtures, including scroll settlement on a local list (see `PROVIDERS.md`).
+
+`node packages/app/test/viewer.mjs`, run from the repo root after `npm run build:app`, loads
+the deployed frontend that the PC server serves from `packages/app/build` (default
+`https://192.168.1.197:9999`, override with `VIDEO_TEST_ORIGIN`) in headless Chromium
+(`/usr/bin/chromium`) with isolated API/media fixtures. Cases cover midpoint continuity
+without scroll writes, immediate settlement, held fingers, continued momentum, directional
+spacer landings, reversal and list boundaries, native URL history, progress persistence,
+marker reset, mute, and seeking. Non-GET requests are blocked; no real edits or
+download-list changes occur.
+
+Both are behavioral regression tests, not proof of physical iPhone momentum or native HLS
+playback; those still need an on-phone check.
