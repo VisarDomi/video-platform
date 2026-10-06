@@ -194,7 +194,10 @@ export class OverlayView {
 		const isOriginal = local && this.video?.type === VIDEO_TYPE.ORIGINAL && this.timeline.isLive === false;
 		const isEdited = local && this.video?.type === VIDEO_TYPE.EDITED;
 		const hasSegments = isOriginal && this.segments.length > 0;
+		// Every control is re-enabled here: a scroll disables them all (below) until it settles.
 		this.muteUndo.disabled = false;
+		this.follow.disabled = false;
+		this.block.disabled = false;
 		this.returnOriginal.disabled = false;
 		this.addMarker.disabled = false;
 		this.muteUndo.textContent = hasSegments ? '↪️' : this.muted ? '🔇' : '🔊';
