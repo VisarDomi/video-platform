@@ -23,7 +23,9 @@ as uncertain, to be checked 24 hours later.
   daily. A Porntrex video that is still processing is checked again after two hours.
 - Without a stored ID, look the upload up by its exact identity suffix. XVideos searches the uploads
   list for the folder name and requires the exact suffix; Porntrex scans every page of My Videos and
-  also accepts the user's manual uploads whose title ends with the unbracketed identity.
+  also accepts the user's manual uploads whose title ends with the unbracketed identity. A Porntrex row
+  marked "Error" (Porntrex's own processing failed: no link, Edit disabled) counts toward the list
+  total but is no copy of the recording; any other row without a link stops the scan.
 - One exact match: persist its provider ID and verify playback: a stream of at least the Full-HD pixel
   count (1920×1080, 0.5% tolerance).
 - Known ID: keep checking that upload. Processing delays, missing playback tiers and provider errors

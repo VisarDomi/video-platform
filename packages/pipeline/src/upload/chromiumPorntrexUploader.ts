@@ -134,6 +134,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         await passPorntrexAgeGate(page);
         const entries = new Map<string, Entry>();
         const processing = new Set<string>();
+        const failed = new Set<string>();
         let countsProcessing = false;
         const signatures = new Set<string>();
         let expected = -1;
@@ -150,7 +151,10 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
                     // empty link and is not yet part of the heading's count.
                     return { remoteId: row.getAttribute("data-item-id") ?? "", title: title?.textContent?.trim() ?? "",
                         remoteUrl: title?.getAttribute("href") ?? "",
-                        processing: row.classList.contains("processing") || !!row.querySelector(".line-processing") };
+                        processing: row.classList.contains("processing") || !!row.querySelector(".line-processing"),
+                        // Porntrex's own processing failed: an "Error" badge, no
+                        // link, Edit disabled. Counted in the totals.
+                        failed: row.classList.contains("error") || !!row.querySelector(".line-error") };
                 }),
             }));
             const tabTotals = snapshot.tabs.map(tab => Number(tab.match(/\((\d+)\)/)?.[1] ?? NaN));
@@ -161,10 +165,12 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             countsProcessing = fromTabs;
             for (const row of snapshot.rows) {
                 const published = row.remoteUrl.startsWith(`${ORIGIN}/video/${row.remoteId}/`);
-                if (!/^\d+$/.test(row.remoteId) || !row.title || (!published && !(row.processing && row.remoteUrl === ""))) {
+                const unlinked = (row.processing || row.failed) && row.remoteUrl === "";
+                if (!/^\d+$/.test(row.remoteId) || !row.title || (!published && !unlinked)) {
                     throw new Error("Incomplete Porntrex upload row; cannot infer absence");
                 }
                 if (row.processing) processing.add(row.remoteId);
+                if (row.failed && !published) failed.add(row.remoteId);
                 entries.set(row.remoteId, { remoteId: row.remoteId, title: row.title,
                     remoteUrl: published ? row.remoteUrl : `${ORIGIN}/video/${row.remoteId}/` });
             }
@@ -177,7 +183,8 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             if (!nextPage?.ok()) throw new Error("Porntrex uploads list is incomplete; cannot infer absence");
         }
         if (entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
-        const matches = [...entries.values()].filter(row => matchesPorntrexIdentity(row.title, identity));
+        // A failed upload holds no video: it is no copy of the recording.
+        const matches = [...entries.values()].filter(row => !failed.has(row.remoteId) && matchesPorntrexIdentity(row.title, identity));
         return matches.length === 1 ? { kind: "found", ...matches[0] }
             : { kind: matches.length > 1 ? "ambiguous" : "absent" };
     }
