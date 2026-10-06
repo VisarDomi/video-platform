@@ -1,3 +1,3 @@
-// Fresh full-catalog uploads with v1-style production titles and cross-generation
-// media/description cache reuse. Media policy remains the approved v4 policy.
+// The upload generation: its ledger rows and artifacts belong together. The media
+// policy is versioned separately (RESOLUTION_POLICY_VERSION, ARTIFACT_RECIPE_VERSION).
 export const CURRENT_PRODUCTION_VERSION = "production-v6";

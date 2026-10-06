@@ -1,23 +1,37 @@
-# HTTP caching follow-up
+# HTTP caching
 
-The frontend cache split introduced in commit `88e67c2` is sound: hashed build assets can use a one-year immutable lifetime, while the SPA entry document must revalidate so a deployment cannot strand clients on an old asset graph.
+The server (`packages/server/src/main.ts`) gives the content-hashed build assets under
+`/assets/` `Cache-Control: public, max-age=31536000, immutable`. `index.html`, the SPA
+fallback and every other static file get Express's default `public, max-age=0` with an
+ETag, so clients revalidate the entry document before reuse and a deployment cannot
+strand them on an old asset graph. The long lifetime belongs on hashed assets, not HTML.
 
-## Dynamic API responses need an explicit policy
+## Dynamic API responses have no caching policy
 
-The video and provider-list endpoints currently rely on browser heuristic caching. Add `Cache-Control: no-store` to dynamic API responses. This makes the server's intent unambiguous and prevents Safari or an intermediary from reusing a stale list.
+The video and provider-list endpoints (`/api/videos`, `/api/<provider>/list|member|exists|resolve`)
+send no `Cache-Control`, only an ETag. Add `Cache-Control: no-store` to dynamic API
+responses so the server's intent is unambiguous and Safari or an intermediary cannot reuse
+a stale list. `API.HEADERS.NO_CACHE` in `packages/server/src/core/constants.ts` is defined
+but unused.
 
-## Live HLS playlists must not be cached
+## Live HLS playlists have no caching policy
 
-Active media playlists change while a stream is running. Serve live `.m3u8` responses with `Cache-Control: no-store` (or an equivalently strict revalidation policy). A cached playlist can make playback appear frozen even while new segments are being produced.
+`GET /hls/:provider/:filename/playlist.m3u8` (`packages/server/src/api/hls.routes.ts`)
+sends no `Cache-Control`, although a recording's playlist changes while the stream is
+running. Serve it with `Cache-Control: no-store` (or an equivalently strict revalidation
+policy): a cached playlist can make playback appear frozen while new segments are produced.
 
-## Finalized segments may be immutable only when their URLs are immutable
+## Segments may be immutable only when their URLs are immutable
 
-Completed HLS segments can use `Cache-Control: public, max-age=31536000, immutable` if a segment URL is never overwritten with different bytes. Keep short or no caching if the same URL can be regenerated.
+Segments (`/hls/:provider/:filename/<segment>.ts|.mp4`) also send no `Cache-Control`.
+Completed segments can use `Cache-Control: public, max-age=31536000, immutable` only if a
+segment URL is never overwritten with different bytes. Keep short or no caching if the
+same URL can be regenerated.
 
-## Keep the SPA shell explicitly revalidated
+## Missing asset paths return the SPA document
 
-Continue serving `index.html` and the SPA fallback with `Cache-Control: no-cache`. `max-age=0` is not itself a problem here: it permits storage but requires validation before reuse, which is the desirable behavior for the entry document. The long lifetime belongs on content-hashed assets, not HTML.
-
-## Minor routing cleanup
-
-A missing static file such as `favicon.ico` currently falls through to the SPA document. Return a real icon or a `404` for asset-looking paths so clients do not cache HTML under an asset URL.
+`/favicon.ico` and any missing asset-looking path (such as `/assets/missing.js`) get
+`index.html` with status 200, so clients can cache HTML under an asset URL. `index.html`
+links `/favicon.ico`, but the icon is in `packages/app/static/`, which Vite does not copy
+into the build (its public directory is `public/`). Ship the icon and return a `404` for
+asset-looking paths.
