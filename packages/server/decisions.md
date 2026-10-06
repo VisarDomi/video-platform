@@ -23,12 +23,17 @@ Processing a pending recording (`processFinalizedRecording`):
    ffmpeg pass. If that fails, MPEG-TS segments are decoded one by one, and a
    segment that fails alone is decoded again after its same-run predecessor (a
    segment without its own SPS/PPS is whole there); fMP4 fragments are decoded
-   alone and then with a same-epoch neighbor. That attributes the damage. Attributed segments stay in the playlist and are listed in
+   alone and then with a same-epoch neighbor. That attributes the damage.
+   Attributed segments stay in the playlist and are listed in
    `invalidSegments` with a `damaged-segments` warning; damage no single
    segment explains is an `unattributed-damage` warning; a playlist the
    validator cannot interpret, or validation that cannot complete for a reason
    in the recording, publishes unvalidated with a `validation-incomplete`
    warning.
+5. Each published recording logs one line. It is a warning when the report has
+   a finding other than damaged segments, or damaged segments beyond 2% of the
+   playlist; damage below that comes from the stream itself (most Tango
+   recordings carry a few corrupted macroblocks) and is an info line.
 
 Finalization may rewrite only `playlist.m3u8` (durations and discontinuity
 tags). It never removes a playlist entry and never moves or deletes a media

@@ -28,6 +28,7 @@ const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonicall
 // publication; it is reported as warnings on a "ready" report. "failed" is
 // reserved for validation-environment failures and is always retried.
 export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 5;
+const MINOR_DAMAGE_FRACTION = 0.02;
 const ENVIRONMENT_ERROR_CODES = new Set([
     "EIO", "EACCES", "EPERM", "ENOSPC", "EDQUOT", "EROFS", "EMFILE", "ENFILE", "ENOMEM", "EAGAIN", "EBUSY", "ESTALE",
 ]);
@@ -835,7 +836,13 @@ export function startMediaIntegrityFinalizer(): void {
                 ? { warnings: warnings.map((warning) => ({ kind: warning.kind, message: warning.message, count: warning.names?.length ?? 0 })) }
                 : {}),
         };
-        if (warnings.length > 0) logger.warn("[Finalization] published recording with warnings", details);
+        // A few damaged segments are the stream's own (Tango sends some in most
+        // recordings) and need nothing: an info line. Any other finding, or damage
+        // beyond MINOR_DAMAGE_FRACTION, is a warning.
+        const damaged = warnings.find((warning) => warning.kind === "damaged-segments")?.names?.length ?? 0;
+        const notable = warnings.some((warning) => warning.kind !== "damaged-segments")
+            || damaged > MINOR_DAMAGE_FRACTION * (result.report.segmentCount ?? 0);
+        if (warnings.length > 0) logger.log(notable ? "warn" : "info", "[Finalization] published recording with warnings", details);
         else logger.info("[Finalization] published recording", details);
     });
 
