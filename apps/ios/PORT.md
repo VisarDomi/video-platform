@@ -100,7 +100,8 @@ to log in. Its login cookies cover both sites.
 
 Start with [shared Mac access](/home/visar/Documents/environment/mac-access.md).
 `scripts/deploy.py` runs on this PC and drives the Mac over SSH (`visar@192.168.1.198`,
-the runbook's known-hosts file). Mac mirror:
+the runbook's known-hosts file; it falls back to the Mac's Wi-Fi automatically when
+Ethernet is down, see `mac-connect --check`). Mac mirror:
 `/Users/visar/Developer/video-platform/apps/ios`. The phone
 (`00008101-000639912881401E`) is cabled to the Mac; paid team `65U58U86DD`. From this folder:
 
