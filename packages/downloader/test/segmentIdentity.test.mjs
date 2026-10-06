@@ -121,6 +121,15 @@ test("an SC-like edge renumbering 693 -> 26 is accepted instead of skipped until
     assert.match(await capture.playlist(), /_693\.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:2,\n\d+_2026-09-21T134247Z_22\.ts\n/);
 });
 
+test("segments that left the live window before a poll are counted as missed", async (t) => {
+    const capture = await liveCapture(t, "stream");
+    assert.deepEqual(await capture.poll(10, 6), [10, 11, 12, 13, 14, 15]);
+    assert.deepEqual(await capture.poll(20, 6), [20, 21, 22, 23, 24, 25]);
+    assert.equal(capture.manager.missedSegmentCount, 4);
+    assert.deepEqual(await capture.poll(21, 6), [26]);
+    assert.equal(capture.manager.missedSegmentCount, 4);
+});
+
 test("a stale window slightly below the baseline is still deduplicated, not a restart", async (t) => {
     const capture = await liveCapture(t, "stream");
     assert.deepEqual(await capture.poll(100, 6), [100, 101, 102, 103, 104, 105]);

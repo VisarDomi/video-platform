@@ -58,6 +58,13 @@ the whole window is accepted as new media, its first segment gets
 baseline drops to the new run. A window closer than that is a stale or lagging
 copy of the same numbering and is deduplicated.
 
+A window whose first sequence lies more than one above the baseline (outside an
+edge switch) has lost the segments between: they left the live window before a
+poll listed them. A `SEQUENCE-GAP` warning names them with the window and the
+time since the previous poll (a long time means this loop fell behind, a short
+one that the provider skipped them), and the session's "recording ended" line
+counts the provider segments missed.
+
 The appended entry also gets a discontinuity after any sequence gap, a change
 of TS dimensions/SAR (unknown dimensions count as a change), a new init map, or
 a resume.
@@ -184,7 +191,7 @@ Recovery from CDN failures is allowed, and its effect on the media is never
 silent. At the default level a recording logs two info lines, `recording started
 in <folder>` and `recording ended (<reason>), <n> segments handed to the server
 in <folder>`, plus `VARIANT_CHANGE`. Warnings are what changed or risked the
-media: `EDGE-GAP`, `SEQUENCE-RESTART`, `EDGE-DEDUP bypassed`, segment
+media: `EDGE-GAP`, `SEQUENCE-GAP`, `SEQUENCE-RESTART`, `EDGE-DEDUP bypassed`, segment
 rejections, re-appended media, unknown dimensions, a session without segments.
 Routine mechanics are debug lines (`LOG_LEVEL=debug`): discovery decisions,
 `START`, `STALE`/`RECOVERED`, `EDGE-SWITCH`, `EDGE-DEDUP` skips, `LOOP-EXIT`,
