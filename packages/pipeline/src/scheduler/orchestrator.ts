@@ -7,6 +7,10 @@ import type {
 import { composeUploadMetadata } from "../metadata/composeUploadMetadata.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 
+// A stage that cannot run now for a reason outside the recording (the machine is
+// short of memory): the recording keeps its state and the stage runs later.
+export class StageDeferredError extends Error {}
+
 export interface DescriptionEvidence {
     readonly artifactSha256: string;
     readonly promptVersion: string;
@@ -161,6 +165,8 @@ export class PipelineOrchestrator {
                     result = recording;
             }
         } catch (error) {
+            // Not now, not a failure: the recording keeps its state for a later step.
+            if (error instanceof StageDeferredError) throw error;
             const message = error instanceof Error ? error.message : String(error);
             result = this.database.transition(recording.id, recording.state, "failed", message);
         } finally {
