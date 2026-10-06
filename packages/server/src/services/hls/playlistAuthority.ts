@@ -673,8 +673,9 @@ export async function repairPlaylistDurations(
         writeSkippedReason,
     };
 
-    // Only a repair that rewrote the playlist is worth an info line.
-    logger.log(wrotePlaylist ? "info" : "debug", "[PlaylistAuthority] playlist-media-timeline-repair", summary);
+    // Correcting a few durations by fractions of a second is routine for Tango
+    // recordings; only probe problems are worth a warning.
+    logger.debug("[PlaylistAuthority] playlist-media-timeline-repair", summary);
     if (failedProbeCount > 0 || missingSegmentCount > 0) {
         logger.warn("[PlaylistAuthority] playlist-media-timeline-repair had probe issues", {
             playlistPath,
