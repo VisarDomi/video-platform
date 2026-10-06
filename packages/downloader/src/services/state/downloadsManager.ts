@@ -46,6 +46,7 @@ export class DownloadHandle {
 export class DownloadsManager {
     private downloads: Map<string, Download> = new Map();
     private activeDownloaders: Map<string, ActiveDownloader> = new Map();
+    private shuttingDown = false;
     private readonly statusFilePath: string;
     private _updateFileDebounceTimer: NodeJS.Timeout | null = null;
 
@@ -61,6 +62,9 @@ export class DownloadsManager {
     }
 
     public add(masterPlaylistUrl: string, initialData: Omit<Download, "liveUrl" | "segmentsDirPath">): DownloadHandle | null {
+        // Discovery keeps polling during shutdown; a session started then would
+        // resume a folder the stopping session just left, and be cut off mid-write.
+        if (this.shuttingDown) return null;
         if (this.downloads.has(masterPlaylistUrl)) {
             logger.warn(`[General] Attempted to add an already existing download: ${masterPlaylistUrl}`);
             return null;
@@ -134,6 +138,7 @@ export class DownloadsManager {
     }
 
     public async shutdownAll(): Promise<void> {
+        this.shuttingDown = true;
         const count = this.activeDownloaders.size;
         if (count === 0) return;
 
