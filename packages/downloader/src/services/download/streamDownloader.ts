@@ -9,7 +9,7 @@ import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
-import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS } from "../../common/timing.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS, RATE_LIMIT_RETRY_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
@@ -304,6 +304,13 @@ export class StreamDownloader {
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
                 if (failure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
+                // Rate limited: the same playlist answers again shortly. Variant
+                // recovery would add requests, and its 5-second pause lets the
+                // window move past segments.
+                if (failure?.kind === "http" && failure.status === 429) {
+                    await timersPromises.setTimeout(RATE_LIMIT_RETRY_MS);
+                    continue;
+                }
                 const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
                 if (!recovered) {
                     logger.debug(`[StreamDownloader] ${alias} variant failed, no recovery candidate (segments=${initTracker.count})`);
