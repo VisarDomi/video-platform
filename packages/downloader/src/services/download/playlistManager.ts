@@ -359,7 +359,7 @@ export class PlaylistManager {
     // segments after the batch's last are new, and a numbering restart is left
     // to the next regular poll.
     public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver,
-        queuedThrough?: number): Promise<SegmentInfo[]> {
+        queuedThrough?: number, pollTimings?: string): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
         const newSegments: SegmentInfo[] = [];
 
@@ -430,7 +430,7 @@ export class PlaylistManager {
             const missed = windowFirst - baseline - 1;
             this._missedSegmentCount += missed;
             const late = sincePreviousPoll === null || sincePreviousPoll > SEQUENCE_GAP_LATE_POLL_SECONDS;
-            logger.log(late ? "warn" : "info", `[PlaylistManager] SEQUENCE-GAP recording=${this.recordingId} missing=${baseline + 1}-${windowFirst - 1} (${missed} segments) window=${windowFirst}-${windowLast} sincePreviousPoll=${sincePreviousPoll === null ? "none" : `${sincePreviousPoll.toFixed(1)}s`}: ${late ? "this loop polled too late" : "the provider skipped them"}`);
+            logger.log(late ? "warn" : "info", `[PlaylistManager] SEQUENCE-GAP recording=${this.recordingId} missing=${baseline + 1}-${windowFirst - 1} (${missed} segments) window=${windowFirst}-${windowLast} sincePreviousPoll=${sincePreviousPoll === null ? "none" : `${sincePreviousPoll.toFixed(1)}s`}${pollTimings ? ` ${pollTimings}` : ""}: ${late ? "this loop polled too late" : "the provider skipped them"}`);
         }
         if (numberingRestarted) {
             logger.warn(`[PlaylistManager] SEQUENCE-RESTART recording=${this.recordingId} edge=${this._timeline.edge ?? "unknown"} previous=${baseline} window=${windowFirst}-${windowLast} margin=${restartMargin}: provider restarted its numbering; accepting the window as new media after a discontinuity`);
