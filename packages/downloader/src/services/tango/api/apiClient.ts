@@ -60,7 +60,9 @@ export class ApiClient implements IStreamProvider {
         method: string,
         headers: HeadersInit,
         responseType: "json" | "text" | "arrayBuffer" = "json",
-        body: any = null
+        body: any = null,
+        // Statuses the caller handles as an ordinary answer: a debug line only.
+        expectedStatuses: readonly number[] = [],
     ): Promise<T | null> {
         try {
             const options: RequestInit = {
@@ -75,7 +77,7 @@ export class ApiClient implements IStreamProvider {
 
             const response = await fetch(url, options);
             if (!response.ok) {
-                logger.error(`[Tango] API request to ${url} failed`, {
+                logger.log(expectedStatuses.includes(response.status) ? "debug" : "error", `[Tango] API request to ${url} failed`, {
                     status: response.status,
                     statusText: response.statusText,
                 });
@@ -171,7 +173,9 @@ export class ApiClient implements IStreamProvider {
         try {
             const tokens = await this.tokenReader();
             const headers = getStreamHeaders(tokens);
-            return await this._makeApiRequest<string>(masterListUrl, "GET", headers, "text");
+            // A master that 404s just after a stream (re)starts is retried by the
+            // session; one that keeps failing ends it with zero segments, a warning.
+            return await this._makeApiRequest<string>(masterListUrl, "GET", headers, "text", null, [404]);
         } catch (error) {
             logger.error(`[Tango] Unexpected error in getMasterList for ${masterListUrl}`, { error: (error as Error).message });
             return null;
