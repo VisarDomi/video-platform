@@ -22,6 +22,8 @@ tango.me
 
 `scripts/tango-unblock-blocklist.mjs` is a standalone account-maintenance utility,
 not part of the app or its tests. It reads the PC's existing Tango session
-(`~/.local/share/video-services/session`) and defaults to a dry run; `--execute`
-unblocks **every** account on the blocklist. Do not use it for routine validation
-or cleanup.
+(`~/.local/share/video-services/session`) and uses the same blocklist endpoint as the
+app and the server (`abregistrar/connection/v1/blocklist`, action `UNBLOCK`). It
+defaults to a dry run. `--account <id> --execute` unblocks one account (e.g. after
+testing Block); `--execute` alone unblocks **every** account on the blocklist, one per
+second. It reports whether anything is still blocked afterwards.
