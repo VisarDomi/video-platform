@@ -355,6 +355,35 @@ try {
     await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/B.m3u8'));
     assert.ok(calls.includes('POST /abregistrar/connection/v1/blocklist {"action":"BLOCK","account_id":["A"]}'));
     assert.deepEqual(await catalog(), ['B', 'C', 'E'], 'A blocked streamer leaves; the next stream takes its place');
+    // A user scroll disables the overlay until it settles; Follow and Block come back with it.
+    await tg.evaluate(() => {
+        window.followDisabled = [];
+        const follow = document.querySelector('.buttons button[title="Follow or unfollow"]');
+        new MutationObserver(() => window.followDisabled.push(follow.disabled)).observe(follow, { attributes: true, attributeFilter: ['disabled'] });
+    });
+    // A vertical swipe starts navigation (as in scroll-settlement.mjs); touchend + scrollend settle it.
+    await tg.evaluate(() => {
+        const stage = document.querySelector('.video-stage');
+        window.tgTouch = (type, y) => {
+            const point = { identifier: 1, target: stage, clientX: 200, clientY: y };
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            Object.defineProperties(event, { touches: { value: type === 'touchend' ? [] : [point] }, changedTouches: { value: [point] } });
+            stage.dispatchEvent(event);
+        };
+        window.tgTouch('touchstart', 400);
+        window.tgTouch('touchmove', 350);
+    });
+    await tg.waitForFunction(() => window.followDisabled.includes(true), null, { timeout: 5000 });
+    await tg.evaluate(() => { window.tgTouch('touchend', 350); window.dispatchEvent(new Event('scrollend')); });
+    await tg.waitForFunction(() => !document.querySelector('.buttons button[title="Follow or unfollow"]').disabled
+        && !document.querySelector('.buttons button[title="Block"]').disabled, null, { timeout: 5000 });
+    await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/B.m3u8'));
+    await tg.locator('.buttons button[title="Follow or unfollow"]').click();
+    await tg.waitForFunction(() => document.querySelector('.buttons button[title="Follow or unfollow"]').textContent === '🤍');
+    await tg.locator('.buttons button[title="Follow or unfollow"]').click();
+    await tg.waitForFunction(() => document.querySelector('.buttons button[title="Follow or unfollow"]').textContent === '❤️');
+    assert.ok(calls.includes('POST /proxycador/api/public/v1/follow/remove B') && calls.includes('POST /proxycador/api/public/v1/follow/add B'),
+        'After a scroll, Follow still unfollows and follows');
     await tg.goto('https://tango.me/stream/sC'); await tgInject();
     await tg.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/E.m3u8'));
     assert.deepEqual(await catalog(), ['B', 'E'], 'An ended stream leaves; the next one takes its place');
