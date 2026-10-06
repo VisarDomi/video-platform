@@ -49,8 +49,10 @@ export class LlamaServer {
         this.child = spawn(this.config.runtimeExecutable, args, {
             stdio: ["ignore", "pipe", "pipe"],
         });
-        this.child.stdout?.on("data", (chunk: Buffer) => { this.logTail = `${this.logTail}${chunk}`.slice(-8192); process.stdout.write(chunk); });
-        this.child.stderr?.on("data", (chunk: Buffer) => { this.logTail = `${this.logTail}${chunk}`.slice(-8192); process.stderr.write(chunk); });
+        // About a thousand lines per run: kept in memory, and shown only with a
+        // failure (startup errors here, request errors through withLog).
+        this.child.stdout?.on("data", (chunk: Buffer) => { this.logTail = `${this.logTail}${chunk}`.slice(-8192); });
+        this.child.stderr?.on("data", (chunk: Buffer) => { this.logTail = `${this.logTail}${chunk}`.slice(-8192); });
         this.child.once("error", (error) => {
             this.launchError = error;
         });
@@ -60,6 +62,14 @@ export class LlamaServer {
             await this.stop();
             throw error;
         }
+    }
+
+    // The error with the end of the managed server's output, which explains most
+    // request failures (out of memory, a crash, a context overflow).
+    withLog(error: unknown): Error {
+        const message = error instanceof Error ? error.message : String(error);
+        const tail = this.logTail.trim().slice(-2000);
+        return tail ? new Error(`${message}\nllama-server output (end):\n${tail}`, { cause: error }) : error instanceof Error ? error : new Error(message);
     }
 
     async stop(): Promise<void> {

@@ -7,8 +7,10 @@ durable job owner nor a standalone daemon.
 
 Managed startup allows up to ten minutes for a slow model load, configurable
 with `DESCRIPTOR_STARTUP_TIMEOUT_MS`. Each health request is bounded to two
-seconds; startup logs progress every thirty seconds and includes recent model
-logs on failure. Exited/signalled children and missing executables fail promptly.
+seconds; startup logs progress every thirty seconds. The managed server's own
+output (about a thousand lines a run) is kept in memory, not logged: its last
+8 KB are appended to a startup failure, its last 2 KB to a failed description or
+rewrite request. Exited/signalled children and missing executables fail promptly.
 Failed starts clean up their child; shutdown sends SIGTERM and kills the child
 after ten seconds. An already-occupied health endpoint is refused in managed
 mode. Set `DESCRIPTOR_MODEL_URL` only when intentionally using an external
