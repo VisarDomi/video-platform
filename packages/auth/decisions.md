@@ -7,9 +7,11 @@
 `TANGO_STREAM_TOKEN_TTL_S = 10` (stream tokens `tt`/`ttu`/`tte`). Each refresh
 cadence is half its TTL: stream tokens every 5 seconds, the session every 30
 minutes. The stream-token cadence runs from the start of each refresh, so a slow
-answer does not delay the next one; the request is abandoned when the current
-stream token expires (queue wait included; 10 seconds without one that lasts
-another second), and a failed refresh is retried after 1 second. A session refresh also returns a replacement refresh token
+answer does not delay the next one. A cycle's first request is abandoned after 2
+seconds and retried 1 second later with the full 10-second bound (queue wait
+included): the usual failure is one request that hangs while a fresh one answers
+in a fraction of a second, and the retry still lands before the token expires,
+whereas a slow API is never cut off on the retry. A session refresh also returns a replacement refresh token
 (`Tango-RT`) when Tango issues one; a 401 or 403 from the refresh falls back to
 a browser login.
 

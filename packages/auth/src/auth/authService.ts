@@ -7,6 +7,9 @@ import { loginQueue } from "../browser/loginQueue.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
 const SHORT_REFRESH_RETRY_MS = 1_000;
+const SHORT_REFRESH_FIRST_ATTEMPT_MS = 2_000;
+// A stream-token request otherwise; Tango's stream token lives 10 seconds.
+const SHORT_TOKEN_REQUEST_TIMEOUT_MS = 10_000;
 
 export class AuthService {
     private readonly account: Account;
@@ -113,12 +116,12 @@ export class AuthService {
         }
     }
 
-    private async setTokenData() {
+    private async setTokenData(timeoutMs = SHORT_TOKEN_REQUEST_TIMEOUT_MS) {
         const tokenBag = this.authContext.getTokenBag();
         if (!tokenBag?.sessionToken) {
             throw new Error(`Cannot fetch token data for ${this.account.email} without session token.`);
         }
-        const result = await this.provider.fetchShortTokens(tokenBag);
+        const result = await this.provider.fetchShortTokens(tokenBag, timeoutMs);
         this.authContext.updateFromTokenData(result);
     }
 
@@ -129,11 +132,15 @@ export class AuthService {
 
         // The stream token outlives one refresh cycle by a single cycle, so the
         // cadence runs from the start of each refresh (a slow answer does not
-        // push the next one later) and a failure is retried at once.
+        // push the next one later) and a failure is retried at once. Most
+        // failures are one request that hangs while a fresh one answers in a
+        // fraction of a second: the cycle's first request gives up after 2 s,
+        // leaving time for a retry before the token expires. A retry may take the
+        // full bound, so a slow API is not cut off.
         while (true) {
             const startedAt = Date.now();
             try {
-                await this.setTokenData();
+                await this.setTokenData(consecutiveFail === 0 ? SHORT_REFRESH_FIRST_ATTEMPT_MS : undefined);
                 await this.authContext.saveTokenToFile();
                 consecutiveOk++;
                 if (!wasHealthy) {

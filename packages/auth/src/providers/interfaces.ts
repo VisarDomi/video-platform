@@ -17,7 +17,8 @@ export interface IAuthProvider {
     readonly name: string;
     login(account: Account): Promise<TokenBag>;
     refreshSession(tokenBag: TokenBag): Promise<RefreshResult>;
-    fetchShortTokens(tokenBag: TokenBag): Promise<ShortTokenResult>;
+    // timeoutMs bounds the request, queue wait included.
+    fetchShortTokens(tokenBag: TokenBag, timeoutMs: number): Promise<ShortTokenResult>;
     extractUsername(refreshToken: string): string | null;
     serializeTokens(bag: TokenBag): Record<string, any>;
     deserializeTokens(data: Record<string, any>): TokenBag | null;
