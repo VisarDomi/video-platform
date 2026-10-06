@@ -5,13 +5,8 @@ repomix-output.xml
 repomix/
 .idea/
 .vscode/
-packages/downloader/tango.txt
-packages/downloader/fc2.txt
-packages/downloader/sc.txt
 dist/
 dist-server/
 build/
 .svelte-kit/
-test.md
-# The Tango app's test description is tracked.
-!apps/tango/test.md
+.claude/

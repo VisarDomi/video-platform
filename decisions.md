@@ -3,9 +3,9 @@
 This file records the system-level rules that hold on `main` and why. It describes
 the current state only; how it came to be is in git history. Package detail lives
 next to the code: `packages/downloader/decisions.md`, `packages/server/decisions.md`,
-`packages/pipeline/README.md` (+ `docs/upload-recovery.md`),
-`packages/descriptor/README.md`, `packages/app/decisions.md`, `apps/ios/PORT.md`,
-`packages/auth/decisions.md`, `packages/shared/decisions.md`, `systemd/README.md`.
+`packages/pipeline/setup.md` (+ `docs/upload-recovery.md`),
+`packages/descriptor/setup.md`, `packages/app/decisions.md`, `apps/ios/PORT.md`,
+`packages/auth/decisions.md`, `packages/shared/decisions.md`, `systemd/setup.md`.
 
 ## 1. Components and ownership boundaries
 

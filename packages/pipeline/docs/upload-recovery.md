@@ -51,7 +51,7 @@ The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility
 attempt columns survive worker restarts, independent of the bounded (16-entry) evidence history.
 `limited_visibility` is informational only: it never affects verification or retry eligibility.
 `metadata_rejection` records phrases the provider refused ("Sorry, 'X' is not allowed here"); the form was
-not validated, so no video exists. The phrases are learned in `rejected_phrases` (see the README section
+not validated, so no video exists. The phrases are learned in `rejected_phrases` (see `setup.md`,
 "Rejected metadata phrases").
 
 ## Source references and artifacts

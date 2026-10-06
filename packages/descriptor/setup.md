@@ -74,7 +74,7 @@ npm run describe-one:bounded -w descriptor -- "/path/to/video.mp4"
 It runs the descriptor in a transient user scope inside
 `video-processing.slice`, which caps all processing work together at
 `CPUQuota=600%`, starts memory reclaim at 70% of physical RAM, hard-limits it at
-80%, and denies swap (see `systemd/README.md`). Exceeding the memory ceiling
+80%, and denies swap (see `systemd/setup.md`). Exceeding the memory ceiling
 terminates work in the slice rather than exhausting host RAM and swap.
 
 Relevant tuning variables:
