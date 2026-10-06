@@ -268,10 +268,14 @@ boundary.
 ## Graceful shutdown: abort without finalization
 
 On SIGTERM/SIGINT, `DownloadsManager.shutdownAll()` aborts all active sessions
-and awaits their completion. The folders remain under `.active` without ENDLIST
-so the next process can compare recording identity and resume.
+and awaits their completion. From then on no session starts, although discovery
+keeps polling. The folders remain under `.active` without ENDLIST so the next
+process can compare recording identity and resume.
 
-**Why:** Process shutdown is not evidence that the remote broadcast ended.
+**Why:** Process shutdown is not evidence that the remote broadcast ended. A
+session started during shutdown would resume a folder its stopped predecessor
+just left and be cut off mid-write by the exit, while the next process resumes
+the same folder.
 
 ## The server serves the playlist as written
 
