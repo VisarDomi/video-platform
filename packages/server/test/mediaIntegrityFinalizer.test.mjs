@@ -285,6 +285,40 @@ test("failed whole-playlist validation reports exact bad segments, keeps them, a
     assert.equal(repeated.kind, "already-processed");
 });
 
+test("a segment that only lacks its parameter sets is whole after its predecessor; damage still counts", async (t) => {
+    const originalPlaylist = `${PLAYLIST_HEADER}#EXTINF:1,
+1.ts
+#EXTINF:1,
+2.ts
+#EXTINF:1,
+3.ts
+#EXTINF:1,
+4.ts
+#EXT-X-ENDLIST
+`;
+    const streamPath = await createStream(t, originalPlaylist);
+    const decoded = [];
+    const result = await finalizeMediaIntegrity(streamPath, {
+        checkpointStore: await createCheckpointStore(t),
+        validateMedia: async inputPath => {
+            decoded.push(inputPath.startsWith("concat:")
+                ? inputPath.slice("concat:".length).split("|").map(part => path.basename(part)).join("+")
+                : path.basename(inputPath));
+            const name = decoded.at(-1);
+            if (name === "playlist.m3u8") return { valid: false, exitCode: 0, stderr: "error while decoding MB 9 36" };
+            if (name === "2.ts" || name === "1.ts+2.ts") return { valid: false, exitCode: 0, stderr: "error while decoding MB 9 36" };
+            if (name === "4.ts") return { valid: false, exitCode: 0, stderr: "non-existing PPS 0 referenced" };
+            return { valid: true, exitCode: 0, stderr: "" };
+        },
+    });
+
+    assert.equal(result.report.status, "ready");
+    assert.deepEqual(result.report.invalidSegments.map(segment => segment.name), ["2.ts"]);
+    assert.ok(decoded.includes("3.ts+4.ts"));
+    // A damaged predecessor gives no context; 3.ts decodes alone anyway.
+    assert.ok(!decoded.includes("2.ts+3.ts"));
+});
+
 test("playlist without ENDLIST remains owned by the downloader", async (t) => {
     const streamPath = await createStream(t, `${PLAYLIST_HEADER}#EXTINF:1,
 1.ts

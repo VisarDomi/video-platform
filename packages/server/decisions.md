@@ -20,9 +20,10 @@ Processing a pending recording (`processFinalizedRecording`):
    an `unreferenced-media` warning and left in place.
 4. Validation decodes each native run (segments between discontinuities and
    init-map changes; a single-run playlist is decoded directly) with one strict
-   ffmpeg pass. If that fails, MPEG-TS segments are decoded one by one, and fMP4
-   fragments alone and then with a same-epoch neighbor, to attribute the
-   damage. Attributed segments stay in the playlist and are listed in
+   ffmpeg pass. If that fails, MPEG-TS segments are decoded one by one, and a
+   segment that fails alone is decoded again after its same-run predecessor (a
+   segment without its own SPS/PPS is whole there); fMP4 fragments are decoded
+   alone and then with a same-epoch neighbor. That attributes the damage. Attributed segments stay in the playlist and are listed in
    `invalidSegments` with a `damaged-segments` warning; damage no single
    segment explains is an `unattributed-damage` warning; a playlist the
    validator cannot interpret, or validation that cannot complete for a reason
@@ -33,7 +34,7 @@ Finalization may rewrite only `playlist.m3u8` (durations and discontinuity
 tags). It never removes a playlist entry and never moves or deletes a media
 file.
 
-The report (version 2, validator revision 4) has status `ready` (published,
+The report (version 2, validator revision 5) has status `ready` (published,
 possibly with `warnings`), `empty` (no playlist entries), or `failed`. `failed`
 means only that the validation environment failed: ffmpeg could not start, the
 filesystem refused I/O (permission, space, I/O errors), or every segment failed

@@ -27,7 +27,7 @@ const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonicall
 // Revision 4: validation is non-destructive. Media damage never blocks
 // publication; it is reported as warnings on a "ready" report. "failed" is
 // reserved for validation-environment failures and is always retried.
-export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 4;
+export const MEDIA_INTEGRITY_VALIDATOR_REVISION = 5;
 const ENVIRONMENT_ERROR_CODES = new Set([
     "EIO", "EACCES", "EPERM", "ENOSPC", "EDQUOT", "EROFS", "EMFILE", "ENFILE", "ENOMEM", "EAGAIN", "EBUSY", "ESTALE",
 ]);
@@ -75,7 +75,7 @@ export interface MediaIntegrityWarning {
 }
 
 // Checkpoint report. Consumers outside the server (pipeline) rely only on
-// `version === 2 && status === "ready"`. Since validator revision 4:
+// `version === 2 && status === "ready"`.
 // - "ready" means published; it may carry `warnings` and a non-empty
 //   `invalidSegments` (damaged segments that were KEPT).
 // - "failed" means the validation environment failed (ffmpeg could not run,
@@ -192,6 +192,25 @@ export async function validateNativeMediaPlaylist(streamPath: string, content: s
             error: results.filter(result => !result.valid).map(result =>
                 `native run ${result.firstIndex}-${result.lastIndex}: ${result.error}`).join("\n") || null };
     } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+}
+
+// A segment that does not begin with its own parameter sets (SPS/PPS) cannot be
+// decoded alone, yet is whole when decoded after the segment before it in the
+// same native run: only a segment that also fails there is damaged. The pair is
+// read through ffmpeg's concat protocol, which joins MPEG-TS byte streams as the
+// player does. Across a discontinuity the predecessor is no context.
+async function decodesAfterPredecessor(
+    streamPath: string,
+    previous: PlaylistEntry | undefined,
+    entry: PlaylistEntry,
+    invalidByName: ReadonlyMap<string, unknown>,
+    validateMedia: (inputPath: string) => Promise<MediaValidationResult>,
+): Promise<boolean> {
+    if (!previous || previous.continuityEpoch !== entry.continuityEpoch) return false;
+    if (!isSafeTsSegmentName(previous.name) || invalidByName.has(previous.name)) return false;
+    if (streamPath.includes("|")) return false;
+    const pair = `concat:${path.join(streamPath, previous.name)}|${path.join(streamPath, entry.name)}`;
+    return (await validateMedia(pair)).valid;
 }
 
 function isIgnoredMediaDecodeError(line: string): boolean {
@@ -532,7 +551,8 @@ export async function finalizeMediaIntegrity(
                     const validatedRun = processingReport.nativeRunResults?.some(run => run.valid
                         && entry.index >= run.firstIndex && entry.index <= run.lastIndex);
                     const result = validatedRun ? null : await validateMedia(path.join(streamPath, entry.name));
-                    if (result && !result.valid) {
+                    if (result && !result.valid
+                        && !await decodesAfterPredecessor(streamPath, parsed.entries[index - 1], entry, invalidByName, validateMedia)) {
                         invalidByName.set(entry.name, { name: entry.name, error: summarizeValidationFailure(result) });
                     }
                 }
