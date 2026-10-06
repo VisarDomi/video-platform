@@ -1,22 +1,18 @@
-# Tango
+# stream-viewer
 
-**Tango** is the iPhone app for live streams on tango.me (`tango-live` in
-`apps/ios/providers.json`, bundle `com.visar.Tango.paid`). It runs the shared viewer's
-`tango-live` provider (`packages/app/src/providers/tango-live.ts`) on tango.me:
+An iOS app, a Safari extension and a Safari userscript for rehauling the ui of the providers supported by this repo.
 
-1. Home lists followed streams first, then recommendations, one per streamer, without
-   blocked streamers.
-2. A stream plays full screen; swipe up/down for the next/previous stream.
+## What?
+This script changes the UI of the providers supported by this script so that's it easier to watch streams. Features:
+1. show list of favorites and recommended.
+2. show streams in tiktok style: swipe to go to next/prev stream
 
-This folder holds the app's notes and a maintenance script; it has no app code. Build,
-deploy, login and renewal: [`apps/ios/PORT.md`](../ios/PORT.md). Provider details:
-[`packages/app/PROVIDERS.md`](../../packages/app/PROVIDERS.md) ("Tango live").
 
 ## Why?
 Native navigation is cumbersome and too resource intensive and wastes phone battery.
 
 ## How?
-[flow.md](flow.md) explains the flows that this app handles best.
+[flow.md](flow.md) explain the flows that this app handles best.
 
 ## setup
 [notes.md](./notes.md)

@@ -13,3 +13,5 @@ dist-server/
 build/
 .svelte-kit/
 test.md
+# The Tango app's test description is tracked.
+!apps/tango/test.md

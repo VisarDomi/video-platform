@@ -104,7 +104,7 @@ if config.get('hosts'):
     # Video Vault reads its other upload site through hidden web views (VideoApp/SiteWorker.swift).
     if 'workers' in config: info['SiteWorkers'] = config['workers']
     if login: info['TangoLogin'] = True
-    # Xvid and Video Vault reach the PC's download lists themselves (VideoApp/DownloadList.swift).
+    # Video Vault reaches the PC's download lists itself (VideoApp/DownloadList.swift).
     if config.get('downloadList') is True:
         info.update(DownloadList=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
                     NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
