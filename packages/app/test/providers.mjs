@@ -128,18 +128,21 @@ try {
         return catalog && !catalog.nextPage && !catalog.restart;
     });
     const marks = () => vp.locator('.video-mark').allTextContents();
-    const order = ['2023-10-04 155600 [68190398] asahi', '2025-11-05 010222 bob | rotation-flag-left', '2026-01-20 140639 alice',
-        '2026-01-20 140639 alice', '2026-01-21 235709 dilaras7', '2026-07-13 162147 AI_channel', 'Full title [no timestamp]'];
+    // Only the pipeline's uploads: the 2023 manual upload, the bare-stamp title (an upload taken
+    // out of the archive) and the title without a recording are on the sites but not listed.
+    const order = ['2025-11-05 010222 bob | rotation-flag-left', '2026-01-20 140639 alice',
+        '2026-01-20 140639 alice', '2026-01-21 235709 dilaras7'];
     await vp.goto('https://www.porntrex.com/video-vault/'); await vInject();
-    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 7);
-    assert.deepEqual(await names(), order, 'Both sites, oldest recording first; a timestamp outside brackets starts the label; none at all goes last');
-    assert.deepEqual(await marks(), ['', '', 'Xvid', 'Ptrex', '', '', ''], 'Only the recording on both sites says which site each row is');
-    assert.deepEqual(await vp.locator('.video-meta > span:first-child').allTextContents(), ['02:30', '1:02:03', '16:00', '1:01:22', '1:02:03', '04:42', '10:00']);
+    await reloaded();
+    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 4);
+    assert.deepEqual(await names(), order, "Both sites' pipeline uploads (a bracketed recording), oldest recording first");
+    assert.deepEqual(await marks(), ['', 'Xvid', 'Ptrex', ''], 'Only the recording on both sites says which site each row is');
+    assert.deepEqual(await vp.locator('.video-meta > span:first-child').allTextContents(), ['1:02:03', '16:00', '1:01:22', '1:02:03']);
     assert.deepEqual(bridgeReads, ['/account/uploads', '/account/uploads/1'], 'XVideos pages come through the app');
     assert.ok(!vaultReads.some(read => read.host === 'www.xvideos.com'), 'The vault page never asks XVideos itself');
     assert.equal(await vp.locator('.video-notice').count(), 0);
     const complete = await vp.evaluate(() => localStorage.getItem('video-catalog:vault:complete'));
-    assert.equal(JSON.parse(complete).videos.length, 7, 'The complete list is kept to open with');
+    assert.equal(JSON.parse(complete).videos.length, 4, 'The complete list is kept to open with');
     assert.ok(!complete.includes('media.invalid') && !complete.includes('get_file'), 'Never persist signed sources');
     await vp.locator('a.video-row', { hasText: 'alice' }).first().click();
     await vp.waitForURL('**/video-vault/xvideos/video.fixture1/upload_1'); await vInject();
@@ -198,13 +201,13 @@ try {
     await vp.waitForFunction(() => document.querySelector('.current-scope video')?.src.endsWith('/fixture1/2160p.mp4/'));
     await vp.waitForFunction(() => document.querySelector('.previous-scope video')?.src.includes('/video.fixture1/'), null, { timeout: 5000 });
     await vp.goBack(); await vInject();
-    await vp.waitForFunction(() => document.querySelectorAll('.video-row').length === 7);
+    await vp.waitForFunction(() => document.querySelectorAll('.video-row').length === 4);
     assert.equal(await vp.locator('.current-video .video-mark').textContent(), 'Ptrex');
     // The kept list opens at once while both sites reload.
     let release;
     stall = new Promise(resolve => { release = resolve; });
     await vp.goto('https://www.porntrex.com/video-vault/'); await vInject();
-    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 7);
+    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 4);
     assert.deepEqual(await names(), order);
     release(); stall = null;
     await reloaded();
@@ -220,7 +223,7 @@ try {
     assert.equal(await vp.locator('#native').count(), 1, 'XVideos login stays native');
     xvSignedIn = true;
     await vp.waitForURL('https://www.porntrex.com/video-vault/', { timeout: 10_000 }); await vInject();
-    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 7);
+    await vp.waitForFunction(() => document.querySelectorAll('a.video-row').length === 4);
     await reloaded();
     assert.equal(await vp.locator('.video-notice').count(), 0, 'Signed back in, the notice goes');
     ptSignedIn = false;

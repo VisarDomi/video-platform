@@ -73,11 +73,12 @@ export function uploadSite(site: UploadSite) {
         return { status: reply.status, url: reply.url, text: async () => reply.text };
     }
 
-    // An uploads-list row; null unless it links one of this site's video pages. Identity is per
-    // upload, so one owner's uploads stay distinct.
+    // An uploads-list row; null unless it links one of this site's video pages and is one of the
+    // pipeline's uploads (see isPipelineUpload). Identity is per upload, so one owner's uploads
+    // stay distinct.
     function upload(id: string, href: string, title: string | null | undefined, seconds: number): Video | null {
         const pageUrl = path(href);
-        if (!pageUrl || !site.routes.video.test(pageUrl)) return null;
+        if (!pageUrl || !site.routes.video.test(pageUrl) || !isPipelineUpload(title ?? '')) return null;
         return {
             filename: id, provider: site.id, type: VIDEO_TYPE.ORIGINAL, duration: seconds, size: 0, isLive: false,
             pageUrl, title: uploadLabel(title?.trim() || `Video ${id}`),
@@ -123,8 +124,18 @@ export function uploadSite(site: UploadSite) {
 // is the display label, without brackets; otherwise the title from the timestamp on. Titles
 // without one keep their full text.
 const RECORDED = /\b(\d{4}-\d{2}-\d{2})\s+(\d{6})\b/;
+const BRACKETED_RECORDING = /\[([^\]]*\b\d{4}-\d{2}-\d{2}\s+\d{6}\b[^\]]*)\]/;
+
+// Video Vault lists only the pipeline's uploads: their title carries the recording in brackets,
+// "[YYYY-MM-DD HHMMSS streamer]" (one shape of a split adds " | part N"). Older manual uploads
+// ("2023-06-14 155500 [68190398] asahi") and uploads taken out of the archive (renamed to the
+// bare "YYYY-MM-DD HHMMSS streamer") are not listed.
+export function isPipelineUpload(title: string): boolean {
+    return BRACKETED_RECORDING.test(title);
+}
+
 export function uploadLabel(title: string): string {
-    const bracketed = title.match(/\[([^\]]*\b\d{4}-\d{2}-\d{2}\s+\d{6}\b[^\]]*)\]/)?.[1].trim();
+    const bracketed = title.match(BRACKETED_RECORDING)?.[1].trim();
     if (bracketed) return bracketed;
     const at = title.search(RECORDED);
     return at < 0 ? title : title.slice(at).trim();
