@@ -61,7 +61,9 @@ export class TangoAuthProvider implements IAuthProvider {
             headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokenBag.sessionToken}` },
             signal: AbortSignal.timeout(timeoutMs),
         };
-        const response = await requestQueue.add<Response>(constants.TANGO_URLS.TOKEN_DATA, options);
+        // Not through the request queue: it runs one request at a time, so a
+        // hedged second request would wait behind the hung first one.
+        const response = await fetch(constants.TANGO_URLS.TOKEN_DATA, options);
 
         if (!response.ok) {
             throw new Error(`Token data fetch failed with status ${response.status}`);

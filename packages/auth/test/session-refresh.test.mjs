@@ -43,3 +43,28 @@ test('persist rotated refresh token before a failing stream-token request', asyn
     await assert.rejects(service.ensureValidTokens('test'), /stream token connection interrupted/);
     assert.equal(writes[0].refreshToken, 'new-refresh');
 });
+
+test('a stream-token refresh unanswered for a second is hedged by a parallel request', async () => {
+    let calls = 0;
+    const provider = {
+        // The first request hangs; the second answers at once.
+        fetchShortTokens: () => ++calls === 1 ? new Promise(() => {}) : Promise.resolve({extras:{tt:'t', ttu:'u', tte:'9999999999'}}),
+    };
+    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tango'}, provider);
+    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:'access',extras:{}});
+    const started = Date.now();
+    await service.setTokenData(true);
+    assert.equal(calls, 2);
+    assert.ok(Date.now() - started < 2000);
+    assert.equal(service.authContext.getTokenBag().extras.tte, '9999999999');
+});
+
+test('a quick stream-token answer sends no second request', async () => {
+    let calls = 0;
+    const provider = { fetchShortTokens: async () => { calls++; return {extras:{tt:'t', ttu:'u', tte:'9999999999'}}; } };
+    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tango'}, provider);
+    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:'access',extras:{}});
+    await service.setTokenData(true);
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    assert.equal(calls, 1);
+});

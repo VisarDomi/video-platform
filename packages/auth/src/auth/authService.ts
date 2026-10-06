@@ -7,7 +7,8 @@ import { loginQueue } from "../browser/loginQueue.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
 const SHORT_REFRESH_RETRY_MS = 1_000;
-const SHORT_REFRESH_FIRST_ATTEMPT_MS = 2_000;
+// A refresh unanswered after this long gets a second, parallel request.
+const SHORT_REFRESH_HEDGE_MS = 1_000;
 // A stream-token request otherwise; Tango's stream token lives 10 seconds.
 const SHORT_TOKEN_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -116,12 +117,30 @@ export class AuthService {
         }
     }
 
-    private async setTokenData(timeoutMs = SHORT_TOKEN_REQUEST_TIMEOUT_MS) {
+    // hedged: a second request starts if the first has not answered within
+    // SHORT_REFRESH_HEDGE_MS; the first answer wins. Most refresh failures are
+    // one request that hangs while a fresh one answers in a fraction of a
+    // second, and a merely slow API is not cut off as an abort would.
+    private async setTokenData(hedged = false) {
         const tokenBag = this.authContext.getTokenBag();
         if (!tokenBag?.sessionToken) {
             throw new Error(`Cannot fetch token data for ${this.account.email} without session token.`);
         }
-        const result = await this.provider.fetchShortTokens(tokenBag, timeoutMs);
+        const attempt = () => this.provider.fetchShortTokens(tokenBag, SHORT_TOKEN_REQUEST_TIMEOUT_MS);
+        const first = attempt();
+        let result;
+        if (!hedged) {
+            result = await first;
+        } else {
+            let answered = false;
+            first.then(() => { answered = true; }, () => { answered = true; });
+            const second = timersPromises.setTimeout(SHORT_REFRESH_HEDGE_MS).then(() => answered ? first : attempt());
+            try {
+                result = await Promise.any([first, second]);
+            } catch (error) {
+                throw error instanceof AggregateError ? error.errors[0] : error;
+            }
+        }
         this.authContext.updateFromTokenData(result);
     }
 
@@ -132,15 +151,12 @@ export class AuthService {
 
         // The stream token outlives one refresh cycle by a single cycle, so the
         // cadence runs from the start of each refresh (a slow answer does not
-        // push the next one later) and a failure is retried at once. Most
-        // failures are one request that hangs while a fresh one answers in a
-        // fraction of a second: the cycle's first request gives up after 2 s,
-        // leaving time for a retry before the token expires. A retry may take the
-        // full bound, so a slow API is not cut off.
+        // push the next one later), each refresh is hedged, and a failure is
+        // retried at once.
         while (true) {
             const startedAt = Date.now();
             try {
-                await this.setTokenData(consecutiveFail === 0 ? SHORT_REFRESH_FIRST_ATTEMPT_MS : undefined);
+                await this.setTokenData(true);
                 await this.authContext.saveTokenToFile();
                 consecutiveOk++;
                 if (!wasHealthy) {
