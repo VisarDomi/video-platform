@@ -48,6 +48,9 @@ export interface IStreamProvider {
     readonly providerName: string;
     // False keeps the selected live URL for the recording, including retries.
     readonly refreshMasterDuringDownload?: boolean;
+    // Wait before polling again after the live playlist could not be fetched
+    // (default EDGE_RECOVERY_SLEEP_MS). It must stay well inside the live window.
+    readonly playlistRetryMs?: number;
     parseMasterPlaylist(masterUrl: string): Promise<string | null>;
     validateSegment(filePath: string): Promise<SegmentValidationResult>;
     createDownloadSession(): IDownloadSession;

@@ -59,6 +59,9 @@ export class TangoAuthProvider implements IAuthProvider {
         const options: RequestInit = {
             method: "GET",
             headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokenBag.sessionToken}` },
+            // Within one refresh cycle (queue wait included): a slower answer
+            // arrives after the token it replaces has expired.
+            signal: AbortSignal.timeout(constants.TANGO_STREAM_TOKEN_REFRESH_MS - 1000),
         };
         const response = await requestQueue.add<Response>(constants.TANGO_URLS.TOKEN_DATA, options);
 

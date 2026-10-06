@@ -125,7 +125,10 @@ transport failure. Shared snapshot reconciliation owns the recording lifecycle:
   once a second. File replacements reload targets (the directory is watched),
   and a new recording identity replaces even a session with an empty or missing
   folder. A live-playlist HTTP 404 ends the session; authentication, network,
-  and server failures remain retryable. The master is used only to select the
+  and server failures remain retryable, polled again after 1 second
+  (`playlistRetryMs`; other providers wait 5 seconds) because the live window
+  holds only six one-second segments. A run of 401s logs one error and one
+  recovery line. The master is used only to select the
   initial live URL: master failures never end a recording, and polling and
   retries keep the selected live URL without refreshing the master.
 - **FC2:** the adult all-channel list (`allchannellist.php`) with `start_time`,

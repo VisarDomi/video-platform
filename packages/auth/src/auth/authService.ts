@@ -6,6 +6,7 @@ import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
+const SHORT_REFRESH_RETRY_MS = 1_000;
 
 export class AuthService {
     private readonly account: Account;
@@ -126,7 +127,11 @@ export class AuthService {
         let consecutiveFail = 0;
         let wasHealthy = true;
 
+        // The stream token outlives one refresh cycle by a single cycle, so the
+        // cadence runs from the start of each refresh (a slow answer does not
+        // push the next one later) and a failure is retried at once.
         while (true) {
+            const startedAt = Date.now();
             try {
                 await this.setTokenData();
                 await this.authContext.saveTokenToFile();
@@ -136,7 +141,7 @@ export class AuthService {
                     wasHealthy = true;
                     consecutiveFail = 0;
                 }
-                await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
+                await timersPromises.setTimeout(Math.max(0, this.provider.intervals.shortTokenRefresh - (Date.now() - startedAt)));
             } catch (error) {
                 consecutiveFail++;
                 if (wasHealthy) {
@@ -144,7 +149,7 @@ export class AuthService {
                     wasHealthy = false;
                     consecutiveOk = 0;
                 }
-                await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
+                await timersPromises.setTimeout(SHORT_REFRESH_RETRY_MS);
             }
         }
     }

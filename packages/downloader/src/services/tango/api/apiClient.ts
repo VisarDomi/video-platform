@@ -36,6 +36,9 @@ function getStreamHeaders(tokens: Tokens): HeadersInit {
 export class ApiClient implements IStreamProvider {
     public readonly providerName = "tango";
     public readonly refreshMasterDuringDownload = false;
+    // Tango lists six one-second segments: a five-second pause after one failed
+    // playlist fetch (an expired token, a network blip) loses media.
+    public readonly playlistRetryMs = 1_000;
     private latestLiveStreams = new Map<string, TangoLiveStream>();
 
     public constructor(private readonly tokenReader: () => Promise<Tokens> = readTokens) {
@@ -235,6 +238,8 @@ export class ApiClient implements IStreamProvider {
 
 class TangoDownloadSession implements IDownloadSession {
     private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
+    // A 401 run is logged when it starts and when it ends, not on every retry.
+    private unauthorizedCount = 0;
     constructor(private readonly tokenReader: () => Promise<Tokens>) {}
 
     public async fetchPlaylist(url: string): Promise<string | null> {
@@ -252,11 +257,17 @@ class TangoDownloadSession implements IDownloadSession {
             if (!response.ok) {
                 if (response.status === 401 && tokens.tte) {
                     const ttlNow = parseInt(tokens.tte, 10) - Math.floor(Date.now() / 1000);
-                    logger.error(`[Tango] Playlist 401 — ttlAtUse=${tokens.ttlAtReadSec}s ttlNow=${ttlNow}s tokenAge=${tokens.tokenAgeMs}ms url=${url}`);
+                    if (this.unauthorizedCount++ === 0) {
+                        logger.error(`[Tango] Playlist 401 — ttlAtUse=${tokens.ttlAtReadSec}s ttlNow=${ttlNow}s tokenAge=${tokens.tokenAgeMs}ms url=${url}`);
+                    }
                 } else {
                     logger.debug(`[Tango] Playlist fetch failed: status=${response.status} url=${url}`);
                 }
                 return null;
+            }
+            if (this.unauthorizedCount > 0) {
+                logger.info(`[Tango] Playlist authorized again after ${this.unauthorizedCount} 401 response(s)`);
+                this.unauthorizedCount = 0;
             }
             return await response.text();
         } catch (error) {

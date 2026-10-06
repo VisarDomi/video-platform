@@ -269,7 +269,7 @@ export class StreamDownloader {
                 const recovered = await this.provider.recoverVariant(this.handle.masterPlaylistUrl);
                 if (!recovered) {
                     logger.debug(`[StreamDownloader] ${alias} variant failed, no recovery candidate (segments=${initTracker.count})`);
-                    await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
+                    await timersPromises.setTimeout(this.provider.playlistRetryMs ?? EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
 
@@ -297,7 +297,7 @@ export class StreamDownloader {
                     const recoveredFailure = session.getLastPlaylistFailure?.();
                     if (recoveredFailure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, recoveredFailure);
                     logger.debug(`[StreamDownloader] ${alias} recovery candidate also failed`);
-                    await timersPromises.setTimeout(EDGE_RECOVERY_SLEEP_MS);
+                    await timersPromises.setTimeout(this.provider.playlistRetryMs ?? EDGE_RECOVERY_SLEEP_MS);
                     continue;
                 }
             }
