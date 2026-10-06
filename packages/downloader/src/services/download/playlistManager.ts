@@ -27,6 +27,8 @@ import {
 // is accepted as new media. A restart that lands within the margin is still
 // deduplicated against the old numbering (bounded by the margin).
 export const SEQUENCE_RESTART_MARGIN_SEGMENTS = 10;
+// Polls come about a second apart; a longer wait before a gap means this loop fell behind.
+export const SEQUENCE_GAP_LATE_POLL_SECONDS = 3;
 
 // A segment re-listed after an edge switch is a duplicate only when its
 // program date-time is not newer than the last saved one AND within this
@@ -419,14 +421,16 @@ export class PlaylistManager {
         this.lastPollAt = polledAt;
         // The window starts after the next expected segment: media between the two
         // was never listed to us. Either the provider skipped it (a stall at the
-        // source) or this loop polled too late (a slow fetch held the previous
-        // batch); the time since the previous poll tells which. After an edge
-        // switch the numbering is the new edge's, and EDGE-GAP judges by PDT.
+        // source: polled on time, the window moved on anyway) or this loop polled
+        // too late (a slow fetch, a restart); only the latter is ours to fix, so
+        // only it is a warning. After an edge switch the numbering is the new
+        // edge's, and EDGE-GAP judges by PDT.
         if (baseline !== null && !numberingRestarted && !this._edgeSwitchActive
             && windowLength > 0 && windowFirst > baseline + 1) {
             const missed = windowFirst - baseline - 1;
             this._missedSegmentCount += missed;
-            logger.warn(`[PlaylistManager] SEQUENCE-GAP recording=${this.recordingId} missing=${baseline + 1}-${windowFirst - 1} (${missed} segments) window=${windowFirst}-${windowLast} sincePreviousPoll=${sincePreviousPoll === null ? "none" : `${sincePreviousPoll.toFixed(1)}s`}: these segments left the live window before this poll`);
+            const late = sincePreviousPoll === null || sincePreviousPoll > SEQUENCE_GAP_LATE_POLL_SECONDS;
+            logger.log(late ? "warn" : "info", `[PlaylistManager] SEQUENCE-GAP recording=${this.recordingId} missing=${baseline + 1}-${windowFirst - 1} (${missed} segments) window=${windowFirst}-${windowLast} sincePreviousPoll=${sincePreviousPoll === null ? "none" : `${sincePreviousPoll.toFixed(1)}s`}: ${late ? "this loop polled too late" : "the provider skipped them"}`);
         }
         if (numberingRestarted) {
             logger.warn(`[PlaylistManager] SEQUENCE-RESTART recording=${this.recordingId} edge=${this._timeline.edge ?? "unknown"} previous=${baseline} window=${windowFirst}-${windowLast} margin=${restartMargin}: provider restarted its numbering; accepting the window as new media after a discontinuity`);

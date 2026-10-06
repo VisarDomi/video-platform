@@ -60,10 +60,12 @@ copy of the same numbering and is deduplicated.
 
 A window whose first sequence lies more than one above the baseline (outside an
 edge switch) has lost the segments between: they left the live window before a
-poll listed them. A `SEQUENCE-GAP` warning names them with the window and the
-time since the previous poll (a long time means this loop fell behind, a short
-one that the provider skipped them), and the session's "recording ended" line
-counts the provider segments missed.
+poll listed them. `SEQUENCE-GAP` names them with the window and the time since
+the previous poll. More than 3 seconds (or a first poll after a restart) means
+this loop fell behind: a warning. Less means the provider skipped them, as when a
+streamer's feed stalls and the window restarts small: an info line, since nothing
+here can recover them. The session's "recording ended" line counts every missed
+provider segment.
 
 The appended entry also gets a discontinuity after any sequence gap, a change
 of TS dimensions/SAR (unknown dimensions count as a change), a new init map, or
@@ -203,7 +205,7 @@ Recovery from CDN failures is allowed, and its effect on the media is never
 silent. At the default level a recording logs two info lines, `recording started
 in <folder>` and `recording ended (<reason>), <n> segments handed to the server
 in <folder>`, plus `VARIANT_CHANGE`. Warnings are what changed or risked the
-media: `EDGE-GAP`, `SEQUENCE-GAP`, `SEQUENCE-RESTART`, `EDGE-DEDUP bypassed`, segment
+media: `EDGE-GAP`, `SEQUENCE-GAP` from a late poll, `SEQUENCE-RESTART`, `EDGE-DEDUP bypassed`, segment
 rejections, re-appended media, unknown dimensions, a session without segments.
 Routine mechanics are debug lines (`LOG_LEVEL=debug`): discovery decisions,
 `START`, `STALE`/`RECOVERED`, `EDGE-SWITCH`, `EDGE-DEDUP` skips, `LOOP-EXIT`,
