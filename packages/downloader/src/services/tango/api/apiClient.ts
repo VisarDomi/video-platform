@@ -266,7 +266,7 @@ class TangoDownloadSession implements IDownloadSession {
                 return null;
             }
             if (this.unauthorizedCount > 0) {
-                logger.info(`[Tango] Playlist authorized again after ${this.unauthorizedCount} 401 response(s)`);
+                logger.info(`[Tango] Playlist authorized again after ${this.unauthorizedCount} 401 response(s) url=${url}`);
                 this.unauthorizedCount = 0;
             }
             return await response.text();
