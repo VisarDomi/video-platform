@@ -12,6 +12,7 @@ interface TargetManagerOptions {
 
 export class TargetManager {
     private targets: Set<string> = new Set();
+    private loaded = false;
     private readonly targetsFilePath: string;
     private readonly label: string;
     private readonly parseIdentifier: (line: string) => string | null;
@@ -24,7 +25,7 @@ export class TargetManager {
         this.label = options.label;
         this.parseIdentifier = options.parseIdentifier;
         this.defaultComment = options.defaultComment;
-        logger.info(`[${this.label}] TargetManager initialized. Watching: ${this.targetsFilePath}`);
+        logger.debug(`[${this.label}] TargetManager initialized. Watching: ${this.targetsFilePath}`);
     }
 
     public static create(options: TargetManagerOptions): TargetManager {
@@ -74,10 +75,12 @@ export class TargetManager {
             this.targets = newTargets;
             const added = [...newTargets].filter(id => !previousTargets.has(id));
             const removed = [...previousTargets].filter(id => !newTargets.has(id));
-            const stats = fs.statSync(this.targetsFilePath);
-            logger.info(
-                `[${this.label}] Loaded ${this.targets.size} targets (added=${added.length}, removed=${removed.length}, mtime=${stats.mtime.toISOString()})`,
-            );
+            // The first load reports the count; a reload reports only what changed.
+            if (!this.loaded) {
+                this.loaded = true;
+                logger.info(`[${this.label}] Loaded ${this.targets.size} targets`);
+                return;
+            }
             if (added.length > 0) {
                 logger.info(`[${this.label}] Added targets: ${added.join(", ")}`);
             }
@@ -91,11 +94,10 @@ export class TargetManager {
 
     private watchFile(): void {
         fs.watch(this.targetsFilePath, (eventType) => {
-            logger.info(`[${this.label}] ${path.basename(this.targetsFilePath)} watch event: ${eventType}`);
             if (eventType === "change") {
                 if (this.debounceTimer) clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(() => {
-                    logger.info(`[${this.label}] ${path.basename(this.targetsFilePath)} changed. Reloading targets...`);
+                    logger.debug(`[${this.label}] ${path.basename(this.targetsFilePath)} changed. Reloading targets...`);
                     this.loadTargets();
                     this.debounceTimer = null;
                 }, FILE_WATCHER_DEBOUNCE_MS);

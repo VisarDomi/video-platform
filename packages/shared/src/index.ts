@@ -7,7 +7,7 @@ export type { NativeMediaSegment, NativeMediaPlaylist } from "./nativeMedia.js";
 export { readTokens } from "./tokenManager.js";
 export type { Tokens } from "./tokenManager.js";
 
-export { createLogger } from "./logger.js";
+export { createLogger, journalPriority } from "./logger.js";
 export { moveToDesktopTrash } from "./desktopTrash.js";
 export {
     PROVIDER_UPLOAD_POLICIES,

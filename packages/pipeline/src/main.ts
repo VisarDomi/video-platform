@@ -1,3 +1,4 @@
+import { journalPriority } from "shared";
 import { pipelineConfig, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
@@ -416,6 +417,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+    console.error(journalPriority("error", 2) + (error instanceof Error ? error.stack ?? error.message : String(error)));
     process.exitCode = 1;
 });

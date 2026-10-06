@@ -65,7 +65,7 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
             if (existingIndex !== -1) {
                 const existing = adapter.parseLine(lines[existingIndex]);
                 if (existing?.label === resolved.label) {
-                    logger.info(`${adapter.name} skip: ${resolved.id} ${resolved.label} (already exists)`);
+                    logger.debug(`${adapter.name} skip: ${resolved.id} ${resolved.label} (already exists)`);
                     return res.json({ success: true });
                 }
                 lines[existingIndex] = adapter.formatEntry(resolved);
