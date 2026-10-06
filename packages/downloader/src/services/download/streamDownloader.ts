@@ -270,6 +270,7 @@ export class StreamDownloader {
         let remoteEndlist = false;
         let health: 'ok' | 'stale' = 'ok';
         let lastQualityCheck = Date.now();
+        let masterCheckMs: number | null = null;
         const staleTimeout = STALE_STREAM_TIMEOUT_MS;
 
         downloadLoop: while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
@@ -283,6 +284,7 @@ export class StreamDownloader {
                 && Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
                 lastQualityCheck = Date.now();
                 const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
+                masterCheckMs = Date.now() - lastQualityCheck;
                 if (betterUrl) {
                     logger.info(`[StreamDownloader] VARIANT_CHANGE ${alias}`, {
                         reason: "master-selection-changed",
@@ -296,7 +298,9 @@ export class StreamDownloader {
                 }
             }
 
+            const playlistFetchStartedAt = Date.now();
             let content = await session.fetchPlaylist(liveUrl);
+            const playlistFetchMs = Date.now() - playlistFetchStartedAt;
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
                 if (failure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
@@ -370,10 +374,15 @@ export class StreamDownloader {
                 }
             }
 
+            // A late poll's gap reports what this poll and a master check since the
+            // previous poll took: the requests that can hold the loop up.
             const identifiedSegments = await playlistManager.identifyNewSegments(
                 content,
                 (line) => resolveSegmentUrl(liveUrl, line),
+                undefined,
+                `playlistFetch=${playlistFetchMs}ms${masterCheckMs === null ? "" : ` masterCheck=${masterCheckMs}ms`}`,
             );
+            masterCheckMs = null;
             const segments = identifiedSegments.filter(segment => !playlistManager.shouldSkipByTimeline(segment));
 
             let downloadedThisIteration = false;
