@@ -353,7 +353,11 @@ export class PlaylistManager {
         }
     }
 
-    public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver): Promise<SegmentInfo[]> {
+    // queuedThrough: a poll made while a batch is still downloading; only
+    // segments after the batch's last are new, and a numbering restart is left
+    // to the next regular poll.
+    public async identifyNewSegments(livePlaylistContent: string, urlResolver: SegmentUrlResolver,
+        queuedThrough?: number): Promise<SegmentInfo[]> {
         const liveLines = livePlaylistContent.split("\n");
         const newSegments: SegmentInfo[] = [];
 
@@ -406,9 +410,10 @@ export class PlaylistManager {
         const windowLength = liveLines.filter((line) => line.trim() !== "" && !line.trim().startsWith("#")).length;
         const windowFirst = this._timeline.mediaSequence;
         const windowLast = windowFirst + windowLength - 1;
-        const baseline = this.baselineProviderSequence;
+        const baseline = queuedThrough ?? this.baselineProviderSequence;
         const restartMargin = windowLength + SEQUENCE_RESTART_MARGIN_SEGMENTS;
         const numberingRestarted = baseline !== null && windowLength > 0 && windowLast < baseline - restartMargin;
+        if (numberingRestarted && queuedThrough !== undefined) return [];
         const polledAt = Date.now();
         const sincePreviousPoll = this.lastPollAt === null ? null : (polledAt - this.lastPollAt) / 1000;
         this.lastPollAt = polledAt;
