@@ -334,6 +334,22 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         }
     }
 
+    // Whether My Videos lists the upload with Porntrex's "Error" badge (its own
+    // processing failed). Pages are read until the row is found or the list ends.
+    private async listedAsFailed(page: Page, uploadId: string): Promise<boolean> {
+        for (let pageNumber = 1; pageNumber <= 1000; pageNumber++) {
+            const response = await page.goto(`${ORIGIN}${pageNumber === 1 ? "/my/videos/" : porntrexUploadsPagePath(pageNumber)}`,
+                { waitUntil: "domcontentloaded", timeout: 30_000 });
+            if (pageNumber === 1) await passPorntrexAgeGate(page);
+            if (!response?.ok() || await page.locator("[data-item-id]").count() === 0) return false;
+            const row = page.locator(`[data-item-id="${uploadId}"]`);
+            if (await row.count()) {
+                return await row.first().evaluate(item => item.classList.contains("error") || !!item.querySelector(".line-error"));
+            }
+        }
+        return false;
+    }
+
     async probeUploadStatus(page: Page, uploadId: string) {
         if (!/^\d+$/.test(uploadId)) throw new Error("Invalid Porntrex edit ID");
         const response = await page.goto(`${ORIGIN}/edit-video/${uploadId}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -353,7 +369,16 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const stored: StoredPorntrexMetadata | null = parsePorntrexEditPage(await page.content());
         const link = page.locator(`a[href^="${ORIGIN}/video/${uploadId}/"]`).first();
         const remoteUrl = await link.getAttribute("href");
-        if (!remoteUrl) return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet", stored };
+        if (!remoteUrl) {
+            // Checked a day after submission: a row Porntrex still marks "Error"
+            // will not become a video. Blocked for review, not re-uploaded: the
+            // same file may fail again, and an Error row cannot be deleted.
+            if (await this.listedAsFailed(page, uploadId)) {
+                return { outcome: "missing" as const, remoteUrl: null, stored,
+                    reason: "Porntrex failed to process the upload (\"Error\" in My Videos); no video exists. Review the artifact before `npm run retry`" };
+            }
+            return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet", stored };
+        }
         await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
         const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
             url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",

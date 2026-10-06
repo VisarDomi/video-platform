@@ -33,6 +33,9 @@ as uncertain, to be checked 24 hours later.
 - A known ID whose edit page answers HTTP 404 (on Porntrex: and absent from My Videos) was removed by
   the provider. The recording is blocked for review; `npm run retry -w pipeline -- RECORDING_ID`
   re-uploads it without the seven-day wait.
+- A known Porntrex ID without a published link that My Videos still marks "Error" at the check a day
+  after submission was not processed by Porntrex: no video exists. It is blocked for review the same
+  way rather than re-uploaded, since the same file may fail again and the Error row cannot be deleted.
 - A complete authenticated search records `absent`: on XVideos an unpaginated result page with the
   explicit "Your filters return no video." marker, on Porntrex a full list whose row count equals the
   Public/Private tab totals. It is not proof that the provider never received any bytes. No new upload
