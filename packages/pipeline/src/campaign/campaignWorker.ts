@@ -6,7 +6,7 @@ import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { Recording, RecordingInput } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
-import { PipelineOrchestrator } from "../scheduler/orchestrator.js";
+import { PipelineOrchestrator, StageDeferredError } from "../scheduler/orchestrator.js";
 import { createDefaultStages } from "../stages/defaultStages.js";
 import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "./selectCandidate.js";
 import { sweepMissingRecordings } from "../commands/sweep.js";
@@ -25,6 +25,7 @@ export type CampaignStepResult =
     | { readonly disposition: "awaiting_upload_activation"; readonly recordingId: string }
     | { readonly disposition: "attention_required"; readonly recordingId: string; readonly reason: string }
     | { readonly disposition: "monthly_quota_wait"; readonly recordingId: string }
+    | { readonly disposition: "resource_wait"; readonly recordingId: string; readonly reason: string }
     | { readonly disposition: "parked_existing_upload"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
     | { readonly disposition: "daily_limit_cooldown"; readonly recordingId: string; readonly resumeAt: string }
@@ -183,7 +184,13 @@ export class CampaignWorker {
             if (comparison && !this.database.comparisonAllows(local[0])) {
                 return { disposition: "idle", reviewRequired };
             }
-            const result = await this.orchestrator.processRecording(local[0].id, now);
+            let result;
+            try {
+                result = await this.orchestrator.processRecording(local[0].id, now);
+            } catch (error) {
+                if (!(error instanceof StageDeferredError)) throw error;
+                return { disposition: "resource_wait", recordingId: local[0].id, reason: error.message };
+            }
             if (!result) throw new Error(`Could not claim campaign recording ${local[0].id}`);
             if (comparison && ["failed", "blocked", "provenance_review_required"].includes(result.state)) {
                 this.database.setCampaignState("paused", now);

@@ -11,7 +11,7 @@ import { ChromiumXvideosUploader, submittedUploadEditId } from "../dist/upload/c
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { filterXvideosEntries } from "../dist/upload/xvideosEntries.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
-import { PipelineOrchestrator } from "../dist/scheduler/orchestrator.js";
+import { PipelineOrchestrator, StageDeferredError } from "../dist/scheduler/orchestrator.js";
 
 async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
@@ -164,6 +164,32 @@ test("orchestrator enables diagnostic titles only for a prepared comparison tria
                 : "Natural public title [2026-09-09 120000 12345]");
         } finally { db.close(); }
     }
+});
+
+test("a deferred stage leaves the recording in its state, unleased, for a later step", async (t) => {
+    const { root } = await rootFixture(t);
+    const db = new PipelineDatabase(path.join(root, "deferred.sqlite"));
+    t.after(() => db.close());
+    const recording = db.discover(input(root, "fc2", "2026-09-09 120000 12345"));
+    const artifactPath = path.join(root, "fixture.mp4");
+    let deferred = true;
+    const orchestrator = new PipelineOrchestrator(db, {
+        remux: async () => artifactPath,
+        validateArtifact: async () => ({ path: artifactPath, sizeBytes: 100, sha256: "a".repeat(64), validatedAt: new Date().toISOString() }),
+        describe: async () => {
+            if (deferred) throw new StageDeferredError("waiting for memory");
+            return { artifactSha256: "a".repeat(64), promptVersion: "test", fps: 1,
+                output: { title: "Natural public title", description: "Factual description." }, evidencePath: "fixture.json" };
+        },
+    }, "test-worker");
+    for (let i = 0; i < 2; i++) await orchestrator.processRecording(recording.id);
+    assert.equal(db.get(recording.id).state, "artifact_valid");
+    await assert.rejects(orchestrator.processRecording(recording.id), StageDeferredError);
+    assert.equal(db.get(recording.id).state, "artifact_valid");
+    assert.equal(db.get(recording.id).leaseOwner ?? null, null);
+    deferred = false;
+    await orchestrator.processRecording(recording.id);
+    assert.equal(db.get(recording.id).state, "described");
 });
 
 test("submitted provider ID is independent of title and refuses ambiguous/foreign edit links", () => {

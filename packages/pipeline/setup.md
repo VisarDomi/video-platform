@@ -111,6 +111,13 @@ when it was produced under the current policy and recipe (`artifact-recipe-v2`)
 from the same source fingerprint; split parts are never reused. Descriptions
 are reused only through the descriptor's exact artifact-hash/prompt cache.
 
+A description that is not cached starts the descriptor's llama-server, which holds
+about 11 GB of RAM. The describe stage first waits until the machine has
+`VIDEO_PIPELINE_DESCRIBE_MIN_MEMORY_GIB` (default 16) GiB available: until then the
+campaign step is `resource_wait`, retried every 30 seconds, and the recording
+keeps its state. Started on a machine short of memory, the server is killed by
+the kernel and the recording would fail.
+
 All validated outputs are kept by default. With `VIDEO_PIPELINE_CLEANUP=1` (and
 no comparison queue) the worker deletes a verified-online upload's staging
 artifact, and forgets recordings older than 24 hours whose source folder is

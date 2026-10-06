@@ -32,6 +32,9 @@ export interface DescribeArtifactOptions {
     readonly manageServer?: boolean;
     readonly now?: () => Date;
     readonly evidenceKey?: string;
+    // Called when the description is not cached, before any work starts (the
+    // upright copy, the model server). A caller can throw to try later.
+    readonly beforeWork?: () => Promise<void>;
 }
 
 interface StoredEvidence {
@@ -113,6 +116,7 @@ export async function describeArtifact(
         } catch {}
     }
 
+    await options.beforeWork?.();
     const startedAt = Date.now();
     const upright = rotation === "clockwise"
         ? await makeUprightCopy(mediaPath, descriptorConfig.mediaDirectory, descriptorConfig.maximumFps) : null;
