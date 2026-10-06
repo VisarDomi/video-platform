@@ -56,12 +56,14 @@ export class TangoAuthProvider implements IAuthProvider {
     }
 
     async fetchShortTokens(tokenBag: TokenBag): Promise<ShortTokenResult> {
+        // Bounded by the current stream token's expiry (queue wait included): an
+        // answer before then is in time, after then a fresh request may well be
+        // faster. Without a token that lasts another second, a plain bound.
+        const expiresInMs = (Number.parseInt(tokenBag.extras?.tte ?? "", 10) || 0) * 1000 - Date.now();
         const options: RequestInit = {
             method: "GET",
             headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokenBag.sessionToken}` },
-            // Within one refresh cycle (queue wait included): a slower answer
-            // arrives after the token it replaces has expired.
-            signal: AbortSignal.timeout(constants.TANGO_STREAM_TOKEN_REFRESH_MS - 1000),
+            signal: AbortSignal.timeout(expiresInMs > 1000 ? expiresInMs : constants.TANGO_STREAM_TOKEN_TTL_S * 1000),
         };
         const response = await requestQueue.add<Response>(constants.TANGO_URLS.TOKEN_DATA, options);
 
