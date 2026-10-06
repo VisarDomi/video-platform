@@ -13,3 +13,5 @@ dist-server/
 build/
 .svelte-kit/
 test.md
+# The TsLive app's test description is tracked.
+!apps/tslive/test.md
