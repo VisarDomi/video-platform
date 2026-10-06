@@ -12,7 +12,7 @@ export class RetryCooldown {
 
     public recordFailure(id: string): void {
         this.cooldownUntil.set(id, Date.now() + ZERO_SEGMENT_COOLDOWN_MS);
-        logger.warn(`[${this.label}] ${id}: download failed. Cooldown ${ZERO_SEGMENT_COOLDOWN_MS / 1000}s`);
+        logger.debug(`[${this.label}] ${id}: download failed. Cooldown ${ZERO_SEGMENT_COOLDOWN_MS / 1000}s`);
     }
 
     public clear(id: string): void {

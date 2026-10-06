@@ -17,7 +17,7 @@ interface ActiveDownloader {
     provider: string;
     streamerId: string;
     abort: () => void;
-    finalize: () => void;
+    finalize: (reason: string) => void;
     completion: Promise<void>;
 }
 
@@ -51,7 +51,7 @@ export class DownloadsManager {
 
     private constructor() {
         this.statusFilePath = path.join(config.sharedStatePath, "live-status.json");
-        logger.info(`[General] DownloadsManager initialized. Status file: ${this.statusFilePath}`);
+        logger.debug(`[General] DownloadsManager initialized. Status file: ${this.statusFilePath}`);
     }
 
     public static async create(): Promise<DownloadsManager> {
@@ -95,7 +95,7 @@ export class DownloadsManager {
         provider: string,
         streamerId: string,
         abort: () => void,
-        finalize: () => void,
+        finalize: (reason: string) => void,
         completion: Promise<void>,
     ): void {
         this.activeDownloaders.set(masterPlaylistUrl, { provider, streamerId, abort, finalize, completion });
@@ -114,10 +114,11 @@ export class DownloadsManager {
             }));
     }
 
-    public async finalizeStreamer(streamerId: string): Promise<boolean> {
+    // The reason appears in the session's "recording ended" line.
+    public async finalizeStreamer(streamerId: string, reason: string): Promise<boolean> {
         const active = [...this.activeDownloaders.values()].find((download) => download.streamerId === streamerId);
         if (!active) return false;
-        active.finalize();
+        active.finalize(reason);
         await active.completion;
         return true;
     }
@@ -125,7 +126,7 @@ export class DownloadsManager {
     public remove(masterPlaylistUrl: string): void {
         const existing = this.downloads.get(masterPlaylistUrl);
         if (existing) {
-            logger.info(`[StreamDownloader] DM-REMOVE streamer=${existing.streamerId} dir=${existing.segmentsDirPath ? existing.segmentsDirPath.split("/").pop() : "none"}`);
+            logger.debug(`[StreamDownloader] DM-REMOVE streamer=${existing.streamerId} dir=${existing.segmentsDirPath ? existing.segmentsDirPath.split("/").pop() : "none"}`);
         }
         if (this.downloads.delete(masterPlaylistUrl)) {
             this._requestStatusFileUpdate();
@@ -205,7 +206,7 @@ export class DownloadsManager {
     }
 
     private async _clearStatusFile(): Promise<void> {
-        logger.info("[General] Clearing live-status.json for a fresh start...");
+        logger.debug("[General] Clearing live-status.json for a fresh start...");
         if (this._updateFileDebounceTimer) {
             clearTimeout(this._updateFileDebounceTimer);
             this._updateFileDebounceTimer = null;

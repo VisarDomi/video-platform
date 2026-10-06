@@ -122,7 +122,7 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
     );
     const isFmp4 = initFiles.length > 0;
 
-    logger.info(`[edit] ${filename} [${ref.provider}]: requested=${segments.length} matched=${validSegments.length} diskTs=${allSourceTsFiles.length} initFiles=${initFiles.length} isFmp4=${isFmp4}`);
+    logger.debug(`[edit] ${filename} [${ref.provider}]: requested=${segments.length} matched=${validSegments.length} diskTs=${allSourceTsFiles.length} initFiles=${initFiles.length} isFmp4=${isFmp4}`);
 
     if (segments.length > 0 && validSegments.length === 0) {
         logger.error(`[edit] ${filename}: all ${segments.length} requested segments failed to match any of ${allSourceTsFiles.length} .ts files on disk. First requested: ${segments[0]}, first on disk: ${allSourceTsFiles[0] ?? "none"}`);
@@ -157,7 +157,7 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
             fsPromises.copyFile(path.join(videoPath, f), path.join(buildingPath, f))
         ));
         await Promise.all(initFiles.map((file) => syncPath(path.join(buildingPath, file))));
-        logger.info(`[edit] ${filename}: copied ${initFiles.length} init files: ${initFiles.join(", ")}`);
+        logger.debug(`[edit] ${filename}: copied ${initFiles.length} init files: ${initFiles.join(", ")}`);
     }
 
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);
@@ -167,7 +167,7 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
         path.join(buildingPath, FILE_NAMES.HLS_PLAYLIST),
         playlistResult.content,
     );
-    logger.info(`[edit] ${filename}: playlist derived — keptSegments=${playlistResult.keptSegmentCount} isFmp4=${playlistResult.isFmp4} hasMapTag=${playlistResult.hasMapTag}`);
+    logger.debug(`[edit] ${filename}: playlist derived — keptSegments=${playlistResult.keptSegmentCount} isFmp4=${playlistResult.isFmp4} hasMapTag=${playlistResult.hasMapTag}`);
     if (playlistResult.isFmp4 && !playlistResult.hasMapTag) {
         throw new Error(`[edit] ${filename}: fmp4 playlist lost #EXT-X-MAP tag`);
     }
@@ -202,5 +202,5 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
     logger.info(`[edit] ${filename}: published ${validSegments.length} edited segments at ${finalizedPath}`);
 
     await moveService.moveVideo(ref, DESTINATIONS.TRASH);
-    logger.info(`[edit] ${filename}: original moved to trash`);
+    logger.debug(`[edit] ${filename}: original moved to trash`);
 }

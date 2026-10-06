@@ -3,6 +3,7 @@ import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { syncFile, syncPublishedArtifact } from "./durableArtifact.js";
 import { DatabaseSync } from "node:sqlite";
+import { journalPriority } from "shared";
 import type { ArtifactRecord, Recording } from "../domain/types.js";
 import { containedArtifactPath } from "./remux.js";
 import { productionArtifactSuffix } from "./artifactNaming.js";
@@ -87,7 +88,7 @@ export async function findArtifactCacheCandidates(
             }
         } catch (error) {
             // Older schemas/damaged historical manifests cannot authorize reuse.
-            console.warn(`[artifact-cache] Cannot read media evidence from ${databasePath}: ${String(error)}`);
+            console.warn(journalPriority("warn", 2) + `[artifact-cache] Cannot read media evidence from ${databasePath}: ${String(error)}`);
         } finally {
             database?.close();
         }

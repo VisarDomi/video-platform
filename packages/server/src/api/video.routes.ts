@@ -50,7 +50,7 @@ router.post("/edit", async (req, res) => {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_FILENAME_SEGMENTS_REQUIRED);
     }
 
-    logger.info(`[api/edit] request: filename=${filename} segments=${segments.length} provider=${targetProvider}`);
+    logger.debug(`[api/edit] request: filename=${filename} segments=${segments.length} provider=${targetProvider}`);
 
     try {
         const ref = await utils.resolveVideo(filename, targetProvider);

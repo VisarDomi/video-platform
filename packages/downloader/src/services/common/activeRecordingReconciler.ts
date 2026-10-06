@@ -148,7 +148,7 @@ export class ActiveRecordingReconciler {
         for (const { streamerId } of this.downloadsManager.activeSessions(this.providerName)) {
             if (listed.has(streamerId)) continue;
             logger.info(`[${this.providerName}] Ending the session of ${streamerId}: removed from the download list`);
-            await this.downloadsManager.finalizeStreamer(streamerId);
+            await this.downloadsManager.finalizeStreamer(streamerId, "removed from the download list");
             this.sessionConfirmations.delete(streamerId);
         }
     }
@@ -253,18 +253,21 @@ export class ActiveRecordingReconciler {
             this.sessionConfirmations.set(streamerId, confirmation);
             if (confirmation.observationCount >= 2 && snapshot.observedAt - confirmation.firstObservedAt >= TERMINAL_CONFIRMATION_MS) {
                 logger.info(`[${this.providerName}] Ending the session of ${streamerId}: offline for 60s without any media`);
-                await this.downloadsManager.finalizeStreamer(streamerId);
+                await this.downloadsManager.finalizeStreamer(streamerId, "offline for 60s without any media");
                 this.sessionConfirmations.delete(streamerId);
             }
         }
     }
 
     private async finalize(targetId: string | null, recordingPath: string, reason: string): Promise<void> {
-        logger.info(`[${this.providerName}] Finalizing ${path.basename(recordingPath)}: ${reason}`);
+        // A running session logs the end itself, with its segment count.
         const finalizedActiveSession = targetId
-            ? await this.downloadsManager.finalizeStreamer(targetId)
+            ? await this.downloadsManager.finalizeStreamer(targetId, reason)
             : false;
-        if (!finalizedActiveSession) await finalizeInactiveRecording(recordingPath);
+        if (!finalizedActiveSession) {
+            logger.info(`[${this.providerName}] Finalizing ${path.basename(recordingPath)}: ${reason}`);
+            await finalizeInactiveRecording(recordingPath);
+        }
         this.confirmations.delete(recordingPath);
     }
 }

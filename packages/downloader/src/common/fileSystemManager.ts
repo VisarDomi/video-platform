@@ -1,5 +1,6 @@
 import { constants, promises as fs } from "fs";
 import * as path from "path";
+import logger from "./logger.js";
 
 export class FileSystemManager {
     public static async readFile(filePath: string): Promise<string | null> {
@@ -7,7 +8,7 @@ export class FileSystemManager {
             return await fs.readFile(filePath, "utf-8");
         } catch (error: any) {
             if (error.code !== "ENOENT") {
-                console.error(`Failed to read file: ${filePath}`, error.message);
+                logger.error(`Failed to read file: ${filePath}`, { error: error.message });
             }
             return null;
         }
@@ -18,20 +19,20 @@ export class FileSystemManager {
             await fs.writeFile(filePath, data);
             return true;
         } catch (error: any) {
-            console.error(`Failed to write file: ${filePath}`, error.message);
+            logger.error(`Failed to write file: ${filePath}`, { error: error.message });
             return false;
         }
     }
 
-    public static async writeFileExclusive(filePath: string, data: string | Uint8Array): Promise<boolean> {
+    // Never overwrites: "exists" when the name is taken, "failed" (logged) otherwise.
+    public static async writeFileExclusive(filePath: string, data: string | Uint8Array): Promise<"written" | "exists" | "failed"> {
         try {
             await fs.writeFile(filePath, data, { flag: "wx" });
-            return true;
+            return "written";
         } catch (error: any) {
-            if (error.code !== "EEXIST") {
-                console.error(`Failed to exclusively write file: ${filePath}`, error.message);
-            }
-            return false;
+            if (error.code === "EEXIST") return "exists";
+            logger.error(`Failed to exclusively write file: ${filePath}`, { error: error.message });
+            return "failed";
         }
     }
 
@@ -53,7 +54,7 @@ export class FileSystemManager {
             }
             return true;
         } catch (error: any) {
-            console.error(`Failed to atomically write file: ${filePath}`, error.message);
+            logger.error(`Failed to atomically write file: ${filePath}`, { error: error.message });
             await handle?.close().catch(() => {});
             await fs.unlink(tempPath).catch(() => {});
             return false;
@@ -65,7 +66,7 @@ export class FileSystemManager {
             await fs.appendFile(filePath, data);
             return true;
         } catch (error: any) {
-            console.error(`Failed to append to file: ${filePath}`, error.message);
+            logger.error(`Failed to append to file: ${filePath}`, { error: error.message });
             return false;
         }
     }
@@ -76,7 +77,7 @@ export class FileSystemManager {
             return true;
         } catch (error: any) {
             if (error.code === "ENOENT") return false;
-            console.error(`Error checking path existence: ${filePath}`, error.message);
+            logger.error(`Error checking path existence: ${filePath}`, { error: error.message });
             return false;
         }
     }
@@ -87,7 +88,7 @@ export class FileSystemManager {
         try {
             return JSON.parse(content) as T;
         } catch (error: any) {
-            console.error(`Failed to parse JSON from file: ${filePath}`, error.message);
+            logger.error(`Failed to parse JSON from file: ${filePath}`, { error: error.message });
             return null;
         }
     }
@@ -96,7 +97,7 @@ export class FileSystemManager {
         try {
             return await this.writeFileAtomic(filePath, JSON.stringify(data, null, 2));
         } catch (error: any) {
-            console.error(`Failed to stringify JSON for file: ${filePath}`, error.message);
+            logger.error(`Failed to stringify JSON for file: ${filePath}`, { error: error.message });
             return false;
         }
     }
@@ -106,7 +107,7 @@ export class FileSystemManager {
             await fs.mkdir(dirPath, { recursive: true });
             return true;
         } catch (error: any) {
-            console.error(`Failed to create directory: ${dirPath}`, error.message);
+            logger.error(`Failed to create directory: ${dirPath}`, { error: error.message });
             return false;
         }
     }
