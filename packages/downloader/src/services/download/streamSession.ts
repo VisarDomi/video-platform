@@ -149,7 +149,8 @@ export class StreamSession {
             const pendingPath = await handoffActiveRecording(disk.dirPath);
             this.handle.update({ segmentsDirPath: pendingPath });
             const reason = this._finalizeRequested ? this.finalizeReason : endReason;
-            logger.info(`[StreamSession] ${this.alias}: recording ended (${reason}), ${initTracker.count} segments handed to the server in ${path.basename(pendingPath)}`);
+            const missed = playlistManager.missedSegmentCount;
+            logger.info(`[StreamSession] ${this.alias}: recording ended (${reason}), ${initTracker.count} segments handed to the server in ${path.basename(pendingPath)}${missed > 0 ? `; ${missed} provider segments missed` : ""}`);
         }
 
         this.handle.remove();

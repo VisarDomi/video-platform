@@ -89,6 +89,13 @@ export class PlaylistManager {
     };
     private lastDownloadedPDT: string | null = null;
     private _edgeSwitchActive = false;
+    private lastPollAt: number | null = null;
+    private _missedSegmentCount = 0;
+
+    // Provider segments that left the live window before a poll listed them.
+    public get missedSegmentCount(): number {
+        return this._missedSegmentCount;
+    }
 
     public get timeline(): Readonly<PlaylistTimeline> {
         return this._timeline;
@@ -402,6 +409,20 @@ export class PlaylistManager {
         const baseline = this.baselineProviderSequence;
         const restartMargin = windowLength + SEQUENCE_RESTART_MARGIN_SEGMENTS;
         const numberingRestarted = baseline !== null && windowLength > 0 && windowLast < baseline - restartMargin;
+        const polledAt = Date.now();
+        const sincePreviousPoll = this.lastPollAt === null ? null : (polledAt - this.lastPollAt) / 1000;
+        this.lastPollAt = polledAt;
+        // The window starts after the next expected segment: media between the two
+        // was never listed to us. Either the provider skipped it (a stall at the
+        // source) or this loop polled too late (a slow fetch held the previous
+        // batch); the time since the previous poll tells which. After an edge
+        // switch the numbering is the new edge's, and EDGE-GAP judges by PDT.
+        if (baseline !== null && !numberingRestarted && !this._edgeSwitchActive
+            && windowLength > 0 && windowFirst > baseline + 1) {
+            const missed = windowFirst - baseline - 1;
+            this._missedSegmentCount += missed;
+            logger.warn(`[PlaylistManager] SEQUENCE-GAP recording=${this.recordingId} missing=${baseline + 1}-${windowFirst - 1} (${missed} segments) window=${windowFirst}-${windowLast} sincePreviousPoll=${sincePreviousPoll === null ? "none" : `${sincePreviousPoll.toFixed(1)}s`}: these segments left the live window before this poll`);
+        }
         if (numberingRestarted) {
             logger.warn(`[PlaylistManager] SEQUENCE-RESTART recording=${this.recordingId} edge=${this._timeline.edge ?? "unknown"} previous=${baseline} window=${windowFirst}-${windowLast} margin=${restartMargin}: provider restarted its numbering; accepting the window as new media after a discontinuity`);
         }
