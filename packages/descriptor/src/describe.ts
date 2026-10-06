@@ -123,7 +123,9 @@ export async function describeArtifact(
     try {
         staged = await stageMedia(upright?.path ?? mediaPath, descriptorConfig.mediaDirectory);
         if (manageServer) await server.start();
-        const result = await requestDescription(staged.url, fps, prompt);
+        const result = await requestDescription(staged.url, fps, prompt).catch((error: unknown) => {
+            throw manageServer ? server.withLog(error) : error;
+        });
         await fs.mkdir(evidenceDirectory, { recursive: true });
         const evidence = {
             inputPath: mediaPath,

@@ -45,6 +45,8 @@ export async function rewriteAvoidingPhrases(
                     },
                 },
             },
+        }).catch((error: unknown) => {
+            throw manageServer ? server.withLog(error) : error;
         });
         if (response.status < 200 || response.status >= 300) {
             throw new Error(`Rewrite request failed (${response.status}): ${response.body.error?.message ?? "no detail"}`);
