@@ -291,6 +291,39 @@ export async function upscaleTranscode(
     return await runUpscaleTranscode(inputPath, stagingRoot, recordingId, plan, mode);
 }
 
+// An encode longer than its segments means a timestamp break reached the
+// encoder; it would upload as hours of frozen picture. Shorter is fine: ffmpeg
+// closes timestamp gaps that hold no media.
+const LENGTH_TOLERANCE_SECONDS = 5;
+
+async function probeFormatDuration(inputPath: string): Promise<number> {
+    return await new Promise((resolve, reject) => {
+        const child = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", inputPath],
+            { stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.stderr.on("data", (chunk: Buffer) => {
+            stderr = `${stderr}${chunk.toString()}`.slice(-16_384);
+        });
+        child.once("error", reject);
+        child.once("close", (code) => {
+            const duration = Number(stdout.trim());
+            if (code === 0 && Number.isFinite(duration)) resolve(duration);
+            else reject(new Error(`ffprobe duration scan failed (${code ?? "unknown"}): ${stderr.trim()}`));
+        });
+    });
+}
+
+async function assertSegmentLength(outputPath: string, runs: readonly { durationSeconds: number }[]): Promise<void> {
+    const expected = runs.reduce((sum, run) => sum + run.durationSeconds, 0);
+    const actual = await probeFormatDuration(outputPath);
+    if (actual > expected + LENGTH_TOLERANCE_SECONDS) {
+        throw new Error(`The conversion lasts ${actual.toFixed(1)} s, longer than its ${expected.toFixed(1)} s of segments; `
+            + "check the recording's timestamps");
+    }
+}
+
 async function runUpscaleTranscode(
     inputPath: string,
     stagingRoot: string,
@@ -333,6 +366,7 @@ async function runUpscaleTranscode(
                 else reject(new Error(`ffmpeg upscale transcode failed (${code ?? "unknown"}): ${stderr.trim()}`));
             });
         });
+        if (prepared?.runs) await assertSegmentLength(temporaryPath, prepared.runs);
         await syncFile(temporaryPath);
         try {
             await fs.link(temporaryPath, finalPath);

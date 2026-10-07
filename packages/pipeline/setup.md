@@ -66,10 +66,13 @@ dropped**. Source folders and their playlists are never modified.
 - **Segment ownership.** The MPEG-TS scan streams the segment bytes in playlist
   order through one ffprobe keyframe pass; packet byte positions decide which
   segment owns a picture (a frame without a usable position fails the
-  analysis). Discontinuities, init-map changes and observed size/SAR changes are
-  input boundaries even when the playlist has no tag: each run is opened on its
-  own through FFmpeg's concat demuxer, with EXTINF durations as the timeline,
-  using temporary run playlists.
+  analysis). Discontinuities, init-map changes, observed size/SAR changes and
+  MPEG-TS timestamp breaks (a segment whose first video timestamp is more than
+  1 s off its run's EXTINF timeline: a reset or a jump) are input boundaries
+  even when the playlist has no tag: each run is opened on its own through
+  FFmpeg's concat demuxer, with EXTINF durations as the timeline, using
+  temporary run playlists. A conversion more than 5 s longer than its segments
+  fails instead of becoming an artifact.
 - **Imperfect input is kept.** A segment that starts a run without a decodable
   keyframe joins the picture that follows it; such runs are decoded on their
   own (a run with no picture at all holds the previous frame and keeps its

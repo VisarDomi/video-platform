@@ -215,3 +215,33 @@ test("a wide 2560x900 recording is scaled to 1080 tall (Porntrex tiers by height
         "stream=width,height", "-of", "json", result.path]);
     assert.deepEqual(JSON.parse(stdout).streams[0], { width: 3072, height: 1080 });
 });
+
+for (const [label, jump] of [["back past the run start (read as a clock wrap)", -990], ["back a few seconds", -5], ["forward", 500]]) {
+    test(`an untagged TS timestamp jump ${label} starts a new run: every frame, on the playlist timeline`, async (t) => {
+        const root = await temporary(t);
+        const parts = [];
+        for (const [index, timestampOffset] of [0, 1000, 1000.4 + jump].entries()) {
+            parts.push(await fixturePart(root, `p${index}`, { frames: 4, offset: index * 60, timestampOffset }));
+        }
+        const playlist = await assemble(root, parts);
+        // The tag before part 1 makes the conversion read per-run inputs; part 2 jumps without one.
+        const original = (await readFile(playlist, "utf8")).replace("#EXT-X-DISCONTINUITY\n#EXTINF:0.4,\npart-2.ts", "#EXTINF:0.4,\npart-2.ts");
+        await writeFile(playlist, original);
+        assert.equal(original.match(/#EXT-X-DISCONTINUITY/g).length, 1);
+        const result = await createDefaultStages(path.join(root, "out")).remux({ id: "jump", playlistPath: playlist });
+        sameFrames((await Promise.all(parts.map((p) => frameIds(p.input)))).flat(), await frameIds(result.path));
+        await continuousVideo(result.path);
+        await sameAudio(parts, result.path);
+        assert.equal(await readFile(playlist, "utf8"), original, "source playlist must remain byte-identical");
+    });
+}
+
+test("a conversion longer than its segments fails and leaves no artifact", async (t) => {
+    const root = await temporary(t);
+    const part = await fixturePart(root, "long", { frames: 70 });
+    const playlist = await assemble(root, [part], [0.4]);
+    const staging = path.join(root, "out");
+    await assert.rejects(createDefaultStages(staging).remux({ id: "long", playlistPath: playlist }),
+        /lasts 7\.\d s, longer than its 0\.4 s of segments/);
+    assert.deepEqual(await readdir(staging), [], "no artifact or temporary input is left behind");
+});

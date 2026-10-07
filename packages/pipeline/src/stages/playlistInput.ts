@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { nativeMediaRuns, renderNativeMediaRun } from "shared";
+import { nativeMediaRuns, renderNativeMediaRun, safeNativeMediaName, type NativeMediaSegment } from "shared";
 import { effectiveKeepIndexes, parseResolutionPlaylist, type RecordingResolutionAnalysis, type ResolutionSegment } from "./resolutionPolicy.js";
 import { nativeStreamCompatibility, probeNativeStreamLayout, type NativeInputRun } from "./mediaCompatibility.js";
+import { firstVideoPts, ptsAdvanceSeconds } from "./tsTimestamps.js";
 
 export interface PlaylistSelection {
     readonly analysis: RecordingResolutionAnalysis;
@@ -14,10 +15,40 @@ export interface PlaylistSelection {
 // and silently discard later frames. Concat opens each run independently and
 // offsets its timestamps onto the continuous playlist timeline.
 // Observed dimension/SAR changes create the same boundaries even if capture
-// omitted EXT-X-DISCONTINUITY. These are temporary input runs, not source edits.
+// omitted EXT-X-DISCONTINUITY, and so does an MPEG-TS timestamp break: a
+// segment whose first video timestamp is off the run's playlist timeline by
+// more than TIMESTAMP_BREAK_SECONDS. Inside one run the encoder would read a
+// reset as a 26.5-hour clock wrap or drop frames until the clock caught up.
+// These are temporary input runs, not source edits.
 // Every selected segment is kept, except zero-byte files (nothing to open). A
 // segment without a decodable keyframe takes the picture that follows it, so
 // it starts that picture's run instead of hiding the boundary.
+export const TIMESTAMP_BREAK_SECONDS = 1;
+
+async function splitAtTimestampBreaks<T extends NativeMediaSegment>(runs: readonly T[][], sourceRoot: string): Promise<T[][]> {
+    const split: T[][] = [];
+    for (const run of runs) {
+        let current: T[] = [];
+        let elapsed = 0;
+        let reference: { pts: number; elapsed: number } | null = null;
+        for (const segment of run) {
+            const pts = segment.mapUri === null
+                ? await firstVideoPts(path.join(sourceRoot, safeNativeMediaName(segment.name))) : null;
+            if (pts !== null && reference
+                && Math.abs(ptsAdvanceSeconds(reference.pts, pts) - (elapsed - reference.elapsed)) > TIMESTAMP_BREAK_SECONDS) {
+                split.push(current);
+                current = [];
+                reference = null;
+            }
+            if (pts !== null) reference ??= { pts, elapsed };
+            current.push(segment);
+            elapsed += segment.durationSeconds;
+        }
+        split.push(current);
+    }
+    return split;
+}
+
 export async function preparePlaylistInput(input: string, stagingRoot: string, selection?: PlaylistSelection): Promise<{
     args: string[];
     runs?: NativeInputRun[];
@@ -35,14 +66,15 @@ export async function preparePlaylistInput(input: string, stagingRoot: string, s
         const picture = measured[next] ?? measured.at(-1);
         if (picture) pictureOf.set(segment.index, picture);
     }
-    const runs = nativeMediaRuns(parsed.segments.filter(segment =>
+    const sourceRoot = selection?.analysis.sourceDirectory ?? path.dirname(path.resolve(input));
+    const runs = await splitAtTimestampBreaks(nativeMediaRuns(parsed.segments.filter(segment =>
         !keepIndexes || keepIndexes.has(segment.index)), (prior, segment) => {
         const priorDimensions = pictureOf.get(prior.index);
         const dimensions = pictureOf.get(segment.index);
         const geometryChanged = priorDimensions && dimensions && (priorDimensions.width !== dimensions.width
             || priorDimensions.height !== dimensions.height || priorDimensions.sampleAspectRatio !== dimensions.sampleAspectRatio);
         return Boolean(geometryChanged);
-    });
+    }), sourceRoot);
     const analyzed = pictureOf;
     if (runs.length === 0) throw new Error("Cannot remux an empty selection");
     // One decoder across runs would read a keyframe-less run start against the
@@ -60,7 +92,6 @@ export async function preparePlaylistInput(input: string, stagingRoot: string, s
     await fs.mkdir(stagingRoot, { recursive: true });
     const temporary = await fs.mkdtemp(path.join(stagingRoot, ".playlist-input-"));
     const cleanup = () => fs.rm(temporary, { recursive: true, force: true });
-    const sourceRoot = selection?.analysis.sourceDirectory ?? path.dirname(path.resolve(input));
     try {
         const concat = ["ffconcat version 1.0"];
         const inputs: NativeInputRun[] = [];
