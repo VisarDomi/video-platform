@@ -153,6 +153,11 @@ removed videos and errors (`VIDEO_PIPELINE_NOTIFY=0` disables them). Control it
 with `systemctl --user start|stop|restart video-pipeline` and the campaign
 intent with `campaign:resume` / `campaign:pause`.
 
+A stop sends SIGTERM to the whole unit, so a running stage's ffmpeg or
+llama-server dies with the worker. A stage that fails while the worker is stopping
+leaves its recording in its state, and the next start resumes it; only a failure
+without a stop marks the recording failed.
+
 While the worker runs, its heartbeat makes `remux-one`, `describe-one`,
 `process-one`, `upload-one`, `upload-provider:set`, `xvideos:sync`,
 `campaign:prepare` and `campaign:select` refuse to start; stop the service

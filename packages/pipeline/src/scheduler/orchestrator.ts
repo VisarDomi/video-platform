@@ -6,6 +6,7 @@ import type {
 } from "../domain/types.js";
 import { composeUploadMetadata } from "../metadata/composeUploadMetadata.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
+import { stopRequested } from "../shutdown.js";
 
 // A stage that cannot run now for a reason outside the recording (the machine is
 // short of memory): the recording keeps its state and the stage runs later.
@@ -167,6 +168,8 @@ export class PipelineOrchestrator {
         } catch (error) {
             // Not now, not a failure: the recording keeps its state for a later step.
             if (error instanceof StageDeferredError) throw error;
+            // A service stop killed the stage's child process: the next start resumes.
+            if (await stopRequested()) throw new StageDeferredError("interrupted by a service stop; resumed at the next start");
             const message = error instanceof Error ? error.message : String(error);
             result = this.database.transition(recording.id, recording.state, "failed", message);
         } finally {

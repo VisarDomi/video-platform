@@ -192,6 +192,21 @@ test("a deferred stage leaves the recording in its state, unleased, for a later 
     assert.equal(db.get(recording.id).state, "described");
 });
 
+test("a stage killed by a service stop leaves the recording in its state", async (t) => {
+    const { markStopping } = await import("../dist/shutdown.js");
+    const { root } = await rootFixture(t);
+    const db = new PipelineDatabase(path.join(root, "stopping.sqlite"));
+    t.after(() => db.close());
+    const recording = db.discover(input(root, "fc2", "2026-09-09 120000 12345"));
+    const orchestrator = new PipelineOrchestrator(db, {
+        remux: async () => { markStopping(); throw new Error("ffmpeg exited (SIGTERM)"); },
+        validateArtifact: async () => { throw new Error("not reached"); },
+        describe: async () => { throw new Error("not reached"); },
+    }, "test-worker");
+    await assert.rejects(orchestrator.processRecording(recording.id), StageDeferredError);
+    assert.equal(db.get(recording.id).state, "server_ready");
+});
+
 test("submitted provider ID is independent of title and refuses ambiguous/foreign edit links", () => {
     const base = "https://www.xvideos.com/account/uploads/new";
     assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit"]), "123");
