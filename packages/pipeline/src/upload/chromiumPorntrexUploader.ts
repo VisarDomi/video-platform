@@ -16,6 +16,7 @@ import {
 
 const ORIGIN = "https://www.porntrex.com";
 const LIST = "#list_videos_my_uploaded_videos";
+const PORNTREX_UPLOADS_PAGE_ROWS = 30;
 const run = promisify(execFile);
 // The page uploads in 9 MB chunks and shows a percentage. A transfer is only
 // given up when that percentage has not moved for this long.
@@ -135,6 +136,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const entries = new Map<string, Entry>();
         const processing = new Set<string>();
         const failed = new Set<string>();
+        let listEnded = false;
         let countsProcessing = false;
         const signatures = new Set<string>();
         let expected = -1;
@@ -179,10 +181,21 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             signatures.add(signature);
             if (entries.size - (countsProcessing ? 0 : processing.size) === expected) break;
             // Load the next page of the list directly (30 rows per page).
-            const nextPage = await page.goto(`${ORIGIN}${porntrexUploadsPagePath(pageNumber + 1)}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            const nextPagePath = `${ORIGIN}${porntrexUploadsPagePath(pageNumber + 1)}`;
+            let nextPage = await page.goto(nextPagePath, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            // Past the last page Porntrex answers 404. Its tab totals still count
+            // a video it has removed (61 counted, 60 listed, the 61st's edit page
+            // 404), so after a full page a repeated 404 ends the list even short
+            // of the total; a single 404 could be transient and is asked again.
+            if (nextPage?.status() === 404 && snapshot.rows.length >= PORNTREX_UPLOADS_PAGE_ROWS
+                && entries.size <= expected) {
+                await page.waitForTimeout(2_000);
+                nextPage = await page.goto(nextPagePath, { waitUntil: "domcontentloaded", timeout: 30_000 });
+                if (nextPage?.status() === 404) { listEnded = true; break; }
+            }
             if (!nextPage?.ok()) throw new Error("Porntrex uploads list is incomplete; cannot infer absence");
         }
-        if (entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
+        if (!listEnded && entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
         // A failed upload holds no video: it is no copy of the recording.
         const matches = [...entries.values()].filter(row => !failed.has(row.remoteId) && matchesPorntrexIdentity(row.title, identity));
         return matches.length === 1 ? { kind: "found", ...matches[0] }
@@ -370,12 +383,13 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const link = page.locator(`a[href^="${ORIGIN}/video/${uploadId}/"]`).first();
         const remoteUrl = await link.getAttribute("href");
         if (!remoteUrl) {
-            // Checked a day after submission: a row Porntrex still marks "Error"
-            // will not become a video. Blocked for review, not re-uploaded: the
-            // same file may fail again, and an Error row cannot be deleted.
+            // Checked a day after submission. Porntrex's "Error" can clear (a
+            // failed upload was published about ten hours later), but one that
+            // still stands after a day is blocked for review, not re-uploaded:
+            // the same file may fail again, and an Error row cannot be deleted.
             if (await this.listedAsFailed(page, uploadId)) {
                 return { outcome: "missing" as const, remoteUrl: null, stored,
-                    reason: "Porntrex failed to process the upload (\"Error\" in My Videos); no video exists. Review the artifact before `npm run retry`" };
+                    reason: "Porntrex still marks the upload \"Error\" in My Videos a day after submission; no video is published. Review the artifact before `npm run retry`" };
             }
             return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet", stored };
         }

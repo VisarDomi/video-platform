@@ -34,11 +34,13 @@ as uncertain, to be checked 24 hours later.
   the provider. The recording is blocked for review; `npm run retry -w pipeline -- RECORDING_ID`
   re-uploads it without the seven-day wait.
 - A known Porntrex ID without a published link that My Videos still marks "Error" at the check a day
-  after submission was not processed by Porntrex: no video exists. It is blocked for review the same
-  way rather than re-uploaded, since the same file may fail again and the Error row cannot be deleted.
+  after submission is blocked for review the same way rather than re-uploaded, since the same file may
+  fail again and the Error row cannot be deleted. ("Error" can clear: one upload was published about
+  ten hours later.)
 - A complete authenticated search records `absent`: on XVideos an unpaginated result page with the
   explicit "Your filters return no video." marker, on Porntrex a full list whose row count equals the
-  Public/Private tab totals. It is not proof that the provider never received any bytes. No new upload
+  Public/Private tab totals, or, since those totals still count a video Porntrex has removed, a list
+  that ends short of them: after a full page the next page answers 404 twice, 2 seconds apart. It is not proof that the provider never received any bytes. No new upload
   is eligible until the attempt's seven-day deadline; the retry looks up again immediately before
   transfer.
 - Authentication errors, unexpected pages, incomplete rows, unexpected pagination and ambiguous matches
