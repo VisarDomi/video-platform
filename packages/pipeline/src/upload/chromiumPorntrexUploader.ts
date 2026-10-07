@@ -278,7 +278,6 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
         const title = page.locator("#edit_video_title");
         let percent = -1;
         let movedAt = Date.now();
-        let logged = -10;
         // The page retries a chunk silently on network errors, so keep what
         // its chunk requests actually got back: a stall must say why.
         const chunkProblems: string[] = [];
@@ -328,13 +327,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             }
             const text = await page.locator(".form-upload .progressbar .text").first().textContent({ timeout: 1_000 }).catch(() => null);
             const current = text ? Number.parseInt(text, 10) : Number.NaN;
+            // Progress is not logged: a transfer that stops moving fails after
+            // TRANSFER_STALL_MILLISECONDS, and the step logs the outcome.
             if (Number.isFinite(current) && current > percent) {
                 percent = current;
                 movedAt = Date.now();
-                if (percent >= logged + 10) {
-                    logged = percent;
-                    console.log(JSON.stringify({ event: "porntrex-transfer-progress", percent }));
-                }
             }
             if (Date.now() - movedAt > TRANSFER_STALL_MILLISECONDS) {
                 if (!await this.stillLoggedIn(page)) {
