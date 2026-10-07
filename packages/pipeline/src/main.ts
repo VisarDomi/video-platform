@@ -1,4 +1,5 @@
 import { journalPriority } from "shared";
+import { markStopping } from "./shutdown.js";
 import { pipelineConfig, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
@@ -211,8 +212,9 @@ async function main(): Promise<void> {
             throw new Error("campaign-worker is reserved for the managed service and requires VIDEO_PIPELINE_SERVICE_MODE=1");
         }
         const controller = new AbortController();
-        process.once("SIGINT", () => controller.abort());
-        process.once("SIGTERM", () => controller.abort());
+        const stop = () => { markStopping(); controller.abort(); };
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
         await runCampaignWorker(pipelineConfig, controller.signal);
         return;
     }
