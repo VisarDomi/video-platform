@@ -7,7 +7,7 @@ import test from "node:test";
 import { ActiveRecordingReconciler } from "../dist/services/common/activeRecordingReconciler.js";
 import { formatSegmentName } from "../dist/services/download/segmentIdentity.js";
 
-async function fixture(t) {
+async function fixture(t, activeSegmentPaths = () => new Set()) {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-active-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
     const finalizedRoot = path.join(root, "fc2", "downloader");
@@ -29,6 +29,7 @@ async function fixture(t) {
         hasStreamer: () => false,
         finalizeStreamer: async () => false,
         activeSessions: () => [],
+        getActiveSegmentPaths: () => activeSegmentPaths(recordingPath),
     };
     return {
         finalizedRoot,
@@ -127,6 +128,21 @@ test("startup completes an interrupted ENDLIST handoff without publishing it", a
     await assert.rejects(stat(value.recordingPath), { code: "ENOENT" });
     await stat(path.join(value.pendingRoot, value.name));
     await assert.rejects(stat(path.join(value.finalizedRoot, value.name)), { code: "ENOENT" });
+});
+
+test("a session that wrote ENDLIST hands its own folder off", async (t) => {
+    const value = await fixture(t, (recordingPath) => new Set([recordingPath]));
+    await writeFile(path.join(value.recordingPath, "playlist.m3u8"), [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION:1",
+        "#EXTINF:1,",
+        formatSegmentName(0, "start-1", 99),
+        "#EXT-X-ENDLIST",
+        "",
+    ].join("\n"));
+    await value.reconciler.reconcile({ observedAt: 0, live: new Map(), terminalTargetIds: new Set() });
+    await stat(value.recordingPath);
+    await assert.rejects(stat(path.join(value.pendingRoot, value.name)), { code: "ENOENT" });
 });
 
 test("a first segment persisted before playlist creation remains resumable", async (t) => {
