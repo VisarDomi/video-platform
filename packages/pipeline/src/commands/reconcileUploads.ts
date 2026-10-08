@@ -43,9 +43,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 let probe = remoteId ? await browser.probeUploadStatus(page, remoteId) : null;
                 const removed = (id: string, reason: string | undefined) => {
                     // The provider gave this video an ID, so it existed; now it is
-                    // gone (404 and unlisted). Do not re-upload by ourselves.
+                    // gone (404 and unlisted). Never back to that provider.
                     database.markProviderRemoved(confirmation.attemptId, id,
-                        `${confirmation.uploadProvider} removed video ${id} after upload (${reason ?? "404"}); review it, then \`npm run retry -w pipeline -- "${confirmation.recordingId}"\` re-uploads`, now);
+                        `${confirmation.uploadProvider} removed video ${id} after upload (${reason ?? "404"}); blocked for manual review: it goes only to another upload provider, so once one is active \`npm run retry -w pipeline -- "${confirmation.recordingId}"\` queues it there`, now);
                     results.push({ recordingId: confirmation.recordingId, disposition: "provider_removed", remoteId: id });
                 };
                 if (remoteId && probe?.outcome === "missing") {
