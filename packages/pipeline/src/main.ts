@@ -29,6 +29,7 @@ import { connectVideoHostPhone } from "./commands/connectVideoHostPhone.js";
 import { videohostSessionReport } from "./commands/videohostSessionReport.js";
 import { videohostUploadsReport } from "./commands/videohostUploadsReport.js";
 import { videohostTiersReport } from "./commands/videohostTiersReport.js";
+import { retryRecording } from "./commands/retryRecording.js";
 
 function usage(): never {
     throw new Error([
@@ -391,13 +392,7 @@ async function main(): Promise<void> {
         if (command === "retry") {
             const recordingId = process.argv[3];
             if (!recordingId) throw new Error("retry requires a recording ID");
-            const recording = database.get(recordingId);
-            if (!recording) throw new Error(`Recording ${recordingId} does not exist`);
-            if (recording.state === "blocked") {
-                console.log(JSON.stringify(database.retryBlocked(recordingId), null, 2));
-            } else {
-                console.log(JSON.stringify(database.retryFailed(recordingId), null, 2));
-            }
+            console.log(JSON.stringify(retryRecording(database, recordingId), null, 2));
             return;
         }
         console.log(JSON.stringify({
