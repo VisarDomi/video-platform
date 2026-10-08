@@ -59,6 +59,12 @@ export async function uploadOne(
         if (recording.sourceKind !== "edited") {
             throw new Error("Production uploads are restricted to edited recordings");
         }
+        // A provider that took this recording down never gets it again.
+        const removal = database.providerRemovals(recordingId).find((entry) => entry.provider === provider);
+        if (removal) {
+            database.transition(recordingId, "metadata_ready", "blocked", removal.reason);
+            return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason: removal.reason };
+        }
         await verifyCurrentServerAuthority(recording, config);
         const artifact = database.getArtifact(recordingId);
         const artifactPart = database.getArtifactPart(recordingId) ?? "full";

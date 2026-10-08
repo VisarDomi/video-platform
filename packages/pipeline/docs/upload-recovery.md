@@ -31,8 +31,9 @@ as uncertain, to be checked 24 hours later.
 - Known ID: keep checking that upload. Processing delays, missing playback tiers and provider errors
   never authorize a new upload.
 - A known ID whose edit page answers HTTP 404 (on Porntrex: and absent from My Videos) was removed by
-  the provider. The recording is blocked for review; `npm run retry -w pipeline -- RECORDING_ID`
-  re-uploads it without the seven-day wait.
+  the provider. The recording is blocked for review with a desktop notification, and the removal is
+  kept in `provider_removals`: that provider never gets the recording again. Once another provider is
+  active, `npm run retry -w pipeline -- RECORDING_ID` queues it there without the seven-day wait.
 - A known Porntrex ID without a published link that My Videos still marks "Error" at the check a day
   after submission is blocked for review the same way rather than re-uploaded, since the same file may
   fail again and the Error row cannot be deleted. ("Error" can clear: one upload was published about

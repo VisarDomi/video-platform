@@ -532,6 +532,16 @@ export class PipelineDatabase {
                 recorded_at TEXT NOT NULL,
                 PRIMARY KEY (recording_id, part)
             ) STRICT;
+            -- Uploads a provider took down. Kept across generations: that
+            -- provider never gets the recording again.
+            CREATE TABLE IF NOT EXISTS provider_removals (
+                recording_id TEXT NOT NULL,
+                provider TEXT NOT NULL CHECK (provider IN ('xvideos', 'porntrex')),
+                remote_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                removed_at TEXT NOT NULL,
+                PRIMARY KEY (recording_id, provider, remote_id)
+            ) STRICT;
         `);
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
         const comparisonColumns = this.database.prepare("PRAGMA table_info(comparison_trial)").all() as unknown as Array<{ name: string }>;
@@ -591,6 +601,15 @@ export class PipelineDatabase {
                 }
             }
         }
+        // Removals recorded before their table, from the reconcile's own reason
+        // text; an owner's deliberate deletion is worded differently.
+        this.database.exec(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
+            SELECT a.recording_id, CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END,
+                json_extract(e.value, '$.remoteId'), json_extract(e.value, '$.reason'), json_extract(e.value, '$.checkedAt')
+            FROM upload_attempts a, json_each(a.evidence_json) e
+            WHERE a.evidence_json LIKE '%provider_removed%' AND json_extract(e.value, '$.stage') = 'provider_removed'
+                AND json_extract(e.value, '$.remoteId') IS NOT NULL
+                AND json_extract(e.value, '$.reason') LIKE '% removed video % after upload%'`);
         if (!attemptColumns.some((column) => column.name === "transfer_started")) {
             this.database.exec("ALTER TABLE upload_attempts ADD COLUMN transfer_started INTEGER NOT NULL DEFAULT 0");
         }
@@ -2663,15 +2682,19 @@ export class PipelineDatabase {
     }
 
     // The video existed on the provider (it had this ID) and now does not:
-    // the provider removed it, with or without notice. Never re-upload on our
-    // own. Blocked for a person; `retry` then re-uploads without a weekly wait.
+    // the provider removed it, with or without notice. Blocked for a person,
+    // and that provider never gets the recording again; `retry` unblocks it
+    // once another provider is active.
     markProviderRemoved(attemptId: string, remoteId: string, reason: string, now = new Date()): boolean {
         return this.transaction(() => {
-            const attempt = this.database.prepare(`SELECT recording_id FROM upload_attempts WHERE id = ? AND status = 'uncertain'`)
-                .get(attemptId) as { recording_id: string } | undefined;
+            const attempt = this.database.prepare(`SELECT recording_id, provider FROM upload_attempts WHERE id = ? AND status = 'uncertain'`)
+                .get(attemptId) as { recording_id: string; provider: string } | undefined;
             if (!attempt) return false;
             this.recordUploadEvidence(attemptId, { stage: "provider_removed", remoteId, reason }, now);
             const timestamp = now.toISOString();
+            this.database.prepare(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
+                VALUES (?, ?, ?, ?, ?)`).run(attempt.recording_id, attempt.provider === "porntrex" ? "porntrex" : "xvideos",
+                remoteId, reason, timestamp);
             this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ?, retry_not_before = started_at WHERE id = ?`)
                 .run(reason, attemptId);
             this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ? AND status = 'pending'`)
@@ -2681,6 +2704,13 @@ export class PipelineDatabase {
             this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, attempt.recording_id);
             return true;
         });
+    }
+
+    providerRemovals(id: string): Array<{ provider: ActiveUploadProvider; remoteId: string; reason: string; removedAt: string }> {
+        return (this.database.prepare(`SELECT provider, remote_id, reason, removed_at FROM provider_removals
+            WHERE recording_id = ? ORDER BY removed_at`).all(id) as unknown as Array<{
+            provider: ActiveUploadProvider; remote_id: string; reason: string; removed_at: string;
+        }>).map((row) => ({ provider: row.provider, remoteId: row.remote_id, reason: row.reason, removedAt: row.removed_at }));
     }
 
     // HTTP 404 on the provider's edit page: the ID does not exist (deleted or

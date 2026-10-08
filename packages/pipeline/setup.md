@@ -178,6 +178,10 @@ Failures and blocks retain the stage they came from. Return one to it:
 npm run retry -w pipeline -- RECORDING_ID
 ```
 
+A recording whose upload a provider removed is never uploaded to that provider
+again: `retry` refuses while it is the active provider, and an upload there is
+blocked before any request.
+
 ### Optional per-provider trial cap
 
 ```sh
@@ -317,7 +321,7 @@ managed worker closes it.
 Verification opens `/account/uploads/<id>/edit`: the video is online when the
 page has the direct video link (`/video.<key>/<slug>`) and its HLS master
 advertises a Full-HD rendition. An edit page answering HTTP 404 means the video
-is gone: the recording is blocked for review and `retry` re-uploads it.
+is gone: the recording is blocked for review, for another provider only.
 
 `xvideos:sync` reads the complete uploads listing (its count must equal the
 account total) into `provider_inventory`:
