@@ -183,6 +183,8 @@ export class ActiveRecordingReconciler {
             }
 
             if (recording.hasEndlist) {
+                // A running session writes ENDLIST, then hands the folder off itself.
+                if (this.downloadsManager.getActiveSegmentPaths().has(recording.path)) continue;
                 const pendingPath = await handoffActiveRecording(recording.path);
                 this.confirmations.delete(recording.path);
                 logger.info(`[${this.providerName}] Recovered completed recording for server processing: ${path.basename(pendingPath)}`);

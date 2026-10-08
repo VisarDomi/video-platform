@@ -24,6 +24,8 @@ At startup each `.active` folder is inspected: one that already has ENDLIST is
 handed off, one without any media goes to the desktop Trash, a legacy folder
 (no compound segment names) is finalized and handed off without guessing an
 identity, and a folder mixing identities is left untouched with a warning.
+While running, the periodic scan hands off an ENDLIST folder only when no
+session owns it; a session hands off its own folder after writing ENDLIST.
 
 `live-status.json` is runtime display state only; lifecycle never reads it.
 
