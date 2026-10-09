@@ -11,6 +11,7 @@ import {
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 import { requestSignal } from "../../core/downloadUtils.js";
+import { dropZeroSizeSamples, inspectFragment } from "../../download/fmp4Fragment.js";
 import { normalizeRecordingId } from "../../download/segmentIdentity.js";
 
 function parseFmp4Duration(data: Buffer): number {
@@ -432,6 +433,13 @@ export class ScClient implements IStreamProvider {
     public async validateSegment(filePath: string): Promise<{ valid: boolean; duration?: number }> {
         try {
             const data = await fs.readFile(filePath);
+            // Players and ffmpeg refuse a fragment whose index points outside
+            // its data or lists an empty frame the session could not drop.
+            const { zeroSizeSamples, problem } = inspectFragment(data);
+            if (problem !== null || zeroSizeSamples > 0) {
+                logger.warn(`[SC] Fragment index damaged: ${problem ?? `${zeroSizeSamples} zero-size sample entries`}: ${filePath}`);
+                return { valid: false };
+            }
             const duration = parseFmp4Duration(data);
             return { valid: true, duration: duration > 0 ? duration : undefined };
         } catch (error: any) {
@@ -524,8 +532,12 @@ class ScDownloadSession implements IDownloadSession {
                 signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
             });
             if (response.ok) {
-                const buf = await response.arrayBuffer();
-                return { data: Buffer.from(buf) };
+                const data = Buffer.from(await response.arrayBuffer());
+                // An empty frame entry left by a source stall carries no media;
+                // dropping it keeps every byte and lets players read the fragment.
+                const repair = dropZeroSizeSamples(data);
+                if (!repair) return { data };
+                return { data: repair.data, repair: `dropped ${repair.droppedSamples} zero-size sample entr${repair.droppedSamples === 1 ? "y" : "ies"}` };
             }
             // 429 asks to retry later; any other HTTP error ends the attempt.
             return { data: null, retryable: response.status === 429, status: response.status };

@@ -90,7 +90,19 @@ An upstream ENDLIST is acted on only after a pending refetch is resolved.
 
 Validators: Tango and FC2 require a nonempty file and probe its dimensions with
 ffprobe; unknown dimensions keep the segment with an input boundary. SC requires
-a readable file and takes the duration from the fMP4 fragment.
+a readable fragment whose index addresses only its own mdat and lists no
+zero-size sample, and takes the duration from the fMP4 fragment.
+
+SC fragments are repaired as they arrive. A source stall can leave a sample
+entry of zero bytes (an empty video frame) in a fragment's index; ffmpeg refuses
+such a fragment, and Safari stops playback ("Cannot Parse") as soon as it reads
+that far ahead, about 70 seconds before the fragment. The session drops each
+such entry, gives its duration to the sample before it (or moves the track's
+`tfdt` when it was the first), and adjusts the box sizes, data offsets and
+`sidx` sizes. Every media byte stays, and only the repaired fragment is written;
+the saved segment logs `repaired segment … dropped N zero-size sample entries`.
+A layout the repair does not rewrite, or any other index damage, fails
+validation.
 
 On resume, files written after the playlist tail before an interruption are
 re-appended in local-number order when they are nonempty, readable, do not
@@ -101,7 +113,9 @@ is trimmed atomically; a playlist with legacy, mixed, or foreign names refuses
 to resume.
 
 **Why:** Bytes received from a live stream cannot be fetched again later. Any
-judgement about damaged media belongs to the server, which keeps it too.
+judgement about damaged media belongs to the server, which keeps it too. An
+empty frame entry carries no media, so dropping it loses nothing and keeps the
+fragment readable by players and the pipeline.
 
 ## Capture keeps every resolution
 
