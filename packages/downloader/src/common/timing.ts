@@ -9,6 +9,7 @@ export const QUALITY_CHECK_INTERVAL_MS = 10_000;
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const NO_NEW_SEGMENTS_SLEEP_MS = 1_000;
 export const POLL_WHILE_WAITING_MS = 1_000;
+export const PLAYLIST_HEDGE_MS = 1_000;
 export const INIT_RETRY_SLEEP_MS = 1_000;
 export const EDGE_RECOVERY_SLEEP_MS = 5_000;
 
