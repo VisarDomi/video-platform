@@ -524,6 +524,9 @@ export class StreamDownloader {
                             segment.accurateDuration = result.duration;
                         }
                         await playlistManager.appendSegmentToPlaylist(segment);
+                        if (fetchResult.repair) {
+                            logger.info(`[StreamDownloader] ${alias} repaired segment ${segment.localName}: ${fetchResult.repair}`);
+                        }
                         playlistManager.recordDownloadedPDT(segment.programDateTime);
                         if (health === 'stale') {
                             health = 'ok';

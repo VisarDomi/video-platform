@@ -13,6 +13,8 @@ export interface SegmentFetchResult {
     retryable?: boolean;
     status?: number;
     error?: string;
+    // What the session repaired in the received bytes, for the log.
+    repair?: string;
 }
 
 export interface PlaylistFetchFailure {
