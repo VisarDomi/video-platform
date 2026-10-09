@@ -6,6 +6,7 @@ import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from 
 import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 import { PlaylistNotFoundError } from "../../core/playlistNotFoundError.js";
+import { requestSignal } from "../../core/downloadUtils.js";
 
 export interface TangoLiveStream {
     accountId: string;
@@ -246,14 +247,14 @@ class TangoDownloadSession implements IDownloadSession {
     private unauthorizedCount = 0;
     constructor(private readonly tokenReader: () => Promise<Tokens>) {}
 
-    public async fetchPlaylist(url: string): Promise<string | null> {
+    public async fetchPlaylist(url: string, signal?: AbortSignal): Promise<string | null> {
         try {
             const tokens = await this.tokenReader();
             const headers = getStreamHeaders(tokens);
             const response = await fetch(url, {
                 method: "GET",
                 headers,
-                signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
+                signal: requestSignal(TangoDownloadSession.FETCH_TIMEOUT_MS, signal),
             });
 
             if (response.status === 404) throw new PlaylistNotFoundError(url);
@@ -276,7 +277,7 @@ class TangoDownloadSession implements IDownloadSession {
             return await response.text();
         } catch (error) {
             if (error instanceof PlaylistNotFoundError) throw error;
-            logger.debug(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
+            if (!signal?.aborted) logger.debug(`[Tango] Playlist fetch error: ${url}`, { error: (error as Error).message });
             return null;
         }
     }

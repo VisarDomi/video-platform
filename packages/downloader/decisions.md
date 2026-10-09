@@ -167,14 +167,20 @@ abort/finalize/completion, and update zero-segment cooldown state.
 **Why:** One writer for download lifecycle registration keeps logs and
 cooldowns consistent across providers.
 
-## Download loop: no concurrent timers, no shared mutable state
+## Download loop: only the loop changes its state
 
-Quality checks and recovery run inline in the download loop. Tango never checks
-the master during capture. SC and FC2 re-check the master every 10 seconds and
-log a different selection as `VARIANT_CHANGE`; SC also tries variant recovery
-when the live playlist fails. Sixty seconds without a saved segment exit the
-attempt (30 seconds logs `STALE`, a debug line); non-terminal exits retain the
-recording for retry.
+Recovery runs inline in the download loop. Tango never checks the master during
+capture. SC and FC2 re-check the master every 10 seconds; the check runs beside
+polling and only returns an answer, which the loop applies at the top of its
+next iteration if the live URL is still the one checked, logging a different
+selection as `VARIANT_CHANGE`. SC also tries variant recovery when the live
+playlist fails. Sixty seconds without a saved segment exit the attempt (30
+seconds logs `STALE`, a debug line); non-terminal exits retain the recording for
+retry.
+
+A playlist request that has not answered within a second gets a second, identical
+request (`PLAYLIST_HEDGE_MS`); the first answer is used and the other is aborted.
+An aborted request records no failure.
 
 Segments of a poll are fetched four at a time and saved in playlist order. While
 the loop waits more than a second for a segment, it polls the live playlist again
@@ -184,9 +190,12 @@ fails, ends, changes its init map or restarts its numbering there is left to the
 next regular poll, after the batch is saved.
 
 **Why:** A timer running beside the loop can act on state the loop has already
-left; inline checks cannot. Tango and SC list about six seconds of media, so one
-slow segment download would otherwise let the segments after it leave the window
-before the loop polls again.
+left, so nothing beside the loop changes its state: the loop applies a check's
+answer itself and drops a stale one. Tango and SC list about six seconds of
+media, so one slow segment download, or one master or playlist request that
+stalls for 5–10 seconds while a fresh request answers at once, would otherwise
+let segments leave the window before the loop polls again. A Tango request that
+stalls also outlives its 10-second stream token and comes back 401.
 
 ## Segment fetches: network errors and 429 retry, other HTTP errors stop
 

@@ -10,6 +10,7 @@ import {
 } from "../../core/interfaces.js";
 import { decryptM3u8, getMouflonUrlParams, loadMouflonKeys } from "./mouflonDecoder.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
+import { requestSignal } from "../../core/downloadUtils.js";
 import { normalizeRecordingId } from "../../download/segmentIdentity.js";
 
 function parseFmp4Duration(data: Buffer): number {
@@ -485,11 +486,11 @@ const CDN_HEADERS = { "User-Agent": USER_AGENT };
 class ScDownloadSession implements IDownloadSession {
     private lastPlaylistFailure: PlaylistFetchFailure | null = null;
 
-    public async fetchPlaylist(url: string): Promise<string | null> {
+    public async fetchPlaylist(url: string, signal?: AbortSignal): Promise<string | null> {
         try {
             const response = await fetch(url, {
                 headers: CDN_HEADERS,
-                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
+                signal: requestSignal(CDN_FETCH_TIMEOUT_MS, signal),
             });
 
             if (!response.ok) {
@@ -506,6 +507,7 @@ class ScDownloadSession implements IDownloadSession {
             this.lastPlaylistFailure = null;
             return decrypted;
         } catch (error: any) {
+            if (signal?.aborted) return null;
             this.lastPlaylistFailure = { kind: "network", error: error.name ?? "network-error" };
             return null;
         }

@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import logger from "../../../common/logger.js";
 import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from "../../core/interfaces.js";
 import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
-import { resolveSegmentUrl } from "../../core/downloadUtils.js";
+import { requestSignal, resolveSegmentUrl } from "../../core/downloadUtils.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
 import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
 import { FC2_SESSION_CLEANUP_INTERVAL_MS, FC2_SESSION_STALE_MS, FC2_WS_HANDSHAKE_TIMEOUT_MS, FC2_WS_HEARTBEAT_INTERVAL_MS } from "../../../common/timing.js";
@@ -363,12 +363,12 @@ class Fc2DownloadSession implements IDownloadSession {
 
     private static readonly FETCH_TIMEOUT_MS = CDN_FETCH_TIMEOUT_MS;
 
-    public async fetchPlaylist(url: string): Promise<string | null> {
+    public async fetchPlaylist(url: string, signal?: AbortSignal): Promise<string | null> {
         try {
             this.client._touchSession(url);
             const response = await fetch(url, {
                 headers: this.HEADERS,
-                signal: AbortSignal.timeout(Fc2DownloadSession.FETCH_TIMEOUT_MS),
+                signal: requestSignal(Fc2DownloadSession.FETCH_TIMEOUT_MS, signal),
             });
             if (!response.ok) {
                 logger.debug(`[FC2] Playlist fetch failed: ${response.status} ${response.statusText} url=${url}`);
@@ -376,7 +376,7 @@ class Fc2DownloadSession implements IDownloadSession {
             }
             return await response.text();
         } catch (error: any) {
-            logger.debug(`[FC2] Playlist fetch error: ${url}`, { error: error.message });
+            if (!signal?.aborted) logger.debug(`[FC2] Playlist fetch error: ${url}`, { error: error.message });
             return null;
         }
     }

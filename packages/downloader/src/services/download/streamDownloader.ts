@@ -9,7 +9,7 @@ import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
 import { resolveSegmentUrl } from "../core/downloadUtils.js";
-import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS, RATE_LIMIT_RETRY_MS } from "../../common/timing.js";
+import { STALE_STREAM_TIMEOUT_MS, QUALITY_CHECK_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, NO_NEW_SEGMENTS_SLEEP_MS, INIT_RETRY_SLEEP_MS, EDGE_RECOVERY_SLEEP_MS, CDN_FETCH_TIMEOUT_MS, SEGMENT_RETRY_SLEEP_MS, POLL_WHILE_WAITING_MS, PLAYLIST_HEDGE_MS, RATE_LIMIT_RETRY_MS } from "../../common/timing.js";
 import { AccessIncidentTracker } from "./accessIncidentTracker.js";
 import { PlaylistNotFoundError } from "../core/playlistNotFoundError.js";
 
@@ -100,6 +100,28 @@ export class StreamDownloader {
             add,
             async close() { stopped = true; await Promise.all(workers); },
         };
+    }
+
+    // A playlist request can stall for seconds while a fresh one answers at
+    // once, and for Tango the stream token expires in flight. A second request
+    // starts if the first has not answered within PLAYLIST_HEDGE_MS; the first
+    // answer is used and the other request is aborted.
+    private async fetchPlaylist(session: IDownloadSession, url: string): Promise<string | null> {
+        const requests: AbortController[] = [];
+        const request = () => {
+            const controller = new AbortController();
+            requests.push(controller);
+            return session.fetchPlaylist(url, controller.signal);
+        };
+        const hedgeTimer = new AbortController();
+        const hedge = timersPromises.setTimeout(PLAYLIST_HEDGE_MS, undefined, { signal: hedgeTimer.signal })
+            .then(request, () => new Promise<never>(() => {}));
+        try {
+            return await Promise.race([request(), hedge]);
+        } finally {
+            hedgeTimer.abort();
+            for (const controller of requests) controller.abort();
+        }
     }
 
     // Waits for a segment's result, polling the live playlist every second
@@ -270,7 +292,9 @@ export class StreamDownloader {
         let remoteEndlist = false;
         let health: 'ok' | 'stale' = 'ok';
         let lastQualityCheck = Date.now();
-        let masterCheckMs: number | null = null;
+        // The quality check runs beside polling: a slow master playlist must
+        // not hold up the live one. betterUrl is undefined until it answers.
+        let qualityCheck: { forLiveUrl: string; betterUrl?: string | null } | null = null;
         const staleTimeout = STALE_STREAM_TIMEOUT_MS;
 
         downloadLoop: while (!this._aborted && Date.now() - lastDownload < staleTimeout) {
@@ -280,12 +304,11 @@ export class StreamDownloader {
                 logger.debug(`[StreamDownloader] STALE ${alias} segments=${initTracker.count} staleSec=${staleSec}`);
             }
 
-            if (this.provider.refreshMasterDuringDownload !== false
-                && Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
-                lastQualityCheck = Date.now();
-                const betterUrl = await this.checkForQualityUpgrade(alias, masterUrl, liveUrl);
-                masterCheckMs = Date.now() - lastQualityCheck;
-                if (betterUrl) {
+            if (qualityCheck?.betterUrl !== undefined) {
+                const { forLiveUrl, betterUrl } = qualityCheck;
+                qualityCheck = null;
+                // An answer for a live URL replaced meanwhile (variant recovery) is stale.
+                if (betterUrl && forLiveUrl === liveUrl) {
                     logger.info(`[StreamDownloader] VARIANT_CHANGE ${alias}`, {
                         reason: "master-selection-changed",
                         from: this.provider.describeVariant?.(liveUrl) ?? null,
@@ -297,9 +320,21 @@ export class StreamDownloader {
                     this.handle.update({ liveUrl });
                 }
             }
+            if (qualityCheck === null && this.provider.refreshMasterDuringDownload !== false
+                && Date.now() - lastQualityCheck > QUALITY_CHECK_INTERVAL_MS) {
+                lastQualityCheck = Date.now();
+                const check: { forLiveUrl: string; betterUrl?: string | null } = { forLiveUrl: liveUrl };
+                qualityCheck = check;
+                this.checkForQualityUpgrade(alias, masterUrl, liveUrl)
+                    .catch((error) => {
+                        logger.warn(`[StreamDownloader] ${alias} quality check failed`, { error: String(error) });
+                        return null;
+                    })
+                    .then((betterUrl) => { check.betterUrl = betterUrl; });
+            }
 
             const playlistFetchStartedAt = Date.now();
-            let content = await session.fetchPlaylist(liveUrl);
+            let content = await this.fetchPlaylist(session, liveUrl);
             const playlistFetchMs = Date.now() - playlistFetchStartedAt;
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
@@ -337,7 +372,7 @@ export class StreamDownloader {
                 this.handle.update({ liveUrl });
                 session = this.provider.createDownloadSession();
 
-                content = await session.fetchPlaylist(liveUrl);
+                content = await this.fetchPlaylist(session, liveUrl);
                 if (!content) {
                     const recoveredFailure = session.getLastPlaylistFailure?.();
                     if (recoveredFailure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, recoveredFailure);
@@ -381,15 +416,13 @@ export class StreamDownloader {
                 }
             }
 
-            // A late poll's gap reports what this poll and a master check since the
-            // previous poll took: the requests that can hold the loop up.
+            // A late poll's gap reports how long this poll's playlist request took.
             const identifiedSegments = await playlistManager.identifyNewSegments(
                 content,
                 (line) => resolveSegmentUrl(liveUrl, line),
                 undefined,
-                `playlistFetch=${playlistFetchMs}ms${masterCheckMs === null ? "" : ` masterCheck=${masterCheckMs}ms`}`,
+                `playlistFetch=${playlistFetchMs}ms`,
             );
-            masterCheckMs = null;
             const segments = identifiedSegments.filter(segment => !playlistManager.shouldSkipByTimeline(segment));
 
             let downloadedThisIteration = false;
@@ -404,7 +437,7 @@ export class StreamDownloader {
             const pollWhileWaiting = async () => {
                 const queuedThrough = segments.at(-1)?.providerSequence;
                 if (queuedThrough === undefined || Date.now() - lastDownload >= staleTimeout) return;
-                const latest = await session.fetchPlaylist(liveUrl).catch(() => null);
+                const latest = await this.fetchPlaylist(session, liveUrl).catch(() => null);
                 if (!latest) return;
                 const latestMap = latest.match(/#EXT-X-MAP:URI="([^"]+)"/)?.[1];
                 if (latestMap && initTracker.needsUpdate(latestMap)) return;

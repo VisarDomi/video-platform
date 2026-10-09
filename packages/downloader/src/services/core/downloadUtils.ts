@@ -12,6 +12,15 @@ export function resolveSegmentUrl(baseUrl: string, segmentLine: string): string 
     }
 }
 
+// AbortSignal.any exists at runtime (Node 20.3+); the pinned @types/node predates it.
+const AnyAbortSignal = AbortSignal as typeof AbortSignal & { any(signals: AbortSignal[]): AbortSignal };
+
+// A request's own timeout, plus the caller's signal when it has one.
+export function requestSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return signal ? AnyAbortSignal.any([signal, timeout]) : timeout;
+}
+
 export function formatDownloadDirName(alias: string, date: Date): string {
     return `${formatTimestampForPath(date)} ${alias}`;
 }
