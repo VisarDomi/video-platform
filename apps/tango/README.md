@@ -1,18 +1,19 @@
-# stream-viewer
+# Tango
 
-Ported from stream-viewer in video-platform. An iOS app for rehauling the ui of the providers supported by this repo.
+The Tango iPhone app: tango.me's live streams in the shared Video Platform viewer (the
+`tango-live` provider; the app is built from `apps/ios`). Ported from stream-viewer.
 
 ## What?
-This script changes the UI of the providers supported by this script so that's it easier to watch streams. Features:
-1. show list of favorites and recommended.
-2. show streams in tiktok style: swipe to go to next/prev stream
-
+The app replaces tango.me's UI so that it's easier to watch streams. Features:
+1. a list of followed and recommended streams.
+2. streams in tiktok style: swipe to go to the next/prev stream, in a native player that keeps
+   playing through lock and the background.
 
 ## Why?
-Native navigation is cumbersome and too resource intensive and wastes phone battery.
+The site's own navigation is cumbersome, too resource intensive and wastes phone battery.
 
 ## How?
-[flow.md](flow.md) explain the flows that this app handles best.
+[flow.md](flow.md) explains the flows that this app handles best.
 
 ## setup
 [notes.md](./notes.md)

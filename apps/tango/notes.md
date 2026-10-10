@@ -8,8 +8,10 @@ streams are removed from navigation. The stream overlay has mute, Follow
 (❤️/🤍), the PC Tango download list (+/-) and Block, which asks once more (❓)
 before blocking and unfollows first.
 
-The page itself renews Tango's session and playback tokens; the app's Safari
-login handoff, build and deploy are in [`apps/ios/PORT.md`](../ios/PORT.md).
+The page renews Tango's session and playback tokens while it runs; the native player
+renews the stream tokens of the playlists it plays (and the session while the app is in the
+background). The app's Safari login handoff, native player, build and deploy are in
+[`apps/ios/PORT.md`](../ios/PORT.md).
 
 
 ## Supported providers
