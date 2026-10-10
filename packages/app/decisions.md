@@ -109,6 +109,21 @@ keeps no in-memory cache.
 
 **Why:** A cache can freeze `isLive` state and make a live stream appear as VOD.
 
+## The iPhone apps play videos natively
+
+In the iPhone apps a list row opens the app's native viewer instead of the viewer document
+(`routes/nativeViewer.ts`; `apps/ios` `VideoApp/ViewerBridge.swift`). The list page posts its
+list whenever it changes and answers the viewer's requests (`window.__videoApp.call`):
+playback sources, co-streamers, follow, block, list removals and additions, the highlighted
+row and the login page. Each video it posts says whether it is a PC recording or a live
+stream, its playback source when one is known without a request (`mediaHint`: local HLS,
+Tango's remembered playlists) and its download-list streamer. A viewer address opened in the
+app opens the list with that video in the native viewer.
+
+**Why:** WebKit pauses a page's video when the phone locks or the app leaves the screen; the
+native player plays on until the video ends. Safari has no `videoViewer` handler and keeps the
+web viewer below.
+
 ## Video Vault lives on porntrex.com
 
 Video Vault lists both upload sites from a page on porntrex.com and reads XVideos pages

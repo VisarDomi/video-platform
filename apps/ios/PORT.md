@@ -31,11 +31,44 @@ first-party, like a second Safari tab. The vault page asks it with
 and only for paths on XVideos (`AppPolicy.workerURL`). The page itself may open XVideos only
 to log in. Its login cookies cover both sites.
 
-## Behavior: a full-screen Safari tab
+## Behavior: a full-screen Safari tab with a native player
 
+- **Videos play in a native viewer** (`VideoApp/Viewer*.swift`), over the list page,
+  because WebKit pauses a page's video whenever the phone locks or the app leaves the
+  screen. Videos play on through lock and the background until they end (background
+  audio), and nothing pauses, reloads or jumps on the way back.
+  - It is the web viewer (`packages/app` `routes/videoViewer.ts`) with AVPlayer: the same
+    three-scope feed (vertical swipes through the list, neighbours touching during a swipe,
+    a runway landing moving one video), the upper-half horizontal seek, the lower-half swipe
+    that shows or hides the controls, the overlay with its buttons (mute, follow, block, +/-,
+    save/cut/return, markers), all three videos muted until unmuted, progress every 3 s.
+  - A pinch zooms the current video anywhere on screen. Zoomed, the list stays put and the
+    left edge is not Back: drags pan the picture as in Safari, except the upper half's
+    horizontal seek (which then starts anywhere). Zoomed back out, swipes move through the
+    list again. The left edge otherwise slides the viewer away to the list.
+  - The list page stays a web page. A row opens the native viewer with the list
+    (`routes/nativeViewer.ts`, `ViewerBridge.swift`); the list's later changes follow it,
+    and the viewer asks the page for what only the provider can do (Video Vault's playback
+    sources, Tango's co-streamers, follow, block, the login page). A viewer address the page
+    is opened at (an old restore point) opens the list with that video in the native viewer.
+  - Local HLS and Tango's playlists are known without the page (`mediaHint`), so playback
+    never waits on a suspended page. Edits and the +/- download lists go to the PC directly
+    (`ViewerPC.swift`).
+  - Tango's playlists need its 10 s stream tokens, so they load through a resource loader
+    that fetches them with fresh tokens (`ViewerMedia.swift`: `TangoTokens`, every 5 s while
+    a stream plays, and the session when it is about to expire while the app is in the
+    background; the web view's cookies get the result). Segments need no tokens and load
+    directly. Video Vault's media gets the page's Referer, user agent and site cookies.
+  - Unmuted, the viewer takes the audio like Safari's video with sound and shows on the lock
+    screen with play/pause, a scrubber (recordings) and next/previous (the neighbouring
+    videos); muted, it mixes with other apps' audio. A call or Siri pauses it; it carries
+    on afterwards. A failed or stalled recording recovers at its position; a live stream
+    that ended gives way to the next one, as in the web viewer.
+  - A killed app reopens its viewer (`viewer-checkpoint.json`); progress is
+    `viewer-progress.json`, seeded once from the web viewer's localStorage.
 - **Local apps** load the PC's page, API, +/- list buttons and HLS exactly as in
-  Safari. No website code is bundled; deploying the website updates them. The phone
-  already trusts the PC's mkcert root. Navigation is limited to the start URL and
+  Safari. No website code is bundled; deploying the website updates their list (the
+  player is in the app). The phone already trusts the PC's mkcert root. Navigation is limited to the start URL and
   its subpaths (`VideoApp/Policy.swift`).
 - **Online apps** load the provider's own site and run its content script
   (`packages/app/scripts/build-content.mjs <provider>`) at document start in the page
@@ -88,11 +121,12 @@ to log in. Its login cookies cover both sites.
   local network access.
 - Like a restored Safari tab, a killed app reopens the page you were on with its
   Back/Forward list (WebKit `interactionState`); only an app page becomes the restore
-  point, and a blank restore falls back to the start page. Edge-swipe Back/Forward, pinch zoom,
+  point, and a blank restore falls back to the start page. In the list: edge-swipe Back/Forward, pinch zoom,
   inline playback, portrait/landscape and pull-down reload. An unreachable PC or site
   shows a message with Retry instead of Safari's error page.
 - Each app has its own WebKit storage: progress, highlights and cookies are not
-  shared with Safari. No icon, launch artwork or background refresh; the only
+  shared with Safari. No icon, launch artwork or background refresh; the background mode is
+  audio (the native viewer); the only
   entitlement is Tango's Keychain group (`<team>.com.visar.Tango.paid`), shared with
   Tango Login.
 

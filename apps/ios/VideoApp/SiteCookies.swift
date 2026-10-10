@@ -9,8 +9,8 @@ import WebKit
 //   WebKit's cookie file, and restores missing ones before the first page loads. When
 //   the site removes them (logout, revocation) the copy is cleared too.
 // - XVideos keeps its login in a session-only cookie beside a persistent session cookie.
-//   That login cookie gets the persistent cookie's lifetime, the same rule as the Xvid
-//   Safari extension. Server expiry, revocation and logout still apply.
+//   That login cookie gets the persistent cookie's lifetime. Server expiry, revocation
+//   and logout still apply.
 @MainActor
 final class SiteCookies: NSObject, WKHTTPCookieStoreObserver {
     struct Durable { let name: String; let lifetimeFrom: String }

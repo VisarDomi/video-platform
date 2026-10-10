@@ -12,7 +12,11 @@ declare global {
 		webkit?: { messageHandlers?: {
 			downloadList?: { postMessage(message: unknown): Promise<unknown> };
 			vaultSite?: { postMessage(message: unknown): Promise<unknown> };
+			// Every app: its native viewer (routes/nativeViewer.ts, apps/ios VideoApp/ViewerBridge.swift).
+			videoViewer?: { postMessage(message: unknown): Promise<unknown> };
 		} };
+		// The page's answers to the native viewer (routes/nativeViewer.ts).
+		__videoApp?: { call(name: string, args: unknown[]): Promise<unknown> };
 	}
 }
 const mediaOrigin = typeof window === 'undefined' ? '' : window.tangoNative?.serverURL ?? '';

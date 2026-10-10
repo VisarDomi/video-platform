@@ -57,7 +57,9 @@ check package.json
 
 Five iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
 **SC local** open the website's provider tabs; **Video Vault** lists the pipeline's
-XVideos and Porntrex uploads; **Tango** shows live streams on tango.me. They are built
+XVideos and Porntrex uploads; **Tango** shows live streams on tango.me. Their videos play
+in a native viewer that keeps playing through lock and the background, so player changes
+need an app deploy; the local apps' lists still come from the website. They are built
 on the Mac (SSH from this PC); the phone is cabled to the Mac. Build, deploy, inspection
 and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
 

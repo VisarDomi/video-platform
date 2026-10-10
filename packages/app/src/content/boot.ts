@@ -1,6 +1,7 @@
 import css from '../style.css?inline';
 import { AuthenticationRequiredError, type OnlineVideoProvider } from '../providers/types.js';
 import { openVideoList } from '../routes/videoList.js';
+import { hasNativeViewer } from '../routes/nativeViewer.js';
 import { VideoViewerPage } from '../routes/videoViewer.js';
 
 type Boot = { entries: number; startedAt: number; shellAt?: number; readyAt?: number; error?: string };
@@ -32,7 +33,10 @@ export function startContentScript(provider: OnlineVideoProvider, hosts: readonl
     document.head.append(viewport, style);
     boot.shellAt = performance.now();
     // Live providers renew their session and playback tokens before anything loads.
-    const task = (provider.live?.start() ?? Promise.resolve()).then(() => route === 'list' ? openVideoList(provider.id)
+    // The app shows a viewer address natively, over the list.
+    const viewerPath = route === 'video' && hasNativeViewer() ? location.pathname : null;
+    if (viewerPath) history.replaceState(null, '', provider.homeUrl);
+    const task = (provider.live?.start() ?? Promise.resolve()).then(() => route === 'list' || viewerPath ? openVideoList(provider.id, viewerPath ? { path: viewerPath } : undefined)
         : new VideoViewerPage(provider.id, location.pathname, null).open());
     void task.then(() => { boot.readyAt = performance.now(); }).catch(error => {
         if (error instanceof AuthenticationRequiredError) { location.replace(provider.loginUrl); return; }

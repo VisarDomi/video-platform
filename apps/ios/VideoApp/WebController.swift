@@ -4,7 +4,8 @@ import WebKit
 // A full-screen Safari tab. Local apps show one provider's videos on the PC; the
 // page, API and HLS come from the PC exactly as in Safari, and the phone already
 // trusts its certificate. Online apps run their Safari extension's content script
-// on the provider's own site.
+// on the provider's own site. Videos open in the native viewer over the list
+// (ViewerController.swift), which plays on through lock and the background.
 @MainActor
 final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private let start: URL
@@ -21,6 +22,10 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     private var failedURL: URL?
     private var started = false
     private var loginView: UIStackView?
+    private var bridge: ViewerBridge!
+    private var media: ViewerMedia!
+    private var progress: ProgressStore!
+    private var viewer: ViewerController?
 
     init(start: URL, hosts: [String]) {
         self.start = start
@@ -39,6 +44,8 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         config.ignoresViewportScaleLimits = true
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        bridge = ViewerBridge { [weak self] url in self?.allows(url) ?? false }
+        config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: ViewerBridge.name)
         if !hosts.isEmpty {
             // The sites see Safari, and the extension's script starts at document start in the page world.
             config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Mobile/15E148 Safari/604.1"
@@ -55,6 +62,12 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
             }
         }
         webView = WKWebView(frame: .zero, configuration: config)
+        bridge.webView = webView
+        bridge.onOpen = { [weak self] open in self?.openViewer(open) }
+        bridge.onList = { [weak self] videos in self?.viewer?.updateList(videos) }
+        media = ViewerMedia(store: config.websiteDataStore.httpCookieStore, bridge: bridge,
+                            tango: Bundle.main.object(forInfoDictionaryKey: "TangoLogin") as? Bool == true)
+        progress = ProgressStore(directory: sessionURL.deletingLastPathComponent())
         if !hosts.isEmpty {
             let durable = (Bundle.main.object(forInfoDictionaryKey: "DurableCookie") as? [String: String]).flatMap { rule in
                 rule["name"].flatMap { name in rule["lifetimeFrom"].map { SiteCookies.Durable(name: name, lifetimeFrom: $0) } }
@@ -85,6 +98,41 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         buildFailureView()
         // Online apps put back their saved login before the first page loads.
         if let cookies { cookies.restore { [weak self] in self?.signIn() } } else { open() }
+        // A killed app reopens its viewer too; the page catches up underneath.
+        if let checkpoint = ViewerCheckpoint.load(sessionURL.deletingLastPathComponent()) {
+            let index = checkpoint.videos.firstIndex { $0.key == checkpoint.current } ?? 0
+            showViewer(ViewerBridge.Open(provider: checkpoint.provider, videos: checkpoint.videos, index: index, progress: [:]))
+        }
+    }
+
+    // A row (or a viewer address the page was opened at) opens the native viewer; the video
+    // already showing stays as it is.
+    private func openViewer(_ open: ViewerBridge.Open) {
+        progress.seed(open.progress)
+        if let viewer, viewer.provider == open.provider, viewer.shows(open.videos[open.index]) {
+            viewer.updateList(open.videos)
+            return
+        }
+        showViewer(open)
+    }
+
+    private func showViewer(_ open: ViewerBridge.Open) {
+        viewer?.close()
+        let controller = ViewerController(provider: open.provider, videos: open.videos, index: open.index, bridge: bridge,
+                                          media: media, progress: progress, directory: sessionURL.deletingLastPathComponent())
+        controller.onClose = { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            controller.willMove(toParent: nil)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+            if viewer === controller { viewer = nil }
+        }
+        addChild(controller)
+        controller.view.frame = view.bounds
+        controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(controller.view)
+        controller.didMove(toParent: self)
+        viewer = controller
     }
     // Tango moves an imported Safari login into the web view first; other apps start directly.
     private func signIn() {
@@ -186,6 +234,7 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         provisional = nil
         failure.isHidden = true
+        bridge.pageChanged()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.scrollView.refreshControl?.endRefreshing()
@@ -217,11 +266,13 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         failure.isHidden = false
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        bridge.pageChanged()
         if webView.url == nil { webView.load(URLRequest(url: start)) } else { webView.reload() }
     }
 
     // Same steps and wording as the original Tango app's login handoff.
     private func showLogin(_ message: String) {
+        viewer?.close()
         hideLogin()
         webView.isHidden = true
         let label = UILabel()

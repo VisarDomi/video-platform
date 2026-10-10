@@ -142,8 +142,17 @@ async function fetchPage(): Promise<{ videos: Video[] }> {
     return { videos: streams.map(toVideo) };
 }
 
+function streamOf(video: Video): string {
+    return decodeURIComponent(video.pageUrl?.match(STREAM_PATH)?.[1] ?? "");
+}
+
+function mediaHint(video: Video): MediaSource | undefined {
+    const url = media()[streamOf(video)];
+    return url ? { url, kind: "hls" } : undefined;
+}
+
 async function resolvePlayback(video: Video): Promise<MediaSource> {
-    const streamId = decodeURIComponent(video.pageUrl?.match(STREAM_PATH)?.[1] ?? "");
+    const streamId = streamOf(video);
     let url = media()[streamId];
     if (!url) { await fetchPage(); url = media()[streamId]; }
     if (!url) throw new Error("This stream has ended.");
@@ -159,7 +168,7 @@ export const tangoLive: OnlineVideoProvider = {
         return STREAM_PATH.test(path) ? "video" : null;
     },
     videoUrl: video => video.pageUrl!,
-    fetchPage, resolvePlayback,
+    fetchPage, resolvePlayback, mediaHint,
     async waitForLogin() {},
     live: {
         downloadList: "tango",
@@ -184,7 +193,7 @@ export const tangoLive: OnlineVideoProvider = {
             if (result.error_code !== 0) throw new Error(result.error_message || "Tango did not block this streamer.");
         },
         async related(video) {
-            const streamId = decodeURIComponent(video.pageUrl?.match(STREAM_PATH)?.[1] ?? "");
+            const streamId = streamOf(video);
             const [response, hidden] = await Promise.all([
                 ok(`${PUBLIC}/live/stream/v2/watch?requestId=${crypto.randomUUID()}`, { method: "POST", body: streamId }),
                 blocked(),

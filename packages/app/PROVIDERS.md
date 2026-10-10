@@ -5,7 +5,9 @@ implementation for the local website (`main.ts`; providers `tango`, `fc2`, `sc`)
 online apps Video Vault (`vault`: XVideos and Porntrex uploads) and Tango (`tango-live`).
 Each online app injects a content script that bundles its online provider:
 `src/content/<provider>.ts` starts the shared `boot.ts` takeover with that provider and its
-hosts.
+hosts. In the iPhone apps (local and online) the list rows open the app's native viewer
+instead of the web viewer (`routes/nativeViewer.ts`, see `decisions.md`); Safari keeps the
+web viewer.
 
 `boot.ts` runs only on those hosts, on a route the provider recognizes, and not in a window
 opened by another page; it starts once per document (`__videoPlatformBoot`). A `login` route

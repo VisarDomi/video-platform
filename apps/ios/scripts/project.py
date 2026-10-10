@@ -92,10 +92,14 @@ if login: settings['CODE_SIGN_ENTITLEMENTS'] = str(entitlements)
 targets.insert(0, obj('Target', 'PBXNativeTarget', buildConfigurationList=config_list(product, settings), buildPhases=phases, buildRules=[],
     dependencies=dependencies, name=product, productName=product, productReference=product_ref, productType='com.apple.product-type.application'))
 # Safari's iPhone orientations; no icon or launch artwork, like the other personal apps.
+# The native viewer plays on through lock and the background (audio), and reaches the PC's
+# website API and download lists itself (local network).
 info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType='APPL',
     LSRequiresIPhoneOS=True, UILaunchScreen={}, UIRequiredDeviceCapabilities=['arm64'],
     UISupportedInterfaceOrientations=['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
-    UIViewControllerBasedStatusBarAppearance=True, StartURL=config['url'])
+    UIViewControllerBasedStatusBarAppearance=True, StartURL=config['url'], UIBackgroundModes=['audio'],
+    NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
+    NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
 if config.get('hosts'):
     info['SiteHosts'] = config['hosts']
     if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
@@ -104,13 +108,10 @@ if config.get('hosts'):
     # Video Vault reads its other upload site through hidden web views (VideoApp/SiteWorker.swift).
     if 'workers' in config: info['SiteWorkers'] = config['workers']
     if login: info['TangoLogin'] = True
-    # Video Vault reaches the PC's download lists itself (VideoApp/DownloadList.swift).
-    if config.get('downloadList') is True:
-        info.update(DownloadList=True, NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
-                    NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
+    # Video Vault's page reaches the PC's download lists through the app (VideoApp/DownloadList.swift).
+    if config.get('downloadList') is True: info['DownloadList'] = True
 else:
-    info.update(NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
-                NSLocalNetworkUsageDescription='Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.')
+    info['NSLocalNetworkUsageDescription'] = 'Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.'
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')

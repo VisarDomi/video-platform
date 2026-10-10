@@ -5,6 +5,7 @@ import { VideoCatalog } from '../services/catalog.js';
 import type { Notice } from '../providers/types.js';
 import type { Video } from '../types.js';
 import { formatDuration, formatSize } from '../utils/format.js';
+import { hasNativeViewer, NativeViewer, type Requested } from './nativeViewer.js';
 
 const POLL_MS = 1000;
 
@@ -30,8 +31,10 @@ class VideoListPage {
 	private refreshController: AbortController | null = null;
 	private lifecycleToken = 0;
 	private highlightedFilename: string | null = null;
+	// The iPhone apps open rows in their native viewer (nativeViewer.ts).
+	private readonly native: NativeViewer | null;
 
-	constructor(private readonly provider: Provider) {
+	constructor(private readonly provider: Provider, private readonly requested?: Requested) {
 		this.source = getProvider(provider);
 		this.catalog = new VideoCatalog(provider, (videos, notices) => {
 			this.videos = videos;
@@ -41,6 +44,14 @@ class VideoListPage {
 		this.list.className = 'video-list';
 		this.notices.className = 'video-notices';
 		this.list.setAttribute('aria-label', `${provider} videos`);
+		this.native = hasNativeViewer() ? new NativeViewer({
+			provider,
+			// Only online lists (Tango's live streams) change from the viewer.
+			remove: filename => { if (this.source.kind === 'online') this.catalog.remove(filename); },
+			append: videos => { if (this.source.kind === 'online') this.catalog.append(videos); },
+			update: video => { if (this.source.kind === 'online') this.catalog.update(video); },
+			highlight: (filename, reveal) => this.highlight(filename, reveal)
+		}) : null;
 	}
 
 	async open(): Promise<void> {
@@ -52,9 +63,15 @@ class VideoListPage {
 		document.body.replaceChildren(this.notices, this.list);
 		if (this.source.kind === 'online' && typeof history.state?.videoListY === 'number') window.scrollTo(0, history.state.videoListY);
 		else this.scrollToHighlight();
-		this.list.addEventListener('click', () => {
+		this.list.addEventListener('click', (event) => {
 			if (this.source.kind === 'online') history.replaceState({ ...history.state, videoListY: window.scrollY }, '');
+			const row = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a.video-row') : null;
+			const video = row && this.videos.find(item => videoKey(item) === row.dataset.key);
+			if (!this.native || !video) return;
+			event.preventDefault();
+			this.native.open(this.videos, video);
 		});
+		if (this.native && this.requested) this.native.open(this.videos, this.native.requested(this.videos, this.requested));
 		this.startPolling();
 		addEventListener('pagehide', this.handlePageHide);
 		addEventListener('pageshow', this.handlePageShow);
@@ -119,7 +136,19 @@ class VideoListPage {
 		highlighted?.scrollIntoView({ block: 'center' });
 	}
 
+	// The native viewer's current video: the row the list shows as last viewed.
+	private highlight(filename: string, reveal: boolean): void {
+		this.highlightedFilename = filename;
+		localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_PREFIX + this.provider, filename);
+		for (const [key, row] of this.rows) row.element.classList.toggle('current-video', key.split('\u001f')[0] === filename);
+		if (!reveal) return;
+		const highlighted = this.list.querySelector<HTMLElement>('.video-row.current-video');
+		const rect = highlighted?.getBoundingClientRect();
+		if (rect && (rect.top < 0 || rect.bottom > innerHeight)) highlighted!.scrollIntoView({ block: 'center' });
+	}
+
 	private reconcile(videos: Video[]): void {
+		this.native?.list(videos);
 		const present = new Set(videos.map(videoKey));
 		for (const [key, row] of this.rows) {
 			if (present.has(key)) continue;
@@ -150,6 +179,7 @@ class VideoListPage {
 	private updateRow(row: Row, video: Video): void {
 		const estimatedSize = video.duration * this.source.estimatedBytesPerSecond;
 		row.element.href = videoUrl(video);
+		row.element.dataset.key = videoKey(video);
 		row.element.classList.toggle('current-video', video.filename === this.highlightedFilename);
 		row.element.classList.toggle('live', video.isLive === true);
 		row.element.classList.toggle('edited', video.type === VIDEO_TYPE.EDITED);
@@ -246,6 +276,7 @@ function status(text: string): HTMLParagraphElement {
 	return message;
 }
 
-export async function openVideoList(provider: Provider): Promise<void> {
-	await new VideoListPage(provider).open();
+// `requested`: a viewer address opened in an iPhone app, which shows it in its native viewer.
+export async function openVideoList(provider: Provider, requested?: Requested): Promise<void> {
+	await new VideoListPage(provider, requested).open();
 }

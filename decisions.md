@@ -206,7 +206,9 @@ server follows the account first, but only if it is not already followed.
 - **iPhone apps** (`apps/ios`) are WKWebView shells generated from
   `providers.json`. The local apps load `https://192.168.1.197:9999/videos/<provider>`,
   the online apps inject the `packages/app` content build, and the Tango app hosts
-  the FC2/SC live extensions.
+  the FC2/SC live extensions. Their videos play in a native viewer over the list
+  (AVPlayer, `VideoApp/Viewer*.swift`). Why: WebKit pauses a page's video on lock and in
+  the background, and the videos must play on until they end. Safari keeps the web viewer.
 
 ## 5. Pipeline output: conversion policy
 
