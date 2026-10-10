@@ -27,6 +27,9 @@ interface BaseProvider {
 	readonly estimatedBytesPerSecond: number;
 	videoUrl(video: Video): string;
 	resolvePlayback(video: Video, signal?: AbortSignal): Promise<MediaSource>;
+	// The source when it is known without a request, so the iPhone apps' native player can
+	// start (or move on) while this page is suspended in the background.
+	mediaHint?(video: Video): MediaSource | undefined;
 }
 
 export interface LocalVideoProvider extends BaseProvider {

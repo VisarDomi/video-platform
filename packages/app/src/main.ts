@@ -1,6 +1,7 @@
 import './style.css';
 import { DEFAULT_PROVIDER, PROVIDERS, type LocalProvider } from './constants.js';
 import { openVideoList } from './routes/videoList.js';
+import { hasNativeViewer } from './routes/nativeViewer.js';
 import type { VideoType } from './types.js';
 import { VIDEO_TYPE } from './constants.js';
 
@@ -22,6 +23,12 @@ async function main(): Promise<void> {
 		const typeValue = new URLSearchParams(location.search).get('type');
 		const type: VideoType | null =
 			typeValue === VIDEO_TYPE.ORIGINAL || typeValue === VIDEO_TYPE.EDITED ? typeValue : null;
+		// The iPhone apps show videos natively, over their list.
+		if (hasNativeViewer()) {
+			history.replaceState(null, '', `/videos/${encodeURIComponent(parts[1])}`);
+			await openVideoList(parts[1], { filename: parts[2], type });
+			return;
+		}
 		const { VideoViewerPage } = await import('./routes/videoViewer.js');
 		await new VideoViewerPage(parts[1], parts[2], type).open();
 		return;
