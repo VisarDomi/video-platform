@@ -5,8 +5,7 @@
     "main": "dist/main.js",
     "type": "module",
     "scripts": {
-        "compile-go": "mkdir -p src/core/bin && go build -o src/core/bin/playlist-parser src/core/go/playlist_parser.go",
-        "build": "npm run compile-go && rm -rf dist && tsc",
+        "build": "rm -rf dist && tsc",
         "test": "npm run build && node --test test/*.test.mjs",
         "finalize-library": "npm run build && node scripts/run-bounded-finalize-library.mjs",
         "start": "npm run build && systemctl --user start video-server",

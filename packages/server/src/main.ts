@@ -15,6 +15,7 @@ import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
+import { startLibraryIndexes } from "./services/video/library-index.js";
 import { API, FILE_NAMES, LOGS, MISC } from "./core/constants.js";
 
 declare module "express-serve-static-core" {
@@ -49,6 +50,7 @@ async function startServer() {
   startScAliasRefresh();
   startMediaIntegrityFinalizer();
   startDiskSpaceMonitor();
+  startLibraryIndexes();
 
   app.use("/", fc2Router);
   app.use("/", scRouter);
