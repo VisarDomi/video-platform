@@ -28,6 +28,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     let provider: String
     var onClose: (() -> Void)?
+    // Opened by going forward from the list: while it still shows that video, the video being
+    // gone (a stream that ended, a recording no longer listed) slides it back to the list
+    // instead of moving on to the next one.
+    var returnsWhenGone = false
     private let host: ViewerHost
     private let media: ViewerMedia
     private let progress: ProgressStore
@@ -227,7 +231,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
         guard let current, let index = filtered.firstIndex(where: {
             $0.same(current) || ($0.pageUrl != nil && $0.pageUrl == current.pageUrl)
-        }) else { return }
+        }) else {
+            if returnsWhenGone { slideAway() }
+            return
+        }
         videos = filtered
         currentIndex = index
         active.update(filtered[index])
@@ -404,6 +411,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let screenTop = selected.view.frame.minY - feed.contentOffset.y
         units = direction == 1 ? [units[1], units[2], units[0]] : [units[2], units[0], units[1]]
         currentIndex += direction
+        returnsWhenGone = false
         segments = []
         layoutFeed()
         setOffset(active.view.frame.minY - screenTop)
@@ -576,12 +584,19 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             view.layer.shadowOpacity = 0.5
             view.transform = CGAffineTransform(translationX: x, y: 0)
         case .ended where x > view.bounds.width / 3 || pan.velocity(in: view.superview).x > 600:
-            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
-                self.view.transform = CGAffineTransform(translationX: self.view.bounds.width, y: 0)
-            } completion: { _ in self.close() }
+            slideAway()
         default:
             UIView.animate(withDuration: 0.2) { self.view.transform = .identity } completion: { _ in self.view.layer.shadowOpacity = 0 }
         }
+    }
+
+    // Off to the right, back to the list.
+    func slideAway(reveal: Bool = true) {
+        guard !closed else { return }
+        view.layer.shadowOpacity = 0.5
+        UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
+            self.view.transform = CGAffineTransform(translationX: self.view.bounds.width, y: 0)
+        } completion: { _ in self.close(reveal: reveal) }
     }
 
     // MARK: overlay actions
@@ -701,7 +716,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func unitUnavailable(_ unit: ViewerUnit) {
-        if unit === active { removeCurrent() }
+        guard unit === active else { return }
+        if returnsWhenGone, let video = active.video {
+            host.remove(video.filename)
+            slideAway()
+        } else {
+            removeCurrent()
+        }
     }
 
     func unitGeometryChanged(_ unit: ViewerUnit) {
@@ -760,7 +781,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if !inBackground { for (position, unit) in units.enumerated() where position != 1 && unit.video != nil { unit.resume(liveEdge: true) } }
     }
 
-    func close() {
+    // `reveal`: the list scrolls the last viewed row into view (not for a forward swipe that
+    // was let go).
+    func close(reveal: Bool = true) {
         guard !closed else { return }
         closed = true
         revealTimer?.invalidate()
@@ -775,7 +798,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         UIApplication.shared.isIdleTimerDisabled = false
-        if let filename { host.highlight(filename, reveal: true) }
+        if let filename { host.highlight(filename, reveal: reveal) }
         onClose?()
     }
 }

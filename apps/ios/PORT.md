@@ -38,7 +38,11 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   - A pinch zooms the current video anywhere on screen. Zoomed, the list stays put and the
     left edge is not Back: drags pan the picture as in Safari, except the upper half's
     horizontal seek (which then starts anywhere). Zoomed back out, swipes move through the
-    list again. The left edge otherwise slides the viewer away to the list.
+    list again. The left edge otherwise slides the viewer away to the list, and the list's
+    right edge brings the last viewed video back (as Safari's forward), at its saved time;
+    a video no longer listed (a deleted recording, a removed upload, a stream that ended) has
+    no forward. Opened that way, a stream found ended, or a video the list drops while it is
+    still the one shown, slides back to the list instead of moving on to the next.
   - A row opens the native viewer with the list; the list's later changes follow it, and
     the viewer asks the list for what only the provider can do (`ViewerHost.swift`: Video
     Vault's playback sources, Tango's co-streamers, follow, block, the login).

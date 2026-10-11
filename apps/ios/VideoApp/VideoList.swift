@@ -2,12 +2,14 @@ import UIKit
 import KitCore
 
 // A video list as the website showed it, native: rows of name, duration (and a site mark) and
-// estimated size; the last viewed row highlighted; rows open the native viewer over the list.
+// estimated size; the last viewed row highlighted; rows open the native viewer over the list,
+// and the right edge brings the last viewed video back (as Safari's forward), if it is still
+// listed.
 // The list's place (its top row and offset) is written whenever scrolling settles, so a kill
 // returns to the same rows; without one, the highlighted row is centred. Subclasses fill the
 // list (the PC's change feed, Video Vault's sites) and answer the viewer's requests.
 @MainActor
-class VideoListController: UIViewController, UITableViewDataSource, UITableViewDelegate, ViewerHost {
+class VideoListController: UIViewController, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, ViewerHost {
     struct State: Codable {
         var highlight: String?
         var top: String?
@@ -34,6 +36,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     let checkpoint: CheckpointWriter
     private(set) var viewer: ViewerController?
     private let stateWriter: BackgroundWriter
+    private var forwardPan: UIScreenEdgePanGestureRecognizer!
 
     init(viewerProvider: String, directory: URL, media: ViewerMedia) {
         self.viewerProvider = viewerProvider
@@ -77,6 +80,11 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         status.isHidden = status.text == nil
         view.addSubview(status)
         buildFailure()
+        forwardPan = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(forwardPanned(_:)))
+        forwardPan.edges = .right
+        forwardPan.delegate = self
+        view.addGestureRecognizer(forwardPan)
+        table.panGestureRecognizer.require(toFail: forwardPan)
         restoreViewer()
         DebugState.shared.register("list") { [weak self] in
             guard let self else { return [:] }
@@ -247,6 +255,49 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     private func restoreViewer() {
         guard let saved = ViewerCheckpoint.load(directory) else { return }
         showViewer(videos: saved.videos, index: saved.videos.firstIndex { $0.key == saved.current } ?? 0)
+    }
+
+    // MARK: forward
+
+    // The last viewed video's row, while it is still listed.
+    private var forwardIndex: Int? { highlight.flatMap { name in videos.firstIndex { $0.filename == name } } }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === forwardPan else { return true }
+        return viewer == nil && forwardIndex != nil
+    }
+
+    // Forward without a finger (the simulator's test hooks).
+    func goForward() {
+        guard viewer == nil, let index = forwardIndex else { return }
+        savePlace()
+        showViewer(videos: videos, index: index)
+        viewer?.returnsWhenGone = true
+    }
+
+    // The viewer follows the finger in from the right edge, the mirror of its own back swipe;
+    // let go before a third of the way (and slowly), it slides back out.
+    @objc private func forwardPanned(_ pan: UIScreenEdgePanGestureRecognizer) {
+        let width = max(view.bounds.width, 1)
+        let x = min(max(-pan.translation(in: view).x, 0), width)
+        switch pan.state {
+        case .began:
+            guard viewer == nil, let index = forwardIndex else { return }
+            savePlace()
+            showViewer(videos: videos, index: index)
+            viewer?.returnsWhenGone = true
+            viewer?.view.layer.shadowOpacity = 0.5
+            viewer?.view.transform = CGAffineTransform(translationX: width - x, y: 0)
+        case .changed:
+            viewer?.view.transform = CGAffineTransform(translationX: width - x, y: 0)
+        case .ended where x > width / 3 || -pan.velocity(in: view).x > 600:
+            guard let viewer else { return }
+            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseOut) {
+                viewer.view.transform = .identity
+            } completion: { _ in viewer.view.layer.shadowOpacity = 0 }
+        default:
+            viewer?.slideAway(reveal: false)
+        }
     }
 
     private func showViewer(videos: [ViewerVideo], index: Int) {

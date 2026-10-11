@@ -46,6 +46,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         AppLifecycle.shared.onActive(resumed)
         AppLifecycle.shared.onBackground(paused)
         #if targetEnvironment(simulator)
+        TestHooks.shared.back = { [weak list] in list?.viewer?.slideAway() }
+        TestHooks.shared.forward = { [weak list] in list?.goForward() }
         TestHooks.shared.start()
         #endif
         window.rootViewController = list
