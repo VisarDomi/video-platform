@@ -8,8 +8,8 @@ strand them on an old asset graph. The long lifetime belongs on hashed assets, n
 
 ## Dynamic API responses have no caching policy
 
-The video and provider-list endpoints (`/api/videos`, `/api/<provider>/list|member|exists|resolve`)
-send no `Cache-Control`, only an ETag. Add `Cache-Control: no-store` to dynamic API
+The provider-list endpoints (`/api/<provider>/list|member|exists|resolve`) send no
+`Cache-Control`, only an ETag (`/api/videos` now sends `no-cache` with a revision ETag). Add `Cache-Control: no-store` to dynamic API
 responses so the server's intent is unambiguous and Safari or an intermediary cannot reuse
 a stale list. `API.HEADERS.NO_CACHE` in `packages/server/src/core/constants.ts` is defined
 but unused.

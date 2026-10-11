@@ -1,8 +1,9 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import * as retrieveService from "../services/video/retrieve.service.js";
+import zlib from "zlib";
+import { libraryIndex } from "../services/video/library-index.js";
 import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as playlistAuthority from "../services/hls/playlistAuthority.js";
@@ -29,15 +30,58 @@ router.get("/cert", (_req, res) => {
     }
 });
 
+function knownProvider(provider: string): boolean {
+    try { getProviderPaths(provider); return true; } catch { return false; }
+}
+
+function sendJSON(req: Request, res: Response, json: Buffer, gzip?: Buffer): void {
+    res.set({ "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache", Vary: "Accept-Encoding" });
+    if (/\bgzip\b/.test(req.get("Accept-Encoding") ?? "") && json.length > 1024) {
+        res.set("Content-Encoding", "gzip");
+        res.end(gzip ?? zlib.gzipSync(json));
+    } else {
+        res.end(json);
+    }
+}
+
+// The recordings of a provider, from the library index (services/video/library-index.ts):
+// the whole list (encoded once per revision, gzipped, 304 when unchanged), or with `after`
+// only the names after it.
 router.get("/videos", async (req, res) => {
+    const provider = (req.query.provider as string) || "tango";
+    if (!knownProvider(provider)) return res.status(400).json({ error: `Unknown provider: ${provider}` });
     try {
-        const provider = (req.query.provider as string) || "tango";
+        const index = libraryIndex(provider);
         const after = req.query.after as string | undefined;
-        const videos = await retrieveService.getAllVideos(provider, after);
-        res.json(videos);
+        if (after) return sendJSON(req, res, Buffer.from(JSON.stringify(await index.videos(after))));
+        const encoded = await index.encodedList();
+        const etag = `W/"${index.epoch}-${encoded.revision}"`;
+        res.set("ETag", etag);
+        if (req.get("If-None-Match") === etag) return res.status(304).end();
+        sendJSON(req, res, encoded.json, encoded.gzip);
     } catch (error: any) {
         logger.error("Failed to retrieve videos", { error });
         res.status(500).json({ error: "Failed to retrieve videos" });
+    }
+});
+
+// What changed since a revision: `?provider=&epoch=&since=&wait=<seconds, at most 25>`. With
+// nothing new it waits for the next change (long polling). A client without a revision, of
+// another epoch (the server restarted) or too far behind gets the whole list instead.
+router.get("/videos/changes", async (req, res) => {
+    const provider = (req.query.provider as string) || "tango";
+    if (!knownProvider(provider)) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+    try {
+        const since = req.query.since === undefined ? undefined : Number(req.query.since);
+        const wait = Math.min(25, Math.max(0, Number(req.query.wait) || 0)) * 1000;
+        let closed = false;
+        req.on("close", () => { closed = true; });
+        const changes = await libraryIndex(provider).changes(Number.isSafeInteger(since) ? since : undefined, req.query.epoch as string | undefined, wait);
+        if (closed) return;
+        sendJSON(req, res, Buffer.from(JSON.stringify(changes)));
+    } catch (error: any) {
+        logger.error("Failed to retrieve video changes", { error });
+        res.status(500).json({ error: "Failed to retrieve video changes" });
     }
 });
 
@@ -55,6 +99,7 @@ router.post("/edit", async (req, res) => {
     try {
         const ref = await utils.resolveVideo(filename, targetProvider);
         await editService.editVideo(ref, segments);
+        await libraryIndex(targetProvider).refresh();
         res.json({ success: true });
     } catch (error: any) {
         if (error.name === "FileNotFoundError") {
@@ -125,6 +170,7 @@ router.post("/videos/:filename/:destination", async (req, res) => {
     try {
         const ref = await utils.resolveVideo(filename, provider);
         await moveService.moveVideo(ref, destination);
+        await libraryIndex(provider).refresh();
         res.json({ success: true });
     } catch (error: any) {
         if (error.name === "FileNotFoundError") {
