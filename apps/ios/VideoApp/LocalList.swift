@@ -26,7 +26,7 @@ final class LocalListController: VideoListController {
         api = LocalAPI(server: server, provider: provider)
         let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
         cacheWriter = BackgroundWriter(url: directory.appendingPathComponent("list-cache.json"), label: "list-cache")
-        super.init(viewerProvider: provider, directory: directory, media: ViewerMedia(store: nil, bridge: nil, tango: false))
+        super.init(viewerProvider: provider, directory: directory, media: ViewerMedia())
         if let cache = try? DurableFile.readJSON(ListCache.self, from: cacheWriter.url), cache.provider == provider {
             epoch = cache.epoch
             revision = cache.revision

@@ -273,7 +273,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     // MARK: ViewerHost (subclasses answer what their videos need)
 
     func resolve(_ video: ViewerVideo) async throws -> MediaSource {
-        guard let media = video.media else { throw ViewerBridge.Failure.page("This video has no source.") }
+        guard let media = video.media else { throw ViewerFailure.page("This video has no source.") }
         return media
     }
 

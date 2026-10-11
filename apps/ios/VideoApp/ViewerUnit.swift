@@ -112,7 +112,7 @@ final class ViewerUnit {
             } catch {
                 guard token == self.token else { return }
                 resolving = false
-                if case ViewerBridge.Failure.authentication = error { delegate.unitNeedsLogin(self) }
+                if case ViewerFailure.authentication = error { delegate.unitNeedsLogin(self) }
                 else if video.liveStream { delegate.unitUnavailable(self) }
                 else { print("Video source resolution failed:", error.localizedDescription); scheduleRecovery() }
             }

@@ -10,3 +10,6 @@ dist-server/
 build/
 .svelte-kit/
 .claude/
+
+# The iPhone apps' private build inputs (the PC's Tango login key).
+apps/ios/Private/

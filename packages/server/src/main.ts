@@ -11,6 +11,7 @@ import hlsRouter from "./api/hls.routes.js";
 import fc2Router from "./api/providers/fc2.routes.js";
 import scRouter from "./api/providers/sc.routes.js";
 import tangoRouter from "./api/providers/tango.routes.js";
+import { createPhoneSessionRoutes } from "./api/providers/phone-session.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
@@ -55,6 +56,7 @@ async function startServer() {
   app.use("/", fc2Router);
   app.use("/", scRouter);
   app.use("/", tangoRouter);
+  app.use("/", createPhoneSessionRoutes());
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);
 

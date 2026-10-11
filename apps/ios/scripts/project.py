@@ -112,9 +112,12 @@ info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType=
     NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
     NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
 if config.get('native'):
-    # Native lists of the sites' pages (VideoApp/VaultList.swift).
-    info['VaultApp'] = True
-    info['NSLocalNetworkUsageDescription'] = 'Add or remove streamers in your PC\'s download lists on your home network.'
+    # A native list of the sites (VideoApp/VaultList.swift, TangoList.swift).
+    info['NativeList'] = config['native']
+    if login: info['TangoLogin'] = True
+    # The PC's Tango login for this phone needs its key (a private build input, never in Git).
+    key = root/'Private'/'tango-phone-key'
+    if config['native'] == 'tango' and key.exists(): info['TangoPhoneKey'] = key.read_text().strip()
 elif config.get('hosts'):
     info['SiteHosts'] = config['hosts']
     if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']

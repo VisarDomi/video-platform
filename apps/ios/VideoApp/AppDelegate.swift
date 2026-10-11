@@ -13,54 +13,43 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 }
 
+// Every app is a native list (VideoList.swift) with the native viewer over it: the PC's
+// recordings (local apps), Video Vault's two sites, or Tango's live streams.
 @MainActor
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-    private var browser: WebController?
-    private var list: LocalListController?
-    private var vault: VaultListController?
+    private var list: VideoListController?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
-        let start = URL(string: Bundle.main.object(forInfoDictionaryKey: "StartURL") as! String)!
         let window = UIWindow(windowScene: scene)
         window.overrideUserInterfaceStyle = .dark
         window.backgroundColor = .black
-        // Local apps are native lists on the PC's API, Video Vault on its sites' pages; Tango still shows its site.
-        if let provider = Bundle.main.object(forInfoDictionaryKey: "LocalProvider") as? String,
-           let server = URL(string: "/", relativeTo: start)?.absoluteURL {
-            let list = LocalListController(provider: provider, server: server)
-            self.list = list
-            window.rootViewController = list
-            AppLifecycle.shared.onActive { [weak list] afterBackground in list?.resumed(afterBackground: afterBackground) }
-            AppLifecycle.shared.onBackground { [weak list] in list?.paused() }
-            #if targetEnvironment(simulator)
-            TestHooks.shared.start()
-            #endif
-        } else if Bundle.main.object(forInfoDictionaryKey: "VaultApp") as? Bool == true {
-            let vault = VaultListController()
-            self.vault = vault
-            window.rootViewController = vault
-            AppLifecycle.shared.onActive { [weak vault] afterBackground in vault?.resumed(afterBackground: afterBackground) }
-            AppLifecycle.shared.onBackground { [weak vault] in vault?.paused() }
-            #if targetEnvironment(simulator)
-            TestHooks.shared.start()
-            #endif
+        let info = Bundle.main.infoDictionary ?? [:]
+        let list: VideoListController
+        var resumed: (Bool) -> Void = { _ in }
+        var paused: () -> Void = {}
+        if let provider = info["LocalProvider"] as? String {
+            let local = LocalListController(provider: provider, server: URL(string: "https://192.168.1.197:9999/")!)
+            (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
+            list = local
+        } else if info["NativeList"] as? String == "tango" {
+            let tango = TangoListController()
+            (resumed, paused) = ({ [weak tango] in tango?.resumed(afterBackground: $0) }, { [weak tango] in tango?.paused() })
+            list = tango
         } else {
-            let browser = WebController(start: start, hosts: Bundle.main.object(forInfoDictionaryKey: "SiteHosts") as? [String] ?? [])
-            self.browser = browser
-            window.rootViewController = browser
+            let vault = VaultListController()
+            (resumed, paused) = ({ [weak vault] in vault?.resumed(afterBackground: $0) }, { [weak vault] in vault?.paused() })
+            list = vault
         }
+        self.list = list
+        AppLifecycle.shared.onActive(resumed)
+        AppLifecycle.shared.onBackground(paused)
+        #if targetEnvironment(simulator)
+        TestHooks.shared.start()
+        #endif
+        window.rootViewController = list
         window.makeKeyAndVisible()
         self.window = window
-    }
-
-    func sceneDidBecomeActive(_ scene: UIScene) { browser?.resume() }
-    func sceneWillResignActive(_ scene: UIScene) { browser?.saveSession() }
-    // iOS evicts only backgrounded apps; give the login cookie time to be saved first.
-    func sceneDidEnterBackground(_ scene: UIScene) {
-        guard let browser else { return }
-        let task = UIApplication.shared.beginBackgroundTask(withName: "Save session")
-        browser.saveSession { UIApplication.shared.endBackgroundTask(task) }
     }
 }

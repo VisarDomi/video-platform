@@ -1,12 +1,12 @@
 #!/bin/bash
-# The apps' native tests on the Mac: site policy and registry, and Video Vault's scrapers and
-# list rules (Vault.swift with NativeKit's core, network and HTML modules).
+# The apps' native tests on the Mac: the registry, Video Vault's scrapers and list rules, and
+# Tango's list rules (with NativeKit's core, network and HTML modules).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/video-tests.XXXXXX")
 trap 'rm -rf "$test_dir"' EXIT
-xcrun swiftc -parse-as-library VideoApp/Policy.swift Tests/PolicyTests.swift -o "$test_dir/policy-tests"
-"$test_dir/policy-tests"
+xcrun swiftc -parse-as-library Tests/RegistryTests.swift -o "$test_dir/registry-tests"
+"$test_dir/registry-tests"
 for module in KitCore KitNet KitHTML; do
   deps=()
   [[ $module == KitNet ]] && deps=(-I "$test_dir" -L "$test_dir" -lKitCore)
@@ -17,3 +17,6 @@ done
 xcrun swiftc -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -lKitHTML -Xlinker -rpath -Xlinker "$test_dir" \
   VideoApp/Vault.swift Tests/VaultTests.swift -o "$test_dir/vault-tests"
 "$test_dir/vault-tests"
+xcrun swiftc -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" \
+  VideoApp/Tango.swift Tests/TangoTests.swift -o "$test_dir/tango-tests"
+"$test_dir/tango-tests"

@@ -28,7 +28,7 @@
       "xvideos.com",
       "www.xvideos.com"
     ],
-    "native": true
+    "native": "vault"
   },
   "tango-live": {
     "name": "Tango",
@@ -39,11 +39,6 @@
     "hosts": [
       "tango.me",
       "www.tango.me"
-    ],
-    "keepCookies": [
-      "Tango-RT",
-      "Tango-DI",
-      "Tango-DeviceId"
     ],
     "tangoLogin": true,
     "extensions": [
@@ -60,6 +55,7 @@
         "name": "SC live",
         "source": "sc-live"
       }
-    }
+    },
+    "native": "tango"
   }
 }

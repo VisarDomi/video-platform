@@ -136,13 +136,13 @@ final class VaultListController: VideoListController {
     // MARK: ViewerHost
 
     override func resolve(_ video: ViewerVideo) async throws -> MediaSource {
-        guard let site = VaultSite(rawValue: video.provider), let page = video.pageUrl else { throw ViewerBridge.Failure.page("Unknown upload.") }
+        guard let site = VaultSite(rawValue: video.provider), let page = video.pageUrl else { throw ViewerFailure.page("Unknown upload.") }
         do {
             let source = site == .xvideos ? try await XVideos.source(http, pageUrl: page) : try await Porntrex.source(http, pageUrl: page)
             return MediaSource(url: source.url, kind: source.kind)
         } catch VaultError.signedOut(let site, let text) {
             authSite = site
-            throw ViewerBridge.Failure.authentication(text)
+            throw ViewerFailure.authentication(text)
         }
     }
 

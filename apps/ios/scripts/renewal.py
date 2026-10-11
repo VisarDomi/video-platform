@@ -23,6 +23,7 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
                      inputs=['VideoApp', 'Shared', 'Kit', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
                             + (['build/' + provider + '/content.js'] if online and not product.get('native') else [])
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
+                            + (['Private'] if product.get('native') == 'tango' else [])
                             + ['build/' + provider + '/' + suffix for suffix in web],
                      build=['/usr/bin/python3', 'scripts/build-provider.py', provider],
                      environment={'DEVELOPMENT_TEAM': args.team, 'SIGNING_DEVICE': args.device}))

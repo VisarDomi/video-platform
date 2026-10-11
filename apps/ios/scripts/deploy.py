@@ -29,6 +29,16 @@ if a.action=='sync':
         subprocess.run(['node',str(ROOT/'packages/app/scripts/build-content.mjs'),a.provider],cwd=ROOT,check=True)
         shutil.copyfile(ROOT/'dist/content'/a.provider/'content.js',staged)
         print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
+    # Tango's PC login shortcut: the server's phone key (made once, private) goes into the build.
+    if config.get('native')=='tango':
+        import os,secrets
+        key=pathlib.Path.home()/'.local/share/video-services/tango-phone-key'
+        if not key.exists():
+            key.parent.mkdir(parents=True,exist_ok=True)
+            with os.fdopen(os.open(key,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'w') as out: out.write(secrets.token_hex(32)+'\n')
+        private=APP/'Private';private.mkdir(exist_ok=True)
+        (private/'tango-phone-key').write_text(key.read_text())
+        os.chmod(private/'tango-phone-key',0o600)
     # Hosted Safari web extensions (Tango's FC2 live and SC live) are built and staged the same way.
     for suffix,extension in config.get('webExtensions',{}).items():
         subprocess.run(['node',str(ROOT/'packages/live-extensions/scripts/build.mjs'),extension['source']],cwd=ROOT,check=True)
@@ -76,7 +86,8 @@ assert info['CFBundleIdentifier']=={config['bundleId']!r}
 assert info['CFBundleDisplayName']=={config['name']!r}
 assert info['StartURL']=={config['url']!r}
 assert info.get('SiteHosts')=={(config.get('hosts') if web_site else None)!r}
-assert info.get('VaultApp')=={(True if config.get('native') else None)!r}
+assert info.get('NativeList')=={config.get('native')!r}
+assert bool(info.get('TangoPhoneKey'))=={config.get('native')=='tango'!r}, 'The PC login key is built into Tango'
 assert info.get('DurableCookie')=={config.get('durableCookie')!r}
 assert info.get('LoginURL')=={config.get('loginUrl')!r}
 assert info.get('KeepCookies')=={config.get('keepCookies')!r}
