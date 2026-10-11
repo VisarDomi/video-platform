@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import WebKit
+import KitNet
 
 // Builds the player's assets. PC recordings play straight from the PC's HLS (the phone trusts
 // its certificate). An online site's media gets the page's Referer, user agent and that site's
@@ -12,12 +13,28 @@ final class ViewerMedia {
     private let store: WKHTTPCookieStore?
     private let bridge: ViewerBridge?
     private let tango: TangoPlaylists?
+    // Native online lists: the app's own cookies, Safari's user agent, each site's Referer.
+    private let jar: CookieJar?
+    private let userAgent: String?
+    private let referer: ((ViewerVideo) -> String?)?
 
     // Local apps have no page: their recordings need neither cookies nor a Referer.
     init(store: WKHTTPCookieStore?, bridge: ViewerBridge?, tango: Bool) {
         self.store = store
         self.bridge = bridge
         self.tango = tango ? store.map { TangoPlaylists(tokens: TangoTokens(store: $0)) } : nil
+        jar = nil
+        userAgent = nil
+        referer = nil
+    }
+
+    init(jar: CookieJar, userAgent: String, referer: @escaping (ViewerVideo) -> String?) {
+        store = nil
+        bridge = nil
+        tango = nil
+        self.jar = jar
+        self.userAgent = userAgent
+        self.referer = referer
     }
 
     func start() { tango?.tokens.start() }
@@ -26,6 +43,12 @@ final class ViewerMedia {
     func asset(_ source: MediaSource, for video: ViewerVideo) async -> AVURLAsset {
         if let tango, video.liveStream { return tango.asset(source.url) }
         if video.local { return AVURLAsset(url: source.url) }
+        if let jar {
+            var headers: [String: String] = [:]
+            if let referer = referer?(video) { headers["Referer"] = referer }
+            if let userAgent { headers["User-Agent"] = userAgent }
+            return AVURLAsset(url: source.url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers, AVURLAssetHTTPCookiesKey: jar.cookies(for: source.url)])
+        }
         var headers: [String: String] = [:]
         if let origin = bridge?.origin { headers["Referer"] = origin.absoluteString.hasSuffix("/") ? origin.absoluteString : origin.absoluteString + "/" }
         if let agent = bridge?.userAgent { headers["User-Agent"] = agent }

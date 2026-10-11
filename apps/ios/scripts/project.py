@@ -80,12 +80,14 @@ for suffix in config.get('extensions', []):
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
-# Online apps bundle their content script, staged by deploy.py sync.
-resources = ['build/'+key+'/content.js'] if config.get('hosts') else []
+# Site apps still on their website (Tango) bundle its content script, staged by deploy.py sync;
+# Video Vault is native (VideoApp/VaultList.swift).
+web_site = bool(config.get('hosts')) and not config.get('native')
+resources = ['build/'+key+'/content.js'] if web_site else []
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name)
-                for name in ['KitCore', 'KitLifecycle', 'KitMigration', 'KitTestHooks']]
+                for name in ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']]
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
                  files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
 phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
@@ -109,7 +111,11 @@ info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType=
     UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes': False},
     NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
     NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
-if config.get('hosts'):
+if config.get('native'):
+    # Native lists of the sites' pages (VideoApp/VaultList.swift).
+    info['VaultApp'] = True
+    info['NSLocalNetworkUsageDescription'] = 'Add or remove streamers in your PC\'s download lists on your home network.'
+elif config.get('hosts'):
     info['SiteHosts'] = config['hosts']
     if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
     if 'loginUrl' in config: info['LoginURL'] = config['loginUrl']

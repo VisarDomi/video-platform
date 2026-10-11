@@ -27,8 +27,9 @@ struct PolicyTests {
                 blocked += local.filter { $0 != provider }.map { "https://192.168.1.197:9999/videos/\($0)" }
                 for raw in blocked { check(!allows(raw), "\(provider) blocks \(raw)") }
             } else {
-                // Video Vault's page may also open XVideos (its login) beside its own site.
-                check(hosts.count == (product["workers"] == nil ? 2 : 4) && hosts.contains(start.host!), "\(provider) start URL is on its site")
+                // Video Vault reads both upload sites natively.
+                check(hosts.count == (provider == "vault" ? 4 : 2) && hosts.contains(start.host!), "\(provider) start URL is on its site")
+                check((product["native"] as? Bool == true) == (provider == "vault"), "\(provider) native list")
                 if provider == "tango-live" {
                     check(allows("https://tango.me/stream/abc") && !allows("https://gateway.tango.me/"), "tango-live pages stay on tango.me")
                 }
@@ -38,16 +39,6 @@ struct PolicyTests {
                     }
                     for raw in ["http://\(host)/", "https://\(host):8443/", "https://user@\(host)/", "https://\(host)/a/../b"] {
                         check(!allows(raw), "\(provider) blocks \(raw)")
-                    }
-                }
-                for (site, worker) in product["workers"] as? [String: [String: Any]] ?? [:] {
-                    let page = URL(string: worker["url"] as! String)!, workerHosts = worker["hosts"] as! [String]
-                    check(workerHosts.allSatisfy(hosts.contains) && !workerHosts.contains(start.host!), "\(provider) \(site) worker is another of its sites")
-                    for path in ["/account/uploads", "/account/uploads/2", "/video.abc/slug", "/robots.txt?x=1"] {
-                        check(AppPolicy.workerURL(path, page: page, hosts: workerHosts)?.host == page.host, "\(site) worker reads \(path)")
-                    }
-                    for path in ["account", "//evil.example/x", "https://evil.example/", "https://\(start.host!)/", "/a/../b", "/./a", "\\evil", ""] {
-                        check(AppPolicy.workerURL(path, page: page, hosts: workerHosts) == nil, "\(site) worker refuses \(path)")
                     }
                 }
                 for raw in ["https://accounts.google.com/", "https://192.168.1.197:9999/videos/tango", "https://evil-\(hosts[0])/",

@@ -2,17 +2,17 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { StoredCookie } from "../upload/porntrexSession.js";
 
-// The paired iPhone is reached through the Mac (apps/ios/PORT.md): devicectl
-// launches the Video Vault app (formerly Ptrex) and the existing WebKit inspector
-// runs a script in its porntrex.com page. Same trusted SSH options as apps/ios/scripts/deploy.py.
+// The paired iPhone is reached through the Mac (apps/ios/PORT.md): the shared session is copied
+// into Video Vault's own data folder (devicectl), the app takes it into its cookies when it starts
+// (VideoApp/VaultList.swift), checks it with a fresh same-session request and leaves the answer
+// beside it, which is read back the same way. Same trusted SSH options as apps/ios/scripts/deploy.py.
 export interface PtrexPhoneConfig {
     readonly sshTarget: string;
     readonly knownHostsFile: string;
     readonly device: string;
     readonly bundleId: string;
-    readonly macAppDirectory: string;
-    readonly inspectorPython: string;
-    readonly inspector: string;
+    // In the app's data container.
+    readonly folder: string;
 }
 
 export const DEFAULT_PTREX_PHONE: PtrexPhoneConfig = {
@@ -20,9 +20,7 @@ export const DEFAULT_PTREX_PHONE: PtrexPhoneConfig = {
     knownHostsFile: process.env.VIDEO_MAC_KNOWN_HOSTS ?? "/home/visar/Documents/hackingtosh/validation/macos-known-hosts",
     device: process.env.VIDEO_IPHONE_DEVICE ?? "00008101-000639912881401E",
     bundleId: "com.visar.Ptrex.paid",
-    macAppDirectory: "/Users/visar/Developer/video-platform/apps/ios",
-    inspectorPython: "/Users/visar/Developer/ios-tools/inspector/.venv/bin/python",
-    inspector: "/Users/visar/Developer/ios-tools/inspector/app-inspector.py",
+    folder: "Library/Application Support/LocalVideos",
 };
 
 export interface PhoneSessionResult {
@@ -49,41 +47,16 @@ function sshRunner(config: PtrexPhoneConfig): SshRunner {
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
-// Runs inside the app's porntrex page. Replaces the phone's PHP session with
-// the shared one, removes kt_member (signing back in with it would start a new
-// session and log the pipeline out), checks with a fresh same-session request
-// and reloads the start page. It returns only booleans and paths.
-export function phoneCookieScript(cookies: readonly StoredCookie[], now = new Date()): string {
-    const expires = new Date(now.getTime() + 400 * 24 * 60 * 60_000).toUTCString();
-    const set = cookies.map((cookie) => {
-        const domain = cookie.domain.startsWith(".") ? `; domain=${cookie.domain}` : "";
-        const secure = cookie.secure || cookie.sameSite === "None" ? "; Secure" : "";
-        return `${cookie.name}=${cookie.value}; path=${cookie.path}${domain}; expires=${expires}; SameSite=${cookie.sameSite}${secure}`;
+// What the app takes in: the shared session's cookies (it removes kt_member, whose sign-in would
+// start a new session and log the pipeline out), named by an ID its answer repeats.
+export function phoneSessionInbox(cookies: readonly StoredCookie[], id: string): string {
+    return JSON.stringify({
+        id,
+        cookies: cookies.filter((cookie) => cookie.name !== "kt_member").map((cookie) => ({
+            name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, secure: cookie.secure, httpOnly: cookie.httpOnly,
+        })),
     });
-    const names = [...new Set(["kt_member", ...cookies.map((cookie) => cookie.name)])];
-    return `(() => {
-    if (!/(^|\\.)porntrex\\.com$/.test(location.hostname)) return JSON.stringify({ loggedIn: false, host: location.hostname, finalPath: "" });
-    const past = "Thu, 01 Jan 1970 00:00:00 GMT";
-    for (const name of ${JSON.stringify(names)}) {
-        document.cookie = name + "=; path=/; expires=" + past;
-        document.cookie = name + "=; path=/; domain=.porntrex.com; expires=" + past;
-    }
-    for (const cookie of ${JSON.stringify(set)}) document.cookie = cookie;
-    const request = new XMLHttpRequest();
-    request.open("GET", "/upload-video/?connected=" + Date.now(), false);
-    request.send();
-    const loggedIn = /name="content"/.test(request.responseText);
-    if (loggedIn) setTimeout(() => location.replace("/video-vault/"), 50);
-    return JSON.stringify({ loggedIn, host: location.hostname, finalPath: new URL(request.responseURL).pathname });
-})()`;
 }
-
-const VERIFY_SCRIPT = `(() => {
-    const request = new XMLHttpRequest();
-    request.open("GET", "/upload-video/?verify=" + Date.now(), false);
-    request.send();
-    return JSON.stringify({ loggedIn: /name="content"/.test(request.responseText), host: location.hostname, finalPath: new URL(request.responseURL).pathname });
-})()`;
 
 export class PtrexPhone {
     private readonly ssh: SshRunner;
@@ -93,37 +66,38 @@ export class PtrexPhone {
     }
 
     async connect(cookies: readonly StoredCookie[]): Promise<PhoneSessionResult> {
-        const file = `/tmp/ptrex-connect-${randomUUID()}.js`;
-        const written = await this.ssh(`umask 077 && cat > ${quote(file)}`, phoneCookieScript(cookies));
+        const id = randomUUID();
+        const inbox = `/tmp/ptrex-session-${id}.json`;
+        const answer = `/tmp/ptrex-result-${id}.json`;
+        const device = quote(this.config.device), bundle = quote(this.config.bundleId);
+        const container = `--domain-type appDataContainer --domain-identifier ${bundle}`;
+        const written = await this.ssh(`umask 077 && cat > ${quote(inbox)}`, phoneSessionInbox(cookies, id));
         if (written.code !== 0) throw new Error(`Could not reach the Mac: ${written.stderr.trim() || "ssh failed"}`);
         try {
-            const launch = await this.ssh(`xcrun devicectl device process launch --terminate-existing --device ${quote(this.config.device)} ${quote(this.config.bundleId)}`);
-            if (launch.code !== 0) {
-                const detail = `${launch.stdout}\n${launch.stderr}`;
-                throw new Error(/lock/i.test(detail) ? "The iPhone is locked: unlock it and run the command again"
-                    : `Could not open Video Vault on the iPhone: ${detail.trim().split("\n").slice(-2).join(" ")}`);
+            const copied = await this.ssh(`xcrun devicectl device copy to --device ${device} ${container} --source ${quote(inbox)} --destination ${quote(`${this.config.folder}/porntrex-session.json`)}`);
+            if (copied.code !== 0) throw this.failure(copied, "Could not copy the session into Video Vault");
+            // A fresh start takes the session in.
+            const launch = await this.ssh(`xcrun devicectl device process launch --terminate-existing --device ${device} ${bundle}`);
+            if (launch.code !== 0) throw this.failure(launch, "Could not open Video Vault on the iPhone");
+            let last = "";
+            for (let attempt = 1; attempt <= 10; attempt++) {
+                await this.pause(3_000);
+                const read = await this.ssh(`rm -f ${quote(answer)}; xcrun devicectl device copy from --device ${device} ${container} --source ${quote(`${this.config.folder}/porntrex-session-result.json`)} --destination ${quote(answer)} >/dev/null 2>&1 && cat ${quote(answer)}`);
+                try {
+                    const result = JSON.parse(read.stdout) as { id?: string; loggedIn?: boolean; finalPath?: string };
+                    if (result.id === id) return { loggedIn: result.loggedIn === true, host: "www.porntrex.com", finalPath: result.finalPath ?? "" };
+                    last = "an earlier answer";
+                } catch { last = read.stderr.trim().split("\n").slice(-1)[0] ?? ""; }
             }
-            const result = await this.evaluate(file);
-            if (!result.loggedIn) return result;
-            // After the reload the app must still be logged in on the shared session.
-            await this.pause(4_000);
-            const verifyFile = `/tmp/ptrex-verify-${randomUUID()}.js`;
-            await this.ssh(`umask 077 && cat > ${quote(verifyFile)}`, VERIFY_SCRIPT);
-            try { return await this.evaluate(verifyFile); } finally { await this.ssh(`rm -f ${quote(verifyFile)}`); }
+            throw new Error(`Video Vault did not answer (keep the iPhone unlocked): ${last || "no answer"}`);
         } finally {
-            await this.ssh(`rm -f ${quote(file)}`);
+            await this.ssh(`rm -f ${quote(inbox)} ${quote(answer)}`);
         }
     }
 
-    private async evaluate(file: string): Promise<PhoneSessionResult> {
-        let last = "";
-        for (let attempt = 1; attempt <= 8; attempt++) {
-            await this.pause(3_000);
-            const run = await this.ssh(`cd ${quote(this.config.macAppDirectory)} && ${quote(this.config.inspectorPython)} ${quote(this.config.inspector)} --device ${quote(this.config.device)} --bundle ${quote(this.config.bundleId)} --url-prefix https://www.porntrex.com/ --evaluate-file ${quote(file)}`);
-            const line = run.stdout.split("\n").find((text) => text.startsWith("RESULT "));
-            if (line) return JSON.parse(line.slice("RESULT ".length)) as PhoneSessionResult;
-            last = `${run.stdout}\n${run.stderr}`.trim().split("\n").filter((text) => !/Warning|warnings\.warn/.test(text)).slice(-1)[0] ?? "";
-        }
-        throw new Error(`Video Vault's page could not be inspected (keep the iPhone unlocked with Video Vault open on its list): ${last}`);
+    private failure(run: { stdout: string; stderr: string }, what: string): Error {
+        const detail = `${run.stdout}\n${run.stderr}`;
+        return new Error(/lock/i.test(detail) ? "The iPhone is locked: unlock it and run the command again"
+            : `${what}: ${detail.trim().split("\n").slice(-2).join(" ")}`);
     }
 }

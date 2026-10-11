@@ -12,7 +12,7 @@ import { checkPorntrexSession } from "../dist/upload/porntrexKeepalive.js";
 import { keepPorntrexSessionAlive } from "../dist/commands/runCampaignWorker.js";
 import { connectPorntrexPhone } from "../dist/commands/connectPorntrexPhone.js";
 import { porntrexSessionReport } from "../dist/commands/porntrexSessionReport.js";
-import { PtrexPhone, phoneCookieScript } from "../dist/phone/ptrexPhone.js";
+import { PtrexPhone, phoneSessionInbox } from "../dist/phone/ptrexPhone.js";
 
 // Local fakes only: no porntrex, Mac or phone traffic.
 const cookie = (name, value, extra = {}) => ({ name, value, domain: ".porntrex.com", path: "/", expires: -1,
@@ -121,43 +121,32 @@ test("connect shares the pipeline session with the phone and resumes a campaign 
     assert.equal(db.getCampaignControl().state, "paused");
 });
 
-test("the phone script swaps in the shared session, drops kt_member and reports only booleans", async t => {
-    const shared = "c".repeat(32);
-    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
-    t.after(() => browser.close());
-    const context = await browser.newContext();
-    await context.addCookies([{ ...cookie("PHPSESSID", "old"), expires: -1 }, { ...cookie("kt_member", "stale"), expires: Date.now() / 1000 + 9e5 }]);
-    await context.route("https://www.porntrex.com/**", route => {
-        const header = route.request().headers().cookie ?? "";
-        const loggedIn = header.includes(`PHPSESSID=${shared}`) && !header.includes("kt_member");
-        route.fulfill({ contentType: "text/html", body: loggedIn && route.request().url().includes("/upload-video/") ? '<input type="file" name="content">' : "<p>home</p>" });
-    });
-    const page = await context.newPage();
-    await page.goto("https://www.porntrex.com/video-vault/");
-    const script = phoneCookieScript([{ ...sessionCookies[0], value: shared }, sessionCookies[1]]);
-    assert(!script.includes("stale"));
-    const result = JSON.parse(await page.evaluate(script));
-    assert.deepEqual(result, { loggedIn: true, host: "www.porntrex.com", finalPath: "/upload-video/" });
-    const jar = Object.fromEntries((await context.cookies("https://www.porntrex.com")).map(c => [c.name, c]));
-    assert.equal(jar.PHPSESSID.value, shared);
-    assert(jar.PHPSESSID.expires > Date.now() / 1000 + 300 * 86400, "pinned so a restart keeps it");
-    assert.equal(jar.kt_member, undefined);
+test("the phone's inbox carries the shared session, never kt_member, named by an ID", () => {
+    const inbox = JSON.parse(phoneSessionInbox([...sessionCookies, cookie("kt_member", "stale")], "id-1"));
+    assert.equal(inbox.id, "id-1");
+    assert.deepEqual(inbox.cookies.map(c => c.name), sessionCookies.map(c => c.name));
+    assert(!JSON.stringify(inbox).includes("stale"));
+    assert.deepEqual(Object.keys(inbox.cookies[0]).sort(), ["domain", "httpOnly", "name", "path", "secure", "value"]);
 });
 
-test("phone bridge launches Video Vault, inspects, verifies after reload, cleans up, and explains a locked phone", async () => {
+test("phone bridge copies the session into Video Vault, relaunches it, reads its answer, cleans up, and explains a locked phone", async () => {
     const commands = [];
-    const results = ['RESULT {"loggedIn":true,"host":"www.porntrex.com","finalPath":"/upload-video/"}'];
+    let id = "";
     const ssh = async (command, input) => {
-        commands.push(command.split(" ")[0] === "cd" ? "inspect" : command.split(" ").slice(0, 4).join(" "));
-        if (command.startsWith("cd ")) return { code: 0, stdout: `PAGE x\n${results[0]}\n`, stderr: "" };
-        assert(!input || !input.includes("kt_member=" + "stale"));
+        commands.push(command.startsWith("rm -f '/tmp/ptrex-result") ? "read" : command.startsWith("rm -f") ? command : command.split(" ").slice(0, 5).join(" "));
+        if (input) id = JSON.parse(input).id;
+        if (command.includes("device copy from")) return { code: 0, stdout: JSON.stringify({ id, loggedIn: true, finalPath: "/upload-video/" }), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
     };
     const phone = new PtrexPhone(undefined, ssh, async () => undefined);
-    assert.equal((await phone.connect(sessionCookies)).loggedIn, true);
-    assert.deepEqual(commands.filter(c => c !== "inspect").map(c => c.split(" ")[0]), ["umask", "xcrun", "umask", "rm", "rm"]);
-    assert.equal(commands.filter(c => c === "inspect").length, 2);
-    const locked = new PtrexPhone(undefined, async command => command.startsWith("xcrun")
+    assert.deepEqual(await phone.connect(sessionCookies), { loggedIn: true, host: "www.porntrex.com", finalPath: "/upload-video/" });
+    assert.deepEqual(commands.slice(0, 4), ["umask 077 && cat >", "xcrun devicectl device copy to",
+        "xcrun devicectl device process launch", "read"]);
+    assert.equal(commands.at(-1), `rm -f '/tmp/ptrex-session-${id}.json' '/tmp/ptrex-result-${id}.json'`);
+    const stale = new PtrexPhone(undefined, async (command, input) => command.includes("copy from")
+        ? { code: 0, stdout: JSON.stringify({ id: "older", loggedIn: true }), stderr: "" } : { code: 0, stdout: "", stderr: "" }, async () => undefined);
+    await assert.rejects(stale.connect(sessionCookies), /did not answer/);
+    const locked = new PtrexPhone(undefined, async command => command.includes("device copy to")
         ? { code: 1, stdout: "", stderr: "ERROR: The device is locked." } : { code: 0, stdout: "", stderr: "" }, async () => undefined);
     await assert.rejects(locked.connect(sessionCookies), /locked: unlock it/);
 });

@@ -13,6 +13,8 @@ def remote(code):
 p=argparse.ArgumentParser();p.add_argument('provider',choices=sorted(registry))
 p.add_argument('action',choices=['sync','test','build','status','install','finish']);a=p.parse_args()
 config=registry[a.provider]
+# Site apps still on their website bundle its content script; Video Vault is native.
+web_site=bool(config.get('hosts')) and not config.get('native')
 log=MAC+'/build/'+a.provider+'/xcode.log'
 # Approves the installed build as its renewal baseline only if it is exactly what was built (ios-tools renewal).
 # Renewal names local apps <provider>-local (see renewal.py).
@@ -21,7 +23,7 @@ deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewa
 if a.action=='sync':
     # Online apps bundle their Safari extension's content script from this repository's
     # build, so the Mac (and monthly renewal) needs no Node or Video Platform checkout.
-    if config.get('hosts'):
+    if web_site:
         staged=APP/'build'/a.provider/'content.js'
         staged.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(['node',str(ROOT/'packages/app/scripts/build-content.mjs'),a.provider],cwd=ROOT,check=True)
@@ -36,16 +38,12 @@ if a.action=='sync':
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
     subprocess.run(['rsync','-az','--delete','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
-    if config.get('hosts'):
+    if web_site:
         subprocess.run(['rsync','-az','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/'content.js'),SSH[-1]+':'+MAC+'/build/'+a.provider+'/content.js'],check=True)
     for suffix in config.get('webExtensions',{}):
         subprocess.run(['rsync','-az','--delete','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/suffix)+'/',SSH[-1]+':'+MAC+'/build/'+a.provider+'/'+suffix+'/'],check=True)
 elif a.action=='test':
-    remote(f'''import subprocess
-subprocess.run(['mkdir','-p','build'],cwd={MAC!r},check=True)
-subprocess.run(['xcrun','swiftc','-parse-as-library','VideoApp/Policy.swift','Tests/PolicyTests.swift','-o','build/policy-tests'],cwd={MAC!r},check=True)
-subprocess.run(['build/policy-tests'],cwd={MAC!r},check=True)
-''')
+    subprocess.run(SSH+['/bin/bash '+shlex.quote(MAC+'/scripts/test.sh')],check=True)
 elif a.action=='build':
     subprocess.run(SSH+[shlex.join(deliver('begin'))],check=True)
     remote(f'''import pathlib,subprocess,json
@@ -77,13 +75,14 @@ info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info['CFBundleIdentifier']=={config['bundleId']!r}
 assert info['CFBundleDisplayName']=={config['name']!r}
 assert info['StartURL']=={config['url']!r}
-assert info.get('SiteHosts')=={config.get('hosts')!r}
+assert info.get('SiteHosts')=={(config.get('hosts') if web_site else None)!r}
+assert info.get('VaultApp')=={(True if config.get('native') else None)!r}
 assert info.get('DurableCookie')=={config.get('durableCookie')!r}
 assert info.get('LoginURL')=={config.get('loginUrl')!r}
 assert info.get('KeepCookies')=={config.get('keepCookies')!r}
 assert info.get('SiteWorkers')=={config.get('workers')!r}
 assert info.get('DownloadList')=={(True if config.get('downloadList') else None)!r}
-if {bool(config.get('hosts'))!r}:
+if {web_site!r}:
     staged=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'content.js'
     assert (app/'content.js').read_bytes()==staged.read_bytes(), 'Bundled content script differs from the staged build'
 assert not any(k.startswith('CFBundleIcon') for k in info)

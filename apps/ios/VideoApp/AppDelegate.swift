@@ -18,6 +18,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private var browser: WebController?
     private var list: LocalListController?
+    private var vault: VaultListController?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
@@ -25,7 +26,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: scene)
         window.overrideUserInterfaceStyle = .dark
         window.backgroundColor = .black
-        // Local apps are native lists on the PC's API; Video Vault and Tango still show their site.
+        // Local apps are native lists on the PC's API, Video Vault on its sites' pages; Tango still shows its site.
         if let provider = Bundle.main.object(forInfoDictionaryKey: "LocalProvider") as? String,
            let server = URL(string: "/", relativeTo: start)?.absoluteURL {
             let list = LocalListController(provider: provider, server: server)
@@ -33,6 +34,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             window.rootViewController = list
             AppLifecycle.shared.onActive { [weak list] afterBackground in list?.resumed(afterBackground: afterBackground) }
             AppLifecycle.shared.onBackground { [weak list] in list?.paused() }
+            #if targetEnvironment(simulator)
+            TestHooks.shared.start()
+            #endif
+        } else if Bundle.main.object(forInfoDictionaryKey: "VaultApp") as? Bool == true {
+            let vault = VaultListController()
+            self.vault = vault
+            window.rootViewController = vault
+            AppLifecycle.shared.onActive { [weak vault] afterBackground in vault?.resumed(afterBackground: afterBackground) }
+            AppLifecycle.shared.onBackground { [weak vault] in vault?.paused() }
             #if targetEnvironment(simulator)
             TestHooks.shared.start()
             #endif
