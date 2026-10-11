@@ -20,6 +20,7 @@ let package = Package(
         .library(name: "KitLifecycle", targets: ["KitLifecycle"]),
         .library(name: "KitTestHooks", targets: ["KitTestHooks"]),
         .library(name: "KitMigration", targets: ["KitMigration"]),
+        .library(name: "KitBackup", targets: ["KitBackup"]),
     ],
     targets: [
         .target(name: "KitCore"),
@@ -34,6 +35,8 @@ let package = Package(
         .target(name: "KitTestHooks", dependencies: ["KitCore"]),
         // Once per app: data the web version kept in WebKit's storage (WebStorageReader.swift).
         .target(name: "KitMigration", dependencies: ["KitCore"]),
+        // The PC backups of the apps' own data (PCBackup.swift).
+        .target(name: "KitBackup", dependencies: ["KitCore", "KitNet"]),
         .testTarget(name: "KitCoreTests", dependencies: ["KitCore"]),
         .testTarget(name: "KitNetTests", dependencies: ["KitNet"]),
         .testTarget(name: "KitHTMLTests", dependencies: ["KitHTML"]),
