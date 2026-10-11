@@ -5,6 +5,13 @@ root=pathlib.Path(__file__).resolve().parents[1]
 registry=json.loads((root/'providers.json').read_text())
 if len(sys.argv)!=2 or sys.argv[1] not in registry: raise SystemExit('Supply exactly one provider: '+', '.join(registry))
 key=sys.argv[1];product=registry[key]['product']
+# SIMULATOR=1: an unsigned simulator build (build/<key>/native/Release-iphonesimulator), no signing lock.
+if os.environ.get('SIMULATOR'):
+    subprocess.run([sys.executable,str(root/'scripts/project.py'),key],check=True)
+    subprocess.run(['xcodebuild','-project',str(root/'build'/key/(product+'.xcodeproj')),'-scheme',product,
+        '-derivedDataPath',str(root/'build'/key/'DerivedData'),'-configuration','Release','-sdk','iphonesimulator',
+        '-destination','generic/platform=iOS Simulator','SYMROOT='+str(root/'build'/key/'native'),'CODE_SIGNING_ALLOWED=NO','build'],cwd=root,check=True)
+    raise SystemExit(0)
 lockpath=pathlib.Path.home()/'Library/Caches/ios-app-refresh/signing.lock'
 lockpath.parent.mkdir(parents=True,exist_ok=True)
 with lockpath.open('a') as lock:

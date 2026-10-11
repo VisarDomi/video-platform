@@ -1,4 +1,5 @@
 import Foundation
+import KitCore
 
 // One video as the list page describes it (packages/app routes/nativeViewer.ts): the provider's
 // own fields, which go back to the page unchanged, plus what the viewer knows without asking.
@@ -34,7 +35,9 @@ struct ViewerVideo {
     func setting(_ field: String, _ value: Any) -> ViewerVideo {
         var copy = self
         copy.raw[field] = value
-        if field == "type" { copy.raw.removeValue(forKey: "media") }
+        // A PC recording's playlist URL names the recording, not its type (the server finds the
+        // edited or original folder), so it stays; an online video's source must be asked again.
+        if field == "type" && !local { copy.raw.removeValue(forKey: "media") }
         return copy
     }
 }
@@ -73,40 +76,41 @@ struct MembershipInfo {
 }
 
 // Where each video was left, by filename, as the web viewer kept it in localStorage (whose
-// values seed this store). Live streams keep none.
+// values seed this store). Live streams keep none. Every change is written at once, off the
+// main thread (newest first), so a kill or power-off loses at most the last few seconds.
 @MainActor
 final class ProgressStore {
-    private let url: URL
+    private let writer: BackgroundWriter
     private var values: [String: Double]
-    private var dirty = false
 
     init(directory: URL) {
-        url = directory.appendingPathComponent("viewer-progress.json")
-        values = (try? Data(contentsOf: url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] } ?? [:]
+        writer = BackgroundWriter(url: directory.appendingPathComponent("viewer-progress.json"), label: "viewer-progress")
+        values = (try? Data(contentsOf: writer.url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] } ?? [:]
     }
 
     func time(_ filename: String) -> Double { values[filename] ?? 0 }
 
     // The page's saved positions for videos this store has never seen.
     func seed(_ progress: [String: Any]) {
+        var changed = false
         for (filename, value) in progress where values[filename] == nil {
-            if let time = (value as? NSNumber)?.doubleValue, time.isFinite, time > 0 { values[filename] = time; dirty = true }
+            if let time = (value as? NSNumber)?.doubleValue, time.isFinite, time > 0 { values[filename] = time; changed = true }
         }
+        if changed { save() }
     }
 
     func set(_ filename: String, _ time: Double) {
         guard time.isFinite, time >= 0, values[filename] != time else { return }
         values[filename] = time
-        dirty = true
+        save()
     }
 
-    func flush() {
-        guard dirty else { return }
-        dirty = false
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONSerialization.data(withJSONObject: values).write(to: url, options: .atomic)
-        } catch { print("Viewer progress:", error) }
+    // Waits for the last write (before the app may be suspended).
+    func flush() { writer.flush() }
+
+    private func save() {
+        let snapshot = values
+        writer.save { try JSONSerialization.data(withJSONObject: snapshot) }
     }
 }
 

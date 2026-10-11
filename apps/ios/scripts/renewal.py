@@ -20,7 +20,7 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
     apps.append(dict(name=provider if online else provider + '-local', root=str(root),
                      app='build/' + provider + '/native/Release-iphoneos/' + product['product'] + '.app',
                      bundleIds=[product['bundleId']] + [product['bundleId'] + '.' + suffix for suffix in extensions],
-                     inputs=['VideoApp', 'Shared', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
+                     inputs=['VideoApp', 'Shared', 'Kit', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
                             + (['build/' + provider + '/content.js'] if online else [])
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
                             + ['build/' + provider + '/' + suffix for suffix in web],

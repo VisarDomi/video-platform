@@ -120,7 +120,7 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
 
     private func showViewer(_ open: ViewerBridge.Open) {
         viewer?.close()
-        let controller = ViewerController(provider: open.provider, videos: open.videos, index: open.index, bridge: bridge,
+        let controller = ViewerController(provider: open.provider, videos: open.videos, index: open.index, host: bridge,
                                           media: media, progress: progress, checkpoint: checkpoint)
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }

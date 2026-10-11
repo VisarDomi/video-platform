@@ -9,14 +9,15 @@ import WebKit
 // need none and load directly.
 @MainActor
 final class ViewerMedia {
-    private let store: WKHTTPCookieStore
-    private let bridge: ViewerBridge
+    private let store: WKHTTPCookieStore?
+    private let bridge: ViewerBridge?
     private let tango: TangoPlaylists?
 
-    init(store: WKHTTPCookieStore, bridge: ViewerBridge, tango: Bool) {
+    // Local apps have no page: their recordings need neither cookies nor a Referer.
+    init(store: WKHTTPCookieStore?, bridge: ViewerBridge?, tango: Bool) {
         self.store = store
         self.bridge = bridge
-        self.tango = tango ? TangoPlaylists(tokens: TangoTokens(store: store)) : nil
+        self.tango = tango ? store.map { TangoPlaylists(tokens: TangoTokens(store: $0)) } : nil
     }
 
     func start() { tango?.tokens.start() }
@@ -26,10 +27,10 @@ final class ViewerMedia {
         if let tango, video.liveStream { return tango.asset(source.url) }
         if video.local { return AVURLAsset(url: source.url) }
         var headers: [String: String] = [:]
-        if let origin = bridge.origin { headers["Referer"] = origin.absoluteString.hasSuffix("/") ? origin.absoluteString : origin.absoluteString + "/" }
-        if let agent = bridge.userAgent { headers["User-Agent"] = agent }
+        if let origin = bridge?.origin { headers["Referer"] = origin.absoluteString.hasSuffix("/") ? origin.absoluteString : origin.absoluteString + "/" }
+        if let agent = bridge?.userAgent { headers["User-Agent"] = agent }
         let host = source.url.host ?? ""
-        let cookies = await store.allCookies().filter { cookie in
+        let cookies = await (store?.allCookies() ?? []).filter { cookie in
             let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
             return host == domain || host.hasSuffix("." + domain)
         }
