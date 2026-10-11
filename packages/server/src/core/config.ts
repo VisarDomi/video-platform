@@ -54,6 +54,7 @@ if (!fs.existsSync(config.sharedStatePath)) {
 }
 
 export const FRONTEND_DIST_PATH: string = config.frontendDistPath;
+export const SHARED_STATE_PATH: string = config.sharedStatePath;
 export const LIVE_STATUS_PATH: string = path.join(config.sharedStatePath, constants.FILE_NAMES.LIVE_STATUS);
 export const FINALIZATION_DB_PATH: string = path.join(config.sharedStatePath, "finalization.sqlite");
 export const ALIASES_PATH: string = path.join(config.sharedStatePath, "aliases.json");
