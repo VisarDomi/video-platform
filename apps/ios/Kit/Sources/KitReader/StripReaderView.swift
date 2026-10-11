@@ -66,8 +66,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var failures: [Int: (attempts: Int, retryAt: CFTimeInterval)] = [:]
     private var laidOutWidth: CGFloat = 0
     private var pendingPosition: StripPosition?
+    private var pendingTop: Int?
     private var touching = false
     private var lastNearEnd = -1
+    private let footer = UILabel()
 
     public init(pipeline: ImagePipeline) {
         self.pipeline = pipeline
@@ -83,6 +85,11 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         scrollView.bouncesZoom = true
         scrollView.scrollsToTop = false
         content.backgroundColor = .black
+        footer.font = .systemFont(ofSize: 14)
+        footer.textAlignment = .center
+        footer.numberOfLines = 0
+        footer.isHidden = true
+        content.addSubview(footer)
         scrollView.addSubview(content)
         addSubview(scrollView)
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
@@ -117,6 +124,21 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         relayout(keeping: anchor)
     }
 
+    // A line under the last page (the next part loading, or why it cannot); nil hides it.
+    public func setFooter(_ text: String?, color: UIColor = UIColor(white: 0.53, alpha: 1)) {
+        footer.text = text
+        footer.textColor = color
+        footer.isHidden = text == nil
+        layoutFooter()
+    }
+
+    private func layoutFooter() {
+        guard laidOutWidth > 0, !footer.isHidden else { return }
+        let width = laidOutWidth - 40
+        let bottom = tops.last.map { $0 + (heights.last ?? 0) } ?? padding
+        footer.frame = CGRect(x: 20, y: bottom + 20, width: width, height: footer.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)
+    }
+
     // A page's real size became known; the page at the centre keeps its place.
     public func setAspect(_ aspect: CGFloat, at index: Int) {
         guard pages.indices.contains(index), aspect.isFinite, aspect > 0 else { return }
@@ -128,20 +150,32 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // MARK: position
 
-    public var currentPosition: StripPosition? { position(atContentY: centreContentY) }
+    public var currentPosition: StripPosition? { laidOutWidth > 0 ? position(atContentY: centreContentY) : nil }
 
     // Puts `position` at the screen's centre (applied after the first layout if needed).
     public func scroll(to position: StripPosition) {
-        guard laidOutWidth > 0, pages.indices.contains(position.index) else { pendingPosition = position; return }
+        guard laidOutWidth > 0, pages.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; return }
         pendingPosition = nil
+        pendingTop = nil
         let y = tops[position.index] + heights[position.index] * position.fraction
         setCentre(contentY: y)
+    }
+
+    // Puts a page's top at the top of the screen (a resumed page, read from its start).
+    public func scroll(toTopOf index: Int) {
+        guard laidOutWidth > 0, pages.indices.contains(index) else {
+            if pages.indices.contains(index) { pendingTop = index }
+            return
+        }
+        pendingTop = nil
+        pendingPosition = nil
+        setCentre(contentY: tops[index] + bounds.height / 2 / scrollView.zoomScale)
     }
 
     private var centreContentY: CGFloat { (scrollView.contentOffset.y + scrollView.bounds.height / 2) / scrollView.zoomScale }
 
     private func position(atContentY y: CGFloat) -> StripPosition? {
-        guard !pages.isEmpty else { return nil }
+        guard !pages.isEmpty, tops.count == pages.count else { return nil }
         let index = pageIndex(atContentY: y)
         return StripPosition(index: index, fraction: Double((y - tops[index]) / max(heights[index], 1)))
     }
@@ -171,6 +205,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         scrollView.frame = bounds
         if bounds.width != laidOutWidth { relayout(keeping: anchor) }
         if let pendingPosition { scroll(to: pendingPosition) }
+        if let pendingTop { scroll(toTopOf: pendingTop) }
         updateVisible()
     }
 
@@ -195,6 +230,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         content.center = CGPoint(x: width * zoom / 2, y: total * zoom / 2)
         scrollView.contentSize = CGSize(width: width * zoom, height: total * zoom)
         for (index, cell) in cells { cell.frame = frame(of: index) }
+        layoutFooter()
         if let anchor, pages.indices.contains(anchor.index) { scroll(to: anchor) }
         updateVisible()
     }
