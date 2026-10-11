@@ -1,17 +1,16 @@
 ## what?
 (extended description)
 
-The list stays in the same order while browsing and returning to Home. Newly
-discovered costreamers are appended to the end without duplicates. Refresh Home
-to fetch a new list; a stream page keeps the tab's list. Blocked or unavailable
-streams are removed from navigation. The stream overlay has mute, Follow
+The list stays in the same order while browsing and returning to it. Newly
+discovered costreamers are appended to the end without duplicates. Pull down on the
+list (or return after half an hour) for a new list. Blocked or unavailable streams are
+removed from navigation. The stream overlay has mute, Follow
 (❤️/🤍), the PC Tango download list (+/-) and Block, which asks once more (❓)
 before blocking and unfollows first.
 
-The page renews Tango's session and playback tokens while it runs; the native player
-renews the stream tokens of the playlists it plays (and the session while the app is in the
-background). The app's Safari login handoff, native player, build and deploy are in
-[`apps/ios/PORT.md`](../ios/PORT.md).
+The iPhone app is native: its own session (one owner refreshes it), the stream tokens
+of the playlists it plays, the Safari login handoff and the PC login shortcut, build and
+deploy are in [`apps/ios/PORT.md`](../ios/PORT.md).
 
 
 ## Supported providers

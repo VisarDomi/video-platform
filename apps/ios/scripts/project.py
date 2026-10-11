@@ -1,6 +1,7 @@
 """Generate the shared VideoApp host for exactly one provider from providers.json."""
 import hashlib
 import json
+import os
 import plistlib
 import sys
 from pathlib import Path
@@ -35,7 +36,7 @@ def phase(target, kind, paths):
     return obj(target+kind, 'PBX'+kind+'BuildPhase', buildActionMask=2147483647, files=refs, runOnlyForDeploymentPostprocessing=0)
 common = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION=config.get('build', '1'), MARKETING_VERSION='1.0',
     GENERATE_INFOPLIST_FILE='NO', PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1', SWIFT_VERSION='5.0',
-    IPHONEOS_DEPLOYMENT_TARGET='17.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos')
+    IPHONEOS_DEPLOYMENT_TARGET='26.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos', SUPPORTED_PLATFORMS='iphoneos iphonesimulator')
 # Tango's Google login arrives through the Tango Login Safari helper and a shared Keychain group.
 login = config.get('tangoLogin') is True
 entitlements = generated/'Login.entitlements'
@@ -79,9 +80,17 @@ for suffix in config.get('extensions', []):
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
-# Online apps bundle their content script, staged by deploy.py sync.
-resources = ['build/'+key+'/content.js'] if config.get('hosts') else []
-phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), phase(product, 'Frameworks', [])]
+# Site apps still on their website (Tango) bundle its content script, staged by deploy.py sync;
+# Video Vault is native (VideoApp/VaultList.swift).
+web_site = bool(config.get('hosts')) and not config.get('native')
+resources = ['build/'+key+'/content.js'] if web_site else []
+# NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
+kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
+kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name)
+                for name in ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']]
+frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
+                 files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
+phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
 if embedded:
     phases.append(obj('Embed', 'PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=13,
                       files=embedded, name='Embed App Extensions', runOnlyForDeploymentPostprocessing=0))
@@ -90,7 +99,8 @@ products.insert(0, product_ref)
 settings = dict(common, INFOPLIST_FILE=str(generated/'Info.plist'), PRODUCT_BUNDLE_IDENTIFIER=config['bundleId'])
 if login: settings['CODE_SIGN_ENTITLEMENTS'] = str(entitlements)
 targets.insert(0, obj('Target', 'PBXNativeTarget', buildConfigurationList=config_list(product, settings), buildPhases=phases, buildRules=[],
-    dependencies=dependencies, name=product, productName=product, productReference=product_ref, productType='com.apple.product-type.application'))
+    dependencies=dependencies, name=product, productName=product, productReference=product_ref, productType='com.apple.product-type.application',
+    packageProductDependencies=kit_products))
 # Safari's iPhone orientations; no icon or launch artwork, like the other personal apps.
 # The native viewer plays on through lock and the background (audio), and reaches the PC's
 # website API and download lists itself (local network).
@@ -98,9 +108,17 @@ info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType=
     LSRequiresIPhoneOS=True, UILaunchScreen={}, UIRequiredDeviceCapabilities=['arm64'],
     UISupportedInterfaceOrientations=['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
     UIViewControllerBasedStatusBarAppearance=True, StartURL=config['url'], UIBackgroundModes=['audio'],
+    UIApplicationSceneManifest={'UIApplicationSupportsMultipleScenes': False},
     NSAppTransportSecurity={'NSAllowsLocalNetworking': True},
     NSLocalNetworkUsageDescription='Add or remove streamers in your PC\'s download lists on your home network.')
-if config.get('hosts'):
+if config.get('native'):
+    # A native list of the sites (VideoApp/VaultList.swift, TangoList.swift).
+    info['NativeList'] = config['native']
+    if login: info['TangoLogin'] = True
+    # The PC's Tango login for this phone needs its key (a private build input, never in Git).
+    key = root/'Private'/'tango-phone-key'
+    if config['native'] == 'tango' and key.exists(): info['TangoPhoneKey'] = key.read_text().strip()
+elif config.get('hosts'):
     info['SiteHosts'] = config['hosts']
     if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
     if 'loginUrl' in config: info['LoginURL'] = config['loginUrl']
@@ -112,14 +130,17 @@ if config.get('hosts'):
     if config.get('downloadList') is True: info['DownloadList'] = True
 else:
     info['NSLocalNetworkUsageDescription'] = 'Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.'
+    # A native list on the PC's API (VideoApp/LocalList.swift) instead of the website.
+    info['LocalProvider'] = key
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')
 project = obj('Project', 'PBXProject', buildConfigurationList=config_list('Project', {}), compatibilityVersion='Xcode 14.0',
-    developmentRegion='en', knownRegions=['en', 'Base'], mainGroup=group, productRefGroup=product_group, projectDirPath='', projectRoot='', targets=targets)
+    developmentRegion='en', knownRegions=['en', 'Base'], mainGroup=group, productRefGroup=product_group, projectDirPath='', projectRoot='', targets=targets,
+    packageReferences=[kit])
 def encode(value):
     if isinstance(value, dict): return '{'+''.join(json.dumps(k)+' = '+encode(v)+';\n' for k, v in value.items())+'}'
     if isinstance(value, list): return '('+','.join(encode(v) for v in value)+')'
     return json.dumps(value)
-document = dict(archiveVersion=1, classes={}, objectVersion=56, objects=objects, rootObject=project)
+document = dict(archiveVersion=1, classes={}, objectVersion=60, objects=objects, rootObject=project)
 (projectdir/'project.pbxproj').write_text('// !$*UTF8*$!\n'+encode(document)+'\n')

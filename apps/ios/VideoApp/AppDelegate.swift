@@ -1,24 +1,55 @@
 import UIKit
+import KitLifecycle
+import KitTestHooks
 
 @main
 @MainActor
 final class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-    private var browser: WebController!
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        browser = WebController(start: URL(string: Bundle.main.object(forInfoDictionaryKey: "StartURL") as! String)!,
-                                hosts: Bundle.main.object(forInfoDictionaryKey: "SiteHosts") as? [String] ?? [])
-        window = UIWindow(frame: UIScreen.main.bounds)
-        window?.overrideUserInterfaceStyle = .dark
-        window?.rootViewController = browser
-        window?.makeKeyAndVisible()
-        return true
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: nil, sessionRole: session.role)
+        configuration.delegateClass = SceneDelegate.self
+        return configuration
     }
-    func applicationDidBecomeActive(_ application: UIApplication) { browser.resume() }
-    func applicationWillResignActive(_ application: UIApplication) { browser.saveSession() }
-    // iOS evicts only backgrounded apps; give the login cookie time to be saved first.
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        let task = application.beginBackgroundTask(withName: "Save session")
-        browser.saveSession { application.endBackgroundTask(task) }
+}
+
+// Every app is a native list (VideoList.swift) with the native viewer over it: the PC's
+// recordings (local apps), Video Vault's two sites, or Tango's live streams.
+@MainActor
+final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    private var list: VideoListController?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let scene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .dark
+        window.backgroundColor = .black
+        let info = Bundle.main.infoDictionary ?? [:]
+        let list: VideoListController
+        var resumed: (Bool) -> Void = { _ in }
+        var paused: () -> Void = {}
+        if let provider = info["LocalProvider"] as? String {
+            let local = LocalListController(provider: provider, server: URL(string: "https://192.168.1.197:9999/")!)
+            (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
+            list = local
+        } else if info["NativeList"] as? String == "tango" {
+            let tango = TangoListController()
+            (resumed, paused) = ({ [weak tango] in tango?.resumed(afterBackground: $0) }, { [weak tango] in tango?.paused() })
+            list = tango
+        } else {
+            let vault = VaultListController()
+            (resumed, paused) = ({ [weak vault] in vault?.resumed(afterBackground: $0) }, { [weak vault] in vault?.paused() })
+            list = vault
+        }
+        self.list = list
+        AppLifecycle.shared.onActive(resumed)
+        AppLifecycle.shared.onBackground(paused)
+        #if targetEnvironment(simulator)
+        TestHooks.shared.start()
+        #endif
+        window.rootViewController = list
+        window.makeKeyAndVisible()
+        self.window = window
     }
 }

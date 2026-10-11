@@ -1,37 +1,30 @@
 # Provider apps
 
-Five iPhone apps share one Swift host (`VideoApp/`), following Gallery Reader's
-provider apps. `providers.json` is the registry; `scripts/project.py <provider>`
-generates that provider's project and Info.plist.
+Five iPhone apps share one Swift host (`VideoApp/`). `providers.json` is the registry;
+`scripts/project.py <provider>` generates that provider's project and Info.plist. Every app
+is a native list with the native viewer over it; no app shows a website.
 
-| Provider | App | Bundle ID | Start URL |
+| Provider | App | Bundle ID | Source |
 | --- | --- | --- | --- |
-| `tango` | Tango local | `com.visar.TangoLocal.paid` | `https://192.168.1.197:9999/videos/tango` |
-| `fc2` | FC2 local | `com.visar.FC2Local.paid` | `https://192.168.1.197:9999/videos/fc2` |
-| `sc` | SC local | `com.visar.SCLocal.paid` | `https://192.168.1.197:9999/videos/sc` |
-| `vault` | Video Vault | `com.visar.Ptrex.paid` | `https://www.porntrex.com/video-vault/` |
-| `tango-live` | Tango | `com.visar.Tango.paid` | `https://tango.me/` |
+| `tango` | Tango local | `com.visar.TangoLocal.paid` | the PC's recordings API (`https://192.168.1.197:9999`) |
+| `fc2` | FC2 local | `com.visar.FC2Local.paid` | the PC's recordings API |
+| `sc` | SC local | `com.visar.SCLocal.paid` | the PC's recordings API |
+| `vault` | Video Vault | `com.visar.Ptrex.paid` | the XVideos and Porntrex uploads pages (`native`) |
+| `tango-live` | Tango | `com.visar.Tango.paid` | Tango's gateway API (`native`) |
 
-**Tango** runs the shared viewer's `tango-live` provider on tango.me (its notes are in
-`apps/tango`, which has no app code) and hosts three Safari extensions: **Tango Login**
+**Tango** lists live streams natively (`VideoApp/Tango.swift`, `TangoList.swift`; its notes
+are in `apps/tango`, which has no app code) and hosts three Safari extensions: **Tango Login**
 (`.Login`, the Safari login handoff), **FC2 live** (`.FC2Live`) and **SC live** (`.SCLive`),
 the download-list bars from `packages/live-extensions`.
 
 **Video Vault**'s bundle ID is `com.visar.Ptrex.paid`; a different ID would install a
 separate app without its Porntrex session and data. It lists the pipeline's XVideos and
-Porntrex uploads together, oldest recording first (`vault` in `packages/app/PROVIDERS.md`):
-only uploads whose title carries the recording in brackets, `[YYYY-MM-DD HHMMSS streamer]`
-(a split part adds ` | part N`); other uploads stay on the sites but are not listed
-(`isPipelineUpload` in `packages/app/src/providers/uploadSite.ts`). It runs on porntrex.com:
-XVideos' security policy blocks Porntrex media on xvideos.com, while Porntrex sends none.
-XVideos pages come through `VideoApp/SiteWorker.swift` (`workers` in `providers.json`): a hidden web view on
-`https://www.xvideos.com/robots.txt` that shares the app's cookie store, so its requests are
-first-party, like a second Safari tab. The vault page asks it with
-`webkit.messageHandlers.vaultSite`; only the vault page (porntrex.com, main frame) may ask,
-and only for paths on XVideos (`AppPolicy.workerURL`). The page itself may open XVideos only
-to log in. Its login cookies cover both sites.
+Porntrex uploads together, oldest recording first (`VideoApp/Vault.swift`, ported from
+`vault` in `packages/app/PROVIDERS.md`): only uploads whose title carries the recording in
+brackets, `[YYYY-MM-DD HHMMSS streamer]` (a split part adds ` | part N`); other uploads stay
+on the sites but are not listed. The same recording on both sites shows `Xvid` or `Ptrex`.
 
-## Behavior: a full-screen Safari tab with a native player
+## Behavior: native lists with a native player
 
 - **Videos play in a native viewer** (`VideoApp/Viewer*.swift`), over the list page,
   because WebKit pauses a page's video whenever the phone locks or the app leaves the
@@ -46,19 +39,15 @@ to log in. Its login cookies cover both sites.
     left edge is not Back: drags pan the picture as in Safari, except the upper half's
     horizontal seek (which then starts anywhere). Zoomed back out, swipes move through the
     list again. The left edge otherwise slides the viewer away to the list.
-  - The list page stays a web page. A row opens the native viewer with the list
-    (`routes/nativeViewer.ts`, `ViewerBridge.swift`); the list's later changes follow it,
-    and the viewer asks the page for what only the provider can do (Video Vault's playback
-    sources, Tango's co-streamers, follow, block, the login page). A viewer address the page
-    is opened at (an old restore point) opens the list with that video in the native viewer.
-  - Local HLS and Tango's playlists are known without the page (`mediaHint`), so playback
+  - A row opens the native viewer with the list; the list's later changes follow it, and
+    the viewer asks the list for what only the provider can do (`ViewerHost.swift`: Video
+    Vault's playback sources, Tango's co-streamers, follow, block, the login).
+  - Local HLS and Tango's playlists are known without asking (`mediaHint`), so playback
     never waits on a suspended page. Edits and the +/- download lists go to the PC directly
     (`ViewerPC.swift`).
   - Tango's playlists need its 10 s stream tokens, so they load through a resource loader
-    that fetches them with fresh tokens (`ViewerMedia.swift`: `TangoTokens`, every 5 s while
-    a stream plays, and the session when it is about to expire while the app is in the
-    background; the web view's cookies get the result). Segments need no tokens and load
-    directly. Video Vault's media gets the page's Referer, user agent and site cookies.
+    that fetches them with fresh tokens (`TangoSession` in `Tango.swift`: every 5 s while a
+    stream plays). Segments need no tokens and load directly.
   - Unmuted, the viewer takes the audio like Safari's video with sound and shows on the lock
     screen with play/pause, a scrubber (recordings) and next/previous (the neighbouring
     videos); muted, it mixes with other apps' audio. A call or Siri pauses it; it carries
@@ -67,69 +56,69 @@ to log in. Its login cookies cover both sites.
   - A killed app reopens its viewer (`viewer-checkpoint.json`, written off the main thread:
     every swipe saves it, and Tango's 4,000-recording list takes about 60 ms to encode);
     progress is `viewer-progress.json`, seeded once from the web viewer's localStorage.
-- **Local apps** load the PC's page, API, +/- list buttons and HLS exactly as in
-  Safari. No website code is bundled; deploying the website updates their list (the
-  player is in the app). The phone already trusts the PC's mkcert root. Navigation is limited to the start URL and
-  its subpaths (`VideoApp/Policy.swift`).
-- **Online apps** load the provider's own site and run its content script
-  (`packages/app/scripts/build-content.mjs <provider>`) at document start in the page
-  world: the same Video Platform list/player as the website.
-  Their page stays on the site's hosts over HTTPS; other sites (including ads) are
-  blocked, and embedded frames (such as a captcha) are allowed. They identify as Safari.
-  XVideos login uses the site's own password form inside the app (Porntrex and Tango
-  sign in as below); the app stores no passwords. Logins are durable
-  (`VideoApp/SiteCookies.swift`):
-  - WebKit writes cookies to disk only when the app is suspended, so a login
-    followed by a kill without a background transition (a swipe from the app
-    switcher) would be lost. The app keeps its own copy of the login cookies
-    (`keepCookies`, plus the durable cookie) in its container, beside WebKit's
-    cookie file, and restores missing ones before the first page loads. When the
-    site removes them (logout, revocation, expiry) the copy is cleared too.
-  - XVideos keeps its login in a session-only, version-1 `session_token_auth`
-    cookie. The app gives it `session_token`'s lifetime (about three months,
-    sliding), stored as a version-0 cookie because
-    Foundation ignores Expires on version-1 cookies. XVideos re-sends the
-    session-only cookie on responses, so this re-runs every 3 seconds while open
-    and at resign/background. With "remember me" ticked XVideos itself sets a
-    30-day sliding login cookie.
-  - Porntrex keeps **one active session per account; the newest login wins**. A password
+- **Lists** (`VideoApp/VideoList.swift`) look like the website's: a 52-point row per video
+  with its name (red while recording or live, orange when edited), duration (Video Vault: a
+  site mark) and estimated size (bold above 350 MiB); the last viewed row is highlighted and,
+  after the viewer closes, scrolled into view if needed. The list's place (top row and
+  offset) is written whenever scrolling settles, so a kill returns to the same rows. Pull
+  down to reload; an unreachable PC or site shows a message with Retry.
+- **Local apps** (`VideoApp/LocalList.swift`) keep the PC's list on the phone
+  (`list-cache.json`), so it shows at once, offline and after a kill, and follow the PC's
+  change feed (`/api/videos/changes`, one long-polling request at a time while on screen):
+  a new recording, a finished recording, an edit or a deletion arrives within a second,
+  placed without moving the rows on screen. The phone trusts the PC's mkcert root. The
+  first native launch read the web version's highlight and viewer positions from the
+  website's localStorage once.
+- **Video Vault** (`VideoApp/VaultList.swift`) opens with its last complete list
+  (`vault-list.json`) and reads both sites again behind it (and on a pull, and on return
+  after ten minutes), from the signed-in account's uploads pages, which are fetched and
+  parsed, never executed, with Safari's user agent and the app's own cookie jar
+  (`cookies.json`, KitNet). A signed-out site keeps its earlier rows under a notice.
+  Playback sources are resolved when needed (XVideos' full-quality HLS master, Porntrex's
+  highest MP4) and played with the site's Referer, the same user agent and the jar's
+  cookies. The first native launch moved the web version's cookies out of WebKit (and its
+  login-cookie backup) into the jar, once.
+  - XVideos signs in with its own page in a sheet (the notice opens it; WebKit only here):
+    once its uploads page answers with the sheet's cookies, they move into the jar.
+    Session-only cookies (`session_token_auth`) are kept like persistent ones.
+  - Porntrex keeps **one active session per account; the newest login wins**: a password
     login, or signing back in with the 30-day `kt_member` cookie, logs every other device
-    out. Video Vault therefore shares the pipeline's session instead of logging in:
-    `npm run ptrex:connect-iphone` (phone unlocked, cabled to the Mac) copies the
-    pipeline's Porntrex session (`PHPSESSID`) into Video Vault, pinned for 400 days, and
-    removes `kt_member`. It keeps `PHPSESSID` among its login cookies so a kill does not
-    lose it. Do not log in on the phone: it stops the pipeline; run the command again
-    instead. The vault's page is Porntrex's 404 page, which loads whether or not Porntrex
-    is signed in; signed out, the list keeps its Porntrex rows and says to run the command.
-- **Tango** signs in with Google, which a web view cannot do, so it uses a Safari
-  handoff: sign in on tango.me in Safari, Import with the Tango Login extension, delete
-  Tango's Safari website data and confirm in the app ("Safari data cleared — continue").
-  Tango Login (`Login/`) reads `Tango-RT`, `-DI`, `-DeviceId`, `-ST` and `-WST` for the
-  gateway's refresh path from the active tab's own cookie store and saves them in the
-  shared Keychain (service `TangoLogin`, account `session`, this device only).
-  `VideoApp/TangoSession.swift` then moves the imported cookies from that inbox into the
-  web view (emptying the inbox) and gives the page the account and session IDs from the
-  token; the page refreshes the session every 30 minutes and the playback tokens every
-  5 seconds itself, so the app has no native token refresh or media relay. SiteCookies
-  keeps `Tango-RT`/`-DI`/`-DeviceId` durable. When Tango reports the session
-  gone, the viewer navigates to `videoapp://login` and the app shows the handoff screen.
-  FC2 live and SC live need enabling once in Safari's extension settings, with their sites
-  allowed; their background pages call the PC's `/api/fc2|sc/member|add|remove`.
-- **Video Vault** (`downloadList` in `providers.json`) edits the PC download lists for
-  the viewer's +/- button (`VideoApp/DownloadList.swift`), as the FC2/SC live extensions'
-  background pages do, so no site's security policy applies to the PC requests. Only the
-  site's main frame may ask, only `/api/tango|fc2|sc/member|exists|add|remove`. It asks once for
-  local network access.
-- Like a restored Safari tab, a killed app reopens the page you were on with its
-  Back/Forward list (WebKit `interactionState`); only an app page becomes the restore
-  point, and a blank restore falls back to the start page. In the list: edge-swipe Back/Forward, pinch zoom,
-  inline playback, portrait/landscape and pull-down reload. An unreachable PC or site
-  shows a message with Retry instead of Safari's error page.
-- Each app has its own WebKit storage: progress, highlights and cookies are not
-  shared with Safari. No icon, launch artwork or background refresh; the background mode is
-  audio (the native viewer); the only
-  entitlement is Tango's Keychain group (`<team>.com.visar.Tango.paid`), shared with
-  Tango Login.
+    out. Video Vault shares the pipeline's session instead: `npm run ptrex:connect-iphone`
+    (phone unlocked and paired) copies the session into the app's data folder
+    (`porntrex-session.json`, via `devicectl`) and relaunches it; the app replaces its
+    Porntrex cookies (removing `kt_member`, pinning the rest for 400 days), checks them with
+    a fresh request and leaves `porntrex-session-result.json`, which the command reads
+    back. Do not log in on the phone: it stops the pipeline; run the command again instead.
+  - The +/- button asks the PC's three download lists directly (`ViewerPC.swift`).
+- **Tango** (`VideoApp/TangoList.swift`) opens with its last list (`tango-list.json`) and
+  asks Tango's gateway for a new one behind it: followed streams first, then
+  recommendations, one per streamer, never blocked ones; the order then stays while
+  browsing (pull down, or return after half an hour, for a new list). Co-streamers found
+  while watching join the end; ended and blocked streams leave. Follow, the two-step Block
+  and co-streamers go to the gateway. The session lives in the app's cookie jar and
+  `TangoSession` (`Tango.swift`) is its only owner: the session token is refreshed from the
+  refresh token when it has under five minutes left (one refresh at a time; a rotated
+  refresh token is saved before anything else, as `packages/auth` does), and the stream
+  tokens every 5 seconds while a stream plays. The first native launch took the newest
+  session out of WebKit's cookies (and the login-cookie backup), once.
+  - Signing in stays the Safari handoff, so Tango works away from home: sign in with Google
+    on tango.me in Safari, Import with the Tango Login extension, delete Tango's Safari
+    website data and confirm in the app ("Safari data cleared — continue"). Tango Login
+    (`Login/`) reads `Tango-RT`, `-DI`, `-DeviceId`, `-ST` and `-WST` for the gateway's
+    refresh path from the active tab's own cookie store and saves them in the shared
+    Keychain (service `TangoLogin`, account `session`, this device only); the app moves a
+    confirmed import into its jar and empties the inbox. (Google refuses sign-in inside an
+    app's web view, and no Apple API gives an app the cookies a site sets in Safari.)
+  - On the home network the login screen also offers **Log in from the PC**: the PC
+    (`POST /api/tango/phone-session`, packages/server, with the key built into the app from
+    `Private/tango-phone-key`) signs in with a fresh browser profile
+    (`packages/auth` `phoneSession.ts`), returns that new session and drops the profile, so
+    each device holds its own refresh token; the PC's own session is never copied.
+  - FC2 live and SC live need enabling once in Safari's extension settings, with their sites
+    allowed; their background pages call the PC's `/api/fc2|sc/member|add|remove`.
+- Each app keeps its own data in `Library/Application Support/LocalVideos`. No icon or
+  launch artwork; the background mode is audio (the native viewer); the only entitlement
+  is Tango's Keychain group (`<team>.com.visar.Tango.paid`), shared with Tango Login.
 
 ## Build, deploy and inspect
 
@@ -141,20 +130,19 @@ Ethernet is down, see `mac-connect --check`). Mac mirror:
 (`00008101-000639912881401E`) is cabled to the Mac; paid team `65U58U86DD`. From this folder:
 
 ```sh
-python3 scripts/deploy.py <provider> sync      # rsyncs sources to the Mac; online apps also build and stage content.js (Tango: its web extensions)
-python3 scripts/deploy.py <provider> test      # policy tests on the Mac
+python3 scripts/deploy.py <provider> sync      # rsyncs sources to the Mac; Tango also builds its web extensions and stages its PC login key
+python3 scripts/deploy.py <provider> test      # policy and Video Vault tests on the Mac (scripts/test.sh)
 python3 scripts/deploy.py <provider> build     # attached GUI session, signing lock
 python3 scripts/deploy.py <provider> status
 python3 scripts/deploy.py <provider> install   # verifies, installs over, approves for renewal, launches
 ```
 
-`install` checks bundle ID, display name, start URL, site scope, bundled content
-script, extensions, icon absence, signature, paid team, phone provisioning and an
-expiry more than 45 days away before replacing the same app. Never uninstall to update
-(that would sign the online apps out). No LaunchAgent is created. Physical checks use
-ios-tools' inspector on the Mac (`~/Developer/ios-tools/inspector`, see its README) with
-`--bundle <bundle ID> --snapshot-file scripts/inspector-snapshot.js` while the app is in
-the foreground.
+`install` checks bundle ID, display name, start URL, the native list key, Tango's PC login
+key, extensions, icon absence, signature, paid
+team, phone provisioning and an expiry more than 45 days away before replacing the same
+app. Never uninstall to update (that would sign the online apps out). No LaunchAgent is
+created. Simulator builds: `SIMULATOR=1 /usr/bin/python3 scripts/build-provider.py
+<provider>` on the Mac; they include NativeKit's test hooks (ios-tools `native/scripts/sim`).
 
 ## Renewal
 
@@ -162,9 +150,9 @@ This repository renews its own apps with its Mac scheduler,
 `com.visar.renewal.video-platform` ([ios-tools renewal](../../../../ios-tools/renewal/PAID-REFRESH.md)).
 `scripts/renewal.py` lists the monthly entries (Mac mirror `/Users/visar/Developer/video-platform/apps/ios`):
 `<provider>-local` (local apps) and `<provider>` (online apps). Their inputs are
-`VideoApp`, `Shared`, `providers.json`, `scripts/project.py`, `scripts/build-provider.py`
-and, for online apps, the staged `build/<provider>/content.js`; Tango also lists `Login`,
-`Extension` and its staged web extensions. The Mac needs no Node. A new provider in
+`VideoApp`, `Shared`, `Kit`, `providers.json`, `scripts/project.py`, `scripts/build-provider.py`
+and, for Tango, `Login`, `Extension`, its staged web extensions and `Private` (its PC login
+key). The Mac needs no Node. A new provider in
 `providers.json` needs no change outside this repository; rerun `configure-refresh.py` for this mirror.
 `install` approves the installed build as that app's renewal baseline, keeping its
 renewal date, when neither its inputs nor the app changed since `build`; otherwise it

@@ -28,7 +28,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     let provider: String
     var onClose: (() -> Void)?
-    private let bridge: ViewerBridge
+    private let host: ViewerHost
     private let media: ViewerMedia
     private let progress: ProgressStore
     private let checkpoint: CheckpointWriter
@@ -67,12 +67,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var lastBounds: CGSize = .zero
     private var closed = false
 
-    init(provider: String, videos: [ViewerVideo], index: Int, bridge: ViewerBridge, media: ViewerMedia,
+    init(provider: String, videos: [ViewerVideo], index: Int, host: ViewerHost, media: ViewerMedia,
          progress: ProgressStore, checkpoint: CheckpointWriter) {
         self.provider = provider
         self.videos = videos
         currentIndex = index
-        self.bridge = bridge
+        self.host = host
         self.media = media
         self.progress = progress
         self.checkpoint = checkpoint
@@ -222,7 +222,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             let position = list.firstIndex { $0.filename == current.filename }
             videos = filtered
             showAt(position.map { list[..<$0].filter { !removed.contains($0.filename) }.count } ?? 0)
-            bridge.send("remove", [current.filename])
+            host.remove(current.filename)
             return
         }
         guard let current, let index = filtered.firstIndex(where: {
@@ -290,7 +290,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         overlay.setInteractive(!unsettled)
         session.setAudible(!active.muted)
         nowPlaying(force: true)
-        bridge.send("highlight", [video.filename, false])
+        host.highlight(video.filename, reveal: false)
         saveCheckpoint()
         discover(video)
     }
@@ -302,10 +302,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         discovered.insert(video.filename)
         Task {
             do {
-                let fresh = (try await bridge.call("related", [video.raw]) as? [Any] ?? []).compactMap(ViewerVideo.init)
-                    .filter { !removed.contains($0.filename) }
+                let fresh = try await host.related(video).filter { !removed.contains($0.filename) }
                 if !fresh.isEmpty && videos.contains(where: { $0.filename == video.filename }) {
-                    bridge.send("append", [fresh.map(\.raw)])
+                    host.append(fresh)
                 }
             } catch {
                 discovered.remove(video.filename)
@@ -321,7 +320,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let index = videos.firstIndex { $0.filename == video.filename }
         if let index { videos.remove(at: index) }
         showAt(max(0, index ?? 0))
-        bridge.send("remove", [video.filename])
+        host.remove(video.filename)
     }
 
     private func showAt(_ index: Int) {
@@ -640,6 +639,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         overlay.setSegments(segments)
         active.load(video, start: 0, play: true)
         activateCurrent()
+        host.changed(video)
     }
 
     private func mutationFailed(_ error: Error) {
@@ -656,7 +656,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard let video = currentVideo, video.liveStream else { return }
         Task {
             do {
-                _ = try await bridge.call("follow", [video.raw, !video.following])
+                try await host.follow(video, !video.following)
                 replace(video.setting("following", !video.following))
             } catch { print("Follow failed:", error.localizedDescription) }
         }
@@ -666,7 +666,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard let video = currentVideo, video.liveStream else { return }
         Task {
             do {
-                _ = try await bridge.call("block", [video.raw])
+                try await host.block(video)
                 if active.video?.filename == video.filename { removeCurrent() }
             } catch { print("Block failed:", error.localizedDescription) }
         }
@@ -713,12 +713,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func unitNeedsLogin(_ unit: ViewerUnit) {
         close()
-        bridge.send("login")
+        host.login()
     }
 
     func unitSource(_ video: ViewerVideo) async throws -> MediaSource {
         if let media = video.media { return media }
-        return try await bridge.resolve(video)
+        return try await host.resolve(video)
     }
 
     func unitAsset(_ source: MediaSource, for video: ViewerVideo) async -> AVURLAsset {
@@ -775,7 +775,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         UIApplication.shared.isIdleTimerDisabled = false
-        if let filename { bridge.send("highlight", [filename, true]) }
+        if let filename { host.highlight(filename, reveal: true) }
         onClose?()
     }
 }

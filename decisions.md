@@ -389,8 +389,9 @@ server follows the account first, but only if it is not already followed.
   minutes without a browser; a logged-out session pauses the campaign with a
   notification and is never logged in again automatically.
   `npm run ptrex:connect-iphone` is the only path that may log in with the password; it
-  copies the session into Video Vault over SSH (the Mac runs `devicectl` and the
-  WebKit inspector) and resumes the campaign.
+  copies the session into Video Vault's data folder over SSH (the Mac runs `devicectl`;
+  the app takes it in at launch and leaves its check for the command to read back) and
+  resumes the campaign.
 - **XVideos:** email/password login in the persistent Chromium profile
   (`~/.config/chromium-agent`); Friendly Captcha gets 60 s to solve automatically;
   the alias is typed into the model search without selecting a model. Verification

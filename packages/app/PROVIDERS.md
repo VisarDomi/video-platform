@@ -204,8 +204,9 @@ MP4 across sites, restored routes, the kept list, signed-out notices, the XVideo
 return and the takeover of Porntrex's own pages; Tango live (list, Follow, +/-, two-step
 Block, co-streamers, ended streams); all three local providers; and shared scroll settlement.
 They do not establish physical iPhone momentum or native HLS playback.
-Inspect the installed apps with ios-tools' inspector (see `apps/ios/PORT.md`); use
-the shared Mac access runbook at `/home/visar/Documents/environment/mac-access.md`.
+The iPhone apps' Video Vault and local lists are native ports of these providers
+(`apps/ios/PORT.md`, tested by `apps/ios/scripts/test.sh`); use the shared Mac access
+runbook at `/home/visar/Documents/environment/mac-access.md`.
 
 ## iPhone packaging
 

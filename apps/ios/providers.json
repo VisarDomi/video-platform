@@ -28,25 +28,7 @@
       "xvideos.com",
       "www.xvideos.com"
     ],
-    "durableCookie": {
-      "name": "session_token_auth",
-      "lifetimeFrom": "session_token"
-    },
-    "keepCookies": [
-      "kt_member",
-      "PHPSESSID",
-      "session_token"
-    ],
-    "workers": {
-      "xvideos": {
-        "url": "https://www.xvideos.com/robots.txt",
-        "hosts": [
-          "xvideos.com",
-          "www.xvideos.com"
-        ]
-      }
-    },
-    "downloadList": true
+    "native": "vault"
   },
   "tango-live": {
     "name": "Tango",
@@ -57,11 +39,6 @@
     "hosts": [
       "tango.me",
       "www.tango.me"
-    ],
-    "keepCookies": [
-      "Tango-RT",
-      "Tango-DI",
-      "Tango-DeviceId"
     ],
     "tangoLogin": true,
     "extensions": [
@@ -78,6 +55,7 @@
         "name": "SC live",
         "source": "sc-live"
       }
-    }
+    },
+    "native": "tango"
   }
 }
