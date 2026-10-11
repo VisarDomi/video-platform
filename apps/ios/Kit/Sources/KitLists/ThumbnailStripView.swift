@@ -23,6 +23,9 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
     public let collectionView: UICollectionView
     private var tickets: [Int: ImageTicket] = [:]
     private var prefetched: [Int: ImageTicket] = [:]
+    // Failed thumbnails: attempts so far (asked again after 1, 2, 4... up to 30 seconds while
+    // on screen, as a dropped connection comes back).
+    private var failures: [Int: Int] = [:]
 
     public init(pipeline: ImagePipeline, itemSize: CGSize = CGSize(width: 100, height: 300)) {
         self.pipeline = pipeline
@@ -55,6 +58,7 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
 
     public func setKeys(_ keys: [String], offset: CGFloat = 0) {
         cancelAll()
+        failures.removeAll()
         self.keys = keys
         collectionView.reloadData()
         collectionView.layoutIfNeeded()
@@ -137,7 +141,21 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
         tickets[index] = pipeline.load(request(index)) { [weak self, weak cell] result in
             guard let self, let cell, cell.index == index else { return }
             tickets[index] = nil
-            if case .success(let image) = result { cell.imageView.image = image }
+            switch result {
+            case .success(let image):
+                failures[index] = nil
+                cell.imageView.image = image
+            case .failure(let error):
+                if error is CancellationError { return }
+                let attempts = (failures[index] ?? 0) + 1
+                failures[index] = attempts
+                let keys = keys
+                DispatchQueue.main.asyncAfter(deadline: .now() + min(30, pow(2, Double(attempts - 1)))) { [weak self, weak cell] in
+                    guard let self, let cell, self.keys == keys, cell.index == index, cell.window != nil,
+                          cell.imageView.image == nil, tickets[index] == nil else { return }
+                    load(index, into: cell)
+                }
+            }
         }
     }
 
