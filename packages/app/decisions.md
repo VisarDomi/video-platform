@@ -109,43 +109,18 @@ keeps no in-memory cache.
 
 **Why:** A cache can freeze `isLive` state and make a live stream appear as VOD.
 
-## The iPhone apps play videos natively
+## The iPhone apps are native
 
-In the iPhone apps a list row opens the app's native viewer instead of the viewer document
-(`routes/nativeViewer.ts`; `apps/ios` `VideoApp/ViewerBridge.swift`). The list page posts its
-list whenever it changes (only the new rows when it just grew: TsLive's 4,000 recordings take
-the app long enough to read that a swipe would stutter) and answers the viewer's requests (`window.__videoApp.call`):
-playback sources, co-streamers, follow, block, list removals and additions, the highlighted
-row and the login page. Each video it posts says whether it is a PC recording or a live
-stream, its playback source when one is known without a request (`mediaHint`: local HLS,
-TsLive's remembered playlists) and its download-list streamer. A viewer address opened in the
-app opens the list with that video in the native viewer.
+The iPhone apps (local lists, the uploads app, TsLive) are native lists with a native viewer
+(`apps/ios`, see its `PORT.md`), not WKWebView shells around this website. The uploads app's
+rules (both upload sites in one list, only the pipeline's bracketed uploads, the shared
+VideoHost session) and TsLive's live list are described there. The content scripts and
+`routes/nativeViewer.ts` that the earlier web versions used are in Git history, before
+October 12, 2026.
 
-**Why:** WebKit pauses a page's video when the phone locks or the app leaves the screen; the
-native player plays on until the video ends. Safari has no `videoViewer` handler and keeps the
-web viewer below.
-
-## The uploads app lives on video-host.example
-
-The uploads app lists both upload sites from a page on video-host.example and reads OldHost pages
-through the app's hidden old-host.example web view.
-
-**Why:** OldHost sends a Content-Security-Policy whose `default-src` lists only its own and
-ad hosts, so a page on old-host.example cannot load VideoHost media. VideoHost sends no policy, and
-OldHost' CDN serves its playlists to other origins, so OldHost HLS plays on video-host.example.
-Neither site's pages can be read from the other origin (no CORS), and a hidden iframe would
-get no cookies (third-party), hence the app's first-party web view. The vault's URLs are
-VideoHost 404 pages, which load whether or not either site is signed in.
-
-## The uploads app lists only the pipeline's uploads
-
-An upload is listed only when its title carries the recording in brackets,
-`[YYYY-MM-DD HHMMSS streamer]` (`isPipelineUpload` in `providers/uploadSite.ts`). Older manual
-uploads and uploads renamed to the bare `YYYY-MM-DD HHMMSS streamer` stay on the sites but are
-not listed.
-
-**Why:** The vault shows the pipeline's archive; an upload renamed to the bare stamp has been
-taken out of it.
+**Why:** WebKit pauses a page's video when the phone locks or the app leaves the screen, and
+a web view cannot open instantly from a saved list or survive the app being killed; the
+native apps do all three. Safari keeps this website.
 
 ## Rules
 
@@ -159,8 +134,8 @@ taken out of it.
 
 ## Regression checks
 
-`npm run test:app:webkit` drives the built website and both content scripts in WebKit with
-isolated fixtures, including scroll settlement on a local list (see `PROVIDERS.md`).
+`npm run test:app:webkit` drives the built website and the LADDER/FMP4 live extensions in WebKit
+with isolated fixtures, including scroll settlement on a local list (see `PROVIDERS.md`).
 
 `node packages/app/test/viewer.mjs`, run from the repo root after `npm run build:app`, loads
 the deployed frontend that the PC server serves from `packages/app/build` (default
