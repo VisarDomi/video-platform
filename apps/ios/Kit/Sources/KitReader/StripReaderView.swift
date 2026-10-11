@@ -67,6 +67,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var laidOutWidth: CGFloat = 0
     private var pendingPosition: StripPosition?
     private var pendingTop: Int?
+    // A page opened at its top keeps its top at the screen's top while sizes settle (until a
+    // finger touches), instead of the centre: a resumed page never slides away.
+    private var pinnedTop: Int?
     private var touching = false
     private var lastNearEnd = -1
     private let footer = UILabel()
@@ -97,6 +100,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         scrollView.addGestureRecognizer(doubleTap)
         let touch = TouchTracker { [weak self] down in
             self?.touching = down
+            if down { self?.pinnedTop = nil }
             if !down { self?.settleIfIdle() }
         }
         scrollView.addGestureRecognizer(touch)
@@ -107,6 +111,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     // MARK: pages
 
     public func setPages(_ pages: [StripPage], position: StripPosition? = nil) {
+        pinnedTop = nil
         cells.values.forEach(recycle)
         cells.removeAll()
         failures.removeAll()
@@ -154,9 +159,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // Puts `position` at the screen's centre (applied after the first layout if needed).
     public func scroll(to position: StripPosition) {
-        guard laidOutWidth > 0, pages.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; return }
+        guard laidOutWidth > 0, pages.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; pinnedTop = nil; return }
         pendingPosition = nil
         pendingTop = nil
+        pinnedTop = nil
         let y = tops[position.index] + heights[position.index] * position.fraction
         setCentre(contentY: y)
     }
@@ -169,6 +175,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         }
         pendingTop = nil
         pendingPosition = nil
+        pinnedTop = index
         setCentre(contentY: tops[index] + bounds.height / 2 / scrollView.zoomScale)
     }
 
@@ -231,7 +238,8 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         scrollView.contentSize = CGSize(width: width * zoom, height: total * zoom)
         for (index, cell) in cells { cell.frame = frame(of: index) }
         layoutFooter()
-        if let anchor, pages.indices.contains(anchor.index) { scroll(to: anchor) }
+        if let pinnedTop, pages.indices.contains(pinnedTop) { setCentre(contentY: tops[pinnedTop] + bounds.height / 2 / scrollView.zoomScale) }
+        else if let anchor, pages.indices.contains(anchor.index) { scroll(to: anchor) }
         updateVisible()
     }
 
@@ -333,7 +341,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         updateVisible()
     }
 
-    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { if !decelerate { settleIfIdle() } }
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        pinnedTop = nil
+        if !decelerate { settleIfIdle() }
+    }
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settleIfIdle() }
     public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) { settleIfIdle() }
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { settleIfIdle() }
