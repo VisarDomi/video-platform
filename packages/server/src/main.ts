@@ -11,6 +11,7 @@ import hlsRouter from "./api/hls.routes.js";
 import ladderRouter from "./api/providers/ladder.routes.js";
 import scRouter from "./api/providers/fmp4.routes.js";
 import tsliveRouter from "./api/providers/tslive.routes.js";
+import { createPhoneSessionRoutes } from "./api/providers/phone-session.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
@@ -55,6 +56,7 @@ async function startServer() {
   app.use("/", ladderRouter);
   app.use("/", scRouter);
   app.use("/", tsliveRouter);
+  app.use("/", createPhoneSessionRoutes());
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);
 
