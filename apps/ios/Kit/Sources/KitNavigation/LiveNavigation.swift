@@ -155,6 +155,31 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
         return popped
     }
 
+    // Going back several screens at once keeps them all for going forward, in order.
+    override public func popToViewController(_ viewController: UIViewController, animated: Bool) -> [UIViewController]? {
+        let popped = super.popToViewController(viewController, animated: animated)
+        keepForward(popped)
+        return popped
+    }
+
+    override public func popToRootViewController(animated: Bool) -> [UIViewController]? {
+        let popped = super.popToRootViewController(animated: animated)
+        keepForward(popped)
+        return popped
+    }
+
+    private func keepForward(_ popped: [UIViewController]?) {
+        let screens = (popped ?? []).compactMap { $0 as? any LiveScreen }
+        guard !screens.isEmpty else { return }
+        if let coordinator = transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                if !context.isCancelled { self?.forward.append(contentsOf: screens.reversed()) }
+            }
+        } else {
+            forward.append(contentsOf: screens.reversed())
+        }
+    }
+
     // MARK: gestures
 
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
