@@ -113,7 +113,8 @@ keeps no in-memory cache.
 
 In the iPhone apps a list row opens the app's native viewer instead of the viewer document
 (`routes/nativeViewer.ts`; `apps/ios` `VideoApp/ViewerBridge.swift`). The list page posts its
-list whenever it changes and answers the viewer's requests (`window.__videoApp.call`):
+list whenever it changes (only the new rows when it just grew: Tango's 4,000 recordings take
+the app long enough to read that a swipe would stutter) and answers the viewer's requests (`window.__videoApp.call`):
 playback sources, co-streamers, follow, block, list removals and additions, the highlighted
 row and the login page. Each video it posts says whether it is a PC recording or a live
 stream, its playback source when one is known without a request (`mediaHint`: local HLS,

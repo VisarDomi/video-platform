@@ -64,8 +64,9 @@ to log in. Its login cookies cover both sites.
     videos); muted, it mixes with other apps' audio. A call or Siri pauses it; it carries
     on afterwards. A failed or stalled recording recovers at its position; a live stream
     that ended gives way to the next one, as in the web viewer.
-  - A killed app reopens its viewer (`viewer-checkpoint.json`); progress is
-    `viewer-progress.json`, seeded once from the web viewer's localStorage.
+  - A killed app reopens its viewer (`viewer-checkpoint.json`, written off the main thread:
+    every swipe saves it, and Tango's 4,000-recording list takes about 60 ms to encode);
+    progress is `viewer-progress.json`, seeded once from the web viewer's localStorage.
 - **Local apps** load the PC's page, API, +/- list buttons and HLS exactly as in
   Safari. No website code is bundled; deploying the website updates their list (the
   player is in the app). The phone already trusts the PC's mkcert root. Navigation is limited to the start URL and

@@ -116,7 +116,7 @@ struct ViewerCheckpoint {
     let videos: [ViewerVideo]
     let current: String
 
-    private static func url(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-checkpoint.json") }
+    fileprivate static func url(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-checkpoint.json") }
 
     static func load(_ directory: URL) -> ViewerCheckpoint? {
         guard let data = try? Data(contentsOf: url(directory)),
@@ -126,14 +126,41 @@ struct ViewerCheckpoint {
         return ViewerCheckpoint(provider: provider, videos: videos, current: current)
     }
 
-    func save(_ directory: URL) {
-        let raw: [String: Any] = ["provider": provider, "current": current, "videos": videos.map(\.raw)]
-        guard JSONSerialization.isValidJSONObject(raw) else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try JSONSerialization.data(withJSONObject: raw).write(to: Self.url(directory), options: .atomic)
-        } catch { print("Viewer checkpoint:", error) }
+    fileprivate var raw: [String: Any] { ["provider": provider, "current": current, "videos": videos.map(\.raw)] }
+}
+
+// Saves the checkpoint off the main thread, newest first. Every swipe saves it, and a long list
+// takes a while to encode (Tango's 4,000 recordings, about 60 ms on the phone): long enough to
+// stutter the swipe that saved it.
+final class CheckpointWriter: @unchecked Sendable {
+    private let directory: URL
+    private let queue = DispatchQueue(label: "viewer-checkpoint", qos: .utility)
+    private let lock = NSLock()
+    private var pending: [String: Any]?
+
+    init(directory: URL) { self.directory = directory }
+
+    func save(_ checkpoint: ViewerCheckpoint) {
+        lock.withLock { pending = checkpoint.raw }
+        queue.async { self.write() }
     }
 
-    static func clear(_ directory: URL) { try? FileManager.default.removeItem(at: url(directory)) }
+    func clear() {
+        lock.withLock { pending = nil }
+        queue.async { try? FileManager.default.removeItem(at: ViewerCheckpoint.url(self.directory)) }
+    }
+
+    // Waits for the last save: the app may be suspended next.
+    func flush() { queue.sync {} }
+
+    private func write() {
+        guard let raw = lock.withLock({ () -> [String: Any]? in
+            defer { pending = nil }
+            return pending
+        }), JSONSerialization.isValidJSONObject(raw) else { return }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: raw).write(to: ViewerCheckpoint.url(directory), options: .atomic)
+        } catch { print("Viewer checkpoint:", error) }
+    }
 }

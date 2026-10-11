@@ -25,6 +25,7 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     private var bridge: ViewerBridge!
     private var media: ViewerMedia!
     private var progress: ProgressStore!
+    private var checkpoint: CheckpointWriter!
     private var viewer: ViewerController?
 
     init(start: URL, hosts: [String]) {
@@ -68,6 +69,7 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
         media = ViewerMedia(store: config.websiteDataStore.httpCookieStore, bridge: bridge,
                             tango: Bundle.main.object(forInfoDictionaryKey: "TangoLogin") as? Bool == true)
         progress = ProgressStore(directory: sessionURL.deletingLastPathComponent())
+        checkpoint = CheckpointWriter(directory: sessionURL.deletingLastPathComponent())
         if !hosts.isEmpty {
             let durable = (Bundle.main.object(forInfoDictionaryKey: "DurableCookie") as? [String: String]).flatMap { rule in
                 rule["name"].flatMap { name in rule["lifetimeFrom"].map { SiteCookies.Durable(name: name, lifetimeFrom: $0) } }
@@ -119,7 +121,7 @@ final class WebController: UIViewController, WKNavigationDelegate, WKUIDelegate 
     private func showViewer(_ open: ViewerBridge.Open) {
         viewer?.close()
         let controller = ViewerController(provider: open.provider, videos: open.videos, index: open.index, bridge: bridge,
-                                          media: media, progress: progress, directory: sessionURL.deletingLastPathComponent())
+                                          media: media, progress: progress, checkpoint: checkpoint)
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }
             controller.willMove(toParent: nil)

@@ -20,7 +20,7 @@ try {
             return route.abort();
         }
         if (url.pathname === '/api/videos') return route.fulfill({ json: records });
-        if (url.pathname === '/api/tango/list') return route.fulfill({ json: [] });
+        if (url.pathname === '/api/tango/member') return route.fulfill({ json: { member: false } });
         if (url.pathname.startsWith('/api/')) return route.abort();
         if (url.pathname.startsWith('/hls/')) {
             if (!url.pathname.endsWith('.m3u8')) return route.abort();
@@ -84,7 +84,33 @@ try {
     assert.equal(new URL(page.url()).pathname, '/videos/tango');
     assert.deepEqual(writes, [], 'No edit, save, or membership mutation may reach the real server');
     assert.deepEqual(errors, []);
-    console.log('PASS: deployed frontend; native list/URL navigation; outgoing progress, marker reset, mute and horizontal seek; no server mutations.');
+
+    // The iPhone apps' native viewer gets the list, then only the rows a new recording adds.
+    const nativeContext = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 428, height: 800 } });
+    const recording = { filename: 'fixture-4', type: 'original', duration: 60, size: 100, isLive: true };
+    let recorded = false;
+    await nativeContext.route('**/*', async route => {
+        const url = new URL(route.request().url());
+        if (url.pathname === '/api/videos') {
+            const after = url.searchParams.get('after');
+            return route.fulfill({ json: (recorded ? [...records, recording] : records).filter(video => !after || video.filename > after) });
+        }
+        if (url.pathname.startsWith('/api/') || url.origin !== new URL(origin).origin) return route.abort();
+        return route.continue();
+    });
+    await nativeContext.addInitScript(() => {
+        window.viewerMessages = [];
+        window.webkit = { messageHandlers: { videoViewer: { postMessage: async message => { window.viewerMessages.push(message); } } } };
+    });
+    const native = await nativeContext.newPage();
+    await native.goto(`${origin}/videos/tango`);
+    await native.waitForSelector('a.video-row');
+    recorded = true;
+    await native.waitForFunction(() => window.viewerMessages.some(message => message.type === 'append'));
+    assert.deepEqual(await native.evaluate(() => window.viewerMessages.map(message => [message.type, message.videos?.map(video => video.filename) ?? null])),
+        [['list', ['fixture-1', 'fixture-2', 'fixture-3']], ['ready', null], ['append', ['fixture-4']]]);
+    assert.ok((await native.evaluate(() => window.viewerMessages[2].videos[0].media.url)).endsWith('/hls/tango/fixture-4/playlist.m3u8'));
+    console.log('PASS: deployed frontend; native list/URL navigation; outgoing progress, marker reset, mute and horizontal seek; no server mutations; the native viewer gets only new rows.');
 } finally {
     await browser.close();
 }

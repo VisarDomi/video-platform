@@ -31,7 +31,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private let bridge: ViewerBridge
     private let media: ViewerMedia
     private let progress: ProgressStore
-    private let directory: URL
+    private let checkpoint: CheckpointWriter
 
     private let feed = FeedScrollView()
     private let content = UIView()
@@ -68,14 +68,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var closed = false
 
     init(provider: String, videos: [ViewerVideo], index: Int, bridge: ViewerBridge, media: ViewerMedia,
-         progress: ProgressStore, directory: URL) {
+         progress: ProgressStore, checkpoint: CheckpointWriter) {
         self.provider = provider
         self.videos = videos
         currentIndex = index
         self.bridge = bridge
         self.media = media
         self.progress = progress
-        self.directory = directory
+        self.checkpoint = checkpoint
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }
@@ -249,7 +249,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func saveCheckpoint() {
         guard let video = currentVideo else { return }
-        ViewerCheckpoint(provider: provider, videos: videos, current: video.key).save(directory)
+        checkpoint.save(ViewerCheckpoint(provider: provider, videos: videos, current: video.key))
     }
 
     private func reveal() {
@@ -743,6 +743,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         saveProgress()
         progress.flush()
         saveCheckpoint()
+        checkpoint.flush()
     }
 
     private func enteringForeground() {
@@ -765,7 +766,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         revealTimer?.invalidate()
         saveProgress()
         progress.flush()
-        ViewerCheckpoint.clear(directory)
+        checkpoint.clear()
         let filename = currentVideo?.filename
         units.forEach { $0.clear() }
         zoomContent.playerLayer.player = nil

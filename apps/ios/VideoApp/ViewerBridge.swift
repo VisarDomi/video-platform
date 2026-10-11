@@ -2,8 +2,8 @@ import Foundation
 import WebKit
 
 // The list page and the native viewer (packages/app routes/nativeViewer.ts). The page posts
-// `ready`, `list` (whenever its list changes) and `open` (a row, or a viewer address it was
-// opened at); the viewer calls `window.__videoApp.call(name, args)` for what only the provider
+// `ready`, `list` (whenever its list changes; `append` when it only grew) and `open` (a row, or
+// a viewer address it was opened at); the viewer calls `window.__videoApp.call(name, args)` for what only the provider
 // can do, answered as {ok} or {error, auth}. Only the app's own pages may post.
 @MainActor
 final class ViewerBridge: NSObject, WKScriptMessageHandlerWithReply {
@@ -25,6 +25,7 @@ final class ViewerBridge: NSObject, WKScriptMessageHandlerWithReply {
     private(set) var origin: URL?
     private(set) var userAgent: String?
     private var ready = false
+    private var list: [ViewerVideo] = []
     private var waiting: [CheckedContinuation<Void, Never>] = []
     private let allows: (URL) -> Bool
 
@@ -43,7 +44,11 @@ final class ViewerBridge: NSObject, WKScriptMessageHandlerWithReply {
             for continuation in waiting { continuation.resume() }
             waiting = []
         case "list":
-            onList?((body["videos"] as? [Any] ?? []).compactMap(ViewerVideo.init))
+            list = (body["videos"] as? [Any] ?? []).compactMap(ViewerVideo.init)
+            onList?(list)
+        case "append":
+            list += (body["videos"] as? [Any] ?? []).compactMap(ViewerVideo.init)
+            onList?(list)
         case "open":
             let videos = (body["videos"] as? [Any] ?? []).compactMap(ViewerVideo.init)
             guard !videos.isEmpty else { break }

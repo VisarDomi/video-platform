@@ -80,6 +80,7 @@ function plain(value: Video): Video {
 
 export class NativeViewer {
 	private ready = false;
+	private sent: readonly Video[] = [];
 
 	constructor(private readonly host: NativeHost) {
 		const methods: Record<string, (...args: never[]) => unknown> = {
@@ -127,8 +128,16 @@ export class NativeViewer {
 		};
 	}
 
-	// The list as it stands; the first one also tells the app this page can answer.
+	// The list as it stands; the first one also tells the app this page can answer. A list that
+	// only grew (new recordings) sends just its new rows: the whole of a long one (Tango's
+	// thousands of recordings) takes the app long enough to read that a swipe would stutter.
 	list(videos: Video[]): void {
+		const sent = this.sent;
+		this.sent = [...videos];
+		if (this.ready && videos.length > sent.length && sent.every((video, index) => videos[index] === video)) {
+			post({ type: 'append', provider: this.host.provider, videos: videos.slice(sent.length).map(describe) });
+			return;
+		}
 		post({ type: 'list', provider: this.host.provider, videos: videos.map(describe) });
 		if (!this.ready) {
 			this.ready = true;
