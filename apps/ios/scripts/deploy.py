@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Linux -> trusted Mac GUI build -> verified, non-destructive device update for one provider app."""
-import argparse,hashlib,json,pathlib,shutil,subprocess,shlex
+import argparse,json,pathlib,shutil,subprocess,shlex
 APP=pathlib.Path(__file__).resolve().parents[1]
 ROOT=APP.parents[1]
 MAC='/Users/visar/Developer/video-platform/apps/ios'
@@ -13,22 +13,12 @@ def remote(code):
 p=argparse.ArgumentParser();p.add_argument('provider',choices=sorted(registry))
 p.add_argument('action',choices=['sync','test','build','status','install','finish']);a=p.parse_args()
 config=registry[a.provider]
-# Site apps still on their website bundle its content script; Video Vault is native.
-web_site=bool(config.get('hosts')) and not config.get('native')
 log=MAC+'/build/'+a.provider+'/xcode.log'
 # Approves the installed build as its renewal baseline only if it is exactly what was built (ios-tools renewal).
 # Renewal names local apps <provider>-local (see renewal.py).
 deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewal/scripts/deliver.py',step,'--repo','video-platform',
                      '--app',a.provider if config.get('hosts') else a.provider+'-local','--bundle',config['bundleId']]
 if a.action=='sync':
-    # Online apps bundle their Safari extension's content script from this repository's
-    # build, so the Mac (and monthly renewal) needs no Node or Video Platform checkout.
-    if web_site:
-        staged=APP/'build'/a.provider/'content.js'
-        staged.parent.mkdir(parents=True,exist_ok=True)
-        subprocess.run(['node',str(ROOT/'packages/app/scripts/build-content.mjs'),a.provider],cwd=ROOT,check=True)
-        shutil.copyfile(ROOT/'dist/content'/a.provider/'content.js',staged)
-        print('Staged',a.provider,'content.js',hashlib.sha256(staged.read_bytes()).hexdigest())
     # Tango's PC login shortcut: the server's phone key (made once, private) goes into the build.
     if config.get('native')=='tango':
         import os,secrets
@@ -39,7 +29,8 @@ if a.action=='sync':
         private=APP/'Private';private.mkdir(exist_ok=True)
         (private/'tango-phone-key').write_text(key.read_text())
         os.chmod(private/'tango-phone-key',0o600)
-    # Hosted Safari web extensions (Tango's FC2 live and SC live) are built and staged the same way.
+    # Hosted Safari web extensions (Tango's FC2 live and SC live) are built here, so the Mac (and
+    # monthly renewal) needs no Node or Video Platform checkout.
     for suffix,extension in config.get('webExtensions',{}).items():
         subprocess.run(['node',str(ROOT/'packages/live-extensions/scripts/build.mjs'),extension['source']],cwd=ROOT,check=True)
         target=APP/'build'/a.provider/suffix
@@ -48,8 +39,6 @@ if a.action=='sync':
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
     subprocess.run(['rsync','-az','--delete','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
-    if web_site:
-        subprocess.run(['rsync','-az','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/'content.js'),SSH[-1]+':'+MAC+'/build/'+a.provider+'/content.js'],check=True)
     for suffix in config.get('webExtensions',{}):
         subprocess.run(['rsync','-az','--delete','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/suffix)+'/',SSH[-1]+':'+MAC+'/build/'+a.provider+'/'+suffix+'/'],check=True)
 elif a.action=='test':
@@ -85,17 +74,9 @@ info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info['CFBundleIdentifier']=={config['bundleId']!r}
 assert info['CFBundleDisplayName']=={config['name']!r}
 assert info['StartURL']=={config['url']!r}
-assert info.get('SiteHosts')=={(config.get('hosts') if web_site else None)!r}
+assert info.get('SiteHosts') is None
 assert info.get('NativeList')=={config.get('native')!r}
 assert bool(info.get('TangoPhoneKey'))=={config.get('native')=='tango'!r}, 'The PC login key is built into Tango'
-assert info.get('DurableCookie')=={config.get('durableCookie')!r}
-assert info.get('LoginURL')=={config.get('loginUrl')!r}
-assert info.get('KeepCookies')=={config.get('keepCookies')!r}
-assert info.get('SiteWorkers')=={config.get('workers')!r}
-assert info.get('DownloadList')=={(True if config.get('downloadList') else None)!r}
-if {web_site!r}:
-    staged=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'content.js'
-    assert (app/'content.js').read_bytes()==staged.read_bytes(), 'Bundled content script differs from the staged build'
 assert not any(k.startswith('CFBundleIcon') for k in info)
 extensions=sorted(p.name for p in (app/'PlugIns').glob('*.appex')) if (app/'PlugIns').exists() else []
 assert extensions==sorted({config['product']!r}+suffix+'.appex' for suffix in {config.get('extensions',[])!r}), extensions
@@ -118,7 +99,7 @@ for suffix,extension in {config.get('webExtensions',{})!r}.items():
     assert plistlib.loads((appex/'Info.plist').read_bytes())['CFBundleDisplayName']==extension['name']
     for name in ['manifest.json','content.js','background.js']:
         assert (appex/name).read_bytes()==(pathlib.Path({MAC!r})/'build'/{a.provider!r}/suffix/name).read_bytes(), suffix+' '+name
-print('Verified bundle, name, start URL, site scope, content script, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
+print('Verified bundle, name, start URL, site scope, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
 subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
 subprocess.run({deliver('installed')!r},check=True)
 subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)

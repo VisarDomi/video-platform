@@ -10,9 +10,8 @@ parser.add_argument('--device', required=True)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 apps = []
-# Local entries are named <provider>-local so they never collide with Tango (tango-live). Online apps
-# also depend on their staged content script, and Tango on its Login helper and staged web extensions,
-# so the Mac needs no Node.
+# Local entries are named <provider>-local so they never collide with Tango (tango-live). Tango also
+# depends on its Login helper, its private PC key and its staged web extensions, so the Mac needs no Node.
 for provider, product in json.loads((root / 'providers.json').read_text()).items():
     online = bool(product.get('hosts'))
     extensions = product.get('extensions', [])
@@ -21,7 +20,6 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
                      app='build/' + provider + '/native/Release-iphoneos/' + product['product'] + '.app',
                      bundleIds=[product['bundleId']] + [product['bundleId'] + '.' + suffix for suffix in extensions],
                      inputs=['VideoApp', 'Shared', 'Kit', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
-                            + (['build/' + provider + '/content.js'] if online and not product.get('native') else [])
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
                             + (['Private'] if product.get('native') == 'tango' else [])
                             + ['build/' + provider + '/' + suffix for suffix in web],

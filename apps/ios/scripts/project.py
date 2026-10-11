@@ -80,17 +80,13 @@ for suffix in config.get('extensions', []):
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
-# Site apps still on their website (Tango) bundle its content script, staged by deploy.py sync;
-# Video Vault is native (VideoApp/VaultList.swift).
-web_site = bool(config.get('hosts')) and not config.get('native')
-resources = ['build/'+key+'/content.js'] if web_site else []
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name)
                 for name in ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']]
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
                  files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
-phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
+phases = [phase(product, 'Sources', sources), phase(product, 'Resources', []), frameworks]
 if embedded:
     phases.append(obj('Embed', 'PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=13,
                       files=embedded, name='Embed App Extensions', runOnlyForDeploymentPostprocessing=0))
@@ -118,16 +114,6 @@ if config.get('native'):
     # The PC's Tango login for this phone needs its key (a private build input, never in Git).
     key = root/'Private'/'tango-phone-key'
     if config['native'] == 'tango' and key.exists(): info['TangoPhoneKey'] = key.read_text().strip()
-elif config.get('hosts'):
-    info['SiteHosts'] = config['hosts']
-    if 'durableCookie' in config: info['DurableCookie'] = config['durableCookie']
-    if 'loginUrl' in config: info['LoginURL'] = config['loginUrl']
-    if 'keepCookies' in config: info['KeepCookies'] = config['keepCookies']
-    # Video Vault reads its other upload site through hidden web views (VideoApp/SiteWorker.swift).
-    if 'workers' in config: info['SiteWorkers'] = config['workers']
-    if login: info['TangoLogin'] = True
-    # Video Vault's page reaches the PC's download lists through the app (VideoApp/DownloadList.swift).
-    if config.get('downloadList') is True: info['DownloadList'] = True
 else:
     info['NSLocalNetworkUsageDescription'] = 'Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.'
     # A native list on the PC's API (VideoApp/LocalList.swift) instead of the website.

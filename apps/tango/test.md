@@ -1,48 +1,40 @@
 # Tango tests
 
-## Automated (PC, no real account)
+## Automated (no real account)
 
 ```bash
-npm run test:app:webkit
+python3 apps/ios/scripts/deploy.py tango-live sync
+python3 apps/ios/scripts/deploy.py tango-live test
 ```
 
-Runs `packages/app/test/providers.mjs` in Playwright WebKit against the built content
-scripts (`node packages/app/scripts/build-content.mjs tango-live` first), with every
-Tango, media and PC request answered by fixtures. For Tango it checks:
+`test` runs `apps/ios/scripts/test.sh` on the Mac, which includes `Tests/TangoTests.swift`:
+the list from Tango's gateway answers (followed streams first, then recommendations, one
+entry per streamer, blocked and ended streams hidden), names from profiles, co-streamers,
+and the session token's claims. Server routes that unblock and follow a streamer when it is
+added to the Tango download list, and the PC login for the phone
+(`/api/tango/phone-session`), are tested by `npm test -w server`.
 
-- Home: followed streams first, then recommendations, one entry per streamer, blocked
-  streamers hidden;
-- playback of the opened stream, no timeline for live streams;
-- Follow: ❤️/🤍 toggles through `/follow/remove` and `/follow/add`, also after a swipe
-  between streams (a swipe disables every overlay button until it settles; Follow and
-  Block must come back);
-- the +/- download-list button against the PC's Tango list;
-- Block: the first tap asks (❓), the second posts `BLOCK` to
-  `abregistrar/connection/v1/blocklist`, removes the streamer and moves on;
-- co-streamers listed after the main stream, ended streams replaced by the next;
-- takeover of tango.me at document start.
-
-`packages/app/test/scroll-settlement.mjs` covers swipe settlement (touch and scrollend
-boundaries, midpoint, next/previous). Server routes that unblock and follow a streamer
-when it is added to the Tango download list are tested by `npm test -w server`.
+The FC2 live and SC live extensions that Tango hosts are covered by
+`npm run test:app:webkit` (their +/- download-list button, ⚠️ for an unreachable PC).
 
 ## On the iPhone (real account)
 
-The phone is cabled to the Mac and unlocked, with the Tango app in the foreground. The
-scripts in `scripts/phone/` are evaluated in the app's page through ios-tools' WebKit
-inspector on the Mac (`scripts/phone/run.sh <script>`). The inspector does not wait for
-promises, so a check starts with one call and is read back with `state.js` until
-`result.done` is true. Button presses use the real buttons' click handlers; physical
-finger gestures are not exercised (the swipe is synthetic touch events, as in the
-WebKit tests).
+The app is native (`apps/ios/VideoApp/Tango.swift`, `TangoList.swift`), so checks are done
+by hand on the phone, or in a simulator build (`SIMULATOR=1`) through NativeKit's test hooks
+(ios-tools `native/scripts/sim`):
 
-- `state.js`: page, current stream, Follow/Block button state, the first list rows, and
-  the last check's result.
-- `follow-test.js`: swipes to the next stream, then taps Follow twice. After each step
-  it records whether the buttons are enabled and whether Tango's own following list
-  contains the streamer. Ends in the starting state.
-- `open-unfollowed.js` then `block-test.js`: opens a streamer you do not follow
-  (blocking a followed one also unfollows it), taps Block twice, and checks that the
-  stream left the list and that Tango's blocklist contains it. This is a real block:
-  undo it with `node scripts/tango-unblock-blocklist.mjs --account <id> --execute`
-  (the id is in `block-test.js`'s result as `target.id`).
+- the list opens at once with the last list and the position it had, also after the app
+  was killed, and new streams join behind it;
+- a stream plays at once, keeps playing when the phone locks, and a swipe moves to the next
+  one; an ended stream leaves the list;
+- Follow toggles ❤️/🤍; +/- edits the PC's Tango download list; Block asks once (❓) and
+  then blocks, removes the streamer and moves on;
+- sign-in: at home, "Log in from the PC" gets a new session from the PC
+  (`/api/tango/phone-session`); away from home, the Safari handoff with the Tango Login
+  extension.
+
+A Block from a test is real: undo it with
+`node apps/tango/scripts/tango-unblock-blocklist.mjs --account <id> --execute`.
+
+The WebKit inspector scripts that drove the earlier web version (`scripts/phone/`) are in
+Git history, before October 12, 2026.

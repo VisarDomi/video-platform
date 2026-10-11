@@ -1,25 +1,9 @@
 export const PROVIDERS = ['tango', 'fc2', 'sc'] as const;
 export type LocalProvider = (typeof PROVIDERS)[number];
-export type Provider = LocalProvider | 'xvideos' | 'porntrex' | 'tango-live' | 'vault';
+export type Provider = LocalProvider;
 export const DEFAULT_PROVIDER: Provider = 'tango';
 
-// Set only by the bundled iPhone shell. Safari keeps its same-origin URLs.
-declare global {
-	interface Window {
-		tangoNative?: { serverURL: string };
-		// Video Vault: the app's PC download-list requests (apps/ios VideoApp/DownloadList.swift),
-		// and Video Vault's reads of its other upload site (VideoApp/SiteWorker.swift).
-		webkit?: { messageHandlers?: {
-			downloadList?: { postMessage(message: unknown): Promise<unknown> };
-			vaultSite?: { postMessage(message: unknown): Promise<unknown> };
-			// Every app: its native viewer (routes/nativeViewer.ts, apps/ios VideoApp/ViewerBridge.swift).
-			videoViewer?: { postMessage(message: unknown): Promise<unknown> };
-		} };
-		// The page's answers to the native viewer (routes/nativeViewer.ts).
-		__videoApp?: { call(name: string, args: unknown[]): Promise<unknown> };
-	}
-}
-const mediaOrigin = typeof window === 'undefined' ? '' : window.tangoNative?.serverURL ?? '';
+const mediaOrigin = '';
 
 export const VIDEO_TYPE = {
 	ORIGINAL: 'original',

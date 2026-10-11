@@ -1,6 +1,6 @@
 # agent notes
 
-Monorepo. Packages: `app` (TypeScript frontend, also the online iPhone apps' content scripts), `server` (Express, HTTPS port `9999`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (the FC2 live and SC live Safari extensions hosted by the Tango iPhone app: download-list controls for fc2/sc; built with esbuild).
+Monorepo. Packages: `app` (TypeScript frontend: the local website; the iPhone apps in `apps/ios` are native), `server` (Express, HTTPS port `9999`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (the FC2 live and SC live Safari extensions hosted by the Tango iPhone app: download-list controls for fc2/sc; built with esbuild).
 
 Recording providers: `tango`, `fc2`, `sc`.
 Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
@@ -44,9 +44,8 @@ reloads systemd but deliberately does not restart services.
 ## Frontend - no restarting
 npm run build:app
 
-The server serves `packages/app/build` directly, so the website and the local iPhone
-apps pick up a build without a restart. Video Vault and Tango bundle their content
-script and need a deploy (`apps/ios/PORT.md`).
+The server serves `packages/app/build` directly, so the website picks up a build without a
+restart. The iPhone apps are native and need a deploy (`apps/ios/PORT.md`).
 
 ## others - depends
 check package.json

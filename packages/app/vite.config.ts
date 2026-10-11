@@ -20,22 +20,10 @@ function getHttpsConfig() {
 	return undefined;
 }
 
-// Each online app's content script bundles its provider (Video Vault: its two sites); the website keeps the local ones.
-const CONTENT_SCRIPTS = ['vault', 'tango-live'];
-
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
 	clearScreen: false,
-	resolve: { alias: { '@providers': path.resolve(import.meta.dirname, CONTENT_SCRIPTS.includes(mode) ? `src/providers/${mode}-registry.ts` : 'src/providers/local-registry.ts') } },
-	build: {
-		outDir: 'build',
-		...(CONTENT_SCRIPTS.includes(mode) ? {
-			outDir: `../../dist/content/${mode}`,
-			emptyOutDir: true,
-			target: 'safari17',
-			lib: { entry: path.resolve(import.meta.dirname, `src/content/${mode}.ts`), name: 'VideoPlatform', formats: ['iife' as const], fileName: () => 'content.js' },
-			rollupOptions: { output: { inlineDynamicImports: true } }
-		} : {})
-	},
+	resolve: { alias: { '@providers': path.resolve(import.meta.dirname, 'src/providers/local-registry.ts') } },
+	build: { outDir: 'build' },
 	server: {
 		host: '0.0.0.0',
 		port: 43210,
