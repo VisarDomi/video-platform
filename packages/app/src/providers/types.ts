@@ -50,9 +50,6 @@ export interface OnlineVideoProvider extends BaseProvider {
 	// Back to the uploads once signed in, or to `home` (Video Vault's page).
 	waitForLogin(home?: string): Promise<void>;
 	readonly live?: LiveActions;
-	// Uploads of PC recordings: the streamer of the recording, if its label names one. Which
-	// download list it belongs in is the user's choice.
-	uploadStreamer?(video: Video): string | undefined;
 	// Video Vault lists several sites in one order (and keeps its last complete list to open
 	// with), marks rows by site where that is ambiguous, and names a viewer route's video
 	// before the list arrives.
