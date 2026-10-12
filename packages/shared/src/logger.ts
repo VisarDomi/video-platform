@@ -11,6 +11,20 @@ const JOURNAL_PRIORITY: Record<string, number> = { error: 3, warn: 4, info: 6, d
 // never reaches the output.
 const SUMMARY = Symbol("repeat-summary");
 
+// An Error's name, message and cause are not enumerable, so JSON shows it as {}.
+// The line keeps them with its own fields (code, errno, syscall, path), without
+// the stack, and nested causes the same way.
+function withErrors(_key: string, value: unknown): unknown {
+    if (!(value instanceof Error)) return value;
+    const { stack: _stack, name: _name, message: _message, ...fields } = value as Error & Record<string, unknown>;
+    return {
+        name: value.name,
+        message: value.message,
+        ...fields,
+        ...(value.cause === undefined ? {} : { cause: value.cause }),
+    };
+}
+
 interface Repeat {
     readonly info: winston.Logform.TransformableInfo;
     count: number;
@@ -51,7 +65,7 @@ export function createLogger(service: string): winston.Logger {
         const { level, message, ...details } = info;
         let key: string;
         try {
-            key = `${level}\u0000${String(message)}\u0000${JSON.stringify(details)}`;
+            key = `${level}\u0000${String(message)}\u0000${JSON.stringify(details, withErrors)}`;
         } catch {
             return info;
         }
@@ -66,7 +80,7 @@ export function createLogger(service: string): winston.Logger {
 
     const line = winston.format.printf(({ timestamp, level, message, ...meta }) => {
         const metaString = Object.keys(meta).length
-            ? " " + JSON.stringify(meta, null, JSON_INDENT)
+            ? " " + JSON.stringify(meta, withErrors, JSON_INDENT)
             : "";
         const prefix = journal ? `<${JOURNAL_PRIORITY[level] ?? 6}>` : `${timestamp} `;
         return `${prefix}[${service}] ${level}: ${message}${metaString}`;
