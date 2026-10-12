@@ -9,6 +9,7 @@ import {
     type MediaIntegrityReport,
     type MediaIntegrityWarning,
 } from "./mediaIntegrityFinalizer.js";
+import { dropEntriesWithoutMedia } from "./emptyEntries.js";
 import { type FinalizationCheckpointStore, playlistFingerprint } from "./finalizationCheckpointStore.js";
 import {
     annotateCompoundSequenceRestarts,
@@ -16,8 +17,9 @@ import {
 } from "./playlistAuthority.js";
 
 // Finalization is NON-DESTRUCTIVE: it may rewrite playlist.m3u8 (durations,
-// discontinuity tags) but never removes a playlist entry and never moves or
-// deletes a media file. Problems are reported as warnings on the report.
+// discontinuity tags, entries whose files hold no bytes) but never removes an
+// entry that holds media and never moves or deletes a media file. Problems are
+// reported as warnings on the report.
 export interface FinalizedRecordingProcessorDependencies {
     // Playlist-only repair; returns findings to record as warnings.
     readonly repairPlaylist?: (streamPath: string) => Promise<readonly MediaIntegrityWarning[] | void>;
@@ -62,9 +64,15 @@ export async function findUnreferencedMediaFiles(streamPath: string): Promise<st
 }
 
 async function defaultRepairPlaylist(streamPath: string): Promise<MediaIntegrityWarning[]> {
+    const { dropped } = await dropEntriesWithoutMedia(streamPath);
     const restarts = await annotateCompoundSequenceRestarts(streamPath);
     await repairPlaylistDurations(streamPath, { apply: true });
-    return restarts.restartSegmentNames.length === 0 ? [] : [{
+    const empty: MediaIntegrityWarning[] = dropped.length === 0 ? [] : [{
+        kind: "empty-entries",
+        message: `${dropped.length} entr${dropped.length === 1 ? "y" : "ies"} whose file holds no bytes (a power loss) left the playlist; the files stay on disk`,
+        names: dropped,
+    }];
+    return restarts.restartSegmentNames.length === 0 ? empty : [...empty, {
         kind: "sequence-restart",
         message: `provider media sequence restarted ${restarts.restartSegmentNames.length} time(s); every segment kept`
             + (restarts.insertedDiscontinuityCount > 0
