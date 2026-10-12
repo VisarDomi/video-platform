@@ -112,10 +112,19 @@ stays on disk for the server to report. A torn line after the last valid entry
 is trimmed atomically; a playlist with legacy, mixed, or foreign names refuses
 to resume.
 
+A power loss can also leave NUL bytes at the end of the playlist and its last
+entries naming files whose data never reached the disk: empty, or still all
+zero bytes in their first 4 KiB. Resume, and the finalization of a recording
+that did not resume, strip the NUL bytes and cut the playlist after the last
+entry whose file has bytes (`dropped N tail entries whose media never reached
+the disk`); the files stay on disk. A missing file is not judged.
+
 **Why:** Bytes received from a live stream cannot be fetched again later. Any
 judgement about damaged media belongs to the server, which keeps it too. An
 empty frame entry carries no media, so dropping it loses nothing and keeps the
-fragment readable by players and the pipeline.
+fragment readable by players and the pipeline. The same holds for a playlist
+entry whose file holds no bytes: players stop on it (Safari about 70 seconds
+early), and a NUL line reads as a segment name.
 
 ## Capture keeps every resolution
 

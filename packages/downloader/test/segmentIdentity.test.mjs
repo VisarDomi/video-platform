@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import test from "node:test";
 import { DiskSession } from "../dist/services/download/diskSession.js";
 import { PlaylistManager } from "../dist/services/download/playlistManager.js";
 import { InitTracker } from "../dist/services/download/initTracker.js";
+import { finalizeInactiveRecording } from "../dist/services/download/activeRecording.js";
 import {
     formatSegmentName,
     normalizeRecordingId,
@@ -367,4 +368,76 @@ test("fMP4 resume publishes one discontinuity and a fresh non-overwriting map", 
     const content = await readFile(path.join(root, "playlist.m3u8"), "utf8");
     assert.equal((content.match(/#EXT-X-DISCONTINUITY/g) ?? []).length, 1);
     assert.match(content, /#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_1\.mp4"\n#EXTINF:1,\n1_public-epoch_41\.ts/);
+});
+
+// A power loss can leave the playlist's last entries naming files whose data
+// never reached the disk (empty, or allocated and still all zero bytes),
+// followed by a NUL-filled tail. Those entries carry no media and stop players.
+async function powerLossRecording(root, recordingId) {
+    const names = [0, 1, 2, 3].map((local) => formatSegmentName(local, recordingId, 20 + local));
+    await writeFile(path.join(root, names[0]), "media");
+    await writeFile(path.join(root, names[1]), Buffer.alloc(0));
+    await writeFile(path.join(root, names[2]), Buffer.alloc(4096));
+    await writeFile(path.join(root, names[3]), Buffer.alloc(0));
+    await writeFile(path.join(root, "playlist.m3u8"), [
+        "#EXTM3U", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:20",
+        "#EXTINF:2,", names[0],
+        "#EXTINF:2,", names[1],
+        "#EXTINF:2,", names[2],
+        "\0".repeat(300),
+    ].join("\n"));
+    return names;
+}
+
+test("resume drops tail entries whose media never reached the disk and keeps the files", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-empty-tail-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const recordingId = "power-loss";
+    const names = await powerLossRecording(root, recordingId);
+    const disk = new DiskSession("alias", { update() {} }, async () => root, root);
+    const manager = new PlaylistManager(disk, recordingId);
+    await manager.initializeFromExistingPlaylist(async () => ({ valid: true, duration: 2 }));
+    const content = await readFile(path.join(root, "playlist.m3u8"), "utf8");
+    assert.equal(content, ["#EXTM3U", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:20",
+        "#EXTINF:2,", names[0], ""].join("\n"));
+    assert.equal(manager.nextSegmentNumber, 4);
+    assert.deepEqual((await readdir(root)).sort(), [...names, "playlist.m3u8"].sort());
+
+    // Capture continues after the last saved media, with a boundary.
+    const next = await manager.identifyNewSegments([
+        "#EXTM3U", "#EXT-X-MEDIA-SEQUENCE:21", "#EXTINF:2,", "21.ts",
+    ].join("\n"), (line) => `https://example.test/${line}`);
+    assert.deepEqual(next.map((segment) => segment.providerSequence), [21]);
+});
+
+test("finalizing an interrupted recording drops the empty tail and the NUL bytes", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-inactive-tail-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const recordingId = "power-loss";
+    const activePath = path.join(root, ".active", "2026-10-11 111849 alias");
+    await mkdir(activePath, { recursive: true });
+    const names = await powerLossRecording(activePath, recordingId);
+    const pendingPath = await finalizeInactiveRecording(activePath);
+    const content = await readFile(path.join(pendingPath, "playlist.m3u8"), "utf8");
+    assert.equal(content, ["#EXTM3U", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:20",
+        "#EXTINF:2,", names[0], "#EXT-X-ENDLIST", ""].join("\n"));
+    assert.deepEqual((await readdir(pendingPath)).sort(), [...names, "playlist.m3u8"].sort());
+});
+
+test("a recording whose every entry lost its media keeps only the playlist header", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-all-empty-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const recordingId = "power-loss";
+    const name = formatSegmentName(0, recordingId, 20);
+    await writeFile(path.join(root, name), Buffer.alloc(0));
+    await writeFile(path.join(root, "playlist.m3u8"), [
+        "#EXTM3U", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:20",
+        "#EXT-X-PROGRAM-DATE-TIME:2026-10-11T09:25:00.000Z", "#EXTINF:2,", name, "",
+    ].join("\n"));
+    const disk = new DiskSession("alias", { update() {} }, async () => root, root);
+    const manager = new PlaylistManager(disk, recordingId);
+    await manager.initializeFromExistingPlaylist();
+    assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8"),
+        ["#EXTM3U", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:20", ""].join("\n"));
+    assert.equal(manager.nextSegmentNumber, 1);
 });

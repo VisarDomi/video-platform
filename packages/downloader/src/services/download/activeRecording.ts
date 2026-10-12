@@ -2,6 +2,8 @@ import { constants, promises as fs } from "fs";
 import * as path from "path";
 import { fixTargetDuration } from "shared";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
+import logger from "../../common/logger.js";
+import { describeDropped, recoverPlaylistTail } from "./playlistTail.js";
 
 export async function handoffActiveRecording(activePath: string): Promise<string> {
     const activeRoot = path.dirname(activePath);
@@ -34,7 +36,11 @@ export async function handoffActiveRecording(activePath: string): Promise<string
 
 export async function finalizeInactiveRecording(activePath: string): Promise<string> {
     const playlistPath = path.join(activePath, "playlist.m3u8");
-    const content = await fs.readFile(playlistPath, "utf8");
+    const original = await fs.readFile(playlistPath, "utf8");
+    const { content, dropped } = await recoverPlaylistTail(activePath, original);
+    if (dropped.length > 0 || original.includes("\0")) {
+        logger.warn(`[ActiveRecording] Recovered incomplete playlist tail at ${playlistPath}${describeDropped(dropped)}`);
+    }
     const withoutEndlist = content.split(/\r?\n/)
         .filter((line) => line.trim() !== "#EXT-X-ENDLIST")
         .join("\n")
