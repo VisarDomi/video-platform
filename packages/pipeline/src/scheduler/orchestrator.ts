@@ -63,8 +63,8 @@ export class PipelineOrchestrator {
         private readonly stages: PipelineStages,
         private readonly workerId: string,
         // Every recording is converted (slow preset, CRF 16): about 2.4x its
-        // duration, and a recording may be up to two hours. Keep it owned
-        // through the longest supported local stage.
+        // duration, so the lease covers recordings of about five hours (the
+        // longest edited recording is 2.3 hours).
         private readonly leaseMilliseconds = 12 * 60 * 60_000,
     ) {}
 
