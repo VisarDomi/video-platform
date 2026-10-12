@@ -54,8 +54,11 @@ export interface InvalidSegment {
 }
 
 // Problems found while finalizing. None of them blocks publication and none
-// is ever repaired by removing media: every playlist entry and file is kept.
+// is ever repaired by removing media: every file is kept, and only an entry
+// whose file holds no bytes leaves the playlist.
 export type MediaIntegrityWarningKind =
+    // Entries whose files hold no bytes (a power loss); taken out of the playlist, files kept.
+    | "empty-entries"
     // Segments that failed individual decoding (attributed); kept in the playlist.
     | "damaged-segments"
     // The whole-recording decode failed but no single segment could be blamed.
