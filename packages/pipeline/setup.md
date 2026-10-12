@@ -79,9 +79,10 @@ dropped**. Source folders and their playlists are never modified.
   audio). Odd TS packet sizes and a size change inside a segment are warnings.
   Only zero-byte files are left out of the encoder input (they hold no media).
   Audio is stream-copied when the inputs allow it, else re-encoded once.
-- **Limits.** An upload longer than two hours or larger than the provider's
-  file limit (Porntrex 10 GB, XVideos 50 GB) is blocked for manual review,
-  judged on the artifact's own duration.
+- **Limits.** An upload outside the active provider's limits is blocked for
+  manual review, judged on the artifact's own duration: Porntrex takes two
+  minutes to 10 GB at any length, XVideos up to two hours and 50 GB at any
+  shortness.
 - Local work without a `resolution-policy-v5` assessment is reset and
   converted again; uploaded recordings are not touched. The local-stage lease
   is 12 hours.

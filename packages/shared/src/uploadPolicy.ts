@@ -54,10 +54,10 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
     porntrex: {
         provider: "porntrex",
         uploadVisibility: "public",
-        minimumDurationSeconds: null,
-        // Not a Porntrex limit: the operator's hard limit for every upload
-        // (2026-10-05). Longer artifacts go to manual review.
-        maximumDurationSeconds: 2 * 60 * 60,
+        // Porntrex removed every upload under two minutes (4 of 4 by
+        // 2026-10-12); shorter artifacts wait for another provider.
+        minimumDurationSeconds: 2 * 60,
+        maximumDurationSeconds: null,
         maximumFileBytes: 10_000_000_000,
         inactiveDeletionDays: null,
         maintenanceVisitIntervalDays: null,
@@ -69,7 +69,11 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         }, {
             url: "https://www.porntrex.com/upload-video/",
             verifiedAt: "2026-10-05",
-            note: "Operator decision: uploads over two hours or 10 GB go to manual review instead of being uploaded.",
+            note: "Operator decision: uploads over 10 GB go to manual review instead of being uploaded.",
+        }, {
+            url: "https://www.porntrex.com/upload-video/",
+            verifiedAt: "2026-10-12",
+            note: "Operator decision: no duration limit; uploads under two minutes go to manual review (Porntrex removed all four short uploads, against 3 of 167 longer ones).",
         }],
     },
     xvideos: {
@@ -80,14 +84,15 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         maximumFileBytes: XVIDEOS_MAXIMUM_FILE_BYTES,
         inactiveDeletionDays: null,
         maintenanceVisitIntervalDays: null,
-        unresolvedConstraints: [
-            "minimumDurationSeconds",
-            "acceptedContainersAndCodecsBeyondH264AacMp4",
-        ],
+        unresolvedConstraints: ["acceptedContainersAndCodecsBeyondH264AacMp4"],
         evidence: [{
             url: "https://www.xvideos.com/account/uploads/new",
             verifiedAt: "2026-08-13",
-            note: "Authenticated upload form confirms two hours, 50 GB, 255 title characters, 1000 description characters, and 20 tags. A validated H.264/AAC MP4 uploaded successfully without saving metadata; the minimum duration remains unknown.",
+            note: "Authenticated upload form confirms two hours, 50 GB, 255 title characters, 1000 description characters, and 20 tags. A validated H.264/AAC MP4 uploaded successfully without saving metadata.",
+        }, {
+            url: "https://www.xvideos.com/account/uploads/new",
+            verifiedAt: "2026-10-12",
+            note: "Operator decision: no minimum duration; seven uploads under two minutes (the shortest 19 s) were verified.",
         }],
     },
     bunkr: {

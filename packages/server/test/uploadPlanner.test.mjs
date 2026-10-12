@@ -31,7 +31,7 @@ test("shared limits are derived from provider policies", () => {
     assert.equal(SHARED_UPLOAD_POLICY.minimumDurationSeconds, null);
     assert.equal(SHARED_UPLOAD_POLICY.maximumDurationSeconds, 7_200);
     assert.equal(SHARED_UPLOAD_POLICY.maximumFileBytes, 50_000_000_000);
-    assert(SHARED_UPLOAD_POLICY.unresolvedConstraints.includes("xvideos.minimumDurationSeconds"));
+    assert(!SHARED_UPLOAD_POLICY.unresolvedConstraints.includes("xvideos.minimumDurationSeconds"));
     assert.equal(PROVIDER_UPLOAD_POLICIES.xvideos.uploadVisibility, "private");
     assert.equal(PROVIDER_UPLOAD_POLICIES.bunkr.inactiveDeletionDays, 30);
     assert.equal(PROVIDER_UPLOAD_POLICIES.bunkr.maintenanceVisitIntervalDays, 15);

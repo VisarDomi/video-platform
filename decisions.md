@@ -251,9 +251,10 @@ server follows the account first, but only if it is not already followed.
 - **Short split pieces.** A piece shorter than 60 s
   (`MINIMUM_SPLIT_PIECE_SECONDS`) is not uploaded. It goes to `manual_pieces` and
   is listed by `review`. If no piece is long enough, the recording is blocked.
-- **Limits.** An upload over two hours (an operator limit) or over 10 GB
-  (Porntrex's limit) is blocked for review. The test uses the artifact's own
-  probed duration.
+- **Limits.** An upload outside the active provider's limits is blocked for
+  review (Porntrex: under two minutes or over 10 GB; XVideos: over two hours or
+  50 GB). The test uses the artifact's own probed duration, so a split piece of
+  one to two minutes is blocked while Porntrex is active.
 - **Local work without a v5 assessment** in its events is reset and converted
   again. Uploaded and verified recordings are not touched.
 - **Artifact cache.** A whole-recording artifact of the current recipe, found in
@@ -355,10 +356,13 @@ server follows the account first, but only if it is not already followed.
 - **Limits** come from `packages/shared/src/uploadPolicy.ts`. The pipeline checks
   each artifact against `policyForUploadProvider(<active>)`.
 
-  | Provider | Visibility | Max duration | Max size |
-  |---|---|---|---|
-  | Porntrex | public | 2 h (operator limit) | 10 GB |
-  | XVideos | private | 2 h | 50 GB |
+  | Provider | Visibility | Min duration | Max duration | Max size |
+  |---|---|---|---|---|
+  | Porntrex | public | 2 min (operator limit) | none | 10 GB |
+  | XVideos | private | none | 2 h | 50 GB |
+
+  Porntrex removed every upload under two minutes (4 of 4 by 2026-10-12,
+  against 3 of 167 longer ones), so shorter ones wait for another provider.
 
   `SHARED_UPLOAD_POLICY` and `UPLOAD_PROVIDER_PLAN` (XVideos primary, Bunkr
   unavailable) feed only the server re-export `services/upload/uploadPolicy.ts`,

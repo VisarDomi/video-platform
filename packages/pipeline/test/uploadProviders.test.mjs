@@ -31,15 +31,27 @@ test("provider-keyed private credentials only; a legacy activeProvider field is 
     assert.throws(() => readUploadProvidersFile(file), /private file/);
 });
 
-test("Porntrex hard limits are inclusive: two hours and 10GB go to manual review, XVideos keeps its 50GB cap", () => {
-    const artifact = { id: "one", path: "/tmp/fixture.mp4", durationSeconds: 2 * 3600, sizeBytes: 10_000_000_000 };
-    assert.equal(assessFinalArtifact(artifact, policyForUploadProvider("porntrex")).disposition, "ready_for_upload");
-    const over = assessFinalArtifact({ ...artifact, sizeBytes: artifact.sizeBytes + 1 }, policyForUploadProvider("porntrex"));
+test("Porntrex takes 2 minutes to 10GB at any length; XVideos takes up to two hours or 50GB at any shortness", () => {
+    const porntrex = policyForUploadProvider("porntrex");
+    const xvideos = policyForUploadProvider("xvideos");
+    const artifact = { id: "one", path: "/tmp/fixture.mp4", durationSeconds: 120, sizeBytes: 10_000_000_000 };
+    // Both limits are inclusive.
+    assert.equal(assessFinalArtifact(artifact, porntrex).disposition, "ready_for_upload");
+    const short = assessFinalArtifact({ ...artifact, durationSeconds: 119.9 }, porntrex);
+    assert.equal(short.disposition, "skipped_too_short");
+    assert.match(short.notification.message, /below the porntrex 120s minimum/);
+    const over = assessFinalArtifact({ ...artifact, sizeBytes: artifact.sizeBytes + 1 }, porntrex);
     assert.equal(over.disposition, "blocked_too_large");
     assert.match(over.notification.message, /porntrex 10000000000-byte maximum/);
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 + 1 }, policyForUploadProvider("porntrex")).disposition, "blocked_too_long");
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 3 * 3600 }, policyForUploadProvider("xvideos")).disposition, "blocked_too_long");
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 11_000_000_000 }, policyForUploadProvider("xvideos")).disposition, "ready_for_upload");
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 6 * 3600 }, porntrex).disposition, "ready_for_upload");
+
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 3 }, xvideos).disposition, "ready_for_upload");
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 }, xvideos).disposition, "ready_for_upload");
+    const long = assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 + 1 }, xvideos);
+    assert.equal(long.disposition, "blocked_too_long");
+    assert.match(long.notification.message, /exceeds the xvideos 7200s maximum/);
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 50_000_000_000 }, xvideos).disposition, "ready_for_upload");
+    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 50_000_000_001 }, xvideos).disposition, "blocked_too_large");
 });
 
 test("native password login uses only its same-origin, unique form and never a social button", async t => {
