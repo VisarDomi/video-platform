@@ -161,6 +161,58 @@ test("regressed provider sequences are kept, in order, behind one discontinuity"
     assert.deepEqual((await readdir(recording)).sort(), [...names, "playlist.m3u8"].sort());
 });
 
+// A power loss leaves entries whose files never got their data (empty, or
+// still all zero bytes) and NUL bytes in the playlist. Such an entry holds no
+// media: it leaves the playlist, and its file stays on disk.
+test("entries whose files hold no bytes leave the playlist, with a boundary where media resumes", async (t) => {
+    const names = ["0_rec_10.ts", "1_rec_11.ts", "2_rec_12.ts", "3_rec_13.ts", "4_rec_14.ts"];
+    const { recording, checkpointStore } = await temporaryRecording(t, [names[0], names[3]], [
+        "#EXTM3U", "#EXT-X-TARGETDURATION:1", "#EXT-X-MEDIA-SEQUENCE:10",
+        ...names.flatMap((name) => ["#EXTINF:1,", name]),
+        "\0".repeat(200),
+        "#EXT-X-ENDLIST", "",
+    ].join("\n"));
+    await writeFile(path.join(recording, names[1]), Buffer.alloc(0));
+    await writeFile(path.join(recording, names[2]), Buffer.alloc(4096));
+    await writeFile(path.join(recording, names[4]), Buffer.alloc(0));
+
+    const result = await processFinalizedRecording(recording, { checkpointStore, validateMedia: async () => valid });
+
+    assert.equal(result.report.status, "ready");
+    const playlist = await readFile(path.join(recording, "playlist.m3u8"), "utf8");
+    assert.doesNotMatch(playlist, /\0/);
+    assert.deepEqual(await uris(recording), [names[0], names[3]]);
+    assert.match(playlist, /0_rec_10\.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:[\d.]+,\n3_rec_13\.ts\n#EXT-X-ENDLIST\n$/);
+    const dropped = result.report.warnings.find((item) => item.kind === "empty-entries");
+    assert.deepEqual(dropped.names, [names[1], names[2], names[4]]);
+    assert.deepEqual(result.report.warnings.find((item) => item.kind === "unreferenced-media").names,
+        [names[1], names[2], names[4]]);
+    assert.deepEqual((await readdir(recording)).sort(), [...names, "playlist.m3u8"].sort());
+});
+
+test("an empty fMP4 entry hands its map and boundary to the next entry", async (t) => {
+    const files = ["init.mp4", "init_2.mp4", "0_rec_10.ts", "2_rec_12.ts"];
+    const { recording, checkpointStore } = await temporaryRecording(t, files, [
+        "#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:10",
+        '#EXT-X-MAP:URI="init.mp4"',
+        "#EXTINF:2.000,", "0_rec_10.ts",
+        "#EXT-X-DISCONTINUITY", '#EXT-X-MAP:URI="init_2.mp4"',
+        "#EXTINF:2.000,", "1_rec_11.ts",
+        "#EXTINF:2.000,", "2_rec_12.ts",
+        "#EXT-X-ENDLIST", "",
+    ].join("\n"));
+    await writeFile(path.join(recording, "1_rec_11.ts"), Buffer.alloc(0));
+
+    const result = await processFinalizedRecording(recording, {
+        checkpointStore, validateMedia: async () => valid, inspectFragment: async () => null,
+    });
+
+    assert.equal(result.report.status, "ready");
+    assert.match(await readFile(path.join(recording, "playlist.m3u8"), "utf8"),
+        /0_rec_10\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_2\.mp4"\n#EXTINF:2\.000,\n2_rec_12\.ts\n#EXT-X-ENDLIST\n$/);
+    assert.deepEqual(result.report.warnings.find((item) => item.kind === "empty-entries").names, ["1_rec_11.ts"]);
+});
+
 test("only a playlist without entries and without unreferenced media segments may be discarded", () => {
     const report = (status, warnings = []) => ({ version: 2, status, invalidSegments: [], warnings });
     assert.equal(pendingRecordingDisposition(report("ready", [{ kind: "validation-incomplete", message: "x" }])), "publish");

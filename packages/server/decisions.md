@@ -12,6 +12,12 @@ queued.
 
 Processing a pending recording (`processFinalizedRecording`):
 
+0. NUL bytes in the playlist are removed, and an entry whose file holds no
+   bytes (empty, or all zero bytes in its first 4 KiB: a power loss before the
+   data reached the disk) leaves the playlist with an `empty-entries` warning.
+   Its tags that still apply (a discontinuity, an init map) pass to the next
+   entry, which starts after a discontinuity where media resumes. The file
+   stays on disk; a missing file is not judged.
 1. Provider sequence restarts (a compound segment name whose sequence does not
    increase) are kept; a missing `#EXT-X-DISCONTINUITY` is added before each
    one and the restarts are reported as a `sequence-restart` warning.
@@ -35,9 +41,9 @@ Processing a pending recording (`processFinalizedRecording`):
    playlist; damage below that comes from the stream itself (most Tango
    recordings carry a few corrupted macroblocks) and is an info line.
 
-Finalization may rewrite only `playlist.m3u8` (durations and discontinuity
-tags). It never removes a playlist entry and never moves or deletes a media
-file.
+Finalization may rewrite only `playlist.m3u8` (durations, discontinuity tags,
+and entries whose files hold no bytes). It never removes an entry that holds
+media and never moves or deletes a media file.
 
 The report (version 2, validator revision 5) has status `ready` (published,
 possibly with `warnings`), `empty` (no playlist entries), or `failed`. `failed`
@@ -60,7 +66,9 @@ processed.
 **Why:** Captured media cannot be captured again. Dropping or trashing a
 segment loses it, and holding back a recording for one bad segment hides all
 the rest. Warnings keep the evidence while every recording stays available to
-the viewer and the pipeline.
+the viewer and the pipeline. An entry whose file holds no bytes has no media to
+lose; left in place it stops players (Safari about 70 seconds before it), and a
+NUL line reads as a segment name that makes the playlist uninterpretable.
 
 ## Finalization checkpoints and stderr handling
 

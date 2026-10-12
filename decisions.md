@@ -114,21 +114,23 @@ server follows the account first, but only if it is not already followed.
   watch costs one inotify watch per recording folder and exhausts the system
   budget.
 - **Steps for each recording:**
-  1. mark provider sequence restarts with discontinuities;
-  2. rewrite EXTINF (`PlaylistAuthority`);
-  3. list unreferenced files;
-  4. validate;
-  5. atomically rename into `<provider>/downloaded/`.
+  1. take out NUL bytes and entries whose files hold no bytes;
+  2. mark provider sequence restarts with discontinuities;
+  3. rewrite EXTINF (`PlaylistAuthority`);
+  4. list unreferenced files;
+  5. validate;
+  6. atomically rename into `<provider>/downloaded/`.
 
   The queue is one deduplicating FIFO with `os.availableParallelism()` workers. Each
   worker waits 15 s between recordings (`QUEUE_COOLDOWN_MS`).
 - **Finalization is non-destructive.** It may rewrite only `playlist.m3u8`
-  (durations and discontinuity tags). It never removes an entry and never moves or
+  (durations, discontinuity tags, and entries whose files hold no bytes after a
+  power loss). It never removes an entry that holds media and never moves or
   deletes a media file.
   - Problems become `warnings` on a `ready` report and the recording still
-    publishes. The kinds are `damaged-segments`, `unattributed-damage`,
-    `validation-incomplete`, `unreferenced-media`, `sequence-restart` and
-    `retired-repair-journal`.
+    publishes. The kinds are `empty-entries`, `damaged-segments`,
+    `unattributed-damage`, `validation-incomplete`, `unreferenced-media`,
+    `sequence-restart` and `retired-repair-journal`.
   - `failed` means only that the environment failed (ffmpeg could not run, or I/O
     failed). It is retried later.
   - `empty` (no entries and no unreferenced media) moves the folder to desktop

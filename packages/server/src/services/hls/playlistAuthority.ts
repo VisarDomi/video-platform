@@ -446,7 +446,7 @@ export function requiresFfprobeFallback(
     return duration === null || (source === "stream-duration" && needsFfprobeFallback);
 }
 
-async function writeFileAtomic(filePath: string, content: string): Promise<void> {
+export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
     let handle;
     try {
