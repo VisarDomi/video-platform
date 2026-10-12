@@ -9,6 +9,13 @@ public protocol ThumbnailStripDelegate: AnyObject {
     func strip(_ strip: ThumbnailStripView, didSelect index: Int)
     // The strip's own scroll settled (save its offset).
     func stripDidSettle(_ strip: ThumbnailStripView)
+    // The thumbnail's file when it is already on the phone (a relaunch shows it in its first
+    // frame: ImagePipeline.beginRestore).
+    func strip(_ strip: ThumbnailStripView, localFileFor index: Int) -> URL?
+}
+
+public extension ThumbnailStripDelegate {
+    func strip(_ strip: ThumbnailStripView, localFileFor index: Int) -> URL? { nil }
 }
 
 // A row of fixed-size thumbnails scrolled sideways (the gallery apps' strips: 100×300
@@ -128,7 +135,8 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
 
     private func request(_ index: Int) -> ImagePipeline.Request {
         let key = keys[index]
-        return ImagePipeline.Request(key: key, source: delegate?.strip(self, sourceFor: index) ?? .load({ throw CancellationError() }), fit: fit) { [weak self] in
+        return ImagePipeline.Request(key: key, source: delegate?.strip(self, sourceFor: index) ?? .load({ throw CancellationError() }), fit: fit,
+                                     localFile: delegate?.strip(self, localFileFor: index)) { [weak self] in
             self?.distanceFromScreen(index) ?? .infinity
         }
     }

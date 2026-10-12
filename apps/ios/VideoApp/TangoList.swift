@@ -41,6 +41,9 @@ final class TangoListController: VideoListController {
             guard let self else { return [:] }
             return ["streams": streams.count, "signedIn": session.signedIn, "login": loginView != nil, "loading": loading != nil]
         }
+        // The sign-in screen as last shown comes back in the first frame; the session (and the
+        // PC) are asked again behind it.
+        if let shown = try? DurableFile.readJSON(LoginShown.self, from: loginFile) { showLogin(shown.reason, pc: shown.pc) }
         migrateCookies { [weak self] in self?.signIn() }
     }
 
@@ -58,10 +61,12 @@ final class TangoListController: VideoListController {
         keptWriter.flush()
     }
 
-    // A confirmed Safari import moves in; then the list, or the login screen.
+    // A confirmed Safari import moves in; then the list, or the login screen. A sign-in screen
+    // already showing stays until the session has worked (a token Tango then rejects would
+    // otherwise hide it for a second and bring it back).
     private func signIn() {
         _ = takeInbox()
-        if session.signedIn { hideLogin(); reload() } else { showLogin(nil) }
+        if session.signedIn { reload() } else { showLogin(nil) }
     }
 
     // MARK: the list
@@ -79,10 +84,12 @@ final class TangoListController: VideoListController {
                 keptWriter.save(json: streams)
                 publish()
                 hideFailure()
+                hideLogin()
             } catch TangoError.loginRequired {
                 showLogin("Tango signed out.")
             } catch {
-                if !Task.isCancelled, streams.isEmpty { showFailure("Can't reach Tango.\n\(error.localizedDescription)") }
+                if !Task.isCancelled, loginView != nil { showLogin("Can't reach Tango to check the login.\n\(error.localizedDescription)") }
+                else if !Task.isCancelled, streams.isEmpty { showFailure("Can't reach Tango.\n\(error.localizedDescription)") }
             }
             refresh.endRefreshing()
             loading = nil
@@ -169,7 +176,16 @@ final class TangoListController: VideoListController {
 
     // MARK: signing in
 
-    private func showLogin(_ reason: String?) {
+    private struct LoginShown: Codable {
+        var reason: String?
+        var pc: Bool
+    }
+
+    private var loginFile: URL { directory.appendingPathComponent("tango-login.json") }
+    private var loginReason: String?
+
+    private func showLogin(_ reason: String?, pc known: Bool? = nil) {
+        loginReason = reason
         if loginView == nil {
             let view = TangoLoginView()
             view.onConfirm = { [weak self] in self?.confirmImport() }
@@ -180,16 +196,23 @@ final class TangoListController: VideoListController {
             loginView = view
         }
         loginView?.show(reason: reason, pending: (try? LoginStore.load()) != nil)
+        // The PC's button as last seen until the PC answers again.
+        let lastPC = known ?? (try? DurableFile.readJSON(LoginShown.self, from: loginFile))?.pc ?? false
+        loginView?.showPC(lastPC)
+        try? DurableFile.writeJSON(LoginShown(reason: reason, pc: lastPC), to: loginFile)
         guard let pc else { return }
         Task { [weak self] in
             let available = await pc.available()
-            self?.loginView?.showPC(available)
+            guard let self, loginView != nil else { return }
+            loginView?.showPC(available)
+            try? DurableFile.writeJSON(LoginShown(reason: loginReason, pc: available), to: loginFile)
         }
     }
 
     private func hideLogin() {
         loginView?.removeFromSuperview()
         loginView = nil
+        try? FileManager.default.removeItem(at: loginFile)
     }
 
     // Tango Login's Keychain inbox: an import waits until the user confirms Safari's copy was
@@ -213,6 +236,7 @@ final class TangoListController: VideoListController {
             guard var inbox = try LoginStore.load() else { loginView?.show(reason: "No Tango login was imported yet.", pending: false); return }
             inbox.handoffComplete = true
             try LoginStore.save(inbox)
+            loginView?.working("Signing in to Tango…")
             signIn()
         } catch { loginView?.show(reason: error.localizedDescription, pending: true) }
     }

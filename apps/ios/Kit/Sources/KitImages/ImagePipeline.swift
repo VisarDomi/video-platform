@@ -37,10 +37,13 @@ public final class ImagePipeline {
         public let source: ImageSource
         public let fit: ImageFit
         public let priority: () -> Double
-        public init(key: String, source: ImageSource, fit: ImageFit, priority: @escaping () -> Double) {
+        // The image's file when it is already on the phone (see beginRestore).
+        public let localFile: URL?
+        public init(key: String, source: ImageSource, fit: ImageFit, localFile: URL? = nil, priority: @escaping () -> Double) {
             self.key = key
             self.source = source
             self.fit = fit
+            self.localFile = localFile
             self.priority = priority
         }
     }
@@ -61,6 +64,10 @@ public final class ImagePipeline {
     private var running = 0
     private var nextID: UInt64 = 0
     private var ticketKeys: [UInt64: String] = [:]
+    private var restoreBudget: CFTimeInterval = 0
+    private var restoreLink: CADisplayLink?
+    private var restoreFrames = 0
+    public private(set) var restoredNow = 0
 
     public init(memoryLimit: Int = 192 << 20, concurrency: Int = 4) {
         cache.totalCostLimit = memoryLimit
@@ -70,13 +77,43 @@ public final class ImagePipeline {
     // Whenever the screen's geometry changes the priorities (a scroll moved).
     public func prioritiesChanged() { queueStale = true }
 
+    // A relaunch restoring the screens as they were left: until a few frames have been shown,
+    // an image whose file is already on the phone (Request.localFile) is decoded at once on
+    // the main thread, so the first frame has it instead of an empty box filled moments later.
+    // `budget` bounds the time spent so (beyond it, decoding is off the main thread as always).
+    public func beginRestore(budget: CFTimeInterval = 0.5, frames: Int = 4) {
+        restoreBudget = budget
+        restoreFrames = frames
+        let link = CADisplayLink(target: RestoreTicker { [weak self] in self?.restoreTick() }, selector: #selector(RestoreTicker.fire))
+        link.add(to: .main, forMode: .common)
+        restoreLink = link
+    }
+
+    private func restoreTick() {
+        restoreFrames -= 1
+        guard restoreFrames <= 0 else { return }
+        restoreBudget = 0
+        restoreLink?.invalidate()
+        restoreLink = nil
+    }
+
+    private func restoreNow(_ request: Request) -> UIImage? {
+        guard restoreBudget > 0, let file = request.localFile else { return nil }
+        let start = CACurrentMediaTime()
+        defer { restoreBudget -= CACurrentMediaTime() - start }
+        guard let image = try? Self.decodeNow(file, fit: request.fit) else { return nil }
+        restoredNow += 1
+        cache.setObject(image, forKey: Self.cacheKey(request.key, request.fit), cost: Self.cost(image))
+        return image
+    }
+
     public func cached(_ key: String, fit: ImageFit) -> UIImage? { cache.object(forKey: Self.cacheKey(key, fit)) }
 
     @discardableResult
     public func load(_ request: Request, completion: @escaping (Result<UIImage, Error>) -> Void) -> ImageTicket {
         nextID += 1
         let ticket = ImageTicket(id: nextID, pipeline: self)
-        if let image = cached(request.key, fit: request.fit) {
+        if let image = cached(request.key, fit: request.fit) ?? restoreNow(request) {
             completion(.success(image))
             return ticket
         }
@@ -102,7 +139,7 @@ public final class ImagePipeline {
         pending[key] = nil
     }
 
-    public var state: [String: Any] { ["pending": pending.count, "running": running, "cacheLimit": cache.totalCostLimit] }
+    public var state: [String: Any] { ["pending": pending.count, "running": running, "cacheLimit": cache.totalCostLimit, "restoredNow": restoredNow] }
 
     private func pump() {
         while running < concurrency {
@@ -131,7 +168,7 @@ public final class ImagePipeline {
         running -= 1
         if pending[key] === entry { pending[key] = nil }
         if case .success(let image) = result {
-            cache.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
+            cache.setObject(image, forKey: key as NSString, cost: Self.cost(image))
         }
         for (id, completion) in entry.completions {
             ticketKeys[id] = nil
@@ -152,35 +189,40 @@ public final class ImagePipeline {
 
     nonisolated static func cacheKey(_ key: String, _ fit: ImageFit) -> NSString { "\(fit)|\(key)" as NSString }
 
+    nonisolated static func cost(_ image: UIImage) -> Int { Int(image.size.width * image.size.height * image.scale * image.scale * 4) }
+
     // A decoded image stays under this many pixels (64 MB): an extreme strip decodes softer
     // rather than taking the memory of a dozen pages.
     nonisolated static let pixelBudget = 16_000_000
 
     // Downsampled and fully decoded off the main thread; the original's orientation applied.
     nonisolated public static func decode(_ file: URL, fit: ImageFit) async throws -> UIImage {
-        try await Task.detached(priority: .userInitiated) {
-            guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
-                throw ImageError.unreadable(file)
-            }
-            let size = pixelSize(source) ?? CGSize(width: 1, height: 1)
-            let longest = max(size.width, size.height, 1)
-            var scale: CGFloat
-            switch fit {
-            case .width(let width): scale = CGFloat(width) / max(size.width, 1)
-            case .cover(let width, let height): scale = max(CGFloat(width) / max(size.width, 1), CGFloat(height) / max(size.height, 1))
-            case .maxPixel(let pixels): scale = CGFloat(pixels) / longest
-            }
-            scale = min(scale, 1, sqrt(CGFloat(pixelBudget) / max(size.width * size.height, 1)))
-            let maxPixel = max(1, Int((longest * scale).rounded(.up)))
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
-            ]
-            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw ImageError.unreadable(file) }
-            return UIImage(cgImage: image)
-        }.value
+        try await Task.detached(priority: .userInitiated) { try decodeNow(file, fit: fit) }.value
+    }
+
+    // The same, on the calling thread.
+    nonisolated public static func decodeNow(_ file: URL, fit: ImageFit) throws -> UIImage {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            throw ImageError.unreadable(file)
+        }
+        let size = pixelSize(source) ?? CGSize(width: 1, height: 1)
+        let longest = max(size.width, size.height, 1)
+        var scale: CGFloat
+        switch fit {
+        case .width(let width): scale = CGFloat(width) / max(size.width, 1)
+        case .cover(let width, let height): scale = max(CGFloat(width) / max(size.width, 1), CGFloat(height) / max(size.height, 1))
+        case .maxPixel(let pixels): scale = CGFloat(pixels) / longest
+        }
+        scale = min(scale, 1, sqrt(CGFloat(pixelBudget) / max(size.width * size.height, 1)))
+        let maxPixel = max(1, Int((longest * scale).rounded(.up)))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw ImageError.unreadable(file) }
+        return UIImage(cgImage: image)
     }
 
     // The image's pixel size without decoding it (orientation applied).
@@ -195,6 +237,14 @@ public final class ImagePipeline {
         let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
         return orientation >= 5 ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
     }
+}
+#endif
+
+#if canImport(UIKit)
+private final class RestoreTicker: NSObject {
+    let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func fire() { action() }
 }
 #endif
 

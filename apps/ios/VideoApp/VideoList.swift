@@ -296,7 +296,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     // A killed app reopens its viewer; the list catches up underneath.
     private func restoreViewer() {
         guard let saved = ViewerCheckpoint.load(directory) else { return }
-        showViewer(videos: saved.videos, index: saved.videos.firstIndex { $0.key == saved.current } ?? 0)
+        showViewer(videos: saved.videos, index: saved.videos.firstIndex { $0.key == saved.current } ?? 0, restoring: true)
     }
 
     // MARK: forward
@@ -342,10 +342,11 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         }
     }
 
-    private func showViewer(videos: [ViewerVideo], index: Int) {
+    private func showViewer(videos: [ViewerVideo], index: Int, restoring: Bool = false) {
         viewer?.close()
         let controller = ViewerController(provider: viewerProvider, videos: videos, index: index, host: self,
                                           media: media, progress: progress, checkpoint: checkpoint)
+        controller.restoring = restoring
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }
             controller.willMove(toParent: nil)

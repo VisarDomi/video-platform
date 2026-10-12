@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import KitCore
 
 // One video as the list page describes it (packages/app routes/nativeViewer.ts): the provider's
@@ -136,8 +137,36 @@ struct ViewerCheckpoint {
 // Saves the checkpoint off the main thread, newest first. Every swipe saves it, and a long list
 // takes a while to encode (Tango's 4,000 recordings, about 60 ms on the phone): long enough to
 // stutter the swipe that saved it.
+// The picture on screen when the app left it, where it was and whether the controls showed
+// (viewer-poster.jpg and .json): a relaunch into the viewer shows it in its first frame, until
+// the player has its own first picture of the same video.
+struct ViewerPoster: Codable {
+    let key: String
+    let frame: [Double]
+    let controls: Bool
+
+    static func image(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-poster.jpg") }
+    static func info(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-poster.json") }
+
+    static func load(_ directory: URL) -> (poster: ViewerPoster, image: UIImage)? {
+        guard let poster = try? DurableFile.readJSON(ViewerPoster.self, from: info(directory)), poster.frame.count == 4,
+              let image = UIImage(contentsOfFile: image(directory).path) else { return nil }
+        return (poster, image)
+    }
+
+    static func save(_ poster: ViewerPoster, jpeg: Data, in directory: URL) {
+        try? DurableFile.write(jpeg, to: image(directory))
+        try? DurableFile.writeJSON(poster, to: info(directory))
+    }
+
+    static func clear(_ directory: URL) {
+        try? FileManager.default.removeItem(at: info(directory))
+        try? FileManager.default.removeItem(at: image(directory))
+    }
+}
+
 final class CheckpointWriter: @unchecked Sendable {
-    private let directory: URL
+    let directory: URL
     private let queue = DispatchQueue(label: "viewer-checkpoint", qos: .utility)
     private let lock = NSLock()
     private var pending: [String: Any]?

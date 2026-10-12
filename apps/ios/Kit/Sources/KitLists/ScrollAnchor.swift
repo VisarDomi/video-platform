@@ -24,12 +24,15 @@ public enum ScrollAnchoring {
         return ScrollAnchor(key: hit.key, fraction: Double((line - hit.frame.minY) / max(hit.frame.height, 1)))
     }
 
-    // Scrolls so the anchor is back at the middle; false when the item is not in `frame`.
+    // Scrolls so the anchor is back at the middle; false when the item is not in `frame`. It needs
+    // no layout first: a list restored before its first layout builds only the rows at the
+    // anchor (their images are the ones decoded for the first frame), not those at the top.
     @discardableResult
     public static func restore(_ anchor: ScrollAnchor, in scrollView: UIScrollView, frame: CGRect?) -> Bool {
         guard let frame else { return false }
         let line = frame.minY + frame.height * anchor.fraction
-        let maxOffset = max(-scrollView.adjustedContentInset.top,
+        // Before the first layout the content size is not known yet: no end to keep within.
+        let maxOffset = scrollView.contentSize.height <= 0 ? CGFloat.greatestFiniteMagnitude : max(-scrollView.adjustedContentInset.top,
                             scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)
         let y = min(max(-scrollView.adjustedContentInset.top, line - scrollView.bounds.height / 2), maxOffset)
         scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: y)

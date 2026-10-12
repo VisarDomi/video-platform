@@ -51,6 +51,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     private var interactiveForward: UIPercentDrivenInteractiveTransition?
     private var pushingForward = false
     private var saveScheduled = false
+    private var warmed = false
 
     public init(file: URL, factory: @escaping Factory, root: @autoclosure () -> any LiveScreen) {
         writer = BackgroundWriter(url: file, label: "kit-navigation")
@@ -76,6 +77,24 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
         forwardPan.edges = .right
         forwardPan.delegate = self
         view.addGestureRecognizer(forwardPan)
+    }
+
+    // After a relaunch the screens below the top are built too, off screen at the screen's size,
+    // once the top one is showing: going back then reveals them complete (their images already
+    // asked for), not filling in during the swipe.
+    override public func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !warmed else { return }
+        warmed = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for screen in viewControllers.dropLast() where !screen.isViewLoaded {
+                screen.loadViewIfNeeded()
+                screen.view.frame = view.bounds
+                screen.view.setNeedsLayout()
+                screen.view.layoutIfNeeded()
+            }
+        }
     }
 
     override public var childForStatusBarHidden: UIViewController? { topViewController }

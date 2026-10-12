@@ -70,6 +70,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var observers: [NSObjectProtocol] = []
     private var lastBounds: CGSize = .zero
     private var closed = false
+    // Restoring after a relaunch: the last picture over the feed until the player has its own.
+    var restoring = false
+    private var poster: UIImageView?
+    private var posterReady: NSKeyValueObservation?
 
     init(provider: String, videos: [ViewerVideo], index: Int, host: ViewerHost, media: ViewerMedia,
          progress: ProgressStore, checkpoint: CheckpointWriter) {
@@ -188,12 +192,20 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             },
         ]
 
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.savePoster() }
+        })
+
         // The selected video gets the network first; its neighbours load once it has a picture.
         guard let video = currentVideo else { return }
+        if restoring { showPoster(for: video) }
         overlay.setVideo(video)
         overlay.setUiVisible(controlsVisible)
         overlay.setMuted(true)
-        active.load(video, start: savedTime(video), play: true)
+        // The saved time at once (not 0:00 until the player reports it).
+        let start = savedTime(video), duration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
+        if !video.liveStream && duration > 0 { overlay.setTimeline(TimelineSnapshot(currentTime: start, duration: duration, seekMax: duration)) }
+        active.load(video, start: start, play: true)
         revealTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.reveal() }
         }
@@ -265,7 +277,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         revealTimer?.invalidate()
         layoutFeed()
         centerActive()
-        UIView.animate(withDuration: 0.12) { self.feed.alpha = 1 }
+        // Under a poster the feed shows at once; the poster goes when the player has a picture.
+        if poster != nil { feed.alpha = 1; removePosterWhenPlaying() }
+        else { UIView.animate(withDuration: 0.12) { self.feed.alpha = 1 } }
         loadEdgeUnits()
         activateCurrent()
         prepareZoom()
@@ -753,6 +767,52 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         session.nowPlaying(currentVideo, active.snapshot(), playing: active.player.rate > 0)
     }
 
+    // MARK: the poster
+
+    private func showPoster(for video: ViewerVideo) {
+        guard let (saved, image) = ViewerPoster.load(checkpoint.directory), saved.key == video.key else { return }
+        let poster = UIImageView(image: image)
+        poster.frame = CGRect(x: saved.frame[0], y: saved.frame[1], width: saved.frame[2], height: saved.frame[3])
+        poster.contentMode = .scaleToFill
+        view.insertSubview(poster, belowSubview: overlay)
+        self.poster = poster
+        controlsVisible = saved.controls
+    }
+
+    private func removePosterWhenPlaying() {
+        let layer = active.view.playerLayer
+        if layer.isReadyForDisplay { removePoster(); return }
+        posterReady = layer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            DispatchQueue.main.async { self?.removePoster() }
+        }
+        // A player that never draws (offline, an ended stream) does not keep a stale picture.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.removePoster() }
+    }
+
+    private func removePoster() {
+        posterReady = nil
+        poster?.removeFromSuperview()
+        poster = nil
+    }
+
+    // Leaving the screen: the current picture (the video's part of the unit, as drawn) for a
+    // relaunch. Zoomed, or without a picture yet, there is none.
+    private func savePoster() {
+        let directory = checkpoint.directory
+        // Still showing the saved poster: it stays the one to show.
+        guard poster == nil else { return }
+        guard revealed, !zoomed, let video = currentVideo, active.presentationSize != .zero else { ViewerPoster.clear(directory); return }
+        let unit = active.view
+        let rect = AVMakeRect(aspectRatio: active.presentationSize, insideRect: unit.bounds)
+        guard rect.width > 1, rect.height > 1 else { ViewerPoster.clear(directory); return }
+        let image = UIGraphicsImageRenderer(bounds: rect).image { _ in unit.drawHierarchy(in: unit.bounds, afterScreenUpdates: false) }
+        let frame = unit.convert(rect, to: view)
+        guard let jpeg = image.jpegData(compressionQuality: 0.85) else { return }
+        ViewerPoster.save(ViewerPoster(key: video.key, frame: [frame.minX, frame.minY, frame.width, frame.height].map(Double.init), controls: controlsVisible),
+                          jpeg: jpeg, in: directory)
+    }
+
     // MARK: lifecycle
 
     // In the background a player keeps playing only without its picture: the layers let go of
@@ -790,6 +850,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         saveProgress()
         progress.flush()
         checkpoint.clear()
+        ViewerPoster.clear(checkpoint.directory)
+        removePoster()
         let filename = currentVideo?.filename
         units.forEach { $0.clear() }
         zoomContent.playerLayer.player = nil

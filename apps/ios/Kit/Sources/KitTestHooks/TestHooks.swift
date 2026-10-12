@@ -15,6 +15,8 @@ import KitCore
 //   curl localhost:8765/back | /forward            the navigation stack
 //   curl localhost:8765/zoom?scale=2.5             the frontmost zooming scroll view
 //   curl localhost:8765/action?name=...            an app-registered action
+//   curl localhost:8765/layout                     what is on screen, as positions (see Layout)
+//   curl localhost:8765/timeline                   the layout at the first frames after launch
 // Every answer is JSON; screenshots come from `xcrun simctl io booted screenshot`.
 @MainActor
 public final class TestHooks {
@@ -23,6 +25,11 @@ public final class TestHooks {
     private var actions: [String: ([String: String]) -> Any] = [:]
     public var back: (() -> Void)?
     public var forward: (() -> Void)?
+    private var timeline: [[String: Any]] = []
+    private var displayLink: CADisplayLink?
+    private var launched = CACurrentMediaTime()
+    private var firstFrame: CFTimeInterval?
+    private var samples: [Double] = []
 
     public func register(_ name: String, _ action: @escaping ([String: String]) -> Any) { actions[name] = action }
 
@@ -47,6 +54,29 @@ public final class TestHooks {
         listener.start(queue: .main)
         self.listener = listener
         Log.app.info("Test hooks listening on 127.0.0.1:\(port.rawValue)")
+        recordLaunch()
+    }
+
+    // The layout at the first frame that shows the app's screen and at fixed times after it, so a
+    // relaunch can be compared with the screen as it was left (a restore is exact when the first
+    // sample already matches).
+    private func recordLaunch() {
+        launched = CACurrentMediaTime()
+        samples = [0, 0.1, 0.25, 0.5, 1, 2, 4, 8]
+        let link = CADisplayLink(target: LinkTarget { [weak self] in self?.tick() }, selector: #selector(LinkTarget.fire))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func tick() {
+        let now = CACurrentMediaTime()
+        guard let window, window.rootViewController?.viewIfLoaded?.window != nil else { return }
+        let first = firstFrame ?? now
+        firstFrame = first
+        guard let next = samples.first, now - first >= next else { return }
+        samples.removeFirst()
+        timeline.append(["sinceLaunch": Int((now - launched) * 1000), "sinceFirstFrame": Int((now - first) * 1000), "layout": Layout.capture(window)])
+        if samples.isEmpty { displayLink?.invalidate(); displayLink = nil }
     }
 
     private func answer(_ request: String) -> Any {
@@ -59,6 +89,8 @@ public final class TestHooks {
         case "/tap": return tap(CGPoint(x: Double(query["x"] ?? "") ?? 0, y: Double(query["y"] ?? "") ?? 0))
         case "/scroll": return scroll(query)
         case "/zoom": return zoom(CGFloat(Double(query["scale"] ?? "") ?? 1))
+        case "/layout": return window.map { ["layout": Layout.capture($0)] } ?? ["error": "no window"]
+        case "/timeline": return ["timeline": timeline]
         case "/back": back?(); return ["ok": true]
         case "/forward": forward?(); return ["ok": true]
         case "/action":
@@ -116,6 +148,49 @@ public final class TestHooks {
         scrollView.setZoomScale(scale, animated: false)
         scrollView.delegate?.scrollViewDidEndZooming?(scrollView, with: nil, atScale: scrollView.zoomScale)
         return ["zoom": scrollView.zoomScale]
+    }
+}
+
+private final class LinkTarget: NSObject {
+    let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func fire() { action() }
+}
+
+// What is on screen, as positions: each visible label (its text), text view, image view (whether
+// it shows an image) and video layer (whether it shows a picture), front to back, with the part
+// of it that is visible (clipped by its scrolling and clipping ancestors) in window points,
+// rounded to a quarter point. Two captures are equal when the screen looks the same, apart from
+// the images' contents.
+@MainActor
+enum Layout {
+    static func capture(_ window: UIWindow) -> [[String: Any]] {
+        var items: [[String: Any]] = []
+        func visit(_ view: UIView, clip: CGRect) {
+            guard !view.isHidden, view.alpha > 0.01 else { return }
+            let frame = view.convert(view.bounds, to: window)
+            let visible = frame.intersection(clip)
+            guard !visible.isNull, visible.width > 0.5, visible.height > 0.5 else { return }
+            var item: [String: Any]?
+            if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+                item = ["kind": "label", "text": text]
+            } else if let text = view as? UITextView {
+                item = ["kind": "text", "text": text.text ?? ""]
+            } else if let image = view as? UIImageView, !(view.superview is UIButton) {
+                item = ["kind": "image", "shown": image.image != nil]
+            } else if NSStringFromClass(type(of: view.layer)) == "AVPlayerLayer" {
+                // AVPlayerLayer's readiness without linking AVFoundation into every app.
+                item = ["kind": "video", "shown": (view.layer.value(forKey: "readyForDisplay") as? Bool) ?? false]
+            }
+            if var item {
+                item["frame"] = [visible.minX, visible.minY, visible.width, visible.height].map { ($0 * 4).rounded() / 4 }
+                items.append(item)
+            }
+            let inner = view.clipsToBounds || view is UIScrollView ? visible : clip
+            for subview in view.subviews { visit(subview, clip: inner) }
+        }
+        visit(window, clip: window.bounds)
+        return items
     }
 }
 

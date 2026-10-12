@@ -70,6 +70,15 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   arrives while a finger or momentum moves the rows waits until they stop, and one whose rows
   look the same is not reloaded at all (Video Vault publishes each site page as it is read;
   October 12, 2026: its scrolling stopped abruptly during every refresh).
+- **Relaunch** (October 13, 2026): the first frame is the screen as it was left. Lists read
+  their kept rows before it (they already did); Tango's sign-in screen, when it was showing,
+  comes back in the first frame (with the PC button as last seen) and stays until the session
+  has worked, instead of disappearing for a second while a rejected token is tried. A viewer
+  restored from its checkpoint shows the picture it had (viewer-poster.jpg, saved when the app
+  leaves the screen, at the video's place) with the controls as they were and the saved time,
+  until the player draws its own picture; sound starts muted, as always. NativeKit's
+  `scripts/restore-check` measures the lists; the poster needs the phone (the simulator here
+  cannot play video without overloading the Mac).
 - **Local apps** (`VideoApp/LocalList.swift`) keep the PC's list on the phone
   (`list-cache.json`), so it shows at once, offline and after a kill, and follow the PC's
   change feed (`/api/videos/changes`, one long-polling request at a time while on screen):
