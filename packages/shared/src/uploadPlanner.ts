@@ -71,7 +71,7 @@ export function assessRecording(
                 candidateId: candidate.id,
                 severity: "warning",
                 code: "too_short",
-                message: `Skipped ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s is below the shared ${policy.minimumDurationSeconds}s minimum.`,
+                message: `Skipped ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s is below the ${policy.providers.join("/")} ${policy.minimumDurationSeconds}s minimum.`,
                 requiresManualAction: true,
             },
         };
@@ -85,7 +85,7 @@ export function assessRecording(
                 candidateId: candidate.id,
                 severity: "warning",
                 code: "too_long",
-                message: `Blocked ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s exceeds the shared ${policy.maximumDurationSeconds}s maximum.`,
+                message: `Blocked ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s exceeds the ${policy.providers.join("/")} ${policy.maximumDurationSeconds}s maximum.`,
                 requiresManualAction: true,
             },
         };
