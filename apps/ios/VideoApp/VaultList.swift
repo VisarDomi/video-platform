@@ -86,13 +86,13 @@ final class VaultListController: VideoListController {
                     guard !Task.isCancelled else { return }
                     absorb(page)
                     hideFailure()
-                    refresh.endRefreshing()
+                    if refresh.isRefreshing { refresh.endRefreshing() }
                     delay = 1
                     guard let next = page.next else { break }
                     cursor = next
                 } catch {
                     guard !Task.isCancelled else { return }
-                    refresh.endRefreshing()
+                    if refresh.isRefreshing { refresh.endRefreshing() }
                     if shown.isEmpty { showFailure("Can't reach the upload sites.\n\(error.localizedDescription)") }
                     try? await Task.sleep(for: .seconds(delay))
                     delay = min(delay * 2, 30)

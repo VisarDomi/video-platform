@@ -65,7 +65,11 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   site mark) and estimated size (bold above 350 MiB); the last viewed row is highlighted and,
   after the viewer closes, scrolled into view if needed. The list's place (top row and
   offset) is written whenever scrolling settles, so a kill returns to the same rows. Pull
-  down to reload; an unreachable PC or site shows a message with Retry.
+  down to reload; an unreachable PC or site shows a message with Retry. A new list keeps the
+  rows on screen in place, which sets the offset and would stop a fling dead, so one that
+  arrives while a finger or momentum moves the rows waits until they stop, and one whose rows
+  look the same is not reloaded at all (Video Vault publishes each site page as it is read;
+  October 12, 2026: its scrolling stopped abruptly during every refresh).
 - **Local apps** (`VideoApp/LocalList.swift`) keep the PC's list on the phone
   (`list-cache.json`), so it shows at once, offline and after a kill, and follow the PC's
   change feed (`/api/videos/changes`, one long-polling request at a time while on screen):

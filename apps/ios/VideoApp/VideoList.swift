@@ -30,6 +30,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     private(set) var highlight: String?
     private var savedTop: (key: String, offset: CGFloat)?
     private var positioned = false
+    // A list that arrived while the rows were moving (see setVideos).
+    private var pending: (videos: [ViewerVideo], marks: [String: String])?
+    private var notices: [String] = []
     var loaded = false
     let media: ViewerMedia
     let progress: ProgressStore
@@ -107,21 +110,54 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     // MARK: contents
 
-    // A new list: the rows on screen stay where they are.
+    // A new list: the rows on screen stay where they are. Keeping them there sets the offset,
+    // which stops a fling dead, so a list that arrives while a finger or momentum moves the
+    // rows waits until they stop (Video Vault publishes each site page as it is read); a list
+    // whose rows look the same needs no reload at all.
     func setVideos(_ new: [ViewerVideo], marks: [String: String] = [:]) {
-        let anchor = positioned ? topAnchor() : nil
+        if positioned && rowsMoving {
+            if pending == nil { applyWhenStill() }
+            pending = (new, marks)
+            return
+        }
+        pending = nil
+        let same = loaded && marks == self.marks && new.count == videos.count && zip(new, videos).allSatisfy { Self.look($0) == Self.look($1) }
+        let anchor = positioned && !same ? topAnchor() : nil
         videos = new
         self.marks = marks
         loaded = true
         status.text = videos.isEmpty ? "No videos found." : nil
         status.isHidden = !videos.isEmpty || !failure.isHidden
-        table.reloadData()
-        if let anchor { restore(anchor) }
+        if !same {
+            table.reloadData()
+            if let anchor { restore(anchor) }
+        }
         positionOnce()
         viewer?.updateList(videos)
     }
 
+    // What a row shows (VideoRowCell.show).
+    private static func look(_ video: ViewerVideo) -> [String] {
+        [video.key, video.name, String(video.isLive), String(video.liveStream), String((video.raw["duration"] as? NSNumber)?.doubleValue ?? 0)]
+    }
+
+    private var rowsMoving: Bool { table.isTracking || table.isDragging || table.isDecelerating }
+
+    private func applyPending() {
+        guard let pending else { return }
+        setVideos(pending.videos, marks: pending.marks)
+    }
+
+    // Also when the rows stop without a scroll's end (a tap stops a fling, a row opens the viewer).
+    private func applyWhenStill() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, pending != nil else { return }
+            if rowsMoving { applyWhenStill() } else { applyPending() }
+        }
+    }
+
     func replaceVideo(_ video: ViewerVideo) {
+        if let index = pending?.videos.firstIndex(where: { $0.filename == video.filename }) { pending?.videos[index] = video }
         guard let row = videos.firstIndex(where: { $0.filename == video.filename }) else { return }
         videos[row] = video
         table.reloadRows(at: [IndexPath(row: row, section: 0)], with: .none)
@@ -129,6 +165,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     // Messages above the list; a message with an action is tappable.
     func setNotices(_ notices: [(text: String, action: (() -> Void)?)]) {
+        let texts = notices.map { $0.text + ($0.action == nil ? "" : "\u{1F}") }
+        guard texts != self.notices else { return }
+        self.notices = texts
         header.subviews.forEach { $0.removeFromSuperview() }
         for notice in notices { header.addSubview(NoticeView(text: notice.text, action: notice.action)) }
         layoutHeader()
@@ -185,8 +224,11 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         stateWriter.save(json: State(highlight: highlight, top: savedTop?.key, offset: savedTop.map { Double($0.offset) }))
     }
 
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { if !decelerate { savePlace() } }
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { savePlace() }
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { applyPending(); savePlace() }
+    }
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { applyPending(); savePlace() }
+    func scrollViewDidScrollToTop(_ scrollView: UIScrollView) { applyPending(); savePlace() }
 
     func flushState() {
         stateWriter.flush()
