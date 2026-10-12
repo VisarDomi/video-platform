@@ -67,6 +67,7 @@ public final class ImagePipeline {
     private var restoreBudget: CFTimeInterval = 0
     private var restoreLink: CADisplayLink?
     private var restoreFrames = 0
+    private var restoreEnds: CFTimeInterval = 0
     public private(set) var restoredNow = 0
 
     public init(memoryLimit: Int = 192 << 20, concurrency: Int = 4) {
@@ -81,17 +82,22 @@ public final class ImagePipeline {
     // an image whose file is already on the phone (Request.localFile) is decoded at once on
     // the main thread, so the first frame has it instead of an empty box filled moments later.
     // `budget` bounds the time spent so (beyond it, decoding is off the main thread as always).
-    public func beginRestore(budget: CFTimeInterval = 0.5, frames: Int = 4) {
+    // The frames are counted once the screen is up (a slow launch can take several before its
+    // first layout); at most `timeout` seconds in all.
+    public func beginRestore(budget: CFTimeInterval = 1.5, frames: Int = 4, timeout: CFTimeInterval = 3) {
         restoreBudget = budget
         restoreFrames = frames
+        restoreEnds = CACurrentMediaTime() + timeout
         let link = CADisplayLink(target: RestoreTicker { [weak self] in self?.restoreTick() }, selector: #selector(RestoreTicker.fire))
         link.add(to: .main, forMode: .common)
         restoreLink = link
     }
 
     private func restoreTick() {
-        restoreFrames -= 1
-        guard restoreFrames <= 0 else { return }
+        let shown = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+            .contains { $0.isKeyWindow && $0.rootViewController?.viewIfLoaded?.window != nil }
+        if shown { restoreFrames -= 1 }
+        guard restoreFrames <= 0 || CACurrentMediaTime() > restoreEnds else { return }
         restoreBudget = 0
         restoreLink?.invalidate()
         restoreLink = nil
