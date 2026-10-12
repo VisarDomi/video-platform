@@ -4,6 +4,7 @@ import { fixTargetDuration } from "shared";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { DiskSession } from "./diskSession.js";
+import { describeDropped, lacksMedia, recoverPlaylistTail } from "./playlistTail.js";
 import type { SegmentDimensions } from "./segmentDimensions.js";
 import type { SegmentValidationResult } from "../core/interfaces.js";
 import {
@@ -194,14 +195,12 @@ export class PlaylistManager {
             throw new Error(`Cannot resume legacy, mixed-name, or internally corrupt playlist at ${this.fullPlaylistPath}`);
         }
 
-        const recoveredContent = lastValidSegmentLine >= 0
-            ? lines.slice(0, lastValidSegmentLine + 1).join("\n") + "\n"
-            : sanitizedContent;
+        const { content: recoveredContent, dropped } = await recoverPlaylistTail(this.disk.dirPath, content, this.recordingId);
         if (recoveredContent !== content) {
             if (!await FileSystemManager.writeFileAtomic(this.fullPlaylistPath, recoveredContent)) {
                 throw new Error(`Could not atomically recover active playlist tail at ${this.fullPlaylistPath}`);
             }
-            logger.warn(`[PlaylistManager] Recovered incomplete playlist tail at ${this.fullPlaylistPath}`);
+            logger.warn(`[PlaylistManager] Recovered incomplete playlist tail at ${this.fullPlaylistPath}${describeDropped(dropped)}`);
         }
 
         const segmentNames = recoveredContent.split(/\r?\n/)
@@ -278,8 +277,7 @@ export class PlaylistManager {
         const reappended: string[] = [];
         for (const { name, identity } of candidates) {
             const filePath = path.join(this.disk.dirPath, name);
-            const size = await fs.stat(filePath).then((stats) => stats.isFile() ? stats.size : 0, () => 0);
-            const inspection: SegmentValidationResult = size === 0
+            const inspection: SegmentValidationResult = await lacksMedia(filePath)
                 ? { valid: false }
                 : inspectSegment ? await inspectSegment(filePath) : { valid: true };
             if (!inspection.valid) {
