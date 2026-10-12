@@ -38,6 +38,10 @@ own lines (the pipeline's JSON events).
 An identical line (level, message and details) repeated within a minute is logged
 once; after the minute one line reports the number of repeats.
 
+An `Error` in the details is written with its name, message, own fields (`code`,
+`errno`, `syscall`, `path`) and `cause`, without the stack; plain JSON would show
+it as `{}`.
+
 **Why:** The journal is read to answer "did anything go wrong, and with which
 recording". Per-poll and per-retry lines bury that answer, and a loop that logs
 on every iteration can write hundreds of thousands of lines an hour.
