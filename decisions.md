@@ -294,8 +294,9 @@ server follows the account first, but only if it is not already followed.
   "Oldest" means the folder-name timestamp, optionally filtered to one provider.
   The worker polls every 30 s when idle and re-reads pause/run intent from
   `campaign_control` at every step. The local-stage lease is 12 h because
-  conversion takes about 2.4× the duration and recordings run up to 2 h. All
-  leases are cleared at boot.
+  conversion takes about 2.4× the duration (it covers about five hours; the
+  longest edited recording is 2.3 h). All leases and half-written conversion
+  files (`*.partial.mp4`, `*.cache-partial`) are cleared at boot.
 - **Manual commands defer to the worker.** It writes a heartbeat every 30 s. These
   commands refuse while the heartbeat is under 90 s old, so stop the service first:
   `remux-one`, `describe-one`, `upload-one`, `process-one`, `xvideos-sync`,

@@ -1,3 +1,6 @@
+import { readdir, stat, unlink } from "node:fs/promises";
+import path from "node:path";
+
 import { journalPriority } from "shared";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
@@ -64,6 +67,24 @@ function confirmationsAreDue(config: PipelineConfig): boolean {
     }
 }
 
+// Temporary files of remux.ts (`<artifact>.<uuid>.partial.mp4`) and
+// artifactCache.ts (`<artifact>.<uuid>.cache-partial`) in the staging root.
+async function removePartialArtifacts(stagingRoot: string): Promise<Array<{ name: string; bytes: number }>> {
+    const entries = await readdir(stagingRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+    });
+    const removed: Array<{ name: string; bytes: number }> = [];
+    for (const entry of entries) {
+        if (!entry.isFile() || !/\.[0-9a-f-]{36}\.(partial\.mp4|cache-partial)$/.test(entry.name)) continue;
+        const filePath = path.join(stagingRoot, entry.name);
+        const bytes = (await stat(filePath)).size;
+        await unlink(filePath);
+        removed.push({ name: entry.name, bytes });
+    }
+    return removed;
+}
+
 export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
     // The pipeline is single-flight by construction: any lease present at
     // boot belongs to a dead process. Clear them so a restart resumes
@@ -79,6 +100,12 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             }
         } finally {
             database.close();
+        }
+        // The same holds for a half-written conversion or cache copy: nothing
+        // adopts it, and a killed encoder would otherwise leave it forever.
+        const partials = await removePartialArtifacts(config.stagingRoot);
+        if (partials.length > 0) {
+            console.log(JSON.stringify({ event: "campaign-boot-clear-partials", removed: partials }));
         }
     }
     // Heartbeat on its own timer so manual *-one commands can tell the

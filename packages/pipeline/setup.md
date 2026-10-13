@@ -152,7 +152,8 @@ The `video-pipeline.service` user unit (`systemd/user/` at the repository
 root) runs `npm run campaign-worker -w pipeline` (`campaign-worker` requires
 `VIDEO_PIPELINE_SERVICE_MODE=1`) with `VIDEO_PIPELINE_NETWORK_UPLOADS=1`,
 `VIDEO_PIPELINE_CLEANUP=0` and `DISPLAY=:111`. It idles while SQLite says
-paused, clears stale leases when it starts, verifies due uploads inline, and
+paused, clears stale leases and half-written conversion files when it starts,
+verifies due uploads inline, and
 sends desktop notifications for attention pauses, cooldowns, rejected words,
 removed videos and errors (`VIDEO_PIPELINE_NOTIFY=0` disables them). Control it
 with `systemctl --user start|stop|restart video-pipeline` and the campaign
