@@ -94,7 +94,7 @@ test("real paused worker observes additions and pending cancellation across SIGK
     await restarted.stop("SIGTERM");
 });
 
-test("killing an actual encoder leaves no published artifact; worker restart clears lease and retry ignores partial", async (t) => {
+test("killing an actual encoder leaves no published artifact; worker restart clears the lease and the partial file", async (t) => {
     const { root, edited, config, database } = await setup(t);
     const source = path.join(edited, "2026-01-01 000000 interrupted");
     const part = await fixturePart(source, "generated", { frames: 60 });
@@ -121,6 +121,9 @@ test("killing an actual encoder leaves no published artifact; worker restart cle
     const restarted = worker(t, config);
     await eventually(() => restarted.output().includes("campaign-step"));
     assert.equal(database.get(recording.id).leaseOwner, null);
+    // Only one conversion runs at a time, so a partial file at boot is a dead one's.
+    assert.deepEqual((await readdir(config.stagingRoot)).filter((name) => name.includes("partial")), []);
+    assert.match(restarted.output(), /"event":"campaign-boot-clear-partials"/);
     await restarted.stop("SIGTERM");
     const result = await convertShapeGroup(playlist, config.stagingRoot, recording.id,
         { output: { width: 1920, height: 1080, rotate: false } }, "production-v5");
