@@ -12,10 +12,13 @@ public protocol ThumbnailStripDelegate: AnyObject {
     // The thumbnail's file when it is already on the phone (a relaunch shows it in its first
     // frame: ImagePipeline.beginRestore).
     func strip(_ strip: ThumbnailStripView, localFileFor index: Int) -> URL?
+    func stripDidScroll(_ strip: ThumbnailStripView)
 }
 
 public extension ThumbnailStripDelegate {
     func strip(_ strip: ThumbnailStripView, localFileFor index: Int) -> URL? { nil }
+    // The strip is being swiped (its thumbnails can be fetched ahead of everything else).
+    func stripDidScroll(_ strip: ThumbnailStripView) {}
 }
 
 // A row of fixed-size thumbnails scrolled sideways (the gallery apps' strips: 100×300
@@ -124,7 +127,13 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
         delegate?.strip(self, didSelect: indexPath.item)
     }
 
-    public func scrollViewDidScroll(_ scrollView: UIScrollView) { pipeline.prioritiesChanged() }
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        pipeline.prioritiesChanged()
+        if scrollView.isDragging || scrollView.isDecelerating { delegate?.stripDidScroll(self) }
+    }
+
+    // The first thumbnail on screen.
+    public var firstVisibleIndex: Int { max(0, Int(collectionView.contentOffset.x / max(itemSize.width, 1))) }
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { if !decelerate { delegate?.stripDidSettle(self) } }
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { delegate?.stripDidSettle(self) }
 

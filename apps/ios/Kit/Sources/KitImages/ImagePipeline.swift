@@ -52,6 +52,7 @@ public final class ImagePipeline {
         let request: Request
         var completions: [UInt64: (Result<UIImage, Error>) -> Void] = [:]
         var task: Task<Void, Never>?
+        var ahead = false
         init(_ request: Request) { self.request = request }
     }
 
@@ -62,6 +63,11 @@ public final class ImagePipeline {
     private var queueStale = true
     private var sortedAt: CFTimeInterval = 0
     private var running = 0
+    // Images off the screen (decoded ahead) at most this many at once, at a lower priority: big
+    // pages decoding ahead must not take the cores the screen and its compositor need. Those on
+    // the screen always go first, as many at once as `concurrency` allows.
+    public var aheadConcurrency = 2
+    private var runningAhead = 0
     private var nextID: UInt64 = 0
     private var ticketKeys: [UInt64: String] = [:]
     private var restoreBudget: CFTimeInterval = 0
@@ -69,6 +75,9 @@ public final class ImagePipeline {
     private var restoreFrames = 0
     private var restoreEnds: CFTimeInterval = 0
     public private(set) var restoredNow = 0
+    // Within a relaunch's first frames (screens may read what they show from disk at once then;
+    // afterwards they ask in the background).
+    public var isRestoring: Bool { restoreBudget > 0 }
 
     public init(memoryLimit: Int = 192 << 20, concurrency: Int = 4) {
         cache.totalCostLimit = memoryLimit
@@ -150,11 +159,18 @@ public final class ImagePipeline {
     private func pump() {
         while running < concurrency {
             if queueStale && (queue.isEmpty || CACurrentMediaTime() - sortedAt > 0.1) { sortQueue() }
-            guard let key = queue.popLast() else { return }
-            guard let entry = pending[key], entry.task == nil else { continue }
+            guard let key = queue.last else { return }
+            guard let entry = pending[key], entry.task == nil else { queue.removeLast(); continue }
+            // The queue is nearest first: once the next is off the screen, so is the rest.
+            let ahead = entry.request.priority() > 0
+            if ahead && runningAhead >= aheadConcurrency { return }
+            queue.removeLast()
             running += 1
+            if ahead { runningAhead += 1 }
+            entry.ahead = ahead
             let request = entry.request
-            entry.task = Task { [weak self] in
+            let priority: TaskPriority = ahead ? .utility : .userInitiated
+            entry.task = Task(priority: priority) { [weak self] in
                 let result: Result<UIImage, Error>
                 do {
                     let file: URL
@@ -163,7 +179,7 @@ public final class ImagePipeline {
                     case .load(let loader): file = try await loader()
                     }
                     try Task.checkCancellation()
-                    result = .success(try await Self.decode(file, fit: request.fit))
+                    result = .success(try await Self.decode(file, fit: request.fit, priority: priority))
                 } catch { result = .failure(error) }
                 self?.finish(key, entry: entry, result: result)
             }
@@ -172,6 +188,7 @@ public final class ImagePipeline {
 
     private func finish(_ key: String, entry: Pending, result: Result<UIImage, Error>) {
         running -= 1
+        if entry.ahead { runningAhead -= 1 }
         if pending[key] === entry { pending[key] = nil }
         if case .success(let image) = result {
             cache.setObject(image, forKey: key as NSString, cost: Self.cost(image))
@@ -204,8 +221,8 @@ public final class ImagePipeline {
     nonisolated static let pixelBudget = 16_000_000
 
     // Downsampled and fully decoded off the main thread; the original's orientation applied.
-    nonisolated public static func decode(_ file: URL, fit: ImageFit) async throws -> UIImage {
-        try await Task.detached(priority: .userInitiated) { try decodeNow(file, fit: fit) }.value
+    nonisolated public static func decode(_ file: URL, fit: ImageFit, priority: TaskPriority = .userInitiated) async throws -> UIImage {
+        try await Task.detached(priority: priority) { try decodeNow(file, fit: fit) }.value
     }
 
     // The same, on the calling thread.
