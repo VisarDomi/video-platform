@@ -38,6 +38,10 @@ reloads systemd but deliberately does not restart services.
   `~/Documents/work/video/video-platform/packages/descriptor/`
 - Pipeline details:
   `~/Documents/work/video/video-platform/packages/pipeline/`
+- Auth (Tango session) details:
+  `~/Documents/work/video/video-platform/packages/auth/`
+- FC2 live / SC live extensions:
+  `~/Documents/work/video/video-platform/packages/live-extensions/`
 - iPhone apps:
   `~/Documents/work/video/video-platform/apps/ios/`
 
@@ -45,7 +49,7 @@ reloads systemd but deliberately does not restart services.
 npm run build:app
 
 The server serves `packages/app/build` directly, so the website picks up a build without a
-restart. The iPhone apps are native and need a deploy (`apps/ios/PORT.md`).
+restart. The iPhone apps are native and need a deploy (`apps/ios/README.md`).
 
 ## others - depends
 check package.json
@@ -55,12 +59,12 @@ check package.json
 ## iPhone apps
 
 Five iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
-**SC local** open the website's provider tabs; **Video Vault** lists the pipeline's
-XVideos and Porntrex uploads; **Tango** shows live streams on tango.me. Their videos play
-in a native viewer that keeps playing through lock and the background, so player changes
-need an app deploy; the local apps' lists still come from the website. They are built
-on the Mac (SSH from this PC); the phone is cabled to the Mac. Build, deploy, inspection
-and renewal are in [`apps/ios/PORT.md`](apps/ios/PORT.md).
+**SC local** list the PC's recordings; **Video Vault** lists the pipeline's XVideos and
+Porntrex uploads; **Tango** shows live streams on tango.me. All five are native lists with
+a native viewer that keeps playing through lock and the background, so any change to them
+needs an app deploy. They are built on the Mac (SSH from this PC); the phone is paired
+with the Mac over Wi-Fi. Build, deploy, tests, inspection and renewal are in
+[`apps/ios/README.md`](apps/ios/README.md).
 
 ## Data outside the repository
 
@@ -69,7 +73,8 @@ nothing (only logs and diagnostic screenshots stay in package folders):
 
 - `~/.local/share/video-services/`: the download lists (below), Tango sessions
   (`session/`), aliases, finalization and pipeline databases, pipeline artifacts,
-  descriptor models and runtimes, live status.
+  descriptor models and runtimes, live status, and the Tango phone key
+  (`tango-phone-key`, made once by `apps/ios/scripts/deploy.py tango-live sync`).
 - `~/.config/video-services/` (files mode 600): `auth-accounts.json` (the accounts
   `video-auth` keeps signed in; `VIDEO_AUTH_ACCOUNTS_FILE` overrides),
   `upload-providers.json` (XVideos/Porntrex upload logins) and `porntrex-session.json`.

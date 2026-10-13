@@ -12,3 +12,26 @@ One provider I implemented myself, the other two are inspired by other github re
 
 # setup
 [setup notes](./notes.md)
+
+# Docs
+
+Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:
+
+- [AGENTS.md](./AGENTS.md): ownership, and where to start.
+- [notes.md](./notes.md): setup: packages, services, logs, data outside the repository, download lists.
+- [decisions.md](./decisions.md): the system's rules and why: components, recording lifecycle, conversion and upload policy, operations.
+- [issues.md](./issues.md): open issues (HTTP caching).
+- [apps/ios/README.md](./apps/ios/README.md): the five iPhone apps: behaviour, rules, build, deploy, tests, frame reports, renewal. (`apps/tango` holds only the Tango unblock script it describes.)
+- [packages/app/README.md](./packages/app/README.md), [decisions.md](./packages/app/decisions.md): the website (lists, viewer, edits) and its WebKit tests.
+- [packages/auth/decisions.md](./packages/auth/decisions.md), [SESSION-RECOVERY.md](./packages/auth/SESSION-RECOVERY.md): the PC's Tango session and how to recover it.
+- [packages/descriptor/setup.md](./packages/descriptor/setup.md), [MODEL.md](./packages/descriptor/MODEL.md): the local description model, its runtime and the measurements behind its settings.
+- [packages/downloader/README.md](./packages/downloader/README.md), [decisions.md](./packages/downloader/decisions.md): stream capture.
+- [packages/live-extensions/README.md](./packages/live-extensions/README.md): the FC2 live and SC live Safari extensions.
+- [packages/pipeline/setup.md](./packages/pipeline/setup.md), [docs/upload-recovery.md](./packages/pipeline/docs/upload-recovery.md): conversion, description, upload and verification; upload recovery.
+- [packages/server/README.md](./packages/server/README.md), [decisions.md](./packages/server/decisions.md): the API, finalization and download lists.
+- [packages/shared/decisions.md](./packages/shared/decisions.md): storage layout, token reader, logging.
+- [systemd/setup.md](./systemd/setup.md): the user units and their resource limits.
+
+Outside the repository: the [NativeKit guide](../../ios-tools/native/README.md) (shared iPhone code and rules), [Mac and phone access](../../../environment/mac-access.md), [renewal](../../ios-tools/renewal/README.md).
+
+Earlier docs (the iPhone port log, the web-era Tango app docs, pipeline launch reports) are in git history; the last commit before this layout is `817cd7f`.

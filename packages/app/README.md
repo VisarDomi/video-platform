@@ -1,10 +1,10 @@
-# Shared video frontend
+# Website
 
 The list, stylesheet, overlay, player units, timeline and gestures in `src` are the local
-website (`main.ts`; providers `tango`, `fc2`, `sc`) that Safari and the PC open. The iPhone
-apps — the local lists, Video Vault and Tango — are native (`apps/ios`, see its `PORT.md`);
-their earlier web versions (content scripts for Video Vault and Tango) are in Git history,
-before October 12, 2026.
+website (`main.ts`; providers `tango`, `fc2`, `sc`) that Safari and the PC open. The server
+serves its build (`packages/app/build`), so `npm run build:app` needs no restart. The iPhone
+apps (the local lists, Video Vault and Tango) are native (`apps/ios`, see its `README.md`);
+a change here does not reach them. Rules and their reasons are in `decisions.md`.
 
 Local adapters (`providers/local.ts`) use the PC's HLS, save/cut/return and download-list
 APIs. The provider types still allow `kind: 'online'` adapters (listing pages, login,

@@ -4,7 +4,7 @@ This file records the system-level rules that hold on `main` and why. It describ
 the current state only; how it came to be is in git history. Package detail lives
 next to the code: `packages/downloader/decisions.md`, `packages/server/decisions.md`,
 `packages/pipeline/setup.md` (+ `docs/upload-recovery.md`),
-`packages/descriptor/setup.md`, `packages/app/decisions.md`, `apps/ios/PORT.md`,
+`packages/descriptor/setup.md`, `packages/app/decisions.md`, `apps/ios/README.md`,
 `packages/auth/decisions.md`, `packages/shared/decisions.md`, `systemd/setup.md`.
 
 ## 1. Components and ownership boundaries
@@ -16,8 +16,9 @@ next to the code: `packages/downloader/decisions.md`, `packages/server/decisions
 | `packages/server` | `video-server.service` (HTTPS :9999) | finalization, library/HLS API, edits, download lists, provider identity resolution, serving the `packages/app` build |
 | `packages/pipeline` | `video-pipeline.service` | conversion, description, upload, verification |
 | `packages/descriptor` | library (no unit) | local model titles and descriptions |
-| `packages/app` | served by the server; online builds for the iPhone | web UI, Video Vault, Tango live viewer |
+| `packages/app` | served by the server | the website: provider lists, viewer, edits |
 | `packages/live-extensions` | Safari extensions in the Tango iPhone app | FC2/SC download-list buttons |
+| `apps/ios` | five iPhone apps, built on the Mac | native lists and viewer: local recordings, Video Vault, Tango live |
 | `packages/shared` | library | layout, playlist parsing, upload policy, token reader, logger |
 
 A recording changes owner only by an atomic rename on one filesystem:
@@ -141,7 +142,7 @@ server follows the account first, but only if it is not already followed.
   and map changes) to the null muxer. Per-segment decoding runs only after a run
   fails, with a checkpoint every 25 segments so a restart resumes. The harmless
   null-muxer non-monotonic-DTS message, and a repeat summary directly after it,
-  are filtered out. `MEDIA_INTEGRITY_VALIDATOR_REVISION` is 4.
+  are filtered out. `MEDIA_INTEGRITY_VALIDATOR_REVISION` is 5.
 - **Checkpoints** are in `finalization.sqlite` (`integrity_checkpoints`, keyed by
   path plus the playlist's SHA-256). The whole pipeline contract is a matching
   fingerprint, `version === 2` and `status === "ready"`.
@@ -197,20 +198,21 @@ server follows the account first, but only if it is not already followed.
     restored scroll; one poller runs. The highlight is kept in `localStorage`
     (`video-highlight:<provider>`).
   - There is no frontend log service or server log route.
-- **Providers in the app.** Local providers (`tango`, `fc2`, `sc`) can save, edit
-  and return. Online ones (`xvideos`, `porntrex`, `vault`, `tango-live`) only
-  play.
-- **Video Vault** (the `vault` build, iPhone bundle `com.visar.Ptrex.paid`) lists
+- **Providers.** The local providers (`tango`, `fc2`, `sc`) can save, edit and
+  return, on the website and in the local iPhone apps. Video Vault and Tango
+  (iPhone only) only play.
+- **Video Vault** (the `vault` app, iPhone bundle `com.visar.Ptrex.paid`) lists
   both upload sites. It shows only titles that carry the bracketed stamp
   `[YYYY-MM-DD HHMMSS streamer]`, optionally with ` | part N` (`isPipelineUpload`
-  in `packages/app/src/providers/uploadSite.ts`). Manual uploads, and uploads
-  renamed to the bare stamp, stay on the sites but are not listed.
-- **iPhone apps** (`apps/ios`) are WKWebView shells generated from
-  `providers.json`. The local apps load `https://192.168.1.197:9999/videos/<provider>`,
-  the online apps inject the `packages/app` content build, and the Tango app hosts
-  the FC2/SC live extensions. Their videos play in a native viewer over the list
-  (AVPlayer, `VideoApp/Viewer*.swift`). Why: WebKit pauses a page's video on lock and in
-  the background, and the videos must play on until they end. Safari keeps the web viewer.
+  in `apps/ios/VideoApp/Vault.swift`). Manual uploads, and uploads renamed to the
+  bare stamp, stay on the sites but are not listed.
+- **iPhone apps** (`apps/ios`, detail in its `README.md`) are native lists with a
+  native viewer (AVPlayer, `VideoApp/Viewer*.swift`), generated per provider from
+  `providers.json`. The local apps read the PC's recordings API (`/api/videos`
+  and its change feed), Video Vault the two sites' uploads pages, Tango its
+  gateway; the Tango app hosts the FC2/SC live extensions. Why: WebKit pauses a
+  page's video on lock and in the background, and the videos must play on until
+  they end. Safari keeps the website.
 
 ## 5. Pipeline output: conversion policy
 

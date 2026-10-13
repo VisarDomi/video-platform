@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { StoredCookie } from "../upload/porntrexSession.js";
 
-// The paired iPhone is reached through the Mac (apps/ios/PORT.md): the shared session is copied
+// The paired iPhone is reached through the Mac (apps/ios/README.md): the shared session is copied
 // into Video Vault's own data folder (devicectl), the app takes it into its cookies when it starts
 // (VideoApp/VaultList.swift), checks it with a fresh same-session request and leaves the answer
 // beside it, which is read back the same way. Same trusted SSH options as apps/ios/scripts/deploy.py.

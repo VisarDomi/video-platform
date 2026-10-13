@@ -27,7 +27,7 @@ or on `online`, the list refetches the full list, reconciles it into the existin
 without scrolling, then starts exactly one poller. Refreshes use an `AbortController` and a
 request token, so a stale response cannot overwrite a newer reconciliation.
 
-Online lists page through `services/catalog.ts` instead (see `PROVIDERS.md`).
+Online lists page through `services/catalog.ts` instead (see `README.md`).
 
 ## No service worker or client logging
 
@@ -112,11 +112,9 @@ keeps no in-memory cache.
 ## The iPhone apps are native
 
 The iPhone apps (local lists, Video Vault, Tango) are native lists with a native viewer
-(`apps/ios`, see its `PORT.md`), not WKWebView shells around this website. Video Vault's
-rules (both upload sites in one list, only the pipeline's bracketed uploads, the shared
-Porntrex session) and Tango's live list are described there. The content scripts and
-`routes/nativeViewer.ts` that the earlier web versions used are in Git history, before
-October 12, 2026.
+(`apps/ios`, see its `README.md`), not web views around this website, so a change here does
+not reach them. Video Vault's rules (both upload sites in one list, only the pipeline's
+bracketed uploads, the shared Porntrex session) and Tango's live list are described there.
 
 **Why:** WebKit pauses a page's video when the phone locks or the app leaves the screen, and
 a web view cannot open instantly from a saved list or survive the app being killed; the
@@ -135,7 +133,7 @@ native apps do all three. Safari keeps this website.
 ## Regression checks
 
 `npm run test:app:webkit` drives the built website and the FC2/SC live extensions in WebKit
-with isolated fixtures, including scroll settlement on a local list (see `PROVIDERS.md`).
+with isolated fixtures, including scroll settlement on a local list (see `README.md`).
 
 `node packages/app/test/viewer.mjs`, run from the repo root after `npm run build:app`, loads
 the deployed frontend that the PC server serves from `packages/app/build` (default
