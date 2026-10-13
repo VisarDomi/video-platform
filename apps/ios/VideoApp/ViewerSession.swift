@@ -1,6 +1,7 @@
 import AVFoundation
 import MediaPlayer
 import UIKit
+import KitCore
 
 // The viewer's audio session and lock-screen controls. Videos play on through lock and the
 // background (UIBackgroundModes audio). While the current video is muted the session mixes with
@@ -57,10 +58,13 @@ final class ViewerSession {
         guard value != audible else { return }
         audible = value
         let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .moviePlayback, options: value ? [] : [.mixWithOthers])
-            try session.setActive(true)
-        } catch { print("Audio session:", error.localizedDescription) }
+        // Activation waits for the system's audio server (measured: it may block).
+        FrameMonitor.shared.measure("audio.session") {
+            do {
+                try session.setCategory(.playback, mode: .moviePlayback, options: value ? [] : [.mixWithOthers])
+                try session.setActive(true)
+            } catch { print("Audio session:", error.localizedDescription) }
+        }
         if !value { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
     }
 

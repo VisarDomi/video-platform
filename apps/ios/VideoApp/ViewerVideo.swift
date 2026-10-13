@@ -4,7 +4,8 @@ import KitCore
 
 // One video as the list page describes it (packages/app routes/nativeViewer.ts): the provider's
 // own fields, which go back to the page unchanged, plus what the viewer knows without asking.
-struct ViewerVideo {
+// Its fields are JSON values, never changed in place: safe to build off the main thread.
+struct ViewerVideo: @unchecked Sendable {
     private(set) var raw: [String: Any]
 
     init?(_ value: Any?) {
@@ -32,6 +33,20 @@ struct ViewerVideo {
     var edited: Bool { type == "edited" }
 
     func same(_ other: ViewerVideo) -> Bool { filename == other.filename && type == other.type }
+
+    // What its row shows (VideoRowCell.show): two lists whose rows look the same need no reload.
+    struct Look: Equatable, Sendable {
+        var filename: String
+        var type: String
+        var name: String
+        var isLive: Bool
+        var liveStream: Bool
+        var duration: Double
+    }
+
+    var look: Look {
+        Look(filename: filename, type: type, name: name, isLive: isLive, liveStream: liveStream, duration: (raw["duration"] as? NSNumber)?.doubleValue ?? 0)
+    }
 
     func setting(_ field: String, _ value: Any) -> ViewerVideo {
         var copy = self
@@ -134,9 +149,6 @@ struct ViewerCheckpoint {
     fileprivate var raw: [String: Any] { ["provider": provider, "current": current, "videos": videos.map(\.raw)] }
 }
 
-// Saves the checkpoint off the main thread, newest first. Every swipe saves it, and a long list
-// takes a while to encode (Tango's 4,000 recordings, about 60 ms on the phone): long enough to
-// stutter the swipe that saved it.
 // The picture on screen when the app left it, where it was and whether the controls showed
 // (viewer-poster.jpg and .json): a relaunch into the viewer shows it in its first frame, until
 // the player has its own first picture of the same video.
@@ -165,6 +177,9 @@ struct ViewerPoster: Codable {
     }
 }
 
+// Saves the checkpoint off the main thread, newest first. Every swipe saves it, and a long list
+// takes a while to encode (Tango's 4,000 recordings, about 60 ms on the phone): long enough to
+// stutter the swipe that saved it.
 final class CheckpointWriter: @unchecked Sendable {
     let directory: URL
     private let queue = DispatchQueue(label: "viewer-checkpoint", qos: .utility)

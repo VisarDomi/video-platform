@@ -31,7 +31,8 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     private var savedTop: (key: String, offset: CGFloat)?
     private var positioned = false
     // A list that arrived while the rows were moving (see setVideos).
-    private var pending: (videos: [ViewerVideo], marks: [String: String])?
+    private var pending: (videos: [ViewerVideo], marks: [String: String], looks: [ViewerVideo.Look]?)?
+    private var looks: [ViewerVideo.Look] = []
     private var notices: [String] = []
     var loaded = false
     let media: ViewerMedia
@@ -112,22 +113,26 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     // A new list: the rows on screen stay where they are. Keeping them there sets the offset,
     // which stops a fling dead, so a list that arrives while a finger or momentum moves the
-    // rows waits until they stop (Video Vault publishes each site page as it is read); a list
-    // whose rows look the same needs no reload at all.
-    func setVideos(_ new: [ViewerVideo], marks: [String: String] = [:]) {
-        FrameMonitor.shared.measure("list.set") { setVideosNow(new, marks: marks) }
+    // rows waits until they stop (Video Vault publishes each site page as it is read), and so
+    // does one that arrives while the open viewer is being swiped; a list whose rows look the
+    // same needs no reload at all.
+    // `looks`: the rows' looks when the caller worked them out off the main thread.
+    func setVideos(_ new: [ViewerVideo], marks: [String: String] = [:], looks: [ViewerVideo.Look]? = nil) {
+        FrameMonitor.shared.measure("list.set") { setVideosNow(new, marks: marks, looks: looks) }
     }
 
-    private func setVideosNow(_ new: [ViewerVideo], marks: [String: String]) {
+    private func setVideosNow(_ new: [ViewerVideo], marks: [String: String], looks given: [ViewerVideo.Look]?) {
         if positioned && rowsMoving {
             if pending == nil { applyWhenStill() }
-            pending = (new, marks)
+            pending = (new, marks, given)
             return
         }
         pending = nil
-        let same = loaded && marks == self.marks && new.count == videos.count && zip(new, videos).allSatisfy { Self.look($0) == Self.look($1) }
+        let newLooks = given ?? new.map(\.look)
+        let same = loaded && marks == self.marks && newLooks == looks
         let anchor = positioned && !same ? topAnchor() : nil
         videos = new
+        looks = newLooks
         self.marks = marks
         loaded = true
         status.text = videos.isEmpty ? "No videos found." : nil
@@ -140,16 +145,11 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         viewer?.updateList(videos)
     }
 
-    // What a row shows (VideoRowCell.show).
-    private static func look(_ video: ViewerVideo) -> [String] {
-        [video.key, video.name, String(video.isLive), String(video.liveStream), String((video.raw["duration"] as? NSNumber)?.doubleValue ?? 0)]
-    }
-
-    private var rowsMoving: Bool { table.isTracking || table.isDragging || table.isDecelerating }
+    private var rowsMoving: Bool { table.isTracking || table.isDragging || table.isDecelerating || viewer?.moving == true }
 
     private func applyPending() {
         guard let pending else { return }
-        setVideos(pending.videos, marks: pending.marks)
+        setVideos(pending.videos, marks: pending.marks, looks: pending.looks)
     }
 
     // Also when the rows stop without a scroll's end (a tap stops a fling, a row opens the viewer).
@@ -164,6 +164,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         if let index = pending?.videos.firstIndex(where: { $0.filename == video.filename }) { pending?.videos[index] = video }
         guard let row = videos.firstIndex(where: { $0.filename == video.filename }) else { return }
         videos[row] = video
+        if looks.indices.contains(row) { looks[row] = video.look }
         table.reloadRows(at: [IndexPath(row: row, section: 0)], with: .none)
     }
 
@@ -358,6 +359,10 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     }
 
     private func showViewer(videos: [ViewerVideo], index: Int, restoring: Bool = false) {
+        FrameMonitor.shared.measure("viewer.open") { showViewerNow(videos: videos, index: index, restoring: restoring) }
+    }
+
+    private func showViewerNow(videos: [ViewerVideo], index: Int, restoring: Bool) {
         viewer?.close()
         let controller = ViewerController(provider: viewerProvider, videos: videos, index: index, host: self,
                                           media: media, progress: progress, checkpoint: checkpoint)
@@ -397,8 +402,12 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         let previous = highlight
         highlight = filename
         saveState()
-        let rows = videos.indices.filter { [previous, filename].contains(videos[$0].filename) }.map { IndexPath(row: $0, section: 0) }
-        table.reloadRows(at: rows.filter { table.indexPathsForVisibleRows?.contains($0) ?? false }, with: .none)
+        // Only rows on screen need redrawing (every swipe in the viewer comes here; Tango's list
+        // holds thousands).
+        let rows = (table.indexPathsForVisibleRows ?? []).filter { path in
+            videos.indices.contains(path.row) && (videos[path.row].filename == filename || videos[path.row].filename == previous)
+        }
+        table.reloadRows(at: rows, with: .none)
         guard reveal, let row = videos.firstIndex(where: { $0.filename == filename }) else { return }
         let path = IndexPath(row: row, section: 0)
         let rect = table.rectForRow(at: path)

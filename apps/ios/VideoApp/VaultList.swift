@@ -108,30 +108,42 @@ final class VaultListController: VideoListController {
     // The merging, ordering and matching of every row happen off the main thread (a page
     // arrives every second or so while the list may be scrolling); only the result is set.
     private func absorb(_ page: Vault.Page) async {
-        let fresh = Vault.unique(self.fresh + page.videos)
         let done = page.next == nil
-        let earlier = done ? shown.filter { video in video.site.map { page.incomplete.contains($0) } ?? false } : shown
-        let (shown, marks, streamers) = await Task.detached(priority: .userInitiated) {
+        let (previous, current) = (self.fresh, shown)
+        let (fresh, shown, built) = await Task.detached(priority: .userInitiated) {
+            let fresh = Vault.unique(previous + page.videos)
+            let earlier = done ? current.filter { video in video.site.map { page.incomplete.contains($0) } ?? false } : current
             let shown = Vault.order(Vault.unique(fresh + earlier))
-            return (shown, Vault.marks(shown), shown.map { Uploads.streamer($0.title) })
+            return (fresh, shown, Self.rows(shown))
         }.value
         self.fresh = done ? [] : fresh
         self.shown = shown
         notices = page.notices
         if done { keptWriter.save(json: Kept(videos: shown, notices: notices, savedAt: Date())) }
-        publish(marks: marks, streamers: streamers)
+        publish(built)
     }
 
-    private func publish(marks known: [String: String]? = nil, streamers known2: [String?]? = nil) {
-        let marks = known ?? Vault.marks(shown)
-        let streamers = known2 ?? shown.map { Uploads.streamer($0.title) }
-        setVideos(zip(shown, streamers).map { describe($0, streamer: $1) }, marks: marks)
+    private struct Rows: Sendable {
+        var videos: [ViewerVideo]
+        var marks: [String: String]
+        var looks: [ViewerVideo.Look]
+    }
+
+    // The rows as the list shows them (marks, streamers, looks), worked out off the main thread.
+    private nonisolated static func rows(_ shown: [VaultVideo]) -> Rows {
+        let videos = shown.map { describe($0, streamer: Uploads.streamer($0.title)) }
+        return Rows(videos: videos, marks: Vault.marks(shown), looks: videos.map(\.look))
+    }
+
+    private func publish(_ built: Rows? = nil) {
+        let rows = built ?? Self.rows(shown)
+        setVideos(rows.videos, marks: rows.marks, looks: rows.looks)
         setNotices(notices.map { notice in (notice.text, notice.login ? { [weak self] in self?.presentLogin() } : nil) })
     }
 
     // As the website described an upload to the viewer: no source until asked; +/- on whichever
     // download list has the recording's streamer.
-    private func describe(_ video: VaultVideo, streamer: String?) -> ViewerVideo {
+    private nonisolated static func describe(_ video: VaultVideo, streamer: String?) -> ViewerVideo {
         var raw: [String: Any] = [
             "filename": video.filename, "provider": video.provider, "type": "original", "title": video.title, "pageUrl": video.pageUrl,
             "duration": video.duration, "size": 0, "isLive": false, "local": false, "live": false,

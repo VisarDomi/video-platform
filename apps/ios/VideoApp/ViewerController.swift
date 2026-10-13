@@ -1,6 +1,7 @@
 import AVFoundation
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
+import KitCore
 
 // The native viewer: packages/app src/routes/videoViewer.ts with AVPlayer, over the list page.
 // The same intrinsic three-scope feed: a 10,000 pt previous scope, the current video at its
@@ -230,6 +231,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // The page's list changed (packages/app routes/nativeViewer.ts list): videoViewer.ts updateCanonicalList.
     func updateList(_ list: [ViewerVideo]) {
+        FrameMonitor.shared.measure("viewer.list") { updateListNow(list) }
+    }
+
+    private func updateListNow(_ list: [ViewerVideo]) {
         guard !closed, !list.isEmpty || live else { return }
         let current = active.video
         let filtered = live ? list.filter { !removed.contains($0.filename) } : list
@@ -286,6 +291,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func loadEdgeUnits() {
+        FrameMonitor.shared.measure("viewer.load") { loadEdgeUnitsNow() }
+    }
+
+    private func loadEdgeUnitsNow() {
         let targets = [video(at: currentIndex - 1), video(at: currentIndex), video(at: currentIndex + 1)]
         for (position, unit) in units.enumerated() {
             guard let video = targets[position] else { unit.clear(); continue }
@@ -297,6 +306,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func activateCurrent() {
+        FrameMonitor.shared.measure("viewer.activate") { activateCurrentNow() }
+    }
+
+    private func activateCurrentNow() {
         for (position, unit) in units.enumerated() {
             if position != 1 { unit.muted = true }
             if position == 1 || !inBackground { unit.play() }
@@ -467,23 +480,35 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        if scrollView === feed { beginUnsettled() }
+        if scrollView === feed { monitor(true); beginUnsettled() }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === feed, !programmatic else { return }
-        let delta = feed.contentOffset.y - lastOffset
-        if abs(delta) >= 0.5 { scrollDirection = delta > 0 ? 1 : -1 }
-        lastOffset = feed.contentOffset.y
-        commitMidpointVideo()
+        FrameMonitor.shared.measure("viewer.scroll") {
+            let delta = feed.contentOffset.y - lastOffset
+            if abs(delta) >= 0.5 { scrollDirection = delta > 0 ? 1 : -1 }
+            lastOffset = feed.contentOffset.y
+            commitMidpointVideo()
+        }
+    }
+
+    // A finger or momentum moves the feed, or it has not settled on a video yet.
+    var moving: Bool { !closed && (unsettled || touching || feed.isTracking || feed.isDragging || feed.isDecelerating) }
+
+    private var monitoring = false
+    private func monitor(_ moving: Bool) {
+        guard moving != monitoring else { return }
+        monitoring = moving
+        FrameMonitor.shared.scrolling(moving)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if scrollView === feed && !decelerate { settle() }
+        if scrollView === feed && !decelerate { monitor(false); settle() }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        if scrollView === feed { settle() }
+        if scrollView === feed { monitor(false); settle() }
     }
 
     // MARK: zoom
@@ -705,6 +730,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func unitTime(_ unit: ViewerUnit, _ snapshot: TimelineSnapshot) {
         guard unit === active else { return }
+        FrameMonitor.shared.measure("viewer.time") { showTime(snapshot) }
+    }
+
+    private func showTime(_ snapshot: TimelineSnapshot) {
         overlay.setTimeline(snapshot)
         let now = CACurrentMediaTime()
         if now - lastProgressSave >= 3 {
@@ -846,6 +875,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func close(reveal: Bool = true) {
         guard !closed else { return }
         closed = true
+        monitor(false)
         revealTimer?.invalidate()
         saveProgress()
         progress.flush()

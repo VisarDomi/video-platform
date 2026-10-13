@@ -70,6 +70,21 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   arrives while a finger or momentum moves the rows waits until they stop, and one whose rows
   look the same is not reloaded at all (Video Vault publishes each site page as it is read;
   October 12, 2026: its scrolling stopped abruptly during every refresh).
+- **The main thread only shows** (October 13, 2026): a local app applies the PC's changes and
+  describes the rows in the background (a live recording changes Tango's 4,000-row list
+  every few seconds), Video Vault merges, orders and describes each site page in the
+  background, and rows are compared by what they show (`ViewerVideo.Look`). A new list also
+  waits while the open viewer is being swiped, and a swipe redraws only the highlighted rows
+  on screen. NativeKit's FrameMonitor measures it on the phone (Instruments cannot record
+  it): while the list or the viewer's feed moves, every frame over 25 ms is kept with the
+  spans of our code that ran in it (`list.set`, `list.cell`, `viewer.open`, `viewer.scroll`,
+  `viewer.activate`, `viewer.load`, `viewer.list`, `viewer.time`, `unit.attach`,
+  `audio.session`), in `debug-state.json` ("frames"), written when the app leaves the screen.
+  First owner test, all five apps: 380-780 frames each, one to three over 25 ms per app,
+  our code at most 10 ms in any frame (a swipe's switch to the next video, once per swipe),
+  rows about 0.3 ms each. The longer frames ran almost none of our code (at most 2.5 ms):
+  about 50 ms once per app, and 640 ms once in Tango. `viewer.open` and `audio.session` were
+  added afterwards to measure the viewer's opening.
 - **Relaunch** (October 13, 2026): the first frame is the screen as it was left. Lists read
   their kept rows before it (they already did); Tango's sign-in screen, when it was showing,
   comes back in the first frame (with the PC button as last seen) and stays until the session
@@ -144,7 +159,7 @@ Start with [shared Mac access](/home/visar/Documents/environment/mac-access.md).
 the runbook's known-hosts file; it falls back to the Mac's Wi-Fi automatically when
 Ethernet is down, see `mac-connect --check`). Mac mirror:
 `/Users/visar/Developer/video-platform/apps/ios`. The phone
-(`00008101-000639912881401E`) is cabled to the Mac; paid team `65U58U86DD`. From this folder:
+(`00008101-000639912881401E`) is paired with the Mac over Wi-Fi (no cable); paid team `65U58U86DD`. From this folder:
 
 ```sh
 python3 scripts/deploy.py <provider> sync      # rsyncs sources to the Mac; Tango also builds its web extensions and stages its PC login key
@@ -160,6 +175,10 @@ team, phone provisioning and an expiry more than 45 days away before replacing t
 app. Never uninstall to update (that would sign the online apps out). No LaunchAgent is
 created. Simulator builds: `SIMULATOR=1 /usr/bin/python3 scripts/build-provider.py
 <provider>` on the Mac; they include NativeKit's test hooks (ios-tools `native/scripts/sim`).
+Frame reports: `xcrun devicectl device copy from --device <phone> --domain-type
+appDataContainer --domain-identifier <bundle id> --source 'Library/Application
+Support/LocalVideos/debug-state.json' --destination <file>` on the Mac, after the app has
+left the screen.
 
 ## Renewal
 

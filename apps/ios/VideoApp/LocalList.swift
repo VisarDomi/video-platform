@@ -77,7 +77,8 @@ final class LocalListController: VideoListController {
                 do {
                     let set = try await api.changes(epoch: epoch, since: revision, wait: loaded ? 25 : 0)
                     guard !Task.isCancelled else { break }
-                    apply(set)
+                    await apply(set)
+                    guard !Task.isCancelled else { break }
                     hideFailure()
                     refresh.endRefreshing()
                     delay = 1
@@ -102,24 +103,33 @@ final class LocalListController: VideoListController {
         follow()
     }
 
-    private func apply(_ set: ChangeSet) {
-        if let all = set.videos {
-            items = all
-        } else {
-            for change in set.changes ?? [] {
-                if let removed = change.removed {
-                    items.removeAll { $0.filename == removed.filename && $0.type == removed.type }
-                } else if let item = change.item {
-                    if let index = items.firstIndex(where: { $0.key == item.key }) { items[index] = item }
-                    else { items.insert(item, at: items.insertionIndex(for: item)) }
-                }
-            }
-        }
+    // The changes are applied, and the rows described, off the main thread (a live recording
+    // changes every few seconds and the list holds thousands); only the result is set.
+    private func apply(_ set: ChangeSet) async {
         let changed = set.videos != nil || !(set.changes ?? []).isEmpty || !loaded
         let moved = set.epoch != epoch || set.revision != revision
+        let (current, api) = (items, api)
+        let result: (items: [ServerVideo], rows: [ViewerVideo], looks: [ViewerVideo.Look])? = changed ? await Task.detached(priority: .userInitiated) {
+            var items = set.videos ?? current
+            if set.videos == nil {
+                for change in set.changes ?? [] {
+                    if let removed = change.removed {
+                        items.removeAll { $0.filename == removed.filename && $0.type == removed.type }
+                    } else if let item = change.item {
+                        if let index = items.firstIndex(where: { $0.filename == item.filename && $0.type == item.type }) { items[index] = item }
+                        else { items.insert(item, at: items.insertionIndex(for: item)) }
+                    }
+                }
+            }
+            let rows = items.map(api.describe)
+            return (items, rows, rows.map(\.look))
+        }.value : nil
         epoch = set.epoch
         revision = set.revision
-        if changed { setVideos(items.map(api.describe)) }
+        if let result {
+            items = result.items
+            setVideos(result.rows, looks: result.looks)
+        }
         if changed || moved { cacheWriter.save(json: ListCache(provider: provider, epoch: set.epoch, revision: set.revision, videos: items)) }
     }
 

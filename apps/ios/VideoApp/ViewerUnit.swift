@@ -1,5 +1,6 @@
 import AVFoundation
 import UIKit
+import KitCore
 
 // The web viewer's PlayerUnit (packages/app src/player/PlayerUnit.ts) with AVPlayer: one video,
 // its timeline and its media lifecycle. Videos never stop by themselves: a failed or stalled
@@ -152,7 +153,7 @@ final class ViewerUnit {
                 self.player.play()
             }
         })
-        player.replaceCurrentItem(with: item)
+        FrameMonitor.shared.measure("unit.attach") { player.replaceCurrentItem(with: item) }
         // Nothing to seek to: play at once, as the web unit did before its metadata arrived.
         if startTime <= 0 || video?.liveStream == true { started = true; if wantsPlay { player.play() } }
     }
