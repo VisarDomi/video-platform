@@ -2,8 +2,8 @@ import Foundation
 import UIKit
 import KitCore
 
-// One video as the list page describes it (packages/app routes/nativeViewer.ts): the provider's
-// own fields, which go back to the page unchanged, plus what the viewer knows without asking.
+// One video as a list describes it (LocalList, VaultList, TangoList): the provider's own fields,
+// kept as they came, plus what the viewer knows without asking.
 // Its fields are JSON values, never changed in place: safe to build off the main thread.
 struct ViewerVideo: @unchecked Sendable {
     private(set) var raw: [String: Any]

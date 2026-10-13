@@ -1,8 +1,8 @@
 import Foundation
 import KitNet
 
-// Video Vault's scrapers and list rules against pages shaped as the sites' own (the same
-// fixtures as packages/app test/providers.mjs), and both sites paged through a stub network.
+// Video Vault's scrapers and list rules against pages shaped as the sites' own, and both
+// sites paged through a stub network.
 
 func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) {
     do { if try !condition() { print("FAIL: " + message); exit(1) } }

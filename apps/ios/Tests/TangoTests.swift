@@ -1,6 +1,6 @@
 import Foundation
 
-// Tango's list rules against the gateway's answers as shaped in packages/app test/providers.mjs.
+// Tango's list rules against answers shaped as the gateway sends them.
 
 func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) {
     do { if try !condition() { print("FAIL: " + message); exit(1) } }

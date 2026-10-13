@@ -1,7 +1,7 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-// NativeKit: what the native apps share instead of WebKit (ios-tools/native/PLAN.md).
+// NativeKit: what the native apps share (ios-tools/native/README.md).
 // Canonical here; each app repository vendors a copy as apps/ios/Kit
 // (native/scripts/vendor-kit.py). KitCore, KitNet, KitHTML and KitLifecycle's transfers
 // build on macOS too, so their tests run with `swift test` on the Mac; the UI modules
