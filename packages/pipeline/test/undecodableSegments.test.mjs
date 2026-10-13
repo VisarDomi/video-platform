@@ -76,7 +76,7 @@ test("conversion keeps the stub: no garbage picture, every decodable frame once,
     const original = await readFile(playlist, "utf8");
     const staging = path.join(root, "out");
     const result = await createDefaultStages(staging).remux({ id: "stubbed", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "stubbed.production-v5.mp4");
+    assert.equal(path.basename(result.path), "stubbed.production-v6.mp4");
     assert.match(result.eventReason, keptNote);
     const [fromA, fromB] = [await frameIds(a.input), await frameIds(b.input)];
     assert.equal(new Set([...fromA, ...fromB]).size, fromA.length + fromB.length, "fixture IDs must be unique");
