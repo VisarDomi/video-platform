@@ -58,12 +58,13 @@ enum Uploads {
     private static let bracketed = #"\[([^\]]*\b\d{4}-\d{2}-\d{2}\s+\d{6}\b[^\]]*)\]"#
 
     // Only the pipeline's uploads: "[YYYY-MM-DD HHMMSS streamer]" in the title.
-    static func isPipelineUpload(_ title: String) -> Bool { title.range(of: bracketed, options: .regularExpression) != nil }
+    static func isPipelineUpload(_ title: String) -> Bool { first(bracketed, in: title) != nil }
 
     // The bracketed recording without brackets; else the title from the timestamp on.
     static func label(_ title: String) -> String {
         if let inside = first(bracketed, in: title)?[1]?.trimmingCharacters(in: .whitespaces), !inside.isEmpty { return inside }
-        guard let range = title.range(of: recorded, options: .regularExpression) else { return title }
+        guard let regex = compiled.regex(recorded, []), let match = regex.firstMatch(in: title, range: NSRange(location: 0, length: (title as NSString).length)),
+              let range = Range(match.range, in: title) else { return title }
         return String(title[range.lowerBound...]).trimmingCharacters(in: .whitespaces)
     }
 
@@ -126,8 +127,10 @@ enum Uploads {
         return url
     }
 
+    // Compiled once each: every row of every page is matched several times (labels, times,
+    // streamers), and compiling a pattern costs far more than matching it.
     static func matches(_ pattern: String, in text: String, options: NSRegularExpression.Options = []) -> [[String?]] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return [] }
+        guard let regex = compiled.regex(pattern, options) else { return [] }
         let ns = text as NSString
         return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { match in
             (0..<match.numberOfRanges).map { index in
@@ -138,7 +141,27 @@ enum Uploads {
     }
 
     static func first(_ pattern: String, in text: String, options: NSRegularExpression.Options = []) -> [String?]? {
-        matches(pattern, in: text, options: options).first
+        guard let regex = compiled.regex(pattern, options), let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) else { return nil }
+        let ns = text as NSString
+        return (0..<match.numberOfRanges).map { index in
+            let range = match.range(at: index)
+            return range.location == NSNotFound ? nil : ns.substring(with: range)
+        }
+    }
+
+    private static let compiled = Patterns()
+}
+
+final class Patterns: @unchecked Sendable {
+    private let lock = NSLock()
+    private var known: [String: NSRegularExpression] = [:]
+
+    func regex(_ pattern: String, _ options: NSRegularExpression.Options) -> NSRegularExpression? {
+        let key = "\(options.rawValue)|" + pattern
+        if let regex = lock.withLock({ known[key] }) { return regex }
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
+        lock.withLock { known[key] = regex }
+        return regex
     }
 }
 

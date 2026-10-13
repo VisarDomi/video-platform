@@ -133,6 +133,10 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     }
 
     public func save() {
+        FrameMonitor.shared.measure("navigation.save") { saveNow() }
+    }
+
+    private func saveNow() {
         let stack = SavedStack(back: screens.map { SavedStack.Entry(route: $0.route, state: $0.savedState()) },
                                forward: forward.reversed().map { SavedStack.Entry(route: $0.route, state: $0.savedState()) }.reversed() + savedForward)
         writer.save(json: stack)

@@ -236,6 +236,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var padding: CGFloat { bounds.height / 2 }
 
     private func relayout(keeping anchor: StripPosition?, screen: (index: Int, top: CGFloat)? = nil) {
+        FrameMonitor.shared.measure("strip.relayout") { relayoutNow(keeping: anchor, screen: screen) }
+    }
+
+    private func relayoutNow(keeping anchor: StripPosition?, screen: (index: Int, top: CGFloat)?) {
         let width = bounds.width
         guard width > 0 else { return }
         laidOutWidth = width
@@ -283,9 +287,12 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         }
         let widthPixels = Int((laidOutWidth * zoomBucket * (window?.screen.scale ?? 3)).rounded(.up))
         // The pages on screen first, then outwards.
+        // Slices of tall pages within a screen of the visible part are attached; the rest let go.
+        let shown = CGRect(x: 0, y: visibleTop - visibleHeight, width: laidOutWidth, height: visibleHeight * 3)
         for index in (first...last).sorted(by: { distanceFromScreen($0) < distanceFromScreen($1) }) {
             let cell = cells[index] ?? dequeue(index)
-            if cell.fit != .width(widthPixels) || (cell.imageView.image == nil && cell.ticket == nil && retryDue(index)) { request(index, cell: cell, width: widthPixels) }
+            if cell.fit != .width(widthPixels) || (!cell.hasImage && cell.ticket == nil && retryDue(index)) { request(index, cell: cell, width: widthPixels) }
+            cell.reveal(shown.offsetBy(dx: 0, dy: -tops[index]))
         }
         pipeline.prioritiesChanged()
         if last >= pages.count - 3, lastNearEnd != pages.count {
@@ -334,7 +341,14 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
             switch result {
             case .success(let image):
                 failures[index] = nil
-                cell.show(image)
+                FrameMonitor.shared.note("page \(Int(image.size.width * image.scale))x\(Int(image.size.height * image.scale))")
+                FrameMonitor.shared.measure("strip.show") {
+                    cell.show(image)
+                    let zoom = scrollView.zoomScale, visibleTop = scrollView.contentOffset.y / zoom, visibleHeight = scrollView.bounds.height / zoom
+                    if tops.indices.contains(index) {
+                        cell.reveal(CGRect(x: 0, y: visibleTop - visibleHeight - tops[index], width: laidOutWidth, height: visibleHeight * 3))
+                    }
+                }
                 if image.size.height > 0 { setAspect(image.size.width / image.size.height, at: index) }
             case .failure(let error):
                 if error is CancellationError { return }
@@ -357,7 +371,16 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     public func viewForZooming(in scrollView: UIScrollView) -> UIView? { content }
 
-    public func scrollViewDidScroll(_ scrollView: UIScrollView) { updateVisible() }
+    public func scrollViewDidScroll(_ scrollView: UIScrollView) { FrameMonitor.shared.measure("strip.scroll") { updateVisible() } }
+
+    private var monitoring = false
+    private func monitor(_ moving: Bool) {
+        guard moving != monitoring else { return }
+        monitoring = moving
+        FrameMonitor.shared.scrolling(moving)
+    }
+
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { monitor(true) }
 
     public func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // Keep a page narrower than the screen centred horizontally (zooming out bounces).
@@ -368,9 +391,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         pinnedTop = nil
-        if !decelerate { settleIfIdle() }
+        if !decelerate { monitor(false); settleIfIdle() }
     }
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settleIfIdle() }
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { monitor(false); settleIfIdle() }
     public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) { settleIfIdle() }
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { settleIfIdle() }
 
@@ -390,7 +413,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     }
 
     public var state: [String: Any] {
-        ["pages": pages.count, "decoded": cells.values.filter { $0.imageView.image != nil }.count,
+        ["pages": pages.count, "decoded": cells.values.filter(\.hasImage).count,
          "position": currentPosition.map { ["index": $0.index, "fraction": $0.fraction] } ?? [:],
          "zoom": scrollView.zoomScale, "failures": failures.count]
     }
@@ -398,15 +421,27 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
 @MainActor
 final class PageCell: UIView {
+    // A page taller than this many pixels is drawn in slices of `slice` pixels, each its own
+    // layer, attached only near the screen: Core Animation then prepares a few megabytes as they
+    // come into view instead of a whole page (Asura's 900×16000 pages are 57 MB) in one frame.
+    static let tallest = 2048
+    static let slice = 1024
+
     let imageView = UIImageView()
     private let message = UILabel()
+    private var slices: [CGImage] = []
+    private var sliceScale: CGFloat = 1
+    private var sliceViews: [Int: UIImageView] = [:]
+    private var pixelHeight = 0
     var index = -1
     var ticket: ImageTicket?
     var fit: ImageFit?
+    private(set) var hasImage = false
 
     init() {
         super.init(frame: .zero)
         backgroundColor = .black
+        clipsToBounds = true
         imageView.contentMode = .scaleAspectFit
         imageView.backgroundColor = .black
         addSubview(imageView)
@@ -422,14 +457,59 @@ final class PageCell: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = bounds
+        for (slice, view) in sliceViews { view.frame = frame(ofSlice: slice) }
         message.frame = bounds.insetBy(dx: 8, dy: 8)
         message.sizeToFit()
         message.frame.origin = CGPoint(x: 8, y: 8)
     }
 
+    private func frame(ofSlice slice: Int) -> CGRect {
+        guard pixelHeight > 0 else { return .zero }
+        let top = CGFloat(slice * Self.slice) / CGFloat(pixelHeight) * bounds.height
+        let bottom = CGFloat(min(pixelHeight, (slice + 1) * Self.slice)) / CGFloat(pixelHeight) * bounds.height
+        return CGRect(x: 0, y: top, width: bounds.width, height: bottom - top)
+    }
+
     func show(_ image: UIImage) {
-        imageView.image = image
+        clearSlices()
         message.isHidden = true
+        hasImage = true
+        guard let cgImage = image.cgImage, cgImage.height > Self.tallest else {
+            imageView.image = image
+            return
+        }
+        // Full-width slices: cropping shares the decoded pixels (no copy until shown).
+        imageView.image = nil
+        pixelHeight = cgImage.height
+        sliceScale = image.scale
+        slices = stride(from: 0, to: cgImage.height, by: Self.slice).compactMap { y in
+            cgImage.cropping(to: CGRect(x: 0, y: y, width: cgImage.width, height: min(Self.slice, cgImage.height - y)))
+        }
+    }
+
+    // The part of the page near the screen, in the cell's coordinates: its slices are attached.
+    func reveal(_ near: CGRect) {
+        guard !slices.isEmpty, bounds.height > 0 else { return }
+        for slice in slices.indices {
+            let frame = frame(ofSlice: slice)
+            if frame.intersects(near) {
+                guard sliceViews[slice] == nil else { continue }
+                let view = UIImageView(image: UIImage(cgImage: slices[slice], scale: sliceScale, orientation: .up))
+                view.contentMode = .scaleToFill
+                view.frame = frame
+                insertSubview(view, belowSubview: message)
+                sliceViews[slice] = view
+            } else if let view = sliceViews.removeValue(forKey: slice) {
+                view.removeFromSuperview()
+            }
+        }
+    }
+
+    private func clearSlices() {
+        for view in sliceViews.values { view.removeFromSuperview() }
+        sliceViews = [:]
+        slices = []
+        pixelHeight = 0
     }
 
     func showFailure(_ text: String?) {
@@ -439,7 +519,9 @@ final class PageCell: UIView {
     }
 
     func reset() {
+        clearSlices()
         imageView.image = nil
+        hasImage = false
         message.isHidden = true
         ticket = nil
         fit = nil

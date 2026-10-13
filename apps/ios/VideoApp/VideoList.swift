@@ -115,6 +115,10 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     // rows waits until they stop (Video Vault publishes each site page as it is read); a list
     // whose rows look the same needs no reload at all.
     func setVideos(_ new: [ViewerVideo], marks: [String: String] = [:]) {
+        FrameMonitor.shared.measure("list.set") { setVideosNow(new, marks: marks) }
+    }
+
+    private func setVideosNow(_ new: [ViewerVideo], marks: [String: String]) {
         if positioned && rowsMoving {
             if pending == nil { applyWhenStill() }
             pending = (new, marks)
@@ -224,15 +228,24 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         stateWriter.save(json: State(highlight: highlight, top: savedTop?.key, offset: savedTop.map { Double($0.offset) }))
     }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { monitor(true) }
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { applyPending(); savePlace() }
+        if !decelerate { monitor(false); applyPending(); savePlace() }
     }
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { applyPending(); savePlace() }
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { monitor(false); applyPending(); savePlace() }
+
+    private var monitoring = false
+    private func monitor(_ moving: Bool) {
+        guard moving != monitoring else { return }
+        monitoring = moving
+        FrameMonitor.shared.scrolling(moving)
+    }
     func scrollViewDidScrollToTop(_ scrollView: UIScrollView) { applyPending(); savePlace() }
 
     func flushState() {
         stateWriter.flush()
         progress.flush()
+        DebugState.shared.write(to: directory)
     }
 
     // MARK: failure
@@ -273,10 +286,12 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { videos.count }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! VideoRowCell
-        let video = videos[indexPath.row]
-        cell.show(video, highlighted: video.filename == highlight, mark: marks[video.filename], bytesPerSecond: bytesPerSecond)
-        return cell
+        FrameMonitor.shared.measure("list.cell") {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! VideoRowCell
+            let video = videos[indexPath.row]
+            cell.show(video, highlighted: video.filename == highlight, mark: marks[video.filename], bytesPerSecond: bytesPerSecond)
+            return cell
+        }
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

@@ -84,7 +84,8 @@ final class VaultListController: VideoListController {
                 do {
                     let page = try await Vault.page(http, cursor: cursor)
                     guard !Task.isCancelled else { return }
-                    absorb(page)
+                    await absorb(page)
+                    guard !Task.isCancelled else { return }
                     hideFailure()
                     if refresh.isRefreshing { refresh.endRefreshing() }
                     delay = 1
@@ -104,32 +105,38 @@ final class VaultListController: VideoListController {
 
     // Until the reload finishes the earlier rows stay with the uploads read so far; then only
     // what was listed remains, except the rows of a site that could not be listed.
-    private func absorb(_ page: Vault.Page) {
-        fresh = Vault.unique(fresh + page.videos)
+    // The merging, ordering and matching of every row happen off the main thread (a page
+    // arrives every second or so while the list may be scrolling); only the result is set.
+    private func absorb(_ page: Vault.Page) async {
+        let fresh = Vault.unique(self.fresh + page.videos)
         let done = page.next == nil
         let earlier = done ? shown.filter { video in video.site.map { page.incomplete.contains($0) } ?? false } : shown
-        shown = Vault.order(Vault.unique(fresh + earlier))
+        let (shown, marks, streamers) = await Task.detached(priority: .userInitiated) {
+            let shown = Vault.order(Vault.unique(fresh + earlier))
+            return (shown, Vault.marks(shown), shown.map { Uploads.streamer($0.title) })
+        }.value
+        self.fresh = done ? [] : fresh
+        self.shown = shown
         notices = page.notices
-        if done {
-            fresh = []
-            keptWriter.save(json: Kept(videos: shown, notices: notices, savedAt: Date()))
-        }
-        publish()
+        if done { keptWriter.save(json: Kept(videos: shown, notices: notices, savedAt: Date())) }
+        publish(marks: marks, streamers: streamers)
     }
 
-    private func publish() {
-        setVideos(shown.map(describe), marks: Vault.marks(shown))
+    private func publish(marks known: [String: String]? = nil, streamers known2: [String?]? = nil) {
+        let marks = known ?? Vault.marks(shown)
+        let streamers = known2 ?? shown.map { Uploads.streamer($0.title) }
+        setVideos(zip(shown, streamers).map { describe($0, streamer: $1) }, marks: marks)
         setNotices(notices.map { notice in (notice.text, notice.login ? { [weak self] in self?.presentLogin() } : nil) })
     }
 
     // As the website described an upload to the viewer: no source until asked; +/- on whichever
     // download list has the recording's streamer.
-    private func describe(_ video: VaultVideo) -> ViewerVideo {
+    private func describe(_ video: VaultVideo, streamer: String?) -> ViewerVideo {
         var raw: [String: Any] = [
             "filename": video.filename, "provider": video.provider, "type": "original", "title": video.title, "pageUrl": video.pageUrl,
             "duration": video.duration, "size": 0, "isLive": false, "local": false, "live": false,
         ]
-        if let streamer = Uploads.streamer(video.title) { raw["membership"] = ["lists": ["tango", "fc2", "sc"], "identifier": streamer, "choose": true] }
+        if let streamer { raw["membership"] = ["lists": ["tango", "fc2", "sc"], "identifier": streamer, "choose": true] }
         return ViewerVideo(raw)!
     }
 

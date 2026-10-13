@@ -176,9 +176,11 @@ public final class ImagePipeline {
         if case .success(let image) = result {
             cache.setObject(image, forKey: key as NSString, cost: Self.cost(image))
         }
-        for (id, completion) in entry.completions {
-            ticketKeys[id] = nil
-            if !(entry.task?.isCancelled ?? false) { completion(result) }
+        FrameMonitor.shared.measure("images.deliver") {
+            for (id, completion) in entry.completions {
+                ticketKeys[id] = nil
+                if !(entry.task?.isCancelled ?? false) { completion(result) }
+            }
         }
         pump()
     }
