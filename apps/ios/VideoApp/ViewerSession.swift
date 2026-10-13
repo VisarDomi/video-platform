@@ -1,7 +1,6 @@
 import AVFoundation
 import MediaPlayer
 import UIKit
-import KitCore
 
 // The viewer's audio session and lock-screen controls. Videos play on through lock and the
 // background (UIBackgroundModes audio). While the current video is muted the session mixes with
@@ -22,7 +21,14 @@ final class ViewerSession {
     private var audible: Bool?
     private var active = false
 
+    // Activating and deactivating the audio session wait for the system's audio server (Apple:
+    // a blocking call, not for a thread where blocking matters), so they run in order on their
+    // own queue. A viewer opened again before its predecessor's deactivation ran skips it.
+    private static let audio = DispatchQueue(label: "viewer-audio", qos: .userInitiated)
+    private static let sessions = Counter()
+
     func begin(_ commands: Commands) {
+        Self.sessions.increment()
         let center = MPRemoteCommandCenter.shared()
         let handlers: [(MPRemoteCommand, (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus)] = [
             (center.playCommand, { _ in commands.play(); return .success }),
@@ -49,7 +55,13 @@ final class ViewerSession {
         for (command, target) in targets { command.removeTarget(target); command.isEnabled = false }
         targets = []
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        if active { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        if active {
+            let sessions = Self.sessions, ended = sessions.value
+            Self.audio.async {
+                guard sessions.value == ended else { return }
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
+        }
         active = false
         audible = nil
     }
@@ -57,9 +69,8 @@ final class ViewerSession {
     func setAudible(_ value: Bool) {
         guard value != audible else { return }
         audible = value
-        let session = AVAudioSession.sharedInstance()
-        // Activation waits for the system's audio server (measured: it may block).
-        FrameMonitor.shared.measure("audio.session") {
+        Self.audio.async {
+            let session = AVAudioSession.sharedInstance()
             do {
                 try session.setCategory(.playback, mode: .moviePlayback, options: value ? [] : [.mixWithOthers])
                 try session.setActive(true)
@@ -83,4 +94,12 @@ final class ViewerSession {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPRemoteCommandCenter.shared().changePlaybackPositionCommand.isEnabled = !(snapshot.isLive || video.liveStream)
     }
+}
+
+// How many viewer sessions have begun, read from the audio queue.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }

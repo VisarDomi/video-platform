@@ -769,6 +769,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func unitGeometryChanged(_ unit: ViewerUnit) {
+        // A closing viewer is off screen: nothing to lay out.
+        guard !closed else { return }
         layoutFeed()
         guard unit === active else { return }
         if !revealed, unit.presentationSize != .zero { reveal() }
@@ -876,22 +878,36 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard !closed else { return }
         closed = true
         monitor(false)
+        // The list is scrolled right after (measured: the frames of the next second are kept).
+        FrameMonitor.shared.scrolling(true)
+        FrameMonitor.shared.note("viewer closed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { FrameMonitor.shared.scrolling(false) }
+        FrameMonitor.shared.measure("viewer.close") { closeNow(reveal: reveal) }
+    }
+
+    private func closeNow(reveal: Bool) {
         revealTimer?.invalidate()
-        saveProgress()
-        progress.flush()
-        checkpoint.clear()
-        ViewerPoster.clear(checkpoint.directory)
+        FrameMonitor.shared.measure("close.save") {
+            saveProgress()
+            progress.flush()
+            checkpoint.clear()
+            ViewerPoster.clear(checkpoint.directory)
+        }
         removePoster()
         let filename = currentVideo?.filename
-        units.forEach { $0.clear() }
-        zoomContent.playerLayer.player = nil
-        session.end()
-        media.stop()
+        FrameMonitor.shared.measure("close.units") {
+            units.forEach { $0.clear() }
+            zoomContent.playerLayer.player = nil
+        }
+        FrameMonitor.shared.measure("close.session") {
+            session.end()
+            media.stop()
+        }
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         UIApplication.shared.isIdleTimerDisabled = false
-        if let filename { host.highlight(filename, reveal: reveal) }
-        onClose?()
+        if let filename { FrameMonitor.shared.measure("close.highlight") { host.highlight(filename, reveal: reveal) } }
+        FrameMonitor.shared.measure("close.remove") { onClose?() }
     }
 }
 

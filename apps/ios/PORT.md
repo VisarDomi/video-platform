@@ -75,16 +75,21 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   every few seconds), Video Vault merges, orders and describes each site page in the
   background, and rows are compared by what they show (`ViewerVideo.Look`). A new list also
   waits while the open viewer is being swiped, and a swipe redraws only the highlighted rows
-  on screen. NativeKit's FrameMonitor measures it on the phone (Instruments cannot record
-  it): while the list or the viewer's feed moves, every frame over 25 ms is kept with the
-  spans of our code that ran in it (`list.set`, `list.cell`, `viewer.open`, `viewer.scroll`,
+  on screen. The audio session is activated and deactivated on its own queue, in order
+  (`ViewerSession.swift`): Apple documents both as blocking calls, and closing the viewer
+  deactivated it on the main thread, so a fling right after going back to the list stuck
+  for a moment (owner, October 13: gone, "so smooth now"). A closing viewer, already off
+  screen, no longer lays itself out as its players stop. NativeKit's FrameMonitor measures
+  it on the phone (Instruments cannot record it): while the list or the viewer's feed moves,
+  and for a second after the viewer closes, every frame over 25 ms is kept with the spans of
+  our code that ran in it (`list.set`, `list.cell`, `viewer.open`, `viewer.scroll`,
   `viewer.activate`, `viewer.load`, `viewer.list`, `viewer.time`, `unit.attach`,
-  `audio.session`), in `debug-state.json` ("frames"), written when the app leaves the screen.
-  First owner test, all five apps: 380-780 frames each, one to three over 25 ms per app,
-  our code at most 10 ms in any frame (a swipe's switch to the next video, once per swipe),
-  rows about 0.3 ms each. The longer frames ran almost none of our code (at most 2.5 ms):
-  about 50 ms once per app, and 640 ms once in Tango. `viewer.open` and `audio.session` were
-  added afterwards to measure the viewer's opening.
+  `viewer.close` and its `close.*` steps), in `debug-state.json` ("frames"), written when the
+  app leaves the screen. Owner's tests, all five apps: 350-1,000 frames each, none to four
+  over 25 ms; a swipe's switch to the next video at most 10 ms of our code, rows about
+  0.3 ms each; opening the viewer 15-30 ms (once, on the tap); closing it 15-21 ms, most of
+  it `close.save` waiting for the progress file (`progress.flush()`, 10-14 ms; it need not
+  wait there), with no frame over 25 ms in the second after.
 - **Relaunch** (October 13, 2026): the first frame is the screen as it was left. Lists read
   their kept rows before it (they already did); Tango's sign-in screen, when it was showing,
   comes back in the first frame (with the PC button as last seen) and stays until the session
