@@ -65,7 +65,7 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         description: "A concrete test description.\n\nRecorded: unknown\nSource: https://ts-live.example/streamer-id",
         tags: ["tslive", "live", "room"],
     });
-    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v5: test fixture");
+    database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v6: test fixture");
     return database.get(recording.id);
 }
 
