@@ -19,6 +19,9 @@ final class TangoListController: VideoListController {
     private var loading: Task<Void, Never>?
     private var lastLoad: Date?
     private var loginView: TangoLoginView?
+    // Co-streamers as found (with their names), for append; and the lookup of those still unnamed.
+    private var found: [String: TangoStream] = [:]
+    private var naming: Task<Void, Never>?
 
     init() {
         let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
@@ -44,7 +47,7 @@ final class TangoListController: VideoListController {
         // The sign-in screen as last shown comes back in the first frame; the session (and the
         // PC) are asked again behind it.
         if let shown = try? DurableFile.readJSON(LoginShown.self, from: loginFile) { showLogin(shown.reason, pc: shown.pc) }
-        migrateCookies { [weak self] in self?.signIn() }
+        migrateCookies { [weak self] in self?.signIn(); self?.nameCoStreamers() }
     }
 
     // MARK: app lifecycle (from SceneDelegate)
@@ -133,8 +136,9 @@ final class TangoListController: VideoListController {
 
     override func related(_ video: ViewerVideo) async throws -> [ViewerVideo] {
         guard let current = stream(video) else { return [] }
-        let found = try await auth { try await session.related(streamer: current.streamerId, streamId: current.streamId) }
-        return found.map(describe)
+        let streams = try await auth { try await session.related(streamer: current.streamerId, streamId: current.streamId) }
+        for stream in streams { found[stream.streamerId] = stream }
+        return streams.map(describe)
     }
 
     override func follow(_ video: ViewerVideo, _ follow: Bool) async throws {
@@ -157,19 +161,52 @@ final class TangoListController: VideoListController {
         publish()
     }
 
-    // Co-streamers join the end, once.
+    // Co-streamers join the end, once, named as found (a row's title is not a name: it starts
+    // with the alias, or with the ID when there is none).
     override func append(_ videos: [ViewerVideo]) {
         let known = Set(streams.map(\.streamerId))
         let added = videos.compactMap { video -> TangoStream? in
-            guard !known.contains(video.filename), let media = video.media, let page = video.pageUrl else { return nil }
+            guard !known.contains(video.filename) else { return nil }
+            if let stream = found[video.filename] { return stream }
+            guard let media = video.media, let page = video.pageUrl else { return nil }
             return TangoStream(streamerId: video.filename, streamId: String(page.dropFirst("/stream/".count)).removingPercentEncoding ?? "",
-                               masterListUrl: media.url.absoluteString, firstName: video.title ?? video.filename, alias: nil,
+                               masterListUrl: media.url.absoluteString, firstName: video.filename, alias: nil,
                                following: video.following, parent: video.parent)
         }
         guard !added.isEmpty else { return }
         streams += added
         keptWriter.save(json: streams)
         publish()
+        nameCoStreamers()
+    }
+
+    // Co-streamers without an alias (the names' lookup is best effort; and those kept before
+    // October 13, 2026, whose rows began with the ID) are looked up again: at once, then after
+    // 10, 30 and 60 seconds, until all have one.
+    private func nameCoStreamers() {
+        guard naming == nil else { return }
+        naming = Task { [weak self] in
+            for delay in [0, 10, 30, 60] {
+                if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+                guard let self, !Task.isCancelled else { return }
+                let unnamed = streams.filter { $0.parent != nil && $0.alias == nil }
+                guard !unnamed.isEmpty, session.signedIn else { break }
+                let named = Dictionary(await session.named(unnamed).map { ($0.streamerId, $0) }, uniquingKeysWith: { $1 })
+                var changed = false
+                for index in streams.indices {
+                    guard let fresh = named[streams[index].streamerId], streams[index].alias == nil,
+                          fresh.alias != nil || fresh.firstName != streams[index].firstName else { continue }
+                    streams[index].alias = fresh.alias
+                    streams[index].firstName = fresh.firstName
+                    changed = true
+                }
+                if changed {
+                    keptWriter.save(json: streams)
+                    publish()
+                }
+            }
+            self?.naming = nil
+        }
     }
 
     override func login() { showLogin("Tango signed out.") }

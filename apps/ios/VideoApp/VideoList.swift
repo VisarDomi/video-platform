@@ -90,6 +90,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         view.addGestureRecognizer(forwardPan)
         table.panGestureRecognizer.require(toFail: forwardPan)
         restoreViewer()
+        prepareSpare()
         DebugState.shared.register("list") { [weak self] in
             guard let self else { return [:] }
             return ["provider": viewerProvider, "rows": videos.count, "highlight": highlight ?? "", "viewer": viewer?.currentVideo?.filename ?? "",
@@ -138,8 +139,10 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         status.text = videos.isEmpty ? "No videos found." : nil
         status.isHidden = !videos.isEmpty || !failure.isHidden
         if !same {
-            table.reloadData()
-            if let anchor { restore(anchor) }
+            FrameMonitor.shared.measure("list.reload") {
+                table.reloadData()
+                if let anchor { restore(anchor) }
+            }
         }
         positionOnce()
         viewer?.updateList(videos)
@@ -364,9 +367,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     private func showViewerNow(videos: [ViewerVideo], index: Int, restoring: Bool) {
         viewer?.close()
-        let controller = ViewerController(provider: viewerProvider, videos: videos, index: index, host: self,
-                                          media: media, progress: progress, checkpoint: checkpoint)
+        let controller = takeSpare() ?? FrameMonitor.shared.measure("open.init") { buildViewer() }
         controller.restoring = restoring
+        controller.open(videos: videos, index: index)
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }
             controller.willMove(toParent: nil)
@@ -384,6 +387,36 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         setNeedsStatusBarAppearanceUpdate()
     }
 
+    // The next viewer, built ahead while nothing moves (a finger down or a moving list or
+    // viewer waits), so a tap only fills it: once the list is up and after each opening.
+    private var spare: ViewerController?
+    private var spareTimer: Timer?
+
+    private func buildViewer() -> ViewerController {
+        let controller = ViewerController(provider: viewerProvider, host: self, media: media, progress: progress, checkpoint: checkpoint)
+        controller.loadViewIfNeeded()
+        return controller
+    }
+
+    func prepareSpare(after delay: TimeInterval = 1.5) {
+        guard spare == nil, spareTimer == nil else { return }
+        spareTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.buildSpare() }
+        }
+    }
+
+    private func buildSpare() {
+        spareTimer = nil
+        guard spare == nil else { return }
+        if rowsMoving || UIApplication.shared.applicationState != .active { prepareSpare(after: 1); return }
+        spare = FrameMonitor.shared.measure("viewer.spare") { buildViewer() }
+    }
+
+    private func takeSpare() -> ViewerController? {
+        defer { spare = nil; prepareSpare() }
+        return spare
+    }
+
     // MARK: ViewerHost (subclasses answer what their videos need)
 
     func resolve(_ video: ViewerVideo) async throws -> MediaSource {
@@ -399,15 +432,13 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     func login() {}
 
     func highlight(_ filename: String, reveal: Bool) {
-        let previous = highlight
         highlight = filename
         saveState()
-        // Only rows on screen need redrawing (every swipe in the viewer comes here; Tango's list
-        // holds thousands).
-        let rows = (table.indexPathsForVisibleRows ?? []).filter { path in
-            videos.indices.contains(path.row) && (videos[path.row].filename == filename || videos[path.row].filename == previous)
+        // Every swipe in the viewer comes here: the rows on screen change their font and colour
+        // in place, without a reload.
+        for path in table.indexPathsForVisibleRows ?? [] where videos.indices.contains(path.row) {
+            (table.cellForRow(at: path) as? VideoRowCell)?.showHighlight(videos[path.row].filename == filename)
         }
-        table.reloadRows(at: rows, with: .none)
         guard reveal, let row = videos.firstIndex(where: { $0.filename == filename }) else { return }
         let path = IndexPath(row: row, section: 0)
         let rect = table.rectForRow(at: path)
@@ -497,12 +528,23 @@ final class VideoRowCell: UITableViewCell {
         separator.frame = CGRect(x: 0, y: contentView.bounds.height - 1, width: width, height: 1)
     }
 
+    private var showsHighlight: Bool?
+
+    func showHighlight(_ highlighted: Bool) {
+        guard highlighted != showsHighlight else { return }
+        showsHighlight = highlighted
+        name.font = highlighted ? Self.bold : Self.regular
+        backgroundColor = highlighted ? UIColor(white: 0.055, alpha: 1) : .black
+    }
+
+    private static let regular = UIFont.systemFont(ofSize: 16)
+    private static let bold = UIFont.boldSystemFont(ofSize: 16)
+
     func show(_ video: ViewerVideo, highlighted: Bool, mark siteMark: String? = nil, bytesPerSecond: Double) {
         name.text = video.name
-        name.font = highlighted ? .boldSystemFont(ofSize: 16) : .systemFont(ofSize: 16)
+        showHighlight(highlighted)
         name.textColor = video.isLive ? UIColor(red: 1, green: 0.42, blue: 0.42, alpha: 1)
             : video.edited ? UIColor(red: 0.94, green: 0.63, blue: 0.31, alpha: 1) : .white
-        backgroundColor = highlighted ? UIColor(white: 0.055, alpha: 1) : .black
         mark.text = siteMark
         let seconds = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         if video.liveStream {

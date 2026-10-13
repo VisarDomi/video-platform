@@ -76,11 +76,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var poster: UIImageView?
     private var posterReady: NSKeyValueObservation?
 
-    init(provider: String, videos: [ViewerVideo], index: Int, host: ViewerHost, media: ViewerMedia,
-         progress: ProgressStore, checkpoint: CheckpointWriter) {
+    // Built ahead, while nothing on screen moves (the list keeps one ready): its views, players
+    // and gestures take 10-20 ms of the main thread, which a tap would otherwise lose as a
+    // frame. `open` starts it.
+    init(provider: String, host: ViewerHost, media: ViewerMedia, progress: ProgressStore, checkpoint: CheckpointWriter) {
         self.provider = provider
-        self.videos = videos
-        currentIndex = index
+        videos = []
+        currentIndex = 0
         self.host = host
         self.media = media
         self.progress = progress
@@ -113,11 +115,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         feed.alpha = 0
         feed.addSubview(content)
         view.addSubview(feed)
-        units = (0..<3).map { _ in
-            let unit = ViewerUnit()
-            unit.delegate = self
-            content.addSubview(unit.view)
-            return unit
+        units = FrameMonitor.shared.measure("open.units") {
+            (0..<3).map { _ in
+                let unit = ViewerUnit()
+                unit.delegate = self
+                content.addSubview(unit.view)
+                return unit
+            }
         }
 
         zoom.delegate = self
@@ -164,20 +168,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             return !(abs(translation.x) > abs(translation.y) && start.y < self.view.bounds.height / 2)
         }
 
-        session.begin(.init(
-            play: { [weak self] in self?.active.play() },
-            pause: { [weak self] in self?.active.pause() },
-            toggle: { [weak self] in
-                guard let self else { return }
-                active.wantsPlay ? active.pause() : active.play()
-            },
-            step: { [weak self] direction in self?.step(direction) },
-            seek: { [weak self] time in
-                guard let self, !self.live else { return }
-                self.active.seek(time, resume: true)
-            }))
-        session.setAudible(false)
-        media.start()
+    }
+
+    // The list's videos from `index`: the session begins and the selected video loads.
+    func open(videos: [ViewerVideo], index: Int) {
+        loadViewIfNeeded()
+        self.videos = videos
+        currentIndex = index
+        FrameMonitor.shared.measure("open.session") { beginSession() }
         UIApplication.shared.isIdleTimerDisabled = true
         let center = NotificationCenter.default
         observers = [
@@ -198,6 +196,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         })
 
         // The selected video gets the network first; its neighbours load once it has a picture.
+        FrameMonitor.shared.measure("open.load") { loadFirst() }
+    }
+
+    private func loadFirst() {
         guard let video = currentVideo else { return }
         if restoring { showPoster(for: video) }
         overlay.setVideo(video)
@@ -212,6 +214,23 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
     }
 
+    private func beginSession() {
+        session.begin(.init(
+            play: { [weak self] in self?.active.play() },
+            pause: { [weak self] in self?.active.pause() },
+            toggle: { [weak self] in
+                guard let self else { return }
+                active.wantsPlay ? active.pause() : active.play()
+            },
+            step: { [weak self] direction in self?.step(direction) },
+            seek: { [weak self] time in
+                guard let self, !self.live else { return }
+                self.active.seek(time, resume: true)
+            }))
+        session.setAudible(false)
+        media.start()
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         feed.frame = view.bounds
@@ -221,10 +240,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         view.layer.shadowPath = UIBezierPath(rect: view.bounds).cgPath
         guard view.bounds.size != lastBounds else { return }
         lastBounds = view.bounds.size
-        if zoomed { exitZoom() }
-        layoutFeed()
-        if revealed && !unsettled { centerActive() }
-        prepareZoom()
+        FrameMonitor.shared.measure("viewer.layout") {
+            if zoomed { exitZoom() }
+            layoutFeed()
+            if revealed && !unsettled { centerActive() }
+            prepareZoom()
+        }
     }
 
     // MARK: the list
@@ -310,22 +331,29 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func activateCurrentNow() {
-        for (position, unit) in units.enumerated() {
-            if position != 1 { unit.muted = true }
-            if position == 1 || !inBackground { unit.play() }
+        let monitor = FrameMonitor.shared
+        monitor.measure("activate.play") {
+            for (position, unit) in units.enumerated() {
+                if position != 1 { unit.muted = true }
+                if position == 1 || !inBackground { unit.play() }
+            }
         }
         guard let video = currentVideo else { return }
-        overlay.setVideo(video)
-        overlay.setTimeline(active.snapshot())
-        overlay.setMuted(active.muted)
-        overlay.setSegments(segments)
-        overlay.showMembership(video.membership)
-        overlay.setUiVisible(controlsVisible)
-        overlay.setInteractive(!unsettled)
-        session.setAudible(!active.muted)
-        nowPlaying(force: true)
-        host.highlight(video.filename, reveal: false)
-        saveCheckpoint()
+        monitor.measure("activate.overlay") {
+            overlay.setVideo(video)
+            overlay.setTimeline(active.snapshot())
+            overlay.setMuted(active.muted)
+            overlay.setSegments(segments)
+            overlay.showMembership(video.membership)
+            overlay.setUiVisible(controlsVisible)
+            overlay.setInteractive(!unsettled)
+        }
+        monitor.measure("activate.session") {
+            session.setAudible(!active.muted)
+            nowPlaying(force: true)
+        }
+        monitor.measure("activate.list") { host.highlight(video.filename, reveal: false) }
+        monitor.measure("activate.save") { saveCheckpoint() }
         discover(video)
     }
 
@@ -829,19 +857,23 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // Leaving the screen: the current picture (the video's part of the unit, as drawn) for a
     // relaunch. Zoomed, or without a picture yet, there is none.
+    // The picture is taken here; it is encoded and written in the background (leaving for the
+    // background waits for it).
     private func savePoster() {
-        let directory = checkpoint.directory
+        FrameMonitor.shared.measure("viewer.poster") { savePosterNow() }
+    }
+
+    private func savePosterNow() {
         // Still showing the saved poster: it stays the one to show.
         guard poster == nil else { return }
-        guard revealed, !zoomed, let video = currentVideo, active.presentationSize != .zero else { ViewerPoster.clear(directory); return }
+        guard revealed, !zoomed, let video = currentVideo, active.presentationSize != .zero else { checkpoint.clearPoster(); return }
         let unit = active.view
         let rect = AVMakeRect(aspectRatio: active.presentationSize, insideRect: unit.bounds)
-        guard rect.width > 1, rect.height > 1 else { ViewerPoster.clear(directory); return }
+        guard rect.width > 1, rect.height > 1 else { checkpoint.clearPoster(); return }
         let image = UIGraphicsImageRenderer(bounds: rect).image { _ in unit.drawHierarchy(in: unit.bounds, afterScreenUpdates: false) }
         let frame = unit.convert(rect, to: view)
-        guard let jpeg = image.jpegData(compressionQuality: 0.85) else { return }
-        ViewerPoster.save(ViewerPoster(key: video.key, frame: [frame.minX, frame.minY, frame.width, frame.height].map(Double.init), controls: controlsVisible),
-                          jpeg: jpeg, in: directory)
+        checkpoint.savePoster(ViewerPoster(key: video.key, frame: [frame.minX, frame.minY, frame.width, frame.height].map(Double.init), controls: controlsVisible),
+                              image: image)
     }
 
     // MARK: lifecycle
@@ -887,11 +919,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func closeNow(reveal: Bool) {
         revealTimer?.invalidate()
+        // Written in the background (the progress stays in memory; leaving the app waits for it).
         FrameMonitor.shared.measure("close.save") {
             saveProgress()
-            progress.flush()
             checkpoint.clear()
-            ViewerPoster.clear(checkpoint.directory)
+            checkpoint.clearPoster()
         }
         removePoster()
         let filename = currentVideo?.filename

@@ -17,9 +17,11 @@ final class ViewerSession {
         let seek: (Double) -> Void
     }
 
+    private var commands: Commands?
     private var targets: [(MPRemoteCommand, Any)] = []
     private var audible: Bool?
     private var active = false
+    private var showsNowPlaying = false
 
     // Activating and deactivating the audio session wait for the system's audio server (Apple:
     // a blocking call, not for a thread where blocking matters), so they run in order on their
@@ -27,8 +29,17 @@ final class ViewerSession {
     private static let audio = DispatchQueue(label: "viewer-audio", qos: .userInitiated)
     private static let sessions = Counter()
 
+    // The lock screen's commands wait for the first unmute: a muted viewer mixes with other
+    // apps' audio and cannot own the lock screen, and registering them costs the opening
+    // 2-4 ms of the main thread.
     func begin(_ commands: Commands) {
         Self.sessions.increment()
+        self.commands = commands
+        active = true
+    }
+
+    private func registerCommands() {
+        guard targets.isEmpty, let commands else { return }
         let center = MPRemoteCommandCenter.shared()
         let handlers: [(MPRemoteCommand, (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus)] = [
             (center.playCommand, { _ in commands.play(); return .success }),
@@ -48,13 +59,13 @@ final class ViewerSession {
         }
         center.skipForwardCommand.isEnabled = false
         center.skipBackwardCommand.isEnabled = false
-        active = true
     }
 
     func end() {
         for (command, target) in targets { command.removeTarget(target); command.isEnabled = false }
         targets = []
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        commands = nil
+        clearNowPlaying()
         if active {
             let sessions = Self.sessions, ended = sessions.value
             Self.audio.async {
@@ -76,7 +87,13 @@ final class ViewerSession {
                 try session.setActive(true)
             } catch { print("Audio session:", error.localizedDescription) }
         }
-        if !value { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
+        if value { registerCommands() } else { clearNowPlaying() }
+    }
+
+    private func clearNowPlaying() {
+        guard showsNowPlaying else { return }
+        showsNowPlaying = false
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     func nowPlaying(_ video: ViewerVideo?, _ snapshot: TimelineSnapshot, playing: Bool) {
@@ -92,6 +109,7 @@ final class ViewerSession {
             info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = snapshot.currentTime
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        showsNowPlaying = true
         MPRemoteCommandCenter.shared().changePlaybackPositionCommand.isEnabled = !(snapshot.isLive || video.liveStream)
     }
 }

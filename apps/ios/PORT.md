@@ -74,22 +74,28 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   describes the rows in the background (a live recording changes Tango's 4,000-row list
   every few seconds), Video Vault merges, orders and describes each site page in the
   background, and rows are compared by what they show (`ViewerVideo.Look`). A new list also
-  waits while the open viewer is being swiped, and a swipe redraws only the highlighted rows
-  on screen. The audio session is activated and deactivated on its own queue, in order
-  (`ViewerSession.swift`): Apple documents both as blocking calls, and closing the viewer
-  deactivated it on the main thread, so a fling right after going back to the list stuck
-  for a moment (owner, October 13: gone, "so smooth now"). A closing viewer, already off
-  screen, no longer lays itself out as its players stop. NativeKit's FrameMonitor measures
-  it on the phone (Instruments cannot record it): while the list or the viewer's feed moves,
-  and for a second after the viewer closes, every frame over 25 ms is kept with the spans of
-  our code that ran in it (`list.set`, `list.cell`, `viewer.open`, `viewer.scroll`,
-  `viewer.activate`, `viewer.load`, `viewer.list`, `viewer.time`, `unit.attach`,
-  `viewer.close` and its `close.*` steps), in `debug-state.json` ("frames"), written when the
-  app leaves the screen. Owner's tests, all five apps: 350-1,000 frames each, none to four
-  over 25 ms; a swipe's switch to the next video at most 10 ms of our code, rows about
-  0.3 ms each; opening the viewer 15-30 ms (once, on the tap); closing it 15-21 ms, most of
-  it `close.save` waiting for the progress file (`progress.flush()`, 10-14 ms; it need not
-  wait there), with no frame over 25 ms in the second after.
+  waits while the open viewer is being swiped. Writes go to background queues without
+  waiting (progress, checkpoint, the poster's JPEG), except when the app leaves for the
+  background, which waits for them.
+  - The audio session is activated and deactivated on its own queue, in order
+    (`ViewerSession.swift`): Apple documents both as blocking calls, and closing the viewer
+    deactivated it on the main thread, so a fling right after going back to the list stuck
+    for a moment (owner: gone, "so smooth now"). The lock screen's commands are registered at
+    the first unmute (a muted viewer mixes with other audio and cannot own the lock screen).
+  - The next viewer is built ahead (`VideoList.swift` `prepareSpare`): its overlay, three
+    players and gestures take about 20 ms, so the list builds one 1.5 s after it loads and
+    after each opening, only while nothing moves and no finger is down; a tap fills it and
+    starts it (`ViewerController.open`).
+  - A swipe's highlight changes the font and colour of the rows on screen in place (no
+    reload, the list being under the viewer); a closing viewer, already off screen, no
+    longer lays itself out as its players stop.
+  - NativeKit's FrameMonitor measures it on the phone (Instruments cannot record it): while
+    the list or the viewer's feed moves, and for a second after the viewer closes, every
+    frame over 25 ms is kept with the spans of our code that ran in it (`list.*`,
+    `viewer.*`, `open.*`, `activate.*`, `close.*`, `unit.attach`), in `debug-state.json`
+    ("frames"), written when the app leaves the screen. Owner's tests, before and after:
+    opening the viewer 15-30 ms to 8-9 ms, a swipe's switch to the next video 3-10 ms to
+    1-2 ms, closing it 15-21 ms to 2-5 ms; Tango local 469 frames, none over 25 ms.
 - **Relaunch** (October 13, 2026): the first frame is the screen as it was left. Lists read
   their kept rows before it (they already did); Tango's sign-in screen, when it was showing,
   comes back in the first frame (with the PC button as last seen) and stays until the session
@@ -131,7 +137,9 @@ on the sites but are not listed. The same recording on both sites shows `Xvid` o
   asks Tango's gateway for a new one behind it: followed streams first, then
   recommendations, one per streamer, never blocked ones; the order then stays while
   browsing (pull down, or return after half an hour, for a new list). Co-streamers found
-  while watching join the end; ended and blocked streams leave. Follow, the two-step Block
+  while watching join the end, named as found (alias and first name); any still without an
+  alias are looked up again (at once, then after 10, 30 and 60 s; until October 13, 2026
+  they joined as their ID). Ended and blocked streams leave. Follow, the two-step Block
   and co-streamers go to the gateway. The session lives in the app's cookie jar and
   `TangoSession` (`Tango.swift`) is its only owner: the session token is refreshed from the
   refresh token when it has under five minutes left (one refresh at a time; a rotated
