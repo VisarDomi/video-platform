@@ -100,8 +100,11 @@ for suffix,extension in {config.get('webExtensions',{})!r}.items():
     for name in ['manifest.json','content.js','background.js']:
         assert (appex/name).read_bytes()==(pathlib.Path({MAC!r})/'build'/{a.provider!r}/suffix/name).read_bytes(), suffix+' '+name
 print('Verified bundle, name, start URL, site scope, icon absence, signature, paid team, phone and expiry:',profile['ExpirationDate'],flush=True)
-subprocess.run(['xcrun','devicectl','device','install','app','--device',{DEVICE!r},str(app)],check=True)
+# phone-install (ios-tools): devicectl when the Mac reaches the phone, else an over-the-air
+# link on the tailnet (exit 10: installed once the owner taps Install on the phone).
+installed=subprocess.run(['/Users/visar/Developer/ios-tools/native/scripts/phone-install','--device',{DEVICE!r},str(app)]).returncode
+if installed not in (0,10): raise SystemExit(installed)
 subprocess.run({deliver('installed')!r},check=True)
-subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
+if installed==0: subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
 ''')
 else: print('Attached build complete; no temporary background job was created.')
