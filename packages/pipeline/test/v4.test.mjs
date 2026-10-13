@@ -36,7 +36,7 @@ async function fixture(t, remoteId) {
     return { config, db, r, attempt };
 }
 
-test("production size: Full HD pixel count AND 1080 tall, landscape, aspect kept, never smaller than the source", () => {
+test("production size: covers 1920x1080 (at least 1920 wide and 1080 tall), landscape, aspect kept, never smaller than the source", () => {
     for (const [width, height, sar] of [[640,480,"1:1"],[480,640,"1:1"],[960,768,"1:1"],
         [768,960,"1:1"],[852,640,"640:639"],[720,1280,"1:1"],[1280,720,"1:1"],[2640,1440,"1:1"],
         [800,800,"1:1"],[2000,1000,"1:1"],[3840,2160,"1:1"],[1440,1080,"4:3"],[360,640,"1:1"]]) {
@@ -46,8 +46,10 @@ test("production size: Full HD pixel count AND 1080 tall, landscape, aspect kept
         const portrait = height > displayWidth;
         assert.equal(out.rotate, portrait, `${width}x${height} turned only when portrait`);
         assert(out.width >= out.height, "always landscape (or square) after the turn");
-        assert(out.width * out.height >= 1920 * 1080, `${width}x${height}: Full HD pixel count`);
-        assert(out.height >= 1080, `${width}x${height}: Porntrex names tiers by height`);
+        // Porntrex makes its 1080p version only from a source at least 1920 wide,
+        // and names it by height.
+        assert(out.width >= 1920, `${width}x${height}: at least 1920 wide`);
+        assert(out.height >= 1080, `${width}x${height}: at least 1080 tall`);
         assert(out.width * out.height >= width * height, `${width}x${height}: never fewer pixels`);
         assert(out.width >= Math.max(displayWidth, height) - 1 && out.height >= Math.min(displayWidth, height) - 1, "never smaller");
         assert.equal(out.width % 2, 0); assert.equal(out.height % 2, 0);
@@ -55,18 +57,20 @@ test("production size: Full HD pixel count AND 1080 tall, landscape, aspect kept
         assert(Math.abs(out.width / out.height / aspect - 1) < 0.002, `${width}x${height}: aspect kept`);
     }
     assert.deepEqual(productionOutputDimensions({ width: 720, height: 1280, sampleAspectRatio: null }), { width: 1920, height: 1080, rotate: true });
-    assert.deepEqual(productionOutputDimensions({ width: 640, height: 480, sampleAspectRatio: "1:1" }), { width: 1664, height: 1248, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 640, height: 480, sampleAspectRatio: "1:1" }), { width: 1920, height: 1440, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 1280, height: 1024, sampleAspectRatio: "1:1" }), { width: 1920, height: 1536, rotate: false });
+    assert.deepEqual(productionOutputDimensions({ width: 1280, height: 720, sampleAspectRatio: "1:1" }), { width: 1920, height: 1080, rotate: false });
     assert.deepEqual(productionOutputDimensions({ width: 2000, height: 1000, sampleAspectRatio: "1:1" }), { width: 2160, height: 1080, rotate: false });
     assert.deepEqual(productionOutputDimensions({ width: 3840, height: 2160, sampleAspectRatio: "1:1" }), { width: 3840, height: 2160, rotate: false });
     assert.deepEqual(productionOutputDimensions({ width: 1080, height: 1920, sampleAspectRatio: "1:1" }), { width: 1920, height: 1080, rotate: true });
 });
 
-test("actual v3 non-widescreen manifests fail Full-HD verification; portrait and landscape pass", () => {
-    for (const size of ["1110x832", "1072x858", "1440x1080", "1350x1080"]) {
+test("Full HD is a version at least 1080 tall: the 1080p version of a 4:3 or 5:4 upload passes, labels count for nothing", () => {
+    for (const size of ["1110x832", "1072x858", "1280x720", "1920x1036"]) {
         const rs = parsePlaybackRenditions(`#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=${size},NAME="1080p"\nvideo.m3u8`);
         assert.equal(hasFullHdPlayback(rs), false, "misleading labels cannot substitute for pixels");
     }
-    for (const size of ["1920x1080", "1080x1920", "1664x1248", "1610x1288", "2560x1440"]) {
+    for (const size of ["1920x1080", "1080x1920", "1440x1080", "1350x1080", "1920x1440", "2560x1440", "1918x1078"]) {
         assert(hasFullHdPlayback(parsePlaybackRenditions(`#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=${size}\na.m3u8`)));
     }
     assert.equal(hasFullHdPlayback(parsePlaybackRenditions("<html>Login</html>")), false);

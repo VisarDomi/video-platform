@@ -115,7 +115,7 @@ for (const resetTimestamps of [false, true]) {
         assert(!original.includes("#EXT-X-DISCONTINUITY"));
         const staging = path.join(root, "out");
         const result = await createDefaultStages(staging).remux({ id: "untagged", playlistPath: playlist });
-        assert.equal(path.basename(result.path), `untagged.production-v5${portrait ? "-ccw" : ""}.mp4`);
+        assert.equal(path.basename(result.path), `untagged.production-v6${portrait ? "-ccw" : ""}.mp4`);
         sameFrames((await Promise.all(parts.map((p) => frameIds(p.input)))).flat(), await frameIds(result.path));
         await continuousVideo(result.path);
         await sameAudio(parts, result.path);
@@ -152,7 +152,7 @@ test("production pure 1440p is converted at its own size, never shrunk", async (
     const part = await fixturePart(root, "native", { size: "2560x1440", frames: 3, fmp4: true });
     const playlist = await assemble(root, [part]);
     const result = await createDefaultStages(path.join(root, "out")).remux({ id: "native", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "native.production-v5.mp4");
+    assert.equal(path.basename(result.path), "native.production-v6.mp4");
     const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height", "-of", "json", result.path]);
     assert.deepEqual(JSON.parse(stdout).streams[0], { width: 2560, height: 1440 });
@@ -169,7 +169,7 @@ test(`${fmp4 ? "fMP4" : "TS"} production keeps mixed 1080p/720p/1440p content, a
     const parts = [full, low, higher];
     const playlist = await assemble(root, parts);
     const result = await createDefaultStages(path.join(root, "out")).remux({ id: "mixed", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "mixed.production-v5.mp4");
+    assert.equal(path.basename(result.path), "mixed.production-v6.mp4");
     sameFrames((await Promise.all(parts.map((p) => frameIds(p.input)))).flat(), await frameIds(result.path));
     await continuousVideo(result.path);
     await sameAudio(parts, result.path);
@@ -188,7 +188,7 @@ test("mixed 2640x1440/1320x720 keeps every frame at 2640x1440 in both orientatio
         const low = await fixturePart(dir, "low", { size: portrait ? "720x1320" : "1320x720", offset: 60, frames: 4, fmp4: true });
         const playlist = await assemble(dir, [high, low]);
         const result = await createDefaultStages(path.join(dir, "out")).remux({ id: "converted", playlistPath: playlist });
-        assert.equal(path.basename(result.path), `converted.production-v5${portrait ? "-ccw" : ""}.mp4`);
+        assert.equal(path.basename(result.path), `converted.production-v6${portrait ? "-ccw" : ""}.mp4`);
         sameFrames([...await frameIds(high.input), ...await frameIds(low.input)], await frameIds(result.path));
         await continuousVideo(result.path);
         await sameAudio([high, low], result.path);
@@ -205,7 +205,7 @@ test("a wide 2560x900 recording is scaled to 1080 tall (Porntrex tiers by height
     const parts = [high, low, high];
     const playlist = await assemble(root, parts);
     const result = await createDefaultStages(path.join(root, "out")).remux({ id: "wide", playlistPath: playlist });
-    assert.equal(path.basename(result.path), "wide.production-v5.mp4");
+    assert.equal(path.basename(result.path), "wide.production-v6.mp4");
     const expected = (await Promise.all(parts.map((p) => frameIds(p.input)))).flat();
     const actual = await frameIds(result.path);
     assert.equal(actual.length, expected.length, "every frame, the low one included");

@@ -65,11 +65,13 @@ export interface RecordingResolutionAnalysis {
 
 type DimensionProbe = (inputPath: string) => Promise<VideoDimensions>;
 
-// v5 (2026-10-05): every recording is converted; nothing is dropped; portrait
-// is turned 90° counterclockwise; each shape is its own upload.
-export const RESOLUTION_POLICY_VERSION = "resolution-policy-v5";
-export const FULL_HD_PIXEL_COUNT = 1920 * 1080;
-// Porntrex names its quality tiers by height, so Full HD needs both.
+// v6 (2026-10-13): every recording is converted; nothing is dropped; portrait
+// is turned 90° counterclockwise; each shape is its own upload, at least
+// 1920 wide and 1080 tall.
+export const RESOLUTION_POLICY_VERSION = "resolution-policy-v6";
+// Porntrex makes its 1080p version only from a source at least 1920 wide, and
+// names it by height: a 4:3 upload of 1664x1248 got 480p and 720p only.
+export const FULL_HD_WIDTH = 1920;
 export const FULL_HD_HEIGHT = 1080;
 // Display aspect ratios this close are one shape (rounding of even sizes).
 export const SHAPE_TOLERANCE = 0.01;
@@ -305,10 +307,10 @@ export interface ProductionOutput {
 }
 
 // One output size for a shape: the picture's display shape in landscape
-// orientation, scaled up until it has at least Full HD's pixel count AND a
-// height of at least 1080 (Porntrex names tiers by height). Never smaller than
-// the source: neither display size nor coded pixel count shrinks. Square
-// pixels; no crop, no padding.
+// orientation, scaled up until it covers 1920x1080 (at least 1920 wide AND
+// 1080 tall; a 4:3 picture becomes 1920x1440). Never smaller than the source:
+// neither display size nor coded pixel count shrinks. Square pixels; no crop,
+// no padding.
 export function productionOutputDimensions(source: VideoDimensions): ProductionOutput {
     if (!Number.isSafeInteger(source.width) || source.width <= 0 || !Number.isSafeInteger(source.height) || source.height <= 0) {
         throw new Error("Source has invalid dimensions");
@@ -320,7 +322,7 @@ export function productionOutputDimensions(source: VideoDimensions): ProductionO
     const height = rotate ? displayWidth : displayHeight;
     const scale = Math.max(
         1,
-        Math.sqrt(FULL_HD_PIXEL_COUNT / (width * height)),
+        FULL_HD_WIDTH / width,
         FULL_HD_HEIGHT / height,
         Math.sqrt(source.width * source.height / (width * height)),
     );

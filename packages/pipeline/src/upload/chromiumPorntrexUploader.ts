@@ -413,7 +413,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             const stream = (JSON.parse(output.stdout) as { streams: Array<{ width: number; height: number }> }).streams?.[0];
             if (!stream) continue;
             renditions.push({ ...stream, label: candidate.label });
-            if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD pixel tier verified from playback stream", stored };
+            if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD tier verified from playback stream", stored };
         }
         if (!renditions.length && failures) throw new Error("Porntrex playback dimension probe failed; retry verification, not upload");
         const best = [...renditions].sort((left, right) => right.width * right.height - left.width * left.height)[0];

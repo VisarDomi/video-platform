@@ -40,7 +40,7 @@ online verification.
 - Network commands require `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
   worker verifies due uploads inline.
 
-## Conversion policy (resolution-policy-v5)
+## Conversion policy (resolution-policy-v6)
 
 Every recording is converted; nothing is stream-copied and **no segment is
 dropped**. Source folders and their playlists are never modified.
@@ -55,13 +55,14 @@ dropped**. Source folders and their playlists are never modified.
 - **Short pieces.** A split's piece shorter than a minute is not uploaded: it
   is recorded in the `manual_pieces` table (listed by `review`). If no piece is
   long enough, the recording is blocked for a person.
-- **Size.** Each shape is scaled to at least 1920×1080 pixels **and** 1080 tall
-  (Porntrex names quality tiers by height), keeping its aspect ratio, and never
-  smaller than its largest picture: 1440p/4K keep their size. No crop, no
+- **Size.** Each shape is scaled until it covers 1920×1080: at least 1920 wide
+  **and** 1080 tall (Porntrex makes its 1080p version only from a source at least
+  1920 wide, and names it by height; 4:3 becomes 1920×1440), keeping its aspect
+  ratio, and never smaller than its largest picture: 1440p/4K keep their size. No crop, no
   padding; square pixels; zscale Lanczos, libx264 slow/CRF 16/yuv420p.
 - **Portrait** pictures are turned 90° counterclockwise (`transpose=2`, head to
   the left) into a landscape frame. Artifacts are named
-  `<id>.production-v5[-shapeN][-ccw].mp4`; `-ccw` tells the describe stage to show
+  `<id>.production-v6[-shapeN][-ccw].mp4`; `-ccw` tells the describe stage to show
   the model an upright copy (descriptor option `rotation: "clockwise"`).
 - **Segment ownership.** The MPEG-TS scan streams the segment bytes in playlist
   order through one ffprobe keyframe pass; packet byte positions decide which
@@ -83,7 +84,7 @@ dropped**. Source folders and their playlists are never modified.
   manual review, judged on the artifact's own duration: Porntrex takes two
   minutes to 10 GB at any length, XVideos up to two hours and 50 GB at any
   shortness.
-- Local work without a `resolution-policy-v5` assessment is reset and
+- Local work without a `resolution-policy-v6` assessment is reset and
   converted again; uploaded recordings are not touched. The local-stage lease
   is 12 hours.
 
@@ -111,7 +112,7 @@ source recordings and the finalization database are preserved.
 `campaign:status` reports the active version and whether a rollover is pending.
 
 A new generation reuses a whole-recording artifact from a history snapshot only
-when it was produced under the current policy and recipe (`artifact-recipe-v2`)
+when it was produced under the current policy and recipe (`artifact-recipe-v3`)
 from the same source fingerprint; split parts are never reused. Descriptions
 are reused only through the descriptor's exact artifact-hash/prompt cache.
 
@@ -251,7 +252,7 @@ profile; outside the service set `DISPLAY=:111`. Only one Chromium may use a
 profile directory at a time.
 
 Before any bytes are sent, an upload checks: the recording has no verified or
-pending remote copy in the ledger, passed `resolution-policy-v5`, fits the
+pending remote copy in the ledger, passed `resolution-policy-v6`, fits the
 provider's duration/size limits, contains no learned rejected phrase, has no
 copy in a synchronized provider inventory, fits the monthly budget, and (for a
 retry) is not found by an exact lookup. A submitted upload is never accepted on
@@ -285,7 +286,7 @@ hold; after it, the pipeline tries for about a minute to read the new video's
 ID from My Videos (otherwise reconciliation finds it by its title suffix).
 Verification opens `/edit-video/<id>/`, follows the published `/video/<id>/`
 link and probes each MP4 download link, highest label first, for a Full-HD
-pixel count. A video still processing is checked again after two hours. Words
+version (at least 1080 on its short side). A video still processing is checked again after two hours. Words
 Porntrex silently replaced in the stored title/description are learned as
 rejected phrases.
 
@@ -397,7 +398,7 @@ with the server processor; with `VIDEO_PIPELINE_NETWORK_UPLOADS=1` it first
 looks the folder up on the active provider and parks an existing upload
 instead. This is not the production conversion: the campaign
 converts the recording again, and `upload-one` refuses an artifact that has not
-passed `resolution-policy-v5`.
+passed `resolution-policy-v6`.
 
 ```bash
 npm run remux-one -w pipeline -- --recording "/absolute/managed/recording/folder"

@@ -196,7 +196,7 @@ test("a lower picture of the same shape joins the larger one; portrait is turned
     assert.equal(group.reference.width, 720);
     assert.equal(group.reference.height, 960);
     assert.deepEqual([...group.indexes].sort(), [0, 1]);
-    assert.deepEqual(group.output, { width: 1664, height: 1248, rotate: true });
+    assert.deepEqual(group.output, { width: 1920, height: 1440, rotate: true });
 });
 test("the XVideos adapter cannot perform network uploads", async () => {
     const uploader = new DisabledXvideosUploader();
@@ -363,7 +363,7 @@ test("production keeps every segment: mixed 1080p/720p is one conversion at the 
     const original = await readFile(playlistPath, "utf8");
     const result = await createDefaultStages(staging).remux(recording);
     assert.equal(result.disposition, "artifact");
-    assert.equal(path.basename(result.path), "mixed.production-v5.mp4");
+    assert.equal(path.basename(result.path), "mixed.production-v6.mp4");
     const converted = await validateArtifact(result.path);
     assert.equal(converted.videoWidth, 1920);
     assert.equal(converted.videoHeight, 1080);
@@ -376,12 +376,12 @@ test("production keeps every segment: mixed 1080p/720p is one conversion at the 
     await writeFile(playlistPath, retainedPlaylist);
     const retained = await createDefaultStages(staging).remux({ ...recording, id: "retained", durationSeconds: 3 });
     assert.equal(retained.disposition, "artifact");
-    assert.equal(path.basename(retained.path), "retained.production-v5.mp4");
+    assert.equal(path.basename(retained.path), "retained.production-v6.mp4");
     const validated = await validateArtifact(retained.path);
     assert.equal(validated.videoHeight, 1080);
     assert(validated.durationSeconds >= 2.9, "the one 720p segment among ten is kept, not dropped");
     assert.equal(await readFile(playlistPath, "utf8"), retainedPlaylist);
-    assert.deepEqual((await readdir(staging)).sort(), ["mixed.production-v5.mp4", "retained.production-v5.mp4"]);
+    assert.deepEqual((await readdir(staging)).sort(), ["mixed.production-v6.mp4", "retained.production-v6.mp4"]);
 });
 
 test("a playlist entry without a valid EXTINF duration is refused", async (t) => {

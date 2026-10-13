@@ -217,9 +217,9 @@ server follows the account first, but only if it is not already followed.
 | Constant | Value |
 |---|---|
 | `CURRENT_PRODUCTION_VERSION` (`domain/productionVersion.ts`) | `production-v6` |
-| `RESOLUTION_POLICY_VERSION` | `resolution-policy-v5` |
-| `ARTIFACT_RECIPE_VERSION` | `artifact-recipe-v2` |
-| artifact file names | `<id>.production-v5[-shapeN][-ccw].mp4` |
+| `RESOLUTION_POLICY_VERSION` | `resolution-policy-v6` |
+| `ARTIFACT_RECIPE_VERSION` | `artifact-recipe-v3` |
+| artifact file names | `<id>.production-v6[-shapeN][-ccw].mp4` |
 
 - **Input:** edited recordings only, each with an exact `ready` checkpoint for its
   current playlist. Admission records a source fingerprint (the playlist plus each
@@ -235,9 +235,11 @@ server follows the account first, but only if it is not already followed.
   upload each (`shape1`, `shape2`, … in order of first appearance), titled
   `… [<folder> | part N]`, uploaded in sequence: the next part is promoted only
   after the previous one verifies.
-- **Size.** Each shape is scaled to at least 1920×1080 pixels and at least 1080
-  tall, keeping its aspect ratio, and never smaller than its largest source
-  picture. No crop, no padding, square pixels; zscale Lanczos, libx264 `slow` CRF
+- **Size.** Each shape is scaled until it covers 1920×1080 (at least 1920 wide
+  and at least 1080 tall; 4:3 becomes 1920×1440), keeping its aspect ratio, and
+  never smaller than its largest source picture. Why: Porntrex makes its 1080p
+  version only from a source at least 1920 wide and names it by height; 4:3
+  uploads of 1664×1248 got 480p and 720p only. No crop, no padding, square pixels; zscale Lanczos, libx264 `slow` CRF
   16, yuv420p, VFR. Audio is copied when the inputs allow it, otherwise re-encoded
   once (AAC 192k).
 - **Portrait** pictures are turned 90° counterclockwise (`transpose=2`, head to
@@ -257,7 +259,7 @@ server follows the account first, but only if it is not already followed.
   review (Porntrex: under two minutes or over 10 GB; XVideos: over two hours or
   50 GB). The test uses the artifact's own probed duration, so a split piece of
   one to two minutes is blocked while Porntrex is active.
-- **Local work without a v5 assessment** in its events is reset and converted
+- **Local work without a v6 assessment** in its events is reset and converted
   again. Uploaded and verified recordings are not touched.
 - **Artifact cache.** A whole-recording artifact of the current recipe, found in
   an earlier generation's history snapshot, is reused only if its size and SHA-256
@@ -265,7 +267,7 @@ server follows the account first, but only if it is not already followed.
   are never reused.
 - **`remux-one` is a supervised diagnostic.** It stream-copies, or with a flag
   writes `--upscale1080p`/`--upscale1440p` variants to `artifact_variants`. Its
-  output has no v5 assessment, so the campaign converts the recording again and
+  output has no v6 assessment, so the campaign converts the recording again and
   `upload-one` refuses it.
 
 ## 6. Pipeline ledger, campaign and verification
@@ -384,7 +386,9 @@ server follows the account first, but only if it is not already followed.
   any match means no upload. A recording with a copy in a synchronized
   `provider_inventory` is blocked.
 - **Porntrex verification.** The edit page must show a published link, and
-  ffprobe must find a `/get_file/` rendition of at least 1920×1080×0.995 pixels. A
+  ffprobe must find a `/get_file/` rendition at least 1080 tall on its short side
+  (1920×1080, or 1440×1080 for a 4:3 upload; 0.5% tolerance); labels count for
+  nothing. A
   video still processing is checked again after 2 h, anything else after 24 h.
   Words Porntrex swapped are learned as rejected phrases. A transfer is abandoned
   only after 10 minutes without progress (`TRANSFER_STALL_MILLISECONDS`).

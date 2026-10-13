@@ -58,10 +58,10 @@ test("several shapes become one validated artifact each; the short piece is reco
     assert.equal(result.state, "artifact_valid");
     const primary = database.getArtifact(recorded.id);
     assert.equal(database.getArtifactPart(recorded.id), "shape1");
-    assert(primary.path.endsWith(".production-v5-shape1.mp4"));
+    assert(primary.path.endsWith(".production-v6-shape1.mp4"));
     const [queued] = database.listQueuedProductionArtifacts(recorded.id);
     assert.equal(queued.part, "shape2");
-    assert(queued.path.endsWith(".production-v5-shape2-ccw.mp4"), "the portrait shape is turned");
+    assert(queued.path.endsWith(".production-v6-shape2-ccw.mp4"), "the portrait shape is turned");
     for (const artifact of [primary, queued]) {
         const validated = await validateArtifact(artifact.path);
         assert.deepEqual([validated.videoWidth, validated.videoHeight], [1920, 1080]);
@@ -83,9 +83,9 @@ test("when every piece of a split is under a minute the recording is blocked for
     const result = await new PipelineOrchestrator(database, createDefaultStages(path.join(root, "staging")), "shape-test")
         .processRecording(recorded.id);
     assert.equal(result.state, "blocked");
-    assert.match(result.blockReason, /^resolution-policy-v5: .*no piece is long enough to upload/);
+    assert.match(result.blockReason, /^resolution-policy-v6: .*no piece is long enough to upload/);
     assert.deepEqual(database.listManualPieces(recorded.id).map((piece) => piece.part), ["shape1", "shape2"]);
-    assert(database.hasResolutionPolicyAssessment(recorded.id, "resolution-policy-v5"));
+    assert(database.hasResolutionPolicyAssessment(recorded.id, "resolution-policy-v6"));
 });
 
 test("split parts get their own public title suffix, and the lookup finds each one", () => {
@@ -103,11 +103,11 @@ test("split parts get their own public title suffix, and the lookup finds each o
 });
 
 test("only counterclockwise-turned production artifacts ask the descriptor to turn the picture back", () => {
-    assert.equal(productionArtifactSuffix("full", false), "production-v5");
-    assert.equal(productionArtifactSuffix("full", true), "production-v5-ccw");
-    assert.equal(productionArtifactSuffix("shape3", true), "production-v5-shape3-ccw");
-    assert(isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v5-ccw.mp4"));
-    assert(isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v5-shape2-ccw.mp4"));
-    assert(!isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v5.mp4"));
+    assert.equal(productionArtifactSuffix("full", false), "production-v6");
+    assert.equal(productionArtifactSuffix("full", true), "production-v6-ccw");
+    assert.equal(productionArtifactSuffix("shape3", true), "production-v6-shape3-ccw");
+    assert(isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v6-ccw.mp4"));
+    assert(isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v6-shape2-ccw.mp4"));
+    assert(!isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-v6.mp4"));
     assert(!isCounterclockwiseArtifact("/a/2026-02-01 120000 shapes.production-upscale1080p.mp4"));
 });

@@ -12,8 +12,9 @@ import { artifactSha256 } from "./validateArtifact.js";
 
 // Independent of the upload generation. Bump when encoder/filter/remux settings
 // change output semantics, even if the resolution-selection policy stays put.
-// v2 (2026-10-05): always converted, portrait turned counterclockwise, shapes split.
-export const ARTIFACT_RECIPE_VERSION = "artifact-recipe-v2";
+// v3 (2026-10-13): always converted, portrait turned counterclockwise, shapes
+// split, each at least 1920 wide and 1080 tall.
+export const ARTIFACT_RECIPE_VERSION = "artifact-recipe-v3";
 
 export interface ArtifactCacheConfig {
     readonly databasePath: string;

@@ -209,7 +209,7 @@ export class ChromiumXvideosUploader implements XvideosUploader {
         const renditions = parsePlaybackRenditions(await manifest.text());
         return { outcome: hasFullHdPlayback(renditions) ? "online" : "not_ready",
             remoteUrl: edit.directLink, renditions,
-            reason: hasFullHdPlayback(renditions) ? "Full-HD pixel tier available" : "Published, but Full-HD playback tier is missing" };
+            reason: hasFullHdPlayback(renditions) ? "Full-HD tier available" : "Published, but Full-HD playback tier is missing" };
     }
 
     // One login flow, then the callers run their specific work on the

@@ -12,8 +12,10 @@ export function parsePlaybackRenditions(manifest: string): PlaybackRendition[] {
         });
 }
 
+// A provider's 1080p version is at least 1080 on its short side (1920x1080,
+// or 1440x1080 for a 4:3 upload); labels count for nothing.
 export function hasFullHdPlayback(renditions: readonly PlaybackRendition[]): boolean {
-    // Provider even-dimension rounding can undershoot its nominal pixel tier
+    // Provider even-dimension rounding can undershoot its nominal tier
     // slightly. This tolerance is far below the gap between 720p and 1080p.
-    return renditions.some(({ width, height }) => width * height >= 1920 * 1080 * 0.995);
+    return renditions.some(({ width, height }) => Math.min(width, height) >= 1080 * 0.995);
 }

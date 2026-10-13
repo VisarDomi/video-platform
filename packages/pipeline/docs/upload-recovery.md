@@ -26,8 +26,8 @@ as uncertain, to be checked 24 hours later.
   also accepts the user's manual uploads whose title ends with the unbracketed identity. A Porntrex row
   marked "Error" (Porntrex's own processing failed: no link, Edit disabled) counts toward the list
   total but is no copy of the recording; any other row without a link stops the scan.
-- One exact match: persist its provider ID and verify playback: a stream of at least the Full-HD pixel
-  count (1920×1080, 0.5% tolerance).
+- One exact match: persist its provider ID and verify playback: a stream at least 1080 tall on its
+  short side (1920×1080, or 1440×1080 for a 4:3 upload; 0.5% tolerance).
 - Known ID: keep checking that upload. Processing delays, missing playback tiers and provider errors
   never authorize a new upload.
 - A known ID whose edit page answers HTTP 404 (on Porntrex: and absent from My Videos) was removed by
