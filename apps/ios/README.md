@@ -186,7 +186,18 @@ both sites shows `Xvid` or `Ptrex`.
     (`abregistrar/connection/v1/blocklist`, action `UNBLOCK`). It is a dry run by default;
     `node apps/tango/scripts/tango-unblock-blocklist.mjs --account <id> --execute` unblocks
     one account, `--execute` alone every blocked account (one per second). It reports
-    whether anything is still blocked.
+    whether anything is still blocked. An unblock shows in the blocklist a few seconds
+    later. Adding a streamer to the PC's Tango list (+) also unblocks and follows them.
+  - Gateway bodies that are not JSON (follow/add and follow/remove take the account ID,
+    the co-streamers' watch the stream ID) are sent as `text/plain` (`Tango.request`).
+    Unlabelled, URLSession calls a POST body a form, and follow/add and follow/remove
+    answer 500 to that: Follow, Unfollow and Block of a followed streamer did nothing
+    until October 14, 2026.
+  - Checking the three actions without the phone: the PC's own Tango session (never the
+    phone's) can send the app's requests from Node through `packages/shared`'s
+    `readTokens()`; follow, then unfollow; block, then unblock; for +/-, the PC's
+    `/api/tango/add`, `member` and `remove` with an already followed streamer who is
+    offline (nothing records, nothing else changes).
 - **One-time migration**: each app's first launch took over what its earlier web version
   kept in WebKit (local apps: the highlight and viewer positions from the website's
   localStorage, through NativeKit's `KitMigration`; Video Vault: its cookies and login-cookie

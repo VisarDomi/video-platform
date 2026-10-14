@@ -29,6 +29,19 @@ enum TangoError: LocalizedError {
 
 enum Tango {
     static let gateway = URL(string: "https://gateway.tango.me")!
+
+    // A gateway request with the session. A body that is not JSON (an account or stream ID) is
+    // labelled as text, as a browser sends a string: unlabelled, URLSession calls it a form, and
+    // follow/add and follow/remove answer 500 to that (October 14, 2026: Follow did nothing).
+    static func request(_ path: String, method: String, body: Data?, json: Bool, sessionToken: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: path, relativeTo: gateway)!.absoluteURL, timeoutInterval: 20)
+        request.httpMethod = method
+        request.httpBody = body
+        request.setValue("Tango-ST=" + sessionToken, forHTTPHeaderField: "Cookie")
+        request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Accept")
+        if body != nil { request.setValue(json ? "application/json" : "text/plain;charset=UTF-8", forHTTPHeaderField: "Content-Type") }
+        return request
+    }
     static let publicAPI = "https://gateway.tango.me/proxycador/api/public/v1"
     static let refreshURL = URL(string: "https://gateway.tango.me/session-service/public/v2/session/web/refresh")!
     static let tokenURL = URL(string: "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData")!
@@ -176,13 +189,7 @@ actor TangoSession {
     // Gateway requests with the session's cookies; a 401/403 refreshes once more.
     func send(_ path: String, method: String = "GET", body: Data? = nil, json: Bool = false) async throws -> Data {
         for attempt in 0..<2 {
-            let st = try await sessionToken()
-            var request = URLRequest(url: URL(string: path, relativeTo: Tango.gateway)!.absoluteURL, timeoutInterval: 20)
-            request.httpMethod = method
-            request.httpBody = body
-            request.setValue("Tango-ST=" + st, forHTTPHeaderField: "Cookie")
-            request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Accept")
-            if json { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+            let request = Tango.request(path, method: method, body: body, json: json, sessionToken: try await sessionToken())
             let (data, response) = try await session.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if (status == 401 || status == 403) && attempt == 0 { try await refresh(); continue }

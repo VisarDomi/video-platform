@@ -35,6 +35,11 @@ struct TangoTests {
         let payload = Data(#"{"accountId":"me","sessionId":"session-1"}"#.utf8).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         expect(Tango.claims("h.\(payload).s")! == ("me", "session-1") && Tango.claims("nope") == nil, "The refresh token names the account and session")
-        print("PASS: Tango list, names, co-streamers, session claims")
+        let follow = Tango.request(Tango.publicAPI + "/follow/add", method: "POST", body: Data("A".utf8), json: false, sessionToken: "st")
+        expect(follow.value(forHTTPHeaderField: "Content-Type") == "text/plain;charset=UTF-8" && follow.httpBody == Data("A".utf8)
+               && follow.value(forHTTPHeaderField: "Cookie") == "Tango-ST=st", "An ID body is text (Tango answers 500 to a form)")
+        expect(Tango.request("/x", method: "POST", body: Data("{}".utf8), json: true, sessionToken: "st").value(forHTTPHeaderField: "Content-Type") == "application/json"
+               && Tango.request("/x", method: "GET", body: nil, json: false, sessionToken: "st").value(forHTTPHeaderField: "Content-Type") == nil, "JSON bodies are JSON; no body, no type")
+        print("PASS: Tango list, names, co-streamers, session claims, request bodies")
     }
 }
