@@ -193,23 +193,30 @@ test("antibot failure parks the campaign in a 60s cooldown instead of blocking",
     assert.equal(database.get(recording.id).state, "metadata_ready");
 });
 
-test("generic pre-transfer failure and login errors retry tomorrow without overriding manual pause", async (t) => {
+test("a generic pre-transfer failure retries in 15 minutes, doubling per failure; a login error waits a day; neither overrides a manual pause", async (t) => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
-    for (const error of [new Error("locator timeout"), new HumanActionRequiredError("session_login", "OAuth timeout")]) {
-        database.setCampaignState("running");
-        let calls = 0;
-        const worker = new CampaignWorker(database, config, resolver, async () => {calls++; throw error;});
-        await worker.step(new Date("2026-10-01T00:00:00Z"));
-        assert.equal(database.getCampaignControl().resumeAt, "2026-10-02T00:00:00.000Z");
-        assert.equal(database.get(recording.id).state, "metadata_ready");
-        await worker.step(new Date("2026-10-01T12:00:00Z"));
-        assert.equal(calls,1);
-        await worker.step(new Date("2026-10-02T00:00:00Z"));
-        assert.equal(calls,2);
-        database.setCampaignState("paused");
-        await worker.step(new Date("2026-10-04T00:00:00Z"));
-        assert.equal(calls,2);
-    }
+    // A page timeout before anything was sent: no video exists, so retry soon.
+    database.setCampaignState("running");
+    let calls = 0;
+    const timeout = new CampaignWorker(database, config, resolver, async () => {calls++; throw new Error("page.goto: Timeout 30000ms exceeded.");});
+    await timeout.step(new Date("2026-10-01T00:00:00Z"));
+    assert.equal(database.getCampaignControl().resumeAt, "2026-10-01T00:15:00.000Z");
+    assert.equal(database.get(recording.id).state, "metadata_ready");
+    await timeout.step(new Date("2026-10-01T00:10:00Z"));
+    assert.equal(calls, 1);
+    await timeout.step(new Date("2026-10-01T00:15:00Z"));
+    assert.equal(calls, 2);
+    assert.equal(database.getCampaignControl().resumeAt, "2026-10-01T00:45:00.000Z", "the second failure in a row waits 30 minutes");
+    database.setCampaignState("paused");
+    await timeout.step(new Date("2026-10-04T00:00:00Z"));
+    assert.equal(calls, 2);
+
+    // A login problem is not retried quickly.
+    database.resetAntibotFailures();
+    database.setCampaignState("running");
+    const login = new CampaignWorker(database, config, resolver, async () => {calls++; throw new HumanActionRequiredError("session_login", "OAuth timeout");});
+    await login.step(new Date("2026-10-05T00:00:00Z"));
+    assert.equal(database.getCampaignControl().resumeAt, "2026-10-06T00:00:00.000Z");
 });
 
 test("cooldown resumes the same recording at resume_at and doubles the wait per failure", async (t) => {

@@ -312,10 +312,13 @@ server follows the account first, but only if it is not already followed.
   `provenance_review_required`. `provenance-set` overrides apply to every
   recording with the same identifier.
 - **Cooldowns** pause the campaign with `resume_at` while verification keeps
-  running. A human-action error (captcha) waits 1, 2, 4 … minutes, capped at 24 h;
-  a successful upload or a manual resume resets that streak. `session_login`, the
-  XVideos daily limit, or an attempt that failed before submission waits 24 h. A
-  lost Porntrex session pauses indefinitely, with `attention_reason` set.
+  running. A human-action error (captcha) waits 1, 2, 4 … minutes, and any other
+  attempt that failed before submission (a page timeout; nothing was sent and no
+  video exists) 15, 30, 60 … minutes, both capped at 24 h; the two share one
+  streak, which a successful upload or a manual resume resets. `session_login`
+  and the XVideos daily limit wait 24 h. A lost Porntrex session pauses
+  indefinitely, with `attention_reason` set. Why: one page timeout on
+  2026-10-14 cost a whole day of uploads.
 - **Monthly budget.** Uploads are capped at 600,000,000,000 bytes per calendar
   month in `Europe/Tirane`, the upload share of the ISP plan. Admission reserves
   the artifact size plus 16 MiB. Every transmitted byte, including failed and

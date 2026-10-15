@@ -16,6 +16,9 @@ import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
 import { MetadataRejectedError, ProviderSessionLostError } from "../upload/providerWarnings.js";
 import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "../stages/resolutionPolicy.js";
 
+// First wait after an upload failed before sending anything (a page timeout).
+const PRE_TRANSFER_RETRY_MILLISECONDS = 15 * 60_000;
+
 export type CampaignStepResult =
     | { readonly disposition: "comparison_finished" | "comparison_verification_wait" | "comparison_attention_required"; readonly reason?: string }
     | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
@@ -287,11 +290,16 @@ export class CampaignWorker {
                     };
                 }
                 // Transport/login timeouts can arrive as ordinary Playwright
-                // errors. A failed pre-transfer attempt is safe to retry; an
-                // uncertain transfer is reconciled separately, never repeated.
+                // errors. A failed pre-transfer attempt sent nothing and created
+                // no video, so it is retried soon, waiting twice as long after
+                // each failure in a row (the streak a successful upload resets);
+                // an uncertain transfer is reconciled separately, never repeated.
                 const afterFailure = this.database.get(uploadReady.id);
                 if (afterFailure?.state === "metadata_ready") {
-                    const after = this.database.recordUploadLimitCooldown(now);
+                    const streak = control.antibotFailures + 1;
+                    const waitMilliseconds = Math.min(24 * 60 * 60_000,
+                        PRE_TRANSFER_RETRY_MILLISECONDS * (2 ** Math.min(streak - 1, 40)));
+                    const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
                     return { disposition: "upload_retry_cooldown", recordingId: uploadReady.id,
                         resumeAt: after.resumeAt ?? "", reason: error instanceof Error ? error.message : String(error) };
                 }
