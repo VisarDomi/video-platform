@@ -170,9 +170,10 @@ While the worker runs, its heartbeat makes `remux-one`, `describe-one`,
 first.
 
 Upload cooldowns pause the campaign with a resume time: a human-action error
-(captcha) backs off from one minute, doubling up to 24 hours; a provider login
-problem or the OldHost daily limit waits 24 hours; another pre-transfer failure
-waits 24 hours. A lost VideoHost session pauses until
+(captcha) backs off from one minute, doubling up to 24 hours; another failure
+before anything was sent (a page timeout) backs off from 15 minutes, doubling up
+to 24 hours; a provider login problem or the OldHost daily limit waits 24 hours.
+A lost VideoHost session pauses until
 `npm run vhost:connect-iphone` restores it.
 
 Failures and blocks retain the stage they came from. Return one to it:
