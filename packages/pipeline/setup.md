@@ -129,7 +129,53 @@ artifact, and forgets recordings older than 24 hours whose source folder is
 gone, together with their pipeline files (leased recordings and in-flight
 uploads are skipped; `bandwidth_events` are never deleted). The managed service
 sets `VIDEO_PIPELINE_CLEANUP=0`. Original downloader/editor folders are never
-touched.
+touched by that automatic cleanup.
+
+### Move files to the Desktop for manual deletion
+
+Two standalone commands in the repository's `scripts/` directory are installed
+in `~/.local/bin`:
+
+```sh
+move-conversions --dry-run    # preview conversions older than seven days
+move-conversions             # move eligible conversions
+move-recordings --dry-run     # preview source recordings older than one calendar month
+move-recordings              # move eligible source folders
+```
+
+They move files on the same filesystem into
+`~/Desktop/video-pipeline/move-conversions/<generation>/` and
+`~/Desktop/video-pipeline/move-recordings/<provider>/<edited|downloaded>/`.
+The user reviews and deletes them manually. Moving them does not free disk space.
+Both commands also accept `--days N` to override their cutoff and `--json` for a
+complete preview/result. They run without rebuilding or restarting any service.
+
+- Conversion age is the later of its file modification and ledger validation
+  dates, not the capture date in its filename. Current conversions move only
+  after every part is verified. Retired conversions must be present in a history
+  snapshot, absent from active work, and have their unchanged original still
+  available (or a fully verified current recording).
+- Source age is the capture date in the folder name. A source must match the
+  current ledger's exact provider, path, playlist and media fingerprint. Every
+  upload part needs an accepted attempt and a verified remote ID/URL; pending
+  confirmations, manual pieces, active work and matching provider-removal records
+  prevent a move. A raw or Trash counterpart of an uploaded edited recording is
+  not assumed to be backed up. Unreferenced media also prevents a source move.
+- Verification uses the pipeline's recorded destination evidence; these commands
+  do not log in or perform a fresh crawl of the provider. Each review CSV includes
+  the provider links. The ledger and remote identities remain intact after moves.
+- A SQLite write lock protects the final state check and rename against the
+  worker. Paths and source identity are checked again, partial files and symlinks
+  are excluded, and an atomic no-overwrite rename prevents destination collisions.
+  A move across filesystems is refused rather than copied.
+- Each run writes `review-<time>.csv` and a durable `moves-<time>.jsonl` journal
+  inside its review folder, recording both paths, sizes, reasons and upload
+  evidence. Reruns leave already staged files alone. Nothing is deleted.
+
+Tests use temporary folders and databases:
+`python3 -m unittest discover -s scripts -p 'test_video_cleanup.py'` from the
+repository root. Direct entry points are `scripts/move-conversions` and
+`scripts/move-recordings`; both support explicit root/database arguments for tests.
 
 ## Durable campaign controls
 
