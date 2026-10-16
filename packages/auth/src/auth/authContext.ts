@@ -9,6 +9,7 @@ export class AuthContext {
     private readonly email: string;
     private readonly provider: IAuthProvider;
     private tokenBag: TokenBag | null = null;
+    private tokenSave: Promise<void> = Promise.resolve();
 
     constructor(email: string, provider: IAuthProvider) {
         this.email = email;
@@ -70,7 +71,15 @@ export class AuthContext {
         return false;
     }
 
-    public async saveTokenToFile(): Promise<void> {
+    public saveTokenToFile(): Promise<void> {
+        // The session and stream refresh loops can save at the same time.
+        // Commit in order so neither steals the other's temporary file or
+        // overwrites a newly rotated refresh token with an older snapshot.
+        this.tokenSave = this.tokenSave.then(() => this.persistTokenToFile());
+        return this.tokenSave;
+    }
+
+    private async persistTokenToFile(): Promise<void> {
         const filePath = this.getSessionFilePath();
         try {
             if (this.tokenBag) {
