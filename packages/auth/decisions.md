@@ -26,6 +26,12 @@ A session refresh consumes the previous refresh token, so its replacement is
 saved before the stream tokens are requested; a stream-token failure or an
 interruption cannot lose it (`test/session-refresh.test.mjs`).
 
+The session and stream refresh loops share a per-account save queue. Each
+atomic write and rename finishes before the next save starts, so concurrent
+saves cannot share a temporary file or let an older snapshot replace a rotated
+refresh token (`test/session-save.test.mjs`). A failed write is logged and
+does not stop later saves.
+
 ## Auth queue: pass the full response, not just the body
 
 The auth request queue (one request at a time, one second apart) resolves with
