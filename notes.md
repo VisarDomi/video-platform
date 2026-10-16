@@ -83,6 +83,10 @@ nothing (only logs and diagnostic screenshots stay in package folders):
   falls back to HTTP).
 - `~/Videos/downloads/<provider>/{downloaded,edited,trash}`: recordings
   (`VIDEO_DOWNLOADS_ROOT` overrides).
+- `~/Desktop/video-pipeline/{move-conversions,move-recordings}`: files staged by
+  the two manual cleanup commands, with review CSVs and move journals. They are
+  still on disk until the user deletes them. See
+  [manual cleanup](packages/pipeline/setup.md#move-files-to-the-desktop-for-manual-deletion).
 
 ## Download lists
 

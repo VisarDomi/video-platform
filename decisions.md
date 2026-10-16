@@ -335,7 +335,12 @@ server follows the account first, but only if it is not already followed.
   another provider is active.
 - **Cleanup is off.** The managed unit sets `VIDEO_PIPELINE_CLEANUP=0`, so
   verified artifacts stay on disk and the source-missing sweep (which needs
-  cleanup) does not run. No pipeline command touches source recordings.
+  cleanup) does not run. The campaign never removes source recordings.
+  `move-conversions` stages ledger-approved conversions older than seven days on
+  the Desktop; `move-recordings` stages unchanged, fully verified sources older
+  than one calendar month. Both only move files for manual review/deletion under
+  `Desktop/video-pipeline/`, retaining the upload ledger and writing manifests.
+  Rules and commands: [manual review](packages/pipeline/setup.md#move-files-to-the-desktop-for-manual-deletion).
 - **Review and retry.** `review` lists blocked recordings with reasons,
   unresolved provenance and manual pieces. `retry <ID>` returns a failed or
   blocked recording to the stage it left.
