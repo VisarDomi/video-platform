@@ -108,6 +108,23 @@ test('campaign automatically parks an isolated short and continues without a man
     assert.deepEqual(await readFile(path.join(clip.source,'playlist.m3u8'),'utf8'),clip.playlist);
 });
 
+test('prepared batches cannot leapfrog older discovery or an older upload-ready recording',async t=>{
+    const f=await fixture(t);const old=await f.add('bob',[[64,36,200]]);await f.add();await f.add();
+    const uploaded=[];const processed=[];
+    f.database.setCampaignState('running');
+    const worker=new CampaignWorker(f.database,f.config,f.resolver,async id=>{uploaded.push(id);return {};});
+    const first=await worker.step();assert.equal(first.disposition,'shorts_joined');
+    worker.orchestrator.processRecording=async id=>{processed.push(id);throw new Error('newer batch ran ahead of older work');};
+    const second=await worker.step();assert.equal(second.disposition,'admitted');assert.equal(second.recordingId,old.id);
+    const file=path.join(f.root,'older.mp4');await writeFile(file,'fixture');
+    f.database.saveRemuxOutput(old.id,file);
+    f.database.saveArtifact(old.id,{path:file,sizeBytes:7,sha256:'a'.repeat(64),validatedAt:new Date().toISOString()});
+    const raw=new DatabaseSync(f.config.databasePath);raw.prepare("UPDATE recordings SET state='metadata_ready' WHERE id=?").run(old.id);raw.close();
+    f.database.recordResolutionPolicyAssessment(old.id,'resolution-policy-v6: test fixture');
+    const third=await worker.step();assert.equal(third.disposition,'upload_completed');
+    assert.deepEqual(uploaded,[old.id]);assert.deepEqual(processed,[]);
+});
+
 test('all required short parts are classified atomically',async t=>{
     const f=await fixture(t);const clip=await f.add();const recording=f.database.discover(clip.input);
     const first={...part(recording.id,65),sourceFingerprint:recording.sourceFingerprint,part:'shape1'};
@@ -132,6 +149,15 @@ test('pipeline joins compatible shorts through canonical streamer identity, pres
     const again=await maintainAutomaticShorts(f.database,f.config,f.resolver,new Date(Date.now()+10*60_000));
     assert.equal(again.joined.length,0);
     assert.equal(f.database.shortParts(b.id)[0].batchId,batch.id);
+});
+
+test('long streamer labels leave room for filesystem-safe artifact names without losing member identity',async t=>{
+    const f=await fixture(t);const alias='alice'+'x'.repeat(170);const original=await f.add(alias);await f.add(alias);
+    const result=await maintainAutomaticShorts(f.database,f.config,f.resolver);assert.equal(result.joined.length,1);
+    const batch=f.database.get(result.joined[0]);
+    assert.ok(Buffer.byteLength(path.basename(batch.sourcePath)+'.production-v6-ccw.mp4')<=255);
+    assert.equal(f.database.shortParts(original.id)[0].batchId,batch.id);
+    assert.match(batch.id,/^2026-01-01 000000 /);
 });
 
 test('different shapes remain in separate waiting pools',async t=>{

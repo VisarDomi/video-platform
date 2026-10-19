@@ -12,6 +12,7 @@ import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import { readRecordingFinalization } from "../discovery/recordingFinalization.js";
 import { analyzeRecordingResolution, deriveResolutionPlaylist, planRecordingShapes } from "../stages/resolutionPolicy.js";
 import { syncFile } from "../stages/durableArtifact.js";
+import { captureKeyFromFolderName } from "./selectCandidate.js";
 
 const scanTimes = new Map<string, number>();
 const SCAN_INTERVAL_MS = 5 * 60_000;
@@ -82,7 +83,9 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
     if (!provenance?.streamerId) throw new Error("Joined shorts require a resolved streamer");
     const signature = JSON.stringify(parts.map(p => [p.recordingId, p.part, p.sourceFingerprint, p.destinationProvider, p.durationSeconds]));
     const hash = createHash("sha256").update(signature).digest("hex").slice(0, 12);
-    const batchId = `${first.id} joined-${hash}`;
+    // Preserve capture date/name, leaving room for generated artifact suffixes
+    // even when an original streamer label is long or uses multibyte text.
+    const batchId = `${Array.from(first.id).slice(0, 50).join("")} joined-${hash}`;
     const parent = path.join(config.stagingRoot, "joined-sources");
     const target = path.join(parent, batchId);
     await fs.mkdir(parent, { recursive: true });
@@ -172,7 +175,7 @@ async function ingestShorts(database: PipelineDatabase, config: PipelineConfig, 
         const sourcePath = path.resolve(checkpoint.recording_path);
         const root = config.discoveryRoots.find(r => path.resolve(r.path) === path.dirname(sourcePath)
             && r.sourceKind === "edited" && (providerFilter === "all" || r.provider === providerFilter));
-        if (!root || path.basename(sourcePath).startsWith(".")) continue;
+        if (!root || !captureKeyFromFolderName(path.basename(sourcePath))) continue;
         const existing = database.getBySourcePath(sourcePath);
         const recoverable = existing?.state === "short_cancelled"
             || existing?.state === "blocked" && existing.blockReason?.includes(`${provider}: skipped_too_short`);
