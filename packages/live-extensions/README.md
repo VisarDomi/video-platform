@@ -11,9 +11,11 @@ button's stay apart. TsLive's own +/- is in the app's native viewer
 
 The server URL is `SERVER` in `src/core/config.ts` (`https://192.168.1.197:9999`).
 
-LADDER live also clicks the site's visible Login link automatically, including when it
-appears after loading. It follows LADDER's `/login/` link with its return URL, in any site
-language; signing in on LADDER ID still uses Safari's normal login page. It clicks once per
+LADDER live starts watching at `document_start` and clicks the site's visible Login link
+as soon as the parser inserts it, without waiting for DOMContentLoaded, images, or the
+download-list bar. It also handles links added later. It follows LADDER's `/login/` link with
+its return URL, in any site language; signing in on LADDER ID still uses Safari's normal login
+page. It clicks once per
 tab session, remembered in `sessionStorage` across reloads and return visits to prevent
 redirect loops.
 
