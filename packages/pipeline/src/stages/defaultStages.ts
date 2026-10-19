@@ -1,43 +1,34 @@
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
 import { artifactRecipeReason, reuseCachedArtifact, type ArtifactCacheConfig } from "./artifactCache.js";
-import { analyzeRecordingResolution, planRecordingShapes, type ShapeGroup } from "./resolutionPolicy.js";
+import { analyzeRecordingResolution, planRecordingShapes } from "./resolutionPolicy.js";
 import { convertShapeGroup } from "./upscale.js";
 import { validateArtifact } from "./validateArtifact.js";
 import { productionArtifactSuffix } from "./artifactNaming.js";
-
-function manualPiece(group: ShapeGroup) {
-    return {
-        part: group.part,
-        segmentIndexes: [...group.indexes].sort((a, b) => a - b),
-        durationSeconds: group.durationSeconds,
-        sourceDimensions: group.sourceDimensions,
-    };
-}
 
 export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactCacheConfig): PipelineStages {
     return {
         // Every recording is converted; no segment is dropped. One shape is one
         // artifact; several shapes are one artifact each, uploaded one after
-        // another; a split's pieces under a minute wait for a person.
+        // another; short pieces enter automatic joining before upload.
         remux: async (recording) => {
             const cached = cacheConfig ? await reuseCachedArtifact(recording, stagingRoot, cacheConfig) : null;
             if (cached) return { disposition: "artifact", ...cached };
             const analysis = await analyzeRecordingResolution(recording.playlistPath);
             const plan = planRecordingShapes(analysis);
-            const reason = artifactRecipeReason(plan.reason);
-            const manualPieces = plan.manual.map(manualPiece);
-            if (plan.upload.length === 0) {
-                return { disposition: "manual", reason: `${reason}; no piece is long enough to upload`, manualPieces };
-            }
-            if (plan.upload.length === 1 && plan.upload[0].part === "full") {
-                const group = plan.upload[0];
+            const reason = artifactRecipeReason(plan.reason.replace(/under 60s: manual handling, not uploaded/g,
+                "short shape: automatic same-streamer joining before upload"));
+            // Small shape pieces are converted too; the campaign pools them
+            // automatically instead of dropping them into manual review.
+            const groups = [...plan.upload, ...plan.manual].sort((a, b) => a.ordinal - b.ordinal);
+            if (groups.length === 1 && groups[0].part === "full") {
+                const group = groups[0];
                 const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
                     productionArtifactSuffix(group.part, group.output.rotate), analysis);
                 return { disposition: "artifact", path: converted.path, eventReason: reason };
             }
             const parts = [];
-            for (const group of plan.upload) {
+            for (const group of groups) {
                 const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
                     productionArtifactSuffix(group.part, group.output.rotate), analysis, group.indexes);
                 const validated = await validateArtifact(converted.path);
@@ -51,7 +42,7 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
                     sourceDimensions: group.sourceDimensions,
                 });
             }
-            return { disposition: "artifact_set", reason, primary: parts[0], queued: parts.slice(1), manualPieces };
+            return { disposition: "artifact_set", reason, primary: parts[0], queued: parts.slice(1) };
         },
         validateArtifact: async (_recording, artifactPath) => {
             const artifact = await validateArtifact(artifactPath);
