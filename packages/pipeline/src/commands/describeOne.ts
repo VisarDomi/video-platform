@@ -39,7 +39,7 @@ export async function describeOne(recordingId: string, config: PipelineConfig): 
                 metadata: database.getUploadMetadata(recordingId),
             };
         }
-        await verifyCurrentServerAuthority(recording, config);
+        await verifyCurrentServerAuthority(recording, config, database);
 
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const resolution = await resolver.resolve(recording);

@@ -137,7 +137,7 @@ test("schema eleven widens the artifact part checks to shapes without losing row
     assert.equal(migrated.integrityCheck(), "ok");
     const inspection = new DatabaseSync(databasePath, { readOnly: true });
     t.after(() => inspection.close());
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 12);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 13);
     assert.equal(inspection.prepare("SELECT remote_id FROM remote_uploads WHERE attempt_id = 'attempt-1'").get().remote_id, "123");
     const write = new DatabaseSync(databasePath);
     t.after(() => write.close());
@@ -178,7 +178,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 12);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 13);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));
