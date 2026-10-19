@@ -7,7 +7,7 @@ export function autoClickFc2Login(): void {
     try {
         // A failed session handoff can return to the same logged-out page.
         if (sessionStorage.getItem(attemptKey)) return;
-    } catch { /* Safari may deny page storage; still click once per document. */ }
+    } catch { return; } // Without session storage we cannot enforce one attempt.
 
     const observer = new MutationObserver(clickLogin);
     observer.observe(document.documentElement, {
@@ -27,7 +27,7 @@ export function autoClickFc2Login(): void {
         });
         if (!link) return;
         observer.disconnect();
-        try { sessionStorage.setItem(attemptKey, "1"); } catch { /* See above. */ }
+        try { sessionStorage.setItem(attemptKey, "1"); } catch { return; }
         link.click();
     }
 }

@@ -50,6 +50,17 @@ export async function testFc2Login(browser, options) {
             assert.deepEqual(await page.evaluate(() => window.loginClicks), [], 'A failed login round trip cannot cause a redirect loop');
             await page.close();
         }
+        for (const method of ['getItem', 'setItem']) {
+            const blocked = await context.newPage();
+            await blocked.goto('https://live.fc2.com/');
+            await blocked.evaluate(method => {
+                Object.defineProperty(Storage.prototype, method, { value() { throw new DOMException('Storage denied', 'SecurityError'); } });
+                document.querySelector('#header').innerHTML = '<a href="/login/">Login</a>';
+            }, method);
+            await blocked.addScriptTag({ content: script });
+            assert.deepEqual(await blocked.evaluate(() => window.loginClicks), [], 'Never risk a redirect loop when Safari denies session storage');
+            await blocked.close();
+        }
         const login = await context.newPage();
         await login.goto('https://live.fc2.com/login/');
         await login.locator('#header').evaluate(header => { header.innerHTML = '<a href="/login/">Login</a>'; });
