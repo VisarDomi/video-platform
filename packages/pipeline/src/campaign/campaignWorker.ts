@@ -171,6 +171,18 @@ export class CampaignWorker {
             }
             trialNextId = first?.id;
         }
+        if (this.config.automaticShortsEnabled && !comparison && control.trialPerProvider === null) {
+            // Joining prepares future work in advance. Choose globally across
+            // local stages, upload-ready work and unadmitted sources so those
+            // batches cannot jump ahead of an older recording or its upload.
+            const pending = order(this.database.list().filter(recording => [
+                "server_ready", "remuxed", "artifact_valid", "described", "metadata_ready",
+            ].includes(recording.state) && allows(recording)), control.providerFilter)[0];
+            const candidate = await selectCandidate();
+            const key = (recording: RecordingInput) => `${captureKeyFromFolderName(path.basename(recording.sourcePath))}|${recording.provider}|${recording.sourcePath}`;
+            if (candidate && (!pending || key(candidate).localeCompare(key(pending)) < 0)) return this.admit(candidate, now);
+            trialNextId = pending?.id;
+        }
         const local = order(this.database.list().filter((recording) => [
             "server_ready", "remuxed", "artifact_valid", "described",
         ].includes(recording.state) && (!trialNextId || recording.id === trialNextId)
