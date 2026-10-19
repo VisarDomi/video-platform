@@ -104,13 +104,16 @@ remain separate. Clips are chronological and assigned once. Insufficient
 compatible footage waits normally, without a manual-review notification.
 
 At the destination minimum, the campaign creates a
-normal pipeline recording named `<first recording> joined-<hash>`. Its durable
+normal pipeline recording named `<first-recording prefix> joined-<hash>`. Its durable
 input playlist has per-clip discontinuities and distinct init maps, under
 `artifacts/production-v6/joined-sources/`. Media entries link to unchanged
 originals, so the derived inputs retain no extra media bytes. The normal
 conversion, validation, descriptor, metadata, upload and 24-hour verification
 stages process the batch. Actual encoded duration is checked too: an unsent batch
 still too short returns for more footage rather than nesting joined batches.
+Preparing batches does not change queue priority: the campaign compares capture
+times across those batches, normal local stages, upload-ready recordings and
+not-yet-admitted sources, completing the oldest work first.
 
 Small shapes in a longer recording pool independently while its other shapes
 keep processing. Every required part must be verified before an original becomes
