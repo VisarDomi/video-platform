@@ -49,7 +49,7 @@ async function ledger(t, root, source, playlistPath) {
     return { database, recorded };
 }
 
-test("several shapes become one validated artifact each; the short piece is recorded for a person", async (t) => {
+test("every shape is converted, including short pieces that will enter automatic joining", async (t) => {
     const root = await temporary(t);
     const { source, playlistPath } = await recording(root, [["1280x720", 70], ["720x1280", 65], ["640x480", 10]]);
     const { database, recorded } = await ledger(t, root, source, playlistPath);
@@ -59,7 +59,7 @@ test("several shapes become one validated artifact each; the short piece is reco
     const primary = database.getArtifact(recorded.id);
     assert.equal(database.getArtifactPart(recorded.id), "shape1");
     assert(primary.path.endsWith(".production-v6-shape1.mp4"));
-    const [queued] = database.listQueuedProductionArtifacts(recorded.id);
+    const [queued, short] = database.listQueuedProductionArtifacts(recorded.id);
     assert.equal(queued.part, "shape2");
     assert(queued.path.endsWith(".production-v6-shape2-ccw.mp4"), "the portrait shape is turned");
     for (const artifact of [primary, queued]) {
@@ -67,24 +67,25 @@ test("several shapes become one validated artifact each; the short piece is reco
         assert.deepEqual([validated.videoWidth, validated.videoHeight], [1920, 1080]);
         assert.equal(validated.sha256, artifact.sha256);
     }
-    const [piece] = database.listManualPieces(recorded.id);
-    assert.equal(piece.part, "shape3");
-    assert.deepEqual(piece.segmentIndexes, [2]);
-    assert.equal(piece.durationSeconds, 10);
-    assert.deepEqual(piece.sourceDimensions, ["640x480"]);
-    assert.deepEqual((await readdir(staging)).sort(), [path.basename(primary.path), path.basename(queued.path)].sort(),
-        "no file for the manual piece, no leftovers");
+    assert.equal(short.part, "shape3");
+    const validatedShort = await validateArtifact(short.path);
+    assert.deepEqual([validatedShort.videoWidth, validatedShort.videoHeight], [1920, 1440]);
+    assert.deepEqual(database.listManualPieces(recorded.id), []);
+    assert.deepEqual((await readdir(staging)).sort(), [primary, queued, short].map(a => path.basename(a.path)).sort(),
+        "all media has a converted artifact; no leftovers");
 });
 
-test("when every piece of a split is under a minute the recording is blocked for a person", async (t) => {
+test("a split consisting entirely of shorts stays automatic rather than becoming a manual block", async (t) => {
     const root = await temporary(t);
     const { source, playlistPath } = await recording(root, [["1280x720", 30], ["720x1280", 20]]);
     const { database, recorded } = await ledger(t, root, source, playlistPath);
     const result = await new PipelineOrchestrator(database, createDefaultStages(path.join(root, "staging")), "shape-test")
         .processRecording(recorded.id);
-    assert.equal(result.state, "blocked");
-    assert.match(result.blockReason, /^resolution-policy-v6: .*no piece is long enough to upload/);
-    assert.deepEqual(database.listManualPieces(recorded.id).map((piece) => piece.part), ["shape1", "shape2"]);
+    assert.equal(result.state, "artifact_valid");
+    assert.equal(result.blockReason, null);
+    assert.equal(database.getArtifactPart(recorded.id), "shape1");
+    assert.deepEqual(database.listQueuedProductionArtifacts(recorded.id).map(piece => piece.part), ["shape2"]);
+    assert.deepEqual(database.listManualPieces(recorded.id), []);
     assert(database.hasResolutionPolicyAssessment(recorded.id, "resolution-policy-v6"));
 });
 

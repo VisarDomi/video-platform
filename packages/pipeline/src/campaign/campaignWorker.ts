@@ -15,11 +15,13 @@ import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthorit
 import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
 import { MetadataRejectedError, ProviderSessionLostError } from "../upload/providerWarnings.js";
 import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "../stages/resolutionPolicy.js";
+import { cancelInvalidShortBatch, maintainAutomaticShorts } from "./shorts.js";
 
 // First wait after an upload failed before sending anything (a page timeout).
 const PRE_TRANSFER_RETRY_MILLISECONDS = 15 * 60_000;
 
 export type CampaignStepResult =
+    | { readonly disposition: "shorts_waiting" | "shorts_joined"; readonly registered: number; readonly joined: readonly string[] }
     | { readonly disposition: "comparison_finished" | "comparison_verification_wait" | "comparison_attention_required"; readonly reason?: string }
     | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
     | { readonly disposition: "trial_finished"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
@@ -132,6 +134,12 @@ export class CampaignWorker {
         }
         const allows = (recording: Recording) => comparison ? this.database.comparisonAllows(recording)
             : this.database.campaignTrialAllows(recording.provider, recording.id);
+        if (this.config.automaticShortsEnabled && !comparison && control.trialPerProvider === null) {
+            const shorts = await maintainAutomaticShorts(this.database, this.config, this.resolver, now);
+            if (shorts.joined.length || shorts.registered) return {
+                disposition: shorts.joined.length ? "shorts_joined" : "shorts_waiting", ...shorts,
+            };
+        }
         const order = (recordings: readonly Recording[], provider: string) => {
             const candidates = ordered(recordings, provider);
             return comparison ? candidates.filter(allows).sort((a, b) =>
@@ -170,10 +178,13 @@ export class CampaignWorker {
         if (local[0]) {
             this.database.enrollCampaignTrial(local[0], now);
             try {
-                await verifyCurrentServerAuthority(local[0], this.config);
+                await verifyCurrentServerAuthority(local[0], this.config, this.database);
                 const resolutionResult = await this.enforceCurrentResolutionPolicy(local[0], now);
                 if (resolutionResult) return resolutionResult;
             } catch (error) {
+                if (await cancelInvalidShortBatch(this.database, this.config, local[0].id, String(error), now)) {
+                    return { disposition: "stage_completed", recordingId: local[0].id, state: "short_cancelled" };
+                }
                 if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",
@@ -207,10 +218,13 @@ export class CampaignWorker {
         if (uploadReady) {
             this.database.enrollCampaignTrial(uploadReady, now);
             try {
-                await verifyCurrentServerAuthority(uploadReady, this.config);
+                await verifyCurrentServerAuthority(uploadReady, this.config, this.database);
                 const resolutionResult = await this.enforceCurrentResolutionPolicy(uploadReady, now);
                 if (resolutionResult) return resolutionResult;
             } catch (error) {
+                if (await cancelInvalidShortBatch(this.database, this.config, uploadReady.id, String(error), now)) {
+                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: "short_cancelled" };
+                }
                 if (comparison) this.database.setCampaignState("paused", now);
                 return {
                     disposition: "attention_required",
@@ -242,6 +256,10 @@ export class CampaignWorker {
             try {
                 const result = await this.upload(uploadReady.id, control.monthlyUploadLimitBytes);
                 const afterUpload = this.database.get(uploadReady.id);
+                if (afterUpload?.state === "short_waiting" || afterUpload?.state === "artifact_valid"
+                    && this.database.shortParts(uploadReady.id).some(part => !part.verified)) {
+                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
+                }
                 if (afterUpload?.state === "blocked") return {
                     disposition: "attention_required", recordingId: uploadReady.id,
                     reason: afterUpload.blockReason ?? "Upload provider policy requires manual review",

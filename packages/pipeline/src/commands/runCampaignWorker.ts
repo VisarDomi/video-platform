@@ -201,7 +201,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 }
             }
             if (disposition === "admitted" || disposition === "stage_completed"
-                || disposition === "upload_completed") continue;
+                || disposition === "upload_completed" || disposition === "shorts_joined" || disposition === "shorts_waiting") continue;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.error(journalPriority("error", 2) + JSON.stringify({ event: "campaign-error", error: message }));

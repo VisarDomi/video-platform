@@ -21,6 +21,9 @@ export async function sweepMissingRecordings(
     if (!config.cleanupEnabled || database.getComparisonTrial()) return [];
     const swept: Array<{ recordingId: string; provider: string; reason: string }> = [];
     for (const recording of database.list()) {
+        // Joined inputs are derived links; their originals and remote coverage
+        // must not disappear from the ledger when the user removes local files.
+        if (database.shortParts(undefined, recording.id).length || database.shortParts(recording.id).some(p => p.batchId)) continue;
         if (IN_FLIGHT_STATES.includes(recording.state)) continue;
         if (recording.leaseOwner) continue;
         const createdAt = new Date(recording.createdAt).getTime();

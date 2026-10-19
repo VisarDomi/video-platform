@@ -75,7 +75,8 @@ export const FULL_HD_WIDTH = 1920;
 export const FULL_HD_HEIGHT = 1080;
 // Display aspect ratios this close are one shape (rounding of even sizes).
 export const SHAPE_TOLERANCE = 0.01;
-// A shape split's pieces shorter than this are not uploaded; a person decides.
+// Legacy classification boundary. The automatic stages convert both buckets;
+// the destination's own minimum decides which artifacts need joining.
 export const MINIMUM_SPLIT_PIECE_SECONDS = 60;
 // More unmeasurable picture than this suggests a broken capture: worth a look.
 const UNDECODABLE_WARNING_SHARE = 0.05;
@@ -348,7 +349,7 @@ export interface ShapeGroup {
 export interface RecordingShapePlan {
     // Converted and uploaded, in order of first appearance.
     readonly upload: readonly ShapeGroup[];
-    // Pieces of a shape split shorter than a minute: kept for a person, not uploaded.
+    // Legacy small-shape bucket; automatic stages process these as well.
     readonly manual: readonly ShapeGroup[];
     readonly reason: string;
 }

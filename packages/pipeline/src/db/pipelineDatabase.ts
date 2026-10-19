@@ -7,6 +7,7 @@ import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
 import type { ManualPiece } from "../scheduler/orchestrator.js";
+import type { ShortPart } from "../domain/shorts.js";
 import { assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
 import type {
     ProviderInventoryEntry,
@@ -28,7 +29,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -657,6 +658,22 @@ export class PipelineDatabase {
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
         }
+        this.database.exec(`
+            CREATE TABLE IF NOT EXISTS short_parts (
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                part TEXT NOT NULL CHECK (${partCheck("part")}),
+                source_fingerprint TEXT NOT NULL,
+                streamer_key TEXT NOT NULL,
+                destination_provider TEXT NOT NULL,
+                aspect_ratio REAL NOT NULL CHECK (aspect_ratio > 0),
+                duration_seconds REAL NOT NULL CHECK (duration_seconds > 0),
+                playlist TEXT NOT NULL,
+                batch_id TEXT REFERENCES recordings(id),
+                verified INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0,1)),
+                PRIMARY KEY (recording_id, part)
+            ) STRICT;
+            CREATE INDEX IF NOT EXISTS short_parts_batch_idx ON short_parts(batch_id);
+        `);
         // Repair the old manual-sync label, without changing identity or retry
         // state. Only known legacy source names and XVideos links qualify.
         this.database.prepare(`UPDATE upload_attempts SET provider = 'xvideos'
@@ -757,6 +774,171 @@ export class PipelineDatabase {
             : this.database.prepare("SELECT * FROM recordings ORDER BY created_at, id");
         const rows = (state ? statement.all(state) : statement.all()) as unknown as RecordingRow[];
         return rows.map(mapRecording);
+    }
+
+    shortParts(recordingId?: string, batchId?: string): ShortPart[] {
+        const rows = this.database.prepare(`SELECT * FROM short_parts
+            ${recordingId ? "WHERE recording_id = ?" : batchId ? "WHERE batch_id = ?" : ""}
+            ORDER BY recording_id, part`).all(...(recordingId ? [recordingId] : batchId ? [batchId] : [])) as unknown as Array<{
+                recording_id: string; part: ProductionArtifactPart; source_fingerprint: string;
+                streamer_key: string; destination_provider: string; aspect_ratio: number;
+                duration_seconds: number; playlist: string; batch_id: string | null; verified: number;
+            }>;
+        return rows.map(r => ({ recordingId: r.recording_id, part: r.part, sourceFingerprint: r.source_fingerprint,
+            streamerKey: r.streamer_key, destinationProvider: r.destination_provider, aspectRatio: r.aspect_ratio,
+            durationSeconds: r.duration_seconds, playlist: r.playlist, batchId: r.batch_id, verified: r.verified === 1 }));
+    }
+
+    waitForShorts(id: string, provider: ActiveUploadProvider, now = new Date()): Recording {
+        return this.transaction(() => {
+            const recording = this.requireRecording(id);
+            if (this.providerRemovals(id).some(removal => removal.provider === provider)) {
+                throw new Error("Removed footage cannot be hidden in a joined upload to the same provider");
+            }
+            if (this.database.prepare(`SELECT 1 FROM upload_attempts WHERE recording_id = ?
+                AND status IN ('started','uncertain')`).get(id)) throw new Error("Short still has an active or uncertain upload");
+            if (recording.state === "short_waiting" || recording.state === "short_joined") return recording;
+            this.updateStateInTransaction(id, recording.state, "short_waiting",
+                `${provider}: waiting for compatible footage from the same streamer`, now.toISOString());
+            this.database.prepare("UPDATE recordings SET lease_owner = NULL, lease_expires_at = NULL WHERE id = ?").run(id);
+            return this.requireRecording(id);
+        });
+    }
+
+    saveShortParts(parts: readonly Omit<ShortPart, "batchId" | "verified">[]): void {
+        // A crash must not leave a multi-shape original looking like it had
+        // only one required part: classification commits as a single unit.
+        this.transaction(() => { for (const part of parts) this.saveShortPart(part); });
+    }
+
+    saveShortPart(part: Omit<ShortPart, "batchId" | "verified">): void {
+        const existing = this.shortParts(part.recordingId).find(row => row.part === part.part);
+        if (existing) {
+            if (existing.sourceFingerprint !== part.sourceFingerprint) throw new Error("Short source changed after pooling");
+            return;
+        }
+        const recording = this.requireRecording(part.recordingId);
+        if (recording.sourceFingerprint !== part.sourceFingerprint) throw new Error("Short source fingerprint mismatch");
+        if (this.database.prepare("SELECT 1 FROM remote_uploads WHERE recording_id = ? AND artifact_part = ?")
+            .get(recording.id, part.part)) throw new Error("Already uploaded footage cannot enter a short pool");
+        if (this.providerRemovals(recording.id).some(r => r.provider === part.destinationProvider)) {
+            throw new Error("Provider removed this footage; it cannot enter that provider's pool");
+        }
+        this.database.prepare(`INSERT INTO short_parts (recording_id, part, source_fingerprint,
+            streamer_key, destination_provider, aspect_ratio, duration_seconds, playlist)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(part.recordingId, part.part, part.sourceFingerprint,
+                part.streamerKey, part.destinationProvider, part.aspectRatio, part.durationSeconds, part.playlist);
+    }
+
+    deferShortArtifact(id: string, provider: ActiveUploadProvider, now = new Date()): Recording {
+        return this.transaction(() => {
+            const recording = this.requireRecording(id);
+            if (!this.shortParts(id).some(row => row.part === this.getArtifactPart(id))) {
+                throw new Error("Short artifact has no durable pool entry");
+            }
+            const queued = this.database.prepare(`SELECT * FROM production_artifact_queue
+                WHERE recording_id = ? ORDER BY queue_position LIMIT 1`).get(id) as QueuedProductionArtifactRow | undefined;
+            if (!queued) return this.waitForShorts(id, provider, now);
+            this.database.prepare("DELETE FROM upload_metadata WHERE recording_id = ?").run(id);
+            this.database.prepare("DELETE FROM descriptions WHERE recording_id = ?").run(id);
+            this.database.prepare(`UPDATE artifacts SET part = ?, path = ?, size_bytes = ?, sha256 = ?, validated_at = ?
+                WHERE recording_id = ?`).run(queued.part, queued.path, queued.size_bytes, queued.sha256, queued.validated_at, id);
+            this.database.prepare("DELETE FROM production_artifact_queue WHERE recording_id = ? AND part = ?").run(id, queued.part);
+            this.updateStateInTransaction(id, recording.state, "artifact_valid", "short part pooled; continue the next shape", now.toISOString());
+            return this.requireRecording(id);
+        });
+    }
+
+    correctShortBatchDuration(id: string, actualSeconds: number): void {
+        const parts = this.shortParts(undefined, id);
+        const expected = parts.reduce((sum, part) => sum + part.durationSeconds, 0);
+        if (!(actualSeconds > 0 && actualSeconds < expected)) return;
+        this.database.prepare("UPDATE short_parts SET duration_seconds = duration_seconds * ? WHERE batch_id = ?")
+            .run(actualSeconds / expected, id);
+    }
+
+    createShortBatch(input: RecordingInput, provenance: Omit<RecordingProvenance, "recordingId">,
+        parts: readonly ShortPart[], now = new Date()): Recording {
+        if (parts.length === 0 || !provenance.streamerId) throw new Error("Short batch needs resolved members");
+        const key = `${input.provider}:${provenance.streamerId}`;
+        if (parts.some(p => p.streamerKey !== key || p.destinationProvider !== parts[0].destinationProvider)) {
+            throw new Error("A short batch must contain one streamer and destination");
+        }
+        return this.transaction(() => {
+            for (const part of parts) {
+                const row = this.shortParts(part.recordingId).find(p => p.part === part.part);
+                if (!row || row.batchId || row.verified || row.sourceFingerprint !== part.sourceFingerprint) {
+                    throw new Error("Short part was already assigned or changed");
+                }
+                if (this.providerRemovals(part.recordingId).some(r => r.provider === part.destinationProvider)) {
+                    throw new Error("Removed footage cannot be joined for that provider");
+                }
+            }
+            const batch = this.discover(input, now);
+            if (batch.state === "short_cancelled") this.updateStateInTransaction(batch.id, "short_cancelled", "server_ready",
+                "cancelled joined inputs are available again", now.toISOString());
+            this.saveProvenance(batch.id, provenance);
+            for (const part of parts) {
+                this.database.prepare(`UPDATE short_parts SET batch_id = ? WHERE recording_id = ? AND part = ? AND batch_id IS NULL`)
+                    .run(batch.id, part.recordingId, part.part);
+                const member = this.requireRecording(part.recordingId);
+                if (member.state === "short_waiting") this.updateStateInTransaction(member.id, "short_waiting", "short_joined",
+                    `included in joined upload ${batch.id}`, now.toISOString());
+            }
+            return this.requireRecording(batch.id);
+        });
+    }
+
+    private completeShortBatch(id: string, now = new Date()): void {
+        const batch = this.requireRecording(id);
+        const members = this.shortParts(undefined, id);
+        if (members.length === 0 || !["xvideos_verified", "cleanup_eligible"].includes(batch.state)) return;
+        this.database.prepare("UPDATE short_parts SET verified = 1 WHERE batch_id = ?").run(id);
+        for (const memberId of new Set(members.map(p => p.recordingId))) {
+            const member = this.requireRecording(memberId);
+            if (this.shortParts(memberId).some(p => !p.verified) || !["short_waiting", "short_joined"].includes(member.state)) continue;
+            if (this.listQueuedProductionArtifacts(memberId).length > 0 || this.listManualPieces(memberId).length > 0) continue;
+            this.updateStateInTransaction(memberId, member.state, "cleanup_eligible",
+                "all short parts covered by verified joined uploads", now.toISOString());
+        }
+    }
+
+    cancelUnsentShortBatch(id: string, reason: string, now = new Date()): boolean {
+        return this.transaction(() => {
+            const batch = this.requireRecording(id);
+            const members = this.shortParts(undefined, id);
+            if (!members.length || !["server_ready", "remuxed", "artifact_valid", "described", "metadata_ready", "failed"].includes(batch.state)
+                || this.database.prepare("SELECT 1 FROM upload_attempts WHERE recording_id = ?").get(id)) return false;
+            this.database.prepare("UPDATE short_parts SET batch_id = NULL, verified = 0 WHERE batch_id = ?").run(id);
+            this.updateStateInTransaction(id, batch.state, "short_cancelled", reason, now.toISOString());
+            for (const memberId of new Set(members.map(p => p.recordingId))) {
+                if (this.requireRecording(memberId).state === "short_joined") this.updateStateInTransaction(memberId,
+                    "short_joined", "short_waiting", reason, now.toISOString());
+            }
+            return true;
+        });
+    }
+
+    discardMissingShort(id: string, reason: string, now = new Date()): void {
+        this.transaction(() => {
+            const recording = this.requireRecording(id);
+            if (!["short_waiting", "short_joined"].includes(recording.state)) return;
+            this.database.prepare("DELETE FROM short_parts WHERE recording_id = ? AND batch_id IS NULL").run(id);
+            this.updateStateInTransaction(id, recording.state, "short_cancelled", reason, now.toISOString());
+        });
+    }
+
+    refreshWaitingShort(input: RecordingInput, now = new Date()): boolean {
+        const recording = this.getBySourcePath(input.sourcePath);
+        if (!recording || recording.state !== "short_waiting" || this.shortParts(recording.id).some(p => p.batchId)
+            || this.database.prepare("SELECT 1 FROM remote_uploads WHERE recording_id = ?").get(recording.id)) return false;
+        this.transaction(() => {
+            this.database.prepare("DELETE FROM short_parts WHERE recording_id = ?").run(recording.id);
+            this.database.prepare("UPDATE recordings SET source_fingerprint = ?, duration_seconds = ?, updated_at = ? WHERE id = ?")
+                .run(input.sourceFingerprint, input.durationSeconds, now.toISOString(), recording.id);
+            this.insertEvent(recording.id, "short_waiting", "short_waiting", "unsubmitted short changed; reclassifying its current source", now.toISOString());
+        });
+        return true;
     }
 
     getBySourcePath(sourcePath: string): Recording | null {
@@ -950,6 +1132,7 @@ export class PipelineDatabase {
             `).run(plan.fromVersion, timestamp);
             for (const table of [
                 "upload_confirmations",
+                "short_parts",
                 "remote_uploads",
                 "upload_attempts",
                 "upload_reservations",
@@ -1252,6 +1435,8 @@ export class PipelineDatabase {
             provenance.reason, provenance.updatedAt);
         const saved = this.getProvenance(id);
         if (!saved) throw new Error(`Failed to save provenance for ${id}`);
+        if (saved.streamerId) this.database.prepare(`UPDATE short_parts SET streamer_key = ?
+            WHERE recording_id = ? AND batch_id IS NULL`).run(`${this.requireRecording(id).provider}:${saved.streamerId}`, id);
         return saved;
     }
 
@@ -2176,6 +2361,10 @@ export class PipelineDatabase {
             WHERE recording_id = ? AND artifact_part = ? ORDER BY verified_at DESC LIMIT 1
         `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
         if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url, verified: true };
+        const covered = this.listVerifiedUploadParts(id);
+        const joined = covered.find(part => part.part === artifactPart)
+            ?? (this.get(id)?.state === "cleanup_eligible" ? covered[0] : undefined);
+        if (joined) return { remoteId: joined.remoteId, remoteUrl: joined.remoteUrl, verified: true };
         // A failed attempt keeps its ID only when the provider (or its owner)
         // removed the video: nothing exists to duplicate.
         const attempt = this.database.prepare(`
@@ -2202,7 +2391,14 @@ export class PipelineDatabase {
             remote_url: string;
             verified_at: string;
         }>;
-        return rows.map((row) => ({
+        const joined = this.database.prepare(`SELECT s.part AS artifact_part, u.remote_id, u.remote_url, u.verified_at
+            FROM short_parts s JOIN recordings original ON original.id = s.recording_id
+                AND original.source_fingerprint = s.source_fingerprint
+            JOIN recordings b ON b.id = s.batch_id
+            JOIN remote_uploads u ON u.recording_id = b.id AND u.artifact_part = 'full'
+            WHERE s.recording_id = ? AND s.verified = 1 AND b.state IN ('xvideos_verified','cleanup_eligible')`)
+            .all(id) as unknown as typeof rows;
+        return [...new Map([...rows, ...joined].map(row => [row.artifact_part, row])).values()].map((row) => ({
             part: row.artifact_part,
             remoteId: row.remote_id,
             remoteUrl: row.remote_url,
@@ -2311,6 +2507,8 @@ export class PipelineDatabase {
     // recording entirely — except the ISP billing truth in bandwidth_events.
     deleteRecording(id: string): void {
         this.transaction(() => {
+            if (this.shortParts(undefined, id).length || this.shortParts(id).some(part => part.batchId)) return;
+            this.database.prepare("DELETE FROM short_parts WHERE recording_id = ?").run(id);
             for (const table of [
                 "upload_confirmations", "upload_attempts", "upload_reservations",
                 "remote_uploads", "recording_provenance", "upload_metadata",
@@ -2503,8 +2701,10 @@ export class PipelineDatabase {
                 WHERE recording_id = ? ORDER BY queue_position LIMIT 1
             `).get(id) as QueuedProductionArtifactRow | undefined;
             if (!queued) {
-                this.updateStateInTransaction(id, "xvideos_uploaded", "xvideos_verified",
+                const pendingShorts = this.shortParts(id).some(part => !part.verified);
+                this.updateStateInTransaction(id, "xvideos_uploaded", pendingShorts ? "short_waiting" : "xvideos_verified",
                     `authenticated edit-page verification for ${current.part}`, timestamp);
+                this.completeShortBatch(id, now);
                 return;
             }
             this.database.prepare("DELETE FROM upload_metadata WHERE recording_id = ?").run(id);
@@ -2702,6 +2902,13 @@ export class PipelineDatabase {
             this.updateStateInTransaction(attempt.recording_id, "xvideos_uncertain", "metadata_ready", reason, timestamp);
             this.updateStateInTransaction(attempt.recording_id, "metadata_ready", "blocked", reason, timestamp);
             this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, attempt.recording_id);
+            for (const memberId of new Set(this.shortParts(undefined, attempt.recording_id).map(part => part.recordingId))) {
+                this.database.prepare(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
+                    VALUES (?, ?, ?, ?, ?)`).run(memberId, attempt.provider, remoteId, reason, timestamp);
+                const member = this.requireRecording(memberId);
+                if (member.state !== "blocked") this.updateStateInTransaction(memberId, member.state, "blocked", reason, timestamp);
+                this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, memberId);
+            }
             return true;
         });
     }

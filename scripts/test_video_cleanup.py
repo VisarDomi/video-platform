@@ -101,6 +101,30 @@ class CleanupTests(unittest.TestCase):
         self.execute("DELETE FROM remote_uploads")
         self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 0)
 
+    def test_joined_receipt_covers_original_only_after_batch_verification(self):
+        self.execute('CREATE TABLE short_parts(recording_id TEXT, part TEXT, batch_id TEXT, verified INTEGER)')
+        batch_id = '2026-01-01 120000 fixture joined-123'
+        self.execute('INSERT INTO recordings SELECT ?,provider,source_kind,?, ?,source_fingerprint,?,NULL FROM recordings WHERE id=?',
+                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'xvideos_verified', self.id))
+        self.execute('UPDATE remote_uploads SET recording_id=?', (batch_id,))
+        self.execute('UPDATE upload_attempts SET recording_id=?', (batch_id,))
+        self.execute('INSERT INTO short_parts VALUES(?,?,?,?)', (self.id,'full',batch_id,1))
+        self.execute("UPDATE recordings SET state='cleanup_eligible' WHERE id=?", (self.id,))
+        self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 1)
+        self.execute("UPDATE recordings SET state='xvideos_uncertain' WHERE id=?", (batch_id,))
+        self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 0)
+
+    def test_removed_joined_upload_keeps_its_original(self):
+        self.execute('CREATE TABLE short_parts(recording_id TEXT, part TEXT, batch_id TEXT, verified INTEGER)')
+        batch_id = '2026-01-01 120000 fixture joined-123'
+        self.execute('INSERT INTO recordings SELECT ?,provider,source_kind,?, ?,source_fingerprint,?,NULL FROM recordings WHERE id=?',
+                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'xvideos_verified', self.id))
+        self.execute('UPDATE remote_uploads SET recording_id=?', (batch_id,))
+        self.execute('UPDATE upload_attempts SET recording_id=?', (batch_id,))
+        self.execute('INSERT INTO short_parts VALUES(?,?,?,?)', (self.id,'full',batch_id,1))
+        self.execute('INSERT INTO provider_removals VALUES(?,?,?)', (batch_id,'porntrex','123'))
+        self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 0)
+
     def test_removal_of_this_destination_prevents_move(self):
         self.execute("INSERT INTO provider_removals VALUES(?,?,?)", (self.id, "porntrex", "123"))
         self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 0)
@@ -157,6 +181,14 @@ class CleanupTests(unittest.TestCase):
         self.conversion.unlink()
         self.conversion.symlink_to(self.source / "one.ts")
         self.assertEqual(cleanup.run(self.args())["eligible_count"], 0)
+
+    def test_derived_joined_input_links_are_not_conversion_candidates(self):
+        inputs = self.artifacts / 'production-v6/joined-sources/fixture'
+        inputs.mkdir(parents=True)
+        (inputs/'init.mp4').symlink_to(self.source/'init.mp4')
+        result = cleanup.run(self.args())
+        self.assertEqual(result['eligible_count'], 1)
+        self.assertEqual(result['skipped'], {})
 
     def test_move_preserves_media_and_ledger_and_can_be_rerun(self):
         before = list(self.db.execute("SELECT * FROM remote_uploads").fetchone())

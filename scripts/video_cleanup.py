@@ -124,9 +124,27 @@ def verified_recording(db, recording_id):
     if db.execute("SELECT 1 FROM upload_attempts WHERE recording_id=? AND status IN ('started','uncertain')", (recording_id,)).fetchone():
         raise ValueError("active_or_uncertain_upload")
     uploads = [dict(r) for r in db.execute("""
-        SELECT u.*, a.provider, a.status AS attempt_status FROM remote_uploads u
+        SELECT u.*, a.provider, a.recording_id AS upload_owner, a.status AS attempt_status FROM remote_uploads u
         JOIN upload_attempts a ON a.id=u.attempt_id WHERE u.recording_id=?
     """, (recording_id,))]
+    short_parts = []
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='short_parts'").fetchone():
+        short_parts = [dict(r) for r in db.execute('SELECT * FROM short_parts WHERE recording_id=?', (recording_id,))]
+        if any(not p['verified'] for p in short_parts):
+            raise ValueError("unverified_joined_parts")
+        if any(p.get('source_fingerprint', recording['source_fingerprint']) != recording['source_fingerprint'] for p in short_parts):
+            raise ValueError("joined_source_changed_since_upload")
+        joined = [dict(r) for r in db.execute("""
+            SELECT u.*, s.part AS source_part, a.provider, a.recording_id AS upload_owner,
+                a.status AS attempt_status FROM short_parts s
+            JOIN recordings b ON b.id=s.batch_id AND b.state IN ('xvideos_verified','cleanup_eligible')
+            JOIN remote_uploads u ON u.recording_id=b.id AND u.artifact_part='full'
+            JOIN upload_attempts a ON a.id=u.attempt_id
+            WHERE s.recording_id=? AND s.verified=1
+        """, (recording_id,))]
+        for upload in joined:
+            upload['artifact_part'] = upload.pop('source_part')
+        uploads.extend(joined)
     if not uploads:
         raise ValueError("no_verified_destination")
     for upload in uploads:
@@ -134,12 +152,14 @@ def verified_recording(db, recording_id):
             raise ValueError("unverified_destination_identity")
         if not upload["remote_id"] or not upload["remote_url"] or not upload["verified_at"]:
             raise ValueError("incomplete_destination_evidence")
-        if db.execute("SELECT 1 FROM provider_removals WHERE recording_id=? AND provider=? AND remote_id=?",
-                      (recording_id, upload["provider"], upload["remote_id"])).fetchone():
+        if db.execute("SELECT 1 FROM provider_removals WHERE recording_id IN (?,?) AND provider=? AND remote_id=?",
+                      (recording_id, upload['upload_owner'], upload["provider"], upload["remote_id"])).fetchone():
             raise ValueError("destination_removed")
     parts = {u["artifact_part"] for u in uploads}
     artifact = db.execute("SELECT part FROM artifacts WHERE recording_id=?", (recording_id,)).fetchone()
     final_part = artifact["part"] if artifact else "full"
+    if not artifact and short_parts and 'full' not in {p['part'] for p in short_parts}:
+        final_part = max((p['part'] for p in short_parts), key=lambda p: int(p.removeprefix('shape')))
     if final_part == "full":
         expected = {"full"}
     else:
@@ -263,7 +283,7 @@ def candidate(db, path, args, archives):
 def paths(args):
     if args.mode == "move-conversions":
         for parent, directories, filenames in os.walk(args.artifacts_root, followlinks=False):
-            directories[:] = sorted(d for d in directories if not d.startswith("."))
+            directories[:] = sorted(d for d in directories if not d.startswith(".") and d != "joined-sources")
             for name in sorted(filenames):
                 if name.endswith(".mp4") and not name.startswith(".") and ".partial" not in name:
                     yield Path(parent) / name

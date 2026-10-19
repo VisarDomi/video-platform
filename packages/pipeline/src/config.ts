@@ -25,6 +25,7 @@ export interface PipelineConfig {
     readonly porntrexSessionPath?: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
+    readonly automaticShortsEnabled?: boolean;
     readonly comparisonTrialOnly?: boolean;
     readonly comparisonSelectionFile?: string;
 }
@@ -78,6 +79,7 @@ export const pipelineConfig: PipelineConfig = {
         10,
     ),
     cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP === "1",
+    automaticShortsEnabled: true,
     comparisonTrialOnly: false,
     comparisonSelectionFile: process.env.VIDEO_PIPELINE_SELECTION_FILE ?? path.join(dataRoot, "pipeline", "test-videos.txt"),
     networkUploadsEnabled: process.env.VIDEO_PIPELINE_NETWORK_UPLOADS === "1",

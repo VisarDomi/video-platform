@@ -254,13 +254,18 @@ server follows the account first, but only if it is not already followed.
   own; a run with no picture at all holds the previous frame and keeps its audio.
   Odd TS packet sizes and size changes inside a segment are warnings. Only
   zero-byte files are left out of the encoder input.
-- **Short split pieces.** A piece shorter than 60 s
-  (`MINIMUM_SPLIT_PIECE_SECONDS`) is not uploaded. It goes to `manual_pieces` and
-  is listed by `review`. If no piece is long enough, the recording is blocked.
-- **Limits.** An upload outside the active provider's limits is blocked for
-  review (Porntrex: under two minutes or over 10 GB; XVideos: over two hours or
-  50 GB). The test uses the artifact's own probed duration, so a split piece of
-  one to two minutes is blocked while Porntrex is active.
+- **Short footage joins automatically.** Whole shorts and short shape pieces
+  wait in `short_waiting`; the campaign groups only the same resolved streamer,
+  provider, destination and compatible display aspect ratio (1% across the
+  entire group). It preserves original bytes and playlists, boundaries and init
+  maps, and runs the resulting recording through the normal pipeline. The
+  actual encoded duration is checked again before any transfer.
+  Insufficient footage waits without blocking other work or asking for manual
+  joins. Every part must be verified before an original is cleanup-ready.
+- **Limits.** The artifact's probed duration/size decides: Porntrex needs two
+  minutes and at most 10 GB; XVideos at most two hours and 50 GB. Too-short
+  artifacts pool automatically; other policy violations stay blocked. Removed
+  footage cannot be smuggled back to the same provider in a joined batch.
 - **Local work without a v6 assessment** in its events is reset and converted
   again. Uploaded and verified recordings are not touched.
 - **Artifact cache.** A whole-recording artifact of the current recipe, found in
@@ -275,7 +280,7 @@ server follows the account first, but only if it is not already followed.
 ## 6. Pipeline ledger, campaign and verification
 
 - **Ledger.** `pipeline/pipeline.sqlite` is SQLite in WAL mode with
-  `synchronous=FULL`, schema 12. Each state change is one durable transition,
+  `synchronous=FULL`, schema 13. Each state change is one durable transition,
   appended to `state_events`. The `xvideos_*` state names are historical labels
   and apply to every provider.
 

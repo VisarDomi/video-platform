@@ -12,6 +12,7 @@ import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { settleRejectedPhrases } from "../metadata/rejectedPhraseCheck.js";
+import { cancelInvalidShortBatch, poolRecordingPart } from "../campaign/shorts.js";
 
 export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
 
@@ -65,7 +66,7 @@ export async function uploadOne(
             database.transition(recordingId, "metadata_ready", "blocked", removal.reason);
             return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason: removal.reason };
         }
-        await verifyCurrentServerAuthority(recording, config);
+        await verifyCurrentServerAuthority(recording, config, database);
         const artifact = database.getArtifact(recordingId);
         const artifactPart = database.getArtifactPart(recordingId) ?? "full";
         const metadata = database.getUploadMetadata(recordingId);
@@ -77,13 +78,28 @@ export async function uploadOne(
             );
         }
         // The file's own length: one shape of a split is shorter than its recording.
+        const actualSeconds = await probeDuration(artifact.path);
         const assessment = assessFinalArtifact({
             id: recording.id,
             path: artifact.path,
-            durationSeconds: await probeDuration(artifact.path),
+            durationSeconds: actualSeconds,
             sizeBytes: artifact.sizeBytes,
         }, policyForUploadProvider(provider));
         if (assessment.disposition !== "ready_for_upload") {
+            if (assessment.disposition === "skipped_too_short" && config.automaticShortsEnabled) {
+                if (database.shortParts(undefined, recordingId).length) {
+                    database.correctShortBatchDuration(recordingId, actualSeconds);
+                    if (!await cancelInvalidShortBatch(database, config, recordingId, "actual joined duration needs additional compatible footage")) {
+                        throw new Error("Joined artifact is short, but its transfer history prevents an automatic rebuild");
+                    }
+                    return { recordingId, uploadProvider: provider, state: database.get(recordingId)?.state, disposition: "shorts_waiting" };
+                }
+                const saved = await poolRecordingPart(database, recording, provider, artifactPart, actualSeconds);
+                if (saved > 0) database.deferShortArtifact(recordingId, provider);
+                else database.waitForShorts(recordingId, provider);
+                return { recordingId, uploadProvider: provider, state: database.get(recordingId)?.state,
+                    disposition: "shorts_waiting" };
+            }
             const reason = `${provider}: ${assessment.disposition}; ${assessment.notification?.message ?? "manual review required"}`;
             database.transition(recordingId, "metadata_ready", "blocked", reason);
             return { recordingId, uploadProvider: provider, state: "blocked", disposition: "manual_review", reason };

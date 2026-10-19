@@ -16,7 +16,7 @@ recording moves through convert → validate → describe → metadata → uploa
 online verification.
 
 - SQLite (`~/.local/share/video-services/pipeline/pipeline.sqlite`, override
-  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 12) holds recording state,
+  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 13) holds recording state,
   transition events, leases, artifact hashes, description evidence, provenance,
   metadata, upload reservations/attempts, transmitted-byte accounting and remote
   identity. Recording IDs are the source folder names (datetime + alias).
@@ -52,9 +52,9 @@ dropped**. Source folders and their playlists are never modified.
   appearance), titled `<title> [<recording folder> | part N]`. Same shapes
   separated in time are joined in time order. The next shape is described and
   uploaded after the previous one is verified online.
-- **Short pieces.** A split's piece shorter than a minute is not uploaded: it
-  is recorded in the `manual_pieces` table (listed by `review`). If no piece is
-  long enough, the recording is blocked for a person.
+- **Short footage.** Whole recordings and shape pieces below the active
+  destination's minimum enter automatic same-streamer joining (below).
+  Every shape is converted; small pieces do not become manual review items.
 - **Size.** Each shape is scaled until it covers 1920×1080: at least 1920 wide
   **and** 1080 tall (Porntrex makes its 1080p version only from a source at least
   1920 wide, and names it by height; 4:3 becomes 1920×1440), keeping its aspect
@@ -80,13 +80,49 @@ dropped**. Source folders and their playlists are never modified.
   audio). Odd TS packet sizes and a size change inside a segment are warnings.
   Only zero-byte files are left out of the encoder input (they hold no media).
   Audio is stream-copied when the inputs allow it, else re-encoded once.
-- **Limits.** An upload outside the active provider's limits is blocked for
-  manual review, judged on the artifact's own duration: Porntrex takes two
+- **Limits.** A short upload waits for automatic joining; other artifacts
+  outside the active provider's limits are blocked, judged on their own
+  duration/size. Porntrex takes two
   minutes to 10 GB at any length, XVideos up to two hours and 50 GB at any
   shortness.
 - Local work without a `resolution-policy-v6` assessment is reset and
   converted again; uploaded recordings are not touched. The local-stage lease
   is 12 hours.
+
+### Automatic same-streamer shorts
+
+The campaign scans exact ready edited-source checkpoints every five minutes,
+including recordings already held by the minimum-duration rule. It parks shorts
+as `short_waiting`, resolves their provider's stable streamer ID, and continues
+other work. No manual join command or additional service is involved.
+
+`short_parts` stores each source fingerprint, selected shape, duration, derived
+playlist, streamer, destination and eventual batch. Only the same resolved
+streamer, source provider, destination and compatible display shapes (at most
+1% difference across the whole group) can join. Portrait and landscape pools
+remain separate. Clips are chronological and assigned once. Insufficient
+compatible footage waits normally, without a manual-review notification.
+
+At the destination minimum, the campaign creates a
+normal pipeline recording named `<first recording> joined-<hash>`. Its durable
+input playlist has per-clip discontinuities and distinct init maps, under
+`artifacts/production-v6/joined-sources/`. Media entries link to unchanged
+originals, so the derived inputs retain no extra media bytes. The normal
+conversion, validation, descriptor, metadata, upload and 24-hour verification
+stages process the batch. Actual encoded duration is checked too: an unsent batch
+still too short returns for more footage rather than nesting joined batches.
+
+Small shapes in a longer recording pool independently while its other shapes
+keep processing. Every required part must be verified before an original becomes
+`cleanup_eligible`. Shared batch coverage creates no extra upload attempts or
+bandwidth charges, and the manual cleanup commands understand it. A provider
+removal applies to every included original: grouping cannot bypass that ban.
+
+Authority checks verify each original and server checkpoint before conversion
+or upload. A changed or deleted input can cancel an unsent batch as
+`short_cancelled`, returning usable members to their pools; unrelated work
+continues. Deleted files are never restored. A batch with transfer history is
+not discarded or duplicated automatically. Local deletion remains manual.
 
 ## Artifacts and generations
 
