@@ -23,7 +23,8 @@ for (const key of names) {
         description: `Add or remove the open ${extension.site} streamer from the PC download list. Hosted by Tango.`,
         host_permissions: extension.matches,
         background: { scripts: ['background.js'], service_worker: 'background.js', persistent: false },
-        content_scripts: [{ matches: extension.matches, js: ['content.js'], run_at: 'document_end', all_frames: false }],
+        content_scripts: [{ matches: extension.matches, js: ['content.js'],
+            run_at: key === 'fc2-live' ? 'document_start' : 'document_end', all_frames: false }],
     }, null, 2) + '\n');
     console.log(`Built ${extension.name} into dist/extension/${key}`);
 }

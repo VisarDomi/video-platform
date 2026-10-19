@@ -10,7 +10,8 @@ export function autoClickFc2Login(): void {
     } catch { return; } // Without session storage we cannot enforce one attempt.
 
     const observer = new MutationObserver(clickLogin);
-    observer.observe(document.documentElement, {
+    // documentElement need not exist yet at document_start.
+    observer.observe(document, {
         subtree: true, childList: true, attributes: true,
         attributeFilter: ["href", "class", "style", "hidden", "aria-disabled"],
     });
