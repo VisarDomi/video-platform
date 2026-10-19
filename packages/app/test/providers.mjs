@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { webkit } from 'playwright-core';
 import { testScrollSettlement } from './scroll-settlement.mjs';
+import { testFc2Login } from './fc2-login.mjs';
 
 // Isolated WebKit fixtures exercise the built website (the local lists and their web viewer)
 // and the FC2/SC live Safari extensions. The iPhone apps are native (apps/ios).
@@ -32,6 +33,7 @@ async function mediaFixture(context) {
 }
 
 try {
+    await testFc2Login(browser, options);
     const extension = await browser.newContext(options);
     const barErrors = [];
     await extension.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<p id="native">FC2</p>' }));

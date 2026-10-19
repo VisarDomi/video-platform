@@ -49,6 +49,7 @@ npm run test:app:webkit
 `test:app:webkit` reads `packages/app/build` and `dist/extension/fc2-live`, so build them
 first. Its WebKit fixtures cover all three local providers (playback and editing controls,
 shared scroll settlement) and the download-list button in the FC2/SC live extensions' bar,
-including ⚠️ for an unreachable PC. They do not establish physical iPhone momentum or native
-HLS playback. The iPhone apps are tested by `apps/ios/scripts/test.sh`; for Mac access use
+including ⚠️ for an unreachable PC and FC2's automatic Login click (late rendering,
+visibility and repeat-redirect protection). They do not establish physical iPhone momentum
+or native HLS playback. The iPhone apps are tested by `apps/ios/scripts/test.sh`; for Mac access use
 the runbook at `/home/visar/Documents/environment/mac-access.md`.
