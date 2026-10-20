@@ -210,7 +210,7 @@ export function campaignStatus(config: PipelineConfig): unknown {
             cleanupEnabled: config.cleanupEnabled && !database.getComparisonTrial(),
             networkUploadsEnabled: config.networkUploadsEnabled,
             activeUploadProvider: config.uploadProvider ?? database.getActiveUploadProvider(),
-            providerInventorySync: { oldhost: database.getProviderInventorySync("oldhost") },
+            providerInventorySync: { videohost: database.getProviderInventorySync("videohost") },
             uploadCredentialsFile: config.credentialsFilePath,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),

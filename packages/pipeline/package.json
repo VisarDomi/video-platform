@@ -23,7 +23,6 @@
         "reconcile-uploads": "npm run build && node --no-warnings dist/main.js reconcile-uploads --apply",
         "upload-provider": "npm run build && node --no-warnings dist/main.js upload-provider",
         "upload-provider:set": "npm run build && node --no-warnings dist/main.js upload-provider --apply",
-        "oldhost:sync": "npm run build && node --no-warnings dist/main.js oldhost-sync --apply",
         "metadata:check": "npm run build && node --no-warnings dist/main.js metadata-check",
         "vhost:connect-iphone": "npm run build && DISPLAY=:111 node --no-warnings dist/main.js vhost-connect-iphone --apply",
         "vhost:session-report": "npm run build && node --no-warnings dist/main.js vhost-session-report",

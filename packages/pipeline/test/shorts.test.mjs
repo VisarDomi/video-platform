@@ -71,7 +71,7 @@ async function fixture(t) {
             database.saveArtifact(batchId,{path:artifactPath,sizeBytes:17,sha256:'a'.repeat(64),validatedAt:new Date().toISOString()});
         }
         const raw=new DatabaseSync(databasePath);
-        raw.prepare("UPDATE recordings SET state='oldhost_uploaded' WHERE id=?").run(batchId);
+        raw.prepare("UPDATE recordings SET state='uploaded' WHERE id=?").run(batchId);
         raw.prepare(`INSERT INTO upload_attempts(id,recording_id,provider,status,phase,remote_id,remote_url,started_at,completed_at,artifact_part)
             VALUES(?,?,'videohost','accepted','metadata_submitting',?,?,?,?,?)`).run(`attempt-${remoteId}`,batchId,remoteId,
                 `https://video-host.example/video/${remoteId}/fixture`,new Date().toISOString(),new Date().toISOString(),database.getArtifactPart(batchId)??'full');
@@ -87,7 +87,7 @@ const part=(id,seconds,aspect=16/9,streamer='tslive:alice',destination='videohos
 
 test('groups only the same resolved streamer, destination and compatible shape',()=>{
     const clips=[part('a',65),part('b',65,16/9,'tslive:bob'),part('c',65,9/16),
-        part('d',65,16/9,'tslive:alice','oldhost'),part('e',65)];
+        part('d',65,16/9,'tslive:alice','retired'),part('e',65)];
     assert.deepEqual(compatibleShortGroups(clips,121).map(g=>g.map(p=>p.recordingId)),[['a','e']]);
 });
 test('incompatible earliest clip cannot starve a later compatible pair',()=>{
@@ -193,7 +193,7 @@ test('a short part pools independently while the longer compatible job continues
     assert.equal(f.database.get(recorded.id).state,'artifact_valid');
     assert.equal(f.database.getUploadIdentity(recorded.id),null,'coverage of shape1 must not falsely cover shape2');
     await f.verified(recorded.id,'301');
-    assert.equal(f.database.get(recorded.id).state,'oldhost_verified');
+    assert.equal(f.database.get(recorded.id).state,'upload_verified');
     assert.deepEqual(f.database.listVerifiedUploadParts(recorded.id).map(p=>p.part).sort(),['shape1','shape2']);
 });
 

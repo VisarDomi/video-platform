@@ -22,7 +22,6 @@ import type { CampaignProviderFilter } from "./domain/types.js";
 import { runCampaignWorker } from "./commands/runCampaignWorker.js";
 import { parseRemuxOneArguments } from "./commands/remuxOneArguments.js";
 import { selectComparisonFile, writeComparisonReport } from "./commands/comparisonTrial.js";
-import { syncOldHostInventory } from "./commands/syncProviderInventory.js";
 import { assertUploadProvider } from "./config/uploadProviders.js";
 import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
 import { connectVideoHostPhone } from "./commands/connectVideoHostPhone.js";
@@ -42,8 +41,8 @@ function usage(): never {
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
-        "  upload-provider [--provider oldhost|videohost --apply] | oldhost-sync --apply",
-        "  metadata-check [--provider oldhost|videohost]",
+        "  upload-provider [--provider videohost --apply]",
+        "  metadata-check [--provider videohost]",
         "  vhost-connect-iphone --apply | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
@@ -84,7 +83,7 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "oldhost-sync", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+        "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
     if (command === "vhost-tiers") {
         console.log(JSON.stringify(await videohostTiersReport(pipelineConfig, option(process.argv.slice(3), "--record")), null, 2));
         return;
@@ -101,12 +100,6 @@ async function main(): Promise<void> {
     }
     if (command === "vhost-session-report") {
         console.log(JSON.stringify(await videohostSessionReport(pipelineConfig), null, 2));
-        return;
-    }
-    if (command === "oldhost-sync") {
-        requireApply(process.argv.slice(3));
-        assertCampaignIdle(pipelineConfig);
-        console.log(JSON.stringify(await syncOldHostInventory(pipelineConfig), null, 2));
         return;
     }
     if (command === "campaign-prepare") {
@@ -365,7 +358,6 @@ async function main(): Promise<void> {
             console.log(JSON.stringify({
                 activeUploadProvider: database.getActiveUploadProvider(),
                 history: database.listUploadProviderEvents(),
-                inventorySync: { oldhost: database.getProviderInventorySync("oldhost") },
             }, null, 2));
             return;
         }
@@ -374,7 +366,7 @@ async function main(): Promise<void> {
             // rejected before. The campaign applies the same check before upload.
             const requested = option(process.argv.slice(3), "--provider") ?? database.getActiveUploadProvider();
             assertUploadProvider(requested);
-            const candidates = database.list().filter((recording) => !["oldhost_verified", "cleanup_eligible"].includes(recording.state)
+            const candidates = database.list().filter((recording) => !["upload_verified", "cleanup_eligible"].includes(recording.state)
                 && database.getUploadMetadata(recording.id));
             const findings = [];
             for (const recording of candidates) {
