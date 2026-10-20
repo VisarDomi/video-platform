@@ -263,7 +263,7 @@ server follows the account first, but only if it is not already followed.
   Insufficient footage waits without blocking other work or asking for manual
   joins. Every part must be verified before an original is cleanup-ready.
 - **Limits.** The artifact's probed duration/size decides: Porntrex needs two
-  minutes and at most 10 GB; XVideos at most two hours and 50 GB. Too-short
+  minutes and at most 10 GB. Too-short
   artifacts pool automatically; other policy violations stay blocked. Removed
   footage cannot be smuggled back to the same provider in a joined batch.
 - **Local work without a v6 assessment** in its events is reset and converted
@@ -280,14 +280,13 @@ server follows the account first, but only if it is not already followed.
 ## 6. Pipeline ledger, campaign and verification
 
 - **Ledger.** `pipeline/pipeline.sqlite` is SQLite in WAL mode with
-  `synchronous=FULL`, schema 13. Each state change is one durable transition,
-  appended to `state_events`. The `xvideos_*` state names are historical labels
-  and apply to every provider.
+  `synchronous=FULL`, schema 14. Each state change is one durable transition,
+  appended to `state_events`. The `upload_*` lifecycle states are independent of destination names.
 
   ```text
-  server_ready → remuxed → artifact_valid → described → metadata_ready → xvideos_admitted
-    → xvideos_uploading → xvideos_uploaded → xvideos_verified → cleanup_eligible
-  side states: provenance_review_required, xvideos_uncertain, blocked, failed
+  server_ready → remuxed → artifact_valid → described → metadata_ready → upload_admitted
+    → uploading → uploaded → upload_verified → cleanup_eligible
+  side states: provenance_review_required, upload_uncertain, blocked, failed
   ```
 
 - **One worker, one recording at a time.** `video-pipeline.service` runs
@@ -306,8 +305,8 @@ server follows the account first, but only if it is not already followed.
   files (`*.partial.mp4`, `*.cache-partial`) are cleared at boot.
 - **Manual commands defer to the worker.** It writes a heartbeat every 30 s. These
   commands refuse while the heartbeat is under 90 s old, so stop the service first:
-  `remux-one`, `describe-one`, `upload-one`, `process-one`, `xvideos-sync`,
-  `campaign-prepare`, `campaign-select` and the upload-provider switch.
+  `remux-one`, `describe-one`, `upload-one`, `process-one`,
+  `campaign-prepare`, `campaign-select` and upload-provider configuration.
 - **A stuck recording stays in front.** A changed source, a lost checkpoint or a
   missing artifact returns `attention_required` and sends a desktop
   notification. No other recording is substituted.
@@ -321,15 +320,15 @@ server follows the account first, but only if it is not already followed.
   attempt that failed before submission (a page timeout; nothing was sent and no
   video exists) 15, 30, 60 … minutes, both capped at 24 h; the two share one
   streak, which a successful upload or a manual resume resets. `session_login`
-  and the XVideos daily limit wait 24 h. A lost Porntrex session pauses
-  indefinitely, with `attention_reason` set. Why: one page timeout on
+  waits 24 h. An authentication failure sets `attention_reason`; a later authenticated
+  keep-alive resumes only that unchanged hold. Manual pauses remain indefinite. Why: one page timeout on
   2026-10-14 cost a whole day of uploads.
 - **Monthly budget.** Uploads are capped at 600,000,000,000 bytes per calendar
   month in `Europe/Tirane`, the upload share of the ISP plan. Admission reserves
   the artifact size plus 16 MiB. Every transmitted byte, including failed and
   retried transfers, goes to `bandwidth_events`, which nothing ever deletes.
 - **Success is never decided at submit.** Once metadata may have been submitted,
-  the attempt is `xvideos_uncertain` with a confirmation due 24 h later. A failure
+  the attempt is `upload_uncertain` with a confirmation due 24 h later. A failure
   before submission is a plain failure (on Porntrex: before the
   `metadata_submitting` phase, since the video exists only once its form is
   submitted). A started transfer holds a 7-day duplicate-safety window
@@ -367,24 +366,20 @@ server follows the account first, but only if it is not already followed.
 
 ## 7. Upload providers and sessions
 
-- **One active destination**, `campaign_control.upload_provider`: `porntrex`
-  (`xvideos` stays selectable via `upload-provider --provider … --apply`). A switch
-  needs a paused campaign, a stopped worker, nothing in flight, no open
-  confirmations on the provider being left and, when leaving XVideos, an
-  `xvideos-sync` inventory newer than its last upload. Each confirmation is
-  verified on the provider its attempt used.
+- **One destination**, `porntrex`, in `campaign_control.upload_provider`. Removed
+  destination receipts are audit evidence only and cannot authorize cleanup. Sources
+  lacking a Porntrex copy return to the queue without disturbing existing Porntrex proofs.
 - **Limits** come from `packages/shared/src/uploadPolicy.ts`. The pipeline checks
   each artifact against `policyForUploadProvider(<active>)`.
 
   | Provider | Visibility | Min duration | Max duration | Max size |
   |---|---|---|---|---|
   | Porntrex | public | 2 min (operator limit) | none | 10 GB |
-  | XVideos | private | none | 2 h | 50 GB |
 
   Porntrex removed every upload under two minutes (4 of 4 by 2026-10-12,
-  against 3 of 167 longer ones), so shorter ones wait for another provider.
+  against 3 of 167 longer ones), so shorter ones wait for compatible same-streamer footage.
 
-  `SHARED_UPLOAD_POLICY` and `UPLOAD_PROVIDER_PLAN` (XVideos primary, Bunkr
+  `SHARED_UPLOAD_POLICY` and `UPLOAD_PROVIDER_PLAN` (Porntrex primary, Bunkr
   unavailable) feed only the server re-export `services/upload/uploadPolicy.ts`,
   which only its tests use.
 - **Metadata.** Title: the descriptor title plus ` [<folder>]`, or
@@ -418,19 +413,9 @@ server follows the account first, but only if it is not already followed.
   copies the session into Video Vault's data folder over SSH (the Mac runs `devicectl`;
   the app takes it in at launch and leaves its check for the command to read back) and
   resumes the campaign.
-- **XVideos:** email/password login in the persistent Chromium profile
-  (`~/.config/chromium-agent`); Friendly Captcha gets 60 s to solve automatically;
-  the alias is typed into the model search without selecting a model. Verification
-  uses the edit page plus a Full-HD rendition in the HLS master.
-- **Rejected phrases** are learned per provider (`rejected_phrases`) and appended
-  to the description prompt. Composed metadata is checked locally (case-insensitive
-  substring) before any byte is sent, and stale text is described again. A refusal
-  during upload is definitive and does not start the 7-day hold. `metadata-check`
-  is the read-only report.
 - **Network gating and browsers.** Real uploads and verification need
-  `VIDEO_PIPELINE_NETWORK_UPLOADS=1`, which the managed unit sets. Under
-  `VIDEO_PIPELINE_SERVICE_MODE=1` the browser always closes on failure, so it
-  never holds the profile lock; interactive commands leave it open.
+  `VIDEO_PIPELINE_NETWORK_UPLOADS=1`, which the managed unit sets. Each Porntrex
+  operation closes its browser context on success or failure, releasing the profile lock.
 
 ## 8. Descriptor
 

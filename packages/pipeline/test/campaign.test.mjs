@@ -12,7 +12,7 @@ import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
-import { HumanActionRequiredError } from "../dist/upload/chromiumXvideosUploader.js";
+import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
 import { configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
@@ -113,7 +113,7 @@ test("provider policy block is manual review, not reported as an upload or retri
 async function addFinalized(authority, root, folderName) {
     const recordingPath = path.join(root, folderName);
     await mkdir(recordingPath, { recursive: true });
-    const playlist = "#EXTM3U\n#EXTINF:1,\n1.ts\n#EXT-X-ENDLIST\n";
+    const playlist = "#EXTM3U\n#EXTINF:180,\n1.ts\n#EXT-X-ENDLIST\n";
     await writeFile(path.join(recordingPath, "playlist.m3u8"), playlist);
     await writeFile(path.join(recordingPath, "1.ts"), "media");
     authority.prepare("INSERT INTO integrity_checkpoints VALUES (?, ?, ?, ?)").run(
@@ -248,12 +248,12 @@ test("cooldown resumes the same recording at resume_at and doubles the wait per 
     assert.equal(database.get(recording.id).state, "metadata_ready");
 });
 
-test("the XVideos daily upload limit parks the campaign for exactly 24h and resets the antibot streak", async (t) => {
+test("the Porntrex daily upload limit parks the campaign for exactly 24h and resets the antibot streak", async (t) => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
     database.setCampaignState("running");
     database.recordAntibotFailure(2, 120_000, new Date("2026-08-17T09:00:00Z"));
     const worker = new CampaignWorker(database, config, resolver, async () => {
-        throw new HumanActionRequiredError("daily_limit", "XVideos daily upload limit reached");
+        throw new HumanActionRequiredError("daily_limit", "Porntrex daily upload limit reached");
     }, undefined, "worker-test");
     database.resumeFromCooldown(new Date("2026-08-17T10:00:00Z"));
     const result = await worker.step(new Date("2026-08-17T10:00:00Z"));
@@ -275,7 +275,7 @@ test("a successful upload resets the antibot streak", async (t) => {
             succeeded = true;
             throw new HumanActionRequiredError("captcha", "Friendly Captcha did not complete automatically on the upload page");
         }
-        return { recordingId: recording.id, state: "xvideos_uncertain", transmittedBytes: 100, confirmAfter: "2026-08-18T10:01:00.000Z" };
+        return { recordingId: recording.id, state: "upload_uncertain", transmittedBytes: 100, confirmAfter: "2026-08-18T10:01:00.000Z" };
     }, undefined, "worker-test");
     await worker.step(new Date("2026-08-17T10:00:00Z"));
     assert.equal(database.getCampaignControl().antibotFailures, 1);
@@ -335,10 +335,10 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
     const uploaded = [];
     const upload = async (id) => {
         uploaded.push(id);
-        database.transition(id, "metadata_ready", "xvideos_admitted");
-        database.transition(id, "xvideos_admitted", "xvideos_uploading");
-        database.transition(id, "xvideos_uploading", "xvideos_uncertain");
-        return { state: "xvideos_uncertain" };
+        database.transition(id, "metadata_ready", "upload_admitted");
+        database.transition(id, "upload_admitted", "uploading");
+        database.transition(id, "uploading", "upload_uncertain");
+        return { state: "upload_uncertain" };
     };
     let worker = new CampaignWorker(database, config, resolver, upload);
     const newer = await inspectFinalizedRecording(path.join(roots[0].path, "2020-01-11 120000 tango"), "tango", "edited");
@@ -359,9 +359,9 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
             assert.equal(database.getCampaignControl().trialFinishedAt, null);
             waitedForVerification = true;
             for (const id of uploaded) {
-                database.transition(id, "xvideos_uncertain", "xvideos_uploaded");
-                database.transition(id, "xvideos_uploaded", "xvideos_verified");
-                database.transition(id, "xvideos_verified", "cleanup_eligible");
+                database.transition(id, "upload_uncertain", "uploaded");
+                database.transition(id, "uploaded", "upload_verified");
+                database.transition(id, "upload_verified", "cleanup_eligible");
             }
         }
         else assert.equal(result.disposition, "upload_completed");

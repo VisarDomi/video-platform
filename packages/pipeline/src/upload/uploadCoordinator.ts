@@ -1,5 +1,5 @@
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
+import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
 import { MetadataRejectedError, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 
 export class UploadTransportError extends Error {
@@ -37,7 +37,7 @@ export class UploadByteMeter {
 export class UploadCoordinator {
     constructor(
         private readonly database: PipelineDatabase,
-        private readonly uploader: XvideosUploader,
+        private readonly uploader: ProviderUploader,
     ) {}
 
     async uploadAdmitted(
@@ -47,7 +47,7 @@ export class UploadCoordinator {
         now = new Date(),
     ): Promise<UploadOutcome> {
         if (request.recordingId !== recordingId) throw new Error("Upload request recording identity mismatch");
-        const provider = this.uploader.provider ?? "xvideos";
+        const provider = this.uploader.provider ?? "porntrex";
         const attemptId = this.database.beginUpload(recordingId, reservationId, now, provider);
         let outcome: UploadOutcome;
         try {
@@ -103,7 +103,7 @@ export class UploadCoordinator {
                 throw error;
             }
             // Any failure once the file upload started is acceptance-unknown:
-            // the file may still land on XVideos (or already have), so the
+            // the file may still land on the upload provider (or already have), so the
             // attempt must be confirmed against the uploads list instead of
             // blindly re-uploading gigabytes.
             const acceptanceUnknown = transportError?.acceptanceUnknown
@@ -132,16 +132,7 @@ export class UploadCoordinator {
             }, new Date());
             return outcome;
         }
-        if (outcome.kind === "title_mismatch") {
-            this.database.finishUploadAttempt(attemptId, {
-                status: "failed",
-                transmittedBytes: 0,
-                error: `${provider} entry ${outcome.remoteId} title does not match the folder identity`,
-            }, new Date());
-            this.database.transition(recordingId, "metadata_ready", "blocked",
-                `${provider} entry ${outcome.remoteId} title does not match the folder identity; manual review required`, new Date());
-            return outcome;
-        }
+
         const receipt = outcome.receipt;
         const submittedAt = new Date(receipt.metadataSubmittedAt);
         if (!Number.isFinite(submittedAt.getTime())) throw new Error("Uploader returned an invalid submission timestamp");

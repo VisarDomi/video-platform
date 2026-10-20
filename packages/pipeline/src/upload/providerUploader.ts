@@ -1,3 +1,5 @@
+import type { ActiveUploadProvider } from "../config/uploadProviders.js";
+
 export interface UploadRequest {
     readonly recordingId: string;
     readonly uploadIdentity: string;
@@ -26,19 +28,17 @@ export interface UploadReceipt {
 // session, and the outcome tells the caller what happened.
 export type UploadOutcome =
     | { kind: "uploaded"; receipt: UploadReceipt }
-    | { kind: "existing"; remoteId: string; remoteUrl: string }
-    | { kind: "title_mismatch"; remoteId: string };
+    | { kind: "existing"; remoteId: string; remoteUrl: string };
 
-export interface XvideosUploader {
+export interface ProviderUploader {
     readonly provider?: ActiveUploadProvider;
     upload(request: UploadRequest): Promise<UploadOutcome>;
 }
 
-export class DisabledXvideosUploader implements XvideosUploader {
+export class DisabledUploader implements ProviderUploader {
     async upload(_request: UploadRequest): Promise<never> {
         throw new Error(
-            "XVideos network uploads are disabled; set the explicit pipeline network-upload opt-in after satisfying production blockers",
+            "Network uploads are disabled; set the explicit pipeline network-upload opt-in after satisfying production blockers",
         );
     }
 }
-import type { ActiveUploadProvider } from "../config/uploadProviders.js";

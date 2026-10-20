@@ -98,7 +98,7 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
                 artifactSizeBytes: artifact?.sizeBytes ?? null,
                 resolutionPolicy: recording ? database.comparisonPolicyReason(recording.id) : null,
                 uploadId: remote?.remoteId ?? null, uploadedUrl: remote?.remoteUrl ?? null,
-                uploadEditUrl: remote ? `https://www.xvideos.com/account/uploads/${remote.remoteId}/edit` : null,
+                uploadEditUrl: remote ? `https://www.porntrex.com/edit-video/${remote.remoteId}/` : null,
                 verifiedOnline: remote?.verified ?? false,
                 uploadDiagnostics: recording ? database.latestUploadDiagnostics(recording.id) : null,
                 // Online verification is not an assertion of frame fidelity.

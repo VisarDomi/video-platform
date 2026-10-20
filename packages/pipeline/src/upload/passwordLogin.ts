@@ -17,7 +17,7 @@ export async function submitPasswordLogin(
     if (action && new URL(action, page.url()).origin !== origin) {
         throw new Error("Native login form submits to an unexpected origin");
     }
-    // Login forms can carry hidden reset/new-password inputs (XVideos does);
+    // Login forms can carry hidden reset/new-password inputs (the upload provider does);
     // only the fields a person could actually type into count.
     const passwords = form.locator('input[type="password"]:visible');
     let identifiers = form.locator('input:not([type="hidden"]):visible:is([type="email"], [autocomplete="username"], [name="username"], [name*="email" i], [name="login"], [name$="[login]"])');

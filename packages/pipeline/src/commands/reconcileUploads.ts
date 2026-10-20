@@ -1,7 +1,7 @@
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { cleanupArtifact } from "../stages/cleanupArtifact.js";
-import type { ChromiumXvideosUploader } from "../upload/chromiumXvideosUploader.js";
+import type { ChromiumPorntrexUploader } from "../upload/chromiumPorntrexUploader.js";
 import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
@@ -9,8 +9,8 @@ import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 import { swappedWords, type StoredPorntrexMetadata } from "../upload/porntrexMetadata.js";
 
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
-    browserOverride?: Pick<ChromiumXvideosUploader, "withAuthenticatedPage" | "probeUploadStatus">
-        & Partial<Pick<ChromiumXvideosUploader, "recoverUploadId" | "lookupUpload">>,
+    browserOverride?: Pick<ChromiumPorntrexUploader, "withAuthenticatedPage" | "probeUploadStatus">
+        & Partial<Pick<ChromiumPorntrexUploader, "lookupUpload">>,
     providerFactory = createProviderUploader,
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
@@ -31,7 +31,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         const due = database.dueUploadConfirmations(now);
         if (due.length === 0) return { checkedAt: now.toISOString(), results };
         // Destination is pinned to the attempt, not today's active provider.
-        // Old XVideos confirmations remain XVideos checks after selecting Porntrex.
+        // Old the upload provider confirmations remain the upload provider checks after selecting Porntrex.
         for (const provider of new Set(due.map(confirmation => confirmation.uploadProvider))) {
         const providerDue = due.filter(confirmation => confirmation.uploadProvider === provider);
         try {
@@ -45,7 +45,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     // The provider gave this video an ID, so it existed; now it is
                     // gone (404 and unlisted). Never back to that provider.
                     database.markProviderRemoved(confirmation.attemptId, id,
-                        `${confirmation.uploadProvider} removed video ${id} after upload (${reason ?? "404"}); blocked for manual review: it goes only to another upload provider, so once one is active \`npm run retry -w pipeline -- "${confirmation.recordingId}"\` queues it there`, now);
+                        `${confirmation.uploadProvider} removed video ${id} after upload (${reason ?? "404"}); retained locally and excluded from re-upload`, now);
                     results.push({ recordingId: confirmation.recordingId, disposition: "provider_removed", remoteId: id });
                 };
                 if (remoteId && probe?.outcome === "missing") {
@@ -69,10 +69,6 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                             results.push({ recordingId: confirmation.recordingId, disposition: "weekly_retry_eligible" });
                             continue;
                         }
-                    } else if (identity && browser.recoverUploadId) {
-                        // Legacy adapters can prove a positive ID, never absence.
-                        remoteId = await browser.recoverUploadId(page, identity);
-                        if (remoteId) database.attachUncertainRemote(confirmation.attemptId, remoteId);
                     }
                 }
                 if (!remoteId) {
@@ -116,9 +112,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     if (config.cleanupEnabled && !database.getComparisonTrial()) {
                         if (verifiedArtifact) {
                             await cleanupArtifact(verifiedArtifact.path);
-                            if (afterVerification.state === "xvideos_verified") database.transition(
+                            if (afterVerification.state === "upload_verified") database.transition(
                                 confirmation.recordingId,
-                                "xvideos_verified",
+                                "upload_verified",
                                 "cleanup_eligible",
                                 "verified online; pipeline artifact cleaned",
                                 now,

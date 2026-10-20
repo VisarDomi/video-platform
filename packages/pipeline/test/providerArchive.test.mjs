@@ -9,7 +9,6 @@ import { descriptionPrompt, descriptionPromptVersion } from "descriptor";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig, activeUploadProvider } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
-import { inventoryRecordingId, syncXvideosInventory } from "../dist/commands/syncProviderInventory.js";
 import { composeUploadMetadata } from "../dist/metadata/composeUploadMetadata.js";
 import { checkRejectedPhrases, settleRejectedPhrases } from "../dist/metadata/rejectedPhraseCheck.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
@@ -58,16 +57,15 @@ test("prompt append is absent without phrases, deterministic with them, and part
 
 test("local sanity check re-describes stale metadata once, then blocks instead of sending bytes", async t => {
     const stale = await fixture(t, { pending: false });
-    assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "xvideos")).kind, "clean");
-    stale.db.recordRejectedPhrases("xvideos", ["ambien"], null);
-    assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "porntrex")).kind, "clean", "phrases are provider-specific");
-    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "xvideos", new Date(), null);
+    assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "porntrex")).kind, "clean");
+    stale.db.recordRejectedPhrases("porntrex", ["ambien"], null);
+    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "porntrex", new Date(), null);
     assert.deepEqual(verdict, { kind: "stale_description", phrases: ["ambien"] });
     assert.equal(stale.db.get(stale.r.id).state, "artifact_valid");
 
     const current = await fixture(t, { pending: false, promptVersion: await descriptionPromptVersion(["ambien"]) });
-    current.db.recordRejectedPhrases("xvideos", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "xvideos", new Date(), null)).kind, "manual_review");
+    current.db.recordRejectedPhrases("porntrex", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "porntrex", new Date(), null)).kind, "manual_review");
     assert.equal(current.db.get(current.r.id).state, "blocked");
     assert.match(current.db.get(current.r.id).blockReason, /'ambien'.*manual review/);
 });
@@ -89,7 +87,7 @@ test("old rows that stored word rejections as limited visibility are split and l
 test("a provider word rejection fails definitively, keeps byte accounting and stays upload-ready for a rewrite", async t => {
     const { db, r } = await fixture(t, { pending: false });
     const reservation = db.reserveUpload(r.id, 120, start);
-    const uploader = { provider: "xvideos", upload: async request => {
+    const uploader = { provider: "porntrex", upload: async request => {
         await request.onProgress("file_uploading", 100);
         await request.onProgress("metadata_submitting", 100);
         throw new MetadataRejectedError(["ambien"]);
@@ -98,7 +96,7 @@ test("a provider word rejection fails definitively, keeps byte accounting and st
         recordingId: r.id, uploadIdentity: r.id, artifactPath: "/unused", sizeBytes: 100, title: "t", description: "d",
         tags: [], visibility: "private" }, start), MetadataRejectedError);
     assert.equal(db.get(r.id).state, "metadata_ready");
-    assert.deepEqual(db.listRejectedPhrases("xvideos"), ["ambien"]);
+    assert.deepEqual(db.listRejectedPhrases("porntrex"), ["ambien"]);
     assert.equal(db.dueUploadConfirmations(day(30)).length, 0, "nothing to reconcile: no remote video exists");
     assert.equal(db.uploadUsage("2026-09").spent, 100);
     assert.equal(db.canAttemptUpload(r.id, day(0.01)), true, "a definitive refusal does not hold the weekly slot");
@@ -131,7 +129,7 @@ test("a video that had an ID and is now 404 was removed by the provider: blocked
     assert.deepEqual(probed, ["3351531"]);
     const recording = db.get(r.id);
     assert.equal(recording.state, "blocked");
-    assert.match(recording.blockReason, /removed video 3351531 after upload.*npm run retry/);
+    assert.match(recording.blockReason, /removed video 3351531 after upload.*excluded from re-upload/);
     assert.equal(db.dueUploadConfirmations(day(30)).length, 0);
     // A deliberate retry re-uploads at once: nothing exists to duplicate.
     db.retryBlocked(r.id, day(2));
@@ -143,82 +141,11 @@ test("a video that had an ID and is now 404 was removed by the provider: blocked
     assert.equal((await guardUploadIdentity(db, db.get(r.id), { cleanupEnabled: false })).kind, "proceed");
 });
 
-test("inventory titles map to recording IDs only through an exact folder-name suffix", () => {
-    assert.equal(inventoryRecordingId("Nice title [2026-01-20 140639 kylllllllie]"), "2026-01-20 140639 kylllllllie");
-    assert.equal(inventoryRecordingId("Title [2025-10-02 141119 mmarianna | production-v2 | full]"), "2025-10-02 141119 mmarianna");
-    assert.equal(inventoryRecordingId("2023-06-14 155500 [68190398] asahi"), null);
-    assert.equal(inventoryRecordingId("2023-07-11 165800 [68190398]"), null);
-});
-
-test("xvideos inventory sync settles open confirmations from the complete listing, reporting the rest", async t => {
-    const { db, config, r, attempt } = await fixture(t);
-    db.attachUncertainRemote(attempt, "91753528");
-    const listing = [
-        { remoteId: "92078515", title: "Other [2026-01-20 140639 someone]", remoteUrl: "https://www.xvideos.com/video.a/x", status: "Pending release" },
-        { remoteId: "85165541", title: "2023-07-11 165800 [68190398]", remoteUrl: "https://www.xvideos.com/video.b/y", status: "Blocked" },
-    ];
-    const report = await syncXvideosInventory(config, day(8), async () => ({
-        withAuthenticatedPage: async run => run({}), listAccountUploads: async () => listing }));
-    assert.deepEqual(report.confirmations.map(c => c.disposition), ["remote_id_missing", "absent_requeued"]);
-    assert.equal(db.get(r.id).state, "metadata_ready");
-    assert.equal(report.notInLedger.length, 2);
-    assert.deepEqual(db.findProviderInventoryCopies("2026-01-20 140639 someone").map(c => c.remoteId), ["92078515"]);
-    assert.deepEqual(db.findProviderInventoryCopies(r.id), []);
-    await assert.rejects(syncXvideosInventory({ ...config, networkUploadsEnabled: false }), /opt-in/);
-});
-
-test("'Pending delete' copies count as gone: no duplicate, no blocking copy, stored ID treated as missing", async t => {
-    const { db, config, r, attempt } = await fixture(t);
-    db.attachUncertainRemote(attempt, "91788613");
-    const report = await syncXvideosInventory(config, day(8), async () => ({ withAuthenticatedPage: async run => run({}),
-        listAccountUploads: async () => [
-            { remoteId: "91788613", title: `Old copy [${r.id}]`, remoteUrl: "https://www.xvideos.com/video.e/a", status: "Pending delete" },
-            { remoteId: "91821388", title: "Kept [2026-03-20 123952 other]", remoteUrl: "https://www.xvideos.com/video.f/b", status: "Pending release" },
-            { remoteId: "91788600", title: "Deleted dup [2026-03-20 123952 other]", remoteUrl: "https://www.xvideos.com/video.g/c", status: "Pending delete" },
-        ] }));
-    assert.deepEqual(report.confirmations.map(c => c.disposition), ["remote_id_missing", "absent_requeued"]);
-    assert.equal(db.get(r.id).state, "metadata_ready");
-    assert.deepEqual(db.findProviderInventoryCopies(r.id), []);
-    assert.deepEqual(db.findProviderInventoryCopies("2026-03-20 123952 other").map(c => c.remoteId), ["91821388"]);
-    assert.deepEqual(report.duplicateCopies, []);
-    assert.deepEqual(report.removalPending.map(e => e.remoteId).sort(), ["91788600", "91788613"]);
-    assert.equal(report.total, 3);
-});
-
-test("sync finds an existing copy by folder name and makes it due for normal verification", async t => {
-    const { db, config, r, attempt } = await fixture(t);
-    const report = await syncXvideosInventory(config, day(2), async () => ({ withAuthenticatedPage: async run => run({}),
-        listAccountUploads: async () => [{ remoteId: "91957324", title: `Model title [${r.id}]`, remoteUrl: "https://www.xvideos.com/video.c/z", status: "Pending release" }] }));
-    assert.equal(report.confirmations[0].disposition, "found_verification_due");
-    assert.equal(db.getUncertainUploadRemote(attempt).remoteId, "91957324");
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
-    assert.equal(db.dueUploadConfirmations(day(2)).length, 1);
-});
-
-test("one active provider in SQLite; leaving XVideos requires a settled, synchronized account", async t => {
-    const { db, config, attempt } = await fixture(t);
-    assert.equal(db.getActiveUploadProvider(), "xvideos");
-    assert.equal(activeUploadProvider({ databasePath: config.databasePath }), "xvideos");
-    assert.equal(activeUploadProvider({ databasePath: config.databasePath, uploadProvider: "porntrex" }), "porntrex");
-    db.setCampaignState("running", day(1));
-    assert.throws(() => db.setActiveUploadProvider("porntrex", day(1)), /Pause the campaign/);
-    db.setCampaignState("paused", day(1));
-    assert.throws(() => db.setActiveUploadProvider("porntrex", day(1)), /unresolved upload confirmation/);
-    db.attachUncertainRemote(attempt, "1");
-    db.verifyUpload(attempt, "1", "https://www.xvideos.com/video.d/w", day(1));
-    assert.throws(() => db.setActiveUploadProvider("porntrex", day(1)), /Synchronize the XVideos inventory/);
-    db.replaceProviderInventory("xvideos", [], day(1));
-    db.setActiveUploadProvider("porntrex", day(2));
-    assert.equal(activeUploadProvider({ databasePath: config.databasePath }), "porntrex");
-    assert.deepEqual(db.listUploadProviderEvents().map(e => [e.fromProvider, e.toProvider]), [["xvideos", "porntrex"]]);
-    assert.throws(() => db.setActiveUploadProvider("bunkr"), /xvideos or porntrex/);
-});
-
 test("the local model's rewrite is kept only when clean; otherwise the full re-description still runs", async t => {
     const good = await fixture(t, { pending: false });
-    good.db.recordRejectedPhrases("xvideos", ["ambien"], null);
+    good.db.recordRejectedPhrases("porntrex", ["ambien"], null);
     const seen = [];
-    const verdict = await settleRejectedPhrases(good.db, good.r.id, "xvideos", new Date(), async (text, phrases) => {
+    const verdict = await settleRejectedPhrases(good.db, good.r.id, "porntrex", new Date(), async (text, phrases) => {
         seen.push(phrases);
         return { title: text.title, description: text.description.replace(/ambient/i, "soft") };
     });
@@ -226,15 +153,15 @@ test("the local model's rewrite is kept only when clean; otherwise the full re-d
     assert.equal(good.db.get(good.r.id).state, "metadata_ready");
     assert.match(good.db.getUploadMetadata(good.r.id).description, /^Purple soft lighting in a bedroom/);
     assert.match(good.db.getUploadMetadata(good.r.id).title, /\[2025-10-16 015701 example\]$/, "the folder identity suffix is recomposed, not lost");
-    assert.equal((await checkRejectedPhrases(good.db, good.r.id, "xvideos")).kind, "clean");
+    assert.equal((await checkRejectedPhrases(good.db, good.r.id, "porntrex")).kind, "clean");
     assert.deepEqual(seen, [["ambien"]]);
 
     const stubborn = await fixture(t, { pending: false });
-    stubborn.db.recordRejectedPhrases("xvideos", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(stubborn.db, stubborn.r.id, "xvideos", new Date(), async text => text)).kind, "stale_description");
+    stubborn.db.recordRejectedPhrases("porntrex", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(stubborn.db, stubborn.r.id, "porntrex", new Date(), async text => text)).kind, "stale_description");
     assert.equal(stubborn.db.get(stubborn.r.id).state, "artifact_valid");
 
     const broken = await fixture(t, { pending: false });
-    broken.db.recordRejectedPhrases("xvideos", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "xvideos", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
+    broken.db.recordRejectedPhrases("porntrex", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "porntrex", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
 });

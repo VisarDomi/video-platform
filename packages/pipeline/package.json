@@ -23,7 +23,6 @@
         "reconcile-uploads": "npm run build && node --no-warnings dist/main.js reconcile-uploads --apply",
         "upload-provider": "npm run build && node --no-warnings dist/main.js upload-provider",
         "upload-provider:set": "npm run build && node --no-warnings dist/main.js upload-provider --apply",
-        "xvideos:sync": "npm run build && node --no-warnings dist/main.js xvideos-sync --apply",
         "metadata:check": "npm run build && node --no-warnings dist/main.js metadata-check",
         "ptrex:connect-iphone": "npm run build && DISPLAY=:111 node --no-warnings dist/main.js ptrex-connect-iphone --apply",
         "ptrex:session-report": "npm run build && node --no-warnings dist/main.js ptrex-session-report",

@@ -16,7 +16,7 @@ import sqlite3
 import stat
 import sys
 
-FINAL_STATES = {"xvideos_verified", "cleanup_eligible"}
+FINAL_STATES = {"upload_verified", "cleanup_eligible"}
 MEDIA_TABLES = ("artifacts", "artifact_variants", "resolution_review_artifacts",
                 "production_artifact_queue", "remux_outputs")
 UTC = dt.timezone.utc
@@ -137,7 +137,7 @@ def verified_recording(db, recording_id):
         joined = [dict(r) for r in db.execute("""
             SELECT u.*, s.part AS source_part, a.provider, a.recording_id AS upload_owner,
                 a.status AS attempt_status FROM short_parts s
-            JOIN recordings b ON b.id=s.batch_id AND b.state IN ('xvideos_verified','cleanup_eligible')
+            JOIN recordings b ON b.id=s.batch_id AND b.state IN ('upload_verified','cleanup_eligible')
             JOIN remote_uploads u ON u.recording_id=b.id AND u.artifact_part='full'
             JOIN upload_attempts a ON a.id=u.attempt_id
             WHERE s.recording_id=? AND s.verified=1
@@ -148,7 +148,7 @@ def verified_recording(db, recording_id):
     if not uploads:
         raise ValueError("no_verified_destination")
     for upload in uploads:
-        if upload["attempt_status"] != "accepted" or upload["provider"] not in ("xvideos", "porntrex"):
+        if upload["attempt_status"] != "accepted" or upload["provider"] not in ("porntrex",):
             raise ValueError("unverified_destination_identity")
         if not upload["remote_id"] or not upload["remote_url"] or not upload["verified_at"]:
             raise ValueError("incomplete_destination_evidence")

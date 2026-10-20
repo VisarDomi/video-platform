@@ -59,8 +59,7 @@ check package.json
 ## iPhone apps
 
 Five iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
-**SC local** list the PC's recordings; **Video Vault** lists the pipeline's XVideos and
-Porntrex uploads; **Tango** shows live streams on tango.me. All five are native lists with
+**SC local** list the PC's recordings; **Video Vault** lists the pipeline's Porntrex uploads; **Tango** shows live streams on tango.me. All five are native lists with
 a native viewer that keeps playing through lock and the background, so any change to them
 needs an app deploy. They are built on the Mac (SSH from this PC); the phone is paired
 with the Mac over Wi-Fi. Build, deploy, tests, inspection and renewal are in
@@ -77,7 +76,7 @@ nothing (only logs and diagnostic screenshots stay in package folders):
   (`tango-phone-key`, made once by `apps/ios/scripts/deploy.py tango-live sync`).
 - `~/.config/video-services/` (files mode 600): `auth-accounts.json` (the accounts
   `video-auth` keeps signed in; `VIDEO_AUTH_ACCOUNTS_FILE` overrides),
-  `upload-providers.json` (XVideos/Porntrex upload logins) and `porntrex-session.json`.
+  `upload-providers.json` (Porntrex credentials) and `porntrex-session.json`.
 - `~/.config/chromium-agent/`: the pipeline's Chromium profile.
 - `~/.local/share/mkcert/pwa/`: the server's HTTPS certificate (without it the server
   falls back to HTTP).

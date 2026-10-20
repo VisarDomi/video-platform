@@ -12,7 +12,7 @@ import { captureKeyFromFolderName, selectOldestFinalizedEditedCandidate } from "
 import { sweepMissingRecordings } from "../commands/sweep.js";
 import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../commands/uploadOne.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
-import { HumanActionRequiredError } from "../upload/chromiumXvideosUploader.js";
+import { HumanActionRequiredError } from "../upload/browserUpload.js";
 import { MetadataRejectedError, ProviderSessionLostError } from "../upload/providerWarnings.js";
 import { RESOLUTION_POLICY_VERSION, resolutionPolicyReason } from "../stages/resolutionPolicy.js";
 import { cancelInvalidShortBatch, maintainAutomaticShorts } from "./shorts.js";
@@ -335,9 +335,9 @@ export class CampaignWorker {
                     return { disposition: "upload_retry_cooldown", recordingId: uploadReady.id,
                         resumeAt: after.resumeAt ?? "", reason: error instanceof Error ? error.message : String(error) };
                 }
-                if (afterFailure?.state === "xvideos_uncertain") {
+                if (afterFailure?.state === "upload_uncertain") {
                     return { disposition: "upload_completed", recordingId: uploadReady.id,
-                        result: { state: "xvideos_uncertain", reason: "Awaiting acceptance reconciliation; no re-upload" } };
+                        result: { state: "upload_uncertain", reason: "Awaiting acceptance reconciliation; no re-upload" } };
                 }
                 if (comparison) this.database.setCampaignState("paused", now);
                 throw error;
@@ -353,7 +353,7 @@ export class CampaignWorker {
                     this.database.setCampaignState("paused", now);
                     return { disposition: "comparison_attention_required", reason: "Selected recording failed, changed, or requires review; no replacement will be admitted" };
                 }
-                if (selected.some((recording) => recording?.state !== "xvideos_verified")) {
+                if (selected.some((recording) => recording?.state !== "upload_verified")) {
                     return { disposition: "comparison_verification_wait" };
                 }
                 for (const recording of selected) {
@@ -369,14 +369,14 @@ export class CampaignWorker {
             if (control.trialPerProvider !== null) {
                 const trial = this.database.getCampaignTrialProgress();
                 const pending = trial.flatMap((provider) => provider.recordings);
-                if (pending.some((recording) => ["xvideos_admitted", "xvideos_uploading", "xvideos_uploaded", "xvideos_uncertain"].includes(recording.state))) {
+                if (pending.some((recording) => ["upload_admitted", "uploading", "uploaded", "upload_uncertain"].includes(recording.state))) {
                     // Verification runs inline even without new campaign work.
                     // Confirmed absence can return the same slot to metadata_ready
                     // for retry; never substitute an extra recording for it.
                     return { disposition: "trial_verification_wait", reviewRequired, trial };
                 }
                 if (trial.some((provider) => provider.admitted < control.trialPerProvider!)
-                    || pending.some((recording) => !["xvideos_verified", "cleanup_eligible"].includes(recording.state))) {
+                    || pending.some((recording) => !["upload_verified", "cleanup_eligible"].includes(recording.state))) {
                     // Do not clear the trial on a later manual resume: failed
                     // slots still belong to this unfinished bounded run.
                     this.database.setCampaignState("paused", now);

@@ -89,7 +89,7 @@ export interface UploadMetadataRecord {
 }
 
 export interface UploadConfirmation {
-    readonly uploadProvider: "xvideos" | "porntrex";
+    readonly uploadProvider: "porntrex";
     readonly attemptId: string;
     readonly recordingId: string;
     readonly confirmAfter: string;
@@ -108,7 +108,7 @@ export interface CampaignControl {
     readonly resumeAt: string | null;
     readonly trialPerProvider: number | null;
     readonly trialFinishedAt: string | null;
-    readonly uploadProvider: "xvideos" | "porntrex";
+    readonly uploadProvider: "porntrex";
     readonly attentionReason: string | null;
     readonly updatedAt: string;
 }

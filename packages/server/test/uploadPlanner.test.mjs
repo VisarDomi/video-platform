@@ -20,19 +20,19 @@ const candidate = {
 
 test("shared limits are derived from provider policies", () => {
     assert.deepEqual(UPLOAD_PROVIDER_PLAN, {
-        primary: "xvideos",
+        primary: "porntrex",
         backups: [],
         unavailableBackups: [{
             provider: "bunkr",
             reason: "Registrations are closed until further notice.",
         }],
     });
-    assert.deepEqual(SHARED_UPLOAD_POLICY.providers, ["xvideos"]);
-    assert.equal(SHARED_UPLOAD_POLICY.minimumDurationSeconds, null);
-    assert.equal(SHARED_UPLOAD_POLICY.maximumDurationSeconds, 7_200);
-    assert.equal(SHARED_UPLOAD_POLICY.maximumFileBytes, 50_000_000_000);
-    assert(!SHARED_UPLOAD_POLICY.unresolvedConstraints.includes("xvideos.minimumDurationSeconds"));
-    assert.equal(PROVIDER_UPLOAD_POLICIES.xvideos.uploadVisibility, "private");
+    assert.deepEqual(SHARED_UPLOAD_POLICY.providers, ["porntrex"]);
+    assert.equal(SHARED_UPLOAD_POLICY.minimumDurationSeconds, 120);
+    assert.equal(SHARED_UPLOAD_POLICY.maximumDurationSeconds, null);
+    assert.equal(SHARED_UPLOAD_POLICY.maximumFileBytes, 10_000_000_000);
+    assert.deepEqual(Object.keys(PROVIDER_UPLOAD_POLICIES).sort(), ["bunkr", "porntrex"]);
+    assert.equal(PROVIDER_UPLOAD_POLICIES.porntrex.uploadVisibility, "public");
     assert.equal(PROVIDER_UPLOAD_POLICIES.bunkr.inactiveDeletionDays, 30);
     assert.equal(PROVIDER_UPLOAD_POLICIES.bunkr.maintenanceVisitIntervalDays, 15);
 
@@ -41,13 +41,13 @@ test("shared limits are derived from provider policies", () => {
         maximumFileBytes: 900_000_000,
     };
     assert.equal(
-        deriveSharedUploadPolicy([PROVIDER_UPLOAD_POLICIES.xvideos, changedBunkrLimit]).maximumFileBytes,
+        deriveSharedUploadPolicy([PROVIDER_UPLOAD_POLICIES.porntrex, changedBunkrLimit]).maximumFileBytes,
         900_000_000,
     );
 });
 
-test("short recordings proceed while the XVideos minimum is unresolved", () => {
-    const shortCandidate = { ...candidate, durationSeconds: 1 };
+test("the Porntrex minimum duration is inclusive", () => {
+    const shortCandidate = { ...candidate, durationSeconds: 120 };
     const assessment = assessRecording(shortCandidate);
 
     assert.deepEqual(assessment, {
@@ -57,17 +57,17 @@ test("short recordings proceed while the XVideos minimum is unresolved", () => {
     });
 });
 
-test("the two-hour maximum duration is inclusive", () => {
+test("Porntrex has no maximum duration", () => {
     const atLimit = { ...candidate, durationSeconds: 7_200 };
     const overLimit = { ...candidate, durationSeconds: 7_200.001 };
 
     assert.equal(assessRecording(atLimit).disposition, "ready_for_description");
-    assert.equal(assessRecording(overLimit).disposition, "blocked_too_long");
-    assert.equal(assessRecording(overLimit).notification?.code, "too_long");
+    assert.equal(assessRecording(overLimit).disposition, "ready_for_description");
+    assert.equal(assessRecording(overLimit).notification, undefined);
     assert.equal(assessRecording(overLimit).sourceAction, "none");
 });
 
-test("a minimum can be enabled globally after the manual XVideos check", () => {
+test("a shared policy can override the minimum duration", () => {
     const verifiedPolicy = { ...SHARED_UPLOAD_POLICY, minimumDurationSeconds: 60 };
     const belowMinimum = { ...candidate, durationSeconds: 59 };
     const atMinimum = { ...candidate, durationSeconds: 60 };
@@ -81,7 +81,7 @@ test("a minimum can be enabled globally after the manual XVideos check", () => {
     });
 });
 
-test("bulk planning keeps short recordings independent while the minimum is unresolved", () => {
+test("bulk planning excludes recordings below the provider minimum", () => {
     const shortOne = { ...candidate, id: "short-one", durationSeconds: 30 };
     const ready = { ...candidate, id: "ready", durationSeconds: 1_200 };
     const shortTwo = { ...candidate, id: "short-two", durationSeconds: 179 };
@@ -89,14 +89,14 @@ test("bulk planning keeps short recordings independent while the minimum is unre
     const plan = planRecordingsForUpload([shortOne, ready, shortTwo]);
 
     assert.equal(plan.strategy, "one_recording_per_upload");
-    assert.deepEqual(plan.readyCandidates, [shortOne, ready, shortTwo]);
-    assert.deepEqual(plan.notifications, []);
+    assert.deepEqual(plan.readyCandidates, [ready, shortTwo]);
+    assert.equal(plan.notifications.length, 1);
     assert(plan.assessments.every((assessment) => assessment.sourceAction === "none"));
 });
 
 test("the final artifact size limit is inclusive", () => {
-    const atLimit = { ...candidate, path: "/videos/example.mp4", sizeBytes: 50_000_000_000 };
-    const overLimit = { ...atLimit, sizeBytes: 50_000_000_001 };
+    const atLimit = { ...candidate, path: "/videos/example.mp4", sizeBytes: 10_000_000_000 };
+    const overLimit = { ...atLimit, sizeBytes: 10_000_000_001 };
 
     assert.equal(assessFinalArtifact(atLimit).disposition, "ready_for_upload");
     assert.equal(assessFinalArtifact(overLimit).disposition, "blocked_too_large");

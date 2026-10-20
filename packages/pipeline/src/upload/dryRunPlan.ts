@@ -19,7 +19,7 @@ export function createDryRunUploadPlan(
     timeZone = "Europe/Tirane",
     monthlyLimitBytes = 600_000_000_000,
     stagingRoot?: string,
-    provider: ActiveUploadProvider = "xvideos",
+    provider: ActiveUploadProvider = "porntrex",
 ): DryRunUploadItem[] {
     let simulatedReserved = 0;
     return database.list("metadata_ready").map((recording) => {

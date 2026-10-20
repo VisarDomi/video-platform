@@ -27,7 +27,7 @@ import {
 import { parseRemuxOneArguments } from "../dist/commands/remuxOneArguments.js";
 import { validateArtifact } from "../dist/stages/validateArtifact.js";
 import { createDefaultStages } from "../dist/stages/defaultStages.js";
-import { DisabledXvideosUploader } from "../dist/upload/disabledXvideosUploader.js";
+import { DisabledUploader } from "../dist/upload/providerUploader.js";
 import { UploadByteMeter } from "../dist/upload/uploadCoordinator.js";
 
 const execFileAsync = promisify(execFile);
@@ -198,8 +198,8 @@ test("a lower picture of the same shape joins the larger one; portrait is turned
     assert.deepEqual([...group.indexes].sort(), [0, 1]);
     assert.deepEqual(group.output, { width: 1920, height: 1440, rotate: true });
 });
-test("the XVideos adapter cannot perform network uploads", async () => {
-    const uploader = new DisabledXvideosUploader();
+test("the disabled transport cannot perform network uploads", async () => {
+    const uploader = new DisabledUploader();
     await assert.rejects(() => uploader.upload({
         recordingId: "e".repeat(64),
         artifactPath: "/tmp/artifact.mp4",
@@ -208,7 +208,7 @@ test("the XVideos adapter cannot perform network uploads", async () => {
         description: "test",
         tags: ["test"],
         visibility: "private",
-    }), /network uploads are disabled/);
+    }), /Network uploads are disabled/);
 });
 
 test("the byte meter refuses a write before it crosses its reservation", () => {

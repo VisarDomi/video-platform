@@ -16,7 +16,7 @@ recording moves through convert → validate → describe → metadata → uploa
 online verification.
 
 - SQLite (`~/.local/share/video-services/pipeline/pipeline.sqlite`, override
-  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 13) holds recording state,
+  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 14) holds recording state,
   transition events, leases, artifact hashes, description evidence, provenance,
   metadata, upload reservations/attempts, transmitted-byte accounting and remote
   identity. Recording IDs are the source folder names (datetime + alias).
@@ -83,8 +83,7 @@ dropped**. Source folders and their playlists are never modified.
 - **Limits.** A short upload waits for automatic joining; other artifacts
   outside the active provider's limits are blocked, judged on their own
   duration/size. Porntrex takes two
-  minutes to 10 GB at any length, XVideos up to two hours and 50 GB at any
-  shortness.
+  minutes to 10 GB at any length.
 - Local work without a `resolution-policy-v6` assessment is reset and
   converted again; uploaded recordings are not touched. The local-stage lease
   is 12 hours.
@@ -250,16 +249,16 @@ leaves its recording in its state, and the next start resumes it; only a failure
 without a stop marks the recording failed.
 
 While the worker runs, its heartbeat makes `remux-one`, `describe-one`,
-`process-one`, `upload-one`, `upload-provider:set`, `xvideos:sync`,
+`process-one`, `upload-one`, `upload-provider:set`,
 `campaign:prepare` and `campaign:select` refuse to start; stop the service
 first.
 
 Upload cooldowns pause the campaign with a resume time: a human-action error
 (captcha) backs off from one minute, doubling up to 24 hours; another failure
 before anything was sent (a page timeout) backs off from 15 minutes, doubling up
-to 24 hours; a provider login problem or the XVideos daily limit waits 24 hours.
-A lost Porntrex session pauses until
-`npm run ptrex:connect-iphone` restores it.
+to 24 hours; a provider login problem waits 24 hours.
+A session-loss hold can resume only after an authenticated same-session check;
+a manual pause remains indefinite.
 
 Failures and blocks retain the stage they came from. Return one to it:
 
@@ -317,23 +316,21 @@ frame-fidelity test or human quality approval.
 
 ## Upload providers
 
-The destination lives in SQLite (`campaign_control.upload_provider`, `xvideos`
-or `porntrex`; a new database starts with `xvideos`), not in the credentials
-file. Show it, or switch while the campaign is paused and its worker stopped:
+The destination is Porntrex. SQLite stores that intent in
+`campaign_control.upload_provider`; the credentials file holds secrets only. Inspect it
+while the campaign is paused:
 
 ```sh
 npm run upload-provider -w pipeline
 npm run upload-provider:set -w pipeline -- --provider porntrex
 ```
 
-A switch is refused while any reservation/attempt is in flight or the provider
-being left still has open confirmations. Leaving XVideos also requires an
-account inventory synchronized after its last upload (`xvideos:sync`, below).
-Confirmations always verify on the provider their attempt used.
+Porntrex is the only upload destination. Its verification receipts, removal bans and
+shared session remain authoritative.
 
 Credentials live in `~/.config/video-services/upload-providers.json` (chmod
 600 is enforced; format in `config/upload-providers.example.json`; override
-`VIDEO_UPLOAD_PROVIDERS_FILE`). Both uploaders drive a headed Chromium
+`VIDEO_UPLOAD_PROVIDERS_FILE`). The uploader drives a headed Chromium
 (`/usr/bin/chromium`, override `VIDEO_CHROMIUM_PATH`) through a persistent
 profile; outside the service set `DISPLAY=:111`. Only one Chromium may use a
 profile directory at a time.
@@ -349,7 +346,7 @@ later. Recovery rules are in `docs/upload-recovery.md`.
 ### Porntrex
 
 Uploads are public, in the Webcam category. The profile is `VIDEO_PORNTREX_BROWSER_PROFILE` (else
-`VIDEO_XVIDEOS_BROWSER_PROFILE`, else `~/.config/chromium-agent`). Porntrex
+`~/.config/chromium-agent`). Porntrex
 keeps one session per account, so the pipeline and the Video Vault iPhone app
 share one session, stored in `~/.config/video-services/porntrex-session.json`
 (chmod 600; override `VIDEO_PORNTREX_SESSION_FILE`). The pipeline never signs
@@ -389,52 +386,9 @@ npm run ptrex:uploads -w pipeline -- --limit 25
 npm run ptrex:tiers -w pipeline -- --record /absolute/tiers.jsonl
 ```
 
-### XVideos
-
-Uploads use Direct-link (private) visibility. The default profile is
-`~/.config/chromium-agent` (override `VIDEO_XVIDEOS_BROWSER_PROFILE`); the
-uploader opens it with remote debugging on port 9222, so close any other
-agent-controlled browser first. To set it up on a fresh clone, launch
-`/usr/bin/chromium --user-data-dir=/home/visar/.config/chromium-agent` once,
-put the credentials in the providers file, confirm the account dashboard shows
-"My Content", and close the browser. The canonical agent-profile notes live in
-`~/Documents/environment/browser/chromium-agent.md`.
-
-The uploader signs in through the native email/password form (only visible
-login fields count). On the upload page it completes Friendly Captcha itself:
-it clicks the widget's "I am human" checkbox, waits for the proof-of-work,
-clicks "Confirm that you are not a robot", and only then expects the file form;
-if the captcha still needs a person it fails with `HumanActionRequiredError`.
-After the file upload starts, actions use five-minute timeouts. The streamer
-alias is typed into the zero-width model typeahead with keyboard events and
-saved without selecting a model. A manual run leaves the browser open on
-failure (logged as `upload-browser-left-open`; close it before retrying); the
-managed worker closes it.
-
-Verification opens `/account/uploads/<id>/edit`: the video is online when the
-page has the direct video link (`/video.<key>/<slug>`) and its HLS master
-advertises a Full-HD rendition. An edit page answering HTTP 404 means the video
-is gone: the recording is blocked for review, for another provider only.
-
-`xvideos:sync` reads the complete uploads listing (its count must equal the
-account total) into `provider_inventory`:
-
-```sh
-VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run xvideos:sync -w pipeline
-```
-
-It settles every open XVideos confirmation from that inventory (IDs missing
-from it are dropped, absent recordings are requeued after their deadline,
-existing copies are made due for verification) and reports verified uploads
-missing from the account, account videos unknown to the ledger and duplicate
-copies without acting on them. Uploads to any provider then refuse recordings
-with a copy in a synchronized inventory; no other provider is logged into for
-that check.
-
 ## Rejected metadata phrases
 
-Providers refuse some words in titles/descriptions (XVideos: "Sorry, 'ambien'
-is not allowed here.") and match them as case-insensitive substrings, so
+The metadata guard avoids learned rejected phrases as case-insensitive substrings, so
 innocent words trip them: "ambient" (ambien), "high-waisted" (waisted),
 "scrolling on" (rolling on), "breathing" (breath). Such a refusal means the
 form was never validated and no video exists. The pipeline therefore:
@@ -451,7 +405,7 @@ form was never validated and no video exists. The pipeline therefore:
   no weekly duplicate hold, no reconcile) and returns the recording to
   upload-ready, where that check runs again.
 
-`npm run metadata:check -w pipeline [-- --provider xvideos|porntrex]` is the
+`npm run metadata:check -w pipeline [-- --provider porntrex]` is the
 read-only version of that check over every composed, not-yet-verified recording
 (default: the active provider). Visibility labels on published videos ("limited
 visibility due to : alcohol…") are informational only and never affect retries.
@@ -566,3 +520,22 @@ VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run upload-one -w pipeline -- 
 
 VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run reconcile-uploads -w pipeline
 ```
+
+## Destination retirement and restored sources
+
+Schema 14 uses destination-neutral `upload_*` lifecycle states. It retires the removed
+destination's active receipts, attempts and inventory into `retired_destination_audit`;
+they cannot satisfy the upload identity guard or authorize cleanup. Their original byte
+accounting remains charged. Existing Porntrex copies, pending confirmations and removal
+bans are preserved. Sources without a Porntrex copy re-enter `server_ready`, or
+`short_waiting` below two minutes, for the normal conversion and upload stages. The
+migration is transactional and does not resume a paused campaign. Before applying it to
+the live ledger, take a private SQLite snapshot under `pipeline/history/`.
+
+A recording restored from Trash must return to its exact
+`~/Videos/downloads/<provider>/edited/<recording>/` path, with its playlist and media
+fingerprint unchanged. Desktop staging is not a discovery root. Restored Porntrex-backed
+recordings remain complete; moving them back does not authorize duplicate uploads.
+The `user-pause.json` operational hold keeps `video-pipeline.service` disabled until
+the user explicitly requests resumption. It covers conversion, description and uploading;
+`video-downloader`, `video-server`, `video-auth` and `video-xvfb` keep running normally.

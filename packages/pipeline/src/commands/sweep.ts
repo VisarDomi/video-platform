@@ -6,7 +6,7 @@ import { containedArtifactPath } from "../stages/remux.js";
 import { PRODUCTION_ARTIFACT_BASE } from "../stages/artifactNaming.js";
 
 const SWEEP_MIN_AGE_MILLISECONDS = 24 * 60 * 60_000;
-const IN_FLIGHT_STATES = ["xvideos_admitted", "xvideos_uploading"];
+const IN_FLIGHT_STATES = ["upload_admitted", "uploading"];
 
 // Disk is the truth: a recording whose source folder no longer exists is
 // forgotten entirely — ledger rows, confirmations, verifications — together

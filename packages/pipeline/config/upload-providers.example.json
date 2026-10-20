@@ -1,7 +1,9 @@
 {
-    "version": 1,
-    "providers": {
-        "xvideos": { "email": "", "password": "" },
-        "porntrex": { "username": "", "password": "" }
+  "version": 1,
+  "providers": {
+    "porntrex": {
+      "username": "",
+      "password": ""
     }
+  }
 }

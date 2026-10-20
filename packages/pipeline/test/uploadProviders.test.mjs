@@ -7,7 +7,6 @@ import test from "node:test";
 import { chromium } from "playwright";
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { readUploadProvidersFile, readProviderCredentials } from "../dist/config/uploadProviders.js";
-import { readXvideosCredentials } from "../dist/config/secrets.js";
 import { submitPasswordLogin } from "../dist/upload/passwordLogin.js";
 import { ChromiumPorntrexUploader, isPorntrexChunkRequest, matchesPorntrexIdentity, orderPlaybackCandidates, passPorntrexAgeGate } from "../dist/upload/chromiumPorntrexUploader.js";
 
@@ -16,12 +15,10 @@ test("provider-keyed private credentials only; a legacy activeProvider field is 
     t.after(() => rm(root, { recursive: true, force: true }));
     const file = path.join(root, "upload-providers.json");
     const data = { version: 1, providers: {
-        xvideos: { email: "xv@example.invalid", password: "test-xv-only" },
         porntrex: { username: "px@example.invalid", password: "test-px-only" },
     } };
     await writeFile(file, JSON.stringify(data), { mode: 0o600 });
     assert.equal(readProviderCredentials(file, "porntrex").email, "px@example.invalid");
-    assert.equal((await readXvideosCredentials(file)).email, "xv@example.invalid");
     data.activeProvider = ["not", "a", "provider"];
     await writeFile(file, JSON.stringify(data));
     assert.equal(readUploadProvidersFile(file).version, 1);
@@ -31,9 +28,8 @@ test("provider-keyed private credentials only; a legacy activeProvider field is 
     assert.throws(() => readUploadProvidersFile(file), /private file/);
 });
 
-test("Porntrex takes 2 minutes to 10GB at any length; XVideos takes up to two hours or 50GB at any shortness", () => {
+test("Porntrex accepts 2-minute minimum and 10GB maximum at any length", () => {
     const porntrex = policyForUploadProvider("porntrex");
-    const xvideos = policyForUploadProvider("xvideos");
     const artifact = { id: "one", path: "/tmp/fixture.mp4", durationSeconds: 120, sizeBytes: 10_000_000_000 };
     // Both limits are inclusive.
     assert.equal(assessFinalArtifact(artifact, porntrex).disposition, "ready_for_upload");
@@ -45,13 +41,7 @@ test("Porntrex takes 2 minutes to 10GB at any length; XVideos takes up to two ho
     assert.match(over.notification.message, /porntrex 10000000000-byte maximum/);
     assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 6 * 3600 }, porntrex).disposition, "ready_for_upload");
 
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 3 }, xvideos).disposition, "ready_for_upload");
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 }, xvideos).disposition, "ready_for_upload");
-    const long = assessFinalArtifact({ ...artifact, durationSeconds: 2 * 3600 + 1 }, xvideos);
-    assert.equal(long.disposition, "blocked_too_long");
-    assert.match(long.notification.message, /exceeds the xvideos 7200s maximum/);
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 50_000_000_000 }, xvideos).disposition, "ready_for_upload");
-    assert.equal(assessFinalArtifact({ ...artifact, durationSeconds: 600, sizeBytes: 50_000_000_001 }, xvideos).disposition, "blocked_too_large");
+
 });
 
 test("native password login uses only its same-origin, unique form and never a social button", async t => {
@@ -75,7 +65,7 @@ test("native password login uses only its same-origin, unique form and never a s
     await assert.rejects(submitPasswordLogin(page, "https://different.example.invalid", { email: "x", password: "x" }), /expected provider origin/);
 });
 
-test("native password login ignores hidden reset-password fields (XVideos sign-in form shape)", async t => {
+test("native password login ignores hidden reset-password fields (Porntrex sign-in form shape)", async t => {
     const server = createServer((_request, response) => response.end(`<!doctype html><form id="signin-form" method="post"><input type="hidden" name="signin-form[csrf_token]"><input type="email" name="signin-form[login]"><input type="password" name="signin-form[password]"><button type="button"></button><div hidden><input type="password" name="signin-form[new_password]" autocomplete="new-password"><input type="password" name="signin-form[new_password_confirm]" autocomplete="new-password"></div><input type="checkbox" name="signin-form[rememberme]"><button type="submit">Sign in</button></form><script>document.querySelector('form').onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);document.body.dataset.submitted=[f.get('signin-form[login]'),f.get('signin-form[password]'),f.get('signin-form[new_password]'),f.get('signin-form[rememberme]')].join('|')}</script>`));
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(() => new Promise(resolve => server.close(resolve)));

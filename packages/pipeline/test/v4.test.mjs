@@ -8,7 +8,7 @@ import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
 import { productionOutputDimensions } from "../dist/stages/resolutionPolicy.js";
 import { parsePlaybackRenditions, hasFullHdPlayback } from "../dist/upload/playbackQuality.js";
-import { ChromiumXvideosUploader, HumanActionRequiredError } from "../dist/upload/chromiumXvideosUploader.js";
+import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { CURRENT_PRODUCTION_VERSION } from "../dist/domain/productionVersion.js";
 
 const now = new Date("2026-10-01T00:00:00Z");
@@ -31,6 +31,7 @@ async function fixture(t, remoteId) {
     db.saveUploadMetadata(r.id, { title: `Example [${r.id} | ${CURRENT_PRODUCTION_VERSION} | full]`, description: "Example", tags: [] });
     const reservation = db.reserveUpload(r.id, 1024, now);
     const attempt = db.beginUpload(r.id, reservation, now);
+    db.updateUploadProgress(attempt, "metadata_submitting", 100, now);
     db.finishUploadAttempt(attempt, { status: "uncertain", remoteId, transmittedBytes: 100,
         confirmation: { confirmAfter: now } }, now);
     return { config, db, r, attempt };
@@ -80,18 +81,18 @@ test("missing ID stays uncertain, retries daily across reopen, then attaches onl
     const { config, db, r, attempt } = await fixture(t);
     let searches = 0;
     const browser = { withAuthenticatedPage: async run => run({}),
-        recoverUploadId: async () => { searches++; return null; },
+        lookupUpload: async () => { searches++; return {kind:"absent"}; },
         probeUploadStatus: async () => { throw Error("No ID should be probed yet"); } };
     await reconcileDueUploads(config, now, browser);
     assert.equal(searches, 1);
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.dueUploadConfirmations(now).length, 0);
     const reopened = new PipelineDatabase(config.databasePath);
     assert.equal(reopened.dueUploadConfirmations(tomorrow)[0].attemptId, attempt);
     reopened.close();
-    await reconcileDueUploads(config, tomorrow, { ...browser, recoverUploadId: async () => "12345",
-        probeUploadStatus: async () => ({outcome:"online",remoteUrl:"https://www.xvideos.com/video.example",renditions:[{width:1664,height:1248,label:"1080p"}]}) });
-    assert.equal(db.get(r.id).state, "xvideos_verified");
+    await reconcileDueUploads(config, tomorrow, { ...browser, lookupUpload: async () => ({kind:"found",remoteId:"12345",remoteUrl:"https://www.porntrex.com/video/12345/example"}),
+        probeUploadStatus: async () => ({outcome:"online",remoteUrl:"https://www.porntrex.com/video.example",renditions:[{width:1664,height:1248,label:"1080p"}]}) });
+    assert.equal(db.get(r.id).state, "upload_verified");
     assert.equal(db.getUploadIdentity(r.id).remoteId, "12345");
     assert.equal(db.dueUploadConfirmations(tomorrow).length, 0);
 });
@@ -100,7 +101,7 @@ test("verification login failure gets a durable daily retry, never an absent ver
     const { config, db, r } = await fixture(t, "12345");
     await reconcileDueUploads(config, now, { withAuthenticatedPage: async () => { throw Error("temporary login timeout"); },
         probeUploadStatus: async () => { throw Error("not reached"); } });
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.dueUploadConfirmations(now).length, 0);
     assert.equal(db.dueUploadConfirmations(tomorrow).length, 1);
     assert.match(JSON.stringify(db.latestUploadDiagnostics(r.id)), /temporary login timeout/);
@@ -111,7 +112,7 @@ test("published 720p remains pending and rechecks the same ID, without another u
     let probes = 0;
     const b = {withAuthenticatedPage: async run => run({}), probeUploadStatus: async (_, id) => {
         assert.equal(id,"12345"); probes++;
-        return { outcome:"not_ready",remoteUrl:"https://www.xvideos.com/video.example",reason:"Full-HD missing",
+        return { outcome:"not_ready",remoteUrl:"https://www.porntrex.com/video.example",reason:"Full-HD missing",
             renditions:[{width:1110,height:832,label:"720p"}] };
     }};
     await reconcileDueUploads(config, now, b);
@@ -119,26 +120,6 @@ test("published 720p remains pending and rechecks the same ID, without another u
     assert.equal(probes,1);
     await reconcileDueUploads(config, tomorrow, b);
     assert.equal(probes,2);
-    assert.equal(db.get(r.id).state,"xvideos_uncertain");
+    assert.equal(db.get(r.id).state,"upload_uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).confirmation_status,"pending");
-});
-
-test("recovery refuses older versions and ambiguous diagnostic identities", async () => {
-    const b = new ChromiumXvideosUploader({});
-    const identity = `example | ${CURRENT_PRODUCTION_VERSION} | full`;
-    b.findEntries = async () => [{remoteId:"1",title:"Example [example | production-v3 | full]"}];
-    assert.equal(await b.recoverUploadId({},identity),null);
-    b.findEntries = async () => [{remoteId:"2",title:`Example [${identity}]`},{remoteId:"3",title:`Example [${identity}]`}];
-    assert.equal(await b.recoverUploadId({},identity),null);
-    b.findEntries = async () => [{remoteId:"2",title:`Example [${identity}]`}];
-    assert.equal(await b.recoverUploadId({},identity),"2");
-});
-
-test("generic login timeout is classified for retries; completed instant OAuth is accepted", async () => {
-    const b = new ChromiumXvideosUploader({});
-    b.ensureAuthenticated = async () => { throw Error("Sign in with Google timed out"); };
-    b.verifyAccountDashboard = async () => false;
-    await assert.rejects(() => b.authenticateForUpload({context:()=>({})}), e => e instanceof HumanActionRequiredError && e.action==="session_login");
-    b.verifyAccountDashboard = async () => true;
-    await b.authenticateForUpload({context:()=>({})});
 });

@@ -1,6 +1,6 @@
 # Upload recovery policy
 
-Applies to both upload providers (Porntrex and XVideos). An upload's identity is its exact title
+Applies to Porntrex. An upload's identity is its exact title
 suffix: `[<recording folder>]`, `[<recording folder> | part N]` for one shape of a split recording,
 or the comparison-queue diagnostic `[<recording folder> | production-v6 | <part>]`.
 
@@ -21,8 +21,7 @@ as uncertain, to be checked 24 hours later.
 
 - The first check is due 24 hours after submission; unresolved verification and lookup checks recur
   daily. A Porntrex video that is still processing is checked again after two hours.
-- Without a stored ID, look the upload up by its exact identity suffix. XVideos searches the uploads
-  list for the folder name and requires the exact suffix; Porntrex scans every page of My Videos and
+- Without a stored ID, look the upload up by its exact identity suffix. Porntrex scans every page of My Videos and
   also accepts the user's manual uploads whose title ends with the unbracketed identity. A Porntrex row
   marked "Error" (Porntrex's own processing failed: no link, Edit disabled) counts toward the list
   total but is no copy of the recording; any other row without a link stops the scan.
@@ -38,8 +37,7 @@ as uncertain, to be checked 24 hours later.
   after submission is blocked for review the same way rather than re-uploaded, since the same file may
   fail again and the Error row cannot be deleted. ("Error" can clear: one upload was published about
   ten hours later.)
-- A complete authenticated search records `absent`: on XVideos an unpaginated result page with the
-  explicit "Your filters return no video." marker, on Porntrex a full list whose row count equals the
+- A complete authenticated search records `absent` from a full list whose row count equals the
   Public/Private tab totals, or, since those totals still count a video Porntrex has removed, a list
   that ends short of them: after a full page the next page answers 404 twice, 2 seconds apart. It is not proof that the provider never received any bytes. No new upload
   is eligible until the attempt's seven-day deadline; the retry looks up again immediately before
@@ -52,9 +50,6 @@ as uncertain, to be checked 24 hours later.
   the video only on that submit; such uncertain attempts are settled as failures on the next campaign
   step or reconcile).
   Login and provider cooldowns still apply.
-- `xvideos:sync` settles open XVideos confirmations from the complete account inventory: an ID missing
-  from it is dropped and the attempt is settled by that inventory like an attempt without an ID.
-
 The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility` and `metadata_rejection`
 attempt columns survive worker restarts, independent of the bounded (16-entry) evidence history.
 `limited_visibility` is informational only: it never affects verification or retry eligibility.

@@ -2,10 +2,10 @@ import { stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { chromium, type BrowserContext, type Page, type Request } from "playwright";
-import { HumanActionRequiredError, type ChromiumUploaderConfig } from "./chromiumXvideosUploader.js";
+import { HumanActionRequiredError, type ChromiumUploaderConfig } from "./browserUpload.js";
 import { submitPasswordLogin } from "./passwordLogin.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
-import type { UploadOutcome, UploadRequest, XvideosUploader } from "./disabledXvideosUploader.js";
+import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
 import { hasFullHdPlayback } from "./playbackQuality.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 import { parsePorntrexEditPage, porntrexUploadsPagePath, type StoredPorntrexMetadata } from "./porntrexMetadata.js";
@@ -59,7 +59,7 @@ export function isPorntrexChunkRequest(method: string, rawUrl: string): boolean 
         && url.searchParams.get("mode") === "async" && url.searchParams.get("action") === "upload_file";
 }
 
-export class ChromiumPorntrexUploader implements XvideosUploader {
+export class ChromiumPorntrexUploader implements ProviderUploader {
     readonly provider = "porntrex" as const;
     constructor(private readonly config: ChromiumUploaderConfig) {}
 

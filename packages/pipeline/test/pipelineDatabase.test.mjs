@@ -137,7 +137,7 @@ test("schema eleven widens the artifact part checks to shapes without losing row
     assert.equal(migrated.integrityCheck(), "ok");
     const inspection = new DatabaseSync(databasePath, { readOnly: true });
     t.after(() => inspection.close());
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 13);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 14);
     assert.equal(inspection.prepare("SELECT remote_id FROM remote_uploads WHERE attempt_id = 'attempt-1'").get().remote_id, "123");
     const write = new DatabaseSync(databasePath);
     t.after(() => write.close());
@@ -178,7 +178,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 13);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 14);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));
@@ -218,7 +218,7 @@ test("production rollover retires workflow state while preserving quota, overrid
     assert.equal(plan.remoteUploadCount, 1);
     const leased = reopened.claimRecording(
         recording.id,
-        ["xvideos_verified"],
+        ["upload_verified"],
         "still-running-old-worker",
         60_000,
     );
@@ -395,7 +395,7 @@ test("accepted uploads require remote identity and preserve exact byte accountin
         remoteId: "remote-1",
         remoteUrl: "https://example.invalid/video/remote-1",
     }, now);
-    assert.equal(result.state, "xvideos_uploaded");
+    assert.equal(result.state, "uploaded");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 1_000, reserved: 0 });
     assert.throws(() => database.markRemoteVerified(
         recording.id,
@@ -406,7 +406,7 @@ test("accepted uploads require remote identity and preserve exact byte accountin
         recording.id,
         "remote-1",
         "https://example.invalid/video/remote-1",
-    ).state, "xvideos_verified");
+    ).state, "upload_verified");
 });
 
 test("uncertain remote acceptance requires reconciliation instead of blind retry", async (t) => {
@@ -421,14 +421,14 @@ test("uncertain remote acceptance requires reconciliation instead of blind retry
         transmittedBytes: 500,
         error: "response lost after request body was sent",
         confirmation: { confirmAfter: new Date(now.getTime() + 86_400_000) },
-    }, now).state, "xvideos_uncertain");
+    }, now).state, "upload_uncertain");
     assert.equal(database.claimNext(["described"], "retry-worker", 1_000, now), null);
     assert.equal(database.reconcileUncertain(
         attempt,
         "remote-uncertain",
         "https://example.invalid/video/remote-uncertain",
         now,
-    ).state, "xvideos_uploaded");
+    ).state, "uploaded");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 500, reserved: 0 });
 });
 
@@ -636,7 +636,7 @@ test("verification promotes the converted mixed artifact and completes only afte
 
     prepareCurrent("b".repeat(64), "converted");
     const afterSecond = uploadAndVerify("remote-converted", new Date("2026-08-30T12:00:00Z"));
-    assert.equal(afterSecond.state, "xvideos_verified");
+    assert.equal(afterSecond.state, "upload_verified");
     assert.deepEqual(database.listVerifiedUploadParts(recording.id).map((row) => row.part), [
         "max1080p",
         "nonmax1080p",
@@ -733,7 +733,7 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
     assert.equal(calls, 1);
     // Submit success is NOT accepted immediately: it waits for the 24-hour
     // public video-link verification.
-    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
     assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-13T07:59:59Z")), []);
 
@@ -747,10 +747,10 @@ test("the upload coordinator parks submit success as uncertain until 24-hour vid
 
     // The video link opens -> that is the success signal.
     database.reconcileUncertain(confirmation.attemptId, "91362268",
-        "https://www.xvideos.com/video.91362268/", after);
+        "https://www.porntrex.com/video.91362268/", after);
     database.markRemoteVerified(recording.id, "91362268",
-        "https://www.xvideos.com/video.91362268/", after);
-    assert.equal(database.get(recording.id)?.state, "xvideos_verified");
+        "https://www.porntrex.com/video.91362268/", after);
+    assert.equal(database.get(recording.id)?.state, "upload_verified");
 });
 
 test("transport errors meter bytes and uncertain acceptance cannot retry", async (t) => {
@@ -760,7 +760,8 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
     const now = new Date("2026-08-12T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 550, now);
     const coordinator = new UploadCoordinator(database, {
-        async upload() {
+        async upload(request) {
+            await request.onProgress("metadata_submitting", 525);
             throw new UploadTransportError("response disappeared", 525, true);
         },
     });
@@ -773,7 +774,7 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
         tags: ["tango", "live"],
         visibility: "private",
     }, now), /response disappeared/);
-    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
 });
 
@@ -801,7 +802,7 @@ test("restart recovery retries only before transfer starts, never after possible
         recordingId: recording.id,
         disposition: "confirmation_required",
     }]);
-    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:00:59Z")).length, 0);
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T09:01:00Z")).length, 1);
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 500, reserved: 0 });
@@ -819,7 +820,7 @@ test(`interrupted file-uploading phase cannot retry blindly (${bytes} bytes reco
     assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T11:01:00Z")), [{
         recordingId: recording.id, disposition: "confirmation_required",
     }]);
-    assert.equal(database.get(recording.id).state, "xvideos_uncertain");
+    assert.equal(database.get(recording.id).state, "upload_uncertain");
     assert.throws(() => database.reserveUpload(recording.id, 550, now));
 });
 }
@@ -833,11 +834,12 @@ test("interrupted upload after the file completed requires confirmation before r
     const attempt = database.beginUpload(recording.id, reservation, now);
     database.updateUploadProgress(attempt, "file_uploading", 500, now);
     database.updateUploadProgress(attempt, "file_uploaded", 500, now);
+    database.updateUploadProgress(attempt, "metadata_submitting", 500, now);
     assert.deepEqual(database.recoverInterruptedUploads(new Date("2026-08-12T11:01:00Z")), [{
         recordingId: recording.id,
         disposition: "confirmation_required",
     }]);
-    assert.equal(database.get(recording.id)?.state, "xvideos_uncertain");
+    assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-13T11:01:00Z")).length, 1);
 });
 
@@ -847,9 +849,9 @@ test("destination is pinned through reservation, interruption and confirmation; 
     advanceToMetadataReady(database, recording, directory, 500);
     const now = new Date("2026-10-02T08:00:00Z");
     const reservation = database.reserveUpload(recording.id, 550, now, "Europe/Tirane", 600_000_000_000, "porntrex");
-    assert.throws(() => database.beginUpload(recording.id, reservation, now, "xvideos"), /destination/);
+    assert.throws(() => database.beginUpload(recording.id, reservation, now, "retired"), /provider/);
     const attempt = database.beginUpload(recording.id, reservation, now, "porntrex");
-    database.updateUploadProgress(attempt, "file_uploading", 500, now);
+    database.updateUploadProgress(attempt, "metadata_submitting", 500, now);
     database.close();
     const restarted = new PipelineDatabase(databasePath);
     t.after(() => restarted.close());
@@ -859,15 +861,15 @@ test("destination is pinned through reservation, interruption and confirmation; 
     const raw = new DatabaseSync(databasePath);
     assert.equal(raw.prepare("SELECT provider FROM bandwidth_events WHERE attempt_id = ?").get(attempt).provider, "porntrex");
     raw.close();
-    assert.throws(() => restarted.reserveUpload(recording.id, 550, dueAt, "Europe/Tirane", 600_000_000_000, "xvideos"));
+    assert.throws(() => restarted.reserveUpload(recording.id, 550, dueAt, "Europe/Tirane", 600_000_000_000, "porntrex"));
 });
 
-test("manual XVideos adoption records destination, not recording origin", async t => {
+test("manual Porntrex adoption records destination, not recording origin", async t => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
     database.parkUploadedCopy(recording.id, "123456", null);
-    assert.equal(database.dueUploadConfirmations(new Date(Date.now() + 1000))[0].uploadProvider, "xvideos");
+    assert.equal(database.dueUploadConfirmations(new Date(Date.now() + 1000))[0].uploadProvider, "porntrex");
 });
 
 test("already uploaded recording can be adopted and verified without preparing another artifact", async t => {
@@ -879,12 +881,12 @@ test("already uploaded recording can be adopted and verified without preparing a
     assert.equal(confirmation.uploadProvider, "porntrex");
     assert.equal(database.getUploadIdentity(recording.id).remoteId, "3314558");
     database.verifyUpload(confirmation.attemptId, "3314558", "https://www.porntrex.com/video/3314558/example", now);
-    assert.equal(database.get(recording.id).state, "xvideos_verified");
+    assert.equal(database.get(recording.id).state, "upload_verified");
     assert.equal(database.getUploadIdentity(recording.id).verified, true);
     assert.equal(database.getArtifact(recording.id), null);
 });
 
-test("existing XVideos upload is refused even when state is reset and Porntrex is selected", async t => {
+test("existing Porntrex upload is refused even when state is reset and Porntrex is selected", async t => {
     const { database, databasePath, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
@@ -892,9 +894,9 @@ test("existing XVideos upload is refused even when state is reset and Porntrex i
     const reservation = database.reserveUpload(recording.id, 550, now);
     const attempt = database.beginUpload(recording.id, reservation, now);
     database.finishUploadAttempt(attempt, { status: "accepted", transmittedBytes: 500,
-        remoteId: "123456", remoteUrl: "https://www.xvideos.com/video.example" }, now);
+        remoteId: "123456", remoteUrl: "https://www.porntrex.com/video.example" }, now);
     database.recoverAcceptedVerifications(now);
-    database.verifyUpload(attempt, "123456", "https://www.xvideos.com/video.example", now);
+    database.verifyUpload(attempt, "123456", "https://www.porntrex.com/video.example", now);
     // Simulate an incorrect retry/reset by another caller. Admission still guards remote identity.
     const raw = new DatabaseSync(databasePath);
     raw.prepare("UPDATE recordings SET state = 'metadata_ready' WHERE id = ?").run(recording.id);

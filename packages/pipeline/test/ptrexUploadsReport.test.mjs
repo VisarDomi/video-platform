@@ -87,7 +87,7 @@ test("a video Porntrex is still processing is re-checked in two hours, not a day
     const due = new Date(start.getTime() + 864e5 + 1000);
     await reconcileDueUploads(config, due, { withAuthenticatedPage: async run => run({}),
         probeUploadStatus: async () => ({ outcome: "not_ready", remoteUrl: null, reason: "Porntrex is still processing the video", processing: true }) });
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 - 1000)).length, 0);
     assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 + 1000)).length, 1);
 });

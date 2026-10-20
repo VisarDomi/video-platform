@@ -12,7 +12,7 @@ const FK_TABLES = [
     "state_events", "artifacts", "descriptions", "remux_outputs",
     "recording_provenance", "upload_metadata", "upload_reservations",
     "upload_attempts", "upload_confirmations", "bandwidth_events",
-    "remote_verifications", "xvideos_entries",
+    "remote_verifications", "upload_entries",
 ];
 
 const recordings = db.prepare("SELECT id, source_path FROM recordings").all();
@@ -88,7 +88,7 @@ try {
         SELECT recording_id, attempt_id, remote_id, remote_url, verified_at FROM remote_verifications
     `);
     db.exec("DROP TABLE remote_verifications");
-    db.exec("DROP TABLE xvideos_entries");
+    db.exec("DROP TABLE upload_entries");
     db.exec(`
         CREATE TABLE bandwidth_events_new (
             id INTEGER PRIMARY KEY,

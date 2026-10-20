@@ -3,10 +3,8 @@ import WebKit
 import KitCore
 import KitNet
 
-// Video Vault's list: both upload sites' uploads, oldest recording first, marked by site where
-// the same recording is on both. It opens with the last complete list (kept on the phone) and
-// reads both sites again behind it; a site that is signed out keeps its earlier rows and says
-// how to sign back in. Pages are read natively with the app's own cookies.
+// Video Vault keeps the last complete Porntrex list and refreshes natively
+// with the shared session; a signed-out session retains its earlier rows.
 @MainActor
 final class VaultListController: VideoListController {
     struct Kept: Codable {
@@ -23,7 +21,6 @@ final class VaultListController: VideoListController {
     private var notices: [VaultNotice] = []
     private var loading: Task<Void, Never>?
     private var lastLoad: Date?
-    private var authSite: VaultSite?
 
     init() {
         let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
@@ -34,8 +31,8 @@ final class VaultListController: VideoListController {
         super.init(viewerProvider: "vault", directory: directory, media: media)
         bytesPerSecond = Uploads.bytesPerSecond
         if let kept = try? DurableFile.readJSON(Kept.self, from: keptWriter.url) {
-            shown = kept.videos
-            notices = kept.notices
+            shown = Vault.order(kept.videos)
+            notices = kept.notices.filter { !$0.login }
             publish()
         }
     }
@@ -71,7 +68,7 @@ final class VaultListController: VideoListController {
 
     // MARK: the list
 
-    // Both sites from their first page, behind the rows already shown; each page joins in order.
+    // Porntrex from its first page, behind the rows already shown; each page joins in order.
     override func reload() {
         loading?.cancel()
         fresh = []
@@ -94,7 +91,7 @@ final class VaultListController: VideoListController {
                 } catch {
                     guard !Task.isCancelled else { return }
                     if refresh.isRefreshing { refresh.endRefreshing() }
-                    if shown.isEmpty { showFailure("Can't reach the upload sites.\n\(error.localizedDescription)") }
+                    if shown.isEmpty { showFailure("Can't reach the upload site.\n\(error.localizedDescription)") }
                     try? await Task.sleep(for: .seconds(delay))
                     delay = min(delay * 2, 30)
                 }
@@ -132,13 +129,13 @@ final class VaultListController: VideoListController {
     // The rows as the list shows them (marks, streamers, looks), worked out off the main thread.
     private nonisolated static func rows(_ shown: [VaultVideo]) -> Rows {
         let videos = shown.map { describe($0, streamer: Uploads.streamer($0.title)) }
-        return Rows(videos: videos, marks: Vault.marks(shown), looks: videos.map(\.look))
+        return Rows(videos: videos, marks: [:], looks: videos.map(\.look))
     }
 
     private func publish(_ built: Rows? = nil) {
         let rows = built ?? Self.rows(shown)
         setVideos(rows.videos, marks: rows.marks, looks: rows.looks)
-        setNotices(notices.map { notice in (notice.text, notice.login ? { [weak self] in self?.presentLogin() } : nil) })
+        setNotices(notices.map { ($0.text, nil) })
     }
 
     // As the website described an upload to the viewer: no source until asked; +/- on whichever
@@ -155,29 +152,17 @@ final class VaultListController: VideoListController {
     // MARK: ViewerHost
 
     override func resolve(_ video: ViewerVideo) async throws -> MediaSource {
-        guard let site = VaultSite(rawValue: video.provider), let page = video.pageUrl else { throw ViewerFailure.page("Unknown upload.") }
+        guard VaultSite(rawValue: video.provider) == .porntrex, let page = video.pageUrl else { throw ViewerFailure.page("Unknown upload.") }
         do {
-            let source = site == .xvideos ? try await XVideos.source(http, pageUrl: page) : try await Porntrex.source(http, pageUrl: page)
+            let source = try await Porntrex.source(http, pageUrl: page)
             return MediaSource(url: source.url, kind: source.kind)
-        } catch VaultError.signedOut(let site, let text) {
-            authSite = site
+        } catch VaultError.signedOut(_, let text) {
             throw ViewerFailure.authentication(text)
         }
     }
 
-    // A site signed out while playing: XVideos signs in here; Porntrex only from the PC.
     override func login() {
-        if authSite == .porntrex {
-            if !notices.contains(Vault.signedOut(.porntrex)) { notices.append(Vault.signedOut(.porntrex)); publish() }
-        } else {
-            presentLogin()
-        }
-    }
-
-    private func presentLogin() {
-        guard presentedViewController == nil else { return }
-        let sheet = XVideosLogin(jar: jar) { [weak self] in self?.reload() }
-        present(UINavigationController(rootViewController: sheet), animated: true)
+        if !notices.contains(Vault.signedOut(.porntrex)) { notices.append(Vault.signedOut(.porntrex)); publish() }
     }
 
     // MARK: cookies
@@ -243,71 +228,3 @@ final class VaultListController: VideoListController {
     }
 }
 
-// XVideos' own sign-in page (its script and captcha need a browser). Once the uploads page
-// answers with the page's cookies, they move into the app's jar and the sheet closes.
-@MainActor
-final class XVideosLogin: UIViewController, WKNavigationDelegate {
-    private let jar: CookieJar
-    private let signedIn: () -> Void
-    private let web: WKWebView
-    private var timer: Timer?
-    private var checking = false
-
-    init(jar: CookieJar, signedIn: @escaping () -> Void) {
-        self.jar = jar
-        self.signedIn = signedIn
-        let configuration = WKWebViewConfiguration()
-        configuration.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1"
-        web = WKWebView(frame: .zero, configuration: configuration)
-        super.init(nibName: nil, bundle: nil)
-        title = "XVideos"
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .black
-        navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
-        web.navigationDelegate = self
-        view.addSubview(web)
-        // The page starts from the app's cookies (a half-finished sign-in carries on).
-        let store = web.configuration.websiteDataStore.httpCookieStore
-        let cookies = jar.all.filter { VaultSite.xvideos.hosts.contains($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
-        Task {
-            for cookie in cookies { await store.setCookie(cookie) }
-            web.load(URLRequest(url: URL(string: "https://www.xvideos.com/account")!))
-        }
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.check() } }
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        web.frame = view.bounds
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        timer?.invalidate()
-    }
-
-    private func check() {
-        guard !checking else { return }
-        checking = true
-        let hosts = VaultSite.xvideos.hosts
-        web.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-            guard let self else { return }
-            let site = cookies.filter { hosts.contains($0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) }
-            let trial = CookieJar(file: nil)
-            trial.set(site)
-            Task {
-                defer { self.checking = false }
-                guard (try? await XVideos.page(VaultHTTP(jar: trial), cursor: nil)) != nil else { return }
-                self.jar.set(site)
-                self.jar.flush()
-                self.timer?.invalidate()
-                self.dismiss(animated: true) { self.signedIn() }
-            }
-        }
-    }
-}

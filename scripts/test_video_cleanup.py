@@ -56,7 +56,7 @@ class CleanupTests(unittest.TestCase):
         (self.source / "playlist.m3u8").write_text('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:3,\none.ts\n#EXT-X-ENDLIST\n')
         fingerprint = cleanup.source_evidence(self.source)["fingerprint"]
         self.db.execute("INSERT INTO recordings VALUES(?,?,?,?,?,?,?,?)",
-                        (self.id, "tango", "edited", str(self.source), str(self.source / "playlist.m3u8"), fingerprint, "xvideos_verified", None))
+                        (self.id, "tango", "edited", str(self.source), str(self.source / "playlist.m3u8"), fingerprint, "upload_verified", None))
         self.conversion = self.artifacts / "production-v6" / (self.id + ".production-v6.mp4")
         self.conversion.parent.mkdir()
         self.conversion.write_bytes(b"converted media")
@@ -92,7 +92,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(cleanup.run(self.args())["eligible_count"], 0)
 
     def test_conversions_needed_by_unfinished_or_blocked_work_stay(self):
-        for state in ["server_ready", "metadata_ready", "xvideos_uploading", "xvideos_uncertain", "blocked", "failed"]:
+        for state in ["server_ready", "metadata_ready", "uploading", "upload_uncertain", "blocked", "failed"]:
             with self.subTest(state=state):
                 self.execute("UPDATE recordings SET state=?", (state,))
                 self.assertEqual(cleanup.run(self.args())["eligible_count"], 0)
@@ -105,20 +105,20 @@ class CleanupTests(unittest.TestCase):
         self.execute('CREATE TABLE short_parts(recording_id TEXT, part TEXT, batch_id TEXT, verified INTEGER)')
         batch_id = '2026-01-01 120000 fixture joined-123'
         self.execute('INSERT INTO recordings SELECT ?,provider,source_kind,?, ?,source_fingerprint,?,NULL FROM recordings WHERE id=?',
-                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'xvideos_verified', self.id))
+                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'upload_verified', self.id))
         self.execute('UPDATE remote_uploads SET recording_id=?', (batch_id,))
         self.execute('UPDATE upload_attempts SET recording_id=?', (batch_id,))
         self.execute('INSERT INTO short_parts VALUES(?,?,?,?)', (self.id,'full',batch_id,1))
         self.execute("UPDATE recordings SET state='cleanup_eligible' WHERE id=?", (self.id,))
         self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 1)
-        self.execute("UPDATE recordings SET state='xvideos_uncertain' WHERE id=?", (batch_id,))
+        self.execute("UPDATE recordings SET state='upload_uncertain' WHERE id=?", (batch_id,))
         self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 0)
 
     def test_removed_joined_upload_keeps_its_original(self):
         self.execute('CREATE TABLE short_parts(recording_id TEXT, part TEXT, batch_id TEXT, verified INTEGER)')
         batch_id = '2026-01-01 120000 fixture joined-123'
         self.execute('INSERT INTO recordings SELECT ?,provider,source_kind,?, ?,source_fingerprint,?,NULL FROM recordings WHERE id=?',
-                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'xvideos_verified', self.id))
+                     (batch_id, str(self.root/'joined'), str(self.root/'joined/playlist.m3u8'), 'upload_verified', self.id))
         self.execute('UPDATE remote_uploads SET recording_id=?', (batch_id,))
         self.execute('UPDATE upload_attempts SET recording_id=?', (batch_id,))
         self.execute('INSERT INTO short_parts VALUES(?,?,?,?)', (self.id,'full',batch_id,1))

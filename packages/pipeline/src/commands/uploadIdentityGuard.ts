@@ -4,7 +4,7 @@ import type { Recording } from "../domain/types.js";
 import { cleanupArtifact } from "../stages/cleanupArtifact.js";
 
 // SQLite is the single source of truth for whether a recording is already on
-// XVideos. The guard runs at every job entry point: a recording with an edit
+// the upload provider. The guard runs at every job entry point: a recording with an edit
 // ID is never remuxed, described, or uploaded again.
 
 export type UploadIdentityGuardOutcome =
@@ -49,7 +49,7 @@ export async function guardUploadIdentity(
 }
 
 export function refusalMessage(outcome: Extract<UploadIdentityGuardOutcome, { kind: "unverified_refused" }>): string {
-    return `Recording already has an XVideos upload (${outcome.remoteId}); refusing to start the job`
+    return `Recording already has an the upload provider upload (${outcome.remoteId}); refusing to start the job`
         + (outcome.verificationScheduled
             ? "; verification is scheduled for the next reconcile"
             : " and no pending confirmation exists — manual review required");

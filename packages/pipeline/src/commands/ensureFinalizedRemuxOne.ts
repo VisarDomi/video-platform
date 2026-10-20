@@ -84,13 +84,13 @@ export async function ensureFinalizedRemuxOne(
         }
     }
     // Admission-time remote check: the folder name is the local truth, the
-    // edit-page title is the XVideos truth.
+    // the provider listing supplies the remote identity.
     if (upscaleMode === null && config.networkUploadsEnabled) {
         const provider = activeUploadProvider(config);
         const uploader = await createProviderUploader(config, provider);
         const folderName = path.basename(recordingPath);
         const copy = await uploader.findUploadedCopy(folderName);
-        if (copy.kind === "found" || copy.kind === "title_mismatch") {
+        if (copy.kind === "found") {
             const database = new PipelineDatabase(config.databasePath);
             try {
                 const inspection = await inspectFinalizedRecording(recordingPath, root.provider, root.sourceKind);
@@ -98,26 +98,10 @@ export async function ensureFinalizedRemuxOne(
                     throw new Error(`Recording is not remuxable: ${inspection.reason}`);
                 }
                 const recording = database.discover(inspection.recording);
-                if (copy.kind === "found") {
-                    database.parkUploadedCopy(recording.id, copy.remoteId, copy.remoteUrl, new Date(), provider);
-                    return {
-                        mode: "single-recording-remux",
-                        recordingId: recording.id,
-                        sourcePath: recordingPath,
-                        disposition: "parked_existing_upload",
-                        remoteId: copy.remoteId,
-                        state: database.get(recording.id)?.state,
-                    };
-                }
-                database.transition(recording.id, recording.state, "blocked",
-                    `${provider} entry ${copy.remoteId} title does not match the folder identity; manual review required`);
+                database.parkUploadedCopy(recording.id, copy.remoteId, copy.remoteUrl, new Date(), provider);
                 return {
-                    mode: "single-recording-remux",
-                    recordingId: recording.id,
-                    sourcePath: recordingPath,
-                    disposition: "manual_review",
-                    remoteId: copy.remoteId,
-                    state: "blocked",
+                    mode: "single-recording-remux", recordingId: recording.id, sourcePath: recordingPath,
+                    disposition: "parked_existing_upload", remoteId: copy.remoteId, state: database.get(recording.id)?.state,
                 };
             } finally {
                 database.close();

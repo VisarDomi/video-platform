@@ -155,9 +155,7 @@ export async function uploadOne(
                 remoteId: outcome.remoteId,
             };
         }
-        if (outcome.kind === "title_mismatch") {
-            throw new Error(`${provider} entry ${outcome.remoteId} title does not match the folder identity; manual review required`);
-        }
+
         const receipt = outcome.receipt;
         return {
             recordingId,

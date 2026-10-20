@@ -9,7 +9,6 @@ import { once } from "node:events";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
-import { ChromiumXvideosUploader } from "../dist/upload/chromiumXvideosUploader.js";
 import { composeUploadMetadata, uploadLookupIdentity } from "../dist/metadata/composeUploadMetadata.js";
 import { limitedVisibilityWarning } from "../dist/upload/providerWarnings.js";
 import { syncPublishedArtifact } from "../dist/stages/durableArtifact.js";
@@ -42,7 +41,7 @@ async function fixture(t, { pending = true, unresolved = false } = {}) {
     return { db, config, root, r, metadata, attempt };
 }
 const browser = lookup => ({ withAuthenticatedPage: async run => run({}), lookupUpload: lookup,
-    probeUploadStatus: async () => ({ outcome: "online", remoteUrl: "https://www.xvideos.com/video.example/test",
+    probeUploadStatus: async () => ({ outcome: "online", remoteUrl: "https://www.porntrex.com/video.example/test",
         renditions: [{ width: 1080, height: 1920 }] }) });
 
 test("unresolved reference uploads as TODO LATER without inventing account data or changing title", async t => {
@@ -58,29 +57,18 @@ test("production filename recovery attaches existing ID and atomically verifies 
     const spent = db.uploadUsage("2026-09").spent;
     await reconcileDueUploads(config, day(1), browser(async (_, identity) => {
         assert.equal(identity, r.id);
-        return { kind: "found", remoteId: "91957324", remoteUrl: "https://www.xvideos.com/video.example/test" };
+        return { kind: "found", remoteId: "91957324", remoteUrl: "https://www.porntrex.com/video.example/test" };
     }));
-    assert.equal(db.get(r.id).state, "xvideos_verified");
+    assert.equal(db.get(r.id).state, "upload_verified");
     assert.equal(db.getUploadIdentity(r.id).remoteId, "91957324");
     assert.equal(db.uploadUsage("2026-09").spent, spent);
-});
-
-test("changing active destination still verifies historical attempts on their pinned provider", async t => {
-    const { db, config, r } = await fixture(t);
-    const providers = [];
-    await reconcileDueUploads({ ...config, uploadProvider: "porntrex" }, day(1), undefined, async (_config, provider) => {
-        providers.push(provider);
-        return browser(async () => ({ kind: "found", remoteId: "12345", remoteUrl: "https://www.xvideos.com/video.example/test" }));
-    });
-    assert.deepEqual(providers, ["xvideos"]);
-    assert.equal(db.get(r.id).state, "xvideos_verified");
 });
 
 test("clean absence waits seven days across reopen, then requeues once with a fresh weekly gate", async t => {
     const { db, config, r, attempt } = await fixture(t);
     const absent = browser(async () => ({ kind: "absent" }));
     await reconcileDueUploads(config, day(1), absent);
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).lookup_state, "absent");
     const reopened = new PipelineDatabase(config.databasePath);
     assert.equal(reopened.canAttemptUpload(r.id, day(6)), false);
@@ -102,10 +90,10 @@ test("clean absence waits seven days across reopen, then requeues once with a fr
 test("login/search errors and ambiguous matches never become absence even after weeks", async t => {
     const { db, config, r } = await fixture(t);
     await reconcileDueUploads(config, day(8), browser(async () => { throw Error("search HTTP 502"); }));
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).lookup_state, null);
     await reconcileDueUploads(config, day(9), browser(async () => ({ kind: "ambiguous" })));
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).lookup_state, "ambiguous");
 });
 
@@ -118,8 +106,7 @@ test("word rejections are learned apart from informational visibility labels, wh
     const diagnostics = reopened.latestUploadDiagnostics(r.id);
     assert.equal(diagnostics.metadata_rejection, "waisted");
     assert.equal(diagnostics.limited_visibility, "Provider reports limited visibility: alcohol/gun/knife/alien");
-    assert.deepEqual(reopened.listRejectedPhrases("xvideos"), ["waisted"]);
-    assert.deepEqual(reopened.listRejectedPhrases("porntrex"), []);
+    assert.deepEqual(reopened.listRejectedPhrases("porntrex"), ["waisted"]);
     reopened.close();
     // A clean negative lookup after the weekly deadline requeues despite both flags.
     await reconcileDueUploads(config, day(30), browser(async () => ({ kind: "absent" })));
@@ -132,23 +119,23 @@ test("verification failure rolls back acceptance, confirmation and state as one 
     const { db, config, r, attempt } = await fixture(t);
     const raw = new DatabaseSync(config.databasePath);
     raw.exec("CREATE TRIGGER fail_verification BEFORE INSERT ON remote_uploads BEGIN SELECT RAISE(ABORT, 'injected crash boundary'); END");
-    assert.throws(() => db.verifyUpload(attempt, "123", "https://www.xvideos.com/video.example", day(1)), /injected/);
-    assert.equal(db.get(r.id).state, "xvideos_uncertain");
+    assert.throws(() => db.verifyUpload(attempt, "123", "https://www.porntrex.com/video.example", day(1)), /injected/);
+    assert.equal(db.get(r.id).state, "upload_uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).status, "uncertain");
     assert.equal(db.latestUploadDiagnostics(r.id).confirmation_status, "pending");
     raw.exec("DROP TRIGGER fail_verification"); raw.close();
-    db.verifyUpload(attempt, "123", "https://www.xvideos.com/video.example", day(1));
-    assert.equal(db.get(r.id).state, "xvideos_verified");
+    db.verifyUpload(attempt, "123", "https://www.porntrex.com/video.example", day(1));
+    assert.equal(db.get(r.id).state, "upload_verified");
 });
 
 test("legacy accepted-but-unverified crash window is restored and verified without uploading", async t => {
     const { db, config, r, attempt } = await fixture(t);
-    db.reconcileUncertain(attempt, "123", "https://www.xvideos.com/video.example", day(1));
-    assert.equal(db.get(r.id).state, "xvideos_uploaded");
+    db.reconcileUncertain(attempt, "123", "https://www.porntrex.com/video.example", day(1));
+    assert.equal(db.get(r.id).state, "uploaded");
     assert.equal(db.recoverAcceptedVerifications(day(2)), 1);
     assert.equal(db.recoverAcceptedVerifications(day(2)), 0);
     await reconcileDueUploads(config, day(2), browser(async () => { throw Error("known ID must not search"); }));
-    assert.equal(db.get(r.id).state, "xvideos_verified");
+    assert.equal(db.get(r.id).state, "upload_verified");
 });
 
 test("reservation-only crash releases quota and returns to metadata without a weekly penalty", async t => {
@@ -176,24 +163,11 @@ test("SIGKILL after durable transfer/ID evidence preserves identity, quota and r
     child.kill('SIGKILL'); await exit;
     db.recoverInterruptedUploads(day(1));
     db.recoverInterruptedUploads(day(1));
-    assert.equal(db.get(r.id).state,'xvideos_uncertain');
+    assert.equal(db.get(r.id).state,'upload_uncertain');
     assert.equal(db.getUploadIdentity(r.id).remoteId,'456');
     assert.match(db.latestUploadDiagnostics(r.id).error,/file_uploading/);
     assert.equal(db.latestUploadDiagnostics(r.id).retry_not_before,day(7).toISOString());
     assert.deepEqual(db.uploadUsage('2026-09'),{spent:100,reserved:0});
-});
-
-test("exact suffix lookup distinguishes absent, ambiguous, wrong generation and same-name substrings", async () => {
-    const b = new ChromiumXvideosUploader({});
-    b.findEntries = async () => [{remoteId:'1',remoteUrl:'url',title:'Title [example]'}];
-    assert.equal((await b.lookupUpload({},'example')).kind,'found');
-    assert.equal((await b.lookupUpload({},'example | production-v6 | full')).kind,'ambiguous');
-    b.findEntries = async () => [{remoteId:'1',title:'Title [example]'}, {remoteId:'2',title:'Another [example]'}];
-    assert.equal((await b.lookupUpload({},'example')).kind,'ambiguous');
-    b.findEntries = async () => [];
-    assert.equal((await b.lookupUpload({},'example')).kind,'absent');
-    assert.equal(uploadLookupIdentity({sourcePath:'/recordings/example'},'full','Title [example]'),'example');
-    assert.equal(uploadLookupIdentity({sourcePath:'/recordings/example'},'nonmax1080p','Title [example]'),null);
 });
 
 test("artifact durability flush preserves completed bytes and rejects missing outputs", async t => {
@@ -201,24 +175,6 @@ test("artifact durability flush preserves completed bytes and rejects missing ou
     const file = path.join(root,'finished.mp4'); await writeFile(file,'complete bytes');
     await syncPublishedArtifact(file); assert.equal(await readFile(file,'utf8'),'complete bytes');
     await assert.rejects(()=>syncPublishedArtifact(path.join(root,'missing.mp4')),/ENOENT/);
-});
-
-test("provider search only accepts authenticated complete results or the observed explicit empty state", async () => {
-    const b = new ChromiumXvideosUploader({});
-    function page({ ok=true, auth=true, body='Your filters return no video. Click here to reset them.', rows=[], paginated=false } = {}) {
-        let url;
-        return { goto: async target => { url=target; return {ok:()=>ok}; }, url:()=>url,
-            getByText:()=>({count:async()=>auth?1:0}),
-            locator:selector => selector.startsWith('[id^=') ? {evaluateAll:async()=>rows}
-                : selector==='body' ? {innerText:async()=>body} : {count:async()=>paginated?1:0} };
-    }
-    assert.deepEqual(await b.findEntries(page(),'filename'),[]);
-    await assert.rejects(()=>b.findEntries(page({ok:false}),'filename'),/failed or redirected/);
-    await assert.rejects(()=>b.findEntries(page({auth:false}),'filename'),/not authenticated/);
-    await assert.rejects(()=>b.findEntries(page({body:'Loading...'}),'filename'),/no recognized empty/);
-    await assert.rejects(()=>b.findEntries(page({paginated:true}),'filename'),/Paginated/);
-    await assert.rejects(()=>b.findEntries(page({rows:[{containerId:'listing-video-123',title:'Processing [filename]',remoteUrl:''}]}),'filename'),/Incomplete/);
-    assert.equal((await b.findEntries(page({rows:[{containerId:'listing-video-123',title:'Title [filename]',remoteUrl:'/video.test'}]}),'filename'))[0].remoteId,'123');
 });
 
 test("existing reference-review rows are released once without losing descriptions or falsely resolving identity", async t => {

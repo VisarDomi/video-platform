@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 
-export type ActiveUploadProvider = "xvideos" | "porntrex";
+export type ActiveUploadProvider = "porntrex";
 export interface UploadProvidersFile {
     version: 1;
     // Ignored: the active destination lives in the pipeline database.
@@ -9,7 +9,7 @@ export interface UploadProvidersFile {
 }
 
 export function assertUploadProvider(value: unknown): asserts value is ActiveUploadProvider {
-    if (value !== "xvideos" && value !== "porntrex") throw new Error("Upload provider must be xvideos or porntrex");
+    if (value !== "porntrex") throw new Error("Upload provider must be porntrex");
 }
 
 export function readUploadProvidersFile(filePath: string): UploadProvidersFile {

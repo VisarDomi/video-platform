@@ -63,13 +63,12 @@ export const pipelineConfig: PipelineConfig = {
     discoveryRoots,
     manualRemuxRoots,
     serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
-    browserProfilePath: process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
+    browserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
-    credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE ?? process.env.VIDEO_XVIDEOS_ENV_FILE
+    credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
     porntrexBrowserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
-        ?? process.env.VIDEO_XVIDEOS_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     porntrexSessionPath: process.env.VIDEO_PORNTREX_SESSION_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "porntrex-session.json"),

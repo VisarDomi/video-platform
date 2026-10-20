@@ -141,10 +141,10 @@ test("verification, identity guard and missing-source sweep retain comparison ev
         withAuthenticatedPage: async (run) => run({}),
         probeUploadStatus: async () => ({ outcome: "online", remoteUrl: "https://example.com/upload-123456" }),
     });
-    assert.equal(db.get(id).state, "xvideos_verified");
+    assert.equal(db.get(id).state, "upload_verified");
     await access(artifactPath);
     await guardUploadIdentity(db, db.get(id), { cleanupEnabled: true });
-    assert.equal(db.get(id).state, "xvideos_verified");
+    assert.equal(db.get(id).state, "upload_verified");
     await access(artifactPath);
     assert.equal(db.getCampaignControl().state, "paused", "verification must not override a manual pause");
     await rm(artifactPath);

@@ -1,4 +1,4 @@
-export type UploadProvider = "xvideos" | "porntrex" | "bunkr";
+export type UploadProvider = "porntrex" | "bunkr";
 
 export interface UploadPolicyEvidence {
     readonly url: string;
@@ -35,14 +35,12 @@ export interface SharedUploadPolicy {
     readonly unresolvedConstraints: readonly string[];
 }
 
-const XVIDEOS_MAXIMUM_DURATION_SECONDS = 2 * 60 * 60;
-const XVIDEOS_MAXIMUM_FILE_BYTES = 50_000_000_000;
 const BUNKR_MAXIMUM_FILE_BYTES = 2_000_000_000;
 const BUNKR_INACTIVE_DELETION_DAYS = 30;
 const BUNKR_MAINTENANCE_VISIT_INTERVAL_DAYS = 15;
 
 export const UPLOAD_PROVIDER_PLAN: UploadProviderPlan = {
-    primary: "xvideos",
+    primary: "porntrex",
     backups: [],
     unavailableBackups: [{
         provider: "bunkr",
@@ -55,7 +53,7 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         provider: "porntrex",
         uploadVisibility: "public",
         // Porntrex removed every upload under two minutes (4 of 4 by
-        // 2026-10-12); shorter artifacts wait for another provider.
+        // 2026-10-12); shorter artifacts wait for compatible same-streamer footage.
         minimumDurationSeconds: 2 * 60,
         maximumDurationSeconds: null,
         maximumFileBytes: 10_000_000_000,
@@ -73,26 +71,7 @@ export const PROVIDER_UPLOAD_POLICIES: Readonly<Record<UploadProvider, ProviderU
         }, {
             url: "https://www.porntrex.com/upload-video/",
             verifiedAt: "2026-10-12",
-            note: "Operator decision: no duration limit; uploads under two minutes go to manual review (Porntrex removed all four short uploads, against 3 of 167 longer ones).",
-        }],
-    },
-    xvideos: {
-        provider: "xvideos",
-        uploadVisibility: "private",
-        minimumDurationSeconds: null,
-        maximumDurationSeconds: XVIDEOS_MAXIMUM_DURATION_SECONDS,
-        maximumFileBytes: XVIDEOS_MAXIMUM_FILE_BYTES,
-        inactiveDeletionDays: null,
-        maintenanceVisitIntervalDays: null,
-        unresolvedConstraints: ["acceptedContainersAndCodecsBeyondH264AacMp4"],
-        evidence: [{
-            url: "https://www.xvideos.com/account/uploads/new",
-            verifiedAt: "2026-08-13",
-            note: "Authenticated upload form confirms two hours, 50 GB, 255 title characters, 1000 description characters, and 20 tags. A validated H.264/AAC MP4 uploaded successfully without saving metadata.",
-        }, {
-            url: "https://www.xvideos.com/account/uploads/new",
-            verifiedAt: "2026-10-12",
-            note: "Operator decision: no minimum duration; seven uploads under two minutes (the shortest 19 s) were verified.",
+            note: "Operator decision: no duration limit; uploads under two minutes wait for compatible same-streamer footage (Porntrex removed all four short uploads, against 3 of 167 longer ones).",
         }],
     },
     bunkr: {

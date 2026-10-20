@@ -12,7 +12,7 @@ struct RegistryTests {
             let product = registry[provider] ?? [:]
             check(product["hosts"] == nil && product["native"] == nil && product["url"] as? String == "https://192.168.1.197:9999/videos/\(provider)", "\(provider) lists the PC's recordings")
         }
-        check(registry["vault"]?["native"] as? String == "vault" && (registry["vault"]?["hosts"] as? [String])?.count == 4, "Video Vault lists both sites natively")
+        check(registry["vault"]?["native"] as? String == "vault" && registry["vault"]?["hosts"] as? [String] == ["porntrex.com", "www.porntrex.com"], "Video Vault lists only Porntrex")
         check(registry["tango-live"]?["native"] as? String == "tango" && registry["tango-live"]?["tangoLogin"] as? Bool == true
               && registry["tango-live"]?["extensions"] as? [String] == ["Login", "FC2Live", "SCLive"], "Tango lists natively and keeps its Safari extensions")
         let names = Set(registry.values.map { $0["name"] as! String }), ids = Set(registry.values.map { $0["bundleId"] as! String })

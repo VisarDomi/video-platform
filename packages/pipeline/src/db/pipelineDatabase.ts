@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { retireUploadDestination } from "./retireUploadDestination.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
@@ -29,7 +30,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -537,7 +538,7 @@ export class PipelineDatabase {
             -- provider never gets the recording again.
             CREATE TABLE IF NOT EXISTS provider_removals (
                 recording_id TEXT NOT NULL,
-                provider TEXT NOT NULL CHECK (provider IN ('xvideos', 'porntrex')),
+                provider TEXT NOT NULL CHECK (provider = 'porntrex'),
                 remote_id TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 removed_at TEXT NOT NULL,
@@ -566,8 +567,8 @@ export class PipelineDatabase {
         }
         if (!controlColumns.some((column) => column.name === "upload_provider")) {
             // The one active destination is campaign intent, not a credential.
-            this.database.exec(`ALTER TABLE campaign_control ADD COLUMN upload_provider TEXT NOT NULL DEFAULT 'xvideos'
-                CHECK (upload_provider IN ('xvideos', 'porntrex'))`);
+            this.database.exec(`ALTER TABLE campaign_control ADD COLUMN upload_provider TEXT NOT NULL DEFAULT 'porntrex'
+                CHECK (upload_provider = 'porntrex')`);
         }
         const inventoryColumns = this.database.prepare("PRAGMA table_info(provider_inventory)").all() as unknown as Array<{ name: string }>;
         if (!inventoryColumns.some((column) => column.name === "removal_pending")) {
@@ -593,7 +594,7 @@ export class PipelineDatabase {
             // Idempotent even if power failed after adding the column but
             // before backfilling it. Only rows with possible warning text need parsing.
             const rows = this.database.prepare(`SELECT id, evidence_json FROM upload_attempts
-                WHERE limited_visibility IS NULL AND metadata_rejection IS NULL
+                WHERE provider='porntrex' AND limited_visibility IS NULL AND metadata_rejection IS NULL
                 AND (evidence_json LIKE '%not allowed here%' OR evidence_json LIKE '%limited visibility%')`)
                 .all() as unknown as Array<{ id: string; evidence_json: string }>;
             for (const row of rows) {
@@ -605,10 +606,10 @@ export class PipelineDatabase {
         // Removals recorded before their table, from the reconcile's own reason
         // text; an owner's deliberate deletion is worded differently.
         this.database.exec(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
-            SELECT a.recording_id, CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END,
+            SELECT a.recording_id, a.provider,
                 json_extract(e.value, '$.remoteId'), json_extract(e.value, '$.reason'), json_extract(e.value, '$.checkedAt')
             FROM upload_attempts a, json_each(a.evidence_json) e
-            WHERE a.evidence_json LIKE '%provider_removed%' AND json_extract(e.value, '$.stage') = 'provider_removed'
+            WHERE a.provider='porntrex' AND a.evidence_json LIKE '%provider_removed%' AND json_extract(e.value, '$.stage') = 'provider_removed'
                 AND json_extract(e.value, '$.remoteId') IS NOT NULL
                 AND json_extract(e.value, '$.reason') LIKE '% removed video % after upload%'`);
         if (!attemptColumns.some((column) => column.name === "transfer_started")) {
@@ -654,7 +655,8 @@ export class PipelineDatabase {
                 `);
             }
             this.rebuildLegacyPartChecks();
-            this.database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
+            // The destination-retirement transaction commits the new version
+            // only after all legacy receipts and workflow states are migrated.
         } else if (version.version !== SCHEMA_VERSION) {
             throw new Error(`Unsupported pipeline schema version ${version.version}`);
         }
@@ -674,15 +676,14 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE INDEX IF NOT EXISTS short_parts_batch_idx ON short_parts(batch_id);
         `);
-        // Repair the old manual-sync label, without changing identity or retry
-        // state. Only known legacy source names and XVideos links qualify.
-        this.database.prepare(`UPDATE upload_attempts SET provider = 'xvideos'
-            WHERE provider IN ('tango', 'fc2', 'sc') AND remote_id IS NOT NULL
-                AND (remote_url IS NULL OR remote_url LIKE 'https://www.xvideos.com/%')`).run();
+        this.database.exec(`CREATE TABLE IF NOT EXISTS retired_destination_audit (
+            destination TEXT PRIMARY KEY, retired_at TEXT NOT NULL, evidence_json TEXT NOT NULL
+        ) STRICT`);
+        if (version.version < 14) retireUploadDestination(this.database);
         // Older code stored metadata word rejections as a visibility warning,
         // which also blocked their retry. Split them out once; learn the words.
         for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
-            WHERE limited_visibility LIKE '%is not allowed here%'`).all() as unknown as Array<{ id: string; limited_visibility: string }>) {
+            WHERE provider='porntrex' AND limited_visibility LIKE '%is not allowed here%'`).all() as unknown as Array<{ id: string; limited_visibility: string }>) {
             const label = row.limited_visibility.replace(/Sorry, '[^'\n]+' is not allowed here\.?/g, "").trim();
             this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(label || null, row.id);
             this.recordProviderMessages(row.id, row.limited_visibility, new Date());
@@ -892,7 +893,7 @@ export class PipelineDatabase {
     private completeShortBatch(id: string, now = new Date()): void {
         const batch = this.requireRecording(id);
         const members = this.shortParts(undefined, id);
-        if (members.length === 0 || !["xvideos_verified", "cleanup_eligible"].includes(batch.state)) return;
+        if (members.length === 0 || !["upload_verified", "cleanup_eligible"].includes(batch.state)) return;
         this.database.prepare("UPDATE short_parts SET verified = 1 WHERE batch_id = ?").run(id);
         for (const memberId of new Set(members.map(p => p.recordingId))) {
             const member = this.requireRecording(memberId);
@@ -2107,7 +2108,7 @@ export class PipelineDatabase {
         return Number.isSafeInteger(bytes) && bytes > 0 && usage.spent + usage.reserved + bytes <= limit;
     }
 
-    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = "xvideos"): string {
+    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = "porntrex"): string {
         assertUploadProvider(provider);
         if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Upload reservation bytes must be a positive integer");
         const month = calendarMonth(now, timeZone);
@@ -2131,12 +2132,12 @@ export class PipelineDatabase {
                     status, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
             `).run(reservationId, id, artifactPart, provider, month, bytes, timestamp, timestamp);
-            this.updateStateInTransaction(id, "metadata_ready", "xvideos_admitted", "monthly bytes reserved", timestamp);
+            this.updateStateInTransaction(id, "metadata_ready", "upload_admitted", "monthly bytes reserved", timestamp);
         });
         return reservationId;
     }
 
-    beginUpload(id: string, reservationId: string, now = new Date(), provider: ActiveUploadProvider = "xvideos"): string {
+    beginUpload(id: string, reservationId: string, now = new Date(), provider: ActiveUploadProvider = "porntrex"): string {
         assertUploadProvider(provider);
         const attemptId = randomUUID();
         const timestamp = now.toISOString();
@@ -2156,7 +2157,7 @@ export class PipelineDatabase {
                 ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?)
             `).run(attemptId, reservationId, id, reservation.artifact_part, reservation.provider, timestamp,
                 new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString());
-            this.updateStateInTransaction(id, "xvideos_admitted", "xvideos_uploading", "upload attempt started", timestamp);
+            this.updateStateInTransaction(id, "upload_admitted", "uploading", "upload attempt started", timestamp);
         });
         return attemptId;
     }
@@ -2213,12 +2214,12 @@ export class PipelineDatabase {
         // No attempt means no network operation was invoked after reservation.
         this.transaction(() => {
             const rows = this.database.prepare(`SELECT u.id, u.recording_id FROM upload_reservations u
-                JOIN recordings r ON r.id = u.recording_id WHERE u.status = 'reserved' AND r.state = 'xvideos_admitted'
+                JOIN recordings r ON r.id = u.recording_id WHERE u.status = 'reserved' AND r.state = 'upload_admitted'
                 AND NOT EXISTS (SELECT 1 FROM upload_attempts a WHERE a.reservation_id = u.id)`)
                 .all() as unknown as Array<{ id: string; recording_id: string }>;
             for (const row of rows) {
                 this.database.prepare(`UPDATE upload_reservations SET status = 'released', updated_at = ? WHERE id = ?`).run(timestamp, row.id);
-                this.updateStateInTransaction(row.recording_id, "xvideos_admitted", "metadata_ready", "restart released unused upload reservation", timestamp);
+                this.updateStateInTransaction(row.recording_id, "upload_admitted", "metadata_ready", "restart released unused upload reservation", timestamp);
             }
         });
         const attempts = this.database.prepare(`
@@ -2227,7 +2228,7 @@ export class PipelineDatabase {
             FROM upload_attempts a
             JOIN upload_reservations r ON r.id = a.reservation_id
             JOIN recordings rec ON rec.id = a.recording_id
-            WHERE a.status = 'started' AND rec.state = 'xvideos_uploading'
+            WHERE a.status = 'started' AND rec.state = 'uploading'
             ORDER BY a.started_at, a.id
         `).all() as unknown as Array<{
             id: string;
@@ -2267,10 +2268,10 @@ export class PipelineDatabase {
                         ) VALUES (?, ?, ?, 'pending', NULL)
                     `).run(attempt.id, attempt.recording_id,
                         new Date(now.getTime() + 24 * 60 * 60_000).toISOString());
-                    this.updateStateInTransaction(attempt.recording_id, "xvideos_uploading", "xvideos_uncertain",
+                    this.updateStateInTransaction(attempt.recording_id, "uploading", "upload_uncertain",
                         "interrupted after upload may have started; acceptance requires confirmation", timestamp);
                 } else {
-                    this.updateStateInTransaction(attempt.recording_id, "xvideos_uploading", "metadata_ready",
+                    this.updateStateInTransaction(attempt.recording_id, "uploading", "metadata_ready",
                         `interrupted during ${attempt.phase}; safe to retry`, timestamp);
                 }
                 results.push({
@@ -2346,9 +2347,9 @@ export class PipelineDatabase {
                     outcome.confirmation.confirmAfter.toISOString());
             }
             const next: PipelineState = outcome.status === "accepted"
-                ? "xvideos_uploaded"
-                : outcome.status === "uncertain" ? "xvideos_uncertain" : "metadata_ready";
-            this.updateStateInTransaction(recordingId, "xvideos_uploading", next,
+                ? "uploaded"
+                : outcome.status === "uncertain" ? "upload_uncertain" : "metadata_ready";
+            this.updateStateInTransaction(recordingId, "uploading", next,
                 outcome.error ?? `upload attempt ${outcome.status}`, timestamp);
         });
         return this.requireRecording(recordingId);
@@ -2396,7 +2397,7 @@ export class PipelineDatabase {
                 AND original.source_fingerprint = s.source_fingerprint
             JOIN recordings b ON b.id = s.batch_id
             JOIN remote_uploads u ON u.recording_id = b.id AND u.artifact_part = 'full'
-            WHERE s.recording_id = ? AND s.verified = 1 AND b.state IN ('xvideos_verified','cleanup_eligible')`)
+            WHERE s.recording_id = ? AND s.verified = 1 AND b.state IN ('upload_verified','cleanup_eligible')`)
             .all(id) as unknown as typeof rows;
         return [...new Map([...rows, ...joined].map(row => [row.artifact_part, row])).values()].map((row) => ({
             part: row.artifact_part,
@@ -2431,7 +2432,7 @@ export class PipelineDatabase {
     listUploadContradictions(): Array<{ id: string; state: PipelineState }> {
         const rows = this.database.prepare(`
             SELECT r.id, r.state FROM recordings r JOIN artifacts p ON p.recording_id = r.id
-            WHERE r.state IN ('xvideos_admitted', 'xvideos_uploading', 'xvideos_uploaded', 'xvideos_uncertain')
+            WHERE r.state IN ('upload_admitted', 'uploading', 'uploaded', 'upload_uncertain')
               AND NOT EXISTS (SELECT 1 FROM upload_attempts a
                   WHERE a.recording_id = r.id AND a.artifact_part = p.part AND a.remote_id IS NOT NULL)
               AND NOT EXISTS (SELECT 1 FROM remote_uploads v
@@ -2521,9 +2522,9 @@ export class PipelineDatabase {
         });
     }
 
-    // The folder's video already exists on XVideos: park it as uncertain with
+    // The folder's video already exists on the upload provider: park it as uncertain with
     // the known edit ID and let the daily reconcile confirm it online.
-    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = "xvideos"): Recording {
+    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = "porntrex"): Recording {
         assertUploadProvider(provider);
         if (!remoteId.trim()) throw new Error("Existing upload requires a remote identity");
         const timestamp = now.toISOString();
@@ -2542,7 +2543,7 @@ export class PipelineDatabase {
                     attempt_id, recording_id, confirm_after, status, checked_at
                 ) VALUES (?, ?, ?, 'pending', NULL)
             `).run(attemptId, id, timestamp);
-            this.updateStateInTransaction(id, recording.state, "xvideos_uncertain",
+            this.updateStateInTransaction(id, recording.state, "upload_uncertain",
                 `already uploaded on ${provider}; parked for verification`, timestamp);
         });
         return this.requireRecording(id);
@@ -2600,7 +2601,7 @@ export class PipelineDatabase {
                 .run("Authenticated filename lookup found no entry after weekly retry deadline", attemptId);
             this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ?`)
                 .run(now.toISOString(), attemptId);
-            this.updateStateInTransaction(a.recording_id, "xvideos_uncertain", "metadata_ready",
+            this.updateStateInTransaction(a.recording_id, "upload_uncertain", "metadata_ready",
                 "not found after reconciliation; weekly retry eligible", now.toISOString());
             return true;
         });
@@ -2619,7 +2620,7 @@ export class PipelineDatabase {
         return this.transaction(() => {
             const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
                 JOIN recordings r ON r.id = a.recording_id JOIN artifacts p ON p.recording_id = r.id
-                WHERE r.state = 'xvideos_uploaded' AND a.status = 'accepted' AND a.artifact_part = p.part
+                WHERE r.state = 'uploaded' AND a.status = 'accepted' AND a.artifact_part = p.part
                     AND a.remote_id IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM remote_uploads u WHERE u.recording_id = r.id AND u.artifact_part = p.part)`)
                 .all() as unknown as Array<{ id: string; recording_id: string }>;
@@ -2628,7 +2629,7 @@ export class PipelineDatabase {
                 this.database.prepare(`INSERT INTO upload_confirmations (attempt_id, recording_id, confirm_after, status, checked_at)
                     VALUES (?, ?, ?, 'pending', NULL) ON CONFLICT(attempt_id) DO UPDATE SET status = 'pending', confirm_after = excluded.confirm_after`)
                     .run(row.id, row.recording_id, now.toISOString());
-                this.updateStateInTransaction(row.recording_id, "xvideos_uploaded", "xvideos_uncertain",
+                this.updateStateInTransaction(row.recording_id, "uploaded", "upload_uncertain",
                     "restore interrupted acceptance-to-verification check", now.toISOString());
             }
             return rows.length;
@@ -2655,7 +2656,7 @@ export class PipelineDatabase {
             this.database.prepare(`
                 UPDATE upload_confirmations SET status = 'found', checked_at = ? WHERE attempt_id = ?
             `).run(timestamp, attemptId);
-            this.updateStateInTransaction(recordingId, "xvideos_uncertain", "xvideos_uploaded",
+            this.updateStateInTransaction(recordingId, "upload_uncertain", "uploaded",
                 "manual reconciliation found accepted remote upload", timestamp);
         });
         return this.requireRecording(recordingId);
@@ -2702,7 +2703,7 @@ export class PipelineDatabase {
             `).get(id) as QueuedProductionArtifactRow | undefined;
             if (!queued) {
                 const pendingShorts = this.shortParts(id).some(part => !part.verified);
-                this.updateStateInTransaction(id, "xvideos_uploaded", pendingShorts ? "short_waiting" : "xvideos_verified",
+                this.updateStateInTransaction(id, "uploaded", pendingShorts ? "short_waiting" : "upload_verified",
                     `authenticated edit-page verification for ${current.part}`, timestamp);
                 this.completeShortBatch(id, now);
                 return;
@@ -2716,7 +2717,7 @@ export class PipelineDatabase {
             this.database.prepare(`
                 DELETE FROM production_artifact_queue WHERE recording_id = ? AND part = ?
             `).run(id, queued.part);
-            this.updateStateInTransaction(id, "xvideos_uploaded", "artifact_valid",
+            this.updateStateInTransaction(id, "uploaded", "artifact_valid",
                 `${current.part} verified; promoted queued ${queued.part} artifact`, timestamp);
         });
         return this.requireRecording(id);
@@ -2737,9 +2738,7 @@ export class PipelineDatabase {
             checked_at: string | null;
         }>;
         return rows.map((row) => ({
-            // Legacy manual sync mistakenly stored the origin (tango/fc2/sc).
-            // Those predate Porntrex support and are all XVideos identities.
-            uploadProvider: row.provider === "porntrex" ? "porntrex" : "xvideos",
+            uploadProvider: "porntrex",
             attemptId: row.attempt_id,
             recordingId: row.recording_id,
             confirmAfter: row.confirm_after,
@@ -2787,8 +2786,7 @@ export class PipelineDatabase {
         const known = attempt.metadata_rejection?.split(", ").filter(Boolean) ?? [];
         this.database.prepare("UPDATE upload_attempts SET metadata_rejection = ? WHERE id = ?")
             .run([...new Set([...known, ...phrases])].join(", "), attemptId);
-        // Legacy manual-sync rows may still carry a source label; those are XVideos.
-        this.recordRejectedPhrases(attempt.provider === "porntrex" ? "porntrex" : "xvideos", phrases, attemptId, now);
+        this.recordRejectedPhrases("porntrex", phrases, attemptId, now);
     }
 
     recordRejectedPhrases(provider: ActiveUploadProvider, phrases: readonly string[], attemptId: string | null, now = new Date()): void {
@@ -2851,14 +2849,14 @@ export class PipelineDatabase {
             const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
                 JOIN recordings r ON r.id = a.recording_id
                 WHERE a.provider = ? AND a.status = 'uncertain' AND a.phase <> 'metadata_submitting'
-                    AND a.remote_id IS NULL AND r.state = 'xvideos_uncertain'`).all(provider) as unknown as Array<{ id: string; recording_id: string }>;
+                    AND a.remote_id IS NULL AND r.state = 'upload_uncertain'`).all(provider) as unknown as Array<{ id: string; recording_id: string }>;
             const timestamp = now.toISOString();
             for (const row of rows) {
                 this.database.prepare(`UPDATE upload_attempts SET status = 'failed', retry_not_before = started_at,
                     error = COALESCE(error || '; ', '') || 'settled: metadata form never submitted, no video exists' WHERE id = ?`).run(row.id);
                 this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ?
                     WHERE attempt_id = ? AND status = 'pending'`).run(timestamp, row.id);
-                this.updateStateInTransaction(row.recording_id, "xvideos_uncertain", "metadata_ready",
+                this.updateStateInTransaction(row.recording_id, "upload_uncertain", "metadata_ready",
                     `${provider} metadata form never submitted; no video exists`, timestamp);
             }
             return rows.map((row) => row.recording_id);
@@ -2876,7 +2874,7 @@ export class PipelineDatabase {
     listVerifiedRemoteUploads(provider: ActiveUploadProvider): Array<{ recordingId: string; remoteId: string }> {
         return (this.database.prepare(`SELECT u.recording_id, u.remote_id FROM remote_uploads u
             JOIN upload_attempts a ON a.id = u.attempt_id
-            WHERE (CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END) = ?
+            WHERE (a.provider) = ?
             ORDER BY u.recording_id`).all(provider) as unknown as Array<{ recording_id: string; remote_id: string }>)
             .map((row) => ({ recordingId: row.recording_id, remoteId: row.remote_id }));
     }
@@ -2893,13 +2891,13 @@ export class PipelineDatabase {
             this.recordUploadEvidence(attemptId, { stage: "provider_removed", remoteId, reason }, now);
             const timestamp = now.toISOString();
             this.database.prepare(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
-                VALUES (?, ?, ?, ?, ?)`).run(attempt.recording_id, attempt.provider === "porntrex" ? "porntrex" : "xvideos",
+                VALUES (?, ?, ?, ?, ?)`).run(attempt.recording_id, "porntrex",
                 remoteId, reason, timestamp);
             this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ?, retry_not_before = started_at WHERE id = ?`)
                 .run(reason, attemptId);
             this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ? AND status = 'pending'`)
                 .run(timestamp, attemptId);
-            this.updateStateInTransaction(attempt.recording_id, "xvideos_uncertain", "metadata_ready", reason, timestamp);
+            this.updateStateInTransaction(attempt.recording_id, "upload_uncertain", "metadata_ready", reason, timestamp);
             this.updateStateInTransaction(attempt.recording_id, "metadata_ready", "blocked", reason, timestamp);
             this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, attempt.recording_id);
             for (const memberId of new Set(this.shortParts(undefined, attempt.recording_id).map(part => part.recordingId))) {
@@ -2991,9 +2989,7 @@ export class PipelineDatabase {
         return this.getCampaignControl().uploadProvider;
     }
 
-    // One destination at a time. The provider being left must be settled
-    // first: nothing in flight, no open confirmations and, for XVideos, an
-    // account inventory synchronized after its last upload attempt.
+    // Keep configuration changes behind the same paused, settled-worker guard.
     setActiveUploadProvider(provider: ActiveUploadProvider, now = new Date()): CampaignControl {
         assertUploadProvider(provider);
         return this.transaction(() => {
@@ -3005,22 +3001,12 @@ export class PipelineDatabase {
                 (SELECT count(*) FROM upload_reservations WHERE status = 'reserved')
                 + (SELECT count(*) FROM upload_attempts WHERE status = 'started') AS n`).get() as { n: number };
             if (inFlight.n > 0) throw new Error("An upload reservation or attempt is still active; let it finish before switching");
-            // Same provider normalization as dueUploadConfirmations: legacy
-            // source labels on manual-sync rows are XVideos identities.
             const pending = (this.database.prepare(`SELECT count(*) AS n FROM upload_confirmations c
                 JOIN upload_attempts a ON a.id = c.attempt_id
-                WHERE c.status = 'pending' AND (CASE WHEN a.provider = 'porntrex' THEN 'porntrex' ELSE 'xvideos' END) = ?`)
+                WHERE c.status = 'pending' AND (a.provider) = ?`)
                 .get(leaving) as { n: number }).n;
             if (pending > 0) {
                 throw new Error(`${leaving} still has ${pending} unresolved upload confirmation(s); settle them before switching`);
-            }
-            if (leaving === "xvideos") {
-                const sync = this.getProviderInventorySync("xvideos");
-                const last = (this.database.prepare("SELECT max(started_at) AS at FROM upload_attempts WHERE provider = 'xvideos'")
-                    .get() as { at: string | null }).at;
-                if (!sync || (last !== null && sync.completedAt < last)) {
-                    throw new Error("Synchronize the XVideos inventory (xvideos-sync --apply) after its last upload before switching away");
-                }
             }
             this.database.prepare("UPDATE campaign_control SET upload_provider = ?, updated_at = ? WHERE id = 1")
                 .run(provider, now.toISOString());

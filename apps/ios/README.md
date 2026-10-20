@@ -11,7 +11,7 @@ in the [NativeKit guide](../../../../ios-tools/native/README.md).
 | `tango` | Tango local | `com.visar.TangoLocal.paid` | the PC's recordings API (`https://192.168.1.197:9999`) |
 | `fc2` | FC2 local | `com.visar.FC2Local.paid` | the PC's recordings API |
 | `sc` | SC local | `com.visar.SCLocal.paid` | the PC's recordings API |
-| `vault` | Video Vault | `com.visar.Ptrex.paid` | the XVideos and Porntrex uploads pages (`native`) |
+| `vault` | Video Vault | `com.visar.Ptrex.paid` | the Porntrex uploads pages (`native`) |
 | `tango-live` | Tango | `com.visar.Tango.paid` | Tango's gateway API (`native`) |
 
 **Tango** lists live streams natively (`VideoApp/Tango.swift`, `TangoList.swift`) and hosts
@@ -19,11 +19,9 @@ three Safari extensions: **Tango Login** (`.Login`, the Safari login handoff), *
 (`.FC2Live`) and **SC live** (`.SCLive`), the download-list bars from `packages/live-extensions`.
 
 **Video Vault**'s bundle ID is `com.visar.Ptrex.paid`; a different ID would install a
-separate app without its Porntrex session and data. It lists the pipeline's XVideos and
-Porntrex uploads together, oldest recording first (`VideoApp/Vault.swift`): only uploads
+separate app without its Porntrex session and data. It lists the pipeline's Porntrex uploads, oldest recording first (`VideoApp/Vault.swift`): only uploads
 whose title carries the recording in brackets, `[YYYY-MM-DD HHMMSS streamer]` (a split part
-adds ` | part N`); other uploads stay on the sites but are not listed. The same recording on
-both sites shows `Xvid` or `Ptrex`.
+adds ` | part N`); other uploads stay on the sites but are not listed. Cached rows for a retired provider are excluded from the list.
 
 ## Rules
 
@@ -133,16 +131,12 @@ both sites shows `Xvid` or `Ptrex`.
   a new recording, a finished recording, an edit or a deletion arrives within a second,
   placed without moving the rows on screen. The phone trusts the PC's mkcert root.
 - **Video Vault** (`VideoApp/VaultList.swift`) opens with its last complete list
-  (`vault-list.json`) and reads both sites again behind it (and on a pull, and on return
+  (`vault-list.json`) and reads Porntrex again behind it (and on a pull, and on return
   after ten minutes), from the signed-in account's uploads pages, which are fetched and
   parsed, never executed, with Safari's user agent and the app's own cookie jar
   (`cookies.json`, KitNet). A signed-out site keeps its earlier rows under a notice.
-  Playback sources are resolved when needed (XVideos' full-quality HLS master, Porntrex's
-  highest MP4) and played with the site's Referer, the same user agent and the jar's
+  Playback sources are resolved when needed (Porntrex's highest MP4) and played with the site's Referer, the same user agent and the jar's
   cookies.
-  - XVideos signs in with its own page in a sheet (the notice opens it; WebKit only here):
-    once its uploads page answers with the sheet's cookies, they move into the jar.
-    Session-only cookies (`session_token_auth`) are kept like persistent ones.
   - Porntrex keeps **one active session per account; the newest login wins**: a password
     login, or signing back in with the 30-day `kt_member` cookie, logs every other device
     out. Video Vault shares the pipeline's session instead: `npm run ptrex:connect-iphone`
