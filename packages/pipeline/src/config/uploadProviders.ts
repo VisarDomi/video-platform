@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 
-export type ActiveUploadProvider = "oldhost" | "videohost";
+export type ActiveUploadProvider = "videohost";
 export interface UploadProvidersFile {
     version: 1;
     // Ignored: the active destination lives in the pipeline database.
@@ -9,7 +9,7 @@ export interface UploadProvidersFile {
 }
 
 export function assertUploadProvider(value: unknown): asserts value is ActiveUploadProvider {
-    if (value !== "oldhost" && value !== "videohost") throw new Error("Upload provider must be oldhost or videohost");
+    if (value !== "videohost") throw new Error("Upload provider must be videohost");
 }
 
 export function readUploadProvidersFile(filePath: string): UploadProvidersFile {

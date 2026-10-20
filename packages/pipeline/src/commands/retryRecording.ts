@@ -12,7 +12,7 @@ export function retryRecording(database: PipelineDatabase, recordingId: string, 
     const removal = database.providerRemovals(recordingId).find((entry) => entry.provider === provider);
     if (removal) {
         throw new Error(`${provider} removed this recording's upload ${removal.remoteId} on ${removal.removedAt.slice(0, 10)}`
-            + ` and is still the active upload provider; switch with \`npm run upload-provider:set -w pipeline -- --provider <other>\`, then retry`);
+            + "; it remains excluded from re-upload");
     }
     return database.retryBlocked(recordingId, now);
 }

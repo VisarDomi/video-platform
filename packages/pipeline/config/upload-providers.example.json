@@ -1,7 +1,9 @@
 {
-    "version": 1,
-    "providers": {
-        "oldhost": { "email": "", "password": "" },
-        "videohost": { "username": "", "password": "" }
+  "version": 1,
+  "providers": {
+    "videohost": {
+      "username": "",
+      "password": ""
     }
+  }
 }

@@ -50,22 +50,22 @@ test("a video the provider removed is blocked for manual review and recorded aga
     await reconcileDueUploads(config, day(1), removedBrowser);
     const recording = db.get(r.id);
     assert.equal(recording.state, "blocked");
-    assert.match(recording.blockReason, /^oldhost removed video 91957324 after upload \(edit page 404\)/);
-    assert.match(recording.blockReason, /another upload provider/);
+    assert.match(recording.blockReason, /^videohost removed video 91957324 after upload \(edit page 404\)/);
+    assert.match(recording.blockReason, /excluded from re-upload/);
     assert.doesNotMatch(recording.blockReason, /re-uploads/);
     assert.deepEqual(db.providerRemovals(r.id).map(({ provider, remoteId }) => ({ provider, remoteId })),
-        [{ provider: "oldhost", remoteId: "91957324" }]);
+        [{ provider: "videohost", remoteId: "91957324" }]);
 });
 
-test("retry refuses while the provider that removed the video is active, and unblocks once another one is", async t => {
+test("retry never resends a recording removed by VideoHost", async t => {
     const { db, config, r } = await fixture(t);
     await reconcileDueUploads(config, day(1), removedBrowser);
-    assert.throws(() => retryRecording(db, r.id, day(2)), /oldhost removed .*91957324.*upload-provider:set/s);
+    assert.throws(() => retryRecording(db, r.id, day(2)), /videohost removed .*91957324.*excluded/s);
     assert.equal(db.get(r.id).state, "blocked");
     db.setCampaignState("paused", day(2));
-    db.replaceProviderInventory("oldhost", [], day(2));
+    db.replaceProviderInventory("videohost", [], day(2));
     db.setActiveUploadProvider("videohost", day(2));
-    assert.equal(retryRecording(db, r.id, day(2)).state, "metadata_ready");
+    assert.throws(() => retryRecording(db, r.id, day(2)), /excluded/);
 });
 
 test("an upload to the provider that removed the video is blocked before any network request", async t => {
@@ -76,7 +76,7 @@ test("an upload to the provider that removed the video is blocked before any net
     const result = await uploadOne(r.id, config);
     assert.equal(result.disposition, "manual_review");
     assert.equal(db.get(r.id).state, "blocked");
-    assert.match(db.get(r.id).blockReason, /^oldhost removed video 91957324/);
+    assert.match(db.get(r.id).blockReason, /^videohost removed video 91957324/);
 });
 
 test("reopening an older ledger learns its provider removals, not the owner's own deletions", async t => {
@@ -85,10 +85,10 @@ test("reopening an older ledger learns its provider removals, not the owner's ow
     db.recordUploadEvidence(attempt, { stage: "provider_removed", remoteId: "91957324",
         reason: "owner deleted the unrotated upload 91957324 for re-processing" }, day(1));
     db.recordUploadEvidence(attempt, { stage: "provider_removed", remoteId: "91957324",
-        reason: "oldhost removed video 91957324 after upload (edit page 404)" }, day(1));
+        reason: "videohost removed video 91957324 after upload (edit page 404)" }, day(1));
     assert.deepEqual(db.providerRemovals(r.id), []);
     const reopened = new PipelineDatabase(config.databasePath);
     t.after(() => reopened.close());
     assert.deepEqual(reopened.providerRemovals(r.id).map(({ provider, remoteId, reason }) => ({ provider, remoteId, reason })),
-        [{ provider: "oldhost", remoteId: "91957324", reason: "oldhost removed video 91957324 after upload (edit page 404)" }]);
+        [{ provider: "videohost", remoteId: "91957324", reason: "videohost removed video 91957324 after upload (edit page 404)" }]);
 });

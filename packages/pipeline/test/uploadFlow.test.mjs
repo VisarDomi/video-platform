@@ -7,9 +7,7 @@ import test from "node:test";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { guardUploadIdentity } from "../dist/commands/uploadIdentityGuard.js";
 import { composeUploadMetadata, hasDiagnosticUploadIdentity } from "../dist/metadata/composeUploadMetadata.js";
-import { ChromiumOldHostUploader, submittedUploadEditId } from "../dist/upload/chromiumOldHostUploader.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
-import { filterOldHostEntries } from "../dist/upload/oldhostEntries.js";
 import { UploadCoordinator } from "../dist/upload/uploadCoordinator.js";
 import { PipelineOrchestrator, StageDeferredError } from "../dist/scheduler/orchestrator.js";
 
@@ -207,50 +205,6 @@ test("a stage killed by a service stop leaves the recording in its state", async
     assert.equal(db.get(recording.id).state, "server_ready");
 });
 
-test("submitted provider ID is independent of title and refuses ambiguous/foreign edit links", () => {
-    const base = "https://old-host.example/account/uploads/new";
-    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit"]), "123");
-    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit", "/account/uploads/123/edit"]), "123");
-    assert.equal(submittedUploadEditId(base, ["/account/uploads/123/edit", "/account/uploads/456/edit"]), null);
-    assert.equal(submittedUploadEditId(base, ["https://other.test/account/uploads/123/edit"]), null);
-    assert.equal(submittedUploadEditId("https://old-host.example/account/uploads/123/edit", ["/account/uploads/456/edit"]), "123");
-});
-
-test("clean-title missing-ID recovery never searches descriptive titles; diagnostic ambiguity is not adopted", async (t) => {
-    const uploader = new ChromiumOldHostUploader({});
-    let searches = 0;
-    uploader.findEntries = async () => { searches++; return [
-        { remoteId: "1", title: "Natural title [identity]" },
-        { remoteId: "2", title: "Another title [identity]" },
-    ]; };
-    // Jump past the panel polling deadline, without opening a browser or waiting.
-    let now = 0;
-    t.mock.method(Date, "now", () => { now += 400_000; return now; });
-    assert.equal(await uploader.captureSubmittedVideoId({}, null), null);
-    assert.equal(searches, 0);
-    assert.equal(await uploader.captureSubmittedVideoId({}, "identity"), null);
-    assert.equal(searches, 1);
-    uploader.findEntries = async () => [{ remoteId: "3", title: "Natural title [identity]" }];
-    assert.equal(await uploader.captureSubmittedVideoId({}, "identity"), "3");
-});
-
-test("uploads-list matching filters entries by title search term", () => {
-    const entries = filterOldHostEntries([{
-        containerId: "listing-video-85165541",
-        remoteUrl: "https://old-host.example/video.example/title",
-        title: "Specific title [ladder-deadbeef1234]",
-    }, {
-        containerId: "listing-video-99999999",
-        remoteUrl: "https://old-host.example/video.example/other",
-        title: "Unrelated title",
-    }], "[ladder-deadbeef1234]");
-    assert.deepEqual(entries, [{
-        remoteId: "85165541",
-        remoteUrl: "https://old-host.example/video.example/title",
-        title: "Specific title [ladder-deadbeef1234]",
-    }]);
-});
-
 test("one manual alias override resolves every matching recording and survives refreshes", async (t) => {
     const { root } = await rootFixture(t);
     const database = new PipelineDatabase(path.join(root, "manual.sqlite"));
@@ -331,7 +285,7 @@ test("failure after the upload started is acceptance-unknown instead of an immed
     const reservationId = database.reserveUpload(recording.id, 100, now);
     const failingUploader = {
         async upload(request) {
-            await request.onProgress?.("file_uploading", request.sizeBytes);
+            await request.onProgress?.("metadata_submitting", request.sizeBytes);
             throw new Error("locator.fill timed out mid-flight");
         },
     };
@@ -355,7 +309,7 @@ test("failure after the upload started is acceptance-unknown instead of an immed
     // The run must NOT drop back to metadata_ready for an immediate retry that
     // would re-upload the file: it stays uncertain until a reconciliation pass
     // confirms whether the upload landed.
-    assert.equal(database.get(recording.id)?.state, "oldhost_uncertain");
+    assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.equal(database.dueUploadConfirmations(new Date("2026-08-14T08:00:00Z")).length, 1);
 });
 
@@ -419,14 +373,14 @@ test("the upload identity guard refuses unverified and cleans verified recording
     // Once verified, the guard cleans the staging artifact and parks the
     // recording at cleanup_eligible.
     const [confirmation] = database.dueUploadConfirmations(new Date());
-    database.reconcileUncertain(attemptId, "91362268", "https://old-host.example/video.abc123/title", now);
-    database.markRemoteVerified(recording.id, "91362268", "https://old-host.example/video.abc123/title", now);
+    database.reconcileUncertain(attemptId, "91362268", "https://video-host.example/video.abc123/title", now);
+    database.markRemoteVerified(recording.id, "91362268", "https://video-host.example/video.abc123/title", now);
     assert.equal(confirmation.attemptId, attemptId);
     const verified = await guardUploadIdentity(database, database.get(recording.id), { cleanupEnabled: true });
     assert.deepEqual(verified, {
         kind: "verified_cleaned",
         remoteId: "91362268",
-        remoteUrl: "https://old-host.example/video.abc123/title",
+        remoteUrl: "https://video-host.example/video.abc123/title",
     });
     assert.equal(database.get(recording.id)?.state, "cleanup_eligible");
     await assert.rejects(access(artifactPath), /ENOENT/);

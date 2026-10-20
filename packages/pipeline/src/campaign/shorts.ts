@@ -54,7 +54,7 @@ export function compatibleShortGroups(parts: readonly ShortPart[], minimumSecond
 }
 
 export async function poolRecordingPart(database: PipelineDatabase, recording: Recording,
-    destinationProvider: "videohost" | "oldhost", selectedPart?: ProductionArtifactPart, actualSeconds?: number): Promise<number> {
+    destinationProvider: "videohost", selectedPart?: ProductionArtifactPart, actualSeconds?: number): Promise<number> {
     const provenance = database.getProvenance(recording.id);
     if (!provenance) return 0;
     const analysis = await analyzeRecordingResolution(recording.playlistPath);
@@ -164,7 +164,7 @@ export async function buildShortBatch(database: PipelineDatabase, config: Pipeli
 }
 
 async function ingestShorts(database: PipelineDatabase, config: PipelineConfig, resolver: TargetCatalogResolver,
-    provider: "videohost" | "oldhost", minimum: number, now: Date): Promise<number> {
+    provider: "videohost", minimum: number, now: Date): Promise<number> {
     const authority = new DatabaseSync(config.finalizationDatabasePath, { readOnly: true });
     let checkpoints: Array<{ recording_path: string; report_json: string }>;
     try { checkpoints = authority.prepare("SELECT recording_path, report_json FROM integrity_checkpoints ORDER BY recording_path")

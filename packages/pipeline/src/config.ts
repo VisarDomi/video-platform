@@ -63,13 +63,12 @@ export const pipelineConfig: PipelineConfig = {
     discoveryRoots,
     manualRemuxRoots,
     serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
-    browserProfilePath: process.env.VIDEO_OLDHOST_BROWSER_PROFILE
+    browserProfilePath: process.env.VIDEO_VIDEOHOST_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
-    credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE ?? process.env.VIDEO_OLDHOST_ENV_FILE
+    credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
     videohostBrowserProfilePath: process.env.VIDEO_VIDEOHOST_BROWSER_PROFILE
-        ?? process.env.VIDEO_OLDHOST_BROWSER_PROFILE
         ?? path.join(os.homedir(), ".config", "chromium-agent"),
     videohostSessionPath: process.env.VIDEO_VIDEOHOST_SESSION_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "videohost-session.json"),
