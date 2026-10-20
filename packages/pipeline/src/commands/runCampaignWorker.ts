@@ -25,6 +25,7 @@ export async function keepVideoHostSessionAlive(config: PipelineConfig, now = ne
     const database = new PipelineDatabase(config.databasePath);
     try {
         if ((config.uploadProvider ?? database.getActiveUploadProvider()) !== "videohost") return;
+        const before = database.getCampaignControl();
         let result;
         try {
             result = await check(config.videohostSessionPath);
@@ -35,6 +36,14 @@ export async function keepVideoHostSessionAlive(config: PipelineConfig, now = ne
         }
         database.recordProviderSessionEvent({ provider: "videohost", kind: "keepalive", loggedIn: result.loggedIn,
             fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
+        const control = database.getCampaignControl();
+        if (result.loggedIn && before.state === "paused" && before.resumeAt === null
+            && before.attentionReason?.startsWith("VideoHost ") && before.attentionReason.includes(SESSION_LOST_ADVICE)
+            && control.updatedAt === before.updatedAt && control.attentionReason === before.attentionReason
+            && control.state === "paused") {
+            database.setCampaignState("running", now);
+            console.log(JSON.stringify({ event: "videohost-session-recovered", fingerprint: result.fingerprint, campaign: "running" }));
+        }
         if (!result.loggedIn && database.getCampaignControl().state === "running") {
             database.pauseForAttention(`VideoHost shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
             console.log(journalPriority("error") + JSON.stringify({ event: "videohost-session-lost", note: result.note, fingerprint: result.fingerprint }));
