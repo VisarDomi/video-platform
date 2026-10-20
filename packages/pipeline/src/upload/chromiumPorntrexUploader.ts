@@ -79,13 +79,17 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             // kt_member would sign in a new session and log the phone out; the
             // shared PHP session is the only login the pipeline may present.
             await context.clearCookies({ name: PORNTREX_LOGIN_TOKEN });
-            if (stored) await context.addCookies(pinCookies(stored.cookies));
+            if (stored) await context.addCookies(pinCookies(sharedSessionCookies(stored.cookies)));
             const page = context.pages()[0] ?? await context.newPage();
-            await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            const response = await page.goto(`${ORIGIN}/upload-video/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+            if (!response?.ok()) throw new Error(`Porntrex upload page unavailable: HTTP ${response?.status() ?? "unknown"}`);
             await passPorntrexAgeGate(page);
             const file = page.locator('input[type="file"][name="content"]');
             let passwordLoginAt: string | null = null;
             if (!await file.count()) {
+                if (!/^\/(?:login\/?)?$/.test(new URL(page.url()).pathname)) {
+                    throw new Error("Porntrex upload page did not contain its form; login state is unknown");
+                }
                 if (!options.allowPasswordLogin) {
                     throw new ProviderSessionLostError(`Porntrex is not logged in with the shared session (another device logged in, or it ended); ${SESSION_LOST_ADVICE}`);
                 }
@@ -124,7 +128,11 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
     private async stillLoggedIn(page: Page): Promise<boolean> {
         return await page.evaluate(async () => {
             const response = await fetch("/upload-video/", { credentials: "include" });
-            return /name="content"/.test(await response.text());
+            // An outage must retain the ordinary transfer-failure retry, rather
+            // than claiming another device logged in and pausing indefinitely.
+            if (!response.ok) return true;
+            if (/name="content"/.test(await response.text())) return true;
+            return !/^\/(?:login\/?)?$/.test(new URL(response.url).pathname);
         }).catch(() => true);
     }
 
@@ -321,7 +329,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             if (error || chunkRejected) {
                 if (!await this.stillLoggedIn(page)) {
                     await stalled("session lost");
-                    throw new ProviderSessionLostError(`Porntrex logged this session out during the upload (another device logged in); ${SESSION_LOST_ADVICE}`);
+                    throw new ProviderSessionLostError(`Porntrex shared session is no longer authenticated during the upload; ${SESSION_LOST_ADVICE}`);
                 }
                 throw await stalled(`Porntrex upload ${error ? `page error: ${error}` : chunkRejected}`);
             }
@@ -336,7 +344,7 @@ export class ChromiumPorntrexUploader implements XvideosUploader {
             if (Date.now() - movedAt > TRANSFER_STALL_MILLISECONDS) {
                 if (!await this.stillLoggedIn(page)) {
                     await stalled("session lost");
-                    throw new ProviderSessionLostError(`Porntrex logged this session out during the upload (another device logged in); ${SESSION_LOST_ADVICE}`);
+                    throw new ProviderSessionLostError(`Porntrex shared session is no longer authenticated during the upload; ${SESSION_LOST_ADVICE}`);
                 }
                 throw await stalled(`Porntrex file transfer made no progress for ${TRANSFER_STALL_MILLISECONDS / 60_000} minutes (last ${percent}%)`);
             }

@@ -1,5 +1,5 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
-import { readPorntrexSession, sessionFingerprint, writePorntrexSession, type StoredCookie } from "./porntrexSession.js";
+import { readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession, type StoredCookie } from "./porntrexSession.js";
 
 // Node tries each address family for only 250 ms by default. While an upload
 // fills the line, the IPv4 handshake takes longer and the (unavailable) IPv6
@@ -26,7 +26,7 @@ export async function checkPorntrexSession(
 ): Promise<SessionCheck> {
     const session = await readPorntrexSession(sessionFilePath);
     if (!session) return { loggedIn: false, fingerprint: null, passwordLoginAt: null, note: "no shared session stored" };
-    const cookieHeader = session.cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+    const cookieHeader = sharedSessionCookies(session.cookies).map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
     const request = () => fetchImpl(`${origin}/upload-video/`, {
         headers: { cookie: cookieHeader, "user-agent": USER_AGENT, accept: "text/html" },
         redirect: "manual",
@@ -46,10 +46,19 @@ export async function checkPorntrexSession(
     }
     const body = response.status === 200 ? await response.text() : "";
     const loggedIn = response.status === 200 && /name="content"/.test(body);
+    const location = response.headers.get("location");
+    const redirected = location && response.status >= 300 && response.status < 400 ? new URL(location, origin) : null;
+    const loggedOut = redirected?.origin === new URL(origin).origin && /^\/(?:login\/?)?$/.test(redirected.pathname)
+        || response.status === 200 && /name=["']pass["']/.test(body);
+    if (!loggedIn && !loggedOut) {
+        // CDN errors, throttling and unexpected HTML say nothing about login.
+        // In particular, do not adopt an anonymous PHP cookie from an error page.
+        throw new Error(`Porntrex session check inconclusive: HTTP ${response.status}`);
+    }
     // A logged-out session is redirected to the home page.
     const note = loggedIn ? "upload form served" : response.status >= 300 && response.status < 400
         ? `redirected to ${new URL(response.headers.get("location") ?? "/", origin).pathname}` : `HTTP ${response.status}`;
-    const rotated = rotatedSession(response, session.cookies);
+    const rotated = loggedIn ? rotatedSession(response, session.cookies) : null;
     if (rotated) {
         await writePorntrexSession(sessionFilePath, { ...session, cookies: rotated, savedAt: new Date().toISOString() });
     }
@@ -76,7 +85,7 @@ export async function porntrexGet(sessionFilePath: string, pathname: string, fet
     const session = await readPorntrexSession(sessionFilePath);
     if (!session) throw new Error("No shared Porntrex session stored; run `npm run ptrex:connect-iphone`");
     const response = await fetchImpl(`${origin}${pathname}`, {
-        headers: { cookie: session.cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), "user-agent": USER_AGENT, accept: "text/html" },
+        headers: { cookie: sharedSessionCookies(session.cookies).map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), "user-agent": USER_AGENT, accept: "text/html" },
         redirect: "manual",
         signal: AbortSignal.timeout(30_000),
     });

@@ -25,6 +25,7 @@ export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new
     const database = new PipelineDatabase(config.databasePath);
     try {
         if ((config.uploadProvider ?? database.getActiveUploadProvider()) !== "porntrex") return;
+        const before = database.getCampaignControl();
         let result;
         try {
             result = await check(config.porntrexSessionPath);
@@ -35,6 +36,14 @@ export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new
         }
         database.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: result.loggedIn,
             fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
+        const control = database.getCampaignControl();
+        if (result.loggedIn && before.state === "paused" && before.resumeAt === null
+            && before.attentionReason?.startsWith("Porntrex ") && before.attentionReason.includes(SESSION_LOST_ADVICE)
+            && control.updatedAt === before.updatedAt && control.attentionReason === before.attentionReason
+            && control.state === "paused") {
+            database.setCampaignState("running", now);
+            console.log(JSON.stringify({ event: "porntrex-session-recovered", fingerprint: result.fingerprint, campaign: "running" }));
+        }
         if (!result.loggedIn && database.getCampaignControl().state === "running") {
             database.pauseForAttention(`Porntrex shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
             console.log(journalPriority("error") + JSON.stringify({ event: "porntrex-session-lost", note: result.note, fingerprint: result.fingerprint }));

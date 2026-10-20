@@ -1362,7 +1362,7 @@ export class PipelineDatabase {
         }
         // A manual pause is indefinite; a manual resume starts a fresh streak.
         if (state === "paused") {
-            this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, updated_at = ? WHERE id = 1")
+            this.database.prepare("UPDATE campaign_control SET state = 'paused', resume_at = NULL, attention_reason = NULL, updated_at = ? WHERE id = 1")
                 .run(now.toISOString());
         } else {
             this.database.prepare(`UPDATE campaign_control SET state = 'running', resume_at = NULL, antibot_failures = 0, attention_reason = NULL,

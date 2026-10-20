@@ -354,7 +354,11 @@ keeps one session per account, so the pipeline and the Video Vault iPhone app
 share one session, stored in `~/.config/video-services/porntrex-session.json`
 (chmod 600; override `VIDEO_PORNTREX_SESSION_FILE`). The pipeline never signs
 in on its own: an upload or the worker's ten-minute keep-alive check that finds
-the session logged out pauses the campaign.
+an explicit authentication redirect pauses the campaign. HTTP failures and unexpected
+pages remain transient errors; they do not prove logout and cannot replace the stored
+PHP session with an anonymous cookie. A later authenticated keep-alive automatically
+resumes a campaign held only for that session failure. Manual pauses and other holds
+remain paused, including a manual pause issued while the check is in flight.
 
 ```sh
 npm run ptrex:connect-iphone -w pipeline

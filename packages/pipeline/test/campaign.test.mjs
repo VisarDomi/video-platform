@@ -13,6 +13,7 @@ import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/chromiumXvideosUploader.js";
+import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
 import { configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
 function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_000) {
@@ -78,6 +79,19 @@ function failingUpload() {
         },
     };
 }
+
+test("a failed in-flight upload preserves a subsequent manual pause", async t => {
+    const { database, config, resolver } = await campaignWorkerFixture(t);
+    database.setCampaignState("running");
+    const worker = new CampaignWorker(database, { ...config, networkUploadsEnabled: true,
+        automaticShortsEnabled: false, discoveryRoots: [] }, resolver, async () => {
+        database.setCampaignState("paused");
+        throw new ProviderSessionLostError(`Porntrex session is logged out; ${SESSION_LOST_ADVICE}`);
+    });
+    assert.equal((await worker.step()).disposition, "attention_required");
+    assert.equal(database.getCampaignControl().state, "paused");
+    assert.equal(database.getCampaignControl().attentionReason, null);
+});
 
 test("provider policy block is manual review, not reported as an upload or retried next step", async t => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);

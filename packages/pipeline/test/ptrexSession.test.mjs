@@ -13,6 +13,8 @@ import { keepPorntrexSessionAlive } from "../dist/commands/runCampaignWorker.js"
 import { connectPorntrexPhone } from "../dist/commands/connectPorntrexPhone.js";
 import { porntrexSessionReport } from "../dist/commands/porntrexSessionReport.js";
 import { PtrexPhone, phoneSessionInbox } from "../dist/phone/ptrexPhone.js";
+import { ChromiumPorntrexUploader } from "../dist/upload/chromiumPorntrexUploader.js";
+import { SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
 
 // Local fakes only: no porntrex, Mac or phone traffic.
 const cookie = (name, value, extra = {}) => ({ name, value, domain: ".porntrex.com", path: "/", expires: -1,
@@ -51,7 +53,7 @@ test("shared session file is private, pinned for 400 days and identified only by
 
 test("keep-alive sends only the shared session, never kt_member, and records rotation", async t => {
     const { config } = await root(t);
-    await store(config.porntrexSessionPath);
+    await store(config.porntrexSessionPath, { cookies: [...sessionCookies, cookie("kt_member", "must-never-be-sent")] });
     const seen = [];
     let mode = "in";
     const server = createServer((request, response) => {
@@ -92,6 +94,60 @@ test("a logged-out keep-alive pauses the running campaign with the fix in its re
         [["keepalive", true], ["keepalive", false], ["keepalive_error", null]]);
     db.setCampaignState("running");
     assert.equal(db.getCampaignControl().attentionReason, null);
+});
+
+test("provider errors cannot pause uploads or replace the shared PHP session", async t => {
+    const { config } = await root(t);
+    await store(config.porntrexSessionPath);
+    const db = new PipelineDatabase(config.databasePath); t.after(() => db.close());
+    db.setCampaignState("running");
+    const before = await readFile(config.porntrexSessionPath, "utf8");
+    for (const status of [200, 403, 429, 500, 504]) {
+        const check = () => checkPorntrexSession(config.porntrexSessionPath, async () => new Response("Unavailable", {
+            status, headers: { "set-cookie": `PHPSESSID=${"b".repeat(32)}; path=/` },
+        }));
+        await assert.rejects(check, new RegExp(`HTTP ${status}`));
+        await keepPorntrexSessionAlive(config, new Date(), check);
+        assert.equal(db.getCampaignControl().state, "running");
+        assert.equal(await readFile(config.porntrexSessionPath, "utf8"), before);
+    }
+    assert(db.listProviderSessionEvents("porntrex").every(event => event.kind === "keepalive_error"));
+});
+
+test("authenticated keepalive resumes only the unchanged session-loss pause", async t => {
+    const { config } = await root(t);
+    const db = new PipelineDatabase(config.databasePath); t.after(() => db.close());
+    const lost = `Porntrex logged this session out during the upload; ${SESSION_LOST_ADVICE}`;
+    const ok = async () => ({ loggedIn: true, fingerprint: "f1", passwordLoginAt: null, note: "upload form served" });
+    db.pauseForAttention(lost);
+    await keepPorntrexSessionAlive(config, new Date(), ok);
+    assert.equal(db.getCampaignControl().state, "running");
+    assert.equal(db.getCampaignControl().attentionReason, null);
+    db.pauseForAttention(lost);
+    db.setCampaignState("paused"); // The operator's subsequent pause is indefinite.
+    await keepPorntrexSessionAlive(config, new Date(), ok);
+    assert.equal(db.getCampaignControl().state, "paused");
+    db.pauseForAttention("manual hold");
+    await keepPorntrexSessionAlive(config, new Date(), ok);
+    assert.equal(db.getCampaignControl().state, "paused");
+    db.pauseForAttention(lost);
+    await keepPorntrexSessionAlive(config, new Date(), async () => { db.setCampaignState("paused"); return ok(); });
+    assert.equal(db.getCampaignControl().state, "paused", "Do not override a pause issued while the check was in flight");
+});
+
+test("browser session probe distinguishes an outage from an authentication redirect", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    let status = 504, destination = "upload";
+    await page.route("**/*", route => route.fulfill({ status, contentType: "text/html", body: destination === "upload"
+        ? "Provider gateway timeout" : '<form><input name="pass"></form>' }));
+    await page.goto("https://www.porntrex.com/");
+    const uploader = new ChromiumPorntrexUploader({ profilePath: "/unused" });
+    assert.equal(await uploader.stillLoggedIn(page), true, "HTTP 504 is not logout evidence");
+    status = 200; destination = "login";
+    await page.route("**/upload-video/", route => route.fulfill({ status: 302, headers: { location: "/login/" } }));
+    assert.equal(await uploader.stillLoggedIn(page), false);
 });
 
 test("connect shares the pipeline session with the phone and resumes a campaign stopped for a lost session", async t => {
