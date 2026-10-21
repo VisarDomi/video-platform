@@ -539,3 +539,18 @@ recordings remain complete; moving them back does not authorize duplicate upload
 The `user-pause.json` operational hold keeps `video-pipeline.service` disabled until
 the user explicitly requests resumption. It covers conversion, description and uploading;
 `video-downloader`, `video-server`, `video-auth` and `video-xvfb` keep running normally.
+
+The EB launchers (`eb` and `ebm`, maintained in `games/eb1-linux/scripts/upload_pipeline.py`)
+apply this hold before launching or focusing the game. They stop only the upload worker's
+service cgroup immediately, interrupting conversion/description/upload safely rather than
+waiting for the current stage to finish. A stuck cgroup is killed after five seconds. The
+campaign is then paused through the built CLI, without rebuilding it. Queues, checkpoints
+and originals remain intact; startup discards only incomplete derived artifacts as usual.
+Game exit never resumes the worker. Help, status, validation and timer commands do not
+apply the gaming hold.
+
+Explicit resumption clears `pipeline/user-pause.json` and the matching operational
+`video-pipeline.service.d/90-user-requested-pause.conf` override, reloads systemd, enables
+and starts only `video-pipeline.service`, then runs `node --no-warnings dist/main.js
+campaign-resume --apply` in this package after its startup build finishes. Daily monitoring
+is a separate schedule and stays disabled unless the user requests it.
