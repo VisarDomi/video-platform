@@ -1,6 +1,6 @@
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
-import { artifactRecipeReason, reuseCachedArtifact, type ArtifactCacheConfig } from "./artifactCache.js";
+import { artifactRecipeReason, reuseCachedArtifact, retainUnprovenArtifact, type ArtifactCacheConfig } from "./artifactCache.js";
 import { analyzeRecordingResolution, planRecordingShapes } from "./resolutionPolicy.js";
 import { convertShapeGroup } from "./upscale.js";
 import { validateArtifact } from "./validateArtifact.js";
@@ -23,12 +23,14 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
             const groups = [...plan.upload, ...plan.manual].sort((a, b) => a.ordinal - b.ordinal);
             if (groups.length === 1 && groups[0].part === "full") {
                 const group = groups[0];
+                await retainUnprovenArtifact(stagingRoot, recording.id, productionArtifactSuffix(group.part, group.output.rotate));
                 const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
                     productionArtifactSuffix(group.part, group.output.rotate), analysis);
                 return { disposition: "artifact", path: converted.path, eventReason: reason };
             }
             const parts = [];
             for (const group of groups) {
+                await retainUnprovenArtifact(stagingRoot, recording.id, productionArtifactSuffix(group.part, group.output.rotate));
                 const converted = await convertShapeGroup(recording.playlistPath, stagingRoot, recording.id, group,
                     productionArtifactSuffix(group.part, group.output.rotate), analysis, group.indexes);
                 const validated = await validateArtifact(converted.path);

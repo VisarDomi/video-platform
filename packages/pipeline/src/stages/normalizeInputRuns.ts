@@ -73,6 +73,7 @@ export async function convertIndependentNativeRuns(runs: readonly NativeInputRun
         await ffmpeg(["-f", "concat", "-safe", "0", "-i", list, "-map", "0:v:0",
             ...(hasAudio ? ["-map", "0:a:0"] : []), "-c:v", "copy",
             ...(hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
-            "-video_track_timescale", "90000", "-movflags", "+faststart", "-f", "mp4", output]);
+            "-video_track_timescale", "90000", "-movie_timescale", "1000000",
+            "-movflags", "+faststart", "-f", "mp4", output]);
     } finally { await fs.rm(temporary, { recursive: true, force: true }); }
 }

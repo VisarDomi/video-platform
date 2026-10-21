@@ -58,7 +58,7 @@ for (const generation of ["production-v4", "production-v5"]) {
         const current = await rollover(f);
         const hit = await reuseCachedArtifact(current, f.newRoot, f.config);
         assert.equal(path.dirname(hit.path), f.newRoot);
-        assert.match(hit.eventReason, /resolution-policy-v6: \[artifact-recipe-v3\] artifact cache hit/);
+        assert.match(hit.eventReason, /resolution-policy-v6: \[artifact-recipe-v4\] artifact cache hit/);
         assert.equal(await artifactSha256(hit.path), await artifactSha256(oldPath));
         assert.equal((await fs.stat(hit.path)).ino, (await fs.stat(oldPath)).ino, "same-filesystem hit does not duplicate storage");
         assert.equal(f.database.getArtifact(current.id), null, "no old pipeline state imported");
@@ -110,7 +110,7 @@ test("cache refuses changed source/provider/path, old policy, different recipe, 
     const raw = new DatabaseSync(f.config.databasePath);
     try {
         for (const reason of ["resolution-policy-v3: old target", "resolution-policy-v4: [artifact-recipe-v2] other policy",
-            "resolution-policy-v5: [artifact-recipe-v1] older recipe", "resolution-policy-v6: [artifact-recipe-v2] older recipe"]) {
+            "resolution-policy-v5: [artifact-recipe-v1] older recipe", "resolution-policy-v6: [artifact-recipe-v2] older recipe", "resolution-policy-v6: [artifact-recipe-v3] older timing"]) {
             raw.prepare("UPDATE state_events SET reason = ? WHERE to_state = 'remuxed'").run(reason);
             assert.equal(await reuseCachedArtifact(f.recording, f.newRoot, f.config), null);
         }
@@ -160,6 +160,22 @@ test("cache refuses to overwrite conflicting destination and supports exclusive 
     assert.equal(await artifactSha256(hit.path), await artifactSha256(oldPath));
     assert.notEqual((await fs.stat(hit.path)).ino, (await fs.stat(oldPath)).ino);
     assert.deepEqual(await fs.readdir(f.newRoot), [path.basename(target)]);
+});
+
+test("an old timing recipe at the current filename is retained, never relabeled as a fresh conversion", async (t) => {
+    const f = await fixture(t, "production-v6");
+    await fs.mkdir(f.recording.sourcePath);
+    const part = await fixturePart(f.recording.sourcePath, "part", { frames: 3 });
+    await assemble(f.recording.sourcePath, [part]);
+    const oldPath = await seed(f, "resolution-policy-v6: [artifact-recipe-v3] old timing");
+    const oldBytes = await fs.readFile(oldPath);
+    const result = await createDefaultStages(f.oldRoot, f.config).remux(f.recording);
+    assert.notDeepEqual(await fs.readFile(result.path), oldBytes, "old same-name bytes must not bypass corrected conversion");
+    assert.match(result.eventReason, /artifact-recipe-v4/);
+    const retained = path.join(f.oldRoot, ".previous-recipes");
+    const folders = await fs.readdir(retained);
+    assert.equal(folders.length, 1);
+    assert.deepEqual(await fs.readFile(path.join(retained, folders[0], path.basename(oldPath))), oldBytes);
 });
 
 test("real cache miss converts; next generation reuses artifact + descriptor cache and submits a fresh upload", async (t) => {

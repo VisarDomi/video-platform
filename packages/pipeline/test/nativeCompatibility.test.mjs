@@ -44,7 +44,7 @@ for (const portrait of [false, true]) {
         const original = await readFile(playlist, "utf8");
         const result = await createDefaultStages(path.join(root, "out")).remux({ id: "mixed-codec", playlistPath: playlist });
         assert.equal(path.basename(result.path), `mixed-codec.production-v6${portrait ? "-ccw" : ""}.mp4`);
-        assert.match(result.eventReason, /^resolution-policy-v6: \[artifact-recipe-v3\] one shape/);
+        assert.match(result.eventReason, /^resolution-policy-v6: \[artifact-recipe-v4\] one shape/);
         await checkFrames(parts, result.path);
         const artifact = await validateArtifact(result.path);
         // Portrait is turned 90° counterclockwise: always a landscape Full HD frame.
