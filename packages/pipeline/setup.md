@@ -543,7 +543,7 @@ the user explicitly requests resumption. It covers conversion, description and u
 The EB launchers (`eb` and `ebm`, maintained in `games/eb1-linux/scripts/upload_pipeline.py`)
 apply this hold before launching or focusing the game. They stop only the upload worker's
 service cgroup immediately, interrupting conversion/description/upload safely rather than
-waiting for the current stage to finish. A stuck cgroup is killed after five seconds. The
+waiting for the current stage to finish. A stuck cgroup is killed after one second. The
 campaign is then paused through the built CLI, without rebuilding it. Queues, checkpoints
 and originals remain intact; startup discards only incomplete derived artifacts as usual.
 Game exit never resumes the worker. Help, status, validation and timer commands do not
