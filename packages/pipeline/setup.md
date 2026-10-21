@@ -549,8 +549,17 @@ and originals remain intact; startup discards only incomplete derived artifacts 
 Game exit never resumes the worker. Help, status, validation and timer commands do not
 apply the gaming hold.
 
-Explicit resumption clears `pipeline/user-pause.json` and the matching operational
-`video-pipeline.service.d/90-user-requested-pause.conf` override, reloads systemd, enables
-and starts only `video-pipeline.service`, then runs `node --no-warnings dist/main.js
-campaign-resume --apply` in this package after its startup build finishes. Daily monitoring
-is a separate schedule and stays disabled unless the user requests it.
+The Bash aliases in `~/.bash_aliases` (backed up by chezmoi) expose upload-only control:
+
+```bash
+pipeline-force-stop
+pipeline-force-start
+```
+
+`pipeline-force-stop` applies the same bounded stop and persistent hold without launching
+EB. `pipeline-force-start` clears `pipeline/user-pause.json` and the matching operational
+`video-pipeline.service.d/90-user-requested-pause.conf` override, reloads systemd, resumes
+campaign intent through the existing built CLI, then enables and starts only
+`video-pipeline.service`. The CLI runs before the unit's startup build to avoid a build
+race. Neither alias affects the downloader, server, auth, display or monitoring schedule.
+Existing terminals can load newly installed aliases with `source ~/.bash_aliases`.
