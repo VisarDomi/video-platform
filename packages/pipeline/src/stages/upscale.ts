@@ -274,7 +274,12 @@ export function buildUpscaleTranscodeArgs(
         "-crf", "16",
         "-pix_fmt", "yuv420p",
         "-fps_mode:v", "vfr",
+        // Encoder defaults round PTS to the nominal frame interval. AAC
+        // pre-roll often puts the video origin between those ticks.
+        "-enc_time_base:v", "1:90000",
         "-c:a", "copy",
+        "-video_track_timescale", "90000",
+        "-movie_timescale", "1000000",
         "-movflags", "+faststart",
         "-f", "mp4",
         temporaryOutput,

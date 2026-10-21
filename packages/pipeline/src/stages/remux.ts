@@ -17,6 +17,7 @@ export function buildStreamCopyRemuxArgs(inputPlaylist: string, temporaryOutput:
         "-map", "0:v?",
         "-map", "0:a?",
         "-c", "copy",
+        "-movie_timescale", "1000000",
         "-movflags", "+faststart",
         "-f", "mp4",
         temporaryOutput,

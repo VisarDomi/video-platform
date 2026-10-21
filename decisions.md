@@ -220,7 +220,7 @@ server follows the account first, but only if it is not already followed.
 |---|---|
 | `CURRENT_PRODUCTION_VERSION` (`domain/productionVersion.ts`) | `production-v6` |
 | `RESOLUTION_POLICY_VERSION` | `resolution-policy-v6` |
-| `ARTIFACT_RECIPE_VERSION` | `artifact-recipe-v3` |
+| `ARTIFACT_RECIPE_VERSION` | `artifact-recipe-v4` |
 | artifact file names | `<id>.production-v6[-shapeN][-ccw].mp4` |
 
 - **Input:** edited recordings only, each with an exact `ready` checkpoint for its
@@ -244,6 +244,12 @@ server follows the account first, but only if it is not already followed.
   uploads of 1664×1248 got 480p and 720p only. No crop, no padding, square pixels; zscale Lanczos, libx264 `slow` CRF
   16, yuv420p, VFR. Audio is copied when the inputs allow it, otherwise re-encoded
   once (AAC 192k).
+- **A/V timing.** Conversion uses a 90 kHz video encoder/track clock and a
+  1 MHz MP4 movie clock. The encoder must not round the video origin to a nominal
+  frame interval while copied audio keeps its precise PTS. Existing source A/V
+  offsets, including AAC pre-roll, are preserved; there is no guessed 44 ms shift.
+  The independent-run path concatenates PCM and encodes AAC once; FFmpeg writes
+  its priming compensation in the MP4 edit list/sample skip metadata.
 - **Portrait** pictures are turned 90° counterclockwise (`transpose=2`, head to
   the left) into a landscape frame, and the file name gets `-ccw`. Why: Porntrex
   scales by height, so a portrait upload reaches at most 406×720. The
@@ -272,6 +278,10 @@ server follows the account first, but only if it is not already followed.
   an earlier generation's history snapshot, is reused only if its size and SHA-256
   still match. It is hardlinked, or copied exclusively if that fails. Split parts
   are never reused.
+  A same-name generated file without current-recipe cache evidence cannot bypass
+  conversion: it is retained under `.previous-recipes/<uuid>/` in the staging
+  directory, with its bytes intact. Existing remote copies and their ledger
+  evidence are not rewritten or re-uploaded for a recipe change.
 - **`remux-one` is a supervised diagnostic.** It stream-copies, or with a flag
   writes `--upscale1080p`/`--upscale1440p` variants to `artifact_variants`. Its
   output has no v6 assessment, so the campaign converts the recording again and

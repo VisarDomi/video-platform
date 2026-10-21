@@ -80,6 +80,14 @@ dropped**. Source folders and their playlists are never modified.
   audio). Odd TS packet sizes and a size change inside a segment are warnings.
   Only zero-byte files are left out of the encoder input (they hold no media).
   Audio is stream-copied when the inputs allow it, else re-encoded once.
+- **Sync.** Video encoder and track timestamps use a 90 kHz clock; MP4 edits use
+  a 1 MHz movie clock. This preserves the source audio/video offset instead of
+  rounding the video origin to a frame interval. Negative AAC pre-roll is normal:
+  when audio must be encoded, FFmpeg's MP4 edit list/sample skip metadata handles
+  its measured encoder delay. Never apply an assumed 2112-sample/44 ms correction
+  to a recording. Capture and editing preserve provider bytes and timestamps;
+  they do not use WebCodecs. Timestamp checks establish whether conversion adds
+  skew, not whether an upstream camera/microphone feed was originally in sync.
 - **Limits.** A short upload waits for automatic joining; other artifacts
   outside the active provider's limits are blocked, judged on their own
   duration/size. Porntrex takes two
@@ -150,9 +158,13 @@ source recordings and the finalization database are preserved.
 `campaign:status` reports the active version and whether a rollover is pending.
 
 A new generation reuses a whole-recording artifact from a history snapshot only
-when it was produced under the current policy and recipe (`artifact-recipe-v3`)
+when it was produced under the current policy and recipe (`artifact-recipe-v4`)
 from the same source fingerprint; split parts are never reused. Descriptions
 are reused only through the descriptor's exact artifact-hash/prompt cache.
+On a cache miss, an existing same-name generated MP4 cannot bypass conversion.
+It is retained byte-for-byte under `artifacts/<generation>/.previous-recipes/<uuid>/`
+before the new artifact is produced. This does not rewrite published copies,
+alter remote ledger evidence, or enable automatic cleanup.
 
 A description that is not cached starts the descriptor's llama-server, which holds
 about 11 GB of RAM. The describe stage first waits until the machine has
