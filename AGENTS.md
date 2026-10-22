@@ -1,5 +1,13 @@
 The coding agent owns this repository and the recordings it manages: any file may be changed, this one included. The user's only manual task is deleting old recordings to free disk space, so a recording that disappears is expected, not an error.
 
+Handle routine project repairs autonomously without requesting confirmation. This includes
+Porntrex session recovery: reuse a valid shared session first; if every retained copy is
+rejected, perform one coordinated PC login through `ptrex-connect-iphone --apply
+--allow-password-login`, share it immediately with Video Vault and verify both devices.
+This coordinated recovery is authorized; do not ask again. Never log in independently on
+the phone or present `kt_member`. Keep the user's upload/gaming hold intact throughout.
+Cookie-only session maintenance continues while the resource-heavy upload worker is stopped.
+
 ## Start here
 
 - [README.md](README.md): what the system does, and a map of every doc.

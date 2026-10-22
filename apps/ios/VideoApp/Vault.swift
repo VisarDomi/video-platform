@@ -184,7 +184,8 @@ struct VaultHTTP: Sendable {
         }
         let response = try await pages.send(HTTPRequest(url, headers: ["Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
                                                         referer: site.origin.absoluteString + "/", accept: Set(300...599)))
-        if response.status == 401 || response.status == 403 { throw VaultError.signedOut(site, "\(site.name) login is required.") }
+        // Proxy/CDN refusals are not proof that the shared PHP session ended.
+        // Only the protected page's explicit login redirect/form decides that.
         guard (200...299).contains(response.status) else { throw VaultError.failed("\(site.name) page unavailable (\(response.status)).") }
         guard site.hosts.contains(response.url.host ?? "") else { throw VaultError.failed("\(site.name) left this site.") }
         return SitePage(html: response.text, landed: response.url.path(percentEncoded: true) + (response.url.query.map { "?" + $0 } ?? ""))
@@ -214,7 +215,7 @@ enum Porntrex {
         guard try document.first("#list_videos_my_uploaded_videos") != nil else {
             let landed = URL(string: page.landed, relativeTo: VaultSite.porntrex.origin)?.path(percentEncoded: true) ?? page.landed
             let password = try document.first("input[type=\"password\"]") != nil
-            if landed.range(of: #"^/my/videos/?$"#, options: .regularExpression) == nil || password {
+            if landed.range(of: #"^/(?:login/?)?$"#, options: .regularExpression) != nil || password {
                 throw VaultError.signedOut(.porntrex, "Log in to Porntrex, then return to your videos.")
             }
             throw VaultError.failed("Could not read your Porntrex videos. Open /my/videos/ to check your session.")

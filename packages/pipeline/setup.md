@@ -374,10 +374,23 @@ npm run ptrex:connect-iphone -w pipeline
 ```
 
 pauses a running campaign, waits for the current upload and the browser
-profile, signs in only if needed, copies the session into the phone app through
+profile, reuses the session, copies it into the phone app through
 the Mac (`VIDEO_MAC_SSH_TARGET`, `VIDEO_MAC_KNOWN_HOSTS`, `VIDEO_IPHONE_DEVICE`),
 checks both, and resumes the campaign if it was running or paused for a lost
 session.
+
+The default command reuses an existing authenticated session. If every saved copy is
+rejected, the agent is authorized to perform coordinated recovery without asking again:
+`npm run ptrex:connect-iphone -w pipeline -- --allow-password-login`. It creates one PC
+login and immediately shares it with Video Vault; it never logs in independently on the
+phone or uses `kt_member`. A manually paused campaign remains paused throughout.
+
+`video-ptrex-session.timer` runs a cookie-only check every ten minutes even when
+`pipeline-force-stop`/`eb`/`ebm` has stopped the upload worker. A fresh worker heartbeat
+suppresses duplicate checks. The independent job never changes campaign intent, starts
+uploads or logs in, treats network failures as inconclusive and warns only on a newly
+observed logout. Session reports mark checks older than fifteen minutes unknown and do
+not claim that an invalidated session necessarily expired by age.
 
 The transfer follows the page's own progress bar and fails after ten minutes
 without progress. Porntrex creates the video only when the metadata form is

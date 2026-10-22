@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep the shared Porntrex phone session alive
+After=network.target
+ConditionPathExists={{HOME}}/.config/video-services/porntrex-session.json
+
+[Service]
+Type=oneshot
+Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=VIDEO_PIPELINE_SERVICE_MODE=1
+WorkingDirectory={{HOME}}/Documents/work/video/video-platform
+ExecStart={{HOME}}/.nvm/versions/node/v22.19.0/bin/node --no-warnings packages/pipeline/dist/main.js ptrex-session-keepalive --apply
+Nice=19
+CPUQuota=10%
+MemoryMax=128M
+TasksMax=32
+TimeoutStartSec=120

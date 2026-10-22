@@ -135,6 +135,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
   after ten minutes), from the signed-in account's uploads pages, which are fetched and
   parsed, never executed, with Safari's user agent and the app's own cookie jar
   (`cookies.json`, KitNet). A signed-out site keeps its earlier rows under a notice.
+  HTTP errors (including 401/403), throttling and unexpected challenge redirects are
+  retried as availability failures, not reported as a sign-out. Only an explicit
+  protected-page redirect to home/login or its login form establishes that the session ended.
   Playback sources are resolved when needed (Porntrex's highest MP4) and played with the site's Referer, the same user agent and the jar's
   cookies.
   - Porntrex keeps **one active session per account; the newest login wins**: a password
@@ -145,6 +148,10 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
     Porntrex cookies (removing `kt_member`, pinning the rest for 400 days), checks them with
     a fresh request and leaves `porntrex-session-result.json`, which the command reads
     back. Do not log in on the phone: it stops the pipeline; run the command again instead.
+    The agent owns recovery and does not require the user to run it: a valid session is
+    reused first; coordinated password recovery uses the command's deliberate
+    `--allow-password-login` option and leaves manual upload pauses intact.
+    `video-ptrex-session.timer` keeps that shared session active while uploads are stopped.
   - The +/- button asks the PC's three download lists directly (`ViewerPC.swift`).
 - **Tango** (`VideoApp/TangoList.swift`) opens with its last list (`tango-list.json`) and
   asks Tango's gateway for a new one behind it: followed streams first, then

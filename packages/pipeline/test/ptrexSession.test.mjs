@@ -177,6 +177,23 @@ test("connect shares the pipeline session with the phone and resumes a campaign 
     assert.equal(db.getCampaignControl().state, "paused");
 });
 
+test("phone recovery requires an explicit password-login opt-in and preserves a manual pause", async t => {
+    const { config } = await root(t);
+    await store(config.porntrexSessionPath);
+    const db = new PipelineDatabase(config.databasePath); t.after(() => db.close());
+    db.setCampaignState("paused"); const before = db.getCampaignControl(), permissions = [];
+    const dependencies = {
+        openPipelineSession: async allow => { permissions.push(allow); },
+        connectPhone: async () => ({ loggedIn: true, host: "www.porntrex.com", finalPath: "/upload-video/" }),
+        checkSession: async () => ({ loggedIn: true, fingerprint: "ok", passwordLoginAt: null, note: "ok" }),
+        pause: async () => {}, log: () => {},
+    };
+    await connectPorntrexPhone(config, dependencies);
+    await connectPorntrexPhone(config, dependencies, { allowPasswordLogin: true });
+    assert.deepEqual(permissions, [false, true]);
+    assert.deepEqual(db.getCampaignControl(), before, "session recovery never resumes a manually paused campaign");
+});
+
 test("the phone's inbox carries the shared session, never kt_member, named by an ID", () => {
     const inbox = JSON.parse(phoneSessionInbox([...sessionCookies, cookie("kt_member", "stale")], "id-1"));
     assert.equal(inbox.id, "id-1");
@@ -214,10 +231,39 @@ test("session report answers the 30-day question from the keep-alive record", as
     const db = new PipelineDatabase(config.databasePath);
     t.after(() => db.close());
     db.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: true, fingerprint, note: "ok" }, new Date("2026-10-20T00:00:00Z"));
-    assert.match((await porntrexSessionReport(config, new Date("2026-10-20T01:00:00Z"))).verdict, /^Logged in; 19 days/);
+    assert.match((await porntrexSessionReport(config, new Date("2026-10-20T00:01:00Z"))).verdict, /^Logged in; 19 days/);
     db.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: true, fingerprint, note: "ok" }, new Date("2026-11-03T00:00:00Z"));
-    const later = await porntrexSessionReport(config, new Date("2026-11-03T01:00:00Z"));
+    const later = await porntrexSessionReport(config, new Date("2026-11-03T00:01:00Z"));
     assert.match(later.verdict, /33 days.*does not end sessions at 30 days/);
     assert.equal(later.keepalive.checks, 2);
     assert(!JSON.stringify(later).includes("a".repeat(32)), "never reports the session value");
+});
+
+
+test("session reports mark stale checks unknown and never guess that an invalidated session ended by age", async t => {
+    const { config } = await root(t); await store(config.porntrexSessionPath);
+    const db = new PipelineDatabase(config.databasePath); t.after(() => db.close());
+    const fingerprint = sessionFingerprint(sessionCookies);
+    db.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: true, fingerprint, note: "ok" }, new Date("2026-10-21T10:00:00Z"));
+    const stale = await porntrexSessionReport(config, new Date("2026-10-22T10:00:00Z"));
+    assert.equal(stale.currentStatus, "unknown"); assert.match(stale.verdict, /No recent session check/);
+    db.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: false, fingerprint, note: "redirected to /" }, new Date("2026-10-22T10:00:00Z"));
+    const lost = await porntrexSessionReport(config, new Date("2026-10-22T10:01:00Z"));
+    assert.equal(lost.currentStatus, "logged_out"); assert.match(lost.verdict, /cannot distinguish idle expiry/);
+    assert.doesNotMatch(lost.verdict, /ended it by age/);
+});
+
+test("a reused PHP ID starts a new authentication lifetime and a verified phone connection is fresh proof", async t => {
+    const { config } = await root(t), fingerprint = sessionFingerprint(sessionCookies);
+    const db = new PipelineDatabase(config.databasePath); t.after(() => db.close());
+    db.recordProviderSessionEvent({ provider: 'porntrex', kind: 'keepalive', loggedIn: true, fingerprint,
+        passwordLoginAt: '2026-10-02T20:00:00.000Z', note: 'old authentication' }, new Date('2026-10-21T10:00:00Z'));
+    await store(config.porntrexSessionPath, { passwordLoginAt: '2026-10-22T13:00:00.000Z' });
+    db.recordProviderSessionEvent({ provider: 'porntrex', kind: 'phone_connected', loggedIn: true, fingerprint,
+        passwordLoginAt: '2026-10-22T13:00:00.000Z', note: 'both verified' }, new Date('2026-10-22T13:01:00Z'));
+    const report = await porntrexSessionReport(config, new Date('2026-10-22T13:02:00Z'));
+    assert.equal(report.currentStatus, 'logged_in');
+    assert.equal(report.keepalive.checks, 0, 'prior authentication must not count toward a new login lifetime');
+    assert.equal(report.keepalive.lastCheckKind, 'phone_connected');
+    assert.doesNotMatch(report.verdict, /-1|unknown/);
 });

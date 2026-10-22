@@ -10,6 +10,7 @@ installed files under `~/.config/systemd/user` directly.
 | `video-downloader.service` | `~/.local/bin/video-downloader` |
 | `video-auth.service` | `~/.local/bin/video-auth` on display `:111` |
 | `video-pipeline.service` | `npm run campaign-worker -w pipeline` on display `:111`, with network uploads on and cleanup off |
+| `video-ptrex-session.timer` / `.service` | one cookie-only authentication check every ten minutes while the upload worker is stopped; never starts uploads or changes campaign intent |
 | `video-xvfb.service` | Xvfb display `:111` (1920x1080) for the auth and pipeline browsers |
 | `video-processing.slice` | the shared resource boundary below |
 
@@ -37,6 +38,13 @@ npm run systemd:sync
 Synchronization manages only the files explicitly listed in
 `scripts/sync-systemd.mjs`. It does not enable, disable, start, stop, or restart
 services. Restart an affected service explicitly after reviewing a change.
+
+Enable `video-ptrex-session.timer` independently of `video-pipeline.service`. It remains
+enabled during gaming pauses so server-side session expiry is not tied to conversion
+CPU usage. The one-shot service runs at nice 19 with a 10% CPU quota and 128 MiB memory
+limit, opens no browser, and exits between checks. A fresh worker heartbeat suppresses
+duplicate checks. Password recovery is never scheduled; the agent handles it through the
+coordinated PC/phone recovery command when needed, preserving the gaming hold.
 
 `video-processing.slice` is the aggregate CPU, memory, and swap boundary
 (`CPUQuota=600%`, `MemoryHigh=70%`, `MemoryMax=80%`, `MemorySwapMax=0`) for the

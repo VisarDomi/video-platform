@@ -4,7 +4,7 @@ const REPEAT_AFTER_MILLISECONDS = 6 * 60 * 60_000;
 const lastSent = new Map<string, number>();
 
 // Desktop notification for events that need a person (campaign paused or in
-// a cooldown, provider removed a video, session lost). Only the managed worker
+// a cooldown, provider removed a video, session lost). Only managed services
 // notifies; the same message is not repeated within six hours.
 export function notifyDesktop(title: string, body: string, urgent = false, now = Date.now()): boolean {
     if (process.env.VIDEO_PIPELINE_SERVICE_MODE !== "1" || process.env.VIDEO_PIPELINE_NOTIFY === "0") return false;

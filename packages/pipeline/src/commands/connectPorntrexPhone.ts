@@ -11,7 +11,7 @@ import { PtrexPhone, type PhoneSessionResult } from "../phone/ptrexPhone.js";
 const IDLE_WAIT_MILLISECONDS = 2 * 60 * 60_000;
 
 export interface ConnectDependencies {
-    readonly openPipelineSession: () => Promise<void>;
+    readonly openPipelineSession: (allowPasswordLogin: boolean) => Promise<void>;
     readonly connectPhone: (cookies: readonly StoredCookie[]) => Promise<PhoneSessionResult>;
     readonly checkSession: (sessionFile: string) => Promise<SessionCheck>;
     readonly pause: (milliseconds: number) => Promise<void>;
@@ -20,10 +20,10 @@ export interface ConnectDependencies {
 
 function defaultDependencies(config: PipelineConfig): ConnectDependencies {
     return {
-        openPipelineSession: async () => {
+        openPipelineSession: async (allowPasswordLogin) => {
             const uploader = await createProviderUploader({ ...config, uploadProvider: "porntrex" }, "porntrex") as ChromiumPorntrexUploader;
             // The one place allowed to log in: it is what the phone is about to share.
-            await uploader.withAuthenticatedPage(async () => undefined, { allowPasswordLogin: true });
+            await uploader.withAuthenticatedPage(async () => undefined, { allowPasswordLogin });
         },
         connectPhone: (cookies) => new PtrexPhone().connect(cookies),
         checkSession: (file) => checkPorntrexSession(file),
@@ -38,10 +38,11 @@ async function profileInUse(profilePath: string): Promise<boolean> {
 }
 
 // `npm run ptrex:connect-iphone`: one Porntrex login shared by the pipeline and
-// the phone. Ensures the pipeline's session is logged in (logging in only if
-// it is not), copies that session into the Video Vault app, checks both, and resumes
+// the phone. Uses the existing session unless a password login is explicitly
+// authorized, copies that session into the Video Vault app, checks both, and resumes
 // the campaign if it was running or stopped for a lost session.
-export async function connectPorntrexPhone(config: PipelineConfig, dependencies = defaultDependencies(config)): Promise<unknown> {
+export async function connectPorntrexPhone(config: PipelineConfig, dependencies = defaultDependencies(config),
+    options: { allowPasswordLogin?: boolean } = {}): Promise<unknown> {
     const sessionFile = config.porntrexSessionPath;
     if (!sessionFile) throw new Error("No Porntrex session file is configured");
     let database = new PipelineDatabase(config.databasePath);
@@ -66,7 +67,7 @@ export async function connectPorntrexPhone(config: PipelineConfig, dependencies 
     }
 
     const before = await readPorntrexSession(sessionFile);
-    await dependencies.openPipelineSession();
+    await dependencies.openPipelineSession(options.allowPasswordLogin === true);
     const session = await readPorntrexSession(sessionFile);
     if (!session) throw new Error("The pipeline did not store a Porntrex session");
     const fingerprint = sessionFingerprint(session.cookies);

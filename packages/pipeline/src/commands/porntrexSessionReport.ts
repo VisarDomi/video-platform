@@ -14,31 +14,41 @@ export async function porntrexSessionReport(config: PipelineConfig, now = new Da
     try {
         const events = database.listProviderSessionEvents("porntrex");
         const fingerprint = session ? sessionFingerprint(session.cookies) : null;
-        const current = events.filter((event) => event.fingerprint === fingerprint);
+        const loginAt = session ? Date.parse(session.passwordLoginAt) : Number.NaN;
+        // PHP may reuse its cookie value after a new password login. Cookie
+        // identity alone must not mix two different authentication lifetimes.
+        const current = events.filter((event) => event.fingerprint === fingerprint
+            && Date.parse(event.occurredAt) >= loginAt
+            && (!event.passwordLoginAt || event.passwordLoginAt === session?.passwordLoginAt));
         const checks = current.filter((event) => event.kind === "keepalive");
         const ok = checks.filter((event) => event.loggedIn);
-        const lastOk = ok.at(-1)?.occurredAt ?? null;
-        const lastCheck = checks.at(-1) ?? null;
-        const loginAt = session ? Date.parse(session.passwordLoginAt) : Number.NaN;
+        const confirmations = current.filter(event => event.kind === "keepalive"
+            || event.kind === "phone_connected" && event.loggedIn === true);
+        const lastOk = confirmations.filter(event => event.loggedIn).at(-1)?.occurredAt ?? null;
+        const lastCheck = confirmations.at(-1) ?? null;
         const losses = events.filter((event) => event.kind === "lost" || (event.kind === "keepalive" && event.loggedIn === false));
-        const firstLoss = losses.find((event) => event.fingerprint === fingerprint);
+        const firstLoss = losses.find((event) => current.includes(event));
         const alive = lastCheck?.loggedIn === true;
+        const fresh = lastCheck !== null && now.getTime() - Date.parse(lastCheck.occurredAt) <= 15 * 60_000;
         const ageAtLastOk = lastOk ? days(Date.parse(lastOk) - loginAt) : null;
         const verdict = !session ? "No shared session yet: run `npm run ptrex:connect-iphone`."
+            : !fresh ? `No recent session check; last confirmed logged in at ${lastOk ?? "never"}. Current authentication is unknown.`
             : alive && ageAtLastOk !== null && ageAtLastOk >= 31
                 ? `Still logged in ${ageAtLastOk} days after its password login: porntrex does not end sessions at 30 days.`
                 : alive ? `Logged in; ${ageAtLastOk ?? 0} days since the password login (30-day question answered after day 31).`
                     : firstLoss ? `Logged out ${days(Date.parse(firstLoss.occurredAt) - loginAt)} days after its password login (${firstLoss.note ?? "no detail"}). `
-                        + "If no other login happened then, porntrex ended it by age."
+                        + "The check cannot distinguish idle expiry, an explicit logout or a replacement login."
                         : "Not confirmed logged in yet.";
         return {
             sharedSession: fingerprint,
             passwordLoginAt: session?.passwordLoginAt ?? null,
             ageDays: session ? days(now.getTime() - loginAt) : null,
+            currentStatus: !fresh ? "unknown" : alive ? "logged_in" : "logged_out",
             keepalive: {
                 checks: checks.length,
                 loggedIn: ok.length,
                 lastCheckAt: lastCheck?.occurredAt ?? null,
+                lastCheckKind: lastCheck?.kind ?? null,
                 lastResult: lastCheck ? (lastCheck.loggedIn ? "logged in" : lastCheck.note) : null,
                 lastLoggedInAt: lastOk,
                 errors: current.filter((event) => event.kind === "keepalive_error").length,

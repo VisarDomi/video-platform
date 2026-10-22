@@ -4,6 +4,9 @@ Monorepo. Packages: `app` (TypeScript frontend: the local website; the iPhone ap
 
 Recording providers: `tango`, `fc2`, `sc`.
 Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
+`video-ptrex-session.timer` maintains the shared phone session every ten minutes even
+while the upload worker is stopped. It makes one cookie-only request, skips a live worker,
+and never logs in, launches processing or changes campaign intent.
 
 The monorepo owns its systemd user configuration under `systemd/user/`. Keep
 the installed copies synchronized with `npm run systemd:check` and

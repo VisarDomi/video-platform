@@ -29,6 +29,7 @@ import { porntrexSessionReport } from "./commands/porntrexSessionReport.js";
 import { porntrexUploadsReport } from "./commands/porntrexUploadsReport.js";
 import { porntrexTiersReport } from "./commands/porntrexTiersReport.js";
 import { retryRecording } from "./commands/retryRecording.js";
+import { maintainPorntrexSession } from "./commands/maintainPorntrexSession.js";
 
 function usage(): never {
     throw new Error([
@@ -43,7 +44,8 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider porntrex --apply]",
         "  metadata-check [--provider porntrex]",
-        "  ptrex-connect-iphone --apply | ptrex-session-report | ptrex-uploads [--limit N] | ptrex-tiers [--record FILE]",
+        "  ptrex-connect-iphone --apply [--allow-password-login] | ptrex-session-report | ptrex-uploads [--limit N] | ptrex-tiers [--record FILE]",
+        "  ptrex-session-keepalive --apply (authentication only; no upload work)",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -83,7 +85,12 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "metadata-check", "ptrex-connect-iphone", "ptrex-session-report", "ptrex-uploads", "ptrex-tiers"].includes(command ?? "")) usage();
+        "upload-provider", "metadata-check", "ptrex-connect-iphone", "ptrex-session-report", "ptrex-session-keepalive", "ptrex-uploads", "ptrex-tiers"].includes(command ?? "")) usage();
+    if (command === "ptrex-session-keepalive") {
+        requireApply(process.argv.slice(3));
+        console.log(JSON.stringify(await maintainPorntrexSession(pipelineConfig)));
+        return;
+    }
     if (command === "ptrex-tiers") {
         console.log(JSON.stringify(await porntrexTiersReport(pipelineConfig, option(process.argv.slice(3), "--record")), null, 2));
         return;
@@ -95,7 +102,8 @@ async function main(): Promise<void> {
     }
     if (command === "ptrex-connect-iphone") {
         requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await connectPorntrexPhone(pipelineConfig), null, 2));
+        console.log(JSON.stringify(await connectPorntrexPhone(pipelineConfig, undefined,
+            { allowPasswordLogin: process.argv.slice(3).includes("--allow-password-login") }), null, 2));
         return;
     }
     if (command === "ptrex-session-report") {

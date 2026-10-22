@@ -25,8 +25,13 @@ final class Stub: URLProtocol, @unchecked Sendable {
         let url = request.url!
         var body = "<p>404</p>", status = 404
         if url.host == "www.porntrex.com", url.path(percentEncoded: true) == "/my/videos/" {
-            body = url.query?.contains("from_my_videos=2") == true ? ptSecond : ptFirst
-            status = 200
+            if let code = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "status" })?.value.flatMap(Int.init) {
+                body = "<p>Temporarily unavailable</p>"
+                status = code
+            } else {
+                body = url.query?.contains("from_my_videos=2") == true ? ptSecond : ptFirst
+                status = 200
+            }
         }
         let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/html"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -64,6 +69,19 @@ struct VaultTests {
         print("PASS: order, marks, labels")
 
         let http = VaultHTTP(jar: CookieJar(file: nil), configure: { $0.protocolClasses = [Stub.self] })
+        for status in [401, 403, 429, 503] {
+            do {
+                _ = try await http.read(.porntrex, "/my/videos/?status=\(status)")
+                expect(false, "HTTP \(status) must report an unavailable page")
+            } catch VaultError.failed { }
+            catch { expect(false, "HTTP \(status) is not proof that the shared session ended") }
+        }
+        do {
+            _ = try Porntrex.parse(SitePage(html: "<p>Checking your browser</p>", landed: "/cdn-cgi/challenge-platform/"), page: 1)
+            expect(false, "Unexpected redirect must fail")
+        } catch VaultError.failed { }
+        catch { expect(false, "A challenge redirect is not a sign-out") }
+        print("PASS: outages and unexpected redirects do not declare a sign-out")
         var cursor: Vault.Cursor?, all: [VaultVideo] = [], last: Vault.Page?
         repeat {
             let page = try await Vault.page(http, cursor: cursor)
