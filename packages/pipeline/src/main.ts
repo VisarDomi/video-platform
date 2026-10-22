@@ -29,6 +29,7 @@ import { videohostSessionReport } from "./commands/videohostSessionReport.js";
 import { videohostUploadsReport } from "./commands/videohostUploadsReport.js";
 import { videohostTiersReport } from "./commands/videohostTiersReport.js";
 import { retryRecording } from "./commands/retryRecording.js";
+import { maintainVideoHostSession } from "./commands/maintainVideoHostSession.js";
 
 function usage(): never {
     throw new Error([
@@ -43,7 +44,8 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider videohost --apply]",
         "  metadata-check [--provider videohost]",
-        "  vhost-connect-iphone --apply | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
+        "  vhost-connect-iphone --apply [--allow-password-login] | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
+        "  vhost-session-keepalive --apply (authentication only; no upload work)",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -83,7 +85,12 @@ async function main(): Promise<void> {
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+        "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-session-keepalive", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+    if (command === "vhost-session-keepalive") {
+        requireApply(process.argv.slice(3));
+        console.log(JSON.stringify(await maintainVideoHostSession(pipelineConfig)));
+        return;
+    }
     if (command === "vhost-tiers") {
         console.log(JSON.stringify(await videohostTiersReport(pipelineConfig, option(process.argv.slice(3), "--record")), null, 2));
         return;
@@ -95,7 +102,8 @@ async function main(): Promise<void> {
     }
     if (command === "vhost-connect-iphone") {
         requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await connectVideoHostPhone(pipelineConfig), null, 2));
+        console.log(JSON.stringify(await connectVideoHostPhone(pipelineConfig, undefined,
+            { allowPasswordLogin: process.argv.slice(3).includes("--allow-password-login") }), null, 2));
         return;
     }
     if (command === "vhost-session-report") {

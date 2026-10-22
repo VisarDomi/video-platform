@@ -13,6 +13,8 @@ const managedFiles = [
     "video-auth.service",
     "video-downloader.service",
     "video-pipeline.service",
+    "video-vhost-session.service",
+    "video-vhost-session.timer",
     "video-processing.slice",
     "video-server.service",
     "video-xvfb.service",
