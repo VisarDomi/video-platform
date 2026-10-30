@@ -287,6 +287,15 @@ PC evidence is `~/.cache/native-zoom-20261030/`. After a real phone probe succee
 task's `~/Library/Caches/ios-app-refresh/resume-zoom.py` activates those exact source/artifact
 pairs and installs them without launching any app, approving renewals only after success.
 
+The away-from-home path was then checked with the owner's phone online on Tailscale.
+TCP connected, but the existing paired lockdown handshake timed out and CoreDevice could
+not find the device. All staged apps were published through the existing private OTA helper
+at `https://mac.tailf47c4e.ts.net:8443/zoom-updates/`. HTTPS page/manifest downloads and
+every downloaded IPA hash matched the verified staged packages. This is publication,
+not an installation receipt: iOS's Install confirmation and the owner's completion report
+are still needed. Keep the approved renewal sources in place until the installed cohort is
+confirmed; then restore its exact staged source/artifact pairs and approve those deliveries.
+
 ## Renewal
 
 The provider builder enters the shared workload guard and limits Xcode to two jobs.
