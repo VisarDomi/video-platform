@@ -45,7 +45,7 @@ function usage(): never {
         "  upload-provider [--provider videohost --apply]",
         "  metadata-check [--provider videohost]",
         "  vhost-connect-iphone --apply [--allow-password-login] | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
-        "  vhost-session-keepalive --apply (authentication only; no upload work)",
+        "  vhost-session-keepalive --apply [--sync-phone] (authentication only; no upload work)",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -88,7 +88,8 @@ async function main(): Promise<void> {
         "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-session-keepalive", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
     if (command === "vhost-session-keepalive") {
         requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await maintainVideoHostSession(pipelineConfig)));
+        console.log(JSON.stringify(await maintainVideoHostSession(pipelineConfig, undefined, undefined,
+            { syncPhone: process.argv.slice(3).includes("--sync-phone") })));
         return;
     }
     if (command === "vhost-tiers") {
