@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tango Login",
-  "version": "1.0",
+  "version": "1.1",
   "description": "One-time Safari login import for the Tango app. Disable after importing.",
   "permissions": ["cookies", "nativeMessaging"],
   "host_permissions": ["https://tango.me/*", "https://www.tango.me/*", "https://gateway.tango.me/*"],

@@ -1,5 +1,6 @@
 import Foundation
 import KitNet
+import KitCore
 
 // Tango live (packages/app providers/tango-live.ts, ported): followed streams first, then
 // recommendations, one entry per streamer, never blocked ones; Follow, two-step Block and
@@ -21,9 +22,14 @@ struct TangoStream: Codable, Sendable, Equatable {
 
 enum TangoError: LocalizedError {
     case loginRequired
+    case verificationRequired
     case failed(String)
     var errorDescription: String? {
-        switch self { case .loginRequired: "Tango login is required."; case .failed(let text): text }
+        switch self {
+        case .loginRequired: "Tango login is required."
+        case .verificationRequired: "Tango needs browser verification to renew this login. Your saved login has been kept."
+        case .failed(let text): text
+        }
     }
 }
 
@@ -45,6 +51,53 @@ enum Tango {
     static let publicAPI = "https://gateway.tango.me/proxycador/api/public/v1"
     static let refreshURL = URL(string: "https://gateway.tango.me/session-service/public/v2/session/web/refresh")!
     static let tokenURL = URL(string: "https://gateway.tango.me/proxycador/api/public/v1/live/stream/v1/tokenData")!
+
+    static func isChallenge(status: Int, data: Data) -> Bool {
+        status == 424 && (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["errorCode"] as? String == "CHALLENGE_REQUIRED"
+    }
+
+    static func firstParty(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.lowercased()
+        return domain == "tango.me" || domain.hasSuffix(".tango.me")
+    }
+
+    private static func tokenDate(_ value: String, key: String) -> Date? {
+        let parts = value.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var text = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        text += String(repeating: "=", count: (4 - text.count % 4) % 4)
+        guard let bytes = Data(base64Encoded: text), let body = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let seconds = body[key] as? Double else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    static func expiration(_ cookie: HTTPCookie) -> Date {
+        min(cookie.expiresDate ?? .distantFuture, tokenDate(cookie.value, key: "exp") ?? .distantFuture)
+    }
+
+    static func credential(_ name: String, in jar: CookieJar) -> HTTPCookie? {
+        // The current website issues credentials through /api on www.tango.me. Older
+        // installations used gateway.tango.me and a different cookie path.
+        jar.all.filter { $0.name == name && firstParty($0) && expiration($0) > Date() }.max {
+            (tokenDate($0.value, key: "iat") ?? $0.expiresDate ?? .distantPast) < (tokenDate($1.value, key: "iat") ?? $1.expiresDate ?? .distantPast)
+        }
+    }
+
+    // Keep every previously used first-party cookie scope on the same credential, in
+    // one durable snapshot. Removing first would briefly persist an empty login.
+    static func storeLogin(_ cookies: [HTTPCookie], in jar: CookieJar) {
+        let trusted = cookies.filter(firstParty)
+        var batch = trusted
+        for old in jar.all where firstParty(old) && ["Tango-ST", "Tango-RT"].contains(old.name) {
+            guard !trusted.contains(where: { $0.name == old.name && $0.domain == old.domain && $0.path == old.path }),
+                  let fresh = trusted.first(where: { $0.name == old.name }), var properties = fresh.properties else { continue }
+            properties[.domain] = old.domain
+            properties[.path] = old.path
+            if let replacement = HTTPCookie(properties: properties) { batch.append(replacement) }
+        }
+        jar.set(batch)
+        jar.flush()
+    }
 
     // The account and session a refresh names, from the refresh token's payload.
     static func claims(_ token: String) -> (account: String, session: String)? {
@@ -123,16 +176,45 @@ enum Tango {
 // The session (Tango-ST, an hour; refreshed from Tango-RT) and the playback tokens (tt, ttu,
 // tte: 10 seconds), for the list's requests and the player's playlists.
 actor TangoSession {
+    typealias LoginRecovery = @Sendable () async throws -> [HTTPCookie]
     let jar: CookieJar
     private let session: URLSession
     private var refreshing: Task<Void, Error>?
     private var stream: (header: String, expires: Date)?
     private var streamTask: Task<Void, Error>?
     private var loop: Task<Void, Never>?
+    private let diagnostics: BackgroundWriter?
+    private var events: [NetworkEvent] = []
+    private let loginRecovery: LoginRecovery?
+    private var proactiveRefresh: Task<Void, Never>?
+    private var nextRefreshAttempt = Date.distantPast
+    private var lastRefreshFailure: Error?
 
-    init(jar: CookieJar) {
+    private struct NetworkEvent: Codable, Sendable {
+        var time = Date()
+        var kind: String
+        var path: String
+        var status: Int?
+        var contentType: String?
+        var requestCookieNames: [String]
+        var responseCookieNames: [String] = []
+        var legacyHeaderCast: Bool?
+        var errorDomain: String?
+        var errorCode: Int?
+        var serverError: String?
+    }
+
+    private struct NetworkSnapshot: Codable, Sendable {
+        var build: String
+        var source: String
+        var events: [NetworkEvent]
+    }
+
+    init(jar: CookieJar, diagnosticURL: URL? = nil, configuration supplied: URLSessionConfiguration? = nil, loginRecovery: LoginRecovery? = nil) {
         self.jar = jar
-        let configuration = URLSessionConfiguration.ephemeral
+        self.loginRecovery = loginRecovery
+        diagnostics = diagnosticURL.map { BackgroundWriter(url: $0, label: "tango-network") }
+        let configuration = supplied ?? URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -140,16 +222,69 @@ actor TangoSession {
         session = URLSession(configuration: configuration)
     }
 
-    nonisolated var refreshToken: String? { jar.value("Tango-RT", for: Tango.refreshURL) }
+    // Bounded, credential-free diagnostics. Only cookie names, HTTP status and transport
+    // error codes are stored; headers, bodies, token values and account IDs never are.
+    private func fetch(_ request: URLRequest, kind: String) async throws -> (Data, URLResponse) {
+        let names = (request.value(forHTTPHeaderField: "Cookie") ?? "").split(separator: ";").map { $0.split(separator: "=", maxSplits: 1).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? "" }
+        var event = NetworkEvent(kind: kind, path: request.url?.path ?? "", requestCookieNames: names)
+        do {
+            let answer = try await session.data(for: request)
+            if let http = answer.1 as? HTTPURLResponse {
+                event.status = http.statusCode
+                event.contentType = http.value(forHTTPHeaderField: "Content-Type")
+                event.legacyHeaderCast = http.allHeaderFields is [String: String]
+                if http.statusCode >= 400, let body = try? JSONSerialization.jsonObject(with: answer.0) as? [String: Any] {
+                    let text = ["code", "errorCode", "status", "error", "message", "errorMessage", "error_description", "reason"].compactMap { key -> String? in
+                        guard let value = body[key] as? String else { return nil }
+                        return key + ": " + value
+                    }.joined(separator: "; ")
+                    event.serverError = "fields=" + body.keys.sorted().joined(separator: ",") + "; " + String(text.replacingOccurrences(of: #"eyJ[A-Za-z0-9_.-]{20,}"#, with: "<redacted-token>", options: .regularExpression)
+                        .replacingOccurrences(of: #"Tango-(?:ST|RT)=[^;\s]+"#, with: "<redacted-cookie>", options: .regularExpression).prefix(500))
+                }
+                event.responseCookieNames = http.allHeaderFields.flatMap { key, value -> [String] in
+                    guard String(describing: key).lowercased() == "set-cookie" else { return [] }
+                    let values = (value as? [String]) ?? (value as? String).map { [$0] } ?? []
+                    return values.flatMap { HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": $0], for: http.url ?? request.url!).map(\.name) }
+                }
+            }
+            record(event)
+            return answer
+        } catch {
+            let error = error as NSError
+            event.errorDomain = error.domain
+            event.errorCode = error.code
+            record(event)
+            throw error
+        }
+    }
+
+    private func record(_ event: NetworkEvent) {
+        guard let diagnostics else { return }
+        events.append(event)
+        if events.count > 24 { events.removeFirst(events.count - 24) }
+        diagnostics.save(json: NetworkSnapshot(build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+                                               source: Bundle.main.object(forInfoDictionaryKey: "VideoSourceRevision") as? String ?? "", events: events))
+    }
+
+    nonisolated var refreshToken: String? { Tango.credential("Tango-RT", in: jar)?.value }
     nonisolated var signedIn: Bool { refreshToken.flatMap(Tango.claims) != nil }
 
     private nonisolated func cookie(_ name: String) -> HTTPCookie? {
-        jar.cookies(for: Tango.tokenURL).first { $0.name == name } ?? jar.cookies(for: Tango.refreshURL).first { $0.name == name }
+        Tango.credential(name, in: jar)
     }
 
-    // A session token good for a while (refreshed when it has under five minutes left).
+    // Renew ahead of expiry, keeping usable access/stream tokens flowing while the
+    // provider's browser verification completes. Only expired/rejected tokens wait.
     func sessionToken() async throws -> String {
-        if let st = cookie("Tango-ST"), (st.expiresDate ?? .distantFuture).timeIntervalSinceNow > 300 { return st.value }
+        if let st = cookie("Tango-ST"), Tango.expiration(st).timeIntervalSinceNow > 0 {
+            if Tango.expiration(st).timeIntervalSinceNow <= 300, proactiveRefresh == nil, Date() >= nextRefreshAttempt {
+                proactiveRefresh = Task {
+                    defer { self.proactiveRefresh = nil }
+                    do { try await self.refresh() } catch { /* The expired-token path reports it. */ }
+                }
+            }
+            return st.value
+        }
         try await refresh()
         guard let st = cookie("Tango-ST") else { throw TangoError.loginRequired }
         return st.value
@@ -158,10 +293,29 @@ actor TangoSession {
     // One refresh at a time; callers share it. A 401/403 means the login is gone.
     func refresh() async throws {
         if let refreshing { return try await refreshing.value }
+        if Date() < nextRefreshAttempt, let lastRefreshFailure { throw lastRefreshFailure }
         let task = Task { try await self.renewSession() }
         refreshing = task
         defer { refreshing = nil }
-        try await task.value
+        do {
+            try await task.value
+            lastRefreshFailure = nil
+            nextRefreshAttempt = .distantPast
+        } catch {
+            lastRefreshFailure = error
+            if case TangoError.verificationRequired = error {
+                nextRefreshAttempt = Date().addingTimeInterval(120)
+            } else { nextRefreshAttempt = Date().addingTimeInterval(30) }
+            throw error
+        }
+    }
+
+    func retryAfterConnectionChange() {
+        // Never cancel an in-flight rotating-token request; allow one new attempt after
+        // a real reconnection/foreground/manual retry once that owner has finished.
+        guard refreshing == nil else { return }
+        nextRefreshAttempt = .distantPast
+        lastRefreshFailure = nil
     }
 
     private func renewSession() async throws {
@@ -174,24 +328,47 @@ actor TangoSession {
         request.setValue("https://www.tango.me", forHTTPHeaderField: "Origin")
         request.setValue("https://www.tango.me/", forHTTPHeaderField: "Referer")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["accountId": ids.account, "sessionId": ids.session])
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await fetch(request, kind: "session-refresh")
+        guard refreshToken == rt else { return } // A newer explicit login owns the jar now.
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         if http.statusCode == 401 || http.statusCode == 403 { throw TangoError.loginRequired }
+        if Tango.isChallenge(status: http.statusCode, data: data) {
+            guard let loginRecovery else { throw TangoError.verificationRequired }
+            do {
+                let cookies = try await loginRecovery()
+                guard refreshToken == rt else { return }
+                let trusted = cookies.filter(Tango.firstParty)
+                guard let replacement = trusted.first(where: { $0.name == "Tango-RT" }),
+                      Tango.claims(replacement.value)?.account == ids.account,
+                      trusted.contains(where: { $0.name == "Tango-ST" && ($0.expiresDate ?? .distantFuture) > Date() })
+                else { throw TangoError.verificationRequired }
+                commit(trusted)
+                record(NetworkEvent(kind: "browser-recovery", path: "/api/tango/phone-session", status: 200, requestCookieNames: [], responseCookieNames: trusted.map(\.name)))
+                return
+            } catch { throw TangoError.verificationRequired }
+        }
         guard http.statusCode == 200 else { throw TangoError.failed("Tango session refresh answered \(http.statusCode)") }
         let fresh = HTTPCookie.cookies(withResponseHeaderFields: (http.allHeaderFields as? [String: String]) ?? [:], for: Tango.refreshURL)
             .filter { $0.name == "Tango-ST" || $0.name == "Tango-RT" }
         guard fresh.contains(where: { $0.name == "Tango-ST" }) else { throw TangoError.failed("Tango did not return a session token") }
         // A rotated refresh token is saved (and synced) before anything else.
-        jar.set(fresh)
-        jar.flush()
+        commit(fresh)
+    }
+
+    private func commit(_ cookies: [HTTPCookie]) {
+        Tango.storeLogin(cookies.filter { ["Tango-ST", "Tango-RT"].contains($0.name) }, in: jar)
     }
 
     // Gateway requests with the session's cookies; a 401/403 refreshes once more.
     func send(_ path: String, method: String = "GET", body: Data? = nil, json: Bool = false) async throws -> Data {
         for attempt in 0..<2 {
             let request = Tango.request(path, method: method, body: body, json: json, sessionToken: try await sessionToken())
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await fetch(request, kind: "gateway")
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if Tango.isChallenge(status: status, data: data) {
+                if attempt == 0 { try await refresh(); continue }
+                throw TangoError.verificationRequired
+            }
             if (status == 401 || status == 403) && attempt == 0 { try await refresh(); continue }
             if status == 401 || status == 403 { throw TangoError.loginRequired }
             guard (200...299).contains(status) else { throw TangoError.failed("\(request.url!.path) answered \(status)") }
@@ -243,26 +420,33 @@ actor TangoSession {
     }
 
     private func renewStream() async throws {
-        let st = try await sessionToken()
-        var request = URLRequest(url: Tango.tokenURL, timeoutInterval: 10)
-        request.setValue("Tango-ST=" + st, forHTTPHeaderField: "Cookie")
-        request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Accept")
-        // As packages/auth does: a request unanswered after 1 s gets a second one; the first answer wins.
-        let answer = try await hedged(request)
-        if answer.status == 401 { try await refresh(); throw URLError(.userAuthenticationRequired) }
-        let values = Dictionary(HTTPCookie.cookies(withResponseHeaderFields: answer.headers, for: Tango.tokenURL).map { ($0.name, $0.value) }, uniquingKeysWith: { $1 })
-        guard answer.status == 200, let tt = values["tt"], let ttu = values["ttu"], let tte = values["tte"] else { throw URLError(.badServerResponse) }
-        stream = ("tt=\(tt);ttu=\(ttu);tte=\(tte)", Double(tte).map(Date.init(timeIntervalSince1970:)) ?? Date().addingTimeInterval(10))
+        for attempt in 0..<2 {
+            let st = try await sessionToken()
+            var request = URLRequest(url: Tango.tokenURL, timeoutInterval: 10)
+            request.setValue("Tango-ST=" + st, forHTTPHeaderField: "Cookie")
+            request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Accept")
+            // A slow request is hedged; a rejected token is renewed only once.
+            let answer = try await hedged(request)
+            if answer.status == 401 || Tango.isChallenge(status: answer.status, data: answer.body) {
+                if attempt == 0 { try await refresh(); continue }
+                throw (answer.status == 401 ? TangoError.loginRequired : TangoError.verificationRequired)
+            }
+            let values = Dictionary(HTTPCookie.cookies(withResponseHeaderFields: answer.headers, for: Tango.tokenURL).map { ($0.name, $0.value) }, uniquingKeysWith: { $1 })
+            guard answer.status == 200, let tt = values["tt"], let ttu = values["ttu"], let tte = values["tte"] else { throw URLError(.badServerResponse) }
+            stream = ("tt=\(tt);ttu=\(ttu);tte=\(tte)", Double(tte).map(Date.init(timeIntervalSince1970:)) ?? Date().addingTimeInterval(10))
+            return
+        }
+        throw TangoError.verificationRequired
     }
 
-    private struct Answer: Sendable { let status: Int; let headers: [String: String] }
+    private struct Answer: Sendable { let status: Int; let headers: [String: String]; let body: Data }
 
     private func hedged(_ request: URLRequest) async throws -> Answer {
         try await withThrowingTaskGroup(of: Answer.self) { group in
             let fetch: @Sendable () async throws -> Answer = { [session] in
-                let (_, response) = try await session.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 let http = response as? HTTPURLResponse
-                return Answer(status: http?.statusCode ?? 0, headers: (http?.allHeaderFields as? [String: String]) ?? [:])
+                return Answer(status: http?.statusCode ?? 0, headers: (http?.allHeaderFields as? [String: String]) ?? [:], body: data)
             }
             group.addTask(operation: fetch)
             group.addTask {

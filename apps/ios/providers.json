@@ -32,7 +32,7 @@
     "name": "Tango",
     "product": "Tango",
     "bundleId": "com.visar.Tango.paid",
-    "build": "22",
+    "build": "25",
     "url": "https://tango.me/",
     "hosts": [
       "tango.me",

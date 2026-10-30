@@ -34,6 +34,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
 - Never commit `Private/` (Tango's PC login key) or `build/`; both are gitignored.
 - Do not play video in the iOS simulator: it overloads the Mac. Playback is checked on the
   phone.
+- Routine UI, lifecycle and simulated-network checks use the Mac's virtual iPhone. Use the
+  physical phone only for behavior that cannot be established there, such as its actual
+  network/authentication path. Remove any temporary phone controller and verify removal.
 - The main thread only shows (below). Keep new work off it and check frames with
   FrameMonitor.
 - A changed renewal input (Renewal, below) blocks that app's monthly renewal until it is
@@ -175,6 +178,23 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
   refreshed from the refresh token when it has under five minutes left (one refresh at a
   time; a rotated refresh token is saved before anything else, as `packages/auth` does), and
   the stream tokens every 5 seconds while a stream plays.
+  - A valid access token remains usable while early renewal runs. An explicit HTTP 424
+    `CHALLENGE_REQUIRED` is provider verification, not an offline connection or a logout.
+    One renewal owner uses the existing PC phone-session automation when available, checks
+    that the account matches, and commits the fresh pair durably before adopting it.
+    The owner prefers this PC-login path; it works directly on the home LAN without the VPN.
+    When it cannot complete, the app preserves the login and shows verification/Safari
+    recovery. Ordinary outages never create new logins. Retries are bounded, and path or
+    foreground recovery retries failed loads immediately; only successful loads start the
+    normal half-hour refresh interval.
+  - The current site issues login responses through `www.tango.me/api`. Safari import and
+    native credential restoration accept that first-party scope and legacy gateway scopes;
+    old paths cannot shadow newer credentials. Credential scopes update in one snapshot.
+    The fallback importer uses the active Safari tab's cookie store and derives missing
+    session-cookie expiry from the JWT.
+  - `tango-network.json` records at most 24 sanitized request outcomes (status/error codes,
+    cookie names and native build/source identity), without token values, request bodies or
+    cookie headers. `debug-state.json` also identifies the installed native source.
   - Signing in stays the Safari handoff, so Tango works away from home: sign in with Google
     on tango.me in Safari, Import with the Tango Login extension, delete Tango's Safari
     website data and confirm in the app ("Safari data cleared — continue"). Tango Login
@@ -268,6 +288,13 @@ reader relayout, then checks fit, stable layer identity, carousel locking, portr
 zoom, deferred reader metadata and retained image surfaces. The fixtures and their commands
 compile only for the simulator; they cannot run in phone builds.
 
+`Tests/TangoSessionTests.swift` checks single-flight challenge recovery, no re-login during
+outages, cooldowns, account preservation, durable cookie scopes and valid-token renewal.
+`scripts/check-tango-network.py` drives the actual native list with simulator-only synthetic
+HTTP: reconnect, foreground retry, refresh failure, one browser recovery and verification
+fallback. It never plays media or contacts a real Tango account. The Safari cookie helper's
+PC tests are `node --test apps/ios/Tests/TangoLoginCookies.test.mjs`.
+
 ### October 30 zoom verification
 
 The saved baseline reproduced width-only clipping, attachment of a second player layer,
@@ -279,22 +306,44 @@ calibration screenshots were inspected; no video was played in the simulator and
 UI was automated. The owned guest and GUI closed, with no new graphics failure report.
 
 All 17 registered NativeKit app builds were signed and verified, including the unused
-reader-module copies in Trader and Guidance. The phone could not be reached for installation.
-The exact candidates and their sources are staged privately under Mac
+reader-module copies in Trader and Guidance. At that checkpoint the phone could not be
+reached for installation. The candidates and their sources were staged privately under Mac
 `~/Library/Caches/ios-app-refresh/native-zoom-pending-20261030/`; all original renewal-source
-hashes were restored and verified against their approved states. The phone is unchanged.
-PC evidence is `~/.cache/native-zoom-20261030/`. After a real phone probe succeeds, the
-task's `~/Library/Caches/ios-app-refresh/resume-zoom.py` activates those exact source/artifact
-pairs and installs them without launching any app, approving renewals only after success.
+hashes were restored and verified against their approved states, leaving the phone unchanged.
+PC evidence is `~/.cache/native-zoom-20261030/`. The task's `resume-zoom.py` was prepared to
+activate those exact source/artifact pairs after a successful real phone probe.
 
 The away-from-home path was then checked with the owner's phone online on Tailscale.
 TCP connected, but the existing paired lockdown handshake timed out and CoreDevice could
 not find the device. All staged apps were published through the existing private OTA helper
 at `https://mac.tailf47c4e.ts.net:8443/zoom-updates/`. HTTPS page/manifest downloads and
-every downloaded IPA hash matched the verified staged packages. This is publication,
-not an installation receipt: iOS's Install confirmation and the owner's completion report
-are still needed. Keep the approved renewal sources in place until the installed cohort is
-confirmed; then restore its exact staged source/artifact pairs and approve those deliveries.
+every downloaded IPA hash matched the verified staged packages. Publication alone did not
+establish installation; the completion record below supersedes that pending state.
+
+### October 31 delivery and Tango recovery
+
+All 17 updates were subsequently installed in place over the authenticated native phone
+connection and approved for renewal. Registered Mac mirrors and signed caches now contain
+the delivered source/artifact pairs. The old staging manifest is marked
+`superseded-and-delivered`; do not run its historical `resume-zoom.py`. The five video OTA
+packages were also republished and their HTTPS downloads verified against the current
+signed packages. No product app was uninstalled or had its data reset.
+
+Tango build 25 includes the session, reconnect and verification fixes above, plus the Safari
+importer's current first-party cookie scopes (extension version 1.1). A real phone renewal
+returned `424 CHALLENGE_REQUIRED`, completed one automatic PC-assisted browser login, and
+durably saved the replacement phone session. PC maintenance independently renewed its own
+session and obtained a live stream token; phone and PC session families were distinct.
+The corrected Xvfb login flow passed. No VPN routing fault was reproduced.
+
+Routine outage, reconnect, foreground and verification UI checks passed on the Mac's virtual
+iPhone with synthetic HTTP. The temporary physical-phone controller used for device-specific
+diagnosis was stopped, uninstalled and verified absent. The owned guest and Simulator GUI
+are closed, with no active workload lease or new graphics failure report. The actual renewal
+check covers one controlled cycle, not a long-duration soak.
+
+Sanitized receipts and reports are under PC `~/.cache/tango-off-vpn-20261030/` and Mac
+`~/Library/Caches/ios-app-refresh/tango-final-delivery-20261031/`.
 
 ## Renewal
 

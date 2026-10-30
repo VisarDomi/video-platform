@@ -4,6 +4,21 @@ export interface TokenBag {
     extras: Record<string, string | null>;
 }
 
+export class BrowserVerificationRequiredError extends Error {
+    readonly code = "CHALLENGE_REQUIRED";
+    constructor() {
+        super("Tango requires browser verification before this session can be renewed.");
+        this.name = "BrowserVerificationRequiredError";
+    }
+}
+
+export class BrowserLoginNeedsAttentionError extends Error {
+    constructor() {
+        super("Google sign-in needs user verification; automatic password retries have stopped.");
+        this.name = "BrowserLoginNeedsAttentionError";
+    }
+}
+
 export interface RefreshResult {
     newSessionToken: string;
     newRefreshToken: string | null;

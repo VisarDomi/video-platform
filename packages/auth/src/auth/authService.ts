@@ -1,9 +1,10 @@
 import * as timersPromises from "timers/promises";
 
 import logger from "../common/logger.js";
-import { Account, IAuthProvider } from "../providers/interfaces.js";
+import { Account, IAuthProvider, BrowserVerificationRequiredError, BrowserLoginNeedsAttentionError } from "../providers/interfaces.js";
 import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
+import { parseJwtPayload } from "./authUtils.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
 const SHORT_REFRESH_RETRY_MS = 1_000;
@@ -16,6 +17,8 @@ export class AuthService {
     private readonly account: Account;
     private readonly provider: IAuthProvider;
     private readonly authContext: AuthContext;
+    private browserLoginBlocked = false;
+    private maintaining: Promise<void> | null = null;
 
     constructor(account: Account, provider: IAuthProvider) {
         this.account = account;
@@ -28,15 +31,26 @@ export class AuthService {
 
         if (loadedFromFile) {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
+            // A freshly recovered access token is already usable. Validate it with the
+            // stream-token endpoint before consuming its rotating refresh token again.
+            const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
+            let reuseSession = typeof expires === "number" && expires * 1000 > Date.now() + 60_000;
             while (true) {
                 try {
-                    await this.ensureValidTokens("init");
+                    if (reuseSession) {
+                        await this.setTokenData();
+                        await this.authContext.saveTokenToFile();
+                        this.logTokenWrite("resume");
+                    } else { await this.ensureValidTokens("init"); }
                     logger.info(`Session successfully established for ${this.account.email} using token from file.`);
                     return;
                 } catch (error) {
                     const errorMessage = (error as Error).message;
-                    if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
-                        logger.warn(`Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
+                    if (error instanceof BrowserVerificationRequiredError || errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                        if (reuseSession) { reuseSession = false; continue; }
+                        logger.warn(error instanceof BrowserVerificationRequiredError
+                            ? `Tango requested browser verification for ${this.account.email}; completing the normal browser login.`
+                            : `Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
                         break;
                     } else {
                         logger.error(`Failed to establish session for ${this.account.email}: ${errorMessage}. Retrying...`);
@@ -53,6 +67,7 @@ export class AuthService {
                 logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
                 return;
             } catch (error) {
+                if (error instanceof BrowserLoginNeedsAttentionError) throw error;
                 const errorMessage = (error as Error).message;
                 logger.error(`Browser login failed for ${this.account.email}: ${errorMessage}. Retrying...`);
                 await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
@@ -66,6 +81,7 @@ export class AuthService {
     }
 
     private async performFreshLogin() {
+        if (this.browserLoginBlocked) throw new BrowserLoginNeedsAttentionError();
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
@@ -76,7 +92,10 @@ export class AuthService {
     }
 
     private async ensureValidTokens(source: string) {
-        await this.refreshSession();
+        const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
+        const recoveredSession = source === "session-maintain" && typeof expires === "number"
+            && expires * 1000 > Date.now() + this.provider.intervals.sessionRefresh + 60_000;
+        if (!recoveredSession) await this.refreshSession();
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
         this.logTokenWrite(source);
@@ -141,6 +160,7 @@ export class AuthService {
                 throw error instanceof AggregateError ? error.errors[0] : error;
             }
         }
+        if (this.authContext.getTokenBag() !== tokenBag) return;
         this.authContext.updateFromTokenData(result);
     }
 
@@ -167,24 +187,38 @@ export class AuthService {
                 await timersPromises.setTimeout(Math.max(0, this.provider.intervals.shortTokenRefresh - (Date.now() - startedAt)));
             } catch (error) {
                 consecutiveFail++;
+                if (error instanceof BrowserVerificationRequiredError && !this.browserLoginBlocked) {
+                    await this.maintainSession();
+                }
                 if (wasHealthy) {
                     logger.warn(`[Tango] Short-refresh failed for ${this.account.email} after ${consecutiveOk} successes: ${(error as Error).message}`);
                     wasHealthy = false;
                     consecutiveOk = 0;
                 }
-                await timersPromises.setTimeout(SHORT_REFRESH_RETRY_MS);
+                await timersPromises.setTimeout(this.browserLoginBlocked ? AUTH_LOGIN_RETRY_MS : SHORT_REFRESH_RETRY_MS);
             }
         }
     }
 
     private async manageTokenLifecycle() {
         while (true) {
-            await timersPromises.setTimeout(this.provider.intervals.sessionRefresh);
+            if (this.browserLoginBlocked) return;
+            const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
+            const delay = typeof expires === "number" ? Math.max(0, Math.min(this.provider.intervals.sessionRefresh, expires * 1000 - Date.now() - 300_000)) : this.provider.intervals.sessionRefresh;
+            await timersPromises.setTimeout(delay);
             await this.maintainSession();
         }
     }
 
     private async maintainSession() {
+        if (this.browserLoginBlocked) return;
+        if (this.maintaining) return this.maintaining;
+        const task = this.maintainSessionOnce();
+        this.maintaining = task;
+        try { await task; } finally { this.maintaining = null; }
+    }
+
+    private async maintainSessionOnce() {
         while (true) {
             try {
                 await this.ensureValidTokens("session-maintain");
@@ -192,20 +226,27 @@ export class AuthService {
                 return;
             } catch (error) {
                 const errorMessage = (error as Error).message;
-                if (errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
-                    logger.warn(`Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
+                if (error instanceof BrowserVerificationRequiredError || errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                    logger.warn(error instanceof BrowserVerificationRequiredError
+                        ? `Tango requested browser verification for ${this.account.email}; completing the normal browser login.`
+                        : `Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
                     try {
                         await this.performFreshLogin();
                         logger.info(`Successfully re-authenticated via browser login for ${this.account.email}.`);
                         return;
                     } catch (loginError) {
+                        if (loginError instanceof BrowserLoginNeedsAttentionError) {
+                            this.browserLoginBlocked = true;
+                            logger.error(loginError.message);
+                            return;
+                        }
                         logger.error(`Browser login failed during maintenance. Retrying after delay.`, { error: (loginError as Error).message });
                     }
                 } else {
                     logger.warn(`Session maintenance failed for ${this.account.email}. Retrying after delay.`, { error: errorMessage });
                 }
             }
-            await timersPromises.setTimeout(this.provider.intervals.shortTokenRefresh);
+            await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
         }
     }
 }

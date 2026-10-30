@@ -1,6 +1,7 @@
 import UIKit
 import KitLifecycle
 import KitTestHooks
+import KitCore
 
 @main
 @MainActor
@@ -25,7 +26,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: scene)
         window.overrideUserInterfaceStyle = .dark
         window.backgroundColor = .black
+        DebugState.shared.register("app") {
+            ["bundle": Bundle.main.bundleIdentifier ?? "", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+             "source": Bundle.main.object(forInfoDictionaryKey: "VideoSourceRevision") as? String ?? ""]
+        }
         #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-tango-network-check") {
+            window.rootViewController = TangoNetworkChecks()
+            window.makeKeyAndVisible()
+            self.window = window
+            TestHooks.shared.start()
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-zoom-check") {
             window.rootViewController = ZoomChecks()
             window.makeKeyAndVisible()

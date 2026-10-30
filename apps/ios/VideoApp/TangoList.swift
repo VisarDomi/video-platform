@@ -1,5 +1,6 @@
 import UIKit
 import WebKit
+import Network
 import KitCore
 import KitNet
 
@@ -17,17 +18,33 @@ final class TangoListController: VideoListController {
     private let keptWriter: BackgroundWriter
     private var streams: [TangoStream] = []
     private var loading: Task<Void, Never>?
-    private var lastLoad: Date?
+    private var lastSuccess: Date?
+    private var lastError: String?
+    private var requestGeneration = 0
+    private var retry: Task<Void, Never>?
+    private var retryDelay: Double = 1
+    private var active = true
+    private let network = NWPathMonitor()
+    private var networkSignature: String?
     private var loginView: TangoLoginView?
     // Co-streamers as found (with their names), for append; and the lookup of those still unnamed.
     private var found: [String: TangoStream] = [:]
     private var naming: Task<Void, Never>?
 
-    init() {
-        let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
+    init(directory supplied: URL? = nil, configuration: URLSessionConfiguration? = nil,
+         loginRecovery: TangoSession.LoginRecovery? = nil, pcLoginEnabled: Bool = true) {
+        let directory = supplied ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
         jar = CookieJar(file: directory.appendingPathComponent("cookies.json"))
-        session = TangoSession(jar: jar)
-        pc = TangoPCLogin()
+        let computer = pcLoginEnabled ? TangoPCLogin() : nil
+        pc = computer
+        var recovery = loginRecovery
+        if recovery == nil, let computer {
+            recovery = {
+                guard await computer.available() else { throw TangoError.verificationRequired }
+                return try await computer.newSession()
+            }
+        }
+        session = TangoSession(jar: jar, diagnosticURL: directory.appendingPathComponent("tango-network.json"), configuration: configuration, loginRecovery: recovery)
         keptWriter = BackgroundWriter(url: directory.appendingPathComponent("tango-list.json"), label: "tango-list")
         super.init(viewerProvider: "tango-live", directory: directory, media: ViewerMedia(tango: session))
         if let kept = try? DurableFile.readJSON([TangoStream].self, from: keptWriter.url) {
@@ -37,28 +54,43 @@ final class TangoListController: VideoListController {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }
+    deinit { network.cancel() }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         DebugState.shared.register("tango") { [weak self] in
             guard let self else { return [:] }
-            return ["streams": streams.count, "signedIn": session.signedIn, "login": loginView != nil, "loading": loading != nil]
+            return ["streams": streams.count, "signedIn": session.signedIn, "login": loginView != nil, "loading": loading != nil,
+                    "lastError": lastError ?? "", "lastSuccess": lastSuccess?.timeIntervalSince1970 ?? 0,
+                    "retryPending": retry != nil, "network": networkSignature ?? "", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""]
         }
         // The sign-in screen as last shown comes back in the first frame; the session (and the
         // PC) are asked again behind it.
         if let shown = try? DurableFile.readJSON(LoginShown.self, from: loginFile) { showLogin(shown.reason, pc: shown.pc) }
         migrateCookies { [weak self] in self?.signIn(); self?.nameCoStreamers() }
+        network.pathUpdateHandler = { [weak self] path in
+            let signature = "\(path.status):" + path.availableInterfaces.map(\.name).sorted().joined(separator: ",")
+            let reachable = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(signature: signature, reachable: reachable) }
+        }
+        network.start(queue: DispatchQueue(label: "TangoList.network"))
     }
 
     // MARK: app lifecycle (from SceneDelegate)
 
     func resumed(afterBackground: Bool) {
+        active = true
         // Back from Safari's import: the inbox decides.
         if loginView != nil { signIn(); return }
-        if lastLoad.map({ Date().timeIntervalSince($0) > 1800 }) ?? true { reload() }
+        if lastError != nil || (lastSuccess.map({ Date().timeIntervalSince($0) > 1800 }) ?? true) { reload() }
     }
 
     func paused() {
+        active = false
+        requestGeneration += 1
+        loading?.cancel(); loading = nil
+        retry?.cancel(); retry = nil
+        refresh.endRefreshing()
         flushState()
         jar.flush()
         keptWriter.flush()
@@ -75,27 +107,64 @@ final class TangoListController: VideoListController {
     // MARK: the list
 
     override func reload() {
+        retryDelay = 1
+        Task { [weak self] in
+            guard let self else { return }
+            await session.retryAfterConnectionChange()
+            loadList()
+        }
+    }
+
+    func networkChanged(signature: String, reachable: Bool) {
+        let changed = networkSignature != nil && networkSignature != signature
+        networkSignature = signature
+        if active, reachable, session.signedIn, changed || (lastError != nil && loading == nil) { reload() }
+    }
+
+    private func loadList() {
         guard session.signedIn else { refresh.endRefreshing(); showLogin(nil); return }
+        guard active else { return }
+        retry?.cancel(); retry = nil
         loading?.cancel()
-        lastLoad = Date()
+        requestGeneration += 1
+        let generation = requestGeneration
         loading = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if generation == requestGeneration { refresh.endRefreshing(); loading = nil }
+            }
             do {
                 let fresh = try await session.live()
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, generation == requestGeneration else { return }
+                lastSuccess = Date()
+                lastError = nil
+                retryDelay = 1
                 streams = fresh
                 keptWriter.save(json: streams)
                 publish()
                 hideFailure()
                 hideLogin()
             } catch TangoError.loginRequired {
+                guard !Task.isCancelled, generation == requestGeneration else { return }
+                lastError = TangoError.loginRequired.localizedDescription
                 showLogin("Tango signed out.")
+            } catch TangoError.verificationRequired {
+                guard !Task.isCancelled, generation == requestGeneration else { return }
+                lastError = TangoError.verificationRequired.localizedDescription
+                showLogin(lastError)
             } catch {
+                guard !Task.isCancelled, generation == requestGeneration else { return }
+                lastError = error.localizedDescription
                 if !Task.isCancelled, loginView != nil { showLogin("Can't reach Tango to check the login.\n\(error.localizedDescription)") }
                 else if !Task.isCancelled, streams.isEmpty { showFailure("Can't reach Tango.\n\(error.localizedDescription)") }
+                let delay = retryDelay
+                retryDelay = min(30, retryDelay * 2)
+                retry = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard !Task.isCancelled else { return }
+                    self?.loadList()
+                }
             }
-            refresh.endRefreshing()
-            loading = nil
         }
     }
 
@@ -258,11 +327,10 @@ final class TangoListController: VideoListController {
     private func takeInbox() -> Bool {
         guard let inbox = try? LoginStore.load() else { return false }
         guard inbox.handoffComplete == true else { showLogin(nil); return false }
-        jar.set(inbox.cookies.compactMap { item in
+        Tango.storeLogin(inbox.cookies.compactMap { item in
             HTTPCookie(properties: [.name: item.name, .value: item.value, .domain: item.domain, .path: item.path,
                                     .secure: "TRUE", .expires: Date(timeIntervalSince1970: item.expirationDate), HTTPCookiePropertyKey("HttpOnly"): "TRUE"])
-        })
-        jar.flush()
+        }, in: jar)
         try? LoginStore.delete()
         Log.app.notice("Tango login imported from Safari")
         return true
@@ -287,9 +355,7 @@ final class TangoListController: VideoListController {
             do {
                 let cookies = try await pc.newSession()
                 guard let self else { return }
-                jar.remove { $0.domain.hasSuffix("tango.me") && $0.name.hasPrefix("Tango-") }
-                jar.set(cookies)
-                jar.flush()
+                Tango.storeLogin(cookies, in: jar)
                 signIn()
             } catch {
                 self?.loginView?.show(reason: "The PC could not sign in: \(error.localizedDescription)", pending: (try? LoginStore.load()) != nil)

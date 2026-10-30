@@ -1,7 +1,7 @@
 import logger from "../../common/logger.js";
 import { requestQueue } from "../../auth/authQueue.js";
 import * as authUtils from "../../auth/authUtils.js";
-import { Account, IAuthProvider, TokenBag, RefreshResult, ShortTokenResult } from "../interfaces.js";
+import { Account, IAuthProvider, TokenBag, RefreshResult, ShortTokenResult, BrowserVerificationRequiredError } from "../interfaces.js";
 import * as constants from "./constants.js";
 import { extractTokens } from "./tangoLogin.js";
 
@@ -41,6 +41,8 @@ export class TangoAuthProvider implements IAuthProvider {
 
         const response = await requestQueue.add<Response>(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
         if (!response.ok) {
+            const details = await response.json().catch(() => null) as { errorCode?: string } | null;
+            if (response.status === 424 && details?.errorCode === "CHALLENGE_REQUIRED") throw new BrowserVerificationRequiredError();
             throw new Error(`Session refresh failed with status ${response.status}. Refresh token may be expired.`);
         }
 
@@ -66,6 +68,8 @@ export class TangoAuthProvider implements IAuthProvider {
         const response = await fetch(constants.TANGO_URLS.TOKEN_DATA, options);
 
         if (!response.ok) {
+            const details = await response.json().catch(() => null) as { errorCode?: string } | null;
+            if (response.status === 424 && details?.errorCode === "CHALLENGE_REQUIRED") throw new BrowserVerificationRequiredError();
             throw new Error(`Token data fetch failed with status ${response.status}`);
         }
 

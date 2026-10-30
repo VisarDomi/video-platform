@@ -12,6 +12,13 @@ if len(sys.argv) != 2 or sys.argv[1] not in registry: raise SystemExit('Supply e
 key = sys.argv[1]
 config = registry[key]
 product = config['product']
+source_hash = hashlib.sha256(key.encode())
+source_files = list((root/'VideoApp').glob('*.swift')) + list((root/'Shared').glob('*.swift')) + list((root/'Kit/Sources').rglob('*.swift'))
+source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
+for source in sorted(source_files):
+    source_hash.update(str(source.relative_to(root)).encode()+b'\0')
+    source_hash.update(hashlib.sha256(source.read_bytes()).digest())
+source_revision = source_hash.hexdigest()[:16]
 generated = root/'build'/key
 projectdir = generated/(product+'.xcodeproj')
 projectdir.mkdir(parents=True, exist_ok=True)
@@ -101,7 +108,7 @@ targets.insert(0, obj('Target', 'PBXNativeTarget', buildConfigurationList=config
 # Safari's iPhone orientations; no icon or launch artwork, like the other personal apps.
 # The native viewer plays on through lock and the background (audio), and reaches the PC's
 # website API and download lists itself (local network).
-info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType='APPL',
+info = dict(plist_base, CFBundleDisplayName=config['name'], CFBundlePackageType='APPL', VideoSourceRevision=source_revision,
     LSRequiresIPhoneOS=True, UILaunchScreen={}, UIRequiredDeviceCapabilities=['arm64'],
     UISupportedInterfaceOrientations=['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationLandscapeLeft', 'UIInterfaceOrientationLandscapeRight'],
     UIViewControllerBasedStatusBarAppearance=True, StartURL=config['url'], UIBackgroundModes=['audio'],
