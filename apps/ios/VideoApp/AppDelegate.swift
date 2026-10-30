@@ -25,6 +25,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: scene)
         window.overrideUserInterfaceStyle = .dark
         window.backgroundColor = .black
+        #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-zoom-check") {
+            window.rootViewController = ZoomChecks()
+            window.makeKeyAndVisible()
+            self.window = window
+            TestHooks.shared.start()
+            return
+        }
+        #endif
         let info = Bundle.main.infoDictionary ?? [:]
         let list: VideoListController
         var resumed: (Bool) -> Void = { _ in }

@@ -11,7 +11,7 @@ registry=json.loads((APP/'providers.json').read_text())
 def remote(code):
     return subprocess.run(SSH+['/usr/bin/python3 -'],input=code,text=True,check=True)
 p=argparse.ArgumentParser();p.add_argument('provider',choices=sorted(registry))
-p.add_argument('action',choices=['sync','test','build','status','install','finish']);a=p.parse_args()
+p.add_argument('action',choices=['sync','test','build','status','install','finish']);p.add_argument('--no-launch',action='store_true');a=p.parse_args()
 config=registry[a.provider]
 log=MAC+'/build/'+a.provider+'/xcode.log'
 # Approves the installed build as its renewal baseline only if it is exactly what was built (ios-tools renewal).
@@ -104,7 +104,9 @@ print('Verified bundle, name, start URL, site scope, icon absence, signature, pa
 # link on the tailnet (exit 10: installed once the owner taps Install on the phone).
 installed=subprocess.run(['/Users/visar/Developer/ios-tools/native/scripts/phone-install','--device',{DEVICE!r},str(app)]).returncode
 if installed not in (0,10): raise SystemExit(installed)
-subprocess.run({deliver('installed')!r},check=True)
-if installed==0: subprocess.run(['xcrun','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
+if installed==0:
+    subprocess.run({deliver('installed')!r},check=True)
+    if not {a.no_launch!r}: subprocess.run(['/Users/visar/Developer/ios-tools/native/scripts/apple-tool','devicectl','device','process','launch','--device',{DEVICE!r},{config['bundleId']!r}],check=True)
+else: print('Published for OTA installation; renewal approval waits for an actual install.',flush=True)
 ''')
 else: print('Attached build complete; no temporary background job was created.')

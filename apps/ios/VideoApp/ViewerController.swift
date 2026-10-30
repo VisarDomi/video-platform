@@ -5,7 +5,7 @@ import KitCore
 
 // The native viewer: packages/app src/routes/videoViewer.ts with AVPlayer, over the list page.
 // The same intrinsic three-scope feed: a 10,000 pt previous scope, the current video at its
-// natural height and a 10,000 pt next scope; at rest the neighbours sit at their scopes' far
+// aspect-fitted size and a 10,000 pt next scope; at rest the neighbours sit at their scopes' far
 // edges, during a vertical swipe they touch the current video, and a neighbour that reaches
 // the screen's midpoint becomes current (scope roles rotate, keeping it where it is on screen).
 // A landing in the blank runway moves one video in the swipe's direction. All three play muted;
@@ -39,11 +39,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private let checkpoint: CheckpointWriter
 
     private let feed = FeedScrollView()
+    private let viewport = UIView()
     private let content = UIView()
     private let overlay = ViewerOverlay()
     private let message = UILabel()
     private let zoom = ZoomScrollView()
-    private let zoomContent = PlayerView()
     private let session = ViewerSession()
     private var units: [ViewerUnit] = []
     private var videos: [ViewerVideo]
@@ -62,8 +62,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var revealed = false
     private var revealTimer: Timer?
     private var zoomed = false
-    private var preparingZoom = false
-    private var zoomAnchor: CGFloat = 0.5
+    private var pendingGeometry = false
     private var seekPan: UIPanGestureRecognizer!
     private var edgePan: UIScreenEdgePanGestureRecognizer!
     private var seekBase: Double = 0
@@ -114,7 +113,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         feed.scrollsToTop = false
         feed.alpha = 0
         feed.addSubview(content)
-        view.addSubview(feed)
         units = FrameMonitor.shared.measure("open.units") {
             (0..<3).map { _ in
                 let unit = ViewerUnit()
@@ -126,17 +124,20 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
         zoom.delegate = self
         zoom.backgroundColor = .black
-        zoom.alpha = 0
         zoom.minimumZoomScale = 1
         zoom.maximumZoomScale = 5
         zoom.showsVerticalScrollIndicator = false
         zoom.showsHorizontalScrollIndicator = false
         zoom.contentInsetAdjustmentBehavior = .never
-        zoom.addSubview(zoomContent)
+        zoom.scrollsToTop = false
+        // Zoom the existing viewport, including its original player layers. Switching to
+        // another AVPlayerLayer at the first pinch needs a new first frame and can flash.
+        viewport.backgroundColor = .black
+        viewport.addSubview(feed)
+        zoom.addSubview(viewport)
         zoom.isActive = { [weak self] in self?.zoomed ?? false }
         view.addSubview(zoom)
-        // A pinch anywhere zooms the current video, as Safari zooms its page.
-        if let pinch = zoom.pinchGestureRecognizer { view.addGestureRecognizer(pinch) }
+        feed.panGestureRecognizer.maximumNumberOfTouches = 1
 
         message.textColor = UIColor(white: 0.67, alpha: 1)
         message.textAlignment = .center
@@ -233,8 +234,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        feed.frame = view.bounds
-        zoom.frame = view.bounds
+        if zoom.frame != view.bounds { zoom.frame = view.bounds }
         overlay.frame = view.bounds
         message.frame = view.bounds.insetBy(dx: 20, dy: 0)
         view.layer.shadowPath = UIBezierPath(rect: view.bounds).cgPath
@@ -242,9 +242,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         lastBounds = view.bounds.size
         FrameMonitor.shared.measure("viewer.layout") {
             if zoomed { exitZoom() }
+            zoom.setZoomScale(1, animated: false)
+            viewport.bounds = CGRect(origin: .zero, size: view.bounds.size)
+            viewport.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+            feed.bounds = CGRect(origin: .zero, size: view.bounds.size)
+            feed.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
+            zoom.contentSize = view.bounds.size
             layoutFeed()
             if revealed && !unsettled { centerActive() }
-            prepareZoom()
         }
     }
 
@@ -308,7 +313,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         else { UIView.animate(withDuration: 0.12) { self.feed.alpha = 1 } }
         loadEdgeUnits()
         activateCurrent()
-        prepareZoom()
     }
 
     private func loadEdgeUnits() {
@@ -407,21 +411,22 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // MARK: the feed
 
-    private func height(_ unit: ViewerUnit) -> CGFloat {
-        guard unit.hasMedia else { return 0 }
+    private func fittedSize(_ unit: ViewerUnit) -> CGSize {
+        guard unit.hasMedia, feed.bounds.width > 0, feed.bounds.height > 0 else { return .zero }
         let size = unit.presentationSize
-        let width = feed.bounds.width
-        return size.width > 0 && size.height > 0 ? width * size.height / size.width : width * 9 / 16
+        let aspect = size.width > 0 && size.height > 0 ? size : CGSize(width: 16, height: 9)
+        return AVMakeRect(aspectRatio: aspect, insideRect: CGRect(origin: .zero, size: feed.bounds.size)).size
     }
 
     private func layoutFeed() {
         guard units.count == 3 else { return }
         let width = feed.bounds.width, runway = Self.runway
-        let heights = units.map(height)
-        units[0].view.frame = CGRect(x: 0, y: unsettled ? runway - heights[0] : 0, width: width, height: heights[0])
-        units[1].view.frame = CGRect(x: 0, y: runway, width: width, height: heights[1])
-        units[2].view.frame = CGRect(x: 0, y: unsettled ? runway + heights[1] : 2 * runway + heights[1] - heights[2],
-                                     width: width, height: heights[2])
+        let sizes = units.map(fittedSize), heights = sizes.map(\.height)
+        let ys = [unsettled ? runway - heights[0] : 0, runway,
+                  unsettled ? runway + heights[1] : 2 * runway + heights[1] - heights[2]]
+        for index in units.indices {
+            units[index].view.frame = CGRect(origin: CGPoint(x: (width - sizes[index].width) / 2, y: ys[index]), size: sizes[index])
+        }
         content.frame = CGRect(x: 0, y: 0, width: width, height: 2 * runway + heights[1])
         feed.contentSize = content.frame.size
     }
@@ -477,7 +482,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // After the finger is up and momentum is over: a runway landing selects one neighbour in the
     // swipe's direction and centres it; otherwise the current video keeps its place on screen.
     private func settle() {
-        guard unsettled, !touching, !feed.isDragging, !feed.isDecelerating, !closed else { return }
+        guard unsettled, !zoomed, !touching, !feed.isDragging, !feed.isDecelerating, !closed else { return }
         let winner = unitAtMidpoint(midpoint)
         if winner == 0 || winner == 2 { commitScope(winner == 0 ? -1 : 1) }
         else if winner == -1 && scrollDirection != 0 { commitScope(scrollDirection) }
@@ -485,12 +490,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let height = feed.bounds.height
         let top = frame.minY - feed.contentOffset.y
         let outside = height / 2 < top || height / 2 >= top + frame.height
-        let desiredTop = outside ? height / 2 - frame.height / 2 : top
+        let desiredTop = outside ? height / 2 - frame.height / 2 : min(max(0, top), max(0, height - frame.height))
         unsettled = false
         layoutFeed()
         overlay.setInteractive(true)
         setOffset(active.view.frame.minY - desiredTop)
-        prepareZoom()
     }
 
     // The lock screen's next/previous: the neighbour, centred.
@@ -504,7 +508,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         layoutFeed()
         centerActive()
         overlay.setInteractive(true)
-        prepareZoom()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -541,55 +544,72 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // MARK: zoom
 
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { scrollView === zoom ? zoomContent : nil }
-
-    // The zoom view waits, invisible, with the current video where it is on screen.
-    private func prepareZoom() {
-        guard !zoomed, revealed, active.hasMedia else { return }
-        let frame = active.view.frame
-        let height = view.bounds.height
-        let top = frame.minY - feed.contentOffset.y
-        preparingZoom = true
-        zoom.zoomScale = 1
-        preparingZoom = false
-        zoomContent.frame = CGRect(origin: .zero, size: frame.size)
-        zoom.contentSize = frame.size
-        zoomAnchor = height - frame.height > 1 ? max(0, min(1, top / (height - frame.height))) : 0.5
-        applyZoomInsets()
-        let maxOffset = max(0, frame.height - height)
-        zoom.contentOffset = CGPoint(x: 0, y: frame.height <= height ? -zoom.contentInset.top : max(0, min(maxOffset, -top)))
-    }
-
-    private func applyZoomInsets() {
-        let height = view.bounds.height, content = zoomContent.frame.height
-        let top = content < height ? (height - content) * zoomAnchor : 0
-        zoom.contentInset = UIEdgeInsets(top: top, left: 0, bottom: content < height ? height - content - top : 0, right: 0)
-    }
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { scrollView === zoom ? viewport : nil }
 
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
-        guard scrollView === zoom, !zoomed, !preparingZoom else { return }
+        guard scrollView === zoom, !zoomed else { return }
         zoomed = true
-        zoomContent.playerLayer.player = inBackground ? nil : active.player
-        zoom.alpha = 1
         feed.isScrollEnabled = false
     }
 
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
-        if scrollView === zoom { applyZoomInsets() }
+        guard scrollView === zoom else { return }
+        // Keep the whole viewport centred during the spring below minimum scale too.
+        viewport.center = CGPoint(x: max(zoom.contentSize.width, zoom.bounds.width) / 2,
+                                  y: max(zoom.contentSize.height, zoom.bounds.height) / 2)
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        if scrollView === zoom, pendingGeometry {
+            pendingGeometry = false
+            layoutFeed()
+            if !unsettled { centerActive() }
+        }
         if scrollView === zoom && scale <= 1.01 { exitZoom() }
     }
 
     private func exitZoom() {
         guard zoomed else { return }
         zoomed = false
-        zoom.alpha = 0
-        zoomContent.playerLayer.player = nil
+        zoom.setZoomScale(1, animated: false)
         feed.isScrollEnabled = true
-        prepareZoom()
+        settle()
     }
+
+    #if targetEnvironment(simulator)
+    // Static geometry checks: no player item, network, audio session or video decoding.
+    func configureZoomCheck(size: CGSize, image: UIImage) {
+        loadViewIfNeeded()
+        let video = ViewerVideo(["filename": "Aspect fit", "provider": "sc", "local": true])!
+        videos = [video]
+        currentIndex = 0
+        active.configureZoomCheck(video: video, size: size, image: image)
+        revealed = true
+        feed.alpha = 1
+        view.layoutIfNeeded()
+        unitGeometryChanged(active)
+        centerActive()
+        overlay.setVideo(video)
+    }
+
+    func setZoomCheckScale(_ scale: CGFloat, animated: Bool) { zoom.setZoomScale(scale, animated: animated) }
+    func beginZoomCheck() { scrollViewWillBeginZooming(zoom, with: viewForZooming(in: zoom)) }
+    func endZoomCheck() { scrollViewDidEndZooming(zoom, with: viewForZooming(in: zoom), atScale: zoom.zoomScale) }
+
+    var zoomCheckState: [String: Any] {
+        func rect(_ value: CGRect) -> [CGFloat] { [value.minX, value.minY, value.width, value.height] }
+        var surfaces = 0
+        func count(_ node: UIView) {
+            if let layer = node.layer as? AVPlayerLayer, layer.player === active.player { surfaces += 1 }
+            node.subviews.forEach(count)
+        }
+        count(view)
+        return ["viewport": rect(view.bounds), "picture": rect(active.view.convert(active.view.bounds, to: view)),
+                "baseSize": [active.view.bounds.width, active.view.bounds.height], "scale": zoom.zoomScale,
+                "surface": String(describing: ObjectIdentifier(active.view.playerLayer)), "surfaces": surfaces,
+                "carouselEnabled": feed.isScrollEnabled, "index": currentIndex, "zoomed": zoomed]
+    }
+    #endif
 
     // MARK: gestures
 
@@ -799,10 +819,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func unitGeometryChanged(_ unit: ViewerUnit) {
         // A closing viewer is off screen: nothing to lay out.
         guard !closed else { return }
+        if zoom.isZooming { pendingGeometry = true; return }
         layoutFeed()
         guard unit === active else { return }
         if !revealed, unit.presentationSize != .zero { reveal() }
-        else if !unsettled { prepareZoom() }
+        else if !unsettled { centerActive() }
     }
 
     func unitNeedsLogin(_ unit: ViewerUnit) {
@@ -833,7 +854,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let poster = UIImageView(image: image)
         poster.frame = CGRect(x: saved.frame[0], y: saved.frame[1], width: saved.frame[2], height: saved.frame[3])
         poster.contentMode = .scaleToFill
-        view.insertSubview(poster, belowSubview: overlay)
+        viewport.addSubview(poster)
         self.poster = poster
         controlsVisible = saved.controls
     }
@@ -882,7 +903,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // their players, and the neighbours wait until the screen is back.
     private func enteredBackground() {
         for unit in units { unit.view.playerLayer.player = nil }
-        zoomContent.playerLayer.player = nil
         for (position, unit) in units.enumerated() where position != 1 { unit.pause() }
         saveProgress()
         progress.flush()
@@ -892,7 +912,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func enteringForeground() {
         for unit in units { unit.view.playerLayer.player = unit.player }
-        if zoomed { zoomContent.playerLayer.player = active.player }
         for (position, unit) in units.enumerated() where unit.video != nil {
             unit.resume(liveEdge: position != 1)
         }
@@ -929,7 +948,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let filename = currentVideo?.filename
         FrameMonitor.shared.measure("close.units") {
             units.forEach { $0.clear() }
-            zoomContent.playerLayer.player = nil
         }
         FrameMonitor.shared.measure("close.session") {
             session.end()
@@ -957,16 +975,14 @@ final class FeedScrollView: UIScrollView {
     }
 }
 
-// The zoomed picture. It takes touches only while zoomed; its pan leaves the upper half's
-// horizontal drags to the seek.
+// The permanent viewport. At rest its child scrolls the feed; zoomed its own pan takes over,
+// leaving the upper half's horizontal drags to seek.
 final class ZoomScrollView: UIScrollView {
     var isActive: () -> Bool = { false }
     var shouldPan: (CGPoint, CGPoint) -> Bool = { _, _ in true }
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        isActive() ? super.hitTest(point, with: event) : nil
-    }
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === panGestureRecognizer, let superview {
+            guard isActive() else { return false }
             let translation = panGestureRecognizer.translation(in: superview)
             let location = panGestureRecognizer.location(in: superview)
             let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)

@@ -77,6 +77,14 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var touching = false
     private var lastNearEnd = -1
     private let footer = UILabel()
+    // Keep the rendered pages and their base geometry stable for the whole pinch. Sharper
+    // decodes, newly learned sizes and appended chapters commit after UIKit finishes zooming.
+    private var zoomInProgress = false
+    private var pinchQuality: CGFloat = 1
+    private var pendingAspects: [Int: CGFloat] = [:]
+    private var pendingAppend = false
+    private var pendingImages: [Int: UIImage] = [:]
+    private var measuredImages = Set<String>()
 
     public init(pipeline: ImagePipeline) {
         self.pipeline = pipeline
@@ -115,6 +123,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     // MARK: pages
 
     public func setPages(_ pages: [StripPage], position: StripPosition? = nil) {
+        pendingAspects = [:]
+        pendingAppend = false
+        pendingImages = [:]
+        measuredImages = []
         pinnedTop = nil
         cells.values.forEach(recycle)
         cells.removeAll()
@@ -130,6 +142,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         guard !more.isEmpty else { return }
         let screen = screenAnchor
         pages += more
+        // Callers index chapters from pages.count immediately, even while a pinch holds
+        // the old geometry. The model advances now; only its frames wait.
+        if zoomInProgress { pendingAppend = true; return }
         relayout(keeping: nil, screen: screen)
     }
 
@@ -155,7 +170,8 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         guard pages.indices.contains(index), aspect.isFinite, aspect > 0 else { return }
         // A size within a pixel or two of the known one (a site's metadata against the file it
         // serves) is the same page: kept, the layout stays what it was in every session.
-        if let known = pages[index].aspect, abs(known - aspect) / known < 0.003 { return }
+        if let known = pages[index].aspect, abs(known - aspect) / known < 0.003 { pendingAspects[index] = nil; return }
+        if zoomInProgress { pendingAspects[index] = aspect; return }
         let screen = screenAnchor
         pages[index].aspect = aspect
         relayout(keeping: nil, screen: screen)
@@ -163,7 +179,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // The page at the screen's centre and where its top is on screen.
     private var screenAnchor: (index: Int, top: CGFloat)? {
-        guard laidOutWidth > 0, !pages.isEmpty, tops.count == pages.count else { return nil }
+        guard laidOutWidth > 0, !tops.isEmpty else { return nil }
         let index = pageIndex(atContentY: centreContentY)
         return (index, tops[index] * scrollView.zoomScale - scrollView.contentOffset.y)
     }
@@ -174,7 +190,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // Puts `position` at the screen's centre (applied after the first layout if needed).
     public func scroll(to position: StripPosition) {
-        guard laidOutWidth > 0, pages.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; pinnedTop = nil; return }
+        guard laidOutWidth > 0, heights.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; pinnedTop = nil; return }
         pendingPosition = nil
         pendingTop = nil
         pinnedTop = nil
@@ -184,7 +200,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // Puts a page's top at the top of the screen (a resumed page, read from its start).
     public func scroll(toTopOf index: Int) {
-        guard laidOutWidth > 0, pages.indices.contains(index) else {
+        guard laidOutWidth > 0, heights.indices.contains(index) else {
             if pages.indices.contains(index) { pendingTop = index }
             return
         }
@@ -194,10 +210,11 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         setCentre(contentY: tops[index] + bounds.height / 2 / scrollView.zoomScale)
     }
 
-    private var centreContentY: CGFloat { (scrollView.contentOffset.y + scrollView.bounds.height / 2) / scrollView.zoomScale }
+    private var visibleContent: CGRect { content.convert(scrollView.bounds, from: scrollView) }
+    private var centreContentY: CGFloat { visibleContent.midY }
 
     private func position(atContentY y: CGFloat) -> StripPosition? {
-        guard !pages.isEmpty, tops.count == pages.count else { return nil }
+        guard !tops.isEmpty else { return nil }
         let index = pageIndex(atContentY: y)
         return StripPosition(index: index, fraction: Double((y - tops[index]) / max(heights[index], 1)))
     }
@@ -213,7 +230,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     // The page containing content y (clamped to the first and last page).
     private func pageIndex(atContentY y: CGFloat) -> Int {
-        var low = 0, high = pages.count - 1
+        var low = 0, high = tops.count - 1
         while low < high {
             let middle = (low + high + 1) / 2
             if tops[middle] <= y { low = middle } else { high = middle - 1 }
@@ -226,7 +243,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     override public func layoutSubviews() {
         super.layoutSubviews()
         let anchor = laidOutWidth > 0 ? currentPosition : nil
-        scrollView.frame = bounds
+        if scrollView.frame != bounds { scrollView.frame = bounds }
         if bounds.width != laidOutWidth { relayout(keeping: anchor) }
         if let pendingPosition { scroll(to: pendingPosition) }
         if let pendingTop { scroll(toTopOf: pendingTop) }
@@ -275,24 +292,26 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     // MARK: visible pages
 
     private func updateVisible() {
-        guard !pages.isEmpty, laidOutWidth > 0 else { return }
-        let zoom = scrollView.zoomScale
-        let visibleTop = scrollView.contentOffset.y / zoom, visibleHeight = scrollView.bounds.height / zoom
+        guard !tops.isEmpty, laidOutWidth > 0 else { return }
+        let visible = visibleContent
+        let visibleTop = visible.minY, visibleHeight = visible.height
         let margin = visibleHeight * preloadScreens
         let first = pageIndex(atContentY: visibleTop - margin), last = pageIndex(atContentY: visibleTop + visibleHeight + margin)
         let wanted = Set(first...last)
-        for (index, cell) in cells where !wanted.contains(index) {
+        // UIKit reports intermediate offsets and scales in separate callbacks. Recycling on
+        // one of those transient ranges can discard the picture under the fingers.
+        for (index, cell) in cells where !zoomInProgress && !wanted.contains(index) {
             recycle(cell)
             cells[index] = nil
         }
-        let widthPixels = Int((laidOutWidth * zoomBucket * (window?.screen.scale ?? 3)).rounded(.up))
+        let widthPixels = Int((laidOutWidth * (zoomInProgress ? pinchQuality : zoomBucket) * (window?.screen.scale ?? 3)).rounded(.up))
         // The pages on screen first, then outwards.
         // Slices of tall pages within a screen of the visible part are attached; the rest let go.
         let shown = CGRect(x: 0, y: visibleTop - visibleHeight, width: laidOutWidth, height: visibleHeight * 3)
         for index in (first...last).sorted(by: { distanceFromScreen($0) < distanceFromScreen($1) }) {
             let cell = cells[index] ?? dequeue(index)
             if cell.fit != .width(widthPixels) || (!cell.hasImage && cell.ticket == nil && retryDue(index)) { request(index, cell: cell, width: widthPixels) }
-            cell.reveal(shown.offsetBy(dx: 0, dy: -tops[index]))
+            cell.reveal(shown.offsetBy(dx: 0, dy: -tops[index]), retaining: zoomInProgress)
         }
         pipeline.prioritiesChanged()
         if last >= pages.count - 3, lastNearEnd != pages.count {
@@ -317,6 +336,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     }
 
     private func recycle(_ cell: PageCell) {
+        pendingImages[cell.index] = nil
         cell.ticket?.cancel()
         cell.reset()
         cell.removeFromSuperview()
@@ -341,15 +361,8 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
             switch result {
             case .success(let image):
                 failures[index] = nil
-                FrameMonitor.shared.note("page \(Int(image.size.width * image.scale))x\(Int(image.size.height * image.scale))")
-                FrameMonitor.shared.measure("strip.show") {
-                    cell.show(image)
-                    let zoom = scrollView.zoomScale, visibleTop = scrollView.contentOffset.y / zoom, visibleHeight = scrollView.bounds.height / zoom
-                    if tops.indices.contains(index) {
-                        cell.reveal(CGRect(x: 0, y: visibleTop - visibleHeight - tops[index], width: laidOutWidth, height: visibleHeight * 3))
-                    }
-                }
-                if image.size.height > 0 { setAspect(image.size.width / image.size.height, at: index) }
+                if zoomInProgress && cell.hasImage { pendingImages[index] = image }
+                else { show(image, at: index, cell: cell) }
             case .failure(let error):
                 if error is CancellationError { return }
                 let attempts = (failures[index]?.attempts ?? 0) + 1
@@ -357,6 +370,22 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
                 cell.showFailure(self.delegate?.strip(self, failureTextFor: index, error: error))
                 DispatchQueue.main.asyncAfter(deadline: .now() + min(30, pow(2, Double(attempts - 1)))) { [weak self] in self?.updateVisible() }
             }
+        }
+    }
+
+    private func show(_ image: UIImage, at index: Int, cell: PageCell) {
+        FrameMonitor.shared.note("page \(Int(image.size.width * image.scale))x\(Int(image.size.height * image.scale))")
+        FrameMonitor.shared.measure("strip.show") {
+            cell.show(image)
+            let visible = visibleContent
+            if tops.indices.contains(index) {
+                cell.reveal(CGRect(x: 0, y: visible.minY - visible.height - tops[index], width: laidOutWidth, height: visible.height * 3), retaining: zoomInProgress)
+            }
+        }
+        // ImageIO rounds downsampled dimensions. A quality upgrade is the same page,
+        // not new layout metadata; it must never resize the strip again.
+        if image.size.height > 0, measuredImages.insert(pages[index].key).inserted {
+            setAspect(image.size.width / image.size.height, at: index)
         }
     }
 
@@ -382,6 +411,13 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { monitor(true) }
 
+    public func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        pinchQuality = zoomBucket
+        zoomInProgress = true
+        pinnedTop = nil
+        monitor(true)
+    }
+
     public func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // Keep a page narrower than the screen centred horizontally (zooming out bounces).
         let offsetX = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
@@ -394,15 +430,31 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         if !decelerate { monitor(false); settleIfIdle() }
     }
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { monitor(false); settleIfIdle() }
-    public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) { settleIfIdle() }
+    public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        zoomInProgress = false
+        let anchor = screenAnchor
+        let changed = !pendingAspects.isEmpty || pendingAppend
+        for (index, aspect) in pendingAspects where pages.indices.contains(index) { pages[index].aspect = aspect }
+        pendingAspects = [:]
+        pendingAppend = false
+        let ready = pendingImages
+        pendingImages = [:]
+        for (index, image) in ready {
+            if let cell = cells[index] { show(image, at: index, cell: cell) }
+        }
+        if changed { relayout(keeping: nil, screen: anchor) }
+        updateVisible()
+        monitor(scrollView.isDragging || scrollView.isDecelerating)
+        settleIfIdle()
+    }
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { settleIfIdle() }
 
     private func settleIfIdle() {
-        guard !touching, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming, let position = currentPosition else { return }
+        guard !touching, !zoomInProgress, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming, let position = currentPosition else { return }
         delegate?.strip(self, settledAt: position)
     }
 
-    public var isZoomed: Bool { scrollView.zoomScale > 1.01 }
+    public var isZoomed: Bool { zoomInProgress || scrollView.zoomScale > 1.01 }
 
     @objc private func doubleTapped(_ tap: UITapGestureRecognizer) {
         if isZoomed { scrollView.setZoomScale(1, animated: true); return }
@@ -509,7 +561,7 @@ final class PageCell: UIView {
     }
 
     // The part of the page near the screen, in the cell's coordinates: its slices are attached.
-    func reveal(_ near: CGRect) {
+    func reveal(_ near: CGRect, retaining: Bool = false) {
         guard !slices.isEmpty, bounds.height > 0 else { return }
         for slice in slices.indices {
             let frame = frame(ofSlice: slice)
@@ -520,7 +572,7 @@ final class PageCell: UIView {
                 view.frame = frame
                 insertSubview(view, belowSubview: message)
                 sliceViews[slice] = view
-            } else if let view = sliceViews.removeValue(forKey: slice) {
+            } else if !retaining, let view = sliceViews.removeValue(forKey: slice) {
                 view.removeFromSuperview()
             }
         }

@@ -47,6 +47,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
   because WebKit pauses a page's video whenever the phone locks or the app leaves the
   screen. Videos play on through lock and the background until they end (background
   audio), and nothing pauses, reloads or jumps on the way back.
+  - At minimum zoom, every video uses the largest aspect-preserving size that fits both
+    viewport dimensions. Tall portraits fit the height; wide videos fit the width, with
+    black space where needed. A settled swipe keeps the whole fitted picture on screen.
   - It works like the website's viewer (`packages/app` `routes/videoViewer.ts`) with
     AVPlayer: the same three-scope feed (vertical swipes through the list, neighbours
     touching during a swipe, a runway landing moving one video), the upper-half horizontal
@@ -61,6 +64,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
     a video no longer listed (a deleted recording, a removed upload, a stream that ended) has
     no forward. Opened that way, a stream found ended, or a video the list drops while it is
     still the one shown, slides back to the list instead of moving on to the next.
+    Pinching scales one permanent viewport containing the original player layers and any
+    restoration poster. No second player layer is attached at pinch start or removed at
+    pinch end. The controls remain outside that zoomed document.
   - A row opens the native viewer with the list; the list's later changes follow it, and
     the viewer asks the list for what only the provider can do (`ViewerHost.swift`: Video
     Vault's playback sources, Tango's co-streamers, follow, block, the login).
@@ -227,6 +233,7 @@ python3 scripts/deploy.py <provider> test      # the apps' Swift tests on the Ma
 python3 scripts/deploy.py <provider> build     # attached GUI session, signing lock
 python3 scripts/deploy.py <provider> status
 python3 scripts/deploy.py <provider> install   # verifies, installs over, approves for renewal, launches
+python3 scripts/deploy.py <provider> install --no-launch  # leave phone UI checks to the owner
 ```
 
 `install` checks bundle ID, display name, start URL, the native list key, Tango's PC login
@@ -253,7 +260,20 @@ On the PC, `npm test -w server` covers the Tango add route (unblock, then follow
 bars (`packages/app/README.md`). The rest is checked by hand on the phone, or in a
 simulator build through NativeKit's test hooks (without playing video).
 
+`scripts/check-zoom.py` compares saved baseline and candidate simulator builds inside one
+guarded visible session. `-zoom-check` selects static calibration fixtures in the actual
+viewer and NativeKit strip reader, with no media items, network, audio session or provider
+actions. It reproduces baseline portrait clipping, duplicate video surfaces and mid-pinch
+reader relayout, then checks fit, stable layer identity, carousel locking, portrait/landscape
+zoom, deferred reader metadata and retained image surfaces. The fixtures and their commands
+compile only for the simulator; they cannot run in phone builds.
+
 ## Renewal
+
+The provider builder enters the shared workload guard and limits Xcode to two jobs.
+`SIGNING_DESTINATION=generic/platform=iOS` can prepare a signed build while the phone is
+unavailable; installation still verifies that the profile includes the configured phone.
+An OTA publication is not approved as installed until the actual installation succeeds.
 
 This repository renews its own apps with its Mac scheduler,
 `com.visar.renewal.video-platform` ([ios-tools renewal](../../../../ios-tools/renewal/README.md)).

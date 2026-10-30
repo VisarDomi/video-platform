@@ -83,6 +83,20 @@ final class ViewerUnit {
 
     var hasMedia: Bool { video != nil && !view.isHidden }
 
+    #if targetEnvironment(simulator)
+    func configureZoomCheck(video: ViewerVideo, size: CGSize, image: UIImage) {
+        self.video = video
+        presentationSize = size
+        view.isHidden = false
+        view.subviews.forEach { $0.removeFromSuperview() }
+        let picture = UIImageView(image: image)
+        picture.contentMode = .scaleAspectFit
+        picture.frame = view.bounds
+        picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(picture)
+    }
+    #endif
+
     func load(_ video: ViewerVideo, start: Double, play: Bool) {
         if let current = self.video, current.same(video), player.currentItem != nil {
             self.video = video
