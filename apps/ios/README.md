@@ -268,6 +268,25 @@ reader relayout, then checks fit, stable layer identity, carousel locking, portr
 zoom, deferred reader metadata and retained image surfaces. The fixtures and their commands
 compile only for the simulator; they cannot run in phone builds.
 
+### October 30 zoom verification
+
+The saved baseline reproduced width-only clipping, attachment of a second player layer,
+and reader relayout during a zoom gesture. The candidate passed eight aspect/orientation
+cases, retained one player layer through the gesture, restored carousel scrolling at
+minimum scale, and kept reader images and base geometry stable. Incoming chapter indices
+remain available immediately while their new frames wait for zoom completion. Static
+calibration screenshots were inspected; no video was played in the simulator and no phone
+UI was automated. The owned guest and GUI closed, with no new graphics failure report.
+
+All 17 registered NativeKit app builds were signed and verified, including the unused
+reader-module copies in Trader and Guidance. The phone could not be reached for installation.
+The exact candidates and their sources are staged privately under Mac
+`~/Library/Caches/ios-app-refresh/native-zoom-pending-20261030/`; all original renewal-source
+hashes were restored and verified against their approved states. The phone is unchanged.
+PC evidence is `~/.cache/native-zoom-20261030/`. After a real phone probe succeeds, the
+task's `~/Library/Caches/ios-app-refresh/resume-zoom.py` activates those exact source/artifact
+pairs and installs them without launching any app, approving renewals only after success.
+
 ## Renewal
 
 The provider builder enters the shared workload guard and limits Xcode to two jobs.
