@@ -45,7 +45,7 @@ function usage(): never {
         "  upload-provider [--provider porntrex --apply]",
         "  metadata-check [--provider porntrex]",
         "  ptrex-connect-iphone --apply [--allow-password-login] | ptrex-session-report | ptrex-uploads [--limit N] | ptrex-tiers [--record FILE]",
-        "  ptrex-session-keepalive --apply (authentication only; no upload work)",
+        "  ptrex-session-keepalive --apply [--sync-phone] (authentication only; no upload work)",
         "  campaign-configure --provider all|tango|fc2|sc [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -88,7 +88,8 @@ async function main(): Promise<void> {
         "upload-provider", "metadata-check", "ptrex-connect-iphone", "ptrex-session-report", "ptrex-session-keepalive", "ptrex-uploads", "ptrex-tiers"].includes(command ?? "")) usage();
     if (command === "ptrex-session-keepalive") {
         requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await maintainPorntrexSession(pipelineConfig)));
+        console.log(JSON.stringify(await maintainPorntrexSession(pipelineConfig, undefined, undefined,
+            { syncPhone: process.argv.slice(3).includes("--sync-phone") })));
         return;
     }
     if (command === "ptrex-tiers") {

@@ -1,4 +1,5 @@
 import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
+import { randomUUID } from "node:crypto";
 import { readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession, type StoredCookie } from "./porntrexSession.js";
 
 // Node tries each address family for only 250 ms by default. While an upload
@@ -27,8 +28,9 @@ export async function checkPorntrexSession(
     const session = await readPorntrexSession(sessionFilePath);
     if (!session) return { loggedIn: false, fingerprint: null, passwordLoginAt: null, note: "no shared session stored" };
     const cookieHeader = sharedSessionCookies(session.cookies).map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-    const request = () => fetchImpl(`${origin}/upload-video/`, {
-        headers: { cookie: cookieHeader, "user-agent": USER_AGENT, accept: "text/html" },
+    const request = () => fetchImpl(`${origin}/upload-video/?_session_check=${randomUUID()}`, {
+        headers: { cookie: cookieHeader, "user-agent": USER_AGENT, accept: "text/html",
+            "cache-control": "no-cache, no-store, max-age=0", pragma: "no-cache" },
         redirect: "manual",
         signal: AbortSignal.timeout(30_000),
     });
@@ -45,6 +47,9 @@ export async function checkPorntrexSession(
         throw new Error(`Porntrex session check could not reach the site: ${error instanceof Error ? error.message : String(error)}${cause ? ` (${cause})` : ""}`);
     }
     const body = response.status === 200 ? await response.text() : "";
+    if (Number(response.headers.get("age") ?? 0) > 0 || /^(HIT|STALE|UPDATING)$/i.test(response.headers.get("cf-cache-status") ?? "")) {
+        throw new Error("Porntrex session check inconclusive: cached response cannot establish current authentication");
+    }
     const loggedIn = response.status === 200 && /name="content"/.test(body);
     const location = response.headers.get("location");
     const redirected = location && response.status >= 300 && response.status < 400 ? new URL(location, origin) : null;

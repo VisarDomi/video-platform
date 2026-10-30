@@ -385,12 +385,23 @@ rejected, the agent is authorized to perform coordinated recovery without asking
 login and immediately shares it with Video Vault; it never logs in independently on the
 phone or uses `kt_member`. A manually paused campaign remains paused throughout.
 
-`video-ptrex-session.timer` runs a cookie-only check every ten minutes even when
+`video-ptrex-session.timer` checks authentication every ten minutes even when
 `pipeline-force-stop`/`eb`/`ebm` has stopped the upload worker. A fresh worker heartbeat
-suppresses duplicate checks. The independent job never changes campaign intent, starts
-uploads or logs in, treats network failures as inconclusive and warns only on a newly
-observed logout. Session reports mark checks older than fifteen minutes unknown and do
+suppresses duplicate healthy checks, while a known authentication loss or pending phone
+delivery remains recoverable. Requests use cache-busting nonces and no-cache headers;
+cached responses and network failures cannot authorize login. The managed job requires
+two matching authentication failures, inspects retained phone cookies first, and performs
+coordinated recovery automatically when needed. A failed handoff is retried using the
+already valid PC session; it never causes another password login. Private recovery state
+and kernel locking survive crashes and prevent concurrent login attempts. This job never
+changes campaign intent or starts uploads. Session reports mark checks older than fifteen minutes unknown and do
 not claim that an invalidated session necessarily expired by age.
+
+The phone bridge uses the Mac's `apple-tool devicectl` entry point and existing pairing
+repair, with bounded SSH/device operations. It does not invoke the Xcode launcher stubs
+that repeat component setup. `ptrex-session-keepalive --apply --sync-phone` with
+`VIDEO_PTREX_AUTO_RECOVER=1` exercises delivery without replacing a valid PC login.
+`pipeline/porntrex-recovery.json` records pending delivery/backoff without cookie values.
 
 The transfer follows the page's own progress bar and fails after ten minutes
 without progress. Porntrex creates the video only when the metadata form is

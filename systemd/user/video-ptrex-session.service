@@ -7,10 +7,12 @@ ConditionPathExists={{HOME}}/.config/video-services/porntrex-session.json
 Type=oneshot
 Environment=PATH={{HOME}}/.nvm/versions/node/v22.19.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=VIDEO_PIPELINE_SERVICE_MODE=1
+Environment=VIDEO_PTREX_AUTO_RECOVER=1
+Environment=DISPLAY=:111
 WorkingDirectory={{HOME}}/Documents/work/video/video-platform
 ExecStart={{HOME}}/.nvm/versions/node/v22.19.0/bin/node --no-warnings packages/pipeline/dist/main.js ptrex-session-keepalive --apply
 Nice=19
-CPUQuota=10%
-MemoryMax=128M
-TasksMax=32
-TimeoutStartSec=120
+CPUQuota=50%
+MemoryMax=768M
+TasksMax=256
+TimeoutStartSec=300

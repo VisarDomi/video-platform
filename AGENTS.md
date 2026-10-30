@@ -6,7 +6,11 @@ rejected, perform one coordinated PC login through `ptrex-connect-iphone --apply
 --allow-password-login`, share it immediately with Video Vault and verify both devices.
 This coordinated recovery is authorized; do not ask again. Never log in independently on
 the phone or present `kt_member`. Keep the user's upload/gaming hold intact throughout.
-Cookie-only session maintenance continues while the resource-heavy upload worker is stopped.
+Session maintenance continues while the resource-heavy upload worker is stopped. The
+managed job repairs confirmed authentication loss automatically, preferring any valid
+phone copy before a password login and retaining failed phone delivery for retry. Never
+turn a provider outage into a new login, repeat password logins for delivery failures,
+or resume a gaming hold as a side effect of authentication repair.
 
 ## Start here
 

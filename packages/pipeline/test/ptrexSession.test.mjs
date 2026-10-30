@@ -213,8 +213,10 @@ test("phone bridge copies the session into Video Vault, relaunches it, reads its
     };
     const phone = new PtrexPhone(undefined, ssh, async () => undefined);
     assert.deepEqual(await phone.connect(sessionCookies), { loggedIn: true, host: "www.porntrex.com", finalPath: "/upload-video/" });
-    assert.deepEqual(commands.slice(0, 4), ["umask 077 && cat >", "xcrun devicectl device copy to",
-        "xcrun devicectl device process launch", "read"]);
+    assert.equal(commands[0], "umask 077 && cat >");
+    assert(commands.some(c => c.includes("apple-tool devicectl device copy to")));
+    assert(commands.some(c => c.includes("apple-tool devicectl device process launch")));
+    assert(!commands.some(c => c.includes("xcrun")), "use installed Apple tools without launcher setup churn");
     assert.equal(commands.at(-1), `rm -f '/tmp/ptrex-session-${id}.json' '/tmp/ptrex-result-${id}.json'`);
     const stale = new PtrexPhone(undefined, async (command, input) => command.includes("copy from")
         ? { code: 0, stdout: JSON.stringify({ id: "older", loggedIn: true }), stderr: "" } : { code: 0, stdout: "", stderr: "" }, async () => undefined);
@@ -266,4 +268,56 @@ test("a reused PHP ID starts a new authentication lifetime and a verified phone 
     assert.equal(report.keepalive.checks, 0, 'prior authentication must not count toward a new login lifetime');
     assert.equal(report.keepalive.lastCheckKind, 'phone_connected');
     assert.doesNotMatch(report.verdict, /-1|unknown/);
+});
+
+
+test('session checks bypass caches and refuse cached authentication evidence',async t=>{
+ const {config}=await root(t);await store(config.porntrexSessionPath);let request;
+ const fetcher=async(url,options)=>{request={url,options};return new Response('<input name="content">',{headers:{age:'120','cf-cache-status':'HIT'}});};
+ await assert.rejects(checkPorntrexSession(config.porntrexSessionPath,fetcher),/cached response/);
+ assert.match(request.url,/_session_check=/);assert.match(request.options.headers['cache-control'],/no-store/);
+});
+
+
+test("phone inspection returns only shared-session cookies with the native Date epoch converted", async () => {
+    const phone = new PtrexPhone(undefined, async command => ({ code: 0, stderr: '', stdout: command.includes('/usr/bin/python3 -c')
+        ? JSON.stringify([{name:'PHPSESSID',value:'synthetic-phone',domain:'.porntrex.com',path:'/',expires:800000000,secure:true,httpOnly:true}]) : '' }), async()=>{});
+    const retained = await phone.readSession();
+    assert.equal(retained[0].expires, 1778307200);
+    assert.deepEqual(retained.map(c=>c.name), ['PHPSESSID']);
+});
+
+test("a user pause issued during coordinated recovery is never undone", async t => {
+    const {config}=await root(t);await store(config.porntrexSessionPath);
+    const db=new PipelineDatabase(config.databasePath);t.after(()=>db.close());db.setCampaignState('running');
+    const result=await connectPorntrexPhone(config,{
+        openPipelineSession:async()=>{}, connectPhone:async()=>{db.setCampaignState('paused',new Date(Date.now()+1000));return {loggedIn:true,host:'www.porntrex.com',finalPath:'/upload-video/'};},
+        checkSession:async()=>({loggedIn:true,fingerprint:'ok',passwordLoginAt:null,note:'ok'}),pause:async()=>{},log:()=>{},
+    });
+    assert.equal(result.campaign,'paused');
+});
+
+
+test("an actual device transport failure invokes pairing repair once and retries the operation", async () => {
+    let id='', copies=0, repairs=0;
+    const bridge=new PtrexPhone(undefined,async(command,input)=>{
+        if(input) id=JSON.parse(input).id;
+        if(command.includes('phone-pairing --repair')) repairs++;
+        if(command.includes('device copy to') && ++copies===1) return {code:1,stdout:'',stderr:'CoreDeviceService was unable to locate a device'};
+        return {code:0,stderr:'',stdout:command.includes('device copy from') ? JSON.stringify({id,loggedIn:true,finalPath:'/upload-video/'}) : ''};
+    },async()=>{});
+    assert.equal((await bridge.connect(sessionCookies)).loggedIn,true);
+    assert.equal(copies,2);assert.equal(repairs,1);
+});
+
+test("a dead local browser PID does not strand recovery, while a live profile owner is respected", async t => {
+    const {config}=await root(t);await store(config.porntrexSessionPath);
+    const {mkdir,symlink,unlink,readlink}=await import('node:fs/promises');await mkdir(config.porntrexBrowserProfilePath);
+    const lock=path.join(config.porntrexBrowserProfilePath,'SingletonLock');await symlink(`${os.hostname()}-2147483647`,lock);
+    let opened=0;const dependencies={openPipelineSession:async()=>{opened++;},connectPhone:async()=>({loggedIn:true,host:'www.porntrex.com',finalPath:'/upload-video/'}),checkSession:async()=>({loggedIn:true,fingerprint:'ok',passwordLoginAt:null,note:'ok'}),pause:async()=>{},log:()=>{}};
+    await connectPorntrexPhone(config,dependencies,{maxIdleWaitMilliseconds:0,preserveCampaign:true});
+    assert.equal(opened,1);assert.equal(await readlink(lock),`${os.hostname()}-2147483647`,'stale symlink is left for Chromium, not removed by us');
+    await unlink(lock);await symlink(`${os.hostname()}-${process.pid}`,lock);
+    await assert.rejects(connectPorntrexPhone(config,dependencies,{maxIdleWaitMilliseconds:0}),/still owns the pipeline profile/);
+    assert.equal(opened,1);
 });

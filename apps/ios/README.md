@@ -152,6 +152,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
     reused first; coordinated password recovery uses the command's deliberate
     `--allow-password-login` option and leaves manual upload pauses intact.
     `video-ptrex-session.timer` keeps that shared session active while uploads are stopped.
+    When the provider invalidates it anyway, the job confirms the failure and restores the
+    shared login automatically. Phone delivery failures retry without another password
+    login; a valid retained phone session is preferred over creating a replacement.
   - The +/- button asks the PC's three download lists directly (`ViewerPC.swift`).
 - **Tango** (`VideoApp/TangoList.swift`) opens with its last list (`tango-list.json`) and
   asks Tango's gateway for a new one behind it: followed streams first, then

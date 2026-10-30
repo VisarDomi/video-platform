@@ -418,17 +418,22 @@ server follows the account first, but only if it is not already followed.
   stores only `PHPSESSID` and `confirmed` in `porntrex-session.json`, pinned for 400
   days, and never presents `kt_member`. The worker checks the session every 10
   minutes without a browser; a logged-out session pauses the campaign with a
-  notification and is never logged in again automatically.
+  notification; the managed maintenance job owns coordinated recovery.
   When the worker is stopped, `video-ptrex-session.timer` continues the lightweight
-  cookie-only check every ten minutes without touching campaign intent. Network
-  failures are inconclusive; an actual logout warning is deduplicated durably.
+  check every ten minutes without touching campaign intent. Checks bypass caches;
+  cached responses and network failures are inconclusive. Two consistent authentication
+  failures authorize recovery. A valid phone copy is reused before a password login;
+  an unreachable phone defers login. A failed phone handoff remains pending and retries
+  the valid PC session without logging in again. Kernel locks, durable backoff and
+  browser/upload ownership checks prevent concurrent or repeated password attempts.
   `npm run ptrex:connect-iphone` shares an existing session. The same command with
   `-- --allow-password-login` is the only path that may log in with the password; it
   copies the session into Video Vault's data folder over SSH (the Mac runs `devicectl`;
   the app takes it in at launch and leaves its check for the command to read back) and
   resumes only a previously running/auth-paused campaign. A manual gaming pause
   remains paused. The owner authorizes coordinated recovery without further confirmation;
-  the flag makes the password step deliberate, never a background retry.
+  the managed job enables this recovery explicitly. It never starts the upload service,
+  and a worker's authentication-only pause resumes only after phone synchronization.
 - **Network gating and browsers.** Real uploads and verification need
   `VIDEO_PIPELINE_NETWORK_UPLOADS=1`, which the managed unit sets. Each Porntrex
   operation closes its browser context on success or failure, releasing the profile lock.

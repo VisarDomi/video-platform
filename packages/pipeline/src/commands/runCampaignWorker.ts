@@ -10,6 +10,8 @@ import { syncComparisonSelection, writeComparisonReport } from "./comparisonTria
 import { checkPorntrexSession } from "../upload/porntrexKeepalive.js";
 import { SESSION_LOST_ADVICE } from "../upload/providerWarnings.js";
 import { notifyDesktop, stepNotification } from "../notify.js";
+import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecoveryState.js";
+import { access } from "node:fs/promises";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -22,6 +24,7 @@ const SESSION_KEEPALIVE_MILLISECONDS = 10 * 60_000;
 export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new Date(),
     check = checkPorntrexSession): Promise<void> {
     if (!config.networkUploadsEnabled || !config.porntrexSessionPath) return;
+    if (await recoveryInProgress(config.databasePath)) return;
     const database = new PipelineDatabase(config.databasePath);
     try {
         if ((config.uploadProvider ?? database.getActiveUploadProvider()) !== "porntrex") return;
@@ -36,8 +39,12 @@ export async function keepPorntrexSessionAlive(config: PipelineConfig, now = new
         }
         database.recordProviderSessionEvent({ provider: "porntrex", kind: "keepalive", loggedIn: result.loggedIn,
             fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
+        if (await recoveryInProgress(config.databasePath)) return;
+        const manuallyHeld = await access(path.join(path.dirname(config.databasePath), "user-pause.json")).then(() => true, () => false);
+        const recovery = await readRecoveryState(config.databasePath);
         const control = database.getCampaignControl();
-        if (result.loggedIn && before.state === "paused" && before.resumeAt === null
+        if (result.loggedIn && !manuallyHeld && (!recovery.status || recovery.status === "healthy")
+            && before.state === "paused" && before.resumeAt === null
             && before.attentionReason?.startsWith("Porntrex ") && before.attentionReason.includes(SESSION_LOST_ADVICE)
             && control.updatedAt === before.updatedAt && control.attentionReason === before.attentionReason
             && control.state === "paused") {
@@ -174,8 +181,18 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     // changes, not on every repetition.
     let lastStep = "";
     const reconcileOutcomes = new Map<string, string>();
+    let waitingForRecovery = false;
     while (!signal.aborted) {
         try {
+            if (await recoveryInProgress(config.databasePath)) {
+                waitingForRecovery = true;
+                await wait(1_000, signal);
+                continue;
+            }
+            if (waitingForRecovery) {
+                waitingForRecovery = false;
+                await keepPorntrexSessionAlive(config);
+            }
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
                 const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
                 const changed = (reconciled.results ?? []).filter((item) => {
