@@ -3,6 +3,7 @@ import WebKit
 import Network
 import KitCore
 import KitNet
+import CryptoKit
 
 // Tango's live list, native: followed streams first, then recommendations, as the website
 // listed them. It opens with the last list (kept on the phone) and asks Tango for a new one
@@ -15,6 +16,7 @@ final class TangoListController: VideoListController {
     private let jar: CookieJar
     private let session: TangoSession
     private let pc: TangoPCLogin?
+    private let hasAutomaticRecovery: Bool
     private let keptWriter: BackgroundWriter
     private var streams: [TangoStream] = []
     private var loading: Task<Void, Never>?
@@ -34,17 +36,20 @@ final class TangoListController: VideoListController {
     init(directory supplied: URL? = nil, configuration: URLSessionConfiguration? = nil,
          loginRecovery: TangoSession.LoginRecovery? = nil, pcLoginEnabled: Bool = true) {
         let directory = supplied ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
+        try? FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication])
+        try? FileManager.default.setAttributes([.protectionKey:FileProtectionType.completeUntilFirstUserAuthentication],ofItemAtPath:directory.path)
         jar = CookieJar(file: directory.appendingPathComponent("cookies.json"))
-        let computer = pcLoginEnabled ? TangoPCLogin() : nil
+        let computer = pcLoginEnabled ? TangoPCLogin(directory: directory) : nil
         pc = computer
+        hasAutomaticRecovery = computer != nil || loginRecovery != nil
         var recovery = loginRecovery
         if recovery == nil, let computer {
-            recovery = {
-                guard await computer.available() else { throw TangoError.verificationRequired }
-                return try await computer.newSession()
-            }
+            recovery = { rt in try await computer.newSession(refreshToken:rt) }
         }
-        session = TangoSession(jar: jar, diagnosticURL: directory.appendingPathComponent("tango-network.json"), configuration: configuration, loginRecovery: recovery)
+        var accepted: (@Sendable () async -> Void)?
+        if let computer { accepted = { await computer.acceptedSession() } }
+        session = TangoSession(jar: jar, diagnosticURL: directory.appendingPathComponent("tango-network.json"), configuration: configuration,
+                               loginRecovery: recovery, recoveryAccepted: accepted, beginRenewal:{await TangoRenewalLifetime.begin()})
         keptWriter = BackgroundWriter(url: directory.appendingPathComponent("tango-list.json"), label: "tango-list")
         super.init(viewerProvider: "tango-live", directory: directory, media: ViewerMedia(tango: session))
         if let kept = try? DurableFile.readJSON([TangoStream].self, from: keptWriter.url) {
@@ -66,7 +71,7 @@ final class TangoListController: VideoListController {
         }
         // The sign-in screen as last shown comes back in the first frame; the session (and the
         // PC) are asked again behind it.
-        if let shown = try? DurableFile.readJSON(LoginShown.self, from: loginFile) { showLogin(shown.reason, pc: shown.pc) }
+        if !hasAutomaticRecovery, let shown = try? DurableFile.readJSON(LoginShown.self, from: loginFile) { showLogin(shown.reason, pc: shown.pc) }
         migrateCookies { [weak self] in self?.signIn(); self?.nameCoStreamers() }
         network.pathUpdateHandler = { [weak self] path in
             let signature = "\(path.status):" + path.availableInterfaces.map(\.name).sorted().joined(separator: ",")
@@ -74,6 +79,36 @@ final class TangoListController: VideoListController {
             Task { @MainActor in self?.networkChanged(signature: signature, reachable: reachable) }
         }
         network.start(queue: DispatchQueue(label: "TangoList.network"))
+        // Paired-device protocol verification only: normal renewal operations,
+        // with sanitized receipts and the user's existing explorer state.
+        if ProcessInfo.processInfo.arguments.contains("-check-tango-auth") {
+            Task{[weak self] in await self?.checkAuthentication()}
+        }
+    }
+
+    private func checkAuthentication() async {
+        func fingerprint(_ value:String?)->String{value.map{SHA256.hash(data:Data($0.utf8)).prefix(8).map{String(format:"%02x",$0)}.joined()} ?? ""}
+        let file=directory.appendingPathComponent("tango-auth-check.json")
+        var steps:[[String:Any]]=[]
+        do{
+            for index in 0..<3 {
+                let before=Tango.credential("Tango-RT",in:jar)?.value
+                try await session.refresh()
+                let after=Tango.credential("Tango-RT",in:jar)?.value
+                let counts=await session.renewalCounts()
+                steps.append(["step":index,"refreshChanged":before != after,"refreshHash":fingerprint(after),
+                    "nativeRenewals":counts["nativeRenewals"] ?? 0,"initialSetups":counts["initialSetups"] ?? 0,
+                    "accessExpiresIn":Tango.credential("Tango-ST",in:jar).map{Tango.expiration($0).timeIntervalSinceNow} ?? -1,
+                    "deviceContext":jar.all.filter{["Tango-DI","Tango-DeviceId","Tango-SD"].contains($0.name)}.map(\.name)])
+                try DurableFile.write(JSONSerialization.data(withJSONObject:["done":false,"steps":steps]),to:file)
+                try await Task.sleep(for:.seconds(1))
+            }
+            let data=try JSONSerialization.data(withJSONObject:["done":true,"success":true,"steps":steps])
+            try DurableFile.write(data,to:file)
+        }catch{
+            let data=try? JSONSerialization.data(withJSONObject:["done":true,"success":false,"steps":steps,"error":error.localizedDescription])
+            if let data{try? DurableFile.write(data,to:file)}
+        }
     }
 
     // MARK: app lifecycle (from SceneDelegate)
@@ -147,11 +182,23 @@ final class TangoListController: VideoListController {
             } catch TangoError.loginRequired {
                 guard !Task.isCancelled, generation == requestGeneration else { return }
                 lastError = TangoError.loginRequired.localizedDescription
-                showLogin("Tango signed out.")
+                if hasAutomaticRecovery {hideLogin();if streams.isEmpty {showFailure("Restoring Tango’s saved login…")}}
+                else {showLogin("Tango login is required.")}
             } catch TangoError.verificationRequired {
                 guard !Task.isCancelled, generation == requestGeneration else { return }
                 lastError = TangoError.verificationRequired.localizedDescription
-                showLogin(lastError)
+                if hasAutomaticRecovery {
+                    if !Tango.deviceContextComplete(jar.all){showLogin("Tango’s updated API needs the complete sign-in context once.")}
+                    else {hideLogin();if streams.isEmpty {showFailure("Restoring Tango’s saved login…")}}
+                } else {showLogin(lastError)}
+                // The PC can return without the phone's NWPath changing. The
+                // session cooldown and durable broker request prevent replays.
+                let delay=hasAutomaticRecovery ? 5.0 : 120.0
+                retry = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard !Task.isCancelled else { return }
+                    self?.loadList()
+                }
             } catch {
                 guard !Task.isCancelled, generation == requestGeneration else { return }
                 lastError = error.localizedDescription
@@ -278,7 +325,9 @@ final class TangoListController: VideoListController {
         }
     }
 
-    override func login() { showLogin("Tango signed out.") }
+    override func login() {
+        if hasAutomaticRecovery {reload()} else {showLogin("Tango login is required.")}
+    }
 
     // MARK: signing in
 
@@ -327,10 +376,11 @@ final class TangoListController: VideoListController {
     private func takeInbox() -> Bool {
         guard let inbox = try? LoginStore.load() else { return false }
         guard inbox.handoffComplete == true else { showLogin(nil); return false }
-        Tango.storeLogin(inbox.cookies.compactMap { item in
+        let accepted = Tango.storeLogin(inbox.cookies.compactMap { item in
             HTTPCookie(properties: [.name: item.name, .value: item.value, .domain: item.domain, .path: item.path,
                                     .secure: "TRUE", .expires: Date(timeIntervalSince1970: item.expirationDate), HTTPCookiePropertyKey("HttpOnly"): "TRUE"])
         }, in: jar)
+        guard accepted else { showLogin("The imported credentials do not form a valid Tango session. Import a fresh login."); return false }
         try? LoginStore.delete()
         Log.app.notice("Tango login imported from Safari")
         return true
@@ -355,7 +405,8 @@ final class TangoListController: VideoListController {
             do {
                 let cookies = try await pc.newSession()
                 guard let self else { return }
-                Tango.storeLogin(cookies, in: jar)
+                guard Tango.storeLogin(cookies, in: jar) else { throw TangoError.verificationRequired }
+                pc.acceptedSession()
                 signIn()
             } catch {
                 self?.loginView?.show(reason: "The PC could not sign in: \(error.localizedDescription)", pending: (try? LoginStore.load()) != nil)
@@ -442,47 +493,5 @@ final class TangoLoginView: UIView {
         open.isEnabled = false
         confirm.isEnabled = false
         pc.isEnabled = false
-    }
-}
-
-// The PC's Tango login for this phone (packages/server, `/api/tango/phone-session`): the PC
-// signs in with a fresh browser profile and returns that new session's cookies. Asking needs
-// the key built into the app (a private build input); without it there is no shortcut.
-@MainActor
-final class TangoPCLogin {
-    private let base = URL(string: "https://192.168.1.197:9999")!
-    private let key: String
-    private let http = HTTPClient(.init(connectionsPerHost: 2, requestTimeout: 120, resourceTimeout: 150))
-
-    init?() {
-        guard let key = Bundle.main.object(forInfoDictionaryKey: "TangoPhoneKey") as? String, !key.isEmpty else { return nil }
-        self.key = key
-    }
-
-    func available() async -> Bool {
-        guard let response = try? await http.send(HTTPRequest(base.appendingPathComponent("api/tango/phone-session"), headers: ["X-Phone-Key": key],
-                                                              retry: .never, timeout: 5, accept: Set(300...599))) else { return false }
-        return response.status == 200 && (try? response.json([String: Bool].self))?["available"] == true
-    }
-
-    func newSession() async throws -> [HTTPCookie] {
-        let response = try await http.send(HTTPRequest(base.appendingPathComponent("api/tango/phone-session"), method: "POST",
-                                                       headers: ["X-Phone-Key": key, "Content-Type": "application/json"], body: Data("{}".utf8),
-                                                       retry: .never, accept: Set(300...599)))
-        struct Answer: Decodable {
-            struct Cookie: Decodable { var name: String; var value: String; var domain: String; var path: String; var expires: Double? }
-            var cookies: [Cookie]?
-            var error: String?
-        }
-        let answer = try response.json(Answer.self)
-        guard response.status == 200, let cookies = answer.cookies, cookies.contains(where: { $0.name == "Tango-RT" }) else {
-            throw TangoError.failed(answer.error ?? "The PC answered \(response.status)")
-        }
-        return cookies.compactMap { cookie in
-            var properties: [HTTPCookiePropertyKey: Any] = [.name: cookie.name, .value: cookie.value, .domain: cookie.domain, .path: cookie.path,
-                                                            .secure: "TRUE", HTTPCookiePropertyKey("HttpOnly"): "TRUE"]
-            if let expires = cookie.expires { properties[.expires] = Date(timeIntervalSince1970: expires) }
-            return HTTPCookie(properties: properties)
-        }
     }
 }

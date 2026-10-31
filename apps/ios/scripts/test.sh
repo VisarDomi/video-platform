@@ -27,3 +27,6 @@ xcrun swiftc -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet 
 xcrun swiftc -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" \
   VideoApp/Tango.swift Tests/TangoSessionTests.swift -o "$test_dir/tango-session-tests"
 "$test_dir/tango-session-tests"
+xcrun swiftc -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" \
+  VideoApp/Tango.swift VideoApp/TangoPCLogin.swift Tests/TangoPCLoginTests.swift -o "$test_dir/tango-pc-tests"
+"$test_dir/tango-pc-tests"

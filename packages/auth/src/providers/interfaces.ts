@@ -13,8 +13,8 @@ export class BrowserVerificationRequiredError extends Error {
 }
 
 export class BrowserLoginNeedsAttentionError extends Error {
-    constructor() {
-        super("Google sign-in needs user verification; automatic password retries have stopped.");
+    constructor(message = "Google sign-in needs user verification; automatic password retries have stopped.") {
+        super(message);
         this.name = "BrowserLoginNeedsAttentionError";
     }
 }
@@ -22,14 +22,18 @@ export class BrowserLoginNeedsAttentionError extends Error {
 export interface RefreshResult {
     newSessionToken: string;
     newRefreshToken: string | null;
+    browserState?: string;
+    browserProfile?: string;
 }
 
 export interface ShortTokenResult {
     extras: Record<string, string | null>;
+    session?: RefreshResult;
 }
 
 export interface IAuthProvider {
     readonly name: string;
+    needsSessionMigration?(bag: TokenBag): boolean;
     login(account: Account): Promise<TokenBag>;
     refreshSession(tokenBag: TokenBag): Promise<RefreshResult>;
     // timeoutMs bounds the request, queue wait included.

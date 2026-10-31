@@ -1,5 +1,14 @@
 The coding agent owns this repository and the recordings it manages: any file may be changed, this one included. The user's only manual task is deleting old recordings to free disk space, so a recording that disappears is expected, not an error.
 
+The phone apps are for exploring; the PC pipeline is the backup engine. Keep the
+phone's ordinary provider session renewal independent of the PC. Initial setup or
+an API migration may use the PC/Safari helper once; normal expiry, backgrounding
+and network changes must renew the existing session automatically. PC recording
+and phone sessions have separate refresh-token families and one owner each.
+Every ordinary PC browser/authentication flow runs headful on Xvfb `:111`; never
+inherit the desktop display. Routine iPhone UI checks use the Mac virtual iPhone;
+reserve the physical device for behavior that cannot be established there.
+
 Handle routine project repairs autonomously without requesting confirmation. This includes
 Porntrex session recovery: reuse a valid shared session first; if every retained copy is
 rejected, perform one coordinated PC login through `ptrex-connect-iphone --apply

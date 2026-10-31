@@ -3,10 +3,14 @@ import { requestQueue } from "../../auth/authQueue.js";
 import * as authUtils from "../../auth/authUtils.js";
 import { Account, IAuthProvider, TokenBag, RefreshResult, ShortTokenResult, BrowserVerificationRequiredError } from "../interfaces.js";
 import * as constants from "./constants.js";
-import { extractTokens } from "./tangoLogin.js";
+import { BROWSER_STATE, rejectedSession } from "./tangoBrowserSession.js";
+import { browserOwner, BROWSER_PROFILE } from "./tangoBrowserOwner.js";
+import { createHash } from "node:crypto";
 
 export class TangoAuthProvider implements IAuthProvider {
+    constructor(private readonly browserRefresh?: (bag:TokenBag)=>Promise<RefreshResult>) {}
     readonly name = "tango";
+    needsSessionMigration(bag:TokenBag):boolean{return !bag.extras[BROWSER_PROFILE];}
 
     readonly intervals = {
         shortTokenRefresh: constants.TANGO_STREAM_TOKEN_REFRESH_MS,
@@ -14,14 +18,17 @@ export class TangoAuthProvider implements IAuthProvider {
     };
 
     async login(account: Account): Promise<TokenBag> {
-        const result = await extractTokens(account);
-        if (!result) {
-            throw new Error(`Browser login failed for ${account.email}`);
-        }
-        return result;
+        return browserOwner("pc-"+createHash("sha256").update(account.email).digest("hex").slice(0,24)).session(account);
     }
 
     async refreshSession(tokenBag: TokenBag): Promise<RefreshResult> {
+        if(this.browserRefresh&&tokenBag.extras[BROWSER_STATE])return this.browserRefresh(tokenBag);
+        const profile=tokenBag.extras[BROWSER_PROFILE];
+        if(profile){
+            const fresh=await browserOwner(profile).session(undefined,300);
+            return {newRefreshToken:fresh.refreshToken,newSessionToken:fresh.sessionToken!,browserProfile:profile};
+        }
+        if(tokenBag.extras[BROWSER_STATE])throw new BrowserVerificationRequiredError();
         const payload = authUtils.parseJwtPayload(tokenBag.refreshToken);
         const accountId = payload?.accountId;
         const sessionId = payload?.sessionId;
@@ -37,12 +44,14 @@ export class TangoAuthProvider implements IAuthProvider {
             Referer: "https://www.tango.me/",
             [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_RT_PREFIX}${tokenBag.refreshToken}`,
         };
-        const refreshOptions = { method: "POST", headers: refreshHeaders, body: JSON.stringify({ accountId, sessionId }) };
+        const refreshOptions = { method: "POST", headers: refreshHeaders, body: JSON.stringify({ accountId, sessionId }), signal: AbortSignal.timeout(15_000) };
 
         const response = await requestQueue.add<Response>(constants.TANGO_URLS.SESSION_REFRESH, refreshOptions);
         if (!response.ok) {
             const details = await response.json().catch(() => null) as { errorCode?: string } | null;
             if (response.status === 424 && details?.errorCode === "CHALLENGE_REQUIRED") throw new BrowserVerificationRequiredError();
+            if (rejectedSession(response.status, details)) throw new BrowserVerificationRequiredError();
+            if (response.status === 401 || response.status === 403) throw new Error(`Tango session renewal was unavailable (HTTP ${response.status}).`);
             throw new Error(`Session refresh failed with status ${response.status}. Refresh token may be expired.`);
         }
 
@@ -58,9 +67,11 @@ export class TangoAuthProvider implements IAuthProvider {
     }
 
     async fetchShortTokens(tokenBag: TokenBag, timeoutMs: number): Promise<ShortTokenResult> {
+        const profile=tokenBag.extras[BROWSER_PROFILE];
+        const current=profile ? await browserOwner(profile).session(undefined,15) : tokenBag;
         const options: RequestInit = {
             method: "GET",
-            headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${tokenBag.sessionToken}` },
+            headers: { [constants.HEADERS.COOKIE]: `${constants.COOKIE_NAMES.TANGO_ST_PREFIX}${current.sessionToken}` },
             signal: AbortSignal.timeout(timeoutMs),
         };
         // Not through the request queue: it runs one request at a time, so a
@@ -69,7 +80,9 @@ export class TangoAuthProvider implements IAuthProvider {
 
         if (!response.ok) {
             const details = await response.json().catch(() => null) as { errorCode?: string } | null;
+            if(profile&&(response.status===401||rejectedSession(response.status,details)))browserOwner(profile).rejectAccess(current.sessionToken!);
             if (response.status === 424 && details?.errorCode === "CHALLENGE_REQUIRED") throw new BrowserVerificationRequiredError();
+            if (response.status === 403 && !rejectedSession(response.status, details)) throw new Error("Tango stream-token request was unavailable (HTTP 403).");
             throw new Error(`Token data fetch failed with status ${response.status}`);
         }
 
@@ -87,7 +100,7 @@ export class TangoAuthProvider implements IAuthProvider {
             logger.warn(`[Tango] Tango API issued short-lived token: tte=${tte} ttl=${ttl}s (expected ~${constants.TANGO_STREAM_TOKEN_TTL_S}s)`);
         }
 
-        return { extras: { tt, ttu, tte } };
+        return { extras: { tt, ttu, tte }, ...(profile&&(current.refreshToken!==tokenBag.refreshToken||current.sessionToken!==tokenBag.sessionToken) ? {session:{newRefreshToken:current.refreshToken,newSessionToken:current.sessionToken!,browserProfile:profile}} : {}) };
     }
 
     extractUsername(refreshToken: string): string | null {
@@ -102,6 +115,8 @@ export class TangoAuthProvider implements IAuthProvider {
             tt: bag.extras.tt ?? null,
             ttu: bag.extras.ttu ?? null,
             tte: bag.extras.tte ?? null,
+            browserState: bag.extras[BROWSER_STATE] ?? null,
+            browserProfile: bag.extras[BROWSER_PROFILE] ?? null,
         };
     }
 
@@ -114,6 +129,8 @@ export class TangoAuthProvider implements IAuthProvider {
                 tt: data.tt ?? null,
                 ttu: data.ttu ?? null,
                 tte: data.tte ?? null,
+                ...(typeof data.browserState === "string" ? {[BROWSER_STATE]: data.browserState} : {}),
+                ...(typeof data.browserProfile === "string" ? {[BROWSER_PROFILE]: data.browserProfile} : {}),
             },
         };
     }

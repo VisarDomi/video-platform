@@ -6,7 +6,7 @@ export function parseJwtPayload(token: string): { [key: string]: any } | null {
         const jsonPayload = Buffer.from(base64Url, "base64").toString();
         return JSON.parse(jsonPayload);
     } catch (error) {
-        logger.error("Failed to parse JWT payload", { token, error });
+        logger.error("Failed to parse JWT payload", { tokenLength: token.length, error });
         return null;
     }
 }

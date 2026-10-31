@@ -6,6 +6,9 @@ const mode = process.argv[2];
 const popup = new Promise((_, reject) => { closePopup = () => reject(new Error('popup target closed')); });
 const response = new Promise((_, reject) => { closeResponse = () => reject(new Error('response target closed')); });
 const visitor = { or() { return this; }, first() { return this; }, async click() {} };
+const google = { or() { return this; }, filter() { return this; }, first() { return this; }, async click() {
+    if (mode !== 'popup-error') throw new Error('login trigger timed out');
+}, async isVisible() { return true; }, async waitFor() {} };
 const page = {
     waitForEvent: () => popup,
     async goto() {
@@ -14,9 +17,8 @@ const page = {
             await new Promise(resolve => setImmediate(resolve));
         }
     },
-    getByTestId: id => id === 'GOOGLE' ? { async click() {
-        if (mode !== 'popup-error') throw new Error('login trigger timed out');
-    } } : visitor,
+    getByTestId: id => id === 'GOOGLE' ? google : visitor,
+    getByText: () => google,
     isClosed: () => false,
     async screenshot() {},
 };

@@ -21,7 +21,7 @@ export async function readTangoLogin(api) {
             return typeof expiry === 'number' ? expiry : undefined;
         } catch { return undefined; }
     };
-    for (const name of ['Tango-RT', 'Tango-DI', 'Tango-DeviceId', 'Tango-ST', 'Tango-WST']) {
+    for (const name of ['Tango-RT', 'Tango-DI', 'Tango-DeviceId', 'Tango-ST', 'Tango-WST', 'Tango-SD']) {
         for (const url of urls) {
             const cookie = await api.cookies.get({url, name, storeId: stores[0].id});
             if (!cookie || !(cookie.domain.replace(/^\./, '') === 'tango.me' || cookie.domain.endsWith('.tango.me'))) continue;

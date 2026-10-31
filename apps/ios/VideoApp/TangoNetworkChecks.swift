@@ -2,6 +2,7 @@
 import UIKit
 import KitNet
 import KitTestHooks
+import KitCore
 
 private final class TangoFixtureHTTP: URLProtocol {
     static let lock = NSLock()
@@ -16,11 +17,11 @@ private final class TangoFixtureHTTP: URLProtocol {
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let refresh = request.url?.path.contains("/session/web/refresh") == true
-            let status = mode.hasSuffix("outage") ? 503 : (refresh && mode.hasPrefix("challenge") ? 424 : 200)
+            let status = mode.hasSuffix("outage") ? 503 : (refresh && mode.hasPrefix("challenge") ? 424 : (refresh && mode.hasPrefix("rejected") ? 401 : 200))
             let record: [String: Any] = ["isPublic": true, "anchor": ["encryptedAccountId": "fixture-streamer", "firstName": "Network fixture"],
                                        "stream": ["id": "fixture-stream", "status": "LIVING", "masterListUrl": "https://media.invalid/never-play.m3u8"]]
             let body: [String: Any]
-            if status >= 400 { body = ["errorCode": status == 424 ? "CHALLENGE_REQUIRED" : "UNAVAILABLE"] }
+            if status >= 400 { body = ["errorCode": status == 424 ? "CHALLENGE_REQUIRED" : (status == 401 ? "SESSION_NOT_FOUND" : "UNAVAILABLE")] }
             else if request.url?.path.contains("blocklist") == true { body = ["users": [String]()] }
             else { body = ["records": [record]] }
             let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
@@ -37,10 +38,20 @@ private final class TangoFixtureHTTP: URLProtocol {
 @MainActor
 final class TangoNetworkChecks: UIViewController {
     private var list: TangoListController?
+    private var brokerChecks: [String: Bool] = [:]
     override var prefersStatusBarHidden: Bool { true }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        DebugState.shared.register("tangoBroker") { [weak self] in self?.brokerChecks ?? [:] }
+        TestHooks.shared.register("tango-pc-check") { [weak self] query in
+            let path = query["route"] ?? "lan"
+            Task { @MainActor [weak self] in
+                let endpoints = TangoPCLogin.endpoints.filter { path == "lan" ? $0.host == "192.168.1.197" : $0.host != "192.168.1.197" }
+                self?.brokerChecks[path] = await TangoPCLogin(endpoints: endpoints)?.available() ?? false
+            }
+            return ["ok":true]
+        }
         TestHooks.shared.register("tango-fixture") { [weak self] in self?.fixture($0["mode"] ?? "success") ?? [:] }
         TestHooks.shared.register("tango-network") { [weak self] query in
             let mode = query["mode"] ?? "success"
@@ -70,12 +81,12 @@ final class TangoNetworkChecks: UIViewController {
         try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try! Data().write(to: directory.appendingPathComponent("tango-cookies-migrated"))
         let jar = CookieJar(file: directory.appendingPathComponent("cookies.json"))
-        jar.set(Self.cookies(session: "original", access: mode != "challenge" && mode != "challenge-no-broker" && mode != "refresh-outage"))
+        jar.set(Self.cookies(session: "original", access: !mode.hasPrefix("challenge") && !mode.hasPrefix("rejected") && mode != "refresh-outage"))
         jar.flush()
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [TangoFixtureHTTP.self]
-        let controller = TangoListController(directory: directory, configuration: config, loginRecovery: {
+        let controller = TangoListController(directory: directory, configuration: config, loginRecovery: { _ in
             TangoFixtureHTTP.lock.withLock { TangoFixtureHTTP.recoveries += 1 }
-            if mode == "challenge-no-broker" { throw TangoError.verificationRequired }
+            if TangoFixtureHTTP.lock.withLock({ TangoFixtureHTTP.mode.hasSuffix("no-broker") }) { throw TangoError.verificationRequired }
             return Self.cookies(session: "recovered", access: true)
         }, pcLoginEnabled: false)
         addChild(controller); controller.view.frame = view.bounds; view.addSubview(controller.view); controller.didMove(toParent: self)
@@ -89,7 +100,7 @@ final class TangoNetworkChecks: UIViewController {
         func cookie(_ name: String, _ value: String) -> HTTPCookie {
             HTTPCookie(properties: [.name: name, .value: value, .domain: "gateway.tango.me", .path: "/", .secure: "TRUE", .expires: Date().addingTimeInterval(3600)])!
         }
-        return [cookie("Tango-RT", "header." + payload + ".signature")] + (access ? [cookie("Tango-ST", "fixture-access")] : [])
+        return [cookie("Tango-RT", "header." + payload + ".signature"),cookie("Tango-DI","fixture-device"),cookie("Tango-DeviceId","fixture-installation"),cookie("Tango-SD","fixture-context")] + (access ? [cookie("Tango-ST", "header." + payload + ".signature")] : [])
     }
 }
 #endif

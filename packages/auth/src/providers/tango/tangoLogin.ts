@@ -1,4 +1,4 @@
-import { chromium, Browser, Page } from "playwright";
+import { chromium, Browser, Page, BrowserContext } from "playwright";
 import logger from "../../common/logger.js";
 import { Account, TokenBag, BrowserLoginNeedsAttentionError } from "../interfaces.js";
 import { createHash } from "node:crypto";
@@ -6,14 +6,15 @@ import * as constants from "./constants.js";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { captureBrowserSession } from "./tangoBrowserSession.js";
 
 const BROWSER_ELEMENT_TIMEOUT_MS = 10_000;
 const BROWSER_INPUT_TIMEOUT_MS = 5_000;
 const BROWSER_BUTTON_TIMEOUT_MS = 15_000;
 const BROWSER_POPUP_CLOSE_TIMEOUT_MS = 20_000;
 const BROWSER_PAGE_TIMEOUT_MS = 30_000;
-const BROWSER_LOGIN_FLOW_TIMEOUT_MS = 105_000;
-const BROWSER_RESPONSE_TIMEOUT_MS = 60_000;
+const BROWSER_LOGIN_FLOW_TIMEOUT_MS = 150_000;
+const BROWSER_RESPONSE_TIMEOUT_MS = 135_000;
 
 export function isTangoLoginResponse(url: string, status: number): boolean {
     try {
@@ -23,15 +24,28 @@ export function isTangoLoginResponse(url: string, status: number): boolean {
     } catch { return false; }
 }
 
-async function findAndClickLoginButton(page: Page, account: Account): Promise<void> {
+export async function findAndClickLoginButton(page: Page, account: Account): Promise<void> {
     const signInButton = page
         .getByTestId("visitor-join-now")
         .or(page.getByTestId("join-now"))
         .first();
-    await signInButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
-
-    const googleButton = page.getByTestId("GOOGLE");
-    await googleButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
+    // Tango serves both the older test-id button and a newer label-only variant.
+    // Wait for the actual visible action; a completed modal is not proof that its
+    // provider button has the old data-testid.
+    const googleButton = page.getByTestId("GOOGLE")
+        .or(page.getByText(/Continue\s+with\s+Google/i))
+        .filter({ visible: true }).first();
+    // SSR can expose Sign in before React attaches its handler. Reopening the
+    // modal is safe; credentials are still submitted only once, after the popup.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        if (await googleButton.isVisible()) break;
+        await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>('[data-testid="visitor-join-now"], [data-testid="join-now"]')]
+            .some(e => !!e.getBoundingClientRect().width && typeof e.onclick === "function"), undefined, {timeout:30_000,polling:100});
+        await signInButton.click({ timeout: BROWSER_ELEMENT_TIMEOUT_MS });
+        try { await googleButton.waitFor({state:"visible",timeout:5000}); break; }
+        catch (error) { if(attempt===2) throw error; }
+    }
+    await googleButton.click({ timeout: BROWSER_BUTTON_TIMEOUT_MS });
     logger.info(`Successfully initiated Google login for ${account.email}`);
 }
 
@@ -40,6 +54,8 @@ async function handleGoogleLogin(popup: Page, account: Account): Promise<void> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             await popup.waitForURL(url => url.protocol === "https:" && url.hostname === "accounts.google.com", { timeout: BROWSER_PAGE_TIMEOUT_MS });
+            const retainedAccount = popup.getByText(account.email, {exact:true}).first();
+            if(await retainedAccount.isVisible())await retainedAccount.click();
             logger.info(`Google login attempt ${attempt}/${maxRetries} for ${account.email}...`);
 
             try {
@@ -90,12 +106,12 @@ async function extractLoginTokensFromResponse(response: any, accountEmail: strin
     return { refreshToken: foundRT, sessionToken: foundST, extras: {} };
 }
 
-export async function runLoginFlow(browser: Browser, account: Account): Promise<TokenBag> {
+export async function runLoginFlow(browser: Pick<Browser,"newContext">, account: Account, existingPage?: Page): Promise<TokenBag> {
     const context = await browser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: null,
     });
-    const page = await context.newPage();
+    const page = existingPage ?? await context.newPage();
 
     try {
         let responseCaptured = false;
@@ -123,7 +139,12 @@ export async function runLoginFlow(browser: Browser, account: Account): Promise<
             path: responseURL.pathname,
             page: response.frame().page() === page ? "main" : "popup",
         });
-        const tokens = await extractLoginTokensFromResponse(response, account.email);
+        const initial = await extractLoginTokensFromResponse(response, account.email);
+        await response.finished();
+        // Cookies arrive before React persists its authenticated account/session.
+        // Closing here would export credentials but lose the context required by
+        // the next ordinary website renewal.
+        const tokens = await captureBrowserSession(context, initial);
 
         logger.info(`Initial tokens successfully extracted for ${account.email}.`);
         return tokens;
@@ -135,14 +156,15 @@ export async function runLoginFlow(browser: Browser, account: Account): Promise<
     }
 }
 
-export async function extractTokens(account: Account): Promise<TokenBag | null> {
+export async function extractTokens(account: Account, persistentContext?: BrowserContext): Promise<TokenBag | null> {
     const diagnosticsDirectory = path.join(os.homedir(), ".local/state/video-services/tango-login");
     const attentionFile = path.join(diagnosticsDirectory, createHash("sha256").update(account.email).digest("hex") + ".attention.json");
     if (await access(attentionFile).then(() => true, () => false)) throw new BrowserLoginNeedsAttentionError();
     logger.info(`Acquiring browser for ${account.email}`);
-    let browser: Browser;
-    browser = await chromium.launch({
+    let browser: Browser | undefined;
+    if(!persistentContext)browser = await chromium.launch({
         headless: false,
+        env:{...process.env,DISPLAY:":111"},
         slowMo: process.env.TANGO_LOGIN_VISIBLE === "1" ? 200 : undefined,
         args: ["--disable-blink-features=AutomationControlled", "--disable-gpu", "--disable-gpu-compositing"],
     });
@@ -153,14 +175,15 @@ export async function extractTokens(account: Account): Promise<TokenBag | null> 
         });
 
         return await Promise.race([
-            runLoginFlow(browser, account),
+            runLoginFlow(persistentContext ? {newContext:async()=>persistentContext} : browser!, account,
+                persistentContext?.pages().find(p=>p.url().startsWith("https://www.tango.me"))),
             timeoutPromise
         ]);
     } catch (ignoredError) {
         const directory = diagnosticsDirectory;
         await mkdir(directory, { recursive: true, mode: 0o700 });
         const prefix = path.join(directory, String(Date.now()));
-        const pages = browser.contexts().flatMap(context => context.pages());
+        const pages = persistentContext?.pages() ?? browser!.contexts().flatMap(context => context.pages());
         const states = [];
         for (let index = 0; index < pages.length; index++) {
             const page = pages[index];
@@ -181,7 +204,7 @@ export async function extractTokens(account: Account): Promise<TokenBag | null> 
         return null;
     } finally {
         if (loginTimer) clearTimeout(loginTimer);
-        await browser.close();
-        logger.info(`Browser released for ${account.email}.`);
+        if(!persistentContext)await browser!.close();
+        logger.info(persistentContext ? `Persistent Tango profile retained for ${account.email}.` : `Browser released for ${account.email}.`);
     }
 }

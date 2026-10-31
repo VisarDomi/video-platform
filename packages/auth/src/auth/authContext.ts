@@ -30,12 +30,14 @@ export class AuthContext {
 
     public updateFromRefresh(result: RefreshResult): boolean {
         if (!this.tokenBag) return false;
-        this.tokenBag.sessionToken = result.newSessionToken;
-        if (result.newRefreshToken) {
-            this.tokenBag.refreshToken = result.newRefreshToken;
-            return true;
-        }
-        return false;
+        // A request using the previous ST must not attach its late stream tokens
+        // to this generation. AuthService checks this immutable owner identity.
+        this.tokenBag = { ...this.tokenBag, sessionToken: result.newSessionToken,
+            refreshToken: result.newRefreshToken ?? this.tokenBag.refreshToken,
+            extras: { ...this.tokenBag.extras,
+                ...(result.browserState ? {tangoBrowserState: result.browserState} : {}),
+                ...(result.browserProfile ? {tangoBrowserProfile: result.browserProfile} : {}) } };
+        return !!result.newRefreshToken;
     }
 
     public updateFromTokenData(result: ShortTokenResult): void {
@@ -75,7 +77,7 @@ export class AuthContext {
         // The session and stream refresh loops can save at the same time.
         // Commit in order so neither steals the other's temporary file or
         // overwrites a newly rotated refresh token with an older snapshot.
-        this.tokenSave = this.tokenSave.then(() => this.persistTokenToFile());
+        this.tokenSave = this.tokenSave.catch(() => {}).then(() => this.persistTokenToFile());
         return this.tokenSave;
     }
 
@@ -86,12 +88,13 @@ export class AuthContext {
                 const serialized = this.provider.serializeTokens(this.tokenBag);
                 serialized.lastWriteMs = Date.now();
                 const tmpPath = filePath + '.tmp';
-                await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2));
+                await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2), {mode: 0o600});
                 await fsPromises.rename(tmpPath, filePath);
                 logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
             logger.error(`Failed to save session file for ${this.email} at ${filePath}`, { error });
+            throw error;
         }
     }
 }

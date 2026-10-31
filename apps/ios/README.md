@@ -198,15 +198,20 @@ bytes and dropped frames without URLs or credentials.
   refreshed from the refresh token when it has under five minutes left (one refresh at a
   time; a rotated refresh token is saved before anything else, as `packages/auth` does), and
   the stream tokens every 5 seconds while a stream plays.
-  - A valid access token remains usable while early renewal runs. An explicit HTTP 424
-    `CHALLENGE_REQUIRED` is provider verification, not an offline connection or a logout.
-    One renewal owner uses the existing PC phone-session automation when available, checks
-    that the account matches, and commits the fresh pair durably before adopting it.
-    The owner prefers this PC-login path; it works directly on the home LAN without the VPN.
-    When it cannot complete, the app preserves the login and shows verification/Safari
-    recovery. Ordinary outages never create new logins. Retries are bounded, and path or
-    foreground recovery retries failed loads immediately; only successful loads start the
-    normal half-hour refresh interval.
+  - The phone is the explorer; the PC pipeline is the backup engine. The phone renews
+    its own session directly through `https://www.tango.me/api`, independently of the PC.
+    Refresh needs the complete issued device context (`Tango-DI`, `Tango-DeviceId`, SD,
+    RT/ST/WST), not RT alone. It commits the coherent replacement pair and auxiliary
+    cookies together, retaining the remembered device while the refresh session is valid.
+    Usable access stays available during early renewal. One in-flight owner and a bounded
+    background assertion protect adoption across app switches/lock; identity and explorer
+    state remain saved during outages. Only successful loads start the half-hour freshness
+    interval, and reconnect/foreground retries failed requests immediately.
+  - The existing PC-login helper is **one-time setup/API migration**. It requires a durable
+    request ID, freezes a complete result, stops/clears the setup browser's Tango state,
+    and closes before handing ownership to the phone. It does not keep rotating the
+    phone's RT in the backup engine. Retries reuse the frozen setup result instead of
+    repeating Google login. All desktop/PC auth automation runs on Xvfb `:111`.
   - The current site issues login responses through `www.tango.me/api`. Safari import and
     native credential restoration accept that first-party scope and legacy gateway scopes;
     old paths cannot shadow newer credentials. Credential scopes update in one snapshot.
@@ -218,7 +223,7 @@ bytes and dropped frames without URLs or credentials.
   - Signing in stays the Safari handoff, so Tango works away from home: sign in with Google
     on tango.me in Safari, Import with the Tango Login extension, delete Tango's Safari
     website data and confirm in the app ("Safari data cleared — continue"). Tango Login
-    (`Login/`) reads `Tango-RT`, `-DI`, `-DeviceId`, `-ST` and `-WST` for the gateway's
+    (`Login/`) reads `Tango-RT`, `-DI`, `-DeviceId`, `-ST`, `-WST` and `-SD` for the gateway's
     refresh path from the active tab's own cookie store and saves them in the shared
     Keychain (service `TangoLogin`, account `session`, this device only); the app moves a
     confirmed import into its jar and empties the inbox. (Google refuses sign-in inside an

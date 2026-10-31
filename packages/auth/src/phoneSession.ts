@@ -1,34 +1,25 @@
 import "dotenv/config";
-import * as fs from "fs";
-import { getConfig } from "./common/config.js";
-import { parseJwtPayload } from "./auth/authUtils.js";
-import { extractTokens } from "./providers/tango/tangoLogin.js";
+import {readFileSync} from "node:fs";
+import {request} from "node:https";
+import {randomUUID} from "node:crypto";
+import os from "node:os";
+import path from "node:path";
 
-// A new Tango session for the iPhone app (packages/server phone-session.routes.ts): one Google
-// login in a fresh browser context, which is discarded afterwards, so the phone holds its own
-// refresh token. The PC's own session (`video-auth`, the session file) is neither read nor
-// written. Prints the new session's cookies as one line, `PHONE-SESSION <json>` (the login's
-// log lines also go to stdout).
-async function main(): Promise<void> {
-    const { accountsPath } = getConfig();
-    const accounts = (JSON.parse(fs.readFileSync(accountsPath, "utf-8")).accounts ?? []) as { email: string; password: string; provider?: string }[];
-    const account = accounts.find(entry => (entry.provider ?? "tango") === "tango");
-    if (!account) throw new Error("No Tango account is configured");
-    const tokens = await extractTokens({ email: account.email, password: account.password, provider: "tango" });
-    if (!tokens?.refreshToken || !tokens.sessionToken) throw new Error("The Tango login did not finish");
-    const { refreshToken, sessionToken } = tokens;
-    const expiry = (token: string, fallbackDays: number) => {
-        const exp = parseJwtPayload(token)?.exp;
-        return typeof exp === "number" ? exp : Math.floor(Date.now() / 1000) + fallbackDays * 86_400;
-    };
-    const cookie = (name: string, value: string, expires: number) => ({ name, value, domain: "gateway.tango.me", path: "/", expires });
-    process.stdout.write("\nPHONE-SESSION " + JSON.stringify({ cookies: [
-        cookie("Tango-RT", refreshToken, expiry(refreshToken, 90)),
-        cookie("Tango-ST", sessionToken, expiry(sessionToken, 1 / 24)),
-    ] }) + "\n");
-}
-
-main().catch(error => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exit(1);
+// Operator adapter for the existing authenticated owner. It never opens a
+// second browser, reads the PC recording RT or consumes the phone profile's RT.
+const home=os.homedir();
+const key=readFileSync(path.join(home,".local/share/video-services/tango-phone-key"),"utf8").trim();
+const ca=readFileSync(path.join(home,".local/share/mkcert/rootCA.pem"));
+const call=request("https://localhost:9999/api/tango/phone-session",{method:"POST",ca,
+    headers:{"X-Phone-Key":key,"X-Phone-Request-ID":randomUUID(),"Content-Type":"application/json"},timeout:220_000},response=>{
+    let body="";
+    response.on("data",chunk=>{body+=chunk;if(body.length>1_000_000)call.destroy(new Error("Unexpected Tango handoff size"));});
+    response.on("end",()=>{
+        const value=JSON.parse(body);
+        if(response.statusCode!==200){process.stderr.write((value.error??"The Tango owner is unavailable")+"\n");process.exitCode=1;return;}
+        process.stdout.write("PHONE-SESSION "+JSON.stringify(value)+"\n");
+    });
 });
+call.on("timeout",()=>call.destroy(new Error("The Tango owner did not finish in time")));
+call.on("error",error=>{process.stderr.write(error.message+"\n");process.exitCode=1;});
+call.end('{"setup":true}');

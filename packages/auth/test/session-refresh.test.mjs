@@ -7,6 +7,53 @@ import { BrowserVerificationRequiredError, BrowserLoginNeedsAttentionError } fro
 
 const token = claims => `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
 
+test('a retained browser session renews without replaying a direct API request or using a password',async()=>{
+    const original=requestQueue.add;
+    const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{tangoBrowserState:'private-fixture-state'}};
+    let renewals=0;
+    const provider=new TangoAuthProvider(async owner=>{assert.equal(owner,bag);renewals++;return {newRefreshToken:'rotated',newSessionToken:'renewed',browserState:'updated-state'};});
+    try {
+        requestQueue.add=async()=>{throw new Error('Current browser state must use the ordinary website flow directly');};
+        assert.deepEqual(await provider.refreshSession(bag),{newRefreshToken:'rotated',newSessionToken:'renewed',browserState:'updated-state'});
+        assert.equal(renewals,1);
+    } finally {requestQueue.add=original;}
+});
+
+test('a blocked refresh page is an outage, while explicit invalid session codes permit recovery',async()=>{
+    const original=requestQueue.add, provider=new TangoAuthProvider();
+    const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{}};
+    try {
+        requestQueue.add=async()=>new Response('<html>upstream denied</html>',{status:403});
+        await assert.rejects(provider.refreshSession(bag),e=>!(e instanceof BrowserVerificationRequiredError)&&/unavailable/.test(e.message));
+        requestQueue.add=async()=>new Response(JSON.stringify({errorCode:'SESSION_NOT_FOUND'}),{status:401});
+        await assert.rejects(provider.refreshSession(bag),BrowserVerificationRequiredError);
+    } finally {requestQueue.add=original;}
+});
+
+test('server rejection forces one renewal even when the saved ST nominally has time left',async()=>{
+    let refreshes=0;
+    const provider={intervals:{shortTokenRefresh:5000,sessionRefresh:1800000},
+        refreshSession:async()=>{refreshes++;return {newSessionToken:token({exp:Math.floor(Date.now()/1000)+3600}),newRefreshToken:'new-refresh'};},
+        fetchShortTokens:async()=>({extras:{tt:'fresh',ttu:'fresh',tte:'9999999999'}})};
+    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'tango'},provider);
+    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:token({exp:Math.floor(Date.now()/1000)+3500}),extras:{}});
+    service.authContext.saveTokenToFile=async()=>{};service.forceSessionRefresh=true;
+    await service.maintainSession();
+    assert.equal(refreshes,1);assert.equal(service.forceSessionRefresh,false);
+});
+
+test('late playback tokens from an old ST cannot overwrite a new session generation',async()=>{
+    let resolve;
+    const provider={fetchShortTokens:()=>new Promise(r=>{resolve=r;})};
+    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'tango'},provider);
+    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{tangoBrowserState:'retained-state'}});
+    const request=service.setTokenData();
+    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',browserState:'fresh-state'});
+    resolve({extras:{tt:'stale-stream-token',ttu:'stale',tte:'9999999999'}});
+    await request;
+    assert.deepEqual(service.authContext.getTokenBag(),{refreshToken:'new-refresh',sessionToken:'new-access',extras:{tangoBrowserState:'fresh-state'}});
+});
+
 test('only an explicit 424 challenge requests browser recovery', async () => {
     const provider=new TangoAuthProvider(),original=requestQueue.add;
     const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{}};
@@ -85,7 +132,7 @@ test('refresh uses the PC token claims and receives replacement cookies', async 
     const refreshToken = token({accountId:'pc-account', sessionId:'pc-session'});
     const original = requestQueue.add;
     requestQueue.add = async (url, request) => {
-        assert.equal(url, 'https://gateway.tango.me/session-service/public/v2/session/web/refresh');
+        assert.equal(url, 'https://www.tango.me/api/session-service/public/v2/session/web/refresh');
         assert.equal(request.method, 'POST');
         assert.deepEqual(JSON.parse(request.body), {accountId:'pc-account', sessionId:'pc-session'});
         assert.equal(new Headers(request.headers).get('cookie'), `Tango-RT=${refreshToken}`);

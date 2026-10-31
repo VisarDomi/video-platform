@@ -9,34 +9,67 @@ credentials separately from `~/.config/video-services/upload-providers.json`
 (`VIDEO_UPLOAD_PROVIDERS_FILE`); when they use the same Google account, changing
 one file does not update the other. Both live outside the repository.
 
-## Refresh request
+## Current ownership and API
 
-The session refresh is `POST https://gateway.tango.me/session-service/public/v2/session/web/refresh`
-with the PC's own `Tango-RT` cookie and the JSON body `{accountId, sessionId}`
-decoded from that same token. No phone credential is involved. The response's
-`Tango-ST` (and replacement `Tango-RT`) cookies are saved to
-`~/.local/share/video-services/session/<account email>.json` before the
-short-lived stream tokens are requested, so a downstream failure cannot lose the
-rotated refresh token. A 401/403 or explicit HTTP 424 `CHALLENGE_REQUIRED` starts
-the normal browser verification/login automation (headed Playwright Chromium on
-the Xvfb display `:111`). Other 424/5xx failures never become password logins.
-Startup validates a usable saved access token before consuming another refresh
-token. Concurrent maintenance shares one owner, and recovery commits the new pair
-before requesting stream tokens.
+The phone is the explorer; the PC pipeline is the backup engine. Each keeps its own
+session. Ordinary phone renewal is native and independent of the PC.
 
-## Recovering
+The current web API base is `https://www.tango.me/api`. Refresh is
+`POST /session-service/public/v2/session/web/refresh` with `{accountId, sessionId}`
+from that same RT and the **complete issued cookie context**, including `Tango-DI`,
+`Tango-DeviceId`, `Tango-SD`, ST and WST where applicable. Sending RT alone returned
+424; retaining the issued device context passed consecutive direct renewals without
+Google or a browser login. Preserve all replacement cookies and coherent RT/ST pairs
+atomically. Device identifiers are retained while a valid rolling refresh session
+needs them; their values and signed JWT expiries are never invented or regenerated.
 
-- Check the refresh path without the network:
-  `npm run build -w auth && node --test packages/auth/test/session-refresh.test.mjs`.
-- Before consuming the rotating refresh token from anything other than
-  `video-auth`, stop the competing token owner
-  (`systemctl --user stop video-auth`), save every replacement token it returns
-  immediately, and restart the service when finished.
-- `systemctl --user restart video-auth` resumes valid saved credentials without an
-  unnecessary refresh; the normal maintenance loop renews ahead of expiry.
-- When Google answers "Too many failed attempts", stop: repeated password
-  submissions keep the block in place, and a session-only check must not trigger
-  a fresh login.
+The PC's own normal Tango client runs in its persistent `pc-<account hash>` Chromium
+profile under `~/.local/share/video-services/tango-browser-profiles/`. This retains the
+complete browser/device identity instead of reconstructing an incognito context at
+every refresh. It alone rotates the PC RT. `video-auth` publishes its current ST and
+10-second stream tokens to the existing private session file. Late stream responses
+cannot overwrite a newer session generation; a failed durable write is reported and
+later saves remain possible.
+
+All ordinary PC authentication, including one-time phone setup, runs headful on the
+existing Xvfb display `:111`, regardless of a parent service's desktop DISPLAY. Profiles
+use the same GNOME credential-store policy across desktop/session restarts. They are
+private, separate from the user's browser and from each other. No new service is added.
+
+## One-time phone setup
+
+`POST /api/tango/phone-session` requires `X-Phone-Key`, `{setup:true}` and a durable
+`X-Phone-Request-ID`. It is an initial setup/API-migration adapter, not the phone's
+routine renewal path. The setup browser waits for the complete device context, stops
+its Tango pages, freezes the result, clears its local Tango data without logging out
+at the provider, and closes. Google SSO remains private for a future explicit setup.
+After handoff, only the phone consumes that session's RT. The PC recording profile is
+never involved.
+
+A repeated request ID retrieves the same frozen result after a lost response, even
+when its ST has since expired: the phone adopts the valid refresh context and renews
+it itself. Acknowledgment happens only after durable native adoption. Google initial
+flows are serialized across PC/server processes by an account lease; provider outages
+never become password-login loops. The operator `dist/phoneSession.js` calls this
+existing authenticated service rather than opening another browser or reading the
+PC recording credentials. Treat its output as secret and keep it outside logs/Git.
+
+Safari import is the alternative initial setup: it copies the complete first-party
+RT/ST/WST/SD/device context from the selected tab. The native app retains its account
+and explorer state during temporary failures instead of describing a failed renewal
+as a logout. Native renewal starts ahead of expiry, shares one in-flight owner, keeps
+usable access flowing, and has a bounded background assertion for atomic adoption.
+
+## Recovery checks
+
+- `npm test -w auth` checks ownership, cookie/session generation, serialized initial
+  sign-in, interrupted setup and the browser login flow. UI control tests use Xvfb.
+- Before consuming a PC RT outside `video-auth`, stop that one owner and save every
+  replacement before restarting it. Never consume a handed-off phone RT on the PC.
+- Restarting the service reuses its persistent profile and valid session. It must not
+  initiate another Google login solely because the process restarted.
+- Recognized Google password/verification blocks retain the existing attention marker;
+  do not clear it to repeat a rejected password.
 
 ## Current browser response and failures
 
@@ -53,11 +86,9 @@ Recognized Google password/verification blocks create an account-specific
 human verification first; only then remove that exact account's marker and restart
 the worker. Never clear a marker merely to repeat a rejected password.
 
-For a phone-only session, use the existing protected `/api/tango/phone-session`
-automation (`dist/phoneSession.js`); it never reads or writes the PC session file.
-Import its fresh pair into the phone, then let the PC obtain its own separate
-session. Sequential rotations of one shared family are not a device-isolation
-strategy. Token values and credential files stay outside Git and logs.
+Phone setup and the PC recording login have separate profiles and token families.
+Sequential rotations of one shared family are not device isolation. Token values,
+profiles and credential files stay outside Git and logs.
 
 The corrected flow passed both an owner-visible desktop run and one controlled
 Xvfb run. The original hidden failure reached Tango after Google but waited for
