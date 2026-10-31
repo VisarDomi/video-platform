@@ -369,3 +369,6 @@ key). The Mac needs no Node. A new provider in
 `install` approves the installed build as that app's renewal baseline, keeping its
 renewal date, when neither its inputs nor the app changed since `build`; otherwise it
 prints why approval was skipped. No scheduler pause is needed.
+`build` re-registers the repository's current extension identities and renewal
+inputs before recording its build receipt, so newly added extensions remain in
+future renewals.

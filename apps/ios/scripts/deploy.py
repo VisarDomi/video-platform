@@ -44,6 +44,9 @@ if a.action=='sync':
 elif a.action=='test':
     subprocess.run(SSH+['/bin/bash '+shlex.quote(MAC+'/scripts/test.sh')],check=True)
 elif a.action=='build':
+    # New embedded extensions change both expected identities and renewal inputs.
+    # Register them before the build receipt is fingerprinted.
+    subprocess.run(SSH+['/usr/bin/python3 /Users/visar/Developer/ios-tools/renewal/scripts/configure-refresh.py '+shlex.quote(MAC)],check=True)
     subprocess.run(SSH+[shlex.join(deliver('begin'))],check=True)
     remote(f'''import pathlib,subprocess,json
 state=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
