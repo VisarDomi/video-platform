@@ -22,6 +22,15 @@ reloads systemd but deliberately does not restart services.
 
 ## Logs
 
+- Hourly babysitting uses `python3 scripts/babysit_ledger.py` for newly committed
+  upload submissions, verification receipts and provider removals. Reconciliation
+  can commit results after a report snapshot with the batch's earlier timestamp,
+  so a timestamp-only window can miss them. The helper reads one SQLite snapshot
+  without modifying it; save its `next_cursors` as `ledger_cursors` in
+  `~/.local/share/video-services/babysit/monitoring.json` only after the full report
+  succeeds. Without cursors it explicitly bootstraps from the previous window
+  (or `--since`); a production rollover rebaselines the counters. Run tests with
+  `python3 -m unittest discover -s scripts -p 'test_babysit_ledger.py'`.
 - Start debugging by checking the managed service logs.
 - Use direct `journalctl` for bounded reads:
   `journalctl --user -u video-server.service -u video-downloader.service -n 300 --no-pager`
