@@ -350,9 +350,12 @@ server follows the account first, but only if it is not already followed.
   submitted). A started transfer holds a 7-day duplicate-safety window
   (`UPLOAD_RETRY_MILLISECONDS`); an uncertain attempt with no remote ID is requeued
   only after a complete negative lookup past that deadline. A video whose ID
-  vanishes from the provider is blocked for review with a desktop notification;
-  that provider never gets the recording again, and `retry` re-uploads it once
-  another provider is active.
+  vanishes from the provider is retained locally and excluded from cleanup and
+  another upload to that provider. New losses are investigated/reported once.
+  Acknowledged provider losses are historical exclusions, not pipeline faults:
+  `scripts/babysit_health.py` separates them from actionable failures without
+  deleting SQLite evidence or changing protective `blocked` states. Its exact
+  acknowledgement cannot hide a later, different failure on the recording.
 - **Cleanup is off.** The managed unit sets `VIDEO_PIPELINE_CLEANUP=0`, so
   verified artifacts stay on disk and the source-missing sweep (which needs
   cleanup) does not run. The campaign never removes source recordings.

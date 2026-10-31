@@ -37,6 +37,13 @@ reloads systemd but deliberately does not restart services.
   succeeds. Without cursors it explicitly bootstraps from the previous window
   (or `--since`); a production rollover rebaselines the counters. Run tests with
   `python3 -m unittest discover -s scripts -p 'test_babysit_ledger.py'`.
+- Queue health comes from `python3 scripts/babysit_health.py --json`. Raw
+  `blocked` counts include durable provider-removal bans, not just broken work.
+  Previously investigated removals can be acknowledged in `monitoring.json`
+  using `--acknowledge-current-removals --apply`; the database stays read-only.
+  A changed block reason or a new removed copy remains visible. Normal short
+  waiting/joined work and recovered old transfer attempts are not current
+  failures. Keep receipts, removal bans and cleanup exclusions intact.
 - Start debugging by checking the managed service logs.
 - Use direct `journalctl` for bounded reads:
   `journalctl --user -u video-server.service -u video-downloader.service -n 300 --no-pager`
