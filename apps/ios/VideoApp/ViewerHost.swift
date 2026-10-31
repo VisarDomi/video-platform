@@ -17,8 +17,13 @@ protocol ViewerHost: AnyObject {
     func highlight(_ filename: String, reveal: Bool)
     // The video's recording changed on the PC (saved, cut or returned).
     func changed(_ video: ViewerVideo)
+    func rename(_ video: ViewerVideo, to name: String) async throws -> ViewerVideo
     // The site needs signing in again.
     func login()
+}
+
+extension ViewerHost {
+    func rename(_ video: ViewerVideo, to name: String) async throws -> ViewerVideo { throw ViewerFailure.page("Renaming is not available for this video.") }
 }
 
 // Why a request for the viewer failed; `authentication` closes the viewer and asks for a login.

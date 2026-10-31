@@ -17,7 +17,10 @@ final class LocalListController: VideoListController {
     private var epoch: String?
     private var revision: Int?
     private var following: Task<Void, Never>?
+    private var feedGeneration = 0
     private var active = true
+    private var mutationGeneration = 0
+    private var renameBarrier: LocalRevisionBarrier?
     private let network = NWPathMonitor()
     private let cacheWriter: BackgroundWriter
 
@@ -70,14 +73,17 @@ final class LocalListController: VideoListController {
     // (first time, after the PC restarted, or too far behind) or only what changed.
     private func follow() {
         guard following == nil, active else { return }
+        feedGeneration += 1
+        let feed = feedGeneration
         following = Task { [weak self] in
             var delay = 1.0
             while !Task.isCancelled {
                 guard let self else { return }
                 do {
+                    let generation = mutationGeneration
                     let set = try await api.changes(epoch: epoch, since: revision, wait: loaded ? 25 : 0)
                     guard !Task.isCancelled else { break }
-                    await apply(set)
+                    await apply(set, requestGeneration: generation)
                     guard !Task.isCancelled else { break }
                     hideFailure()
                     refresh.endRefreshing()
@@ -90,7 +96,7 @@ final class LocalListController: VideoListController {
                     delay = min(delay * 2, 30)
                 }
             }
-            self?.following = nil
+            if let self, self.feedGeneration == feed { self.following = nil }
         }
     }
 
@@ -105,32 +111,58 @@ final class LocalListController: VideoListController {
 
     // The changes are applied, and the rows described, off the main thread (a live recording
     // changes every few seconds and the list holds thousands); only the result is set.
-    private func apply(_ set: ChangeSet) async {
+    private func permits(_ set: ChangeSet, requestGeneration: Int) -> Bool {
+        if requestGeneration != mutationGeneration {
+            guard let barrier = renameBarrier, set.epoch == barrier.epoch, set.revision >= barrier.revision else { return false }
+        }
+        return renameBarrier?.permits(set) ?? true
+    }
+
+    private func apply(_ set: ChangeSet, requestGeneration: Int) async {
+        guard !Task.isCancelled, permits(set, requestGeneration: requestGeneration) else { return }
         let changed = set.videos != nil || !(set.changes ?? []).isEmpty || !loaded
         let moved = set.epoch != epoch || set.revision != revision
         let (current, api) = (items, api)
         let result: (items: [ServerVideo], rows: [ViewerVideo], looks: [ViewerVideo.Look])? = changed ? await Task.detached(priority: .userInitiated) {
-            var items = set.videos ?? current
-            if set.videos == nil {
-                for change in set.changes ?? [] {
-                    if let removed = change.removed {
-                        items.removeAll { $0.filename == removed.filename && $0.type == removed.type }
-                    } else if let item = change.item {
-                        if let index = items.firstIndex(where: { $0.filename == item.filename && $0.type == item.type }) { items[index] = item }
-                        else { items.insert(item, at: items.insertionIndex(for: item)) }
-                    }
-                }
-            }
+            let items = mergingLocalVideos(current, set)
             let rows = items.map(api.describe)
             return (items, rows, rows.map(\.look))
         }.value : nil
+        guard !Task.isCancelled, permits(set, requestGeneration: requestGeneration) else { return }
         epoch = set.epoch
         revision = set.revision
         if let result {
-            items = result.items
-            setVideos(result.rows, looks: result.looks)
+            publish(result.items, rows: result.rows, looks: result.looks)
         }
         if changed || moved { cacheWriter.save(json: ListCache(provider: provider, epoch: set.epoch, revision: set.revision, videos: items)) }
+    }
+
+    private func publish(_ next: [ServerVideo], rows: [ViewerVideo]? = nil, looks: [ViewerVideo.Look]? = nil) {
+        let highlighted = items.first { $0.filename == highlight }
+        for item in next {
+            if let id = item.fileId, items.contains(where: { $0.fileId == nil && $0.filename == item.filename && $0.size == item.size && $0.duration == item.duration }) {
+                progress.migrate(from: item.filename, to: id)
+            }
+        }
+        items = next
+        setVideos(rows ?? next.map(api.describe), looks: looks)
+        if let highlighted, let id = highlighted.fileId, let renamed = next.first(where: { $0.fileId == id }), renamed.filename != highlighted.filename {
+            highlight(renamed.filename, reveal: false)
+        }
+    }
+
+    override func rename(_ video: ViewerVideo, to name: String) async throws -> ViewerVideo {
+        guard provider == "bunkr", let id = video.fileId else { throw LocalLibraryFailure(message: "Reconnect to the PC before renaming this video.") }
+        let selected = ServerVideo(filename: video.filename, type: video.type, size: video.size,
+                                   duration: (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0, isLive: false, fileId: id)
+        do {
+            let result = try await api.rename(selected, to: name)
+            mutationGeneration += 1; renameBarrier = LocalRevisionBarrier(epoch: result.epoch, revision: result.revision)
+            var next = items.filter { $0.fileId != id && !($0.fileId == nil && $0.filename == video.filename && $0.type == video.type) }
+            next.insert(result.video, at: next.insertionIndex(for: result.video)); publish(next)
+            cacheWriter.save(json: ListCache(provider: provider, epoch: epoch ?? "", revision: revision ?? 0, videos: items))
+            return api.describe(result.video)
+        } catch { reload(); throw error }
     }
 
     // The web version kept the last viewed row and the web viewer's positions in the website's

@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { mp4Identity, MP4RenameError, type MP4Rename } from "./video/mp4Identity.js";
 
 const DOMAINS = new Set(["bunkr.si", "bunkr.ph", "bunkr.cr"]);
 export function bunkrPage(value: unknown): URL {
@@ -76,6 +77,7 @@ export interface BunkrJob {
     id: string; page: string; state: "queued" | "downloading" | "complete" | "failed";
     createdAt: string; updatedAt: string; attempts: number; bytes: number;
     filename?: string; total?: number; etag?: string; error?: string; retryAt?: number; durableBytes?: number;
+    fileId?: string; originalFilename?: string;
 }
 interface Options { directory?: string; stateDirectory?: string; fetcher?: Fetcher; autoStart?: boolean }
 // One byte-copy transfer, outside the conversion/upload campaign. Jobs and partials survive service restarts.
@@ -137,6 +139,12 @@ export class BunkrDownloads {
         await link(partial, destination); await this.syncDirectory();
         await unlink(partial); await this.syncDirectory();
     }
+    private async publishedIdentity(job: BunkrJob, destination: string) {
+        const file = await stat(destination).catch(() => undefined);
+        // Publication already succeeded. A user's subsequent removal is not a failed
+        // transfer and must never make the queue restore that completed download.
+        if (file) job.fileId = mp4Identity(file);
+    }
     async enqueue(value: unknown): Promise<BunkrJob> {
         await this.ready;
         const page = bunkrPage(value);
@@ -161,6 +169,29 @@ export class BunkrDownloads {
         this.jobs.set(job.id, job); this.kick(); return job;
     }
     async get(id: string) { await this.ready; const job = this.jobs.get(id); return job ? { ...job } : undefined; }
+    async prepareLocalRename(from: string, to: string, fileId: string, bytes: number): Promise<string[]> {
+        await this.ready;
+        const selected = [...this.jobs.values()].filter(job => job.fileId === fileId || (job.filename === from && !job.fileId));
+        if (selected.some(job => job.state !== "complete")) throw new MP4RenameError(409, "The download is still being finalized");
+        const ids = selected.filter(job => job.total === bytes).map(job => job.id);
+        if ([...this.jobs.values()].some(job => job.filename === to && job.state !== "complete" && !ids.includes(job.id))) {
+            throw new MP4RenameError(409, "Another download is using that filename");
+        }
+        for (const id of ids) {
+            const job = this.jobs.get(id)!; job.originalFilename ??= job.filename ?? from; job.filename = from; job.fileId ??= fileId; await this.save(job);
+        }
+        return ids;
+    }
+    async commitLocalRename(change: MP4Rename): Promise<void> {
+        await this.ready;
+        for (const id of change.jobs) {
+            const job = this.jobs.get(id);
+            if (!job || job.state !== "complete" || job.total !== change.bytes || (job.fileId && job.fileId !== change.fileId)
+                || (job.filename !== change.from && job.filename !== change.to)) throw new Error("Download association changed during rename");
+            job.originalFilename ??= change.from; job.filename = change.to; job.fileId = change.fileId;
+            await this.save(job);
+        }
+    }
     private kick() {
         if (!this.autoStart || this.running || this.stopped) return;
         this.running = true;
@@ -197,13 +228,14 @@ export class BunkrDownloads {
         await mkdir(this.directory, { recursive: true });
         const parent = await open(path.dirname(this.directory), "r"); try { await parent.sync(); } finally { await parent.close(); }
         job.filename ??= `${job.page.split("/").at(-1)} - ${media.filename}`;
+        job.originalFilename ??= job.filename;
         const destination = path.join(this.directory, job.filename), partial = `${destination}.part`;
         const existing = await stat(destination).catch(() => undefined);
         if (existing) {
             if (job.total && existing.size === job.total) {
                 const alias = await stat(partial).catch(() => undefined);
                 if (alias && alias.ino === existing.ino && alias.dev === existing.dev) { await unlink(partial); await this.syncDirectory(); }
-                job.bytes = existing.size; return;
+                job.bytes = existing.size; job.fileId = mp4Identity(existing); return;
             }
             throw new Error("Destination exists with unexpected size; retained without overwriting");
         }
@@ -227,7 +259,7 @@ export class BunkrDownloads {
             const head = await request(this.fetcher, media.url, { method: "HEAD" }, true);
             await head.body?.cancel();
             if (head.headers.get("etag") === job.etag && Number(head.headers.get("content-length")) === offset) {
-                await this.publish(partial, destination); job.bytes = offset; return;
+                await this.publish(partial, destination); job.bytes = offset; await this.publishedIdentity(job, destination); return;
             }
         }
         // An idle read is bounded separately; a large, progressing video has no 30-second total deadline.
@@ -271,6 +303,7 @@ export class BunkrDownloads {
             }
             if ((await stat(partial)).size !== job.total) throw new Error("Bunkr download length mismatch");
             await this.publish(partial, destination);
+            await this.publishedIdentity(job, destination);
         } finally { clearTimeout(idle); }
     }
     stop() { this.stopped = true; clearTimeout(this.timer); this.controller?.abort(); }

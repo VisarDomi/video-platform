@@ -12,7 +12,10 @@ import { createBunkrLibraryRoutes } from "./api/bunkr-library.routes.js";
 // Independently restartable byte-copy queue; no capture, login, finalizer or upload worker imports.
 const certificates = path.join(os.homedir(), ".local/share/mkcert/pwa");
 const queue = new BunkrDownloads();
-const library = new MP4Library(queue.directory);
+const library = new MP4Library(queue.directory, { renameHooks: {
+    prepare: (from, to, fileId, bytes) => queue.prepareLocalRename(from, to, fileId, bytes),
+    commit: change => queue.commitLocalRename(change),
+} });
 void library.start().catch(error => console.error("Bunkr library startup:", error.message));
 const app = express();
 app.use(cors());

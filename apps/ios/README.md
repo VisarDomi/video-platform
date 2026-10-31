@@ -42,6 +42,13 @@ soon as buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
 bytes and dropped frames without URLs or credentials.
+The ✏️ button beside mute renames the MP4 on the PC and updates its list/player
+name. A stable file identity keeps the current player, saved position and row
+identity intact across renames. New names keep the `.mp4` extension and cannot
+overwrite another file. A lost reply is checked with a read before reporting
+failure. The download receipt follows the new name and retains its original
+name. File renames are journaled for recovery after power loss; old playback
+addresses remain pinned to the same file.
 
 ## Rules
 

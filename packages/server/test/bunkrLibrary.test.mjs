@@ -19,7 +19,8 @@ test('only completed nonempty MP4 files are listed, with real size and cached du
     let probes=0;const f=await fixture(t,async()=>{probes++;return 12.5;});
     for(const name of ['a.mp4','b.MP4','c.mp4.part','c.mp4.part.retained-123','.hidden.mp4','empty.mp4','readme.txt'])await writeFile(path.join(f.directory,name),name==='empty.mp4'?'':'video-bytes');
     await mkdir(path.join(f.directory,'folder.mp4'));await writeFile(path.join(f.root,'outside.mp4'),'outside');await symlink(path.join(f.root,'outside.mp4'),path.join(f.directory,'link.mp4'));
-    assert.deepEqual(await f.library.videos(),['a.mp4','b.MP4'].map(filename=>({filename,type:'original',size:11,duration:12.5,isLive:false})));
+    const rows=await f.library.videos();assert.ok(rows.every(row=>/^[a-f0-9]{24}$/.test(row.fileId)));
+    assert.deepEqual(rows.map(({fileId,...row})=>row),['a.mp4','b.MP4'].map(filename=>({filename,type:'original',size:11,duration:12.5,isLive:false})));
     await f.library.refresh();assert.equal(probes,2,'unchanged files are not probed on every poll');
     await f.library.stop();const resumed=new MP4Library(f.directory,f.options);t.after(()=>resumed.stop());
     assert.equal((await resumed.videos()).length,2);assert.equal(probes,2,'restart reuses stat-matched duration cache');

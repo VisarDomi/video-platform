@@ -109,6 +109,10 @@ nothing (only logs and diagnostic screenshots stay in package folders):
   pipeline. See `packages/live-extensions/README.md` for power-loss recovery.
 - `~/.local/share/video-services/bunkr-library/index.json`: disposable MP4 duration/stat
   metadata for Bunkr local. The actual MP4 directory remains the library authority.
+- `~/.local/share/video-services/bunkr-library/rename-{journal,aliases}.json`:
+  durable rename recovery and older playback-address mappings. Keep these when
+  clearing only the disposable index cache. A renamed download keeps its receipt,
+  stable file ID and original filename in `bunkr-downloads/`.
 - `~/Desktop/video-pipeline/{move-conversions,move-recordings}`: files staged by
   the two manual cleanup commands, with review CSVs and move journals. They are
   still on disk until the user deletes them. See

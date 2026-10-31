@@ -20,6 +20,22 @@ struct LocalLibraryTests {
         let cache = ListCache(provider: "bunkr", epoch: "fixture", revision: 4, videos: [item])
         let restored = try JSONDecoder().decode(ListCache.self, from: JSONEncoder().encode(cache))
         check(restored.videos == [item], "offline list cache retains MP4 metadata")
+        var identified = item; identified.fileId = String(repeating: "a", count: 24)
+        var renamed = identified; renamed.filename = "A renamed movie.mp4"
+        check(identified.key == renamed.key, "rename keeps the list/progress identity")
+        check(mp4.mediaURL(identified.filename, fileId: identified.fileId) == mp4.mediaURL(renamed.filename, fileId: renamed.fileId), "rename keeps the byte-range playback URL")
+        let delta = ChangeSet(epoch: "fixture", revision: 6, videos: nil, changes: [
+            ChangeSet.Change(revision: 5, item: renamed, removed: nil),
+            ChangeSet.Change(revision: 6, item: nil, removed: ChangeSet.Removed(filename: identified.filename, type: identified.type)),
+        ])
+        check(mergingLocalVideos([identified], delta) == [renamed], "rename upsert/removal cannot duplicate or lose the same file")
+        let barrier = LocalRevisionBarrier(epoch: "fixture", revision: 6)
+        check(!barrier.permits(ChangeSet(epoch: "fixture", revision: 5, videos: [identified], changes: nil)) && barrier.permits(delta), "an older list cannot undo a confirmed rename")
+        let normalized = try localMP4Name(" cafe\u{301} ")
+        check(normalized == "café.mp4", "local names preserve MP4 and normalize Unicode")
+        for invalid in ["", "../outside", "folder/name", ".hidden", String(repeating: "🎬", count: 100)] {
+            do { _ = try localMP4Name(invalid); check(false, "unsafe name rejected") } catch { }
+        }
         let hls = LocalAPI(server: URL(string: "https://192.168.1.197:9999/videos/fc2")!, provider: "fc2")
         let recording = ServerVideo(filename: "2026-01-01 120000 streamer", type: "original", size: 0, duration: 120, isLive: false)
         let original = hls.describeRaw(recording)

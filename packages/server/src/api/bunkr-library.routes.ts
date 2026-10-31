@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { MP4Library } from "../services/video/mp4Library.js";
+import { MP4RenameError } from "../services/video/mp4Identity.js";
 
 export function createBunkrLibraryRoutes(library: MP4Library) {
     const router = Router();
@@ -16,6 +17,35 @@ export function createBunkrLibraryRoutes(library: MP4Library) {
                 typeof req.query.epoch === "string" ? req.query.epoch : undefined, wait, controller.signal);
             if (!res.destroyed) res.json(result);
         } catch { if (!res.headersSent && !res.destroyed) res.status(503).json({ error: "Bunkr library unavailable" }); }
+    });
+    router.get("/api/bunkr/files/:id", async (req, res) => {
+        const video = await library.videoById(req.params.id);
+        res.set("Cache-Control", "no-store");
+        if (!video) { res.status(404).json({ error: "The video no longer exists" }); return; }
+        res.json({ video, epoch: library.epoch, revision: library.currentRevision });
+    });
+    router.post("/api/bunkr/files/:id/rename", async (req, res) => {
+        if (req.get("Origin") || req.get("X-Video-Library") !== "1") { res.status(403).json({ error: "Use Bunkr local to rename videos" }); return; }
+        try {
+            const video = await library.renameFile(req.params.id, req.body?.filename, req.body?.name);
+            res.json({ video, epoch: library.epoch, revision: library.currentRevision });
+        }
+        catch (error) {
+            if (error instanceof MP4RenameError) { res.status(error.status).json({ error: error.message }); return; }
+            console.error("Bunkr rename could not complete:", (error as Error).message);
+            res.status(503).json({ error: "Rename could not be confirmed. Reconnect and check the filename." });
+        }
+    });
+    router.get("/media/bunkr/id/:id", async (req, res) => {
+        const file = await library.fileById(req.params.id);
+        if (!file) { res.status(404).end(); return; }
+        res.type("video/mp4").set("Cache-Control", "private, no-cache");
+        res.sendFile(file, { dotfiles: "deny", acceptRanges: true, cacheControl: false }, error => {
+            if (!error || req.aborted || res.destroyed) return;
+            if (res.headersSent) { res.destroy(); return; }
+            for (const [name, value] of Object.entries((error as { headers?: Record<string, string> }).headers ?? {})) res.set(name, value);
+            res.status((error as { status?: number }).status ?? 500).end();
+        });
     });
     router.get("/media/bunkr/:filename", async (req, res) => {
         const file = await library.file(req.params.filename);

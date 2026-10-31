@@ -8,6 +8,7 @@ import UIKit
 protocol ViewerOverlayActions: AnyObject {
     func overlaySeek(_ time: Double, resume: Bool)
     func overlayToggleMuteOrUndo()
+    func overlayRename()
     func overlayReturnOriginal()
     func overlaySaveOrCut(_ playbackDuration: Double)
     func overlayAddMarker()
@@ -26,6 +27,8 @@ final class ViewerOverlay: UIView {
     private let markerLayer = UIView()
     private let segmentText = UIStackView()
     private let muteUndo = OverlayButton()
+    private let rename = OverlayButton()
+    private var renaming = false
     private let follow = OverlayButton()
     private let membershipButton = OverlayButton()
     private var choices: [OverlayButton] = []
@@ -88,8 +91,11 @@ final class ViewerOverlay: UIView {
         scrub.allowableMovement = .greatestFiniteMagnitude
         progress.addGestureRecognizer(scrub)
         for view in [name, time, segmentName, progress] as [UIView] { addSubview(view) }
-        for button in [muteUndo, follow, membershipButton, block, returnOriginal, saveCut, addMarker] { addSubview(button) }
+        for button in [muteUndo, rename, follow, membershipButton, block, returnOriginal, saveCut, addMarker] { addSubview(button) }
         muteUndo.addAction(UIAction { [weak self] _ in self?.actions?.overlayToggleMuteOrUndo() }, for: .touchUpInside)
+        rename.addAction(UIAction { [weak self] _ in self?.actions?.overlayRename() }, for: .touchUpInside)
+        rename.accessibilityLabel = "Rename file"
+        rename.setTitle("✏️", for: .normal)
         returnOriginal.addAction(UIAction { [weak self] _ in self?.actions?.overlayReturnOriginal() }, for: .touchUpInside)
         saveCut.addAction(UIAction { [weak self] _ in
             guard let self else { return }
@@ -143,6 +149,8 @@ final class ViewerOverlay: UIView {
         self.interactive = interactive
         renderButtons()
     }
+
+    func setRenaming(_ value: Bool) { renaming = value; renderButtons() }
 
     func setSegments(_ segments: [Double]) {
         self.segments = segments
@@ -312,6 +320,9 @@ final class ViewerOverlay: UIView {
         let live = video?.liveStream ?? false
         follow.isHidden = !live
         block.isHidden = !live
+        rename.isHidden = video?.canRename != true
+        rename.isEnabled = interactive && !renaming
+        rename.setTitle(renaming ? "⏳" : "✏️", for: .normal)
         follow.setTitle(video?.following == true ? "❤️" : "🤍", for: .normal)
         block.setTitle(blockConfirm ? "❓" : "🚫", for: .normal)
         let isOriginal = local && video?.edited == false && !timeline.isLive
@@ -376,7 +387,7 @@ final class ViewerOverlay: UIView {
             y += 110
         }
         var x = left
-        for button in [muteUndo, follow, membershipButton] + choices + [block, returnOriginal, saveCut, addMarker] where !button.isHidden {
+        for button in [muteUndo, rename, follow, membershipButton] + choices + [block, returnOriginal, saveCut, addMarker] where !button.isHidden {
             let size = button.intrinsicContentSize
             button.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
             x += size.width + 10

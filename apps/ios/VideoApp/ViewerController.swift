@@ -282,6 +282,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
         videos = filtered
         currentIndex = index
+        if current.fileId == nil, filtered[index].fileId != nil, current.size == filtered[index].size {
+            progress.migrate(from: current.progressKey, to: filtered[index].progressKey)
+        }
         active.update(filtered[index])
         overlay.setVideo(filtered[index])
         if revealed { loadEdgeUnits() }
@@ -292,11 +295,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func video(at index: Int) -> ViewerVideo? { videos.indices.contains(index) ? videos[index] : nil }
 
-    private func savedTime(_ video: ViewerVideo) -> Double { video.liveStream ? 0 : progress.time(video.filename) }
+    private func savedTime(_ video: ViewerVideo) -> Double { video.liveStream ? 0 : progress.time(video.progressKey) }
 
     private func saveProgress() {
         guard let video = currentVideo, !video.liveStream else { return }
-        progress.set(video.filename, active.snapshot().currentTime)
+        progress.set(video.progressKey, active.snapshot().currentTime)
     }
 
     private func saveCheckpoint() {
@@ -407,9 +410,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func replace(_ video: ViewerVideo) {
-        if let index = videos.firstIndex(where: { $0.filename == video.filename }) { videos[index] = video }
-        if active.video?.filename == video.filename { active.update(video) }
-        if currentVideo?.filename == video.filename { overlay.setVideo(video) }
+        if let index = videos.firstIndex(where: { $0.same(video) }) { videos[index] = video }
+        for unit in units where unit.video?.same(video) == true { unit.update(video) }
+        if currentVideo?.same(video) == true { overlay.setVideo(video) }
     }
 
     // MARK: the feed
@@ -708,6 +711,40 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard !snapshot.isLive else { return }
         segments = (segments + [snapshot.currentTime]).sorted()
         overlay.setSegments(segments)
+    }
+
+    func overlayRename() {
+        guard let video = currentVideo, video.canRename, presentedViewController == nil else { return }
+        saveProgress()
+        let dialog = UIAlertController(title: "Rename video", message: nil, preferredStyle: .alert)
+        dialog.addTextField { field in
+            field.text = (video.filename as NSString).deletingPathExtension
+            field.placeholder = "New filename"
+            field.autocorrectionType = .no
+            field.autocapitalizationType = .none
+            field.clearButtonMode = .whileEditing
+        }
+        dialog.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        dialog.addAction(UIAlertAction(title: "Rename", style: .default) { [weak self, weak dialog] _ in
+            guard let self, let name = dialog?.textFields?.first?.text else { return }
+            self.overlay.setRenaming(true)
+            Task { [self] in
+                defer { self.overlay.setRenaming(false) }
+                do {
+                    let renamed = try await self.host.rename(video, to: name)
+                    guard !self.closed else { return }
+                    self.replace(renamed); self.saveCheckpoint()
+                } catch {
+                    guard !self.closed else { return }
+                    let failed = UIAlertController(title: "Couldn’t rename video", message: error.localizedDescription, preferredStyle: .alert)
+                    failed.addAction(UIAlertAction(title: "OK", style: .default))
+                    let show = { [weak self] in guard let self, !self.closed, self.viewIfLoaded?.window != nil else { return }; self.present(failed, animated: true) }
+                    if let presentedViewController = self.presentedViewController { presentedViewController.dismiss(animated: true, completion: show) }
+                    else { show() }
+                }
+            }
+        })
+        present(dialog, animated: true)
     }
 
     func overlaySaveOrCut(_ playbackDuration: Double) {

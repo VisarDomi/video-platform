@@ -224,6 +224,14 @@ directory watch.
   media folder. The original MP4 is streamed with HEAD and byte-range support,
   never buffered whole, transcoded or treated as an HLS recording. Hidden files,
   partials and symbolic links are excluded from listing and playback.
+  Native Rename uses `POST /api/bunkr/files/:id/rename` with an expected filename.
+  IDs are derived from device/inode/birth time and remain stable when a file is
+  renamed. `/media/bunkr/id/:id` supports seeking without tying an active player
+  to its display name; durable aliases preserve older filename URLs. Renames
+  create a non-overwriting hard link, flush it, update the matching completed
+  download receipts and aliases, then remove only the original link to that same
+  file. A durable journal completes interrupted work, and respects removals of
+  an already-published destination. Original media bytes are never rewritten.
 
 - The API server uses HTTPS with the mkcert certificate in
   `~/.local/share/mkcert/pwa/` and falls back to HTTP when it is missing.

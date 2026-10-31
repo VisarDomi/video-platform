@@ -28,12 +28,18 @@ struct ViewerVideo: @unchecked Sendable {
     var media: MediaSource? { MediaSource(raw["media"]) }
     var membership: MembershipInfo? { MembershipInfo(raw["membership"]) }
 
-    var key: String { filename + "\u{1F}" + type }
+    var key: String { progressKey + "\u{1F}" + type }
     var name: String { title ?? filename }
     var size: Double { (raw["size"] as? NSNumber)?.doubleValue ?? 0 }
+    var fileId: String? { raw["fileId"] as? String }
+    var progressKey: String { fileId ?? filename }
+    var canRename: Bool { provider == "bunkr" && fileId != nil }
     var edited: Bool { type == "edited" }
 
-    func same(_ other: ViewerVideo) -> Bool { filename == other.filename && type == other.type }
+    func same(_ other: ViewerVideo) -> Bool {
+        if let id = fileId, let otherId = other.fileId { return id == otherId && type == other.type }
+        return filename == other.filename && type == other.type
+    }
 
     // What its row shows (VideoRowCell.show): two lists whose rows look the same need no reload.
     struct Look: Equatable, Sendable {
@@ -107,6 +113,10 @@ final class ProgressStore {
     }
 
     func time(_ filename: String) -> Double { values[filename] ?? 0 }
+    func migrate(from old: String, to new: String) {
+        guard old != new, values[new] == nil, let value = values[old] else { return }
+        values[new] = value; save()
+    }
 
     // The page's saved positions for videos this store has never seen.
     func seed(_ progress: [String: Any]) {

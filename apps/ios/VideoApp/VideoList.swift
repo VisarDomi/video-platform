@@ -448,6 +448,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     }
 
     func changed(_ video: ViewerVideo) { replaceVideo(video) }
+    func rename(_ video: ViewerVideo, to name: String) async throws -> ViewerVideo { throw ViewerFailure.page("Renaming is not available for this video.") }
 }
 
 // A message above a list (blue and tappable when it leads somewhere, amber otherwise).
