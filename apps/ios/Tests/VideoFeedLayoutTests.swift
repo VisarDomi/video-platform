@@ -18,7 +18,14 @@ import CoreGraphics
             precondition(layout.index(at: layout.frames[3701].midY) == 3701)
             precondition(layout.index(at: -10) == 0)
             precondition(layout.index(at: layout.size.height + 10) == 3999)
+            let chosen = 40, offset = layout.frames[40].midY - viewport.height / 2
+            let window = layout.playerWindow(top: offset, height: viewport.height, current: chosen)!
+            precondition(window.contains(chosen) && window.count <= 12)
+            precondition(window.contains(layout.index(at: offset)!) && window.contains(layout.index(at: offset + viewport.height)!))
         }
+        let extreme = VideoFeedLayout(viewport: CGSize(width: 428, height: 926), aspects: Array(repeating: CGSize(width: 10_000, height: 1), count: 4000))
+        let window = extreme.playerWindow(top: extreme.frames[2000].midY - 463, height: 926, current: 2000)!
+        precondition(window.count == 12 && window.contains(2000))
         precondition(VideoFeedLayout(viewport: CGSize(width: 428, height: 926), aspects: []).index(at: 0) == nil)
         print("PASS: 8,000 fitted continuous frames, both orientations, no gaps/runways, arbitrary multi-item traversal and boundaries")
     }

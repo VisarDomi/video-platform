@@ -28,4 +28,17 @@ struct VideoFeedLayout {
         }
         return low
     }
+
+    // Loading is bounded independently of document geometry. Extremely shallow videos
+    // must not allocate thousands of players just because they all fit inside a screen.
+    func playerWindow(top: CGFloat, height: CGFloat, current: Int, limit: Int = 12) -> ClosedRange<Int>? {
+        guard frames.indices.contains(current), let first = index(at: top), let last = index(at: top + height) else { return nil }
+        var lower = max(0, min(first, current) - 1)
+        var upper = min(frames.count - 1, max(last, current) + 1)
+        if upper - lower + 1 > limit {
+            lower = max(lower, min(current - limit / 2, upper - limit + 1))
+            upper = min(upper, lower + limit - 1)
+        }
+        return lower...upper
+    }
 }

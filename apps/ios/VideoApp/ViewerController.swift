@@ -359,9 +359,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             }
         }
         layoutFeed()
-        let first = geometry.index(at: feed.contentOffset.y) ?? currentIndex
-        let last = geometry.index(at: feed.contentOffset.y + feed.bounds.height) ?? currentIndex
-        let wanted = Set(max(0, min(first, currentIndex) - 1)...min(videos.count - 1, max(last, currentIndex) + 1))
+        guard let window = geometry.playerWindow(top: feed.contentOffset.y, height: feed.bounds.height, current: currentIndex) else { return }
+        let wanted = Set(window)
         let keys = Set(wanted.map { videos[$0].key })
         for index in wanted.sorted(by: { abs($0 - currentIndex) < abs($1 - currentIndex) }) {
             let video = videos[index]
