@@ -217,6 +217,13 @@ directory watch.
   without overwriting existing destinations. Power-loss tails are retained and
   resume requires exact entity/range proof. The queue does not join the live
   library or upload campaign. Details are in `packages/live-extensions/README.md`.
+  The same HTTPS :9998 service exposes Bunkr local's MP4 library through
+  `/api/videos?provider=bunkr`, `/api/videos/changes?provider=bunkr` and
+  `/media/bunkr/:filename`. A directory watcher and safety scan find published
+  files and manual removals; stat-matched duration metadata is cached outside the
+  media folder. The original MP4 is streamed with HEAD and byte-range support,
+  never buffered whole, transcoded or treated as an HLS recording. Hidden files,
+  partials and symbolic links are excluded from listing and playback.
 
 - The API server uses HTTPS with the mkcert certificate in
   `~/.local/share/mkcert/pwa/` and falls back to HTTP when it is missing.

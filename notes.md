@@ -78,8 +78,8 @@ check package.json
 
 ## iPhone apps
 
-Five iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
-**SC local** list the PC's recordings; **Video Vault** lists the pipeline's Porntrex uploads; **Tango** shows live streams on tango.me. All five are native lists with
+Six iPhone apps share one host (`apps/ios`): **Tango local**, **FC2 local** and
+**SC local** list the PC's recordings; **Bunkr local** plays the PC's completed MP4s; **Video Vault** lists the pipeline's Porntrex uploads; **Tango** shows live streams on tango.me. All six are native lists with
 a native viewer that keeps playing through lock and the background, so any change to them
 needs an app deploy. They are built on the Mac (SSH from this PC); the phone is paired
 with the Mac over Wi-Fi. Build, deploy, tests, inspection and renewal are in
@@ -104,9 +104,11 @@ nothing (only logs and diagnostic screenshots stay in package folders):
   (`VIDEO_DOWNLOADS_ROOT` overrides).
 - `~/Videos/plab/bunkr/`: original Bunkr downloads requested in Safari through
   Tango's **Bunkr to PC** extension (`.si`, `.ph`, `.cr`). The server owns this
-  separate durable queue, with job/checkpoint files in
+  separate durable queue and Bunkr local's MP4 library on HTTPS :9998, with job/checkpoint files in
   `~/.local/share/video-services/bunkr-downloads/`; it does not enter the upload
   pipeline. See `packages/live-extensions/README.md` for power-loss recovery.
+- `~/.local/share/video-services/bunkr-library/index.json`: disposable MP4 duration/stat
+  metadata for Bunkr local. The actual MP4 directory remains the library authority.
 - `~/Desktop/video-pipeline/{move-conversions,move-recordings}`: files staged by
   the two manual cleanup commands, with review CSVs and move journals. They are
   still on disk until the user deletes them. See

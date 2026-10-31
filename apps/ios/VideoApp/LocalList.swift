@@ -21,9 +21,9 @@ final class LocalListController: VideoListController {
     private let network = NWPathMonitor()
     private let cacheWriter: BackgroundWriter
 
-    init(provider: String, server: URL) {
+    init(provider: String, server: URL, mediaKind: LocalMediaKind = .hls) {
         self.provider = provider
-        api = LocalAPI(server: server, provider: provider)
+        api = LocalAPI(server: server, provider: provider, mediaKind: mediaKind)
         let directory = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LocalVideos")
         cacheWriter = BackgroundWriter(url: directory.appendingPathComponent("list-cache.json"), label: "list-cache")
         super.init(viewerProvider: provider, directory: directory, media: ViewerMedia())
@@ -136,6 +136,7 @@ final class LocalListController: VideoListController {
     // The web version kept the last viewed row and the web viewer's positions in the website's
     // localStorage; read them once (from the PC's page, so only while it answers).
     private func migrateWebStorage() {
+        guard api.mediaKind == .hls else { return }
         let marker = directory.appendingPathComponent("web-storage-migrated")
         guard !FileManager.default.fileExists(atPath: marker.path), let page = URL(string: "/videos/\(provider)", relativeTo: api.server) else { return }
         let reader = WebStorageReader()
@@ -160,101 +161,11 @@ final class LocalListController: VideoListController {
     // Local recordings always have their source; asked anyway, it is the PC's playlist.
     override func resolve(_ video: ViewerVideo) async throws -> MediaSource {
         if let media = video.media { return media }
-        return MediaSource(url: api.playlist(video.filename), kind: "hls")
+        return MediaSource(url: api.mediaURL(video.filename), kind: api.mediaKind.rawValue)
     }
 }
 
-// A recording as the PC lists it.
-struct ServerVideo: Codable, Sendable, Equatable {
-    var filename: String
-    var type: String
-    var size: Double
-    var duration: Double
-    var isLive: Bool
-
-    var key: String { filename + "\u{1F}" + type }
-
-    // The PC's order: the filename's UTF-16 code units (JavaScript's `<`), then the type.
-    static func precedes(_ a: ServerVideo, _ b: ServerVideo) -> Bool {
-        if a.filename != b.filename { return a.filename.utf16.lexicographicallyPrecedes(b.filename.utf16) }
-        return a.type.utf16.lexicographicallyPrecedes(b.type.utf16)
-    }
-}
-
-extension Array where Element == ServerVideo {
-    func insertionIndex(for item: ServerVideo) -> Int {
-        var low = 0, high = count
-        while low < high {
-            let middle = (low + high) / 2
-            if ServerVideo.precedes(self[middle], item) { low = middle + 1 } else { high = middle }
-        }
-        return low
-    }
-}
-
-struct ListCache: Codable {
-    var provider: String
-    var epoch: String
-    var revision: Int
-    var videos: [ServerVideo]
-}
-
-struct ChangeSet: Decodable {
-    struct Removed: Decodable { var filename: String; var type: String }
-    struct Change: Decodable { var revision: Int; var item: ServerVideo?; var removed: Removed? }
-    var epoch: String
-    var revision: Int
-    var videos: [ServerVideo]?
-    var changes: [Change]?
-}
-
-// The PC's recordings API for one provider (packages/server video.routes.ts, library-index.ts).
-struct LocalAPI: Sendable {
-    let server: URL
-    let provider: String
-    private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 45
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.urlCache = nil
-        return URLSession(configuration: configuration)
-    }()
-
-    init(server: URL, provider: String) {
-        self.server = server
-        self.provider = provider
-    }
-
-    func playlist(_ filename: String) -> URL {
-        server.appendingPathComponent("hls").appendingPathComponent(provider).appendingPathComponent(filename).appendingPathComponent("playlist.m3u8")
-    }
-
-    // What changed since `revision` of `epoch`, waiting up to `wait` seconds for a change.
-    func changes(epoch: String?, since revision: Int?, wait: Int) async throws -> ChangeSet {
-        var components = URLComponents(url: server.appendingPathComponent("api/videos/changes"), resolvingAgainstBaseURL: false)!
-        var query = [URLQueryItem(name: "provider", value: provider), URLQueryItem(name: "wait", value: String(wait))]
-        if let epoch, let revision { query += [URLQueryItem(name: "epoch", value: epoch), URLQueryItem(name: "since", value: String(revision))] }
-        components.queryItems = query
-        var request = URLRequest(url: components.url!)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await Self.session.data(for: request)
-        // The server answers unknown paths with its web page and status 200.
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-              http.value(forHTTPHeaderField: "Content-Type")?.contains("application/json") == true else { throw URLError(.badServerResponse) }
-        return try JSONDecoder().decode(ChangeSet.self, from: data)
-    }
-
-    // As the website's nativeViewer.ts describe(): a local recording with its PC playlist and
-    // its streamer for the +/- button.
-    func describe(_ video: ServerVideo) -> ViewerVideo {
-        let parts = video.filename.split(separator: " ", omittingEmptySubsequences: false)
-        let identifier = parts.count >= 3 ? parts[2...].joined(separator: " ") : video.filename
-        let raw: [String: Any] = [
-            "filename": video.filename, "type": video.type, "size": video.size, "duration": video.duration, "isLive": video.isLive,
-            "provider": provider, "local": true, "live": false,
-            "media": ["url": playlist(video.filename).absoluteString, "kind": "hls"],
-            "membership": ["lists": [provider], "identifier": identifier, "choose": false],
-        ]
-        return ViewerVideo(raw)!
-    }
+// UI adaptation stays here; the API/cache models are Foundation-only in LocalLibrary.swift.
+extension LocalAPI {
+    func describe(_ video: ServerVideo) -> ViewerVideo { ViewerVideo(describeRaw(video))! }
 }

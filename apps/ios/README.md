@@ -1,6 +1,6 @@
 # iPhone apps
 
-Five iPhone apps share one Swift host (`VideoApp/`). `providers.json` is the registry;
+Six iPhone apps share one Swift host (`VideoApp/`). `providers.json` is the registry;
 `scripts/project.py <provider>` generates that provider's project and Info.plist. Every app
 is a native list with the native viewer over it; no app shows a website. Code shared with the
 other iPhone apps is NativeKit (`Kit/`, vendored); its canonical copy and the shared rules are
@@ -11,6 +11,7 @@ in the [NativeKit guide](../../../../ios-tools/native/README.md).
 | `tango` | Tango local | `com.visar.TangoLocal.paid` | the PC's recordings API (`https://192.168.1.197:9999`) |
 | `fc2` | FC2 local | `com.visar.FC2Local.paid` | the PC's recordings API |
 | `sc` | SC local | `com.visar.SCLocal.paid` | the PC's recordings API |
+| `bunkr` | Bunkr local | `com.visar.BunkrLocal.paid` | completed MP4s in `~/Videos/plab/bunkr/`, HTTPS :9998 |
 | `vault` | Video Vault | `com.visar.Ptrex.paid` | the Porntrex uploads pages (`native`) |
 | `tango-live` | Tango | `com.visar.Tango.paid` | Tango's gateway API (`native`) |
 
@@ -23,6 +24,18 @@ four Safari extensions: **Tango Login** (`.Login`, the Safari login handoff), **
 separate app without its Porntrex session and data. It lists the pipeline's Porntrex uploads, oldest recording first (`VideoApp/Vault.swift`): only uploads
 whose title carries the recording in brackets, `[YYYY-MM-DD HHMMSS streamer]` (a split part
 adds ` | part N`); other uploads stay on the sites but are not listed. Cached rows for a retired provider are excluded from the list.
+
+**Bunkr local** uses the same native library/viewer experience with the PC's flat
+MP4 files. It has cached lists and saved playback positions, automatic list updates,
+seeking, gestures, lock-screen/background audio and viewer restoration. The files
+stream directly from `video-bunkr-downloads.service` on HTTPS :9998 using byte
+ranges; no HLS conversion, streamer membership or recording-edit actions are
+involved. Rows show the actual MP4 size and probed duration. `.part`, retained
+fragments, hidden files and symbolic links are excluded. Publishing a completed
+download or deleting a file on the PC updates the app through the same revision
+feed contract as the other local apps. No files are moved or deleted by the app.
+`LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
+provider's `LocalMediaKind` selects HLS recordings or direct MP4s.
 
 ## Rules
 
@@ -279,7 +292,8 @@ left the screen.
 
 ### Tests
 
-`test` runs `scripts/test.sh` on the Mac: the registry (`Tests/RegistryTests.swift`), Video
+`test` runs `scripts/test.sh` on the Mac: the registry (`Tests/RegistryTests.swift`),
+MP4/HLS local-library URLs, descriptors and offline cache (`Tests/LocalLibraryTests.swift`), Video
 Vault's scrapers and list rules (`VaultTests.swift`), and Tango's list rules
 (`TangoTests.swift`: the gateway's answers, followed streams first, then recommendations,
 one entry per streamer, blocked and ended streams hidden; names from profiles;

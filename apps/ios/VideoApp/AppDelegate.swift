@@ -51,7 +51,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         var resumed: (Bool) -> Void = { _ in }
         var paused: () -> Void = {}
         if let provider = info["LocalProvider"] as? String {
-            let local = LocalListController(provider: provider, server: URL(string: "https://192.168.1.197:9999/")!)
+            let server = URL(string: info["StartURL"] as? String ?? "https://192.168.1.197:9999/")!
+            let kind = LocalMediaKind(rawValue: info["LocalMediaKind"] as? String ?? "hls") ?? .hls
+            let local = LocalListController(provider: provider, server: server, mediaKind: kind)
             (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
             list = local
         } else if info["NativeList"] as? String == "tango" {

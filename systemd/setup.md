@@ -7,7 +7,7 @@ installed files under `~/.config/systemd/user` directly.
 | Unit | Runs |
 |---|---|
 | `video-server.service` | `~/.local/bin/video-server` (API, frontend, finalization) |
-| `video-bunkr-downloads.service` | lightweight HTTPS :9998 Bunkr byte-copy queue; durable jobs/partials, automatic restart and boot recovery |
+| `video-bunkr-downloads.service` | lightweight HTTPS :9998 Bunkr byte-copy queue and local MP4 library; durable jobs/partials, ranged playback, automatic restart and boot recovery |
 | `video-downloader.service` | `~/.local/bin/video-downloader` |
 | `video-auth.service` | `~/.local/bin/video-auth` on display `:111` |
 | `video-pipeline.service` | `npm run campaign-worker -w pipeline` on display `:111`, with network uploads on and cleanup off |

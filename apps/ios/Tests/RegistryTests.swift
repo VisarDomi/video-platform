@@ -1,6 +1,6 @@
 import Foundation
 
-// providers.json: the five apps' names, bundle IDs (never changed: a new ID loses the app's data
+// providers.json: the apps' names, bundle IDs (never changed: a new ID loses the app's data
 // and logins) and how each lists its videos.
 @main
 struct RegistryTests {
@@ -12,13 +12,17 @@ struct RegistryTests {
             let product = registry[provider] ?? [:]
             check(product["hosts"] == nil && product["native"] == nil && product["url"] as? String == "https://192.168.1.197:9999/videos/\(provider)", "\(provider) lists the PC's recordings")
         }
+        let bunkr = registry["bunkr"] ?? [:]
+        check(bunkr["name"] as? String == "Bunkr local" && bunkr["mediaKind"] as? String == "mp4"
+              && bunkr["url"] as? String == "https://192.168.1.197:9998/videos/bunkr"
+              && bunkr["hosts"] == nil && bunkr["native"] == nil, "Bunkr local lists the PC MP4 library")
         check(registry["vault"]?["native"] as? String == "vault" && registry["vault"]?["hosts"] as? [String] == ["porntrex.com", "www.porntrex.com"], "Video Vault lists only Porntrex")
         check(registry["tango-live"]?["native"] as? String == "tango" && registry["tango-live"]?["tangoLogin"] as? Bool == true
               && registry["tango-live"]?["extensions"] as? [String] == ["Login", "FC2Live", "SCLive", "Bunkr"], "Tango lists natively and keeps its Safari extensions")
         let names = Set(registry.values.map { $0["name"] as! String }), ids = Set(registry.values.map { $0["bundleId"] as! String })
-        check(names == ["Tango local", "FC2 local", "SC local", "Video Vault", "Tango"], "display names")
+        check(names == ["Tango local", "FC2 local", "SC local", "Bunkr local", "Video Vault", "Tango"], "display names")
         check(ids == ["com.visar.TangoLocal.paid", "com.visar.FC2Local.paid", "com.visar.SCLocal.paid",
-                      "com.visar.Ptrex.paid", "com.visar.Tango.paid"], "paid bundle IDs; Tango and Video Vault (formerly Ptrex) keep their original identities")
+                      "com.visar.BunkrLocal.paid", "com.visar.Ptrex.paid", "com.visar.Tango.paid"], "paid bundle IDs; existing apps keep their original identities")
         if failures > 0 { print("\(failures) registry check(s) failed"); exit(1) }
         print("PASS: registry (names, bundle IDs, list kinds)")
     }

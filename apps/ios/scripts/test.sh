@@ -7,6 +7,8 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/video-tests.XXXXXX")
 trap 'rm -rf "$test_dir"' EXIT
 xcrun swiftc -parse-as-library Tests/RegistryTests.swift -o "$test_dir/registry-tests"
 "$test_dir/registry-tests"
+xcrun swiftc -j 2 -parse-as-library VideoApp/LocalLibrary.swift Tests/LocalLibraryTests.swift -o "$test_dir/local-library-tests"
+"$test_dir/local-library-tests"
 for module in KitCore KitNet KitHTML; do
   deps=()
   [[ $module == KitNet ]] && deps=(-I "$test_dir" -L "$test_dir" -lKitCore)

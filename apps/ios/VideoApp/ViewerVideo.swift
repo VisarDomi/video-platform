@@ -30,6 +30,7 @@ struct ViewerVideo: @unchecked Sendable {
 
     var key: String { filename + "\u{1F}" + type }
     var name: String { title ?? filename }
+    var size: Double { (raw["size"] as? NSNumber)?.doubleValue ?? 0 }
     var edited: Bool { type == "edited" }
 
     func same(_ other: ViewerVideo) -> Bool { filename == other.filename && type == other.type }
@@ -42,10 +43,11 @@ struct ViewerVideo: @unchecked Sendable {
         var isLive: Bool
         var liveStream: Bool
         var duration: Double
+        var size: Double = 0
     }
 
     var look: Look {
-        Look(filename: filename, type: type, name: name, isLive: isLive, liveStream: liveStream, duration: (raw["duration"] as? NSNumber)?.doubleValue ?? 0)
+        Look(filename: filename, type: type, name: name, isLive: isLive, liveStream: liveStream, duration: (raw["duration"] as? NSNumber)?.doubleValue ?? 0, size: size)
     }
 
     func setting(_ field: String, _ value: Any) -> ViewerVideo {

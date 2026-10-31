@@ -552,7 +552,7 @@ final class VideoRowCell: UITableViewCell {
             size.text = ""
         } else {
             duration.text = Self.duration(seconds)
-            let bytes = seconds * bytesPerSecond
+            let bytes = video.size > 0 ? video.size : seconds * bytesPerSecond
             size.text = bytes > 0 ? String(format: "%.1f MiB", bytes / 1_048_576) : "-- MiB"
             let large = bytes > 350 * 1_048_576
             size.textColor = large ? UIColor(white: 0.88, alpha: 1) : UIColor(white: 0.67, alpha: 1)

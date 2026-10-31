@@ -126,6 +126,7 @@ else:
     info['NSLocalNetworkUsageDescription'] = 'Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.'
     # A native list on the PC's API (VideoApp/LocalList.swift) instead of the website.
     info['LocalProvider'] = key
+    info['LocalMediaKind'] = config.get('mediaKind', 'hls')
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')
