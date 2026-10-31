@@ -214,7 +214,9 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
     Bunkr to PC instead sends the file page to `/api/bunkr/downloads` when the PC
     is reachable: tapping Download on `bunkr.si`, `.ph` or `.cr` queues the original
     video in `~/Videos/plab/bunkr/`. Closing Safari does not stop an accepted
-    download. The PC queue and partials survive power loss. Away from the PC the
+    download. Refreshing or revisiting the file page restores progress from the
+    PC automatically; temporary disconnections retain the last progress and
+    reconnect without resubmitting. The PC queue and partials survive power loss. Away from the PC the
     normal download link is preserved. See `packages/live-extensions/README.md`
     for queue recovery and the mobile WebKit checks.
   - A Block is real, also in a test. `apps/tango/scripts/tango-unblock-blocklist.mjs` (run on

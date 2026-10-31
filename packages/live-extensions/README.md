@@ -15,10 +15,17 @@ The existing list server is `SERVER` in `src/core/config.ts`
 **Bunkr to PC** handles video pages at `https://bunkr.si/f/...`, `bunkr.ph/f/...`
 and `bunkr.cr/f/...`. It probes the PC from its background page. With a recently
 reachable PC, tapping the file's Download button queues the original video in
-`~/Videos/plab/bunkr/` and shows its progress on the button. Related-file links
+`~/Videos/plab/bunkr/` and shows its progress on the button. Opening or refreshing
+the same file page discovers its existing job by the PC's deterministic ID,
+without another tap or submission. A per-tab cache keeps the last confirmed
+progress visible during an outage; it says reconnecting until the PC answers.
+Foreground, page restoration and network recovery refresh status immediately,
+with bounded requests and automatic polling. A lost submission acknowledgement
+is resolved by reading the existing job rather than submitting again. Related-file links
 and modified clicks keep their normal behavior. When the PC is unavailable,
-the site's Download button works normally. A lost queue acknowledgement offers
-an idempotent retry, so it cannot accidentally create a second download.
+the site's Download button works normally for a new download. A known active PC
+job stays attached during a connection loss, avoiding an accidental duplicate
+download on the phone. An explicit retry is idempotent.
 
 The independent `video-bunkr-downloads.service` on HTTPS :9998 resolves Bunkr's numeric metadata and expiring signature itself; Safari
 can close after acceptance. `/api/bunkr/health` advertises this capability;
