@@ -26,7 +26,7 @@ Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:
 - [packages/auth/decisions.md](./packages/auth/decisions.md), [SESSION-RECOVERY.md](./packages/auth/SESSION-RECOVERY.md): the PC's Tango session and how to recover it.
 - [packages/descriptor/setup.md](./packages/descriptor/setup.md), [MODEL.md](./packages/descriptor/MODEL.md): the local description model, its runtime and the measurements behind its settings.
 - [packages/downloader/README.md](./packages/downloader/README.md), [decisions.md](./packages/downloader/decisions.md): stream capture.
-- [packages/live-extensions/README.md](./packages/live-extensions/README.md): the FC2 live and SC live Safari extensions.
+- [packages/live-extensions/README.md](./packages/live-extensions/README.md): FC2/SC controls and the Bunkr-to-PC Safari extension hosted by Tango.
 - [packages/pipeline/setup.md](./packages/pipeline/setup.md), [docs/upload-recovery.md](./packages/pipeline/docs/upload-recovery.md): conversion, description, upload and verification; upload recovery.
 - [packages/server/README.md](./packages/server/README.md), [decisions.md](./packages/server/decisions.md): the API, finalization and download lists.
 - [packages/shared/decisions.md](./packages/shared/decisions.md): storage layout, token reader, logging.

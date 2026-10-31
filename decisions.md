@@ -17,7 +17,7 @@ next to the code: `packages/downloader/decisions.md`, `packages/server/decisions
 | `packages/pipeline` | `video-pipeline.service` | conversion, description, upload, verification |
 | `packages/descriptor` | library (no unit) | local model titles and descriptions |
 | `packages/app` | served by the server | the website: provider lists, viewer, edits |
-| `packages/live-extensions` | Safari extensions in the Tango iPhone app | FC2/SC download-list buttons |
+| `packages/live-extensions` | Safari extensions in the Tango iPhone app | FC2/SC download-list buttons and Bunkr downloads to the PC |
 | `apps/ios` | five iPhone apps, built on the Mac | native lists and viewer: local recordings, Video Vault, Tango live |
 | `packages/shared` | library | layout, playlist parsing, upload policy, token reader, logger |
 

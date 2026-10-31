@@ -1,7 +1,7 @@
 {
     "name": "live-extensions",
     "version": "3",
-    "description": "FC2 live and SC live Safari extensions (hosted by Tango): download-list controls for fc2 and stripchat",
+    "description": "Safari extensions hosted by Tango: FC2/SC download-list controls and Bunkr downloads to the PC",
     "private": true,
     "type": "module",
     "scripts": {

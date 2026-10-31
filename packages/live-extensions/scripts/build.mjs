@@ -1,4 +1,4 @@
-// Builds the FC2 live and SC live Safari extensions (hosted by the Tango app).
+// Builds Tango's FC2/SC list controls and Bunkr-to-PC Safari extension.
 import { build } from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';

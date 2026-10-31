@@ -1,6 +1,6 @@
 # agent notes
 
-Monorepo. Packages: `app` (TypeScript frontend: the local website; the iPhone apps in `apps/ios` are native), `server` (Express, HTTPS port `9999`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (the FC2 live and SC live Safari extensions hosted by the Tango iPhone app: download-list controls for fc2/sc; built with esbuild).
+Monorepo. Packages: `app` (TypeScript frontend: the local website; the iPhone apps in `apps/ios` are native), `server` (Express, HTTPS port `9999`, plus the independent Bunkr queue on `9998`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (Safari extensions hosted by Tango: FC2/SC download-list controls and Bunkr downloads to the PC; built with esbuild).
 
 Recording providers: `tango`, `fc2`, `sc`.
 Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), `video-bunkr-downloads` (independent durable byte-copy queue on HTTPS :9998), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
@@ -60,7 +60,7 @@ reloads systemd but deliberately does not restart services.
   `~/Documents/work/video/video-platform/packages/pipeline/`
 - Auth (Tango session) details:
   `~/Documents/work/video/video-platform/packages/auth/`
-- FC2 live / SC live extensions:
+- FC2 live / SC live / Bunkr to PC extensions:
   `~/Documents/work/video/video-platform/packages/live-extensions/`
 - iPhone apps:
   `~/Documents/work/video/video-platform/apps/ios/`

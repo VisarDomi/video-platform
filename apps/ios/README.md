@@ -15,8 +15,9 @@ in the [NativeKit guide](../../../../ios-tools/native/README.md).
 | `tango-live` | Tango | `com.visar.Tango.paid` | Tango's gateway API (`native`) |
 
 **Tango** lists live streams natively (`VideoApp/Tango.swift`, `TangoList.swift`) and hosts
-three Safari extensions: **Tango Login** (`.Login`, the Safari login handoff), **FC2 live**
-(`.FC2Live`) and **SC live** (`.SCLive`), the download-list bars from `packages/live-extensions`.
+four Safari extensions: **Tango Login** (`.Login`, the Safari login handoff), **FC2 live**
+(`.FC2Live`) and **SC live** (`.SCLive`, the download-list bars), and **Bunkr to PC**
+(`.Bunkr`, the webpage Download-button handoff). The last three come from `packages/live-extensions`.
 
 **Video Vault**'s bundle ID is `com.visar.Ptrex.paid`; a different ID would install a
 separate app without its Porntrex session and data. It lists the pipeline's Porntrex uploads, oldest recording first (`VideoApp/Vault.swift`): only uploads
