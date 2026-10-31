@@ -1,4 +1,4 @@
-// Builds the LADDER live and FMP4 live Safari extensions (hosted by the TsLive app).
+// Builds TsLive's LADDER/FMP4 list controls and FileHost-to-PC Safari extension.
 import { build } from 'esbuild';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
