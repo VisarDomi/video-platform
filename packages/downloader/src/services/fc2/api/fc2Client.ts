@@ -4,7 +4,7 @@ import { IDownloadSession, IStreamProvider, type SegmentValidationResult } from 
 import { probeSegmentDimensions } from "../../download/segmentDimensions.js";
 import { requestSignal, resolveSegmentUrl } from "../../core/downloadUtils.js";
 import { Fc2QualitySelector } from "./fc2QualitySelector.js";
-import { CDN_FETCH_TIMEOUT_MS } from "../../../common/timing.js";
+import { CDN_FETCH_TIMEOUT_MS, FC2_DISCOVERY_RETRY_MS } from "../../../common/timing.js";
 import { FC2_SESSION_CLEANUP_INTERVAL_MS, FC2_SESSION_STALE_MS, FC2_WS_HANDSHAKE_TIMEOUT_MS, FC2_WS_HEARTBEAT_INTERVAL_MS } from "../../../common/timing.js";
 
 interface Fc2Session {
@@ -75,35 +75,51 @@ export class Fc2Client implements IStreamProvider {
     }
 
     public async getAdultChannelList(): Promise<Map<string, Fc2Broadcast> | null> {
-        try {
-            const response = await this._request("https://live.fc2.com/adult/contents/allchannellist.php");
-            if (!response.ok) {
-                logger.warn(`[FC2] Adult channel list returned ${response.status}`);
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const response = await this._request("https://live.fc2.com/adult/contents/allchannellist.php");
+                if (!response.ok) {
+                    logger.warn(`[FC2] Adult channel list returned ${response.status}`);
+                    return null;
+                }
+                const json: any = await response.json();
+                const channels = Array.isArray(json?.channel)
+                    ? json.channel
+                    : Array.isArray(json) ? json : null;
+                if (!channels) {
+                    logger.warn("[FC2] Adult channel list has no recognized channel array; provider state unavailable");
+                    return null;
+                }
+
+                const broadcasts = new Map<string, Fc2Broadcast>();
+                for (const channel of channels) {
+                    const channelId = String(channel?.id ?? "");
+                    const startTime = String(channel?.start_time ?? "");
+                    if (!/^\d+$/.test(channelId) || startTime === "") continue;
+                    broadcasts.set(channelId, {
+                        channelId,
+                        startTime,
+                        isPaid: Number(channel?.pay ?? 0) !== 0,
+                    });
+                }
+                this.latestBroadcasts = broadcasts;
+                if (attempt > 1) logger.info("[FC2] Adult channel list recovered after one transport retry");
+                return broadcasts;
+            } catch (error: any) {
+                const codes: unknown[] = [error.cause?.code,
+                    ...(Array.isArray(error.cause?.errors) ? error.cause.errors.map((cause: any) => cause.code) : [])];
+                const transportCodes = [...new Set(codes.filter((code): code is string => typeof code === "string"))];
+                const retryable = transportCodes.length > 0 || error.name === "TimeoutError" || error.message === "fetch failed";
+                if (attempt === 1 && retryable) {
+                    logger.debug("[FC2] Adult channel list transport failed; retrying once", { error: error.message, transportCodes });
+                    await new Promise(resolve => setTimeout(resolve, FC2_DISCOVERY_RETRY_MS));
+                    continue;
+                }
+                logger.error("[FC2] Adult channel list unavailable", { error: error.message, transportCodes, attempts: attempt });
                 return null;
             }
-            const json: any = await response.json();
-            const channels = Array.isArray(json?.channel)
-                ? json.channel
-                : Array.isArray(json) ? json : [];
-            if (!Array.isArray(channels)) return null;
-
-            const broadcasts = new Map<string, Fc2Broadcast>();
-            for (const channel of channels) {
-                const channelId = String(channel?.id ?? "");
-                const startTime = String(channel?.start_time ?? "");
-                if (!/^\d+$/.test(channelId) || startTime === "") continue;
-                broadcasts.set(channelId, {
-                    channelId,
-                    startTime,
-                    isPaid: Number(channel?.pay ?? 0) !== 0,
-                });
-            }
-            this.latestBroadcasts = broadcasts;
-            return broadcasts;
-        } catch (error: any) {
-            logger.error("[FC2] Adult channel list unavailable", { error: error.message });
-            return null;
         }
+        return null;
     }
 
     private _performWsHandshake(wsUrl: string, channelId: string): Promise<string | null> {

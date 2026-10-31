@@ -159,7 +159,12 @@ transport failure. Shared snapshot reconciliation owns the recording lifecycle:
   initial live URL: master failures never end a recording, and polling and
   retries keep the selected live URL without refreshing the master.
 - **FC2:** the adult all-channel list (`allchannellist.php`) with `start_time`,
-  requested at most once per 30 seconds.
+  polled every 30 seconds. A transport failure gets one retry after one second,
+  with a fresh request deadline; HTTP refusals and malformed responses do not retry.
+  Persistent failures retain the last known snapshot and log transport cause codes;
+  a successful retry logs recovery. An unrecognized JSON payload means unavailable,
+  never an authoritative empty channel list. An explicit empty array still means
+  that no channels are live.
 
 **Why:** A folder per download attempt would split one broadcast into many
 folders at every CDN edge rotation and lose the media between them.
