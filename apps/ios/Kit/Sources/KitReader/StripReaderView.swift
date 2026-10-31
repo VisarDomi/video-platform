@@ -114,7 +114,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         let touch = TouchTracker { [weak self] down in
             self?.touching = down
             if down { self?.pinnedTop = nil }
-            if !down { self?.settleIfIdle() }
+            if !down { DispatchQueue.main.async { [weak self] in self?.settleIfIdle() } }
         }
         scrollView.addGestureRecognizer(touch)
     }
@@ -225,6 +225,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     }
 
     private func setOffset(_ y: CGFloat) {
+        if geometryInMotion, abs(scrollView.contentOffset.y - y) <= 0.001 { return }
         let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
         let target = min(max(0, y), maxOffset)
         guard abs(scrollView.contentOffset.y - target) > 0.001 else { return }

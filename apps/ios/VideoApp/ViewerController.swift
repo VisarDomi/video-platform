@@ -166,7 +166,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let contact = ContactRecognizer { [weak self] down in
             guard let self else { return }
             touching = down
-            if !down { settle() }
+            if !down { DispatchQueue.main.async { [weak self] in self?.settle() } }
         }
         contact.delegate = self
         view.addGestureRecognizer(contact)
