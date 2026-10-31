@@ -292,7 +292,9 @@ npm run retry -w pipeline -- RECORDING_ID
 
 A recording whose upload a provider removed is never uploaded to that provider
 again: `retry` refuses while it is the active provider, and an upload there is
-blocked before any request.
+blocked before any request. A removal discovered after verification also revokes
+cleanup eligibility and shared-batch coverage. Historical verification receipts and
+bandwidth accounting remain in the ledger; a removed copy is no longer backup evidence.
 
 ### Optional per-provider trial cap
 
@@ -422,7 +424,10 @@ hold; after it, the pipeline tries for about a minute to read the new video's
 ID from My Videos (otherwise reconciliation finds it by its title suffix).
 Verification opens `/edit-video/<id>/`, follows the published `/video/<id>/`
 link and probes each MP4 download link, highest label first, for a Full-HD
-version (at least 1080 on its short side). A video still processing is checked again after two hours. Words
+version (at least 1080 on its short side). A video still processing is checked again after two hours.
+An advertised Full-HD link whose playback probe fails is recorded as unavailable and
+also retried after two hours, even when a lower tier works; it is never verified from
+the label alone or reported as having no Full-HD tier. Words
 Porntrex silently replaced in the stored title/description are learned as
 rejected phrases.
 

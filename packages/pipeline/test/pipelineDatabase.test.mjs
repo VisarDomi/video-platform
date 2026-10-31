@@ -975,3 +975,28 @@ test("existing Porntrex upload is refused even when state is reset and Porntrex 
     raw.close();
     assert.throws(() => database.reserveUpload(recording.id, 550, new Date("2026-11-02"), "Europe/Tirane", 600_000_000_000, "porntrex"), /remote upload/);
 });
+
+for (const cleaned of [false, true]) test(`a provider removal revokes ${cleaned ? "cleanup eligibility" : "verified coverage"} without erasing receipts`, async t => {
+    const { database, databasePath, directory } = await databaseFixture(t);
+    const recording = database.discover(input(directory));
+    advanceToMetadataReady(database, recording, directory, 500);
+    const now = new Date("2026-10-02T08:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 550, now);
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.finishUploadAttempt(attempt, { status: "accepted", transmittedBytes: 500,
+        remoteId: "123456", remoteUrl: "https://www.porntrex.com/video/123456/example" }, now);
+    database.recoverAcceptedVerifications(now);
+    database.verifyUpload(attempt, "123456", "https://www.porntrex.com/video/123456/example", now);
+    if (cleaned) database.transitionToCleanupEligible(recording.id, "fully backed up", now);
+    assert.equal(database.markProviderRemoved(attempt, "wrong-id", "unrelated", now), false);
+    assert.equal(database.markProviderRemoved(attempt, "123456", "confirmed removed after verification", now), true);
+    assert.equal(database.get(recording.id).state, "blocked");
+    assert.equal(database.getUploadIdentity(recording.id).verified, false);
+    assert.deepEqual(database.listVerifiedUploadParts(recording.id), []);
+    assert.equal(database.providerRemovals(recording.id)[0].remoteId, "123456");
+    assert.equal(database.markProviderRemoved(attempt, "123456", "repeat", now), false);
+    const raw = new DatabaseSync(databasePath);
+    assert.equal(raw.prepare("SELECT remote_id FROM remote_uploads WHERE attempt_id=?").get(attempt).remote_id, "123456");
+    assert.equal(raw.prepare("SELECT SUM(transmitted_bytes) AS bytes FROM bandwidth_events").get().bytes, 500);
+    raw.close();
+});

@@ -368,7 +368,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         return false;
     }
 
-    async probeUploadStatus(page: Page, uploadId: string) {
+    async probeUploadStatus(page: Page, uploadId: string, probe = run) {
         if (!/^\d+$/.test(uploadId)) throw new Error("Invalid Porntrex edit ID");
         const response = await page.goto(`${ORIGIN}/edit-video/${uploadId}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         if (response?.status() === 404) {
@@ -403,19 +403,21 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
         }))));
         const renditions: Array<{ width: number; height: number; label: string }> = [];
-        let failures = 0;
+        const unavailableRenditions: Array<{ label: string; reason: string }> = [];
         for (const candidate of candidates) {
             const url = new URL(candidate.url, ORIGIN);
             if (url.origin !== ORIGIN || !url.pathname.startsWith("/get_file/")) throw new Error("Unexpected Porntrex playback URL");
             // A quality label is not proof of dimensions. Probe stream headers, not the whole video.
             let output;
             try {
-                output = await run("ffprobe", ["-v", "error", "-rw_timeout", "15000000", "-probesize", "2000000",
+                output = await probe("ffprobe", ["-v", "error", "-rw_timeout", "15000000", "-probesize", "2000000",
                     "-analyzeduration", "2000000", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", url.href],
                 { timeout: 25_000, maxBuffer: 64 * 1024 });
-            } catch {
+            } catch (error) {
                 // One link failing (the CDN does this now and then) says nothing about the others.
-                failures++;
+                const stderr = (error as { stderr?: string }).stderr ?? "";
+                unavailableRenditions.push({ label: candidate.label,
+                    reason: stderr.match(/Server returned ([^\r\n]+)/)?.[1] ?? "playback probe failed" });
                 continue;
             }
             const stream = (JSON.parse(output.stdout) as { streams: Array<{ width: number; height: number }> }).streams?.[0];
@@ -423,9 +425,12 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             renditions.push({ ...stream, label: candidate.label });
             if (hasFullHdPlayback([{ ...stream, label: candidate.label }])) return { outcome: "online" as const, remoteUrl, renditions, reason: "Full-HD tier verified from playback stream", stored };
         }
-        if (!renditions.length && failures) throw new Error("Porntrex playback dimension probe failed; retry verification, not upload");
+        const fullHdUnavailable = unavailableRenditions.some(candidate => Number(candidate.label.match(/(\d{3,4})p\b/)?.[1] ?? 0) >= 1080);
+        if (!renditions.length && unavailableRenditions.length && !fullHdUnavailable) throw new Error("Porntrex playback dimension probe failed; retry verification, not upload");
         const best = [...renditions].sort((left, right) => right.width * right.height - left.width * left.height)[0];
-        return { outcome: "not_ready" as const, remoteUrl, renditions, stored,
-            reason: best ? `Published; best stream ${best.width}x${best.height} (${best.label}), no Full-HD tier yet` : "Published, but no playback stream was found" };
+        return { outcome: "not_ready" as const, remoteUrl, renditions, stored, unavailableRenditions,
+            retrySoon: fullHdUnavailable,
+            reason: fullHdUnavailable ? `Published; Full-HD link advertised but unavailable (${unavailableRenditions.map(candidate => `${candidate.label}: ${candidate.reason}`).join("; ")}); retry playback verification`
+                : best ? `Published; best stream ${best.width}x${best.height} (${best.label}), no Full-HD tier yet` : "Published, but no playback stream was found" };
     }
 }

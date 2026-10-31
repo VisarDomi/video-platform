@@ -193,6 +193,32 @@ test("only the page's own chunk POSTs count as upload chunks, never pixels that 
     assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/?mode=async&action=upload_files"), false);
 });
 
+test("an unavailable advertised Full-HD tier stays unverified and retries sooner even if 720p works", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.route("https://www.porntrex.com/**", route => route.fulfill({ contentType: "text/html",
+        body: route.request().url().includes("/edit-video/")
+            ? '<a href="https://www.porntrex.com/video/55/fixture">Published</a>'
+            : '<a href="/get_file/high">MP4 1080p</a><a href="/get_file/low">MP4 720p</a>' }));
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused" });
+    const result = await uploader.probeUploadStatus(page, "55", async (_command, args) => {
+        if (args.at(-1).endsWith("/high")) throw Object.assign(new Error("CDN failure"), { stderr: "Server returned 503 Service Unavailable" });
+        return { stdout: JSON.stringify({ streams: [{ width: 1280, height: 720 }] }) };
+    });
+    assert.equal(result.outcome, "not_ready");
+    assert.equal(result.retrySoon, true);
+    assert.match(result.reason, /Full-HD link advertised but unavailable/);
+    assert.deepEqual(result.unavailableRenditions, [{ label: "MP4 1080p", reason: "503 Service Unavailable" }]);
+    assert.equal(result.renditions[0].height, 720);
+    const allUnavailable = await uploader.probeUploadStatus(page, "55", async () => {
+        throw Object.assign(new Error("CDN failure"), { stderr: "Server returned 404 Not Found" });
+    });
+    assert.equal(allUnavailable.outcome, "not_ready");
+    assert.equal(allUnavailable.retrySoon, true);
+    assert.equal(allUnavailable.renditions.length, 0);
+});
+
 test("Porntrex verification probes every MP4 link, highest label first, whatever the label calls a portrait tier", () => {
     const ordered = orderPlaybackCandidates([
         { url: "/get_file/a_480p.mp4", label: "MP4 480p, 120 Mb" },
