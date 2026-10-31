@@ -22,6 +22,12 @@ reloads systemd but deliberately does not restart services.
 
 ## Logs
 
+- The current Internet download cap is **10 Mbps** (owner confirmed 2026-10-31).
+  Preserve the highest-quality source bytes and keep missed-segment accounting
+  accurate; bandwidth-constrained gaps are still counted as `missed_ours` when
+  logged as late polls. Do not add parallel requests or change capture quality
+  to conceal the cap. The owner plans to contact the ISP next month; that is
+  context, not a scheduled reminder or authorization to contact anyone.
 - Hourly babysitting uses `python3 scripts/babysit_ledger.py` for newly committed
   upload submissions, verification receipts and provider removals. Reconciliation
   can commit results after a report snapshot with the batch's earlier timestamp,

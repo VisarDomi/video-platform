@@ -87,6 +87,25 @@ test("Stripchat source remains the described master-best variant", async (t) => 
     });
 });
 
+test("access evidence keeps its original cache timestamp when bulk status updates during probes", async t => {
+    let now = 10_000;
+    t.mock.method(Date, 'now', () => now);
+    const client = new ScClient();
+    client.latestStatusObservedAt = 9_000;
+    t.mock.method(globalThis, 'fetch', async url => {
+        if (String(url).includes('/cam')) {
+            now = 15_000;
+            client.latestStatusObservedAt = now;
+            return Response.json({ user: { user: { status: 'public', isLive: true } } });
+        }
+        return new Response('#EXTM3U\n');
+    });
+    const evidence = await client.diagnoseAccessFailure({ stage: 'playlist', streamerId: '123',
+        alias: 'alias', recordingId: 'recording', masterUrl: 'https://example.test/master.m3u8',
+        liveUrl: 'https://example.test/live.m3u8', failure: { kind: 'network' } });
+    assert.equal(evidence.providerState.cachedAgeMs, 1_000);
+});
+
 test("access evidence distinguishes paid denial from a quality decision", async (t) => {
     const originalFetch = globalThis.fetch;
     t.after(() => { globalThis.fetch = originalFetch; });

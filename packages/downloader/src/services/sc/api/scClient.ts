@@ -351,6 +351,7 @@ export class ScClient implements IStreamProvider {
     public async diagnoseAccessFailure(context: AccessFailureContext): Promise<Record<string, unknown>> {
         const observedAt = Date.now();
         const cached = this.latestStatuses.get(context.streamerId);
+        const cachedObservedAt = this.latestStatusObservedAt;
         const camUrl = `https://stripchat.com/api/front/v2/models/${encodeURIComponent(context.streamerId)}/cam`;
         const camData = await this.fetchApi<any>(camUrl, true);
         const cam = camData?.cam && !Array.isArray(camData.cam) ? camData.cam : null;
@@ -409,7 +410,7 @@ export class ScClient implements IStreamProvider {
                 camActive: typeof cam?.isCamActive === "boolean" ? cam.isCamActive : null,
                 camAvailable: typeof cam?.isCamAvailable === "boolean" ? cam.isCamAvailable : null,
                 statusChangedAt: rawStatusChangedAt,
-                cachedAgeMs: this.latestStatusObservedAt > 0 ? observedAt - this.latestStatusObservedAt : null,
+                cachedAgeMs: cachedObservedAt > 0 ? observedAt - cachedObservedAt : null,
             },
             master: {
                 status: masterStatus,

@@ -254,9 +254,14 @@ Routine mechanics are debug lines (`LOG_LEVEL=debug`): discovery decisions,
 session retries, per-fetch failures that a retry absorbs.
 
 Repeated HTTP failures are aggregated into one access incident spanning
-retry-created sessions: one `ACCESS_INCIDENT_OPEN` warning carrying the SC
-evidence snapshot, and one `ACCESS_INCIDENT_CLOSE` with duration and counts;
-recovery candidates that never work stay at debug level.
+retry-created sessions: one immediate `ACCESS_INCIDENT_OPEN` warning and one
+`ACCESS_INCIDENT_CLOSE` with duration and counts. The optional SC snapshot arrives
+separately as `ACCESS_INCIDENT_EVIDENCE`; all three carry the incident's start
+time and recording identity, even when evidence arrives after recovery.
+Diagnostic network probes never block capture or change its state. At most one
+diagnostic runs per recording session, including retry attempts; another incident while it is pending still
+logs its open/close but starts no additional probe. Recovery candidates that never
+work stay at debug level.
 
 The SC evidence snapshot is observational and does not change download
 behavior. It records a fresh cam status, the complete master variant ranking,

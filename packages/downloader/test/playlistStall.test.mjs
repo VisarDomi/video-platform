@@ -10,13 +10,15 @@ import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
 import { AccessIncidentTracker } from '../dist/services/download/accessIncidentTracker.js';
 import { ApiClient } from '../dist/services/tango/api/apiClient.js';
+import logger from '../dist/common/logger.js';
 
 async function fixture(t, provider) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'playlist-stall-'));
     t.after(() => rm(root, { recursive: true, force: true }));
-    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const handle = { state: { alias: 'example', streamerId: '123', recordingId: 'recording' }, update(value) { Object.assign(this.state, value); } };
     const disk = new DiskSession('example', handle, async () => root);
     const manager = new PlaylistManager(disk, 'recording');
+    const incidents = new AccessIncidentTracker();
     const downloader = new StreamDownloader(handle, {
         providerName: 'tango',
         playlistRetryMs: 100,
@@ -24,8 +26,8 @@ async function fixture(t, provider) {
         recoverVariant: async () => null,
         validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
         ...provider,
-    }, new AccessIncidentTracker());
-    return { manager, run: () => downloader.run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk) };
+    }, incidents);
+    return { manager, downloader, handle, incidents, run: () => downloader.run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk) };
 }
 
 const fetchSegment = async url => ({ data: Buffer.from(`unprobeable media: ${url}`) });
@@ -102,4 +104,60 @@ test('an aborted playlist request records no failure', async (t) => {
     controller.abort();
     assert.equal(await pending, null);
     assert.equal(session.getLastPlaylistFailure(), null);
+});
+
+test('slow access diagnostics do not hold capture behind a moving live window', { timeout: 15000 }, async t => {
+    const window = movingWindow(5000);
+    let calls = 0, diagnostics = 0;
+    const events = [];
+    t.mock.method(logger, 'warn', (name, data) => events.push({ name, data }));
+    t.mock.method(logger, 'info', (name, data) => events.push({ name, data }));
+    const f = await fixture(t, {
+        refreshMasterDuringDownload: false,
+        recoverVariant: async () => 'https://example.test/live.m3u8',
+        diagnoseAccessFailure: async () => {
+            diagnostics++;
+            await new Promise(resolve => setTimeout(resolve, 3500));
+            return { diagnosticMarker: true };
+        },
+        createDownloadSession: () => ({
+            fetchPlaylist: async () => ++calls === 3 ? null : window(),
+            getLastPlaylistFailure: () => ({ kind: 'network', error: 'TypeError' }),
+            fetchSegment,
+        }),
+    });
+    const result = await f.run();
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(diagnostics, 1);
+    assert.equal(f.manager.missedSegmentCount, 0);
+    const open = events.findIndex(e => e.name.includes('ACCESS_INCIDENT_OPEN'));
+    const close = events.findIndex(e => e.name.includes('ACCESS_INCIDENT_CLOSE'));
+    const evidence = events.findIndex(e => e.name.includes('ACCESS_INCIDENT_EVIDENCE'));
+    assert(open >= 0 && close > open && evidence > close);
+    assert.equal(events[evidence].data.incidentStartedAt, events[open].data.incidentStartedAt);
+});
+
+test('an outstanding diagnostic does not multiply probes or borrow a later recording identity', async t => {
+    let finish;
+    const pending = new Promise(resolve => { finish = resolve; });
+    t.after(() => finish({}));
+    let probes = 0;
+    const events = [];
+    t.mock.method(logger, 'warn', (name, data) => events.push({ name, data }));
+    t.mock.method(logger, 'info', (name, data) => events.push({ name, data }));
+    const f = await fixture(t, { diagnoseAccessFailure: () => { probes++; return pending; } });
+    const failure = { kind: 'network', error: 'TypeError' };
+    const nextAttempt = new StreamDownloader(f.handle,
+        { providerName: 'tango', diagnoseAccessFailure: () => { probes++; return pending; } }, f.incidents);
+    nextAttempt.recordAccessFailure('playlist', 'example', 'https://example.test/master', 'https://example.test/live', failure);
+    f.downloader.closeAccessIncident('example', 'https://example.test/live', 'recovered');
+    f.handle.update({ recordingId: 'later-recording' });
+    f.downloader.recordAccessFailure('playlist', 'example', 'https://example.test/master', 'https://example.test/live', failure);
+    assert.equal(probes, 1);
+    finish({ diagnosticMarker: true });
+    await new Promise(resolve => setImmediate(resolve));
+    const evidence = events.filter(e => e.name.includes('ACCESS_INCIDENT_EVIDENCE'));
+    assert.equal(evidence.length, 1);
+    assert.equal(evidence[0].data.recordingId, 'recording');
+    assert.equal(events.filter(e => e.name.includes('ACCESS_INCIDENT_OPEN')).length, 2);
 });

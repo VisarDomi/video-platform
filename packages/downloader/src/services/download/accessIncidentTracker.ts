@@ -20,6 +20,17 @@ function failureKey(failure: PlaylistFetchFailure): string {
 
 export class AccessIncidentTracker {
     private incident: AccessIncidentSnapshot | null = null;
+    private evidencePending = false;
+
+    public beginEvidence(): boolean {
+        if (this.evidencePending) return false;
+        this.evidencePending = true;
+        return true;
+    }
+
+    public finishEvidence(): void {
+        this.evidencePending = false;
+    }
 
     public record(failure: PlaylistFetchFailure, now = Date.now()): { opened: boolean; snapshot: AccessIncidentSnapshot } {
         const opened = this.incident === null;
