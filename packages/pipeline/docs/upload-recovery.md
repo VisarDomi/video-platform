@@ -50,6 +50,16 @@ as uncertain, to be checked 24 hours later.
   the video only on that submit; such uncertain attempts are settled as failures on the next campaign
   step or reconcile).
   Login and provider cooldowns still apply.
+
+Transfer diagnostics observe the page's same-origin multipart chunk POSTs to
+`/upload-video/`, as well as the older `mode=async&action=upload_file` URL.
+Listeners attach before file selection/submission, so immediate HTTP errors,
+login redirects and non-JSON rejections are retained in the attempt evidence.
+Chunk recognition uses request headers without buffering the media body.
+The provider controls chunk size; a missing percentage advance for ten minutes
+still triggers the ordinary bounded retry cooldown. An empty diagnostic from an
+older worker does not establish why that transfer stalled.
+
 The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility` and `metadata_rejection`
 attempt columns survive worker restarts, independent of the bounded (16-entry) evidence history.
 `limited_visibility` is informational only: it never affects verification or retry eligibility.

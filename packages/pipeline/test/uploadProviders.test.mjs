@@ -191,6 +191,39 @@ test("only the page's own chunk POSTs count as upload chunks, never pixels that 
     assert.equal(isPorntrexChunkRequest("GET", `https://www.google-analytics.com/g/collect?dl=${chunk}&en=page_view`), false);
     assert.equal(isPorntrexChunkRequest("POST", `https://www.porntrex.com/pixel.gif?ref=/upload-video/?mode=async`), false);
     assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/?mode=async&action=upload_files"), false);
+    // Current KVS sends chunk fields in FormData to the bare form action.
+    const multipart = "multipart/form-data; boundary=----fixture";
+    assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/", multipart), true);
+    assert.equal(isPorntrexChunkRequest("GET", "https://www.porntrex.com/upload-video/", multipart), false);
+    assert.equal(isPorntrexChunkRequest("POST", "https://other.invalid/upload-video/", multipart), false);
+    assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/", "application/x-www-form-urlencoded"), false);
+    assert.equal(isPorntrexChunkRequest("POST", "https://www.porntrex.com/upload-video/?action=upload_files", multipart), false);
+});
+
+test("multipart chunk failures are captured before the submit callback can respond", async t => {
+    const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.route("https://www.porntrex.com/**", route => route.fulfill(route.request().method() === "POST"
+        ? { status: 413, contentType: "text/html", body: "upstream rejected the chunk" }
+        : { contentType: "text/html", body: '<a>Hello, fixture</a><form class="form-upload"><input type="file" name="content"><div class="progressbar"><div class="text">0%</div></div></form>' }));
+    await page.goto("https://www.porntrex.com/upload-video/");
+    const uploader = new ChromiumPorntrexUploader({ executablePath: "unused", profilePath: "unused" });
+    const evidence = [];
+    const waiting = uploader.waitForFileTransfer(page, { onEvidence: value => evidence.push(value) }, async () => {
+        await page.evaluate(async () => {
+            const form = new FormData(); form.append("content", new Blob(["fixture"]), "tiny.mp4");
+            await fetch("/upload-video/", { method: "POST", body: form });
+        });
+    });
+    try {
+        await assert.rejects(Promise.race([waiting, new Promise((_, reject) => {
+            const timer = setTimeout(() => reject(new Error("multipart rejection was not observed")), 5_000);
+            timer.unref();
+        })]), /chunk response not JSON.*HTTP 413/);
+        assert(evidence[0].chunkProblems.includes("HTTP 413 text/html"));
+        assert.equal(evidence[0].page, "/upload-video/");
+    } finally { await page.close(); await waiting.catch(() => {}); }
 });
 
 test("an unavailable advertised Full-HD tier stays unverified and retries sooner even if 720p works", async t => {

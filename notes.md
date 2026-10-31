@@ -28,7 +28,7 @@ reloads systemd but deliberately does not restart services.
   logged as late polls. Do not add parallel requests or change capture quality
   to conceal the cap. The owner plans to contact the ISP next month; that is
   context, not a scheduled reminder or authorization to contact anyone.
-- Hourly babysitting uses `python3 scripts/babysit_ledger.py` for newly committed
+- Babysitting uses `python3 scripts/babysit_ledger.py` for newly committed
   upload submissions, verification receipts and provider removals. Reconciliation
   can commit results after a report snapshot with the batch's earlier timestamp,
   so a timestamp-only window can miss them. The helper reads one SQLite snapshot

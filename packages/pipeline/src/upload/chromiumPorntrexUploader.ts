@@ -18,7 +18,7 @@ const ORIGIN = "https://www.porntrex.com";
 const LIST = "#list_videos_my_uploaded_videos";
 const PORNTREX_UPLOADS_PAGE_ROWS = 30;
 const run = promisify(execFile);
-// The page uploads in 9 MB chunks and shows a percentage. A transfer is only
+// The page chooses its chunk size and shows a percentage. A transfer is only
 // given up when that percentage has not moved for this long.
 const TRANSFER_STALL_MILLISECONDS = 10 * 60_000;
 type Entry = { remoteId: string; remoteUrl: string; title: string };
@@ -52,11 +52,15 @@ export function orderPlaybackCandidates(rows: ReadonlyArray<{ url: string; label
 
 // Exactly the upload page's chunk POSTs. Analytics pixels and other requests
 // can carry the upload address inside their own query strings.
-export function isPorntrexChunkRequest(method: string, rawUrl: string): boolean {
+export function isPorntrexChunkRequest(method: string, rawUrl: string, contentType = ""): boolean {
     if (method !== "POST") return false;
     const url = new URL(rawUrl);
-    return url.origin === ORIGIN && url.pathname === "/upload-video/"
-        && url.searchParams.get("mode") === "async" && url.searchParams.get("action") === "upload_file";
+    if (url.origin !== ORIGIN || url.pathname !== "/upload-video/") return false;
+    const action = url.searchParams.get("action");
+    if (action !== null) return action === "upload_file" && url.searchParams.get("mode") === "async";
+    // Current KVS puts chunk fields in FormData and POSTs to the bare form
+    // action. Inspect only the header, never materialize a 200 MiB body.
+    return /^multipart\/form-data\s*;/i.test(contentType);
 }
 
 export class ChromiumPorntrexUploader implements ProviderUploader {
@@ -237,9 +241,10 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             await page.locator("#edit_video_upload_option_file").check();
             // Persist transfer intent BEFORE choosing a file: some uploaders start on selection.
             await request.onProgress?.("file_uploading", request.sizeBytes);
-            await upload.locator('input[name="content"]').setInputFiles(request.artifactPath);
-            await upload.locator('input[type="submit"]').click();
-            await this.waitForFileTransfer(page, request);
+            await this.waitForFileTransfer(page, request, async () => {
+                await upload.locator('input[name="content"]').setInputFiles(request.artifactPath);
+                await upload.locator('input[type="submit"]').click();
+            });
             await request.onProgress?.("file_uploaded", request.sizeBytes);
             const metadata = page.locator("form:has(#edit_video_title)");
             if (request.title.length > 300) throw new Error("Porntrex title exceeds 300 characters");
@@ -282,14 +287,14 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
     // Follow the page's own progress bar, like a person watching the upload:
     // keep waiting while it moves, however slow the connection is, and stop
     // only on a stall or a page error. The metadata form marks completion.
-    private async waitForFileTransfer(page: Page, request: UploadRequest): Promise<void> {
+    private async waitForFileTransfer(page: Page, request: UploadRequest, startTransfer?: () => Promise<void>): Promise<void> {
         const title = page.locator("#edit_video_title");
         let percent = -1;
         let movedAt = Date.now();
         // The page retries a chunk silently on network errors, so keep what
         // its chunk requests actually got back: a stall must say why.
         const chunkProblems: string[] = [];
-        const isChunk = (request: Request) => isPorntrexChunkRequest(request.method(), request.url());
+        const isChunk = (request: Request) => isPorntrexChunkRequest(request.method(), request.url(), request.headers()["content-type"]);
         page.on("requestfailed", (failed) => {
             if (isChunk(failed)) chunkProblems.push(`failed: ${failed.failure()?.errorText ?? "unknown"}`);
         });
@@ -319,6 +324,9 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             return new TransferAbortedBeforeSubmissionError(
                 `${message}${chunkProblems.length ? `; chunk responses: ${chunkProblems.slice(-3).join(" | ")}` : ""}`);
         };
+        // A fast rejection can arrive during setInputFiles or click itself.
+        // All listeners must be attached before either can start a transfer.
+        await startTransfer?.();
         for (;;) {
             if (await title.isVisible().catch(() => false)) {
                 console.log(JSON.stringify({ event: "porntrex-transfer-complete" }));
