@@ -37,7 +37,8 @@ export async function preparePorntrexTransfer(page: Page, sizeBytes: number,
         if (w.__pipelineTransfer) throw new Error("Upload transfer monitor already installed");
         if (!w.pageContext) throw new Error("Porntrex chunk configuration is missing");
         const configured = Number(w.pageContext.upload_chunk_size);
-        w.pageContext.upload_chunk_size = Math.min(configured > 0 ? configured : chunkBytes, chunkBytes);
+        const effectiveChunkBytes = Math.min(configured > 0 ? configured : chunkBytes, chunkBytes);
+        w.pageContext.upload_chunk_size = effectiveChunkBytes;
         const state: PorntrexTransferState = w.__pipelineTransfer = {
             bytesObserved: 0, acceptedChunks: 0, abortedChunks: 0, claimedBytes: 0, failure: null,
         };
@@ -63,7 +64,7 @@ export async function preparePorntrexTransfer(page: Page, sizeBytes: number,
             // Reserve the remaining unique media and its envelopes as well as
             // this request. Repeated failures cannot silently exceed admission.
             const remaining = Math.max(0, sizeBytes - acceptedBytes - bytes);
-            const futureEnvelopes = (Math.ceil(remaining / chunkBytes) + 1) * envelope;
+            const futureEnvelopes = (Math.ceil(remaining / effectiveChunkBytes) + 1) * envelope;
             const claim = state.claimedBytes + bytes + envelope;
             if (count > 3 || claim + remaining + futureEnvelopes > limit) {
                 state.failure = count > 3 ? `chunk ${index} failed after three attempts`
@@ -93,7 +94,10 @@ export async function preparePorntrexTransfer(page: Page, sizeBytes: number,
             void w.__pipelineClaimChunk(Math.max(sizeBytes, claim)).then(() => {
                 if (xhr.readyState !== XMLHttpRequest.OPENED || state.failure) return;
                 movedAt = Date.now();
-                timer = setInterval(() => {
+                // Index zero assembles accepted chunks on the server. It has no
+                // media to send and uses the enclosing ten-minute deadline.
+                // Replaying an assembly request after one minute is unsafe.
+                if (bytes > 0) timer = setInterval(() => {
                     if (Date.now() - movedAt < idleMs) return;
                     clearInterval(timer);
                     state.abortedChunks++;

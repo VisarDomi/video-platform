@@ -62,6 +62,8 @@ response for 60 seconds is aborted; KVS retries that same index, keeping the
 previously accepted prefix. Three attempts at one index are the limit. Byte
 progress and successful chunk acknowledgements reset the transfer's ten-minute
 idle deadline even while the whole-percent display is unchanged.
+The final, media-free assembly request keeps that ten-minute deadline; the
+one-minute media-request watchdog must not replay a normal server assembly.
 
 Chunk body/envelope claims are checked against the existing artifact + 16 MiB
 reservation before sending. A 2 KiB allowance covers each bounded KVS multipart

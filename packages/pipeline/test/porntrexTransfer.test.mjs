@@ -6,7 +6,7 @@ import { ChromiumPorntrexUploader } from '../dist/upload/chromiumPorntrexUploade
 
 // The actual site's contract: FormData slices, JSON acknowledgements, and an
 // index-preserving retry when XHR status is zero. All traffic is intercepted.
-async function fixture(t, { hangIndex, alwaysHang = false, delay = 0 } = {}) {
+async function fixture(t, { hangIndex, alwaysHang = false, delay = 0, assemblyDelay = 0 } = {}) {
     const browser = await chromium.launch({ executablePath:'/usr/bin/chromium', headless:true });
     t.after(() => browser.close());
     const page = await browser.newPage();
@@ -36,6 +36,7 @@ async function fixture(t, { hangIndex, alwaysHang = false, delay = 0 } = {}) {
         observations.push(await readPorntrexTransfer(page));
         if(index===hangIndex && (alwaysHang || indices.filter(i=>i===index).length===1))return;
         if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+        if(index===0 && assemblyDelay)await new Promise(resolve=>setTimeout(resolve,assemblyDelay));
         if(index)pieces.set(index,Buffer.from(await data.get('content').arrayBuffer()));
         await route.fulfill({contentType:'application/json',body:'{"status":"success","data":{}}'});
     });
@@ -98,4 +99,13 @@ test('production chunk size is capped and impossible overhead is refused before 
     await second.page.waitForFunction(()=>window.__pipelineTransfer.failure!==null);
     assert.deepEqual(second.indices,[]);
     assert.match((await readPorntrexTransfer(second.page)).failure,/allowance exhausted/);
+});
+
+test('final server assembly may take longer than the media-chunk idle deadline without replaying it',async t=>{
+    const f=await fixture(t,{assemblyDelay:300});
+    await preparePorntrexTransfer(f.page,f.source.length,async()=>{},{chunkBytes:2048,idleMs:100});
+    await f.page.evaluate(()=>startFixture());
+    await f.page.locator('#edit_video_title').waitFor({state:'visible',timeout:3000});
+    assert.deepEqual(f.indices,[1,2,3,0]);
+    assert.equal((await readPorntrexTransfer(f.page)).abortedChunks,0);
 });
