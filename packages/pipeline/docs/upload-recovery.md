@@ -56,9 +56,22 @@ Transfer diagnostics observe the page's same-origin multipart chunk POSTs to
 Listeners attach before file selection/submission, so immediate HTTP errors,
 login redirects and non-JSON rejections are retained in the attempt evidence.
 Chunk recognition uses request headers without buffering the media body.
-The provider controls chunk size; a missing percentage advance for ten minutes
-still triggers the ordinary bounded retry cooldown. An empty diagnostic from an
-older worker does not establish why that transfer stalled.
+The provider's KVS client still owns slicing, assembly and metadata submission,
+but the pipeline caps its chunks at 4 MiB. An XHR with no byte progress or
+response for 60 seconds is aborted; KVS retries that same index, keeping the
+previously accepted prefix. Three attempts at one index are the limit. Byte
+progress and successful chunk acknowledgements reset the transfer's ten-minute
+idle deadline even while the whole-percent display is unchanged.
+
+Chunk body/envelope claims are checked against the existing artifact + 16 MiB
+reservation before sending. A 2 KiB allowance covers each bounded KVS multipart
+envelope. Claims include internal failed/retried requests and the remaining
+unique media, so retries cannot spend unreserved bytes. Full-artifact transfer
+intent remains conservatively charged on early failure; any additional claims
+are committed before transmission, and survive worker failure. Historical
+attempt charges are not rewritten. Exhausted retries/allowance return the
+recording to the ordinary bounded campaign cooldown before metadata submission.
+An empty diagnostic from an older worker does not establish why it stalled.
 
 The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility` and `metadata_rejection`
 attempt columns survive worker restarts, independent of the bounded (16-entry) evidence history.
