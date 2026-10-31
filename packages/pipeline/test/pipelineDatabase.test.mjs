@@ -8,6 +8,7 @@ import { PipelineDatabase, calendarMonth } from "../dist/db/pipelineDatabase.js"
 import { createDryRunUploadPlan } from "../dist/upload/dryRunPlan.js";
 import { PipelineOrchestrator } from "../dist/scheduler/orchestrator.js";
 import { UploadCoordinator, UploadTransportError } from "../dist/upload/uploadCoordinator.js";
+import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../dist/domain/uploadBudget.js";
 
 async function databaseFixture(t, closeAfter = true) {
     const directory = await mkdtemp(path.join(os.tmpdir(), "video-pipeline-db-test-"));
@@ -356,6 +357,54 @@ test("named artifact variants coexist without changing canonical state or artifa
     }, 10, 10), /valid source and dropped frame counts/);
 });
 
+test("upload budget releases 100, 300 and 700 GB cumulatively at Tirana midnight", async (t) => {
+    const { database } = await databaseFixture(t);
+    const gb = 1_000_000_000;
+    for (const [instant, released] of [
+        ["2026-11-10T22:59:59.999Z", 100],
+        ["2026-11-10T23:00:00.000Z", 300],
+        ["2026-11-20T22:59:59.999Z", 300],
+        ["2026-11-20T23:00:00.000Z", 700],
+        ["2026-11-30T22:59:59.999Z", 700],
+        ["2026-11-30T23:00:00.000Z", 100],
+        ["2026-06-10T21:59:59.999Z", 100],
+        ["2026-06-10T22:00:00.000Z", 300],
+        ["2026-02-28T23:00:00.000Z", 100],
+        ["2028-02-29T23:00:00.000Z", 100],
+    ]) {
+        const now = new Date(instant);
+        assert.equal(database.canReserve(released * gb, now), true, instant);
+        assert.equal(database.canReserve(released * gb + 1, now), false, instant);
+    }
+    assert.equal(database.canReserve(101 * gb, new Date("2026-11-01"), "Europe/Tirane", 800 * gb), false);
+    assert.equal(database.canReserve(301 * gb, new Date("2026-11-11"), "Europe/Tirane", 800 * gb), false);
+    assert.equal(database.canReserve(701 * gb, new Date("2026-11-21"), "Europe/Tirane", 800 * gb), false);
+    assert.equal(database.canReserve(51 * gb, new Date("2026-11-21"), "Europe/Tirane", 50 * gb), false);
+});
+
+test("staged quota shares spent and reserved bytes, carries unused allowance and resets monthly", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const first = database.discover(input(directory, "budget-one"));
+    const second = database.discover(input(directory, "budget-two"));
+    advanceToMetadataReady(database, first, directory, 1_000);
+    advanceToMetadataReady(database, second, directory, 1_000);
+    const gb = 1_000_000_000;
+    const day1 = new Date("2026-11-01T12:00:00Z");
+    const reservation = database.reserveUpload(first.id, 90 * gb, day1);
+    assert.equal(database.canReserve(10 * gb, day1), true);
+    assert.throws(() => database.reserveUpload(second.id, 10 * gb + 1, day1), /limit exceeded/);
+    const attempt = database.beginUpload(first.id, reservation, day1);
+    database.finishUploadAttempt(attempt, { status: "failed", transmittedBytes: 80 * gb }, day1);
+    assert.equal(database.canReserve(20 * gb, day1), true);
+    assert.equal(database.canReserve(20 * gb + 1, day1), false);
+    assert.equal(database.canReserve(220 * gb, new Date("2026-11-11")), true);
+    assert.equal(database.canReserve(220 * gb + 1, new Date("2026-11-11")), false);
+    assert.equal(database.canReserve(620 * gb, new Date("2026-11-21")), true);
+    assert.equal(database.canReserve(620 * gb + 1, new Date("2026-11-21")), false);
+    assert.equal(database.canReserve(100 * gb, new Date("2026-12-01")), true);
+    assert.deepEqual(database.uploadUsage("2026-11"), { spent: 80 * gb, reserved: 0 });
+});
+
 test("monthly quota reserves atomically, counts retries, and rolls over by timezone", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const first = database.discover(input(directory, "one"));
@@ -437,20 +486,43 @@ test("dry-run plans are deterministic and mutate neither state nor quota", async
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 400);
     const before = database.get(recording.id);
-    const first = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", 1_000);
-    const second = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", 1_000);
+    const limit = REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000;
+    const first = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
+    const second = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
     assert.deepEqual(first, second);
     assert.equal(first[0].disposition, "would_upload");
     const wrongGeneration = createDryRunUploadPlan(
         database,
         new Date("2026-08-12T08:00:00Z"),
         "Europe/Tirane",
-        1_000,
+        limit,
         path.join(directory, "production-v6"),
     );
     assert.equal(wrongGeneration[0].reason, "artifact_generation_mismatch");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 0, reserved: 0 });
     assert.deepEqual(database.get(recording.id), before);
+});
+
+test("dry-run releases match admission, including overhead and simulated reservations", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t);
+    for (const suffix of ["preview-one", "preview-two"]) {
+        advanceToMetadataReady(database, database.discover(input(directory, suffix)), directory, 1_000);
+    }
+    const spent = 100_000_000_000 - REQUEST_OVERHEAD_RESERVATION_BYTES - 1_500;
+    const seed = new DatabaseSync(databasePath);
+    seed.prepare(`INSERT INTO bandwidth_events
+        (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
+        VALUES ('prior-recording', 'prior-attempt', 'porntrex', '2026-11', ?, '2026-11-01T12:00:00Z')`).run(spent);
+    seed.close();
+    const beforeRelease = new Date("2026-11-10T22:59:59.999Z");
+    assert.equal(database.canReserve(REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000, beforeRelease), true);
+    assert.deepEqual(createDryRunUploadPlan(database, beforeRelease).map(item => item.disposition),
+        ["would_upload", "blocked"]);
+    assert.equal(createDryRunUploadPlan(database, beforeRelease)[1].reason, "monthly_upload_limit");
+    const afterRelease = new Date("2026-11-10T23:00:00.000Z");
+    assert.deepEqual(createDryRunUploadPlan(database, afterRelease).map(item => item.disposition),
+        ["would_upload", "would_upload"]);
+    assert.deepEqual(database.uploadUsage("2026-11"), { spent, reserved: 0 });
 });
 
 test("the orchestrator resumes one durable stage at a time", async (t) => {

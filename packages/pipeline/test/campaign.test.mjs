@@ -14,7 +14,7 @@ import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
-import { configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
+import { campaignStatus, configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
 function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_000) {
     database.transition(recording.id, "server_ready", "remuxed");
@@ -91,6 +91,35 @@ test("a failed in-flight upload preserves a subsequent manual pause", async t =>
     assert.equal((await worker.step()).disposition, "attention_required");
     assert.equal(database.getCampaignControl().state, "paused");
     assert.equal(database.getCampaignControl().attentionReason, null);
+});
+
+test("campaign waits for the next budget release and retries without a manual resume", async t => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    const databasePath = path.join(path.dirname(config.finalizationDatabasePath), "pipeline.sqlite");
+    const seed = new DatabaseSync(databasePath);
+    seed.prepare(`INSERT INTO bandwidth_events
+        (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
+        VALUES ('prior-recording', 'prior-attempt', 'porntrex', '2026-11', 100000000000, '2026-11-01T12:00:00Z')`).run();
+    seed.close();
+    database.configureCampaign("all", 700_000_000_000);
+    database.setCampaignState("running");
+    let calls = 0;
+    const worker = new CampaignWorker(database, { ...config, automaticShortsEnabled: false,
+        discoveryRoots: [] }, resolver, async () => { calls++; return {}; });
+    const beforeRelease = new Date("2026-11-10T22:59:59.999Z");
+    const waiting = await worker.step(beforeRelease);
+    assert.equal(waiting.disposition, "monthly_quota_wait");
+    assert.equal(waiting.budget.releasedLimitBytes, 100_000_000_000);
+    assert.equal(waiting.budget.remainingBytes, 0);
+    assert.equal(calls, 0);
+    assert.equal(database.get(recording.id).state, "metadata_ready");
+    assert.equal(database.getCampaignControl().state, "running");
+    const status = campaignStatus({ ...config, databasePath }, beforeRelease);
+    assert.equal(status.uploadBudget.spentBytes, 100_000_000_000);
+    assert.equal(status.uploadBudget.releasedLimitBytes, 100_000_000_000);
+    assert.equal((await worker.step(new Date("2026-11-10T23:00:00Z"))).disposition, "upload_completed");
+    assert.equal(calls, 1);
+    assert.equal(database.getCampaignControl().state, "running");
 });
 
 test("provider policy block is manual review, not reported as an upload or retried next step", async t => {

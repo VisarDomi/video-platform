@@ -333,10 +333,16 @@ server follows the account first, but only if it is not already followed.
   waits 24 h. An authentication failure sets `attention_reason`; a later authenticated
   keep-alive resumes only that unchanged hold. Manual pauses remain indefinite. Why: one page timeout on
   2026-10-14 cost a whole day of uploads.
-- **Monthly budget.** Uploads are capped at 800,000,000,000 bytes per calendar
-  month in `Europe/Tirane`, the upload share of the ISP plan. Admission reserves
-  the artifact size plus 16 MiB. Every transmitted byte, including failed and
-  retried transfers, goes to `bandwidth_events`, which nothing ever deletes.
+- **Monthly budget.** The calendar-month upload allowance in `Europe/Tirane`
+  releases cumulatively: 100 GB on day 1, another 200 GB on day 11 (300 GB total),
+  and another 400 GB on day 21 (700 GB total; decimal GB). Unused allowance
+  carries forward until month-end; the next month starts at 100 GB. The
+  configured monthly cap may lower these limits but cannot unlock bytes early.
+  Admission atomically checks spent and reserved bytes against the current
+  release, reserving the artifact size plus 16 MiB. Preview and direct upload
+  use the same policy. A quota wait retries automatically with running intent.
+  Every transmitted byte, including failed and retried transfers, goes to
+  `bandwidth_events`, which nothing ever deletes.
 - **Success is never decided at submit.** Once metadata may have been submitted,
   the attempt is `upload_uncertain` with a confirmation due 24 h later. A failure
   before submission is a plain failure (on Porntrex: before the

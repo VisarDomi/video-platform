@@ -4,6 +4,8 @@ import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { retireUploadDestination } from "./retireUploadDestination.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
+import { calendarMonth, DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, uploadBudget } from "../domain/uploadBudget.js";
+export { calendarMonth } from "../domain/uploadBudget.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
 import { assertTransition, type PipelineState } from "../domain/states.js";
@@ -47,7 +49,6 @@ const LEGACY_PART_CHECKS: ReadonlyArray<readonly [string, string]> = [
     ["CHECK (part IN ('max1080p', 'nonmax1080p'))", `CHECK (${queuedPartCheck("part")})`],
 ];
 const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
-const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 800_000_000_000;
 
 interface RecordingRow {
     id: string;
@@ -193,18 +194,6 @@ function mapResolutionReviewArtifact(row: ResolutionReviewArtifactRow): Resoluti
         segmentCount: row.segment_count,
         sourceDimensions,
     };
-}
-
-export function calendarMonth(date: Date, timeZone: string): string {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone,
-        year: "numeric",
-        month: "2-digit",
-    }).formatToParts(date);
-    const year = parts.find((part) => part.type === "year")?.value;
-    const month = parts.find((part) => part.type === "month")?.value;
-    if (!year || !month) throw new Error(`Could not derive calendar month in ${timeZone}`);
-    return `${year}-${month}`;
 }
 
 export class PipelineDatabase {
@@ -2103,9 +2092,20 @@ export class PipelineDatabase {
         return { spent: spent.spent, reserved: reserved.reserved };
     }
 
+    uploadBudget(now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES) {
+        const budget = uploadBudget(now, timeZone, limit);
+        const usage = this.uploadUsage(budget.calendarMonth);
+        return {
+            ...budget,
+            spentBytes: usage.spent,
+            reservedBytes: usage.reserved,
+            remainingBytes: Math.max(0, budget.releasedLimitBytes - usage.spent - usage.reserved),
+        };
+    }
+
     canReserve(bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES): boolean {
-        const usage = this.uploadUsage(calendarMonth(now, timeZone));
-        return Number.isSafeInteger(bytes) && bytes > 0 && usage.spent + usage.reserved + bytes <= limit;
+        const budget = this.uploadBudget(now, timeZone, limit);
+        return Number.isSafeInteger(bytes) && bytes > 0 && bytes <= budget.remainingBytes;
     }
 
     reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = "porntrex"): string {
@@ -2124,8 +2124,10 @@ export class PipelineDatabase {
             if (!this.canAttemptUpload(id, now)) throw new Error("Weekly upload retry deadline has not elapsed");
             const artifactPart = this.getArtifactPart(id);
             if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
-            const usage = this.uploadUsage(month);
-            if (usage.spent + usage.reserved + bytes > limit) throw new Error(`Monthly upload limit exceeded for ${month}`);
+            const budget = this.uploadBudget(now, timeZone, limit);
+            if (bytes > budget.remainingBytes) {
+                throw new Error(`Monthly upload limit exceeded for ${month}: ${budget.releasedLimitBytes} bytes released through day ${budget.localDay}`);
+            }
             this.database.prepare(`
                 INSERT INTO upload_reservations (
                     id, recording_id, artifact_part, provider, calendar_month, reserved_bytes,

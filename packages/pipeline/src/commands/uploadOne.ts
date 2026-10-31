@@ -13,8 +13,9 @@ import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { settleRejectedPhrases } from "../metadata/rejectedPhraseCheck.js";
 import { cancelInvalidShortBatch, poolRecordingPart } from "../campaign/shorts.js";
+import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
 
-export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
+export { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
 
 export async function uploadOne(
     recordingId: string,

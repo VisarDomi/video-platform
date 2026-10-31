@@ -29,7 +29,7 @@ export type CampaignStepResult =
     | { readonly disposition: "admitted" | "stage_completed"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "awaiting_upload_activation"; readonly recordingId: string }
     | { readonly disposition: "attention_required"; readonly recordingId: string; readonly reason: string }
-    | { readonly disposition: "monthly_quota_wait"; readonly recordingId: string }
+    | { readonly disposition: "monthly_quota_wait"; readonly recordingId: string; readonly budget: ReturnType<PipelineDatabase["uploadBudget"]> }
     | { readonly disposition: "resource_wait"; readonly recordingId: string; readonly reason: string }
     | { readonly disposition: "parked_existing_upload"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
@@ -263,7 +263,8 @@ export class CampaignWorker {
                 now,
                 this.config.uploadTimeZone,
                 control.monthlyUploadLimitBytes,
-            )) return { disposition: "monthly_quota_wait", recordingId: uploadReady.id };
+            )) return { disposition: "monthly_quota_wait", recordingId: uploadReady.id,
+                budget: this.database.uploadBudget(now, this.config.uploadTimeZone, control.monthlyUploadLimitBytes) };
             if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
             try {
                 const result = await this.upload(uploadReady.id, control.monthlyUploadLimitBytes);

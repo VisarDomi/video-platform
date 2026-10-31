@@ -3,6 +3,7 @@ import path from "node:path";
 import { providerFolders } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 import { CURRENT_PRODUCTION_VERSION } from "./domain/productionVersion.js";
+import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES } from "./domain/uploadBudget.js";
 import type { ActiveUploadProvider } from "./config/uploadProviders.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 
@@ -74,7 +75,7 @@ export const pipelineConfig: PipelineConfig = {
         ?? path.join(os.homedir(), ".config", "video-services", "porntrex-session.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
     monthlyUploadLimitBytes: Number.parseInt(
-        process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? "800000000000",
+        process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? String(DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES),
         10,
     ),
     cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP === "1",
