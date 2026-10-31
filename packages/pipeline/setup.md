@@ -57,6 +57,26 @@ online verification.
 - Network commands require `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
   worker verifies due uploads inline.
 
+### Queue health and retained history
+
+Use `python3 scripts/babysit_health.py` from the repository root for a human
+queue summary, or add `--json` for monitoring. It separates current failed work,
+actionable blocks, newly observed provider losses, normal short waiting and
+acknowledged historical provider removals. Service/journal/storage checks still
+run separately; a raw workflow-state count is not a severity assessment.
+
+After investigating/reporting existing provider losses, or when the owner
+explicitly accepts them, `--acknowledge-current-removals --apply` records exact
+removal/reason acknowledgements in `babysit/monitoring.json`. This does not write
+SQLite, delete receipts, unblock/requeue footage, grant backup/cleanup coverage,
+or clear any provider-removal ban. New remote IDs and changed failure reasons
+remain actionable. Historical raw `blocked` rows remain the safety mechanism,
+while acknowledged external losses stop appearing as current pipeline faults.
+An old failed transfer attempt is history when its recording has since resumed.
+
+Tests use temporary databases and monitor files:
+`python3 -m unittest discover -s scripts -p 'test_babysit*.py'`.
+
 ## Conversion policy (resolution-policy-v6)
 
 Every recording is converted; nothing is stream-copied and **no segment is
