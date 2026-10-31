@@ -49,6 +49,11 @@ online verification.
   retries automatically at the next release; it needs no manual resume.
   `campaign:status` includes `uploadBudget` with the local day, released limit,
   spent, reserved and remaining bytes.
+- Porntrex file transfers use the site's own KVS client with chunks capped at
+  4 MiB. After 60 seconds without byte progress/response, the current request
+  retries at the same index, keeping accepted chunks. Byte-level progress counts
+  even below one displayed percent. Retries are bounded by three attempts per
+  chunk and the durable upload reservation; see [upload recovery](docs/upload-recovery.md).
 - Network commands require `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
   worker verifies due uploads inline.
 

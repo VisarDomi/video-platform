@@ -9,6 +9,7 @@ import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerU
 import { hasFullHdPlayback } from "./playbackQuality.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 import { parsePorntrexEditPage, porntrexUploadsPagePath, type StoredPorntrexMetadata } from "./porntrexMetadata.js";
+import { preparePorntrexTransfer, readPorntrexTransfer } from "./porntrexTransfer.js";
 import {
     PORNTREX_LOGIN_TOKEN, pinCookies, readPorntrexSession, sessionFingerprint, sharedSessionCookies, writePorntrexSession,
     type PorntrexSession,
@@ -18,8 +19,8 @@ const ORIGIN = "https://www.porntrex.com";
 const LIST = "#list_videos_my_uploaded_videos";
 const PORNTREX_UPLOADS_PAGE_ROWS = 30;
 const run = promisify(execFile);
-// The page chooses its chunk size and shows a percentage. A transfer is only
-// given up when that percentage has not moved for this long.
+// The page shows whole percentages; transport bytes and acknowledged chunks
+// also count as progress, even on a link too slow to advance that display.
 const TRANSFER_STALL_MILLISECONDS = 10 * 60_000;
 type Entry = { remoteId: string; remoteUrl: string; title: string };
 
@@ -241,11 +242,16 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             await page.locator("#edit_video_upload_option_file").check();
             // Persist transfer intent BEFORE choosing a file: some uploaders start on selection.
             await request.onProgress?.("file_uploading", request.sizeBytes);
+            let transmittedBytes = request.sizeBytes;
+            await preparePorntrexTransfer(page, request.sizeBytes, async bytes => {
+                await request.onProgress?.("file_uploading", bytes);
+                transmittedBytes = bytes;
+            });
             await this.waitForFileTransfer(page, request, async () => {
                 await upload.locator('input[name="content"]').setInputFiles(request.artifactPath);
                 await upload.locator('input[type="submit"]').click();
             });
-            await request.onProgress?.("file_uploaded", request.sizeBytes);
+            await request.onProgress?.("file_uploaded", transmittedBytes);
             const metadata = page.locator("form:has(#edit_video_title)");
             if (request.title.length > 300) throw new Error("Porntrex title exceeds 300 characters");
             await page.locator("#edit_video_title").fill(request.title);
@@ -265,7 +271,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             if (!await metadata.locator('input[name="category_ids[]"][value="21"]').count()) {
                 throw new Error("Porntrex Webcam category was not applied; metadata not submitted");
             }
-            await request.onProgress?.("metadata_submitting", request.sizeBytes);
+            await request.onProgress?.("metadata_submitting", transmittedBytes);
             await request.onEvidence?.({ stage: "metadata_prepared", provider: this.provider, visibility: "public" });
             const submittedAt = new Date();
             await metadata.locator('input[type="submit"]').click();
@@ -279,7 +285,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
                 remoteId = recovered.kind === "found" ? recovered.remoteId : null;
             }
             if (remoteId) await request.onEvidence?.({ stage: "remote_identity_captured", remoteId });
-            return { kind: "uploaded", receipt: { transmittedBytes: request.sizeBytes,
+            return { kind: "uploaded", receipt: { transmittedBytes,
                 submittedVideoId: remoteId, metadataSubmittedAt: submittedAt.toISOString() } };
         });
     }
@@ -287,10 +293,12 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
     // Follow the page's own progress bar, like a person watching the upload:
     // keep waiting while it moves, however slow the connection is, and stop
     // only on a stall or a page error. The metadata form marks completion.
-    private async waitForFileTransfer(page: Page, request: UploadRequest, startTransfer?: () => Promise<void>): Promise<void> {
+    private async waitForFileTransfer(page: Page, request: UploadRequest, startTransfer?: () => Promise<void>,
+        timing: { stallMs?: number; pollMs?: number } = {}): Promise<void> {
         const title = page.locator("#edit_video_title");
         let percent = -1;
         let movedAt = Date.now();
+        let observedBytes = 0, acceptedChunks = 0, abortedChunks = 0;
         // The page retries a chunk silently on network errors, so keep what
         // its chunk requests actually got back: a stall must say why.
         const chunkProblems: string[] = [];
@@ -320,6 +328,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         });
         const stalled = async (message: string) => {
             await request.onEvidence?.({ stage: "transfer_stall", percent, chunkProblems: chunkProblems.slice(-10),
+                transport: await readPorntrexTransfer(page).catch(() => null),
                 page: new URL(page.url()).pathname, loggedIn: await page.getByRole("link", { name: /Hello,/ }).count() > 0 });
             return new TransferAbortedBeforeSubmissionError(
                 `${message}${chunkProblems.length ? `; chunk responses: ${chunkProblems.slice(-3).join(" | ")}` : ""}`);
@@ -334,12 +343,23 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             }
             const error = (await page.locator(".form-upload .generic-error:visible").first().textContent({ timeout: 1_000 })
                 .catch(() => null))?.trim();
-            if (error || chunkRejected) {
+            const transfer = await readPorntrexTransfer(page).catch(() => null);
+            if (transfer && transfer.abortedChunks > abortedChunks) {
+                abortedChunks = transfer.abortedChunks;
+                await request.onEvidence?.({ stage: "chunk_recovery", abortedChunks,
+                    acceptedChunks: transfer.acceptedChunks, bytesObserved: transfer.bytesObserved });
+            }
+            if (transfer && (transfer.bytesObserved > observedBytes || transfer.acceptedChunks > acceptedChunks)) {
+                observedBytes = transfer.bytesObserved;
+                acceptedChunks = transfer.acceptedChunks;
+                movedAt = Date.now();
+            }
+            if (error || chunkRejected || transfer?.failure) {
                 if (!await this.stillLoggedIn(page)) {
                     await stalled("session lost");
                     throw new ProviderSessionLostError(`Porntrex shared session is no longer authenticated during the upload; ${SESSION_LOST_ADVICE}`);
                 }
-                throw await stalled(`Porntrex upload ${error ? `page error: ${error}` : chunkRejected}`);
+                throw await stalled(`Porntrex upload ${error ? `page error: ${error}` : chunkRejected ?? transfer?.failure}`);
             }
             const text = await page.locator(".form-upload .progressbar .text").first().textContent({ timeout: 1_000 }).catch(() => null);
             const current = text ? Number.parseInt(text, 10) : Number.NaN;
@@ -349,14 +369,14 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
                 percent = current;
                 movedAt = Date.now();
             }
-            if (Date.now() - movedAt > TRANSFER_STALL_MILLISECONDS) {
+            if (Date.now() - movedAt > (timing.stallMs ?? TRANSFER_STALL_MILLISECONDS)) {
                 if (!await this.stillLoggedIn(page)) {
                     await stalled("session lost");
                     throw new ProviderSessionLostError(`Porntrex shared session is no longer authenticated during the upload; ${SESSION_LOST_ADVICE}`);
                 }
                 throw await stalled(`Porntrex file transfer made no progress for ${TRANSFER_STALL_MILLISECONDS / 60_000} minutes (last ${percent}%)`);
             }
-            await page.waitForTimeout(15_000);
+            await page.waitForTimeout(timing.pollMs ?? 15_000);
         }
     }
 

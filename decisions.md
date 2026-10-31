@@ -418,7 +418,10 @@ server follows the account first, but only if it is not already followed.
   nothing. A
   video still processing is checked again after 2 h, anything else after 24 h.
   Words Porntrex swapped are learned as rejected phrases. A transfer is abandoned
-  only after 10 minutes without progress (`TRANSFER_STALL_MILLISECONDS`).
+  after 10 minutes without byte/acknowledgement progress, a definitive rejection,
+  or exhausted chunk retries. KVS chunks are capped at 4 MiB; a request idle for
+  60 seconds retries at its own index, up to three attempts, retaining accepted
+  chunks. All body/envelope claims remain inside the durable upload reservation.
 - **The Porntrex session is shared with the phone**, because Porntrex keeps one
   session per account and the newest login logs the others out. The pipeline
   stores only `PHPSESSID` and `confirmed` in `porntrex-session.json`, pinned for 400
