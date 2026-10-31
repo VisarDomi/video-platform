@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSIONS = {
     'ladder-live': { name: 'LADDER live', site: 'LADDER', matches: ['https://ladder-live.example/*'], api: '/api/ladder' },
     'fmp4-live': { name: 'FMP4 live', site: 'Fmp4Live', matches: ['https://fmp4-live.example/*', 'https://*.fmp4-live.example/*'], api: '/api/fmp4' },
-    'filehost': { name: 'FileHost to PC', site: 'FileHost', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
+    'filehost': { name: 'FileHost to PC', site: 'FileHost', version: '1.0.1', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
 };
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(EXTENSIONS);
 for (const key of names) {
@@ -20,7 +20,7 @@ for (const key of names) {
     await build({ ...common, entryPoints: [resolve(root, key === 'filehost' ? 'src/extension/filehost-background.ts' : 'src/extension/background.ts')], outfile: resolve(out, 'background.js'),
         define: { __API_PATH__: JSON.stringify(extension.api) } });
     await writeFile(resolve(out, 'manifest.json'), JSON.stringify({
-        manifest_version: 3, name: extension.name, version: '1.0.0',
+        manifest_version: 3, name: extension.name, version: extension.version ?? '1.0.0',
         description: key === 'filehost' ? 'Send FileHost video downloads to your PC on the home network. Hosted by TsLive.' : `Add or remove the open ${extension.site} streamer from the PC download list. Hosted by TsLive.`,
         host_permissions: [...extension.matches, `https://192.168.1.197:${key === 'filehost' ? 9998 : 9999}/*`],
         background: { scripts: ['background.js'], service_worker: 'background.js', persistent: false },
