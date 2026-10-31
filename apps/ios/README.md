@@ -208,8 +208,14 @@ adds ` | part N`); other uploads stay on the sites but are not listed. Cached ro
     `Private/tango-phone-key`) signs in with a fresh browser profile
     (`packages/auth` `phoneSession.ts`), returns that new session and drops the profile, so
     each device holds its own refresh token; the PC's own session is never copied.
-  - FC2 live and SC live need enabling once in Safari's extension settings, with their sites
+  - FC2 live, SC live and Bunkr to PC need enabling once in Safari's extension settings, with their sites
     allowed; their background pages call the PC's `/api/fc2|sc/member|add|remove`.
+    Bunkr to PC instead sends the file page to `/api/bunkr/downloads` when the PC
+    is reachable: tapping Download on `bunkr.si`, `.ph` or `.cr` queues the original
+    video in `~/Videos/plab/bunkr/`. Closing Safari does not stop an accepted
+    download. The PC queue and partials survive power loss. Away from the PC the
+    normal download link is preserved. See `packages/live-extensions/README.md`
+    for queue recovery and the mobile WebKit checks.
   - A Block is real, also in a test. `apps/tango/scripts/tango-unblock-blocklist.mjs` (run on
     the PC) undoes it with the PC's Tango session (`~/.local/share/video-services/session`)
     and the same blocklist endpoint as the app and the server

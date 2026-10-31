@@ -1,0 +1,20 @@
+[Unit]
+Description=Bunkr video download queue
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory="{{HOME}}/Documents/work/video/video-platform/packages/server"
+ExecStart="{{HOME}}/.nvm/versions/node/v22.19.0/bin/node" dist/bunkr.js
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=90
+Nice=10
+CPUWeight=50
+MemoryHigh=192M
+MemoryMax=256M
+UMask=0077
+
+[Install]
+WantedBy=default.target

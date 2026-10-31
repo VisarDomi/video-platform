@@ -210,6 +210,14 @@ directory watch.
 
 ## Notes
 
+- Bunkr downloads (`/api/bunkr`) are a separate, one-at-a-time durable byte-copy
+  queue into `~/Videos/plab/bunkr`, driven by Tango's Bunkr Safari extension.
+  Jobs are acknowledged only after atomic write/fsync, retain `.part` bytes and
+  data-before-metadata checkpoints, and publish only complete flushed files
+  without overwriting existing destinations. Power-loss tails are retained and
+  resume requires exact entity/range proof. The queue does not join the live
+  library or upload campaign. Details are in `packages/live-extensions/README.md`.
+
 - The API server uses HTTPS with the mkcert certificate in
   `~/.local/share/mkcert/pwa/` and falls back to HTTP when it is missing.
 - The FC2/SC live extensions and the viewer's +/- button drive the download

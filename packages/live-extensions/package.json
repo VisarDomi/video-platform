@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "build": "node scripts/build.mjs",
-        "check": "tsc --noEmit"
+        "check": "tsc --noEmit",
+        "test:bunkr": "node test/bunkr.mjs"
     },
     "dependencies": {
         "app": "0.0.1"

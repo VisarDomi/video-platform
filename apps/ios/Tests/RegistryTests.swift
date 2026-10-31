@@ -14,7 +14,7 @@ struct RegistryTests {
         }
         check(registry["vault"]?["native"] as? String == "vault" && registry["vault"]?["hosts"] as? [String] == ["porntrex.com", "www.porntrex.com"], "Video Vault lists only Porntrex")
         check(registry["tango-live"]?["native"] as? String == "tango" && registry["tango-live"]?["tangoLogin"] as? Bool == true
-              && registry["tango-live"]?["extensions"] as? [String] == ["Login", "FC2Live", "SCLive"], "Tango lists natively and keeps its Safari extensions")
+              && registry["tango-live"]?["extensions"] as? [String] == ["Login", "FC2Live", "SCLive", "Bunkr"], "Tango lists natively and keeps its Safari extensions")
         let names = Set(registry.values.map { $0["name"] as! String }), ids = Set(registry.values.map { $0["bundleId"] as! String })
         check(names == ["Tango local", "FC2 local", "SC local", "Video Vault", "Tango"], "display names")
         check(ids == ["com.visar.TangoLocal.paid", "com.visar.FC2Local.paid", "com.visar.SCLocal.paid",

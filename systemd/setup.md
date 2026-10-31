@@ -7,6 +7,7 @@ installed files under `~/.config/systemd/user` directly.
 | Unit | Runs |
 |---|---|
 | `video-server.service` | `~/.local/bin/video-server` (API, frontend, finalization) |
+| `video-bunkr-downloads.service` | lightweight HTTPS :9998 Bunkr byte-copy queue; durable jobs/partials, automatic restart and boot recovery |
 | `video-downloader.service` | `~/.local/bin/video-downloader` |
 | `video-auth.service` | `~/.local/bin/video-auth` on display `:111` |
 | `video-pipeline.service` | `npm run campaign-worker -w pipeline` on display `:111`, with network uploads on and cleanup off |
@@ -38,6 +39,13 @@ npm run systemd:sync
 Synchronization manages only the files explicitly listed in
 `scripts/sync-systemd.mjs`. It does not enable, disable, start, stop, or restart
 services. Restart an affected service explicitly after reviewing a change.
+
+Enable `video-bunkr-downloads.service` for automatic recovery after reboot. It
+runs the already built `packages/server/dist/bunkr.js`; deploy those bytes before
+starting it. It uses the existing local HTTPS certificate, keeps one transfer
+active, and persists the queue before acknowledging a request. This service is
+independent of the heavy upload worker and gaming holds. Its files are in
+`~/Videos/plab/bunkr` and `~/.local/share/video-services/bunkr-downloads`.
 
 Enable `video-ptrex-session.timer` independently of `video-pipeline.service`. It remains
 enabled during gaming pauses so server-side session expiry is not tied to conversion

@@ -32,7 +32,7 @@
     "name": "Tango",
     "product": "Tango",
     "bundleId": "com.visar.Tango.paid",
-    "build": "25",
+    "build": "26",
     "url": "https://tango.me/",
     "hosts": [
       "tango.me",
@@ -42,7 +42,8 @@
     "extensions": [
       "Login",
       "FC2Live",
-      "SCLive"
+      "SCLive",
+      "Bunkr"
     ],
     "webExtensions": {
       "FC2Live": {
@@ -52,6 +53,10 @@
       "SCLive": {
         "name": "SC live",
         "source": "sc-live"
+      },
+      "Bunkr": {
+        "name": "Bunkr to PC",
+        "source": "bunkr"
       }
     },
     "native": "tango"

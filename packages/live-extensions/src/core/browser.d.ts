@@ -2,7 +2,7 @@
 declare const browser: {
     runtime: {
         sendMessage(message: unknown): Promise<unknown>;
-        onMessage: { addListener(listener: (message: unknown) => Promise<unknown> | undefined): void };
+        onMessage: { addListener(listener: (message: unknown, sender?: { url?: string }) => Promise<unknown> | undefined): void };
     };
 };
 // The provider's download-list API path, fixed per extension at build time.

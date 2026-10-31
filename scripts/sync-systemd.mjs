@@ -11,6 +11,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const sourceRoot = path.join(repositoryRoot, "systemd", "user");
 const managedFiles = [
     "video-auth.service",
+    "video-bunkr-downloads.service",
     "video-downloader.service",
     "video-pipeline.service",
     "video-ptrex-session.service",

@@ -3,7 +3,7 @@
 Monorepo. Packages: `app` (TypeScript frontend: the local website; the iPhone apps in `apps/ios` are native), `server` (Express, HTTPS port `9999`), `downloader` (stream capture), `auth` (token refresh daemon), `shared` (cross-package policy/HLS utilities), `descriptor` (local native-video description engine), `pipeline` (durable processing and upload campaign), and `live-extensions` (the FC2 live and SC live Safari extensions hosted by the Tango iPhone app: download-list controls for fc2/sc; built with esbuild).
 
 Recording providers: `tango`, `fc2`, `sc`.
-Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
+Systemd user services: `video-server`, `video-downloader`, `video-auth`, `video-pipeline` (campaign worker; idles while the campaign is paused), `video-bunkr-downloads` (independent durable byte-copy queue on HTTPS :9998), and `video-xvfb` (persistent virtual display `:111` for the auth and pipeline Chromium). Upload verification runs inline in the campaign worker; there is no reconcile timer and no descriptor unit. `video-processing.slice` bounds the server's and pipeline's processing.
 `video-ptrex-session.timer` maintains the shared phone session every ten minutes even
 while the upload worker is stopped. Healthy checks are cookie-only. Confirmed sign-outs
 are repaired through one coordinated PC/phone recovery; valid phone copies are reused
@@ -102,6 +102,11 @@ nothing (only logs and diagnostic screenshots stay in package folders):
   falls back to HTTP).
 - `~/Videos/downloads/<provider>/{downloaded,edited,trash}`: recordings
   (`VIDEO_DOWNLOADS_ROOT` overrides).
+- `~/Videos/plab/bunkr/`: original Bunkr downloads requested in Safari through
+  Tango's **Bunkr to PC** extension (`.si`, `.ph`, `.cr`). The server owns this
+  separate durable queue, with job/checkpoint files in
+  `~/.local/share/video-services/bunkr-downloads/`; it does not enter the upload
+  pipeline. See `packages/live-extensions/README.md` for power-loss recovery.
 - `~/Desktop/video-pipeline/{move-conversions,move-recordings}`: files staged by
   the two manual cleanup commands, with review CSVs and move journals. They are
   still on disk until the user deletes them. See
