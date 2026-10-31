@@ -405,7 +405,7 @@ login and immediately shares it with Video Vault; it never logs in independently
 phone or uses `kt_member`. A manually paused campaign remains paused throughout.
 
 `video-ptrex-session.timer` checks authentication every ten minutes even when
-`pipeline-force-stop`/`eb`/`ebm` has stopped the upload worker. A fresh worker heartbeat
+the user has manually stopped the upload worker. A fresh worker heartbeat
 suppresses duplicate healthy checks, while a known authentication loss or pending phone
 delivery remains recoverable. Requests use cache-busting nonces and no-cache headers;
 cached responses and network failures cannot authorize login. The managed job requires
@@ -598,26 +598,31 @@ The `user-pause.json` operational hold keeps `video-pipeline.service` disabled u
 the user explicitly requests resumption. It covers conversion, description and uploading;
 `video-downloader`, `video-server`, `video-auth` and `video-xvfb` keep running normally.
 
-The EB launchers (`eb` and `ebm`, maintained in `games/eb1-linux/scripts/upload_pipeline.py`)
-apply this hold before launching or focusing the game. They stop only the upload worker's
-service cgroup immediately, interrupting conversion/description/upload safely rather than
-waiting for the current stage to finish. A stuck cgroup is killed after one second. The
-campaign is then paused through the built CLI, without rebuilding it. Queues, checkpoints
-and originals remain intact; startup discards only incomplete derived artifacts as usual.
-Game exit never resumes the worker. Help, status, validation and timer commands do not
-apply the gaming hold.
+Upload control belongs to this repository's `scripts/pipeline_control.py`.
+Game launch, focus, exit, calibration and benchmarking do not inspect or change
+pipeline state. The owner chooses when to stop or resume it.
 
-The Bash aliases in `~/.bash_aliases` (backed up by chezmoi) expose upload-only control:
+The standalone commands are installed in `~/.local/bin` as links to that script:
 
 ```bash
 pipeline-force-stop
 pipeline-force-start
 ```
 
-`pipeline-force-stop` applies the same bounded stop and persistent hold without launching
-EB. `pipeline-force-start` clears `pipeline/user-pause.json` and the matching operational
+To install or restore the links:
+
+```bash
+ln -sfn "$HOME/Documents/work/video/video-platform/scripts/pipeline_control.py" "$HOME/.local/bin/pipeline-force-stop"
+ln -sfn "$HOME/Documents/work/video/video-platform/scripts/pipeline_control.py" "$HOME/.local/bin/pipeline-force-start"
+```
+
+Both commands accept `--dry-run` without changing services or hold files.
+The explicit `heavy-resources-stop/start` controls also retain their wider trader
+model/lab scope; their video stop delegates to this script.
+
+`pipeline-force-stop` applies the bounded stop and persistent hold. `pipeline-force-start` clears `pipeline/user-pause.json` and the matching operational
 `video-pipeline.service.d/90-user-requested-pause.conf` override, reloads systemd, resumes
 campaign intent through the existing built CLI, then enables and starts only
 `video-pipeline.service`. The CLI runs before the unit's startup build to avoid a build
-race. Neither alias affects the downloader, server, auth, display or monitoring schedule.
-Existing terminals can load newly installed aliases with `source ~/.bash_aliases`.
+race. Neither pipeline command affects the downloader, server, auth, display or monitoring schedule.
+Manual stop receipts live in `pipeline/pause-completed.json` alongside the hold; all control code is versioned here.
