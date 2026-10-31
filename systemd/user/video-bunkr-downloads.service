@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory="{{HOME}}/Documents/work/video/video-platform/packages/server"
+WorkingDirectory={{HOME}}/Documents/work/video/video-platform/packages/server
 ExecStart="{{HOME}}/.nvm/versions/node/v22.19.0/bin/node" dist/bunkr.js
 Restart=on-failure
 RestartSec=10
