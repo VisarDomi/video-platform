@@ -2363,7 +2363,8 @@ export class PipelineDatabase {
             SELECT remote_id, remote_url FROM remote_uploads
             WHERE recording_id = ? AND artifact_part = ? ORDER BY verified_at DESC LIMIT 1
         `).get(id, artifactPart) as { remote_id: string; remote_url: string | null } | undefined;
-        if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url, verified: true };
+        if (verified) return { remoteId: verified.remote_id, remoteUrl: verified.remote_url,
+            verified: !this.providerRemovals(id).some(removal => removal.remoteId === verified.remote_id) };
         const covered = this.listVerifiedUploadParts(id);
         const joined = covered.find(part => part.part === artifactPart)
             ?? (this.get(id)?.state === "cleanup_eligible" ? covered[0] : undefined);
@@ -2401,7 +2402,9 @@ export class PipelineDatabase {
             JOIN remote_uploads u ON u.recording_id = b.id AND u.artifact_part = 'full'
             WHERE s.recording_id = ? AND s.verified = 1 AND b.state IN ('upload_verified','cleanup_eligible')`)
             .all(id) as unknown as typeof rows;
-        return [...new Map([...rows, ...joined].map(row => [row.artifact_part, row])).values()].map((row) => ({
+        const removed = new Set(this.providerRemovals(id).map(removal => removal.remoteId));
+        return [...new Map([...rows, ...joined].filter(row => !removed.has(row.remote_id))
+            .map(row => [row.artifact_part, row])).values()].map((row) => ({
             part: row.artifact_part,
             remoteId: row.remote_id,
             remoteUrl: row.remote_url,
@@ -2887,8 +2890,9 @@ export class PipelineDatabase {
     // once another provider is active.
     markProviderRemoved(attemptId: string, remoteId: string, reason: string, now = new Date()): boolean {
         return this.transaction(() => {
-            const attempt = this.database.prepare(`SELECT recording_id, provider FROM upload_attempts WHERE id = ? AND status = 'uncertain'`)
-                .get(attemptId) as { recording_id: string; provider: string } | undefined;
+            const attempt = this.database.prepare(`SELECT recording_id, provider FROM upload_attempts
+                WHERE id = ? AND status IN ('uncertain','accepted') AND (remote_id IS NULL OR remote_id = ?)`)
+                .get(attemptId, remoteId) as { recording_id: string; provider: string } | undefined;
             if (!attempt) return false;
             this.recordUploadEvidence(attemptId, { stage: "provider_removed", remoteId, reason }, now);
             const timestamp = now.toISOString();
@@ -2899,8 +2903,13 @@ export class PipelineDatabase {
                 .run(reason, attemptId);
             this.database.prepare(`UPDATE upload_confirmations SET status = 'absent', checked_at = ? WHERE attempt_id = ? AND status = 'pending'`)
                 .run(timestamp, attemptId);
-            this.updateStateInTransaction(attempt.recording_id, "upload_uncertain", "metadata_ready", reason, timestamp);
-            this.updateStateInTransaction(attempt.recording_id, "metadata_ready", "blocked", reason, timestamp);
+            const recording = this.requireRecording(attempt.recording_id);
+            if (recording.state === "upload_uncertain") {
+                this.updateStateInTransaction(attempt.recording_id, "upload_uncertain", "metadata_ready", reason, timestamp);
+                this.updateStateInTransaction(attempt.recording_id, "metadata_ready", "blocked", reason, timestamp);
+            } else if (recording.state !== "blocked") {
+                this.updateStateInTransaction(attempt.recording_id, recording.state, "blocked", reason, timestamp);
+            }
             this.database.prepare("UPDATE recordings SET block_reason = ? WHERE id = ?").run(reason, attempt.recording_id);
             for (const memberId of new Set(this.shortParts(undefined, attempt.recording_id).map(part => part.recordingId))) {
                 this.database.prepare(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)

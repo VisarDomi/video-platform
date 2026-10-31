@@ -227,6 +227,21 @@ test('multi-shape originals need a verified batch for each of their compatible p
     assert.equal(f.database.listVerifiedUploadParts(multi.id).length,2);
 });
 
+test('removal of a verified batch revokes every original without erasing the shared receipt',async t=>{
+    const f=await fixture(t);const a=await f.add();const b=await f.add();
+    const result=await maintainAutomaticShorts(f.database,f.config,f.resolver);
+    const batch=result.joined[0];await f.verified(batch,'987');
+    assert.equal(f.database.markProviderRemoved('attempt-987','987','confirmed provider removal'),true);
+    for(const id of [batch,a.id,b.id]){
+        assert.equal(f.database.get(id).state,'blocked');
+        assert.equal(f.database.providerRemovals(id)[0].remoteId,'987');
+        assert.equal(f.database.listVerifiedUploadParts(id).length,0);
+    }
+    const raw=new DatabaseSync(f.config.databasePath);
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM remote_uploads WHERE recording_id=?').get(batch).n,1);
+    raw.close();
+});
+
 test('a newly changed original invalidates joined authority before conversion or upload',async t=>{
     const f=await fixture(t);const a=await f.add();await f.add();
     const result=await maintainAutomaticShorts(f.database,f.config,f.resolver);
