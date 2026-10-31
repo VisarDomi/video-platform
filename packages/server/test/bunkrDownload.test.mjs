@@ -53,6 +53,19 @@ test('queued clicks deduplicate across domains, stream once, and publish only a 
     const recovered=new BunkrDownloads(options);t.after(()=>recovered.stop());
     assert.equal((await recovered.enqueue(page)).state,'complete');await recovered.runPending();assert.equal(transfers,1);
 });
+test('a worker wake and duplicate tap cannot outrun the durable admission write',async t=>{
+    let transfers=0,release,entered;
+    const gate=new Promise(resolve=>{release=resolve;}),saving=new Promise(resolve=>{entered=resolve;});
+    const {queue:q}=await queue(t,fixture(()=>{transfers++;return new Response('data',{headers:{'content-length':'4',etag:'"same"'}});}));
+    const save=q.save.bind(q);let first=true;
+    q.save=async job=>{if(first){first=false;entered();await gate;}return save(job);};
+    const admission=q.enqueue(page);await saving;
+    let duplicateSettled=false;const duplicate=q.enqueue(page).then(job=>{duplicateSettled=true;return job;});
+    const wake=q.runPending();await new Promise(resolve=>setTimeout(resolve,30));
+    const earlyTransfers=transfers,earlyAcknowledgement=duplicateSettled;release();
+    const [a,b]=await Promise.all([admission,duplicate]);assert.equal(a.id,b.id);await wake;await q.runPending();assert.equal(transfers,1);
+    assert.equal(earlyTransfers,0,'no media request before durable queue acceptance');assert.equal(earlyAcknowledgement,false,'duplicate tap waits for the original receipt');
+});
 test('interrupted transfers retain bytes and resume the identical entity after a service restart',async t=>{
     const body='abcdefghij';let interrupted=true,ranges=[];
     const fetcher=fixture((_url,init)=>{
@@ -99,6 +112,24 @@ test('a crash after the last durable byte recovers by HEAD without downloading o
     await writeFile(path.join(options.stateDirectory,job.id+'.json'),JSON.stringify(job));q.stop();
     const recovered=new BunkrDownloads(options);t.after(()=>recovered.stop());await recovered.runPending();
     assert.equal((await recovered.get(job.id)).state,'complete');assert.deepEqual(await readdir(options.directory),[job.filename]);
+});
+test('a crash after atomic publication rejoins the complete file and removes only its identical partial link',async t=>{
+    const {queue:q,options}=await queue(t,fixture(()=>assert.fail('already published; no media transfer needed')));
+    const job=await q.enqueue(page);Object.assign(job,{filename:'Fixture42 - clip.mp4',etag:'"same"',total:4,bytes:4,durableBytes:4,state:'downloading'});
+    const {mkdir,link}=await import('node:fs/promises');await mkdir(options.directory);
+    const complete=path.join(options.directory,job.filename);await writeFile(complete,'done');await link(complete,complete+'.part');
+    await writeFile(path.join(options.stateDirectory,job.id+'.json'),JSON.stringify(job));q.stop();
+    const recovered=new BunkrDownloads(options);t.after(()=>recovered.stop());await recovered.runPending();
+    assert.equal((await recovered.get(job.id)).state,'complete');assert.deepEqual(await readdir(options.directory),[job.filename]);
+});
+test('the accepted FIFO order survives restarting from receipt files named by hashes',async t=>{
+    const {queue:q,options}=await queue(t,fixture(()=>assert.fail()));
+    const first=await q.enqueue('https://bunkr.cr/f/oldest'),second=await q.enqueue('https://bunkr.cr/f/newest');
+    first.createdAt='2026-01-01T00:00:00.000Z';second.createdAt='2026-02-01T00:00:00.000Z';
+    for(const job of [second,first])await writeFile(path.join(options.stateDirectory,job.id+'.json'),JSON.stringify(job));q.stop();
+    const recovered=new BunkrDownloads(options);t.after(()=>recovered.stop());const order=[];
+    recovered.transfer=async job=>{order.push(job.page);};await recovered.runPending();
+    assert.deepEqual(order,[first.page,second.page]);
 });
 test('SIGKILL during a real queued transfer recovers its durable prefix and completes exactly once',async t=>{
     const size=10*1024*1024;

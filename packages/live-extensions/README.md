@@ -32,7 +32,9 @@ download, separate from capture and the conversion/description/upload campaign.
 
 Jobs persist outside the checkout in
 `~/.local/share/video-services/bunkr-downloads/`. One transfer runs at a time.
-Acceptance follows an fsynced atomic job write and directory flush. Partial
+Acceptance follows an fsynced atomic job write and directory flush; duplicate
+taps share that pending receipt, and a worker cannot start an uncommitted job.
+Receipt writes are serialized per video, and accepted FIFO order survives restart. Partial
 files have a `.part` suffix, checkpoint every 8 MiB or five seconds with data
 flushed before the checkpoint, and recover after abrupt power loss. An
 uncommitted tail is retained separately before resuming the last durable prefix.

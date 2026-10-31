@@ -84,6 +84,8 @@ export class BunkrDownloads {
     private stateDirectory: string;
     private fetcher: Fetcher;
     private jobs = new Map<string, BunkrJob>();
+    private admissions = new Map<string, Promise<BunkrJob>>();
+    private writes = new Map<string, Promise<void>>();
     private ready: Promise<void>;
     private running = false;
     private stopped = false;
@@ -108,11 +110,20 @@ export class BunkrDownloads {
             if (job.state === "downloading") job.state = "queued";
             this.jobs.set(job.id, job);
         }
+        this.jobs = new Map([...this.jobs].sort(([aId, a], [bId, b]) => a.createdAt.localeCompare(b.createdAt) || aId.localeCompare(bId)));
     }
     private async save(job: BunkrJob) {
         job.updatedAt = new Date().toISOString();
-        const file = path.join(this.stateDirectory, `${job.id}.json`);
-        await writeFile(`${file}.tmp`, JSON.stringify(job) + "\n", { mode: 0o600 });
+        const snapshot = JSON.stringify(job) + "\n";
+        const previous = this.writes.get(job.id) ?? Promise.resolve();
+        const write = previous.catch(() => undefined).then(() => this.writeJob(job.id, snapshot));
+        this.writes.set(job.id, write);
+        try { await write; }
+        finally { if (this.writes.get(job.id) === write) this.writes.delete(job.id); }
+    }
+    private async writeJob(id: string, snapshot: string) {
+        const file = path.join(this.stateDirectory, `${id}.json`);
+        await writeFile(`${file}.tmp`, snapshot, { mode: 0o600 });
         const handle = await open(`${file}.tmp`, "r"); try { await handle.sync(); } finally { await handle.close(); }
         await rename(`${file}.tmp`, file);
         const directory = await open(this.stateDirectory, "r"); try { await directory.sync(); } finally { await directory.close(); }
@@ -130,16 +141,24 @@ export class BunkrDownloads {
         await this.ready;
         const page = bunkrPage(value);
         const id = createHash("sha256").update(page.pathname).digest("hex").slice(0, 24);
-        let job = this.jobs.get(id);
-        if (job) {
-            if (job.state === "failed") { job.state = "queued"; job.attempts = 0; delete job.error; delete job.retryAt; await this.save(job); }
-            this.kick(); return { ...job };
-        }
-        if ([...this.jobs.values()].filter(j => j.state !== "complete").length >= 100) throw new Error("Bunkr queue is full");
-        job = { id, page: page.href, state: "queued", createdAt: new Date().toISOString(), updatedAt: "", attempts: 0, bytes: 0 };
-        this.jobs.set(id, job);
-        try { await this.save(job); } catch (error) { this.jobs.delete(id); throw error; }
-        this.kick(); return { ...job };
+        const pending = this.admissions.get(id);
+        if (pending) return { ...await pending };
+        const existing = this.jobs.get(id);
+        if (existing && existing.state !== "failed") return { ...existing };
+        if ([...this.jobs.values()].filter(j => j.state !== "complete").length + this.admissions.size >= 100) throw new Error("Bunkr queue is full");
+        const admission = this.admit(existing ? { ...existing, state: "queued", attempts: 0 } : {
+            id, page: page.href, state: "queued", createdAt: new Date().toISOString(), updatedAt: "", attempts: 0, bytes: 0,
+        });
+        this.admissions.set(id, admission);
+        try { return { ...await admission }; }
+        finally { this.admissions.delete(id); }
+    }
+    private async admit(job: BunkrJob): Promise<BunkrJob> {
+        delete job.error; delete job.retryAt;
+        // The worker cannot see an input until its receipt is durable. Duplicate
+        // requests share this promise instead of acknowledging an uncommitted map entry.
+        await this.save(job);
+        this.jobs.set(job.id, job); this.kick(); return job;
     }
     async get(id: string) { await this.ready; const job = this.jobs.get(id); return job ? { ...job } : undefined; }
     private kick() {
@@ -155,8 +174,8 @@ export class BunkrDownloads {
         for (const job of this.jobs.values()) {
             if (this.stopped) break;
             if (job.state !== "queued" || (job.retryAt ?? 0) > Date.now()) continue;
-            job.state = "downloading"; job.attempts++; delete job.error; await this.save(job);
-            try { await this.transfer(job); job.state = "complete"; delete job.retryAt; }
+            job.state = "downloading"; job.attempts++; delete job.error;
+            try { await this.save(job); await this.transfer(job); job.state = "complete"; delete job.retryAt; }
             catch (error) {
                 job.error = error instanceof Error ? error.message.replace(/https?:\/\/\S+/g, "[URL]") : "Bunkr download failed";
                 job.state = job.attempts >= 5 ? "failed" : "queued";
@@ -181,7 +200,11 @@ export class BunkrDownloads {
         const destination = path.join(this.directory, job.filename), partial = `${destination}.part`;
         const existing = await stat(destination).catch(() => undefined);
         if (existing) {
-            if (job.total && existing.size === job.total) { job.bytes = existing.size; return; }
+            if (job.total && existing.size === job.total) {
+                const alias = await stat(partial).catch(() => undefined);
+                if (alias && alias.ino === existing.ino && alias.dev === existing.dev) { await unlink(partial); await this.syncDirectory(); }
+                job.bytes = existing.size; return;
+            }
             throw new Error("Destination exists with unexpected size; retained without overwriting");
         }
         let offset = (await stat(partial).catch(() => undefined))?.size ?? 0;
