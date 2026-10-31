@@ -17,7 +17,7 @@ export function createDryRunUploadPlan(
     database: PipelineDatabase,
     now = new Date(),
     timeZone = "Europe/Tirane",
-    monthlyLimitBytes = 600_000_000_000,
+    monthlyLimitBytes = 800_000_000_000,
     stagingRoot?: string,
     provider: ActiveUploadProvider = "porntrex",
 ): DryRunUploadItem[] {

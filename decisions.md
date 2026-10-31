@@ -333,7 +333,7 @@ server follows the account first, but only if it is not already followed.
   waits 24 h. An authentication failure sets `attention_reason`; a later authenticated
   keep-alive resumes only that unchanged hold. Manual pauses remain indefinite. Why: one page timeout on
   2026-10-14 cost a whole day of uploads.
-- **Monthly budget.** Uploads are capped at 600,000,000,000 bytes per calendar
+- **Monthly budget.** Uploads are capped at 800,000,000,000 bytes per calendar
   month in `Europe/Tirane`, the upload share of the ISP plan. Admission reserves
   the artifact size plus 16 MiB. Every transmitted byte, including failed and
   retried transfers, goes to `bandwidth_events`, which nothing ever deletes.
