@@ -573,7 +573,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        if scrollView === feed { monitor(true); unsettled = true; overlay.setInteractive(false) }
+        if scrollView === feed {
+            // A restoration image must never hold the document still under a moving finger.
+            removePoster()
+            if !revealed { reveal(); feed.alpha = 1 }
+            monitor(true)
+            unsettled = true
+            overlay.setInteractive(false)
+        }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -714,9 +721,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         fresh.insert(ViewerVideo(["filename": "Inserted fixture", "provider": "sc", "local": true])!, at: 0)
         updateList(fresh)
         saveCheckpoint()
+        savePoster()
         checkpoint.flush()
         let savedSizes = ViewerCheckpoint.load(checkpoint.directory)?.videos.filter { $0.raw["viewerWidth"] != nil }.count ?? 0
-        return ["before": before, "after": zoomCheckState, "savedSizes": savedSizes]
+        return ["before": before, "after": zoomCheckState, "savedSizes": savedSizes,
+                "posterFrame": ViewerPoster.load(checkpoint.directory)?.poster.frame ?? []]
     }
 
     func configureRestoredFeedCheck(image: UIImage) {
@@ -734,6 +743,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         layoutFeed()
         placeInitialVideo()
         loadEdgeUnits()
+        showPoster(for: videos[currentIndex])
     }
 
     func setZoomCheckScale(_ scale: CGFloat, animated: Bool) { zoom.setZoomScale(scale, animated: animated) }
@@ -752,7 +762,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                 "baseSize": [active.view.bounds.width, active.view.bounds.height], "scale": zoom.zoomScale,
                 "surface": String(describing: ObjectIdentifier(active.view.playerLayer)), "surfaces": surfaces,
                 "carouselEnabled": feed.isScrollEnabled, "index": currentIndex, "zoomed": zoomed,
-                "offset": feed.contentOffset.y, "documentHeight": feed.contentSize.height,
+                "offset": feed.contentOffset.y, "documentHeight": feed.contentSize.height, "poster": poster != nil,
                 "key": currentVideo?.key ?? "", "name": currentVideo?.filename ?? "", "players": units.compactMap { unit -> [String: Any]? in
                     guard let video = unit.video else { return nil }
                     return ["key": video.key, "frame": rect(unit.view.convert(unit.view.bounds, to: view))]
@@ -1074,11 +1084,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         // Still showing the saved poster: it stays the one to show.
         guard poster == nil else { return }
         guard revealed, !zoomed, let video = currentVideo, active.presentationSize != .zero else { checkpoint.clearPoster(); return }
-        let unit = active.view
-        let rect = AVMakeRect(aspectRatio: active.presentationSize, insideRect: unit.bounds)
+        // Several partially visible videos can now share the viewport. Preserve that first
+        // frame as a whole, rather than restoring only the active video's rectangle.
+        let rect = viewport.bounds
         guard rect.width > 1, rect.height > 1 else { checkpoint.clearPoster(); return }
-        let image = UIGraphicsImageRenderer(bounds: rect).image { _ in unit.drawHierarchy(in: unit.bounds, afterScreenUpdates: false) }
-        let frame = unit.convert(rect, to: view)
+        let image = UIGraphicsImageRenderer(bounds: rect).image { _ in viewport.drawHierarchy(in: rect, afterScreenUpdates: false) }
+        let frame = viewport.convert(rect, to: view)
         checkpoint.savePoster(ViewerPoster(key: video.key, frame: [frame.minX, frame.minY, frame.width, frame.height].map(Double.init), controls: controlsVisible),
                               image: image)
     }

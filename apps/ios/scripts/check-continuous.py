@@ -62,10 +62,14 @@ try:
  assert result['before']['name']==result['after']['name'] and result['before']['key']!=result['after']['key'],result
  assert abs(result['before']['picture'][1]-result['after']['picture'][1])<.5,result
  assert result['savedSizes']==30,result
+ assert result['posterFrame']==result['after']['viewport'],result
  report['listRefresh']=result
  before=state();action('zoom-fixture',kind='restore');after=state();same_position(before,after)
  report['partialRestoration']={'before':before,'after':after}
- action('feed-scroll',delta=57,end=0);result=action('feed-metadata')
+ assert after['poster'] is True,after
+ moved=action('feed-scroll',delta=57,end=0)
+ assert moved['after']['poster'] is False,moved
+ result=action('feed-metadata')
  same_position(result['before'],result['during'])
  action('feed-scroll',delta=0);report['deferredVideoMetadata']=result
  # A real strip may append while a finger/momentum moves it; sizes wait and cannot stop it.
