@@ -97,6 +97,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var active: ViewerUnit { units[1] }
     private var live: Bool { currentVideo?.liveStream ?? false }
     private var inBackground: Bool { UIApplication.shared.applicationState == .background }
+    private var playbackPolicy: ViewerPlaybackPolicy { ViewerPlaybackPolicy(provider: provider) }
+    private var lastPlaybackEvidence: CFTimeInterval = 0
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -325,7 +327,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             guard let video = targets[position] else { unit.clear(); continue }
             if let current = unit.video, current.same(video) { unit.update(video); continue }
             // In the background only the current video plays; its neighbours wait for the screen.
-            unit.load(video, start: savedTime(video), play: position == 1 || !inBackground)
+            unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: position, inBackground: inBackground))
         }
         layoutFeed()
     }
@@ -339,7 +341,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         monitor.measure("activate.play") {
             for (position, unit) in units.enumerated() {
                 if position != 1 { unit.muted = true }
-                if position == 1 || !inBackground { unit.play() }
+                if playbackPolicy.shouldPlay(position: position, inBackground: inBackground) { unit.play() }
+                else { unit.pause() }
             }
         }
         guard let video = currentVideo else { return }
@@ -782,6 +785,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func showTime(_ snapshot: TimelineSnapshot) {
+        if provider == "bunkr", !moving, CACurrentMediaTime() - lastPlaybackEvidence >= 2 {
+            lastPlaybackEvidence = CACurrentMediaTime()
+            BunkrPlaybackDiagnostics.record(units.map(\.playbackEvidence))
+        }
         overlay.setTimeline(snapshot)
         let now = CACurrentMediaTime()
         if now - lastProgressSave >= 3 {
@@ -913,14 +920,15 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private func enteringForeground() {
         for unit in units { unit.view.playerLayer.player = unit.player }
         for (position, unit) in units.enumerated() where unit.video != nil {
-            unit.resume(liveEdge: position != 1)
+            if playbackPolicy.shouldPlay(position: position, inBackground: false) { unit.resume(liveEdge: position != 1) }
+            else { unit.pause() }
         }
     }
 
     // A call or Siri paused playback; videos carry on afterwards.
     private func interruptionEnded() {
         active.resume(liveEdge: false)
-        if !inBackground { for (position, unit) in units.enumerated() where position != 1 && unit.video != nil { unit.resume(liveEdge: true) } }
+        if !inBackground && playbackPolicy.playsNeighbors { for (position, unit) in units.enumerated() where position != 1 && unit.video != nil { unit.resume(liveEdge: true) } }
     }
 
     // `reveal`: the list scrolls the last viewed row into view (not for a forward swipe that

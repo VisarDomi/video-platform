@@ -36,6 +36,12 @@ download or deleting a file on the PC updates the app through the same revision
 feed contract as the other local apps. No files are moved or deleted by the app.
 `LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
 provider's `LocalMediaKind` selects HLS recordings or direct MP4s.
+Only the visible Bunkr video plays. Neighbours remain paused, with a preferred
+half-second preview buffer; the active file prefers two seconds and starts as
+soon as buffered data permits. Buffer recovery respects manual pause, seeks and
+the end of a movie. Original video resolution and bytes are unchanged. Bounded
+`bunkrPlayback` debug samples record activation delay, buffer state, transferred
+bytes and dropped frames without URLs or credentials.
 
 ## Rules
 
@@ -395,3 +401,6 @@ renewal input in the shared Mac mirror. The key is reused, never rotated as a
 side effect of building another app; private copies are atomically written with
 mode 600. Its temporary-directory regressions are
 `python3 -m unittest discover -s apps/ios/Tests -p test_private_inputs.py`.
+Installation requires a completed build receipt whose source and app hashes still
+match. A concurrent source sync or replacement build must be rebuilt before any
+phone installation, rather than merely skipping renewal approval afterwards.
