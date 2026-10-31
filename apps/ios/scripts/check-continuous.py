@@ -67,6 +67,7 @@ try:
  before=state();action('zoom-fixture',kind='restore');after=state();same_position(before,after)
  report['partialRestoration']={'before':before,'after':after}
  assert after['poster'] is True,after
+ shot('video-restored')
  moved=action('feed-scroll',delta=57,end=0)
  assert moved['after']['poster'] is False,moved
  result=action('feed-metadata')
