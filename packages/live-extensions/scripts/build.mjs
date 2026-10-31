@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSIONS = {
     'ladder-live': { name: 'LADDER live', site: 'LADDER', matches: ['https://ladder-live.example/*'], api: '/api/ladder' },
     'fmp4-live': { name: 'FMP4 live', site: 'Fmp4Live', matches: ['https://fmp4-live.example/*', 'https://*.fmp4-live.example/*'], api: '/api/fmp4' },
-    'filehost': { name: 'FileHost to PC', site: 'FileHost', version: '1.0.1', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
+    'filehost': { name: 'FileHost to PC', site: 'FileHost', version: '1.0.2', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
 };
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(EXTENSIONS);
 for (const key of names) {
