@@ -19,6 +19,7 @@ export class AuthService {
     private readonly authContext: AuthContext;
     private browserLoginBlocked = false;
     private maintaining: Promise<void> | null = null;
+    private forceSessionRefresh = false;
 
     constructor(account: Account, provider: IAuthProvider) {
         this.account = account;
@@ -29,7 +30,7 @@ export class AuthService {
     public async initiateAuth() {
         const loadedFromFile = await this.authContext.loadTokenFromFile();
 
-        if (loadedFromFile) {
+        if (loadedFromFile && !this.provider.needsSessionMigration?.(this.authContext.getTokenBag()!)) {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             // A freshly recovered access token is already usable. Validate it with the
             // stream-token endpoint before consuming its rotating refresh token again.
@@ -86,6 +87,7 @@ export class AuthService {
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
         await this.authContext.saveTokenToFile();
+        this.forceSessionRefresh = false;
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
         this.logTokenWrite("login");
@@ -93,11 +95,13 @@ export class AuthService {
 
     private async ensureValidTokens(source: string) {
         const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
-        const recoveredSession = source === "session-maintain" && typeof expires === "number"
+        const recoveredSession = !this.forceSessionRefresh && source === "session-maintain" && typeof expires === "number"
             && expires * 1000 > Date.now() + this.provider.intervals.sessionRefresh + 60_000;
         if (!recoveredSession) await this.refreshSession();
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
+
+        this.forceSessionRefresh = false;
         this.logTokenWrite(source);
     }
 
@@ -128,6 +132,7 @@ export class AuthService {
         // The previous RT is consumed. Commit its replacement before requesting
         // stream tokens, which can fail independently or be interrupted.
         await this.authContext.saveTokenToFile();
+        this.forceSessionRefresh = false;
 
         if (receivedNewRT) {
             logger.debug(`Successfully refreshed session token and refresh token for ${this.account.email}.`);
@@ -161,6 +166,7 @@ export class AuthService {
             }
         }
         if (this.authContext.getTokenBag() !== tokenBag) return;
+        if(result.session)this.authContext.updateFromRefresh(result.session);
         this.authContext.updateFromTokenData(result);
     }
 
@@ -187,7 +193,8 @@ export class AuthService {
                 await timersPromises.setTimeout(Math.max(0, this.provider.intervals.shortTokenRefresh - (Date.now() - startedAt)));
             } catch (error) {
                 consecutiveFail++;
-                if (error instanceof BrowserVerificationRequiredError && !this.browserLoginBlocked) {
+                if ((error instanceof BrowserVerificationRequiredError || /failed with status (401|403)\b/.test((error as Error).message)) && !this.browserLoginBlocked) {
+                    this.forceSessionRefresh = true;
                     await this.maintainSession();
                 }
                 if (wasHealthy) {
@@ -204,7 +211,7 @@ export class AuthService {
         while (true) {
             if (this.browserLoginBlocked) return;
             const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
-            const delay = typeof expires === "number" ? Math.max(0, Math.min(this.provider.intervals.sessionRefresh, expires * 1000 - Date.now() - 300_000)) : this.provider.intervals.sessionRefresh;
+            const delay = typeof expires === "number" ? Math.max(30_000, Math.min(this.provider.intervals.sessionRefresh, expires * 1000 - Date.now() - 300_000)) : this.provider.intervals.sessionRefresh;
             await timersPromises.setTimeout(delay);
             await this.maintainSession();
         }
@@ -225,6 +232,11 @@ export class AuthService {
                 logger.debug(`Session successfully maintained for ${this.account.email}.`);
                 return;
             } catch (error) {
+                if (error instanceof BrowserLoginNeedsAttentionError) {
+                    this.browserLoginBlocked = true;
+                    logger.error(error.message);
+                    return;
+                }
                 const errorMessage = (error as Error).message;
                 if (error instanceof BrowserVerificationRequiredError || errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
                     logger.warn(error instanceof BrowserVerificationRequiredError

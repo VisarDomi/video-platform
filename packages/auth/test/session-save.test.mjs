@@ -74,7 +74,8 @@ test('a failed save does not prevent a later token from being saved', async t =>
     const first = context.saveTokenToFile();
     context.updateFromLogin(bag('rotated-token'));
     const second = context.saveTokenToFile();
-    await Promise.all([first, second]);
+    await assert.rejects(first, /fixture write failure/);
+    await second;
 
     assert.equal(errors.length, 1);
     assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).refreshToken, 'rotated-token');
