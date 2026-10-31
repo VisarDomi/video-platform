@@ -196,13 +196,13 @@ export class StreamDownloader {
         return await this.downloadLoop(alias, masterUrl, liveUrl, session, playlistManager, initTracker, disk);
     }
 
-    private async recordAccessFailure(
+    private recordAccessFailure(
         stage: "playlist" | "segment",
         alias: string,
         masterUrl: string,
         liveUrl: string,
         failure: PlaylistFetchFailure,
-    ): Promise<void> {
+    ): void {
         const state = this.handle.state;
         if (!state) return;
         const recorded = this.accessIncidents.record(failure);
@@ -214,28 +214,34 @@ export class StreamDownloader {
             alias,
             recordingId: state.recordingId,
         };
-        // One warning per incident, carrying the provider's diagnosis when it has one.
-        let evidence: object = {};
-        if (this.provider.diagnoseAccessFailure) {
-            try {
-                evidence = await this.provider.diagnoseAccessFailure({
-                    stage,
-                    ...identity,
-                    masterUrl,
-                    liveUrl,
-                    failure,
-                });
-            } catch (error: any) {
-                evidence = { evidenceUnavailable: error.name ?? "diagnostic-error" };
-            }
-        }
+        const incidentStartedAt = recorded.snapshot.startedAt;
+        const diagnose = this.provider.diagnoseAccessFailure;
+        const evidencePending = !!diagnose && this.accessIncidents.beginEvidence();
+        // Optional evidence must never consume the live window while capture
+        // waits for probes. Open/close are immediate; late evidence is correlated.
         logger.warn(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_OPEN`, {
             ...identity,
+            incidentStartedAt,
             stage,
             failure,
             selected: this.provider.describeVariant?.(liveUrl) ?? null,
-            ...evidence,
+            evidencePending,
+            evidenceDeferred: !!diagnose && !evidencePending,
         });
+        if (!diagnose || !evidencePending) return;
+        void (async () => {
+            let evidence: object;
+            try {
+                evidence = await diagnose.call(this.provider, { stage, ...identity, masterUrl, liveUrl, failure });
+            } catch (error: any) {
+                evidence = { evidenceUnavailable: error.name ?? "diagnostic-error" };
+            }
+            logger.info(`[${this.provider.providerName.toUpperCase()}] ACCESS_INCIDENT_EVIDENCE`, {
+                ...identity, incidentStartedAt, stage, failure, ...evidence,
+            });
+        })().catch(error => {
+            logger.debug(`[StreamDownloader] ${alias} access evidence could not be logged`, { error: String(error) });
+        }).finally(() => { this.accessIncidents.finishEvidence(); });
     }
 
     private closeAccessIncident(alias: string, liveUrl: string, outcome: string): void {
@@ -247,6 +253,7 @@ export class StreamDownloader {
             streamerId: state.streamerId,
             alias,
             recordingId: state.recordingId,
+            incidentStartedAt: closed.startedAt,
             outcome,
             durationMs: closed.durationMs,
             attempts: closed.attempts,
@@ -338,7 +345,7 @@ export class StreamDownloader {
             const playlistFetchMs = Date.now() - playlistFetchStartedAt;
             if (!content) {
                 const failure = session.getLastPlaylistFailure?.();
-                if (failure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
+                if (failure) this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, failure);
                 // Rate limited: the same playlist answers again shortly. Variant
                 // recovery would add requests, and its 5-second pause lets the
                 // window move past segments.
@@ -375,7 +382,7 @@ export class StreamDownloader {
                 content = await this.fetchPlaylist(session, liveUrl);
                 if (!content) {
                     const recoveredFailure = session.getLastPlaylistFailure?.();
-                    if (recoveredFailure) await this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, recoveredFailure);
+                    if (recoveredFailure) this.recordAccessFailure("playlist", alias, masterUrl, liveUrl, recoveredFailure);
                     logger.debug(`[StreamDownloader] ${alias} recovery candidate also failed`);
                     await timersPromises.setTimeout(this.provider.playlistRetryMs ?? EDGE_RECOVERY_SLEEP_MS);
                     continue;
@@ -458,7 +465,7 @@ export class StreamDownloader {
 
                     if (!fetchResult.data) {
                         if (fetchResult.status !== undefined) {
-                            await this.recordAccessFailure("segment", alias, masterUrl, liveUrl, {
+                            this.recordAccessFailure("segment", alias, masterUrl, liveUrl, {
                                 kind: "http",
                                 status: fetchResult.status,
                             });
