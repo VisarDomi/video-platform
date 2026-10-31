@@ -62,16 +62,26 @@ p=pathlib.Path({log!r})
 print('\\n'.join(p.read_text().splitlines()[-14:]) if p.exists() else 'Waiting for log')
 ''')
 elif a.action=='install':
-    remote(f'''import subprocess,plistlib,pathlib,datetime,fnmatch,json
+    remote(f'''import subprocess,plistlib,pathlib,datetime,fnmatch,json,sys
 state=json.loads((pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json').read_text())
 if state.get('running') or state.get('exit')!=0: raise SystemExit('Wait for the build to finish successfully')
 app=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'native/Release-iphoneos'/{(config['product']+'.app')!r}
+sys.path.insert(0,{MAC!r}+'/scripts')
+sys.path.insert(0,'/Users/visar/Developer/ios-tools/renewal/scripts')
+from validate_delivery import validate_delivery
+from refresh import fingerprint
+registration=pathlib.Path('/Users/visar/Library/Application Support/ios-tools/renewal/video-platform/config')/({(a.provider if config.get('hosts') else a.provider+'-local')!r}+'.json')
+validate_delivery(json.loads(registration.read_text()),fingerprint)
 info=plistlib.loads((app/'Info.plist').read_bytes())
 assert info['CFBundleIdentifier']=={config['bundleId']!r}
 assert info['CFBundleDisplayName']=={config['name']!r}
+assert info['CFBundleVersion']=={str(config.get('build','1'))!r}, 'Built version differs from the requested app'
 assert info['StartURL']=={config['url']!r}
 assert info.get('SiteHosts') is None
 assert info.get('NativeList')=={config.get('native')!r}
+if not {bool(config.get('native'))!r}:
+    assert info.get('LocalProvider')=={a.provider!r}
+    assert info.get('LocalMediaKind')=={config.get('mediaKind','hls')!r}
 assert bool(info.get('TangoPhoneKey'))=={config.get('native')=='tango'!r}, 'The PC login key is built into Tango'
 assert not any(k.startswith('CFBundleIcon') for k in info)
 extensions=sorted(p.name for p in (app/'PlugIns').glob('*.appex')) if (app/'PlugIns').exists() else []
