@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSIONS = {
     'fc2-live': { name: 'FC2 live', site: 'FC2', matches: ['https://live.fc2.com/*'], api: '/api/fc2' },
     'sc-live': { name: 'SC live', site: 'Stripchat', matches: ['https://stripchat.com/*', 'https://*.stripchat.com/*'], api: '/api/sc' },
-    'bunkr': { name: 'Bunkr to PC', site: 'Bunkr', version: '1.0.1', matches: ['https://bunkr.si/*', 'https://bunkr.ph/*', 'https://bunkr.cr/*'], api: '/api/bunkr' },
+    'bunkr': { name: 'Bunkr to PC', site: 'Bunkr', version: '1.0.2', matches: ['https://bunkr.si/*', 'https://bunkr.ph/*', 'https://bunkr.cr/*'], api: '/api/bunkr' },
 };
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(EXTENSIONS);
 for (const key of names) {

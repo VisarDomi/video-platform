@@ -41,7 +41,8 @@ function paint() {
     else if (known?.state === "complete") text = "Downloaded to PC ✓";
     else if (known?.state === "failed") text = reachable ? "PC download failed · tap to retry" : "PC download failed · reconnecting…";
     else if (known) {
-        text = known.state === "queued" ? "Queued on PC" : `Downloading to PC${known.total ? ` · ${Math.min(99, Math.floor(known.bytes / known.total * 100))}%` : "…"}`;
+        const progress = known.total ? ` · ${Math.min(99, Math.floor(known.bytes / known.total * 100))}%` : "…";
+        text = known.state === "queued" ? known.bytes ? `Resuming on PC${progress}` : "Queued on PC" : `Downloading to PC${progress}`;
         if (!reachable) text += " · reconnecting…";
     } else if (uncertain) text = reachable ? "Could not confirm PC download · tap to retry" : "Checking PC download · reconnecting…";
     for (const [anchor, original] of labels) {

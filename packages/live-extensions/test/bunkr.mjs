@@ -27,11 +27,12 @@ const browser=await webkit.launch({headless:true,executablePath:process.env.WEBK
 try{
     for(const domain of ['si','ph','cr']){
         const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
-        let available=true,job=null,loseAck=false;const requests=[],errors=[];
+        let available=true,job=null,loseAck=false,hangNext=false;const requests=[],errors=[];
         await context.route('**/*',route=>route.fulfill({contentType:'text/html',body:`<a id="download" href="https://dl.bunkr.${domain}/file/42" target="_blank"><span>Download</span></a><a id="related" href="/f/other">Related</a>`}));
         const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(3000);
         await page.exposeFunction('pcMessage',async message=>{
             requests.push(message);
+            if(hangNext){hangNext=false;return new Promise(()=>{});}
             if(!available)return {ok:false,status:0};
             if(message.action==='health')return {ok:true,status:200};
             if(message.action==='download'){
@@ -41,6 +42,9 @@ try{
             return job?{ok:true,status:200,job:{...job}}:{ok:false,status:404};
         });
         await page.addInitScript(()=>{
+            // Advance only the bridge-deadline clock for a deterministic suspension check.
+            const schedule=window.setTimeout.bind(window);
+            window.setTimeout=(callback,delay,...args)=>schedule(callback,delay===7000?100:delay,...args);
             window.nativeClicks=0;document.addEventListener('click',e=>{window.nativeClicks++;e.preventDefault();});
             window.browser={runtime:{sendMessage:message=>window.pcMessage(message)}};
         });
@@ -54,6 +58,10 @@ try{
         await page.locator('#download').click();assert.equal(submissions(),1);assert.equal(await page.evaluate(()=>window.nativeClicks),0,'known PC jobs never become accidental phone downloads during an outage');
         available=true;job.bytes=81;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await label('81%');
         assert.equal(submissions(),1,'reconnect rejoins the existing transfer');
+        job.bytes=90;hangNext=true;
+        await page.evaluate(()=>{window.dispatchEvent(new Event('online'));window.dispatchEvent(new Event('online'));});
+        await label('90%');assert.equal(submissions(),1,'a suspended extension reply cannot wedge future status checks');
+        job.bytes=92;job.state='queued';await load();await label('92%');await label('Resuming');
         job.state='complete';await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await label('Downloaded');
         await page.locator('#download').click();assert.equal(submissions(),1);
         await page.locator('#related').click();assert.equal(await page.evaluate(()=>window.nativeClicks),1);
