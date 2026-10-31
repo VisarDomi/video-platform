@@ -409,3 +409,22 @@ mode 600. Its temporary-directory regressions are
 Installation requires a completed build receipt whose source and app hashes still
 match. A concurrent source sync or replacement build must be rebuilt before any
 phone installation, rather than merely skipping renewal approval afterwards.
+
+### October 31 persistent-session completion
+
+Tango build 28 was installed and approved with the current shared sources, including
+Bunkr local build 2 and its playback policy. All six registered video-app artifacts
+were installed in place without resetting data; the other five were not launched.
+The phone completed three real native refresh rotations while the PC API was stopped,
+with `nativeRenewals=3` and `initialSetups=0`. Ordinary phone renewal is independent
+of the backup engine. The PC recording session also completed natural hourly renewals
+with its original session family and no new Google login. X11 window PIDs verified
+that PC authentication was on Xvfb `:111`.
+
+Native session/cookie rules, one-time ownership transfer and interrupted delivery tests
+passed, along with the Mac virtual-iPhone outage, foreground, reconnect and setup-TLS
+checks. No WDA or physical UI automation was used. Current signed OTA packages were
+republished and HTTPS hashes verified. Private receipts are under
+`~/.cache/tango-hardening-20261031/` on the PC and
+`~/Library/Caches/ios-app-refresh/tango-hardening-20261031/` on the Mac. The protocol
+checks cover controlled rotations and observed PC hourly renewal, not a multi-day soak.
