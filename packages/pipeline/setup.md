@@ -35,7 +35,7 @@ online verification.
   find a video.
 - Uploads are budgeted per calendar month in `Europe/Tirane`
   (`VIDEO_PIPELINE_UPLOAD_TIMEZONE`): the campaign uses the limit stored by
-  `campaign:configure` (default 600,000,000,000 bytes); `upload-one` uses
+  `campaign:configure` (default 800,000,000,000 bytes); `upload-one` uses
   `VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES` (same default).
 - Network commands require `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
   worker verifies due uploads inline.
@@ -233,7 +233,7 @@ Campaign intent is stored in SQLite independently of worker lifetime.
 
 ```bash
 npm run campaign:configure -w pipeline -- \
-  --provider all --monthly-upload-bytes 600000000000 --apply
+  --provider all --monthly-upload-bytes 800000000000 --apply
 npm run campaign:status -w pipeline
 npm run campaign:resume -w pipeline
 npm run campaign:pause -w pipeline

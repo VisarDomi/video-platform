@@ -47,7 +47,7 @@ const LEGACY_PART_CHECKS: ReadonlyArray<readonly [string, string]> = [
     ["CHECK (part IN ('max1080p', 'nonmax1080p'))", `CHECK (${queuedPartCheck("part")})`],
 ];
 const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
-const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 600_000_000_000;
+const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 800_000_000_000;
 
 interface RecordingRow {
     id: string;
