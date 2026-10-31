@@ -1,7 +1,7 @@
 {
     "name": "live-extensions",
     "version": "3",
-    "description": "LADDER live and FMP4 live Safari extensions (hosted by TsLive): download-list controls for ladder and fmp4live",
+    "description": "Safari extensions hosted by TsLive: LADDER/FMP4 download-list controls and FileHost downloads to the PC",
     "private": true,
     "type": "module",
     "scripts": {
