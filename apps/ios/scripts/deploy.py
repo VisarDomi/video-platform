@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Linux -> trusted Mac GUI build -> verified, non-destructive device update for one provider app."""
 import argparse,json,pathlib,shutil,subprocess,shlex
+from private_inputs import stage_private_inputs
 APP=pathlib.Path(__file__).resolve().parents[1]
 ROOT=APP.parents[1]
 MAC='/Users/visar/Developer/video-platform/apps/ios'
@@ -19,16 +20,8 @@ log=MAC+'/build/'+a.provider+'/xcode.log'
 deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewal/scripts/deliver.py',step,'--repo','video-platform',
                      '--app',a.provider if config.get('hosts') else a.provider+'-local','--bundle',config['bundleId']]
 if a.action=='sync':
-    # Tango's PC login shortcut: the server's phone key (made once, private) goes into the build.
-    if config.get('native')=='tango':
-        import os,secrets
-        key=pathlib.Path.home()/'.local/share/video-services/tango-phone-key'
-        if not key.exists():
-            key.parent.mkdir(parents=True,exist_ok=True)
-            with os.fdopen(os.open(key,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'w') as out: out.write(secrets.token_hex(32)+'\n')
-        private=APP/'Private';private.mkdir(exist_ok=True)
-        (private/'tango-phone-key').write_text(key.read_text())
-        os.chmod(private/'tango-phone-key',0o600)
+    # All providers share this mirror. A local-app sync must preserve Tango's build key too.
+    stage_private_inputs(APP,registry,pathlib.Path.home()/'.local/share/video-services')
     # Hosted Safari web extensions (Tango's FC2 live and SC live) are built here, so the Mac (and
     # monthly renewal) needs no Node or Video Platform checkout.
     for suffix,extension in config.get('webExtensions',{}).items():

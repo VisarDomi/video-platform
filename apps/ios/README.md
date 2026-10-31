@@ -389,3 +389,9 @@ prints why approval was skipped. No scheduler pause is needed.
 `build` re-registers the repository's current extension identities and renewal
 inputs before recording its build receipt, so newly added extensions remain in
 future renewals.
+Every provider's `sync` stages the shared Tango PC-login build key from the
+canonical PC state first. Local-app syncs therefore preserve Tango's private
+renewal input in the shared Mac mirror. The key is reused, never rotated as a
+side effect of building another app; private copies are atomically written with
+mode 600. Its temporary-directory regressions are
+`python3 -m unittest discover -s apps/ios/Tests -p test_private_inputs.py`.
