@@ -46,6 +46,19 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
             } else { applyScale(scale); endPinch() }
             return snapshot()
         }
+        TestHooks.shared.register("feed-scroll") { [weak self] query in
+            self?.viewer?.checkFeedScroll(delta: CGFloat(Double(query["delta"] ?? "0") ?? 0), end: query["end"] != "0") ?? [:]
+        }
+        TestHooks.shared.register("feed-metadata") { [weak self] _ in self?.viewer?.checkFeedMetadata() ?? [:] }
+        TestHooks.shared.register("feed-refresh") { [weak self] _ in self?.viewer?.checkFeedRefresh() ?? [:] }
+        TestHooks.shared.register("reader-scroll") { [weak self] query in
+            guard let self, let strip else { return [:] }
+            strip.scrollViewWillBeginDragging(strip.scrollView)
+            strip.scrollView.contentOffset.y += CGFloat(Double(query["delta"] ?? "0") ?? 0)
+            let before = snapshot()
+            if query["end"] != "0" { strip.scrollViewDidEndDragging(strip.scrollView, willDecelerate: false) }
+            return ["before": before, "after": snapshot()]
+        }
         TestHooks.shared.register("zoom-metadata") { [weak self] _ in
             guard let self, let strip else { return [:] }
             strip.setAspect(0.18, at: 0)
@@ -116,6 +129,8 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
             player.didMove(toParent: self)
             player.configureZoomCheck(size: size, image: calibration(CGSize(width: 320, height: min(2048, 320 * size.height / max(1, size.width)))))
             viewer = player
+            if query["kind"] == "feed" { player.configureFeedCheck(image: calibration(CGSize(width: 320, height: 180))) }
+            if query["kind"] == "restore" { player.configureRestoredFeedCheck(image: calibration(CGSize(width: 320, height: 180))) }
         }
         return snapshot()
     }
@@ -163,7 +178,8 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
         }
         visit(content)
         return ["kind": "reader", "scale": strip.scrollView.zoomScale, "contentHeight": content.bounds.height,
-                "pages": strip.pages.count, "images": images, "state": strip.state]
+                "pages": strip.pages.count, "images": images, "state": strip.state,
+                "offset": strip.scrollView.contentOffset.y]
     }
 
     private func startTrace() {

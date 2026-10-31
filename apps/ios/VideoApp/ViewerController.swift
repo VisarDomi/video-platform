@@ -3,13 +3,8 @@ import UIKit
 import UIKit.UIGestureRecognizerSubclass
 import KitCore
 
-// The native viewer: packages/app src/routes/videoViewer.ts with AVPlayer, over the list page.
-// The same intrinsic three-scope feed: a 10,000 pt previous scope, the current video at its
-// aspect-fitted size and a 10,000 pt next scope; at rest the neighbours sit at their scopes' far
-// edges, during a vertical swipe they touch the current video, and a neighbour that reaches
-// the screen's midpoint becomes current (scope roles rotate, keeping it where it is on screen).
-// A landing in the blank runway moves one video in the swipe's direction. All three play muted;
-// the mute button unmutes only the current one.
+// A continuous, aspect-fitted video document. Players are reused around the visible range;
+// loading, changing the active player and lifting a finger never reposition the document.
 //
 // Gestures: a vertical swipe moves through the list, a horizontal drag in the upper half seeks
 // (60 s per screen width), one in the lower half shows (rightward) or hides (leftward) the
@@ -23,7 +18,6 @@ import KitCore
 @MainActor
 final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate,
                               ViewerUnitDelegate, ViewerOverlayActions {
-    private static let runway: CGFloat = 10_000
     private static let edgeWidth: CGFloat = 28
     private static let seekSecondsPerWidth: CGFloat = 60
 
@@ -46,6 +40,18 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private let zoom = ZoomScrollView()
     private let session = ViewerSession()
     private var units: [ViewerUnit] = []
+    private var activeUnit: ViewerUnit!
+    private var geometry = VideoFeedLayout(viewport: .zero, aspects: [])
+    private var geometryKeys: [String] = []
+    private var indexes: [String: Int] = [:]
+    private var measuredSizes: [String: CGSize] = [:]
+    private var loadingUnits = false
+    private var geometryDirty = true
+    private var initialPositionApplied = false
+    var restoredTop: CGFloat?
+    #if targetEnvironment(simulator)
+    private var fixtureImage: UIImage?
+    #endif
     private var videos: [ViewerVideo]
     private var currentIndex: Int
     private var segments: [Double] = []
@@ -53,8 +59,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var unsettled = false
     private var programmatic = false
     private var touching = false
-    private var lastOffset: CGFloat = 0
-    private var scrollDirection = 0
     private var lastProgressSave: CFTimeInterval = 0
     private var lastNowPlaying: CFTimeInterval = 0
     private var discovered = Set<String>()
@@ -94,7 +98,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
     var currentVideo: ViewerVideo? { videos.indices.contains(currentIndex) ? videos[currentIndex] : active.video }
-    private var active: ViewerUnit { units[1] }
+    private var active: ViewerUnit { activeUnit }
     private var live: Bool { currentVideo?.liveStream ?? false }
     private var inBackground: Bool { UIApplication.shared.applicationState == .background }
     private var playbackPolicy: ViewerPlaybackPolicy { ViewerPlaybackPolicy(provider: provider) }
@@ -123,6 +127,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                 return unit
             }
         }
+
+        activeUnit = units[1]
 
         zoom.delegate = self
         zoom.backgroundColor = .black
@@ -177,6 +183,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func open(videos: [ViewerVideo], index: Int) {
         loadViewIfNeeded()
         self.videos = videos
+        indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
+        geometryDirty = true
         currentIndex = index
         FrameMonitor.shared.measure("open.session") { beginSession() }
         UIApplication.shared.isIdleTimerDisabled = true
@@ -241,6 +249,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         message.frame = view.bounds.insetBy(dx: 20, dy: 0)
         view.layer.shadowPath = UIBezierPath(rect: view.bounds).cgPath
         guard view.bounds.size != lastBounds else { return }
+        let anchor = documentAnchor
         lastBounds = view.bounds.size
         FrameMonitor.shared.measure("viewer.layout") {
             if zoomed { exitZoom() }
@@ -250,8 +259,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             feed.bounds = CGRect(origin: .zero, size: view.bounds.size)
             feed.center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)
             zoom.contentSize = view.bounds.size
-            layoutFeed()
-            if revealed && !unsettled { centerActive() }
+            geometryDirty = true
+            layoutFeed(anchor: anchor)
+            if revealed && !initialPositionApplied { placeInitialVideo() }
         }
     }
 
@@ -265,7 +275,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private func updateListNow(_ list: [ViewerVideo]) {
         guard !closed, !list.isEmpty || live else { return }
         let current = active.video
-        let filtered = live ? list.filter { !removed.contains($0.filename) } : list
+        var filtered = (live ? list.filter { !removed.contains($0.filename) } : list).map { video in
+            guard let size = measuredSizes[video.key] else { return video }
+            return video.setting("viewerWidth", Double(size.width)).setting("viewerHeight", Double(size.height))
+        }
         // A live stream that ended before this list arrived: the next one takes its place.
         if let current, live, removed.contains(current.filename) {
             let position = list.firstIndex { $0.filename == current.filename }
@@ -280,9 +293,20 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             if returnsWhenGone { slideAway() }
             return
         }
+        var anchor = documentAnchor
+        let updated = filtered[index]
+        if anchor?.key == current.key { anchor?.key = updated.key }
+        let size = measuredSizes[current.key] ?? active.presentationSize
+        if size.width > 0, size.height > 0 {
+            measuredSizes[updated.key] = size
+            filtered[index] = updated.setting("viewerWidth", Double(size.width)).setting("viewerHeight", Double(size.height))
+        }
         videos = filtered
+        indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
+        geometryDirty = true
         currentIndex = index
-        if current.fileId == nil, filtered[index].fileId != nil, current.size == filtered[index].size {
+        layoutFeed(anchor: anchor)
+        if current.progressKey != filtered[index].progressKey, current.size == filtered[index].size {
             progress.migrate(from: current.progressKey, to: filtered[index].progressKey)
         }
         active.update(filtered[index])
@@ -304,7 +328,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func saveCheckpoint() {
         guard let video = currentVideo else { return }
-        checkpoint.save(ViewerCheckpoint(provider: provider, videos: videos, current: video.key))
+        let top = geometry.frames.indices.contains(currentIndex) ? geometry.frames[currentIndex].minY - feed.contentOffset.y : nil
+        checkpoint.save(ViewerCheckpoint(provider: provider, videos: videos, current: video.key, top: top.map(Double.init)))
     }
 
     private func reveal() {
@@ -312,7 +337,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         revealed = true
         revealTimer?.invalidate()
         layoutFeed()
-        centerActive()
+        placeInitialVideo()
         // Under a poster the feed shows at once; the poster goes when the player has a picture.
         if poster != nil { feed.alpha = 1; removePosterWhenPlaying() }
         else { UIView.animate(withDuration: 0.12) { self.feed.alpha = 1 } }
@@ -325,14 +350,55 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func loadEdgeUnitsNow() {
-        let targets = [video(at: currentIndex - 1), video(at: currentIndex), video(at: currentIndex + 1)]
-        for (position, unit) in units.enumerated() {
-            guard let video = targets[position] else { unit.clear(); continue }
-            if let current = unit.video, current.same(video) { unit.update(video); continue }
-            // In the background only the current video plays; its neighbours wait for the screen.
-            unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: position, inBackground: inBackground))
+        guard !loadingUnits, !closed, !videos.isEmpty else { return }
+        loadingUnits = true
+        defer {
+            loadingUnits = false
+            if pendingGeometry {
+                DispatchQueue.main.async { [weak self] in self?.applyPendingGeometry() }
+            }
         }
         layoutFeed()
+        let first = geometry.index(at: feed.contentOffset.y) ?? currentIndex
+        let last = geometry.index(at: feed.contentOffset.y + feed.bounds.height) ?? currentIndex
+        let wanted = Set(max(0, min(first, currentIndex) - 1)...min(videos.count - 1, max(last, currentIndex) + 1))
+        let keys = Set(wanted.map { videos[$0].key })
+        for index in wanted.sorted(by: { abs($0 - currentIndex) < abs($1 - currentIndex) }) {
+            let video = videos[index]
+            let unit: ViewerUnit
+            if let kept = units.first(where: { $0.video?.same(video) == true }) { unit = kept }
+            else if let spare = units.first(where: { $0.video.map { !keys.contains($0.key) } ?? true }) {
+                rememberProgress(spare)
+                unit = spare
+            } else {
+                unit = ViewerUnit()
+                unit.delegate = self
+                units.append(unit)
+                content.addSubview(unit.view)
+            }
+            if index == currentIndex { activeUnit = unit }
+            if unit.video?.same(video) == true { unit.update(video) }
+            else {
+                #if targetEnvironment(simulator)
+                if let fixtureImage {
+                    unit.configureZoomCheck(video: video, size: aspect(of: video), image: fixtureImage)
+                } else {
+                    unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: index == currentIndex ? 1 : 0, inBackground: inBackground))
+                }
+                #else
+                unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: index == currentIndex ? 1 : 0, inBackground: inBackground))
+                #endif
+            }
+            if geometry.frames.indices.contains(index) { unit.view.frame = geometry.frames[index] }
+        }
+        for unit in units where unit.video.map({ !keys.contains($0.key) }) == true {
+            rememberProgress(unit)
+            unit.clear()
+        }
+    }
+
+    private func rememberProgress(_ unit: ViewerUnit) {
+        if let video = unit.video, !video.liveStream { progress.set(video.progressKey, unit.snapshot().currentTime) }
     }
 
     private func activateCurrent() {
@@ -340,11 +406,18 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func activateCurrentNow() {
+        #if targetEnvironment(simulator)
+        if fixtureImage != nil {
+            overlay.setVideo(currentVideo)
+            overlay.setInteractive(!unsettled)
+            return
+        }
+        #endif
         let monitor = FrameMonitor.shared
         monitor.measure("activate.play") {
-            for (position, unit) in units.enumerated() {
-                if position != 1 { unit.muted = true }
-                if playbackPolicy.shouldPlay(position: position, inBackground: inBackground) { unit.play() }
+            for unit in units where unit.video != nil {
+                if unit !== active { unit.muted = true }
+                if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: inBackground) { unit.play() }
                 else { unit.pause() }
             }
         }
@@ -405,6 +478,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
         message.isHidden = true
         currentIndex = min(index, videos.count - 1)
+        geometryDirty = true
         loadEdgeUnits()
         activateCurrent()
     }
@@ -417,120 +491,97 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // MARK: the feed
 
-    private func fittedSize(_ unit: ViewerUnit) -> CGSize {
-        guard unit.hasMedia, feed.bounds.width > 0, feed.bounds.height > 0 else { return .zero }
-        let size = unit.presentationSize
-        let aspect = size.width > 0 && size.height > 0 ? size : CGSize(width: 16, height: 9)
-        return AVMakeRect(aspectRatio: aspect, insideRect: CGRect(origin: .zero, size: feed.bounds.size)).size
+    private func aspect(of video: ViewerVideo) -> CGSize {
+        if let size = measuredSizes[video.key] { return size }
+        if let width = video.raw["viewerWidth"] as? Double, let height = video.raw["viewerHeight"] as? Double,
+           width > 0, height > 0 { return CGSize(width: width, height: height) }
+        return CGSize(width: 16, height: 9)
     }
 
-    private func layoutFeed() {
-        guard units.count == 3 else { return }
-        let width = feed.bounds.width, runway = Self.runway
-        let sizes = units.map(fittedSize), heights = sizes.map(\.height)
-        let ys = [unsettled ? runway - heights[0] : 0, runway,
-                  unsettled ? runway + heights[1] : 2 * runway + heights[1] - heights[2]]
-        for index in units.indices {
-            units[index].view.frame = CGRect(origin: CGPoint(x: (width - sizes[index].width) / 2, y: ys[index]), size: sizes[index])
+    private var documentAnchor: (key: String, top: CGFloat)? {
+        guard let index = geometry.index(at: midpoint), geometryKeys.indices.contains(index) else { return nil }
+        return (geometryKeys[index], geometry.frames[index].minY - feed.contentOffset.y)
+    }
+
+    private func layoutFeed(anchor: (key: String, top: CGFloat)? = nil) {
+        guard geometryDirty, feed.bounds.width > 0, feed.bounds.height > 0 else { return }
+        let anchor = anchor ?? (initialPositionApplied ? documentAnchor : nil)
+        geometryDirty = false
+        indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
+        geometry = VideoFeedLayout(viewport: feed.bounds.size, aspects: videos.map(aspect))
+        geometryKeys = videos.map(\.key)
+        programmatic = true
+        content.frame = CGRect(origin: .zero, size: geometry.size)
+        feed.contentSize = geometry.size
+        for unit in units {
+            if let key = unit.video?.key, let index = indexes[key] { unit.view.frame = geometry.frames[index] }
         }
-        content.frame = CGRect(x: 0, y: 0, width: width, height: 2 * runway + heights[1])
-        feed.contentSize = content.frame.size
+        if let anchor, let index = indexes[anchor.key] { setOffset(geometry.frames[index].minY - anchor.top) }
+        programmatic = false
     }
 
     private var midpoint: CGFloat { feed.contentOffset.y + feed.bounds.height / 2 }
 
-    private func unitAtMidpoint(_ midpoint: CGFloat) -> Int {
-        units.firstIndex { $0.hasMedia && $0.view.frame.minY <= midpoint && midpoint < $0.view.frame.maxY } ?? -1
-    }
-
     private func setOffset(_ y: CGFloat) {
+        guard abs(feed.contentOffset.y - y) > 0.001 else { return }
+        let previous = programmatic
         programmatic = true
         feed.contentOffset = CGPoint(x: 0, y: y)
-        lastOffset = y
-        programmatic = false
+        programmatic = previous
     }
 
-    private func centerActive() {
-        setOffset(active.view.frame.midY - feed.bounds.height / 2)
+    private func placeInitialVideo() {
+        guard !initialPositionApplied, geometry.frames.indices.contains(currentIndex) else { return }
+        initialPositionApplied = true
+        let frame = geometry.frames[currentIndex]
+        setOffset(restoredTop.map { frame.minY - $0 } ?? (frame.midY - feed.bounds.height / 2))
     }
 
-    private func beginUnsettled() {
-        guard !unsettled else { return }
-        unsettled = true
-        lastOffset = feed.contentOffset.y
-        scrollDirection = 0
-        layoutFeed()
-        overlay.setInteractive(false)
+    private func selectVisibleVideo() {
+        guard !zoomed, let index = geometry.index(at: midpoint) else { return }
+        if index != currentIndex {
+            saveProgress()
+            currentIndex = index
+            returnsWhenGone = false
+            segments = []
+            loadEdgeUnits()
+            activateCurrent()
+        } else { loadEdgeUnits() }
     }
 
-    private func commitMidpointVideo() {
-        guard unsettled else { return }
-        let winner = unitAtMidpoint(midpoint)
-        if winner == 0 || winner == 2 { commitScope(winner == 0 ? -1 : 1) }
+    // Idle only commits state and any deferred metadata. It never chooses a landing position.
+    private func settle() {
+        guard !zoomed, !touching, !feed.isDragging, !feed.isDecelerating, !closed else { return }
+        unsettled = false
+        applyPendingGeometry()
+        selectVisibleVideo()
+        overlay.setInteractive(true)
+        saveCheckpoint()
     }
 
-    // Rotate the scope roles; the selected video stays where it is on screen, even during momentum.
-    private func commitScope(_ direction: Int) {
-        guard video(at: currentIndex + direction) != nil else { return }
+    // Explicit lock-screen next/previous is navigation, unlike a free scroll.
+    private func step(_ direction: Int) {
+        guard !moving, videos.indices.contains(currentIndex + direction) else { return }
+        if zoomed { exitZoom() }
         saveProgress()
-        let selected = direction == 1 ? units[2] : units[0]
-        let screenTop = selected.view.frame.minY - feed.contentOffset.y
-        units = direction == 1 ? [units[1], units[2], units[0]] : [units[2], units[0], units[1]]
         currentIndex += direction
-        returnsWhenGone = false
         segments = []
         layoutFeed()
-        setOffset(active.view.frame.minY - screenTop)
+        let frame = geometry.frames[currentIndex]
+        setOffset(frame.midY - feed.bounds.height / 2)
         loadEdgeUnits()
         activateCurrent()
     }
 
-    // After the finger is up and momentum is over: a runway landing selects one neighbour in the
-    // swipe's direction and centres it; otherwise the current video keeps its place on screen.
-    private func settle() {
-        guard unsettled, !zoomed, !touching, !feed.isDragging, !feed.isDecelerating, !closed else { return }
-        let winner = unitAtMidpoint(midpoint)
-        if winner == 0 || winner == 2 { commitScope(winner == 0 ? -1 : 1) }
-        else if winner == -1 && scrollDirection != 0 { commitScope(scrollDirection) }
-        let frame = active.view.frame
-        let height = feed.bounds.height
-        let top = frame.minY - feed.contentOffset.y
-        let outside = height / 2 < top || height / 2 >= top + frame.height
-        let desiredTop = outside ? height / 2 - frame.height / 2 : min(max(0, top), max(0, height - frame.height))
-        unsettled = false
-        layoutFeed()
-        overlay.setInteractive(true)
-        setOffset(active.view.frame.minY - desiredTop)
-    }
-
-    // The lock screen's next/previous: the neighbour, centred.
-    private func step(_ direction: Int) {
-        guard !unsettled, video(at: currentIndex + direction) != nil else { return }
-        if zoomed { exitZoom() }
-        unsettled = true
-        layoutFeed()
-        commitScope(direction)
-        unsettled = false
-        layoutFeed()
-        centerActive()
-        overlay.setInteractive(true)
-    }
-
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        if scrollView === feed { monitor(true); beginUnsettled() }
+        if scrollView === feed { monitor(true); unsettled = true; overlay.setInteractive(false) }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard scrollView === feed, !programmatic else { return }
-        FrameMonitor.shared.measure("viewer.scroll") {
-            let delta = feed.contentOffset.y - lastOffset
-            if abs(delta) >= 0.5 { scrollDirection = delta > 0 ? 1 : -1 }
-            lastOffset = feed.contentOffset.y
-            commitMidpointVideo()
-        }
+        guard scrollView === feed, !programmatic, revealed else { return }
+        FrameMonitor.shared.measure("viewer.scroll") { selectVisibleVideo() }
     }
 
-    // A finger or momentum moves the feed, or it has not settled on a video yet.
     var moving: Bool { !closed && (unsettled || touching || feed.isTracking || feed.isDragging || feed.isDecelerating) }
 
     private var monitoring = false
@@ -546,6 +597,21 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         if scrollView === feed { monitor(false); settle() }
+    }
+
+    private func applyPendingGeometry() {
+        guard pendingGeometry, !zoom.isZooming, !moving else { return }
+        pendingGeometry = false
+        for unit in units { recordSize(unit) }
+        layoutFeed()
+    }
+
+    private func recordSize(_ unit: ViewerUnit) {
+        guard let video = unit.video, let index = indexes[video.key], unit.presentationSize.width > 0,
+              unit.presentationSize.height > 0, measuredSizes[video.key] != unit.presentationSize else { return }
+        measuredSizes[video.key] = unit.presentationSize
+        videos[index] = videos[index].setting("viewerWidth", Double(unit.presentationSize.width)).setting("viewerHeight", Double(unit.presentationSize.height))
+        geometryDirty = true
     }
 
     // MARK: zoom
@@ -566,11 +632,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        if scrollView === zoom, pendingGeometry {
-            pendingGeometry = false
-            layoutFeed()
-            if !unsettled { centerActive() }
-        }
+        if scrollView === zoom { applyPendingGeometry() }
         if scrollView === zoom && scale <= 1.01 { exitZoom() }
     }
 
@@ -590,12 +652,89 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         videos = [video]
         currentIndex = 0
         active.configureZoomCheck(video: video, size: size, image: image)
+        measuredSizes[video.key] = size
+        geometryDirty = true
+        fixtureImage = image
         revealed = true
         feed.alpha = 1
         view.layoutIfNeeded()
-        unitGeometryChanged(active)
-        centerActive()
+        layoutFeed()
+        placeInitialVideo()
         overlay.setVideo(video)
+    }
+
+    func configureFeedCheck(image: UIImage) {
+        loadViewIfNeeded()
+        fixtureImage = image
+        videos = (0..<30).map { index in
+            let size = index % 3 == 0 ? CGSize(width: 9, height: 16) : CGSize(width: 16, height: 9)
+            let video = ViewerVideo(["filename": "Fixture \(index)", "provider": "sc", "local": true,
+                                     "viewerWidth": Double(size.width), "viewerHeight": Double(size.height)])!
+            measuredSizes[video.key] = size
+            return video
+        }
+        currentIndex = 3
+        active.configureZoomCheck(video: videos[currentIndex], size: aspect(of: videos[currentIndex]), image: image)
+        geometryDirty = true
+        initialPositionApplied = false
+        revealed = true
+        feed.alpha = 1
+        view.layoutIfNeeded()
+        layoutFeed()
+        placeInitialVideo()
+        loadEdgeUnits()
+    }
+
+    func checkFeedScroll(delta: CGFloat, end: Bool) -> [String: Any] {
+        scrollViewWillBeginDragging(feed)
+        feed.contentOffset.y += delta
+        scrollViewDidScroll(feed)
+        let before = zoomCheckState
+        if end { scrollViewDidEndDragging(feed, willDecelerate: false) }
+        return ["before": before, "after": zoomCheckState]
+    }
+
+    func checkFeedMetadata() -> [String: Any] {
+        let before = zoomCheckState
+        if let unit = units.first(where: { $0 !== active && $0.video != nil }), let video = unit.video, let fixtureImage {
+            unit.configureZoomCheck(video: video, size: CGSize(width: 9, height: 32), image: fixtureImage)
+            unitGeometryChanged(unit)
+        }
+        return ["before": before, "during": zoomCheckState]
+    }
+
+    func checkFeedRefresh() -> [String: Any] {
+        let before = zoomCheckState
+        var fresh = videos.map { video -> ViewerVideo in
+            var raw = video.raw
+            raw.removeValue(forKey: "viewerWidth")
+            raw.removeValue(forKey: "viewerHeight")
+            if video.same(currentVideo!) { raw["fileId"] = "fixture-stable-identity" }
+            return ViewerVideo(raw)!
+        }
+        fresh.insert(ViewerVideo(["filename": "Inserted fixture", "provider": "sc", "local": true])!, at: 0)
+        updateList(fresh)
+        saveCheckpoint()
+        checkpoint.flush()
+        let savedSizes = ViewerCheckpoint.load(checkpoint.directory)?.videos.filter { $0.raw["viewerWidth"] != nil }.count ?? 0
+        return ["before": before, "after": zoomCheckState, "savedSizes": savedSizes]
+    }
+
+    func configureRestoredFeedCheck(image: UIImage) {
+        guard let saved = ViewerCheckpoint.load(checkpoint.directory) else { return }
+        fixtureImage = image
+        videos = saved.videos
+        currentIndex = videos.firstIndex { $0.key == saved.current } ?? 0
+        restoredTop = saved.top.map { CGFloat($0) }
+        initialPositionApplied = false
+        geometryDirty = true
+        active.configureZoomCheck(video: videos[currentIndex], size: aspect(of: videos[currentIndex]), image: image)
+        revealed = true
+        feed.alpha = 1
+        view.layoutIfNeeded()
+        layoutFeed()
+        placeInitialVideo()
+        loadEdgeUnits()
     }
 
     func setZoomCheckScale(_ scale: CGFloat, animated: Bool) { zoom.setZoomScale(scale, animated: animated) }
@@ -613,7 +752,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         return ["viewport": rect(view.bounds), "picture": rect(active.view.convert(active.view.bounds, to: view)),
                 "baseSize": [active.view.bounds.width, active.view.bounds.height], "scale": zoom.zoomScale,
                 "surface": String(describing: ObjectIdentifier(active.view.playerLayer)), "surfaces": surfaces,
-                "carouselEnabled": feed.isScrollEnabled, "index": currentIndex, "zoomed": zoomed]
+                "carouselEnabled": feed.isScrollEnabled, "index": currentIndex, "zoomed": zoomed,
+                "offset": feed.contentOffset.y, "documentHeight": feed.contentSize.height,
+                "key": currentVideo?.key ?? "", "name": currentVideo?.filename ?? "", "players": units.compactMap { unit -> [String: Any]? in
+                    guard let video = unit.video else { return nil }
+                    return ["key": video.key, "frame": rect(unit.view.convert(unit.view.bounds, to: view))]
+                }]
     }
     #endif
 
@@ -790,6 +934,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         videos.remove(at: currentIndex)
         if videos.isEmpty { close(); return }
         currentIndex = min(currentIndex, videos.count - 1)
+        geometryDirty = true
         loadEdgeUnits()
         activateCurrent()
     }
@@ -861,13 +1006,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func unitGeometryChanged(_ unit: ViewerUnit) {
-        // A closing viewer is off screen: nothing to lay out.
         guard !closed else { return }
-        if zoom.isZooming { pendingGeometry = true; return }
+        if zoom.isZooming || moving || loadingUnits { pendingGeometry = true; return }
+        recordSize(unit)
         layoutFeed()
-        guard unit === active else { return }
-        if !revealed, unit.presentationSize != .zero { reveal() }
-        else if !unsettled { centerActive() }
+        if unit === active, !revealed, unit.presentationSize != .zero { reveal() }
     }
 
     func unitNeedsLogin(_ unit: ViewerUnit) {
@@ -947,7 +1090,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // their players, and the neighbours wait until the screen is back.
     private func enteredBackground() {
         for unit in units { unit.view.playerLayer.player = nil }
-        for (position, unit) in units.enumerated() where position != 1 { unit.pause() }
+        for unit in units where unit !== active { unit.pause() }
         saveProgress()
         progress.flush()
         saveCheckpoint()
@@ -956,8 +1099,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func enteringForeground() {
         for unit in units { unit.view.playerLayer.player = unit.player }
-        for (position, unit) in units.enumerated() where unit.video != nil {
-            if playbackPolicy.shouldPlay(position: position, inBackground: false) { unit.resume(liveEdge: position != 1) }
+        for unit in units where unit.video != nil {
+            if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: false) { unit.resume(liveEdge: unit !== active) }
             else { unit.pause() }
         }
     }
@@ -965,7 +1108,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // A call or Siri paused playback; videos carry on afterwards.
     private func interruptionEnded() {
         active.resume(liveEdge: false)
-        if !inBackground && playbackPolicy.playsNeighbors { for (position, unit) in units.enumerated() where position != 1 && unit.video != nil { unit.resume(liveEdge: true) } }
+        if !inBackground && playbackPolicy.playsNeighbors { for unit in units where unit !== active && unit.video != nil { unit.resume(liveEdge: true) } }
     }
 
     // `reveal`: the list scrolls the last viewed row into view (not for a forward swipe that

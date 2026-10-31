@@ -369,6 +369,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         viewer?.close()
         let controller = takeSpare() ?? FrameMonitor.shared.measure("open.init") { buildViewer() }
         controller.restoring = restoring
+        if restoring { controller.restoredTop = ViewerCheckpoint.load(directory)?.top.map { CGFloat($0) } }
         controller.open(videos: videos, index: index)
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }

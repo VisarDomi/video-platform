@@ -93,7 +93,9 @@ final class ViewerUnit {
         view.isHidden = false
         view.subviews.forEach { $0.removeFromSuperview() }
         let picture = UIImageView(image: image)
-        picture.contentMode = .scaleAspectFit
+        // A calibration grid fills the synthetic fitted surface. Actual playback still
+        // uses the permanent AVPlayerLayer's resizeAspect gravity.
+        picture.contentMode = .scaleToFill
         picture.frame = view.bounds
         picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(picture)
@@ -367,6 +369,9 @@ final class ViewerUnit {
 
     private func currentSeconds() -> Double {
         if let seekTarget { return seekTarget.seconds }
+        // A reused preview may leave the visible range before its saved seek can start.
+        // Its temporary zero is not a new playback position.
+        if !started { return startTime }
         let seconds = player.currentTime().seconds
         return seconds.isFinite ? seconds : 0
     }

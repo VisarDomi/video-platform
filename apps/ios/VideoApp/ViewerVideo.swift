@@ -147,6 +147,7 @@ struct ViewerCheckpoint {
     let provider: String
     let videos: [ViewerVideo]
     let current: String
+    var top: Double? = nil
 
     fileprivate static func url(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-checkpoint.json") }
 
@@ -155,10 +156,14 @@ struct ViewerCheckpoint {
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let provider = raw["provider"] as? String, let current = raw["current"] as? String,
               let videos = (raw["videos"] as? [Any])?.compactMap(ViewerVideo.init), !videos.isEmpty else { return nil }
-        return ViewerCheckpoint(provider: provider, videos: videos, current: current)
+        return ViewerCheckpoint(provider: provider, videos: videos, current: current, top: raw["top"] as? Double)
     }
 
-    fileprivate var raw: [String: Any] { ["provider": provider, "current": current, "videos": videos.map(\.raw)] }
+    fileprivate var raw: [String: Any] {
+        var result: [String: Any] = ["provider": provider, "current": current, "videos": videos.map(\.raw)]
+        if let top, top.isFinite { result["top"] = top }
+        return result
+    }
 }
 
 // The picture on screen when the app left it, where it was and whether the controls showed

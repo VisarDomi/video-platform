@@ -79,13 +79,12 @@ addresses remain pinned to the same file.
   audio), and nothing pauses, reloads or jumps on the way back.
   - At minimum zoom, every video uses the largest aspect-preserving size that fits both
     viewport dimensions. Tall portraits fit the height; wide videos fit the width, with
-    black space where needed. A settled swipe keeps the whole fitted picture on screen.
+    black space where needed. Scrolling can leave any part of a picture on screen; lifting a finger never moves it.
   - It works like the website's viewer (`packages/app` `routes/videoViewer.ts`) with
-    AVPlayer: the same three-scope feed (vertical swipes through the list, neighbours
-    touching during a swipe, a runway landing moving one video), the upper-half horizontal
+    AVPlayer: a continuous document of fitted videos (vertical scrolling through the list,
+    neighbours touching with no blank runways or snap positions), the upper-half horizontal
     seek, the lower-half swipe that shows or hides the controls, the overlay with its buttons
-    (mute, follow, block, +/-, save/cut/return, markers), all three videos muted until
-    unmuted, progress every 3 s. Save/cut/return and markers show only for local recordings.
+    (mute, follow, block, +/-, save/cut/return, markers), videos muted until unmuted, progress every 3 s. Save/cut/return and markers show only for local recordings.
   - A pinch zooms the current video anywhere on screen. Zoomed, the list stays put and the
     left edge is not Back: drags pan the picture as in Safari, except the upper half's
     horizontal seek (which then starts anywhere). Zoomed back out, swipes move through the
@@ -114,7 +113,7 @@ addresses remain pinned to the same file.
     that ended gives way to the next one, as in the web viewer. A live stream that plays
     without a picture for 3 s counts as ended (`ViewerUnit.swift`).
   - A killed app reopens its viewer (`viewer-checkpoint.json`, written off the main thread:
-    every swipe saves it, and Tango's 4,000-recording list takes about 60 ms to encode);
+    every scroll position saves it, including the active picture's exact top, and Tango's 4,000-recording list takes about 60 ms to encode);
     progress is `viewer-progress.json`.
 - **Lists** (`VideoApp/VideoList.swift`) look like the website's: a 52-point row per video
   with its name (red while recording or live, orange when edited), duration (Video Vault: a

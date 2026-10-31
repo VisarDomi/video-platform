@@ -80,6 +80,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     // Keep the rendered pages and their base geometry stable for the whole pinch. Sharper
     // decodes, newly learned sizes and appended chapters commit after UIKit finishes zooming.
     private var zoomInProgress = false
+    private var scrollInProgress = false
     private var pinchQuality: CGFloat = 1
     private var pendingAspects: [Int: CGFloat] = [:]
     private var pendingAppend = false
@@ -171,7 +172,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         // A size within a pixel or two of the known one (a site's metadata against the file it
         // serves) is the same page: kept, the layout stays what it was in every session.
         if let known = pages[index].aspect, abs(known - aspect) / known < 0.003 { pendingAspects[index] = nil; return }
-        if zoomInProgress { pendingAspects[index] = aspect; return }
+        if geometryInMotion { pendingAspects[index] = aspect; return }
         let screen = screenAnchor
         pages[index].aspect = aspect
         relayout(keeping: nil, screen: screen)
@@ -225,7 +226,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     private func setOffset(_ y: CGFloat) {
         let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
-        scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: min(max(0, y), maxOffset))
+        let target = min(max(0, y), maxOffset)
+        guard abs(scrollView.contentOffset.y - target) > 0.001 else { return }
+        scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: target)
     }
 
     // The page containing content y (clamped to the first and last page).
@@ -409,7 +412,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         FrameMonitor.shared.scrolling(moving)
     }
 
-    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { monitor(true) }
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { scrollInProgress = true; monitor(true) }
 
     public func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         pinchQuality = zoomBucket
@@ -427,22 +430,17 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         pinnedTop = nil
-        if !decelerate { monitor(false); settleIfIdle() }
+        if !decelerate { scrollInProgress = false; monitor(false); settleIfIdle() }
     }
-    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { monitor(false); settleIfIdle() }
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { scrollInProgress = false; monitor(false); settleIfIdle() }
     public func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
         zoomInProgress = false
-        let anchor = screenAnchor
-        let changed = !pendingAspects.isEmpty || pendingAppend
-        for (index, aspect) in pendingAspects where pages.indices.contains(index) { pages[index].aspect = aspect }
-        pendingAspects = [:]
-        pendingAppend = false
         let ready = pendingImages
         pendingImages = [:]
         for (index, image) in ready {
             if let cell = cells[index] { show(image, at: index, cell: cell) }
         }
-        if changed { relayout(keeping: nil, screen: anchor) }
+        applyPendingGeometry()
         updateVisible()
         monitor(scrollView.isDragging || scrollView.isDecelerating)
         settleIfIdle()
@@ -451,7 +449,22 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     private func settleIfIdle() {
         guard !touching, !zoomInProgress, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming, let position = currentPosition else { return }
-        delegate?.strip(self, settledAt: position)
+        scrollInProgress = false
+        applyPendingGeometry()
+        delegate?.strip(self, settledAt: currentPosition ?? position)
+    }
+
+    private var geometryInMotion: Bool {
+        touching || scrollInProgress || zoomInProgress || scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating || scrollView.isZooming
+    }
+
+    private func applyPendingGeometry() {
+        guard !geometryInMotion, !pendingAspects.isEmpty || pendingAppend else { return }
+        let anchor = screenAnchor
+        for (index, aspect) in pendingAspects where pages.indices.contains(index) { pages[index].aspect = aspect }
+        pendingAspects = [:]
+        pendingAppend = false
+        relayout(keeping: nil, screen: anchor)
     }
 
     public var isZoomed: Bool { zoomInProgress || scrollView.zoomScale > 1.01 }
