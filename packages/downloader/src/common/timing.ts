@@ -3,6 +3,7 @@ export const TSLIVE_POLL_MS = 1_000;
 export const FMP4_POLL_MS = 5_000;
 export const FMP4_IDENTITY_REFRESH_MS = 60_000;
 export const LADDER_POLL_MS = 30_000;
+export const LADDER_DISCOVERY_RETRY_MS = 1_000;
 
 export const STALE_STREAM_TIMEOUT_MS = 60_000;
 export const QUALITY_CHECK_INTERVAL_MS = 10_000;
