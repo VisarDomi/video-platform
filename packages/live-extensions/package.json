@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "build": "node scripts/build.mjs",
-        "check": "tsc --noEmit"
+        "check": "tsc --noEmit",
+        "test:filehost": "node test/filehost.mjs"
     },
     "dependencies": {
         "app": "0.0.1"
