@@ -192,12 +192,13 @@ export async function setCampaignRunning(config: PipelineConfig, running: boolea
     }
 }
 
-export function campaignStatus(config: PipelineConfig): unknown {
+export function campaignStatus(config: PipelineConfig, now = new Date()): unknown {
     const database = new PipelineDatabase(config.databasePath);
     try {
         const control = database.getCampaignControl();
         return {
             ...control,
+            uploadBudget: database.uploadBudget(now, config.uploadTimeZone, control.monthlyUploadLimitBytes),
             trial: database.getCampaignTrialProgress(),
             comparison: database.getComparisonTrial(),
             productionVersion: database.getProductionVersion(),
