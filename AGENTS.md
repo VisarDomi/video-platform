@@ -31,3 +31,9 @@ or resume a gaming hold as a side effect of authentication repair.
 - [NativeKit guide](../../ios-tools/native/README.md): the shared iPhone modules, vendoring into `apps/ios/Kit`, main-thread rules, relaunch restore, FrameMonitor, simulator limits.
 - [Mac and phone access](../../../environment/mac-access.md): SSH to the Mac, UDIDs, signing.
 - [Renewal](../../ios-tools/renewal/README.md): the monthly re-signing of the paid apps.
+
+The viewer follows the user directly: free continuous scrolling, content loading in place,
+and pinch zoom of the same content. Never add snapping, automatic centering, page landing,
+runways or repositioning when scrolling stops. Loading, refreshes and player reuse preserve
+the visible position. Cached next chapters must append during continuous scrolling; do not
+require a scroll-end or settled-page check. Explicit navigation and restoration are separate.
