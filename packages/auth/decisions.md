@@ -37,3 +37,12 @@ does not stop later saves.
 The auth request queue (one request at a time, one second apart) resolves with
 the full `Response`, not parsed JSON. Callers read `set-cookie` headers to
 extract tokens; a body-only result would lose them.
+
+## Login waiters cannot outlive their error handling
+
+The Tango response and Google popup waits are armed before navigation/clicks and
+have rejection handlers immediately. If a trigger fails or browser cleanup closes
+the context, the unused waiter cannot crash the daemon as an unhandled rejection.
+Awaiting the popup still reports its original failure normally; the existing login
+queue and maintenance retry own recovery. Tests run isolated child processes with
+strict unhandled-rejection handling and fake browser objects, without real accounts.

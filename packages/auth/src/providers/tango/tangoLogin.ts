@@ -90,7 +90,7 @@ async function extractLoginTokensFromResponse(response: any, accountEmail: strin
     return { refreshToken: foundRT, sessionToken: foundST, extras: {} };
 }
 
-async function runLoginFlow(browser: Browser, account: Account): Promise<TokenBag> {
+export async function runLoginFlow(browser: Browser, account: Account): Promise<TokenBag> {
     const context = await browser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         viewport: null,
@@ -105,6 +105,7 @@ async function runLoginFlow(browser: Browser, account: Account): Promise<TokenBa
         }).then(response => { responseCaptured = true; return response; });
         void responsePromise.catch(() => {}); // Browser cleanup may cancel this waiter.
         const popupPromise = page.waitForEvent("popup", { timeout: BROWSER_PAGE_TIMEOUT_MS });
+        void popupPromise.catch(() => {}); // Navigation/click failure can bypass awaiting it; cleanup still rejects it.
 
         await page.goto(constants.TANGO_URLS.HOME, { waitUntil: "domcontentloaded", timeout: BROWSER_PAGE_TIMEOUT_MS });
 
