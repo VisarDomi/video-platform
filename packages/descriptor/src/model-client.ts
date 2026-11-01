@@ -29,6 +29,8 @@ export function postJson(url: URL, body: unknown): Promise<{ status: number; bod
             let responseBody = "";
             response.setEncoding("utf8");
             response.on("data", (chunk: string) => { responseBody += chunk; });
+            response.on("error", reject);
+            response.on("aborted", () => reject(new Error("Model response was interrupted")));
             response.on("end", () => {
                 try {
                     resolve({
