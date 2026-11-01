@@ -300,10 +300,17 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         state = "cooldown" if control["resume_at"] else "finishing" if active else "paused"
     elif not active and worker_step and worker_step["disposition"] in ("monthly_quota_wait", "resource_wait"):
         state = worker_step["disposition"]
+    heartbeat = stamp(health["worker_heartbeat"])
+    late_heartbeat = not manual_hold and current_services.get("video-pipeline", {}).get("state") == "active" and (
+        heartbeat is None or (now - heartbeat).total_seconds() > 90)
+    if late_heartbeat:
+        state = "worker_unresponsive"
     alerts = [{"recording": r["id"], "message": safe_reason(r["block_reason"]), "kind": r["state"]} for r in health["actionable_items"]]
     alerts.extend({"recording": r["recording_id"], "message": "A new provider copy is missing", "kind": "provider_loss"} for r in health["unacknowledged_provider_removals"])
     if state == "worker_stopped":
         alerts.insert(0, {"message": "The upload worker is stopped", "kind": "service"})
+    elif late_heartbeat:
+        alerts.insert(0, {"message": "The upload worker heartbeat is late", "kind": "service"})
     for unit, label in (("video-downloader", "Recorder"), ("video-server", "Library service"), ("video-auth", "Authentication service")):
         if current_services.get(unit, {}).get("state") in ("inactive", "failed"):
             alerts.append({"message": label + " is stopped", "kind": "service"})

@@ -140,6 +140,13 @@ class DashboardDataTests(unittest.TestCase):
         data=self.read(worker_step={"disposition":"monthly_quota_wait","reason":"old wait"})
         self.assertEqual(data["campaign"]["state"],"running")
 
+    def test_active_unit_without_a_fresh_heartbeat_is_not_reported_as_running_normally(self):
+        self.db.execute("UPDATE worker_heartbeat SET updated_at='2026-10-31T23:00:00Z'")
+        self.db.commit()
+        data=self.read()
+        self.assertEqual(data['campaign']['state'],'worker_unresponsive')
+        self.assertEqual(data['health']['alerts'][0]['message'],'The upload worker heartbeat is late')
+
     def test_recording_status_exposes_no_signed_urls_or_private_paths(self):
         folder=self.downloads/'sc/downloaded/.active/2026-11-01 010000 capture';folder.mkdir(parents=True)
         (folder/'playlist.m3u8').write_text('#EXTM3U\n#EXTINF:2,\n1.ts\n')

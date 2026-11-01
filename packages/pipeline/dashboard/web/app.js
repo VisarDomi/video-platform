@@ -15,18 +15,19 @@ function text(id,value){$(id).textContent=value;}
 function provider(name){return el('span','provider '+(name||''),name==='tango'?'TANGO':name==='sc'?'SC':name==='fc2'?'FC2':name||'LOCAL');}
 function empty(message){return el('p','empty-inline',message);}
 function formatCount(n){return n===null||n===undefined?'—':num.format(n);}
-function working(){return data?.services['video-pipeline']?.state==='active'&&!['user_paused','paused','worker_stopped','status_unavailable','cooldown'].includes(data.campaign.state);}
+function working(){return data?.services['video-pipeline']?.state==='active'&&!['user_paused','paused','worker_stopped','worker_unresponsive','status_unavailable','cooldown'].includes(data.campaign.state);}
 function setConnection(ok,message){live=ok;document.body.classList.toggle('saved-data',!ok);$('refresh').classList.toggle('offline',!ok);text('connection-label',ok?'Live':data?'Saved':'Offline');$('connection-banner').hidden=ok;if(!ok)text('connection-banner',message||`Connection interrupted. Showing the last snapshot from ${data?time(data.generated_at,true):'this phone'}.`);}
 
 function renderHero(){
  const a=data.active,c=data.campaign,state=c.state;
- const paused=['user_paused','paused','worker_stopped'].includes(state);
+ const paused=['user_paused','paused','worker_stopped','worker_unresponsive'].includes(state);
  $('now-card').classList.toggle('paused',paused);
  let title=a?`${LABELS[a.stage]||'Working'}.`:'Ready for what’s next.';
  let tag=a?LABELS[a.stage]:'PIPELINE RUNNING',detail=a?`${(a.provider||'local').toUpperCase()} · ${date(a.captured_at)} · ${duration(a.seconds)}`:`${data.counts.capturing} recording${data.counts.capturing===1?'':'s'} live · ${formatCount(data.counts.verified)} verified`;
  if(a?.stage==='upload'&&a.progress?.percent>=100){title=a.phase==='metadata_submitting'?'Publishing the upload.':'Finishing the upload.';tag=a.phase==='metadata_submitting'?'SUBMITTING DETAILS':'PROVIDER ASSEMBLY';}
  if(state==='user_paused'||state==='paused'){title='Taking a breather.';tag='UPLOAD WORKER PAUSED';detail=`${data.counts.capturing} live recording${data.counts.capturing===1?'':'s'} · capture stays independent`;}
  if(state==='worker_stopped'){title='Worker is stopped.';tag='UPLOAD WORKER OFFLINE';detail='Your queue and completed work are preserved.';}
+ if(state==='worker_unresponsive'){title='Checking on the worker.';tag='HEARTBEAT LATE';detail=`Last signal ${ago(c.worker_heartbeat)}. The queue snapshot is preserved.`;}
  if(state==='cooldown'){title='A moment to retry.';tag='AUTOMATIC RETRY';detail=`Retry ${time(c.resume_at,true)} · the queue keeps its place`;}
  if(state==='monthly_quota_wait'){title='Waiting for allowance.';tag='AUTOMATIC BUDGET WAIT';detail=`More allowance on ${date(data.budget.next_release)}. No manual resume needed.`;}
  if(state==='resource_wait'){title='Waiting for room.';tag='RESOURCE WAIT';detail=c.step?.reason||'The next stage will start when resources are available.';}
