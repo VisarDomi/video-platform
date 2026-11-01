@@ -33,6 +33,8 @@ class DashboardDataTests(unittest.TestCase):
             duration_seconds REAL,state TEXT,block_reason TEXT,lease_owner TEXT,updated_at TEXT);
           CREATE TABLE recording_provenance(recording_id TEXT,alias TEXT);
           CREATE TABLE artifacts(recording_id TEXT,path TEXT,size_bytes INTEGER);
+          CREATE TABLE upload_metadata(recording_id TEXT,title TEXT);
+          CREATE TABLE descriptions(recording_id TEXT,output_json TEXT);
           CREATE TABLE campaign_control(id INTEGER,state TEXT,monthly_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT);
           CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT);
           CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT);
@@ -79,6 +81,27 @@ class DashboardDataTests(unittest.TestCase):
         self.assertIsNone(data["active"]["progress"])
         self.assertEqual(data["active"]["reservation_month"], "2026-10")
         self.assertEqual(data["budget"]["reserved"], 4000000000)
+
+    def test_active_job_includes_exact_source_path_and_final_upload_title_only(self):
+        source = '/home/visar/Videos/downloads/tango/edited/2026-01-01 010000 alice'
+        self.db.execute("UPDATE recordings SET source_path=? WHERE state='uploading'", (source,))
+        self.db.execute("INSERT INTO upload_metadata VALUES ('2026-01-01 010000 alice',?)", ('Generated title [2026-01-01 010000 alice]',))
+        self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Earlier descriptor title'}),))
+        self.db.commit()
+        data = self.read()
+        self.assertEqual(data['active']['source_path'], source)
+        self.assertEqual(data['active']['generated_title'], 'Generated title [2026-01-01 010000 alice]')
+        self.assertNotIn('/private/file.mp4', json.dumps(data))
+        self.assertTrue(all('source_path' not in row and 'generated_title' not in row for row in data['queue']))
+
+    def test_active_title_can_appear_before_upload_metadata_and_be_absent_before_description(self):
+        self.assertIsNone(self.read()['active']['generated_title'])
+        self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Fresh descriptor title'}),))
+        self.db.commit()
+        self.assertEqual(self.read()['active']['generated_title'], 'Fresh descriptor title')
+        self.db.execute("UPDATE descriptions SET output_json='{}'")
+        self.db.commit()
+        self.assertIsNone(self.read()['active']['generated_title'])
 
     def test_repeated_foreground_snapshots_close_readonly_database_handles(self):
         before = len(os.listdir('/proc/self/fd'))

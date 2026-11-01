@@ -14,7 +14,7 @@ function fixture(){
  return {generated_at:now,fresh:true,campaign:{state:'running',resume_at:null,worker_heartbeat:now,step:null},
   health:{attention:0,historical_removals:9,alerts:[]},
   counts:{verified:123,ready:2,short_waiting:1,prepared_batches:1,confirming:1,capturing:1,submitted:7,receipts_verified:3,converted:8},
-  active:{id:'2026-01-01 010000 fixture-active',alias:'fixture-active',provider:'tango',captured_at:'2026-01-01 010000',stage:'upload',state:'uploading',seconds:900,size_bytes:1000000000,started_at:now,reservation_month:'2026-11',progress:{acknowledged_bytes:250000000,total_bytes:1000000000,percent:25,bytes_per_second:500000,eta_seconds:1500,fresh:true,updated_at:now}},
+  active:{id:'2026-01-01 010000 fixture-active',alias:'fixture-active',source_path:'/home/visar/Videos/downloads/tango/edited/2026-01-01 010000 fixture-active-with-a-very-long-unbroken-streamer-name',generated_title:'A generated title for the active recording [2026-01-01 010000 fixture-active]',provider:'tango',captured_at:'2026-01-01 010000',stage:'upload',state:'uploading',seconds:900,size_bytes:1000000000,started_at:now,reservation_month:'2026-11',progress:{acknowledged_bytes:250000000,total_bytes:1000000000,percent:25,bytes_per_second:500000,eta_seconds:1500,fresh:true,updated_at:now}},
   captures:[{alias:'fixture-capture',provider:'sc',segments:350,seconds:700,active:true}],finalization:{processing:0,completed24:6},
   queue:[{id:'2026-01-02 010000 fixture-next',alias:'fixture-next',provider:'tango',captured_at:'2026-01-02 010000',seconds:800,stage:'convert'},
     {id:'2026-01-03 010000 fixture-later',alias:'fixture-later',provider:'fc2',captured_at:'2026-01-03 010000',seconds:900,stage:'describe'}],
@@ -56,11 +56,14 @@ for(const [name,engine,options] of engines){
   for(const width of [320,390,430,1024]){await p.setViewportSize({width,height:844});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`no overflow at ${width}`);}
   await p.setViewportSize({width:390,height:844});
   assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.equal(await p.locator('#progress-number').innerText(),'25.0%');
+  assert.equal(await p.locator('#now-source-path').innerText(),f.getData().active.source_path);
+  assert.equal(await p.locator('#now-generated-title').innerText(),f.getData().active.generated_title);
   await p.getByRole('button',{name:/Queue$/}).click();await p.locator('#queue-search').fill('fixture-next');assert.equal(await p.locator('.queue-row').count(),1);
   await p.locator('.brand').click();assert.equal(await p.locator('#overview').isVisible(),true);
   await p.locator('#show-shorts').click();assert.match(await p.locator('#queue-list').innerText(),/fixture-short/);
-  const changed=f.getData();changed.active.alias='<img src=x onerror="window.__unsafe=1">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('#now-alias').textContent.startsWith('<img'));
-  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#now-alias img').count(),0);
+  const changed=f.getData();changed.active.generated_title='<img src=x onerror="window.__unsafe=1">';changed.active.source_path='/recordings/<img src=x onerror="window.__unsafe=1">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('#now-generated-title').textContent.startsWith('<img'));
+  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#now-generated-title img,#now-source-path img').count(),0);
+  assert.equal(await p.locator('#now-source-path').innerText(),changed.active.source_path);
   assert.deepEqual(f.errors,[]);
  });
  test(`${name}: offline reload preserves a clearly saved snapshot and reconnects`,async t=>{
@@ -69,6 +72,8 @@ for(const [name,engine,options] of engines){
   f.offline(true);await f.context.setOffline(true);await p.reload({waitUntil:'domcontentloaded'});
   await p.waitForFunction(()=>document.querySelector('#connection-label')?.textContent==='Saved');
   assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.match(await p.locator('#now-state').innerText(),/LAST SEEN/);assert.match(await p.locator('#health-label').innerText(),/Last known/);
+  assert.equal(await p.locator('#now-source-path').innerText(),f.getData().active.source_path);
+  assert.equal(await p.locator('#now-generated-title').innerText(),f.getData().active.generated_title);
   const changed=f.getData();changed.active.progress.percent=50;changed.active.progress.acknowledged_bytes=500000000;f.setData(changed);f.offline(false);await f.context.setOffline(false);await p.evaluate(()=>window.dispatchEvent(new Event('online')));
   await p.waitForFunction(()=>document.querySelector('#connection-label').textContent==='Live'&&document.querySelector('#progress-number').textContent==='50.0%');
   assert.deepEqual(f.errors,[]);

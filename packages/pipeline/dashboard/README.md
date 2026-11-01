@@ -13,6 +13,11 @@ state transitions. Queue entries are the registered jobs; newly finalized
 recordings appear as the worker admits them. The dashboard never performs a
 parallel discovery/conversion/upload or provider crawl.
 
+The active-job card shows the generated upload title and complete recording
+source-folder path, wrapping without truncation on phones. Before upload metadata
+is composed, it uses the descriptor's title when available; earlier stages say
+the title has not been generated yet. The source path can be selected and copied.
+
 This is a **read-only** view. Known provider removals are retained history, not
 current pipeline errors. Short waiting, normal verification, resource and quota
 waits are labeled normally. Manual pipeline controls remain independent; the
@@ -39,7 +44,8 @@ of the machine between recent readings; the first reading remains unknown.
 this directory on HTTPS8791. The existing TLS key is read only by the server and
 is never exposed. Only explicit asset paths and `GET/HEAD /api/dashboard` exist;
 write methods are rejected. Clients are limited to loopback, private IPv4 and
-Tailscale. Responses omit signed media URLs, source paths, cookies and provider
+Tailscale. The active recording's source path is included for identification;
+responses omit signed media URLs, unrelated local paths, cookies and provider
 credentials. No media is decoded, transcoded or played for dashboard operation.
 
 All phone tabs share one five-second backend snapshot. The page requests it

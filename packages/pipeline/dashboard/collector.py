@@ -216,6 +216,17 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
             active_row = next((r for r in records if r["lease_owner"] and r["state"] in ACTIVE_STATES), None)
         active = identity(active_row) if active_row else None
         if active:
+            active["source_path"] = active_row["source_path"]
+            metadata = db.execute("SELECT title FROM upload_metadata WHERE recording_id=?", (active_row["id"],)).fetchone()
+            active["generated_title"] = metadata["title"] if metadata else None
+            if not active["generated_title"]:
+                description = db.execute("SELECT output_json FROM descriptions WHERE recording_id=?", (active_row["id"],)).fetchone()
+                try:
+                    output = json.loads(description["output_json"]) if description else None
+                    title = output.get("title") if isinstance(output, dict) else None
+                    active["generated_title"] = title if isinstance(title, str) and title.strip() else None
+                except (ValueError, TypeError):
+                    active["generated_title"] = None
             active["size_bytes"] = artifact.get(active_row["id"], {}).get("size_bytes")
             attempt = next((a for a in attempts if a["recording_id"] == active_row["id"]), None)
             active["started_at"] = attempt["started_at"] if attempt else active_row["updated_at"]
