@@ -42,3 +42,6 @@ Video visibility is independent of scrolling coordinates: at rest or while zoome
 the current video is shown. Neighbours appear only during an unzoomed vertical scroll.
 Every VOD provider pauses neighbours; only TsLive live keeps neighbours playing muted.
 Zoom disables carousel navigation. Never turn a visibility transition into snapping.
+
+Do not convert or transcode FileHost videos, including separate playback copies. Serve the
+original bytes; retain/report native codec limitations rather than substituting media.
