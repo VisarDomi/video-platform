@@ -14,3 +14,6 @@ __pycache__/
 
 # The iPhone apps' private build inputs (the PC's Tango login key).
 apps/ios/Private/
+apps/ios/ThirdParty/VLCKit/VLCKit.xcframework/
+apps/ios/ThirdParty/VLCKit/MobileVLCKit.xcframework/
+apps/ios/ThirdParty/VLCKit/binary-receipt.json

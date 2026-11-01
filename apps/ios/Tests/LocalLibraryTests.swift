@@ -22,6 +22,11 @@ struct LocalLibraryTests {
         check(dimensioned["displayWidth"] as? Double == 720 && dimensioned["displayHeight"] as? Double == 1280, "display dimensions reach the viewer before playback")
         let decodedDimensions = try JSONDecoder().decode(ServerVideo.self, from: JSONEncoder().encode(portrait))
         check(decodedDimensions == portrait, "list cache retains display dimensions")
+        var av1 = portrait; av1.videoCodec = "av1"; av1.frameRate = 60
+        let codec = mp4.describeRaw(av1)
+        check(codec["videoCodec"] as? String == "av1" && codec["frameRate"] as? Double == 60, "original codec reaches the native decoder selector")
+        let cachedCodec = try JSONDecoder().decode(ServerVideo.self, from: JSONEncoder().encode(av1))
+        check(cachedCodec == av1, "offline cache retains codec selection")
         let cache = ListCache(provider: "bunkr", epoch: "fixture", revision: 4, videos: [item])
         let restored = try JSONDecoder().decode(ListCache.self, from: JSONEncoder().encode(cache))
         check(restored.videos == [item], "offline list cache retains MP4 metadata")

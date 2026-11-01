@@ -11,10 +11,15 @@ registry = json.loads((root/'providers.json').read_text())
 if len(sys.argv) != 2 or sys.argv[1] not in registry: raise SystemExit('Supply exactly one provider: ' + ', '.join(registry))
 key = sys.argv[1]
 config = registry[key]
+probe = os.environ.get('DECODER_PROBE') == '1'
+if probe:
+    assert key == 'bunkr'
+    config = dict(config, product='OriginalVideoProbe', name='Original video check', bundleId='com.visar.OriginalVideoProbe.paid', build='1')
 product = config['product']
 source_hash = hashlib.sha256(key.encode())
 source_files = list((root/'VideoApp').glob('*.swift')) + list((root/'Shared').glob('*.swift')) + list((root/'Kit/Sources').rglob('*.swift'))
 source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
+if key == 'bunkr': source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py']
 for source in sorted(source_files):
     source_hash.update(str(source.relative_to(root)).encode()+b'\0')
     source_hash.update(hashlib.sha256(source.read_bytes()).digest())
@@ -36,7 +41,7 @@ files = []
 def phase(target, kind, paths):
     refs = []
     for path in paths:
-        filetype = {'swift': 'sourcecode.swift', 'js': 'sourcecode.javascript', 'json': 'text.json', 'html': 'text.html'}[path.rsplit('.', 1)[1]]
+        filetype = 'folder' if (root/path).is_dir() else {'swift': 'sourcecode.swift', 'js': 'sourcecode.javascript', 'json': 'text.json', 'html': 'text.html', 'txt': 'text'}[path.rsplit('.', 1)[1]]
         ref = obj(path, 'PBXFileReference', lastKnownFileType=filetype, path=str(root/path), sourceTree='<group>')
         if ref not in files: files.append(ref)
         refs.append(obj(target+kind+path, 'PBXBuildFile', fileRef=ref))
@@ -87,20 +92,29 @@ for suffix in config.get('extensions', []):
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
+if probe:
+    sources = ['VideoApp/ViewerVideo.swift', 'VideoApp/ViewerDecoder.swift', 'VideoApp/VLCVideoDecoder.swift', 'Tests/OriginalVideoProbe.swift']
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
 kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
 if os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name) for name in kit_names]
+packages = [kit]
+if key == 'bunkr':
+    decoder_package = obj('DecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/VLCKit', generated))
+    packages.append(decoder_package)
+    kit_products.append(obj('DecoderProduct', 'XCSwiftPackageProductDependency', productName='VLCKit', package=decoder_package))
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
                  files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
-phases = [phase(product, 'Sources', sources), phase(product, 'Resources', []), frameworks]
+resources = ['ThirdParty/VLCKit/LICENSE.txt'] if key == 'bunkr' else []
+phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
 if embedded:
     phases.append(obj('Embed', 'PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=13,
                       files=embedded, name='Embed App Extensions', runOnlyForDeploymentPostprocessing=0))
 product_ref = obj('Product', 'PBXFileReference', explicitFileType='wrapper.application', includeInIndex=0, path=product+'.app', sourceTree='BUILT_PRODUCTS_DIR')
 products.insert(0, product_ref)
 settings = dict(common, INFOPLIST_FILE=str(generated/'Info.plist'), PRODUCT_BUNDLE_IDENTIFIER=config['bundleId'])
+if key == 'bunkr': settings['LD_RUNPATH_SEARCH_PATHS'] = '$(inherited) @executable_path/Frameworks'
 if login: settings['CODE_SIGN_ENTITLEMENTS'] = str(entitlements)
 targets.insert(0, obj('Target', 'PBXNativeTarget', buildConfigurationList=config_list(product, settings), buildPhases=phases, buildRules=[],
     dependencies=dependencies, name=product, productName=product, productReference=product_ref, productType='com.apple.product-type.application',
@@ -127,12 +141,13 @@ else:
     # A native list on the PC's API (VideoApp/LocalList.swift) instead of the website.
     info['LocalProvider'] = key
     info['LocalMediaKind'] = config.get('mediaKind', 'hls')
+if probe: info.pop('UIApplicationSceneManifest', None)
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')
 project = obj('Project', 'PBXProject', buildConfigurationList=config_list('Project', {}), compatibilityVersion='Xcode 14.0',
     developmentRegion='en', knownRegions=['en', 'Base'], mainGroup=group, productRefGroup=product_group, projectDirPath='', projectRoot='', targets=targets,
-    packageReferences=[kit])
+    packageReferences=packages)
 def encode(value):
     if isinstance(value, dict): return '{'+''.join(json.dumps(k)+' = '+encode(v)+';\n' for k, v in value.items())+'}'
     if isinstance(value, list): return '('+','.join(encode(v) for v in value)+')'

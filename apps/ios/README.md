@@ -42,6 +42,17 @@ soon as buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
 bytes and dropped frames without URLs or credentials.
+Original AV1/VP9/VP8 Bunkr files use VLCKit's native decoder behind the same
+`ViewerUnit`; supported files keep AVFoundation. No file is converted, replaced
+or proxied into another format. The alternate engine retains the shared controls,
+fitted surface, zoom, current-only visibility, paused neighbours and saved timeline.
+Its library/media setup runs off the main thread. Backgrounding disables its video
+track while retaining audio/time, and foregrounding restores that track.
+The checksum-pinned official iOS binary, system TLS trust and renewal inputs are
+documented in [ThirdParty/VLCKit](ThirdParty/VLCKit/README.md).
+The owner chose the previously playing VLCKit 4 build on November 1. Original
+AV1 playback is verified on the A14 and confirmed by the owner; precise seek,
+end and return behavior remain for the explicitly deferred Bunkr polish pass.
 The ✏️ button beside mute renames the MP4 on the PC and updates its list/player
 name. A stable file identity keeps the current player, saved position and row
 identity intact across renames. New names keep the `.mp4` extension and cannot

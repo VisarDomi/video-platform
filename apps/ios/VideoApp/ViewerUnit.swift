@@ -61,6 +61,10 @@ final class ViewerUnit {
     private var playbackPolicy = ViewerPlaybackPolicy(provider: "")
     private var playRequestedAt: CFTimeInterval?
     private var playStartedMs: Double?
+    private var decoder: (any ViewerDecoder)?
+    private var decoderSurface: UIView?
+    private var alternateKey: String?
+    private var videoEnabled = true
 
     init() {
         player.isMuted = true
@@ -80,8 +84,20 @@ final class ViewerUnit {
     }
 
     var muted: Bool {
-        get { player.isMuted }
-        set { player.isMuted = newValue }
+        get { decoder?.muted ?? player.isMuted }
+        set {
+            player.isMuted = newValue
+            decoder?.muted = newValue
+        }
+    }
+
+    var isPlaying: Bool { decoder?.playing ?? (player.rate > 0) }
+    var hasPicture: Bool { decoder?.hasPicture ?? view.playerLayer.isReadyForDisplay }
+
+    func setVideoEnabled(_ enabled: Bool) {
+        videoEnabled = enabled
+        view.playerLayer.player = enabled ? player : nil
+        decoder?.setVideoEnabled(enabled)
     }
 
     var hasMedia: Bool { video != nil && !view.isHidden }
@@ -113,7 +129,8 @@ final class ViewerUnit {
     #endif
 
     func load(_ video: ViewerVideo, start: Double, play: Bool) {
-        if let current = self.video, current.same(video), player.currentItem != nil {
+        let alternate = ViewerDecoders.available && (video.needsAlternateDecoder || alternateKey == video.key)
+        if let current = self.video, current.same(video), (player.currentItem != nil || decoder != nil), alternate == (decoder != nil) {
             self.video = video
             play ? self.play() : pause()
             return
@@ -138,6 +155,10 @@ final class ViewerUnit {
             do {
                 let source = try await delegate.unitSource(video)
                 guard token == self.token else { return }
+                if alternate {
+                    await attachDecoder(source, video: video, token: token)
+                    return
+                }
                 let asset = await delegate.unitAsset(source, for: video)
                 guard token == self.token else { return }
                 resolving = false
@@ -225,7 +246,40 @@ final class ViewerUnit {
     private func failed(token: Int) {
         guard token == self.token else { return }
         if video?.liveStream == true { delegate?.unitUnavailable(self); return }
+        if useAlternateDecoder() { return }
         scheduleRecovery()
+    }
+
+    private func useAlternateDecoder() -> Bool {
+        guard ViewerDecoders.available, decoder == nil, let video, video.provider == "bunkr" else { return false }
+        alternateKey = video.key
+        reload()
+        return true
+    }
+
+    private func attachDecoder(_ source: MediaSource, video: ViewerVideo, token: Int) async {
+        let surface = UIView(frame: view.bounds)
+        surface.backgroundColor = .black
+        surface.isUserInteractionEnabled = false
+        surface.clipsToBounds = true
+        surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(surface)
+        let prepared = await ViewerDecoders.make(source: source, video: video, surface: surface, start: startTime,
+            changed: { [weak self] in
+                guard let self, self.token == token else { return }
+                self.timeUpdate()
+            }, failed: { [weak self] in
+                guard let self, self.token == token else { return }
+                self.scheduleRecovery()
+            })
+        guard token == self.token else { prepared?.stop(); surface.removeFromSuperview(); return }
+        decoderSurface = surface
+        decoder = prepared
+        resolving = false
+        guard decoder != nil else { surface.removeFromSuperview(); decoderSurface = nil; scheduleRecovery(); return }
+        decoder?.muted = player.isMuted
+        decoder?.setVideoEnabled(videoEnabled)
+        if wantsPlay { decoder?.play() }
     }
 
     // With automatic startup waiting disabled, AVPlayer pauses on an empty buffer.
@@ -256,13 +310,14 @@ final class ViewerUnit {
         }
         pictureCheck?.invalidate()
         pictureCheck = nil
-        guard video?.liveStream == true, player.timeControlStatus == .playing else { return }
+        guard (video?.liveStream == true || video?.provider == "bunkr"), player.timeControlStatus == .playing else { return }
         let token = token
         pictureCheck = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, token == self.token, self.player.timeControlStatus == .playing,
                       self.player.currentItem?.presentationSize == .zero else { return }
-                self.delegate?.unitUnavailable(self)
+                if self.video?.liveStream == true { self.delegate?.unitUnavailable(self) }
+                else { _ = self.useAlternateDecoder() }
             }
         }
     }
@@ -305,6 +360,7 @@ final class ViewerUnit {
     func play() {
         if !wantsPlay { playRequestedAt = CACurrentMediaTime(); playStartedMs = nil }
         wantsPlay = true
+        if let decoder { decoder.play(); return }
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: true)
         if let item = player.currentItem, item.status == .failed { reload(); return }
         if player.currentItem == nil, video != nil, recovery == nil, !resolving { reload(); return }
@@ -313,6 +369,7 @@ final class ViewerUnit {
 
     func pause() {
         wantsPlay = false
+        decoder?.pause()
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: false)
         player.pause()
     }
@@ -323,6 +380,7 @@ final class ViewerUnit {
         guard video != nil else { return }
         if !wantsPlay { playRequestedAt = CACurrentMediaTime(); playStartedMs = nil }
         wantsPlay = true
+        if let decoder { decoder.play(); return }
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: true)
         if resolving { return }
         if player.currentItem == nil || player.currentItem?.status == .failed { reload(); return }
@@ -333,6 +391,9 @@ final class ViewerUnit {
     }
 
     func snapshot() -> TimelineSnapshot {
+        if let decoder {
+            return TimelineSnapshot(currentTime: decoder.currentTime, duration: decoder.duration, seekMax: decoder.duration, seekableEnd: decoder.duration)
+        }
         observe()
         return timeline.snapshot()
     }
@@ -345,6 +406,13 @@ final class ViewerUnit {
         var target = max(0, min(time, snapshot.seekMax))
         let shouldResume = resume && (snapshot.isLive || target < terminal - 0.1)
         if !shouldResume && target >= terminal - 0.1 { target = max(0, terminal - 0.1) }
+        if let decoder {
+            decoder.seek(target)
+            if shouldResume { wantsPlay = true; decoder.play() }
+            else if resume { wantsPlay = false; decoder.pause() }
+            emitTime()
+            return
+        }
         if resume { player.pause() }
         seek(to: target) { [weak self] in
             guard let self, shouldResume, resume else { return }
@@ -378,6 +446,7 @@ final class ViewerUnit {
     }
 
     private func currentSeconds() -> Double {
+        if let decoder { return decoder.currentTime }
         if let seekTarget { return seekTarget.seconds }
         // A reused preview may leave the visible range before its saved seek can start.
         // Its temporary zero is not a new playback position.
@@ -389,6 +458,16 @@ final class ViewerUnit {
     private func observe() { timeline.observe(player, current: currentSeconds()) }
 
     private func timeUpdate() {
+        if let decoder {
+            if decoder.playing { failures = 0; recovery?.invalidate(); recovery = nil }
+            if decoder.size != .zero && decoder.size != presentationSize {
+                presentationSize = decoder.size
+                delegate?.unitGeometryChanged(self)
+            }
+            if decoder.playing, let requested = playRequestedAt, playStartedMs == nil {
+                playStartedMs = (CACurrentMediaTime() - requested) * 1000
+            }
+        }
         let now = CACurrentMediaTime()
         guard now - lastTimeEmit >= 0.25 else { return }
         lastTimeEmit = now
@@ -439,6 +518,10 @@ final class ViewerUnit {
     var playlist: Playlist? { timeline.playlist }
 
     var playbackEvidence: [String: Any] {
+        if let decoder {
+            return decoder.evidence.merging(["video": video?.filename ?? "", "videoCodec": video?.raw["videoCodec"] ?? "unknown",
+                                              "wantsPlay": wantsPlay, "activationMs": playStartedMs ?? -1]) { _, new in new }
+        }
         let item = player.currentItem, log = item?.accessLog()?.events.last
         let finite = { (value: Double) in value.isFinite ? value : 0 }
         let end = item?.loadedTimeRanges.last?.timeRangeValue.end.seconds ?? 0
@@ -454,6 +537,10 @@ final class ViewerUnit {
     }
 
     private func clearMedia() {
+        decoder?.stop()
+        decoder = nil
+        decoderSurface?.removeFromSuperview()
+        decoderSurface = nil
         playlistRefresh?.invalidate()
         playlistRefresh = nil
         playlistTask?.cancel()

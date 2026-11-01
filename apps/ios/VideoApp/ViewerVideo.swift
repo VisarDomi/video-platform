@@ -26,6 +26,7 @@ struct ViewerVideo: @unchecked Sendable {
     var local: Bool { raw["local"] as? Bool ?? false }
     var liveStream: Bool { raw["live"] as? Bool ?? false }
     var media: MediaSource? { MediaSource(raw["media"]) }
+    var needsAlternateDecoder: Bool { provider == "bunkr" && ["av1", "vp9", "vp8"].contains((raw["videoCodec"] as? String ?? "").lowercased()) }
     var displaySize: CGSize? {
         if provider == "tango-live" { return CGSize(width: 720, height: 1280) }
         guard let width = raw["displayWidth"] as? Double, let height = raw["displayHeight"] as? Double,

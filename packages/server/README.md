@@ -35,3 +35,6 @@ list startup. They include sample aspect ratio and track rotation, persist with 
 and publish through the existing revision feed. Fragmented/encrypted HLS is probed with
 its local playlist context so init maps and keys are available. MP4 dimensions share the
 existing stat-fingerprint metadata cache. Neither path transcodes or changes media files.
+
+Bunkr playback serves original files byte-for-byte. Automatic conversion/transcoding is
+not permitted. Codec incompatibility must be reported without rewriting or substituting media.

@@ -376,7 +376,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             } else {
                 unit = ViewerUnit()
                 unit.delegate = self
-                if inBackground { unit.view.playerLayer.player = nil }
+                if inBackground { unit.setVideoEnabled(false) }
                 units.append(unit)
                 content.addSubview(unit.view)
             }
@@ -1032,6 +1032,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func unitTime(_ unit: ViewerUnit, _ snapshot: TimelineSnapshot) {
         guard unit === active else { return }
+        if unit.hasPicture { removePoster() }
         FrameMonitor.shared.measure("viewer.time") { showTime(snapshot) }
     }
 
@@ -1101,7 +1102,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let now = CACurrentMediaTime()
         guard force || now - lastNowPlaying >= 5 else { return }
         lastNowPlaying = now
-        session.nowPlaying(currentVideo, active.snapshot(), playing: active.player.rate > 0)
+        session.nowPlaying(currentVideo, active.snapshot(), playing: active.isPlaying)
     }
 
     // MARK: the poster
@@ -1122,7 +1123,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func removePosterWhenPlaying() {
         let layer = active.view.playerLayer
-        if layer.isReadyForDisplay { removePoster(); return }
+        if active.hasPicture { removePoster(); return }
         posterReady = layer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] layer, _ in
             guard layer.isReadyForDisplay else { return }
             DispatchQueue.main.async { self?.removePoster() }
@@ -1167,7 +1168,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // In the background a player keeps playing only without its picture: the layers let go of
     // their players, and the neighbours wait until the screen is back.
     private func enteredBackground() {
-        for unit in units { unit.view.playerLayer.player = nil }
+        for unit in units { unit.setVideoEnabled(false) }
         for unit in units where unit !== active { unit.pause() }
         saveProgress()
         progress.flush()
@@ -1176,7 +1177,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func enteringForeground() {
-        for unit in units { unit.view.playerLayer.player = unit.player }
+        for unit in units { unit.setVideoEnabled(true) }
         for unit in units where unit.video != nil {
             if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: false) { unit.resume(liveEdge: unit !== active) }
             else { unit.pause() }

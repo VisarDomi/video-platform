@@ -15,6 +15,8 @@ struct ServerVideo: Codable, Sendable, Equatable {
     var fileId: String? = nil
     var width: Double? = nil
     var height: Double? = nil
+    var videoCodec: String? = nil
+    var frameRate: Double? = nil
 
     var key: String { (fileId ?? filename) + "\u{1F}" + type }
 
@@ -176,6 +178,8 @@ struct LocalAPI: Sendable {
             "media": ["url": mediaURL(video.filename, fileId: video.fileId).absoluteString, "kind": mediaKind.rawValue],
         ]
         if let fileId = video.fileId { raw["fileId"] = fileId }
+        if let codec = video.videoCodec { raw["videoCodec"] = codec }
+        if let fps = video.frameRate { raw["frameRate"] = fps }
         if let width = video.width, let height = video.height, width.isFinite, height.isFinite, width > 0, height > 0 {
             raw["displayWidth"] = width
             raw["displayHeight"] = height

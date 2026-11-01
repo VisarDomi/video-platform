@@ -22,7 +22,8 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
                      inputs=['VideoApp', 'Shared', 'Kit', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
                             + (['Private'] if product.get('native') == 'tango' else [])
-                            + ['build/' + provider + '/' + suffix for suffix in web],
+                            + ['build/' + provider + '/' + suffix for suffix in web]
+                            + (['ThirdParty/VLCKit', 'scripts/prepare-vlckit.py'] if provider == 'bunkr' else []),
                      build=['/usr/bin/python3', 'scripts/build-provider.py', provider],
                      environment={'DEVELOPMENT_TEAM': args.team, 'SIGNING_DEVICE': args.device}))
 print(json.dumps(dict(repo='video-platform', apps=apps)))
