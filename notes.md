@@ -22,12 +22,12 @@ reloads systemd but deliberately does not restart services.
 
 ## Logs
 
-- The current Internet download cap is **10 Mbps** (owner confirmed 2026-10-31).
-  Preserve the highest-quality source bytes and keep missed-segment accounting
-  accurate; bandwidth-constrained gaps are still counted as `missed_ours` when
-  logged as late polls. Do not add parallel requests or change capture quality
-  to conceal the cap. The owner plans to contact the ISP next month; that is
-  context, not a scheduled reminder or authorization to contact anyone.
+- The owner confirmed Internet bandwidth was restored on 2026-11-01 without
+  contacting the ISP. A short PC download test measured about **205 Mbps**;
+  recent completed Porntrex transfers also confirm usable upload bandwidth.
+  This is a measured sample, not a guaranteed line rate. Preserve the
+  highest-quality source bytes and accurate missed-segment accounting: a
+  `SEQUENCE-GAP` warning still counts as `missed_ours`, whatever its cause.
 - Babysitting uses `python3 scripts/babysit_ledger.py` for newly committed
   upload submissions, verification receipts and provider removals. Reconciliation
   can commit results after a report snapshot with the batch's earlier timestamp,
