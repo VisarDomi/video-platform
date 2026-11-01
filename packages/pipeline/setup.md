@@ -7,6 +7,10 @@ managed `video-pipeline` systemd user service runs its campaign worker.
 
 ## Campaign
 
+The phone PWA at **https://192.168.1.197:8791/** visualizes the live pipeline,
+queue, short batches, allowance and verification history. It stays available
+while uploads are paused. [Dashboard setup and data meanings](dashboard/README.md).
+
 The active generation is `production-v6` (`src/domain/productionVersion.ts`).
 The campaign admits only `edited` recordings with an exact, current server
 checkpoint (finalization report version 2, status `ready`) and orders them by
