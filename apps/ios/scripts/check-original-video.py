@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the isolated native codec check on a phone; retain its app/data/permission."""
+"""Run native codec checks in place; use --cleanup when the task is finished."""
 import argparse, fcntl, json, pathlib, plistlib, subprocess, time, uuid
 
 BUNDLE = 'com.visar.OriginalVideoProbe.paid'
@@ -27,14 +27,16 @@ def validate(report, run_id):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--app', type=pathlib.Path, required=True)
+    parser.add_argument('--app', type=pathlib.Path)
     parser.add_argument('--device', required=True)
-    parser.add_argument('--original-url', required=True)
+    parser.add_argument('--original-url')
     parser.add_argument('--out', type=pathlib.Path, required=True)
+    parser.add_argument('--cleanup', action='store_true', help='Finish the testing session: uninstall only the diagnostic app and verify cleanup')
     parser.add_argument('--tools', type=pathlib.Path, default=pathlib.Path.home() / 'Developer/ios-tools/native/scripts')
     args = parser.parse_args()
+    if not args.cleanup and (args.app is None or args.original_url is None):
+        parser.error('--app and --original-url are required for a test run')
     args.out.mkdir(parents=True, exist_ok=True)
-    assert plistlib.loads((args.app / 'Info.plist').read_bytes())['CFBundleIdentifier'] == BUNDLE, 'Never target a product app'
     run_id = str(uuid.uuid4())
     pid = None
 
@@ -45,6 +47,32 @@ def main():
         return run(args.tools / 'apple-tool', 'devicectl', 'device', *command[:2], '--device', args.device,
                    '--timeout', str(timeout), *command[2:], timeout=timeout + 10)
 
+    if args.cleanup:
+        lock_path = pathlib.Path.home() / 'Library/Caches/ios-app-refresh/signing.lock'
+        with lock_path.open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def info(kind, label):
+                path = args.out / (label + '-' + kind + '.json')
+                device('info', kind, '--quiet', '--json-output', path, timeout=30)
+                return json.loads(path.read_text())['result']
+
+            before = {a['bundleIdentifier']: a for a in info('apps', 'before')['apps']}
+            if BUNDLE in before:
+                device('uninstall', 'app', BUNDLE, timeout=60)
+            after = {a['bundleIdentifier']: a for a in info('apps', 'after')['apps']}
+            assert BUNDLE not in after, 'Diagnostic app is still installed'
+            assert {k: v for k, v in before.items() if k != BUNDLE} == after, 'Other installed apps changed during cleanup'
+            processes = info('processes', 'after')
+            assert 'OriginalVideoProbe.app/OriginalVideoProbe' not in json.dumps(processes), 'Diagnostic process is still running'
+            (args.out / 'cleanup.json').write_text(json.dumps({
+                'diagnosticAppRemoved': True, 'diagnosticProcessAbsent': True,
+                'otherInstalledAppsUnchanged': True,
+            }, indent=2))
+            print('PASS cleanup: diagnostic app/process absent; other installed apps unchanged', flush=True)
+        return
+
+    assert plistlib.loads((args.app / 'Info.plist').read_bytes())['CFBundleIdentifier'] == BUNDLE, 'Never target a product app'
     run('codesign', '--verify', '--deep', '--strict', args.app)
     links = subprocess.check_output(['otool', '-L', str(args.app / 'OriginalVideoProbe')], text=True)
     if '@rpath/VLCKit.framework' in links:
@@ -78,7 +106,7 @@ def main():
         finally:
             if pid is not None:
                 device('process', 'terminate', '--pid', str(pid), timeout=30)
-                print('Stopped test process; retained app, data and Local Network permission', flush=True)
+                print('Stopped test process; app retained between runs. Run --cleanup when the task is finished.', flush=True)
 
 if __name__ == '__main__':
     main()

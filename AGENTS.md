@@ -47,5 +47,7 @@ Do not convert or transcode Bunkr videos, including separate playback copies. Se
 original bytes; retain/report native codec limitations rather than substituting media.
 
 Update the isolated native codec test app in place, preserving its stable bundle ID,
-container and Local Network permission. Stop its process after a run; do not uninstall
-it between tests or builds. The owner explicitly requested this on November 1.
+container and Local Network permission between runs in the same testing session.
+Stop its process after each run. When the task is finished, uninstall the diagnostic
+app and verify it and its process are absent; do not leave test apps on the phone.
+Use `apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private directory>`.

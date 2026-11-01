@@ -44,8 +44,10 @@ Do not play video in this Mac's simulator. Its UI checks use static real-view
 fixtures. `Tests/OriginalVideoProbe.swift` is a separate native diagnostic app for
 physical-device-only codec tests; `DECODER_PROBE=1 scripts/project.py bunkr`
 generates it only in the QA mirror. It uses its own stable bundle/container and writes
-only its own diagnostic report. Update it in place and stop its process after testing;
-retain its Local Network permission for future builds. It is never shipped in a product app.
+only its own diagnostic report. Update it in place between runs in the same testing
+session, preserving Local Network permission, and stop its process after each run.
+When the task is complete, uninstall the diagnostic app and verify cleanup. It is
+never shipped in a product app.
 
 After a guarded probe build, run `scripts/check-original-video.py --app <probe.app>
 --device <UDID> --original-url <original HTTPS URL> --out <private report directory>`
@@ -54,3 +56,8 @@ the actual native clock, and stops only its own PID. The full real-ViewerUnit
 check covers paused preparation, paused seek to 120 s, video-off audio/time,
 track return, saved 130 s restore, terminal EOF without recovery, and explicit
 replay. These checks passed on the A14 using the original AV1 file on November 1.
+
+Finish the task with `scripts/check-original-video.py --cleanup --device <UDID>
+--out <private report directory>`. This removes only the isolated diagnostic app,
+verifies that its process and installation are absent, and checks that other
+installed apps are unchanged.
