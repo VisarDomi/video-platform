@@ -34,7 +34,9 @@ function renderHero(){
  if(state==='status_unavailable'){title='Checking worker status.';tag='SERVICE STATUS UNAVAILABLE';detail='The queue snapshot is available; service status is temporarily unavailable.';}
  if(state==='finishing'){tag='FINISHING ACTIVE WORK';}
  text('now-state',live?tag.toUpperCase():`LAST SEEN · ${tag.toUpperCase()}`);text('now-title',title);
- text('now-alias',a?a.alias:'');text('now-detail',detail);
+ text('now-generated-title',a?(a.generated_title||'Title will appear after description.'):'');
+ $('now-generated-title').classList.toggle('pending-title',Boolean(a&&!a.generated_title));
+ text('now-source-path',a?(a.source_path||a.id):'');text('now-detail',detail);
  const elapsed=a?.started_at?(Date.now()-new Date(a.started_at).valueOf())/1000:null;
  text('job-elapsed',a&&!paused?`${duration(elapsed)} elapsed`:'');
  const p=a?.progress;

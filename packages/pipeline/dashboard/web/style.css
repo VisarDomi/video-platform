@@ -7,3 +7,4 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 .brand{min-height:44px}.connection,.filters button{min-height:44px}
+.now-source-path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.65;color:#bdd0d5;overflow-wrap:anywhere;margin:0 0 9px;user-select:text;-webkit-user-select:text}.now-alias.pending-title{font-size:14px;color:var(--muted);letter-spacing:0}
