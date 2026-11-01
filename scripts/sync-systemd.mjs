@@ -14,6 +14,7 @@ const managedFiles = [
     "video-filehost-downloads.service",
     "video-downloader.service",
     "video-pipeline.service",
+    "video-pipeline-dashboard.service",
     "video-vhost-session.service",
     "video-vhost-session.timer",
     "video-processing.slice",
