@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import pLimit from "p-limit";
 
 export interface DisplaySize { width: number; height: number }
-export interface MediaMetadata extends Partial<DisplaySize> { duration: number }
+export interface MediaMetadata extends Partial<DisplaySize> { duration: number; videoCodec?: string; frameRate?: number }
 const execute = promisify(execFile);
 const probes = pLimit(2);
 
@@ -28,10 +28,14 @@ export async function mediaMetadata(file: string, active = () => true): Promise<
     return probes(async () => {
         if (!active()) return { duration: 0 };
         const { stdout } = await execute("ffprobe", ["-v", "error", "-protocol_whitelist", "file,crypto,data", "-analyzeduration", "1000000", "-probesize", "1000000",
-            "-select_streams", "v:0", "-show_entries", "format=duration:stream=width,height,sample_aspect_ratio:stream_tags=rotate:stream_side_data=rotation",
+            "-select_streams", "v:0", "-show_entries", "format=duration:stream=width,height,sample_aspect_ratio,codec_name,r_frame_rate:stream_tags=rotate:stream_side_data=rotation",
             "-of", "json", ...(path.extname(file).toLowerCase() === ".m3u8" ? ["-allowed_extensions", "ALL"] : []), file], { timeout: 15_000, maxBuffer: 128 * 1024 });
         const data = JSON.parse(stdout), duration = Number(data.format?.duration);
-        return { duration: Number.isFinite(duration) && duration >= 0 ? duration : 0, ...displaySize(data.streams?.[0]) };
+        const stream = data.streams?.[0], rate = String(stream?.r_frame_rate ?? "0/1").split("/").map(Number);
+        const frameRate = rate.length === 2 && rate[1] > 0 ? rate[0] / rate[1] : 0;
+        return { duration: Number.isFinite(duration) && duration >= 0 ? duration : 0, ...displaySize(stream),
+            ...(typeof stream?.codec_name === "string" ? { videoCodec: stream.codec_name } : {}),
+            ...(Number.isFinite(frameRate) && frameRate > 0 ? { frameRate } : {}) };
     });
 }
 

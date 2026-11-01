@@ -6,7 +6,7 @@ import path from "node:path";
 import { mp4Identity, mp4RenameName, MP4RenameError, type MP4Rename, type MP4RenameHooks } from "./mp4Identity.js";
 
 import { mediaMetadata, type MediaMetadata } from "./displayMetadata.js";
-export interface MP4Video { filename: string; fileId: string; type: "original"; size: number; duration: number; isLive: false; width?: number; height?: number }
+export interface MP4Video { filename: string; fileId: string; type: "original"; size: number; duration: number; isLive: false; width?: number; height?: number; videoCodec?: string; frameRate?: number }
 interface Entry { video: MP4Video; mtimeMs: number; ctimeMs: number; inode: number }
 interface Change { revision: number; item?: MP4Video; removed?: { filename: string; type: "original" } }
 type Probe = (filename: string) => Promise<number | MediaMetadata>;
@@ -103,7 +103,7 @@ export class MP4Library {
             const fileId = mp4Identity(stat);
             if (seen.has(fileId)) continue;
             const previous = this.entries.get(filename);
-            if (previous?.video.size === stat.size && previous.mtimeMs === stat.mtimeMs && previous.ctimeMs === stat.ctimeMs && previous.inode === stat.ino && (!this.needsDisplaySize || (previous.video.width && previous.video.height))) {
+            if (previous?.video.size === stat.size && previous.mtimeMs === stat.mtimeMs && previous.ctimeMs === stat.ctimeMs && previous.inode === stat.ino && (!this.needsDisplaySize || (previous.video.width && previous.video.height && previous.video.videoCodec))) {
                 found.set(filename, { ...previous, video: { ...previous.video, fileId } }); seen.add(fileId); continue;
             }
             let metadata: MediaMetadata = { duration: 0 };
@@ -115,7 +115,8 @@ export class MP4Library {
                 if (previous && after?.isFile()) found.set(filename, previous);
                 continue;
             }
-            found.set(filename, { video: { filename, fileId, type: "original", size: stat.size, duration: Number.isFinite(metadata.duration) && metadata.duration >= 0 ? metadata.duration : 0, isLive: false, ...(metadata.width && metadata.height ? { width: metadata.width, height: metadata.height } : {}) },
+            found.set(filename, { video: { filename, fileId, type: "original", size: stat.size, duration: Number.isFinite(metadata.duration) && metadata.duration >= 0 ? metadata.duration : 0, isLive: false, ...(metadata.width && metadata.height ? { width: metadata.width, height: metadata.height } : {}),
+                ...(metadata.videoCodec ? { videoCodec: metadata.videoCodec } : {}), ...(metadata.frameRate ? { frameRate: metadata.frameRate } : {}) },
                 mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, inode: stat.ino });
             seen.add(fileId);
         }
@@ -124,7 +125,9 @@ export class MP4Library {
             if (JSON.stringify(this.entries.get(filename)?.video) === JSON.stringify(entry.video)) continue;
             this.record({ item: entry.video }); changed = true;
         }
-        for (const filename of this.entries.keys()) if (!found.has(filename)) { this.record({ removed: { filename, type: "original" } }); changed = true; }
+        for (const filename of this.entries.keys()) if (!found.has(filename)) {
+            this.record({ removed: { filename, type: "original" } }); changed = true;
+        }
         const fingerprintsChanged = JSON.stringify([...this.entries]) !== JSON.stringify([...found]);
         this.entries = found;
         if (fingerprintsChanged) await this.save();
