@@ -24,6 +24,7 @@ function renderHero(){
  $('now-card').classList.toggle('paused',paused);
  let title=a?`${LABELS[a.stage]||'Working'}.`:'Ready for what’s next.';
  let tag=a?LABELS[a.stage]:'PIPELINE RUNNING',detail=a?`${(a.provider||'local').toUpperCase()} · ${date(a.captured_at)} · ${duration(a.seconds)}`:`${data.counts.capturing} recording${data.counts.capturing===1?'':'s'} live · ${formatCount(data.counts.verified)} verified`;
+ if(a?.stage==='upload'&&a.progress?.percent>=100){title=a.phase==='metadata_submitting'?'Publishing the upload.':'Finishing the upload.';tag=a.phase==='metadata_submitting'?'SUBMITTING DETAILS':'PROVIDER ASSEMBLY';}
  if(state==='user_paused'||state==='paused'){title='Taking a breather.';tag='UPLOAD WORKER PAUSED';detail=`${data.counts.capturing} live recording${data.counts.capturing===1?'':'s'} · capture stays independent`;}
  if(state==='worker_stopped'){title='Worker is stopped.';tag='UPLOAD WORKER OFFLINE';detail='Your queue and completed work are preserved.';}
  if(state==='cooldown'){title='A moment to retry.';tag='AUTOMATIC RETRY';detail=`Retry ${time(c.resume_at,true)} · the queue keeps its place`;}
@@ -41,7 +42,7 @@ function renderHero(){
  text('progress-number',p?`${p.percent.toFixed(1)}%`:a&&!paused?'In progress':'');
  text('progress-detail',p?`${bytes(p.acknowledged_bytes)} of ${bytes(p.total_bytes)} acknowledged`:a?.stage==='convert'&&a.output_bytes?`${bytes(a.output_bytes)} written so far`:a&&!paused?`Processing ${a.size_bytes?bytes(a.size_bytes)+' · ':''}${duration(a.seconds)} of footage`:paused?'Work resumes when the upload worker is enabled.':'Watching for the next finalized recording.');
  const extras=[];
- if(p){if(!p.fresh)extras.push(`Progress last reported ${ago(p.updated_at)}`);else if(p.bytes_per_second)extras.push(`${(p.bytes_per_second*8/1e6).toFixed(1)} Mbps · roughly ${duration(p.eta_seconds)} remaining`);extras.push('Transfer progress; online verification follows.');}
+ if(p){if(!p.fresh)extras.push(`Progress last reported ${ago(p.updated_at)}`);else if(p.percent>=100)extras.push('File transfer complete; provider processing and verification follow.');else if(p.bytes_per_second)extras.push(`${(p.bytes_per_second*8/1e6).toFixed(1)} Mbps · roughly ${duration(p.eta_seconds)} remaining`);if(p.percent<100)extras.push('Transfer progress; online verification follows.');}
  else if(a?.stage==='upload')extras.push('Transfer in progress. Online verification follows.');
  if(a?.reservation_month&&a.reservation_month!==data.budget.month)extras.push(`Budgeted in ${new Intl.DateTimeFormat('en',{month:'long',year:'numeric'}).format(new Date(a.reservation_month+'-15T12:00:00Z'))}.`);
  text('job-extra',extras.join(' '));
@@ -66,7 +67,8 @@ function renderBudget(){
  text('budget-remaining',bytes(b.remaining,0));
  $('released-ring').setAttribute('stroke-dasharray',`${Math.min(100,b.released/b.monthly_limit*100)} 100`);
  $('used-ring').setAttribute('stroke-dasharray',`${Math.min(100,(b.spent+b.reserved)/b.released*100)} 100`);
- const numbers=$('budget-numbers');numbers.replaceChildren();for(const [value,label] of [[bytes(b.released,0),'Released this month'],[bytes(b.spent),'Spent · retries included'],[bytes(b.reserved),'Committed to transfers']]){const n=el('div','budget-value');n.append(el('strong','',value),el('span','',label));numbers.append(n);}
+ $('used-ring').style.opacity=b.spent+b.reserved>0?'1':'0';
+ const numbers=$('budget-numbers');numbers.replaceChildren();for(const [value,label] of [[bytes(b.released,0),'Released this month'],[b.spent?bytes(b.spent):'0 GB','Spent · retries included'],[b.reserved?bytes(b.reserved):'0 GB','Committed to transfers']]){const n=el('div','budget-value');n.append(el('strong','',value),el('span','',label));numbers.append(n);}
  const schedule=$('release-schedule');schedule.replaceChildren();for(const [i,r] of b.releases.entries()){const active=i===(b.day<=10?0:b.day<=20?1:2);const n=el('div','release-step'+(active?' current':''));n.append(el('span','',i===0?'DAYS 1–10':i===1?'DAYS 11–20':'DAY 21+'),el('strong','',bytes(Math.min(b.monthly_limit,r.bytes),0)));schedule.append(n);}
  text('budget-note',`${bytes(b.next_amount,0)} total allowance from ${date(b.next_release)}. Unused allowance carries within the month.`);
 }
