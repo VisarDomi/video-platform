@@ -227,7 +227,7 @@ final class TangoListController: VideoListController {
         var raw: [String: Any] = [
             "filename": stream.streamerId, "provider": "tango-live", "type": "original", "duration": 0, "size": 0, "isLive": true,
             "title": stream.title, "pageUrl": "/stream/" + (stream.streamId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? stream.streamId),
-            "following": stream.following, "local": false, "live": true,
+            "following": stream.following, "local": false, "live": true, "displayWidth": 720.0, "displayHeight": 1280.0,
             "media": ["url": stream.masterListUrl, "kind": "hls"],
             "membership": ["lists": ["tango"], "identifier": stream.streamerId, "choose": false],
         ]

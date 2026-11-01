@@ -9,7 +9,7 @@ recordings handed off through `.pending`, and non-download operational logic.
   (`src/services/video/library-index.ts`: in memory and in
   `~/.local/share/video-services/list-index/<provider>.json`, following the folders through
   inotify and a 30 s stat rescan; playlists are read only when their stat changes):
-  - `GET /api/videos?provider=` → every recording `{ filename, type, size: 0, duration, isLive }`
+  - `GET /api/videos?provider=` → every recording `{ filename, type, size: 0, duration, isLive, width?, height? }`
     in code-unit order of the filename, encoded once per revision, gzipped, with a revision
     ETag (`304` when unchanged); `&after=<filename>` only the names after it.
   - `GET /api/videos/changes?provider=&epoch=&since=&wait=` → `{ epoch, revision, changes }`
@@ -29,3 +29,9 @@ recordings handed off through `.pending`, and non-download operational logic.
 - Library maintenance: `POST /api/videos/:filename/repair-playlist` and
   `POST /api/videos/repair-playlists?provider=&scope=all|downloads|edited` run
   PlaylistAuthority duration repair (the bulk form skips `.active` and `.pending`).
+
+Display dimensions are backfilled by at most two local ffprobe jobs, without blocking HLS
+list startup. They include sample aspect ratio and track rotation, persist with the index,
+and publish through the existing revision feed. Fragmented/encrypted HLS is probed with
+its local playlist context so init maps and keys are available. MP4 dimensions share the
+existing stat-fingerprint metadata cache. Neither path transcodes or changes media files.

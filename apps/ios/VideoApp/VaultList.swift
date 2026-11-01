@@ -155,7 +155,8 @@ final class VaultListController: VideoListController {
         guard VaultSite(rawValue: video.provider) == .porntrex, let page = video.pageUrl else { throw ViewerFailure.page("Unknown upload.") }
         do {
             let source = try await Porntrex.source(http, pageUrl: page)
-            return MediaSource(url: source.url, kind: source.kind)
+            let size = source.width.flatMap { width in source.height.map { CGSize(width: width, height: $0) } }
+            return MediaSource(url: source.url, kind: source.kind, displaySize: size)
         } catch VaultError.signedOut(_, let text) {
             throw ViewerFailure.authentication(text)
         }

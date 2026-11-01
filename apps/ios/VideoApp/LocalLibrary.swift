@@ -13,6 +13,8 @@ struct ServerVideo: Codable, Sendable, Equatable {
     var duration: Double
     var isLive: Bool
     var fileId: String? = nil
+    var width: Double? = nil
+    var height: Double? = nil
 
     var key: String { (fileId ?? filename) + "\u{1F}" + type }
 
@@ -174,6 +176,10 @@ struct LocalAPI: Sendable {
             "media": ["url": mediaURL(video.filename, fileId: video.fileId).absoluteString, "kind": mediaKind.rawValue],
         ]
         if let fileId = video.fileId { raw["fileId"] = fileId }
+        if let width = video.width, let height = video.height, width.isFinite, height.isFinite, width > 0, height > 0 {
+            raw["displayWidth"] = width
+            raw["displayHeight"] = height
+        }
         if mediaKind == .hls { raw["membership"] = ["lists": [provider], "identifier": identifier, "choose": false] }
         return raw
     }

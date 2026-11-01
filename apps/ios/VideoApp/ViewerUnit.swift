@@ -93,12 +93,22 @@ final class ViewerUnit {
         view.isHidden = false
         view.subviews.forEach { $0.removeFromSuperview() }
         let picture = UIImageView(image: image)
-        // A calibration grid fills the synthetic fitted surface. Actual playback still
-        // uses the permanent AVPlayerLayer's resizeAspect gravity.
-        picture.contentMode = .scaleToFill
+        // A real aspect-fit image, including delayed-metadata cases. Do not stretch a
+        // calibration image to mask an incorrectly reserved player rectangle.
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let target = CGSize(width: 288, height: max(1, min(2048, 288 * size.height / max(1, size.width))))
+        let source = UIGraphicsImageRenderer(size: target, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+        picture.image = source
+        picture.contentMode = .scaleAspectFit
         picture.frame = view.bounds
         picture.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(picture)
+    }
+    func configurePendingMetadataCheck(video: ViewerVideo) {
+        self.video = video
+        presentationSize = .zero
+        view.isHidden = false
+        view.subviews.forEach { $0.removeFromSuperview() }
     }
     #endif
 

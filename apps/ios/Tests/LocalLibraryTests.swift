@@ -17,6 +17,11 @@ struct LocalLibraryTests {
         check(raw["local"] as? Bool == false && raw["membership"] == nil, "MP4s use the Vault-style viewer without HLS editing or streamer actions")
         check((raw["media"] as? [String: String])?["kind"] == "mp4", "MP4 media kind")
         check(raw["size"] as? Double == item.size && raw["duration"] as? Double == item.duration, "duration and actual file size reach the list")
+        var portrait = item; portrait.width = 720; portrait.height = 1280
+        let dimensioned = mp4.describeRaw(portrait)
+        check(dimensioned["displayWidth"] as? Double == 720 && dimensioned["displayHeight"] as? Double == 1280, "display dimensions reach the viewer before playback")
+        let decodedDimensions = try JSONDecoder().decode(ServerVideo.self, from: JSONEncoder().encode(portrait))
+        check(decodedDimensions == portrait, "list cache retains display dimensions")
         let cache = ListCache(provider: "bunkr", epoch: "fixture", revision: 4, videos: [item])
         let restored = try JSONDecoder().decode(ListCache.self, from: JSONEncoder().encode(cache))
         check(restored.videos == [item], "offline list cache retains MP4 metadata")

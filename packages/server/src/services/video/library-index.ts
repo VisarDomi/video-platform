@@ -6,6 +6,7 @@ import * as config from "../../core/config.js";
 import * as constants from "../../core/constants.js";
 import * as types from "../../core/types.js";
 import logger from "../../core/logger.js";
+import { recordingDisplaySize, type DisplaySize } from "./displayMetadata.js";
 
 // Each provider's recordings, kept instead of rescanned for every request. The list used to
 // be rebuilt per request (three directory scans, a stat per recording, playlists re-read
@@ -69,7 +70,7 @@ export function playlistDuration(text: string): number {
 }
 
 function item(entry: Entry): types.VideoItem {
-    return { filename: entry.filename, type: entry.type, size: 0, duration: entry.duration, isLive: entry.isLive };
+    return { filename: entry.filename, type: entry.type, size: 0, duration: entry.duration, isLive: entry.isLive, ...(entry.width && entry.height ? { width: entry.width, height: entry.height } : {}) };
 }
 
 export class ProviderIndex {
@@ -84,11 +85,17 @@ export class ProviderIndex {
     private reconciling: Promise<void> = Promise.resolve();
     private saveTimer: NodeJS.Timeout | null = null;
     private started: Promise<void> | null = null;
+    private closed = false;
+    private sizing = new Set<string>();
+    private sizeRetry = new Map<string, number>();
+    private readySizes = new Map<string, DisplaySize>();
+    private sizeTimer: NodeJS.Timeout | null = null;
 
     constructor(
         readonly provider: string,
         private readonly dirs: { live: string; original: string; edited: string },
         private readonly stateFile: string,
+        private readonly sizeProbe = recordingDisplaySize,
     ) {}
 
     static forProvider(provider: string): ProviderIndex {
@@ -111,6 +118,8 @@ export class ProviderIndex {
 
     // Stops following the folders; a save still due is written first.
     async stop(): Promise<void> {
+        if (this.sizeTimer) { clearTimeout(this.sizeTimer); this.flushSizes(); }
+        this.closed = true;
         this.watchers.forEach(watcher => watcher.close());
         this.timers.forEach(clearInterval);
         if (this.pending) clearTimeout(this.pending);
@@ -247,12 +256,15 @@ export class ProviderIndex {
         let changed = false;
         for (const [entryKey, entry] of found) {
             const existing = this.entries.get(entryKey);
+            if (existing?.width && existing.height && !entry.width) Object.assign(entry, { width: existing.width, height: existing.height });
             if (existing && existing.duration === entry.duration && existing.isLive === entry.isLive && existing.kind === entry.kind) {
                 existing.mtimeMs = entry.mtimeMs;
                 existing.bytes = entry.bytes;
+                this.requestSize(entryKey, existing);
                 continue;
             }
             this.entries.set(entryKey, entry);
+            this.requestSize(entryKey, entry);
             this.record({ item: item(entry) });
             changed = true;
         }
@@ -275,13 +287,44 @@ export class ProviderIndex {
         const type = kind === "edited" ? constants.ALL_VIDEO_PATHS_TYPES.EDITED : constants.ALL_VIDEO_PATHS_TYPES.ORIGINAL;
         let stat;
         try { stat = await fs.stat(playlist); } catch { return kind === "live" ? null : { filename: name, type, size: 0, duration: 0, isLive: false, kind, mtimeMs: 0, bytes: 0 }; }
-        if (kind === "live") return { filename: name, type, size: 0, duration: 0, isLive: true, kind, mtimeMs: 0, bytes: 0 };
         const previous = this.entries.get(key(name, type));
+        const dimensions = previous?.width && previous.height ? { width: previous.width, height: previous.height } : {};
+        if (kind === "live") return { filename: name, type, size: 0, duration: 0, isLive: true, kind, mtimeMs: 0, bytes: 0, ...dimensions };
         let duration = previous?.duration ?? 0;
         if (!previous || previous.kind !== kind || previous.mtimeMs !== stat.mtimeMs || previous.bytes !== stat.size) {
             try { duration = playlistDuration(await fs.readFile(playlist, "utf8")); } catch { duration = 0; }
         }
-        return { filename: name, type, size: 0, duration, isLive: false, kind, mtimeMs: stat.mtimeMs, bytes: stat.size };
+        return { filename: name, type, size: 0, duration, isLive: false, kind, mtimeMs: stat.mtimeMs, bytes: stat.size, ...dimensions };
+    }
+
+    // Backfill independently of list startup. Successful results join the ordinary
+    // durable revision feed in batches; a phone never has to download video to learn its size.
+    private requestSize(entryKey: string, entry: Entry): void {
+        if (this.closed || (entry.width && entry.height) || this.sizing.has(entryKey) || (this.sizeRetry.get(entryKey) ?? 0) > Date.now()) return;
+        this.sizing.add(entryKey);
+        const directory = path.join(this.dirs[entry.kind], entry.filename);
+        const active = () => !this.closed && this.entries.get(entryKey)?.kind === entry.kind;
+        void this.sizeProbe(directory, active).then(size => {
+            if (!active()) return;
+            if (size?.width && size.height) {
+                this.readySizes.set(entryKey, size);
+                if (!this.sizeTimer) this.sizeTimer = setTimeout(() => this.flushSizes(), 250);
+            } else this.sizeRetry.set(entryKey, Date.now() + 30_000);
+        }).catch(() => this.sizeRetry.set(entryKey, Date.now() + 30_000)).finally(() => this.sizing.delete(entryKey));
+    }
+
+    private flushSizes(): void {
+        this.sizeTimer = null;
+        if (this.closed) return;
+        for (const [entryKey, size] of this.readySizes) {
+            const entry = this.entries.get(entryKey);
+            if (!entry || (entry.width === size.width && entry.height === size.height)) continue;
+            Object.assign(entry, size);
+            this.record({ item: item(entry) });
+        }
+        this.readySizes.clear();
+        this.scheduleSave();
+        for (const waiter of [...this.waiters]) waiter();
     }
 
     private record(change: Omit<Change, "revision">): void {

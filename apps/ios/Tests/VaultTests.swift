@@ -44,6 +44,10 @@ final class Stub: URLProtocol, @unchecked Sendable {
 @main
 struct VaultTests {
     static func main() async throws {
+        expect(Porntrex.dimensions("<meta property='og:video:width' content='720'><meta property='og:video:height' content='1280'>")?.height == 1280, "Vault reads actual OpenGraph video dimensions")
+        expect(Porntrex.dimensions("var flashvars={video_width: '1920', video_height: '1080'}")?.width == 1920, "Vault reads video dimensions from player metadata")
+        expect(Porntrex.dimensions("var flashvars={player_width: '1920', player_height: '1080'}") == nil, "a player CSS box cannot become video metadata")
+
         let pt = try Porntrex.parse(SitePage(html: ptFirst, landed: "/my/videos/"), page: 1)
         expect(pt.videos[0].pageUrl == "/video/1/upload-1/", "Porntrex page keeps its trailing slash")
         expect(pt.videos.map(\.filename) == ["porntrex-1", "porntrex-2"] && pt.videos[0].duration == 3682 && pt.videos[1].duration == 3723 && pt.next == 2, "Porntrex rows and its AJAX page link")

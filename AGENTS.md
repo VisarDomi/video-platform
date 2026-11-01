@@ -37,3 +37,8 @@ and pinch zoom of the same content. Never add snapping, automatic centering, pag
 runways or repositioning when scrolling stops. Loading, refreshes and player reuse preserve
 the visible position. Cached next chapters must append during continuous scrolling; do not
 require a scroll-end or settled-page check. Explicit navigation and restoration are separate.
+
+Video visibility is independent of scrolling coordinates: at rest or while zoomed only
+the current video is shown. Neighbours appear only during an unzoomed vertical scroll.
+Every VOD provider pauses neighbours; only Tango live keeps neighbours playing muted.
+Zoom disables carousel navigation. Never turn a visibility transition into snapping.

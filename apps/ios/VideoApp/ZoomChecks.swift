@@ -49,6 +49,11 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
         TestHooks.shared.register("feed-scroll") { [weak self] query in
             self?.viewer?.checkFeedScroll(delta: CGFloat(Double(query["delta"] ?? "0") ?? 0), end: query["end"] != "0") ?? [:]
         }
+        TestHooks.shared.register("feed-cache") { [weak self] _ in self?.viewer?.checkDimensionCache() ?? [:] }
+        TestHooks.shared.register("feed-arrival") { [weak self] query in
+            self?.viewer?.checkMetadataArrival(width: CGFloat(Double(query["width"] ?? "720") ?? 720),
+                                               height: CGFloat(Double(query["height"] ?? "1280") ?? 1280)) ?? [:]
+        }
         TestHooks.shared.register("feed-metadata") { [weak self] _ in self?.viewer?.checkFeedMetadata() ?? [:] }
         TestHooks.shared.register("feed-refresh") { [weak self] _ in self?.viewer?.checkFeedRefresh() ?? [:] }
         TestHooks.shared.register("reader-scroll") { [weak self] query in
@@ -120,8 +125,8 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
             strip = reader
         } else {
             let size = CGSize(width: Double(query["width"] ?? "1920") ?? 1920, height: Double(query["height"] ?? "1080") ?? 1080)
-            let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("zoom-check", isDirectory: true)
-            let player = ViewerController(provider: "sc", host: host, media: ViewerMedia(),
+            let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(query["kind"] == "contract" ? "contract-" + UUID().uuidString : "zoom-check", isDirectory: true)
+            let player = ViewerController(provider: query["kind"] == "tango" ? "tango-live" : query["provider"] ?? "sc", host: host, media: ViewerMedia(),
                                           progress: ProgressStore(directory: directory), checkpoint: CheckpointWriter(directory: directory))
             addChild(player)
             player.view.frame = view.bounds
@@ -129,6 +134,8 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
             player.didMove(toParent: self)
             player.configureZoomCheck(size: size, image: calibration(CGSize(width: 320, height: min(2048, 320 * size.height / max(1, size.width)))))
             viewer = player
+            if query["kind"] == "contract" { player.configureFeedCheck(image: calibration(CGSize(width: 288, height: 512)), sourceProvider: query["provider"] ?? "sc", late: true) }
+            if query["kind"] == "tango" { player.configureFeedCheck(image: calibration(CGSize(width: 288, height: 512)), sourceProvider: "tango-live", late: true) }
             if query["kind"] == "feed" { player.configureFeedCheck(image: calibration(CGSize(width: 320, height: 180))) }
             if query["kind"] == "restore" { player.configureRestoredFeedCheck(image: calibration(CGSize(width: 320, height: 180))) }
         }

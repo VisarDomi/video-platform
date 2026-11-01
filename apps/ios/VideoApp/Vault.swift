@@ -42,6 +42,8 @@ struct VaultSource: Sendable, Equatable {
     var url: URL
     var kind: String
     var quality: String
+    var width: Double? = nil
+    var height: Double? = nil
 }
 
 // MARK: - Upload labels and media
@@ -238,7 +240,24 @@ enum Porntrex {
         guard let best = try sources(page.html, base: URL(string: pageUrl, relativeTo: VaultSite.porntrex.origin)!.absoluteURL).first else {
             throw VaultError.failed("This video is unavailable or is still processing. Check its status in your Porntrex account.")
         }
-        return VaultSource(url: best.url, kind: "mp4", quality: best.quality)
+        let size = dimensions(page.html)
+        return VaultSource(url: best.url, kind: "mp4", quality: best.quality, width: size?.width, height: size?.height)
+    }
+
+    // Only actual-video metadata; a CSS player box is not a video's aspect ratio.
+    static func dimensions(_ html: String) -> (width: Double, height: Double)? {
+        func checked(_ width: String?, _ height: String?) -> (width: Double, height: Double)? {
+            guard let width = width.flatMap(Double.init), let height = height.flatMap(Double.init),
+                  width.isFinite, height.isFinite, width >= 32, height >= 32, width <= 100_000, height <= 100_000 else { return nil }
+            return (width, height)
+        }
+        if let document = try? HTMLDocument(html),
+           let width = try? document.first("meta[property=\"og:video:width\"]"),
+           let height = try? document.first("meta[property=\"og:video:height\"]"),
+           let size = checked(width["content"], height["content"]) { return size }
+        let width = Uploads.first(#"\bvideo_width\s*[:=]\s*['"]?(\d+)"#, in: html)?[1]
+        let height = Uploads.first(#"\bvideo_height\s*[:=]\s*['"]?(\d+)"#, in: html)?[1]
+        return checked(width, height)
     }
 
     static func sources(_ html: String, base: URL) throws -> [(url: URL, quality: String)] {

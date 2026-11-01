@@ -1,24 +1,17 @@
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { link, lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { mp4Identity, mp4RenameName, MP4RenameError, type MP4Rename, type MP4RenameHooks } from "./mp4Identity.js";
 
-const execute = promisify(execFile);
-export interface MP4Video { filename: string; fileId: string; type: "original"; size: number; duration: number; isLive: false }
+import { mediaMetadata, type MediaMetadata } from "./displayMetadata.js";
+export interface MP4Video { filename: string; fileId: string; type: "original"; size: number; duration: number; isLive: false; width?: number; height?: number }
 interface Entry { video: MP4Video; mtimeMs: number; ctimeMs: number; inode: number }
 interface Change { revision: number; item?: MP4Video; removed?: { filename: string; type: "original" } }
-type Probe = (filename: string) => Promise<number>;
+type Probe = (filename: string) => Promise<number | MediaMetadata>;
 export function mp4Name(filename: unknown): filename is string {
     return typeof filename === "string" && !filename.startsWith(".") && !/[\x00/\\]/.test(filename) && /\.mp4$/i.test(filename);
-}
-async function duration(filename: string): Promise<number> {
-    const { stdout } = await execute("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "json", filename], { timeout: 15_000, maxBuffer: 64 * 1024 });
-    const value = Number(JSON.parse(stdout)?.format?.duration);
-    return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 // The same revision/long-poll contract as recording lists, with flat completed MP4 files.
@@ -39,13 +32,15 @@ export class MP4Library {
     private closed = false;
     private stateFile: string;
     private probe: Probe;
+    private needsDisplaySize: boolean;
     private aliases: Record<string, string> = {};
     private renameHooks: MP4RenameHooks;
     private journalFile: string;
     private aliasesFile: string;
     constructor(readonly directory = path.join(os.homedir(), "Videos/plab/bunkr"), options: { stateFile?: string; probe?: Probe; renameHooks?: MP4RenameHooks } = {}) {
         this.stateFile = options.stateFile ?? path.join(os.homedir(), ".local/share/video-services/bunkr-library/index.json");
-        this.probe = options.probe ?? duration;
+        this.probe = options.probe ?? mediaMetadata;
+        this.needsDisplaySize = !options.probe;
         this.journalFile = path.join(path.dirname(this.stateFile), "rename-journal.json");
         this.aliasesFile = path.join(path.dirname(this.stateFile), "rename-aliases.json");
         this.renameHooks = options.renameHooks ?? { prepare: async () => [], commit: async () => undefined };
@@ -108,11 +103,11 @@ export class MP4Library {
             const fileId = mp4Identity(stat);
             if (seen.has(fileId)) continue;
             const previous = this.entries.get(filename);
-            if (previous?.video.size === stat.size && previous.mtimeMs === stat.mtimeMs && previous.ctimeMs === stat.ctimeMs && previous.inode === stat.ino) {
+            if (previous?.video.size === stat.size && previous.mtimeMs === stat.mtimeMs && previous.ctimeMs === stat.ctimeMs && previous.inode === stat.ino && (!this.needsDisplaySize || (previous.video.width && previous.video.height))) {
                 found.set(filename, { ...previous, video: { ...previous.video, fileId } }); seen.add(fileId); continue;
             }
-            let seconds = 0;
-            try { seconds = await this.probe(file); }
+            let metadata: MediaMetadata = { duration: 0 };
+            try { const value = await this.probe(file); metadata = typeof value === "number" ? { duration: value } : value; }
             catch { console.warn("Bunkr MP4 metadata unavailable:", filename); }
             const after = await lstat(file).catch(() => undefined);
             if (!after?.isFile() || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ino !== stat.ino) {
@@ -120,7 +115,7 @@ export class MP4Library {
                 if (previous && after?.isFile()) found.set(filename, previous);
                 continue;
             }
-            found.set(filename, { video: { filename, fileId, type: "original", size: stat.size, duration: Number.isFinite(seconds) && seconds >= 0 ? seconds : 0, isLive: false },
+            found.set(filename, { video: { filename, fileId, type: "original", size: stat.size, duration: Number.isFinite(metadata.duration) && metadata.duration >= 0 ? metadata.duration : 0, isLive: false, ...(metadata.width && metadata.height ? { width: metadata.width, height: metadata.height } : {}) },
                 mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, inode: stat.ino });
             seen.add(fileId);
         }

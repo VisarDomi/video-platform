@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtemp,mkdir,writeFile,rm } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { displaySize,mediaMetadata,recordingDisplaySize } from '../dist/services/video/displayMetadata.js';
+import { ProviderIndex } from '../dist/services/video/library-index.js';
+const exec=promisify(execFile);
+test('display dimensions honor SAR and track rotation',()=>{
+ assert.deepEqual(displaySize({width:720,height:1280}),{width:720,height:1280});
+ assert.deepEqual(displaySize({width:720,height:576,sample_aspect_ratio:'16:15'}),{width:768,height:576});
+ assert.deepEqual(displaySize({width:1920,height:1080,side_data_list:[{rotation:-90}]}),{width:1080,height:1920});
+ assert.equal(displaySize({width:0,height:1}),undefined);
+});
+test('real local MP4 and HLS headers expose display dimensions without playback',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'display-metadata-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const mp4=path.join(root,'movie.mp4');
+ await exec('ffmpeg',['-v','error','-f','lavfi','-i','color=c=blue:s=320x568:r=1','-t','1','-c:v','libx264','-pix_fmt','yuv420p',mp4]);
+ const metadata=await mediaMetadata(mp4);assert.equal(metadata.width,320);assert.equal(metadata.height,568);assert.ok(metadata.duration>0);
+ const ts=path.join(root,'seg.ts');await exec('ffmpeg',['-v','error','-i',mp4,'-c','copy','-f','mpegts',ts]);
+ await writeFile(path.join(root,'playlist.m3u8'),'#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n');
+ assert.deepEqual(await recordingDisplaySize(root),{width:320,height:568});
+ const fragmented=path.join(root,'fragmented');await mkdir(fragmented);
+ await exec('ffmpeg',['-v','error','-i',mp4,'-c','copy','-hls_time','1','-hls_segment_type','fmp4','-hls_segment_filename',path.join(fragmented,'segment%d.m4s'),path.join(fragmented,'playlist.m3u8')]);
+ assert.deepEqual(await recordingDisplaySize(fragmented),{width:320,height:568},'fMP4 init-map context is preserved');
+});
+test('dimension backfill does not block lists, publishes changes and survives restart',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'dimension-index-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const dirs={live:path.join(root,'live'),original:path.join(root,'original'),edited:path.join(root,'edited')};
+ for(const dir of Object.values(dirs))await mkdir(dir,{recursive:true});
+ await mkdir(path.join(dirs.original,'recording'));await writeFile(path.join(dirs.original,'recording','playlist.m3u8'),'#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n');
+ let deliver;const ready=new Promise(resolve=>{deliver=resolve});let calls=0;
+ const state=path.join(root,'index.json');const index=new ProviderIndex('sc',dirs,state,async()=>{calls++;return ready});
+ const before=await index.videos();assert.equal(before.length,1);assert.equal(before[0].width,undefined);
+ const base=await index.changes(undefined,undefined);const changed=index.changes(base.revision,base.epoch,2000);
+ deliver({width:720,height:1280});const delta=await changed;
+ assert.equal(delta.changes[0].item.width,720);assert.equal(delta.changes[0].item.height,1280);
+ await index.stop();
+ const reopened=new ProviderIndex('sc',dirs,state,async()=>{throw Error('cached size was unnecessarily probed')});
+ const list=await reopened.videos();assert.equal(list[0].width,720);assert.equal(list[0].height,1280);assert.equal(calls,1);await reopened.stop();
+});

@@ -26,6 +26,13 @@ struct ViewerVideo: @unchecked Sendable {
     var local: Bool { raw["local"] as? Bool ?? false }
     var liveStream: Bool { raw["live"] as? Bool ?? false }
     var media: MediaSource? { MediaSource(raw["media"]) }
+    var displaySize: CGSize? {
+        if provider == "tango-live" { return CGSize(width: 720, height: 1280) }
+        guard let width = raw["displayWidth"] as? Double, let height = raw["displayHeight"] as? Double,
+              width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
     var membership: MembershipInfo? { MembershipInfo(raw["membership"]) }
 
     var key: String { progressKey + "\u{1F}" + type }
@@ -69,10 +76,12 @@ struct ViewerVideo: @unchecked Sendable {
 struct MediaSource {
     let url: URL
     let kind: String
+    let displaySize: CGSize?
 
-    init(url: URL, kind: String) {
+    init(url: URL, kind: String, displaySize: CGSize? = nil) {
         self.url = url
         self.kind = kind
+        self.displaySize = displaySize
     }
 
     init?(_ value: Any?) {
@@ -80,6 +89,7 @@ struct MediaSource {
               url.scheme == "https" || url.scheme == "http" else { return nil }
         self.url = url
         kind = raw["kind"] as? String ?? "hls"
+        displaySize = nil
     }
 }
 
@@ -106,14 +116,24 @@ struct MembershipInfo {
 final class ProgressStore {
     private let writer: BackgroundWriter
     private var values: [String: Double]
+    private let sizesWriter: BackgroundWriter
+    private var sizes: [String: [Double]]
 
     init(directory: URL) {
         writer = BackgroundWriter(url: directory.appendingPathComponent("viewer-progress.json"), label: "viewer-progress")
         values = (try? Data(contentsOf: writer.url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Double] } ?? [:]
+        sizesWriter = BackgroundWriter(url: directory.appendingPathComponent("viewer-dimensions.json"), label: "viewer-dimensions")
+        sizes = (try? Data(contentsOf: sizesWriter.url)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: [Double]] } ?? [:]
     }
 
     func time(_ filename: String) -> Double { values[filename] ?? 0 }
     func migrate(from old: String, to new: String) {
+        if old != new {
+            for type in ["original", "edited"] {
+                let prior = old + "\u{1F}" + type, next = new + "\u{1F}" + type
+                if sizes[next] == nil, let size = sizes[prior] { sizes[next] = size; sizesWriter.save(json: sizes) }
+            }
+        }
         guard old != new, values[new] == nil, let value = values[old] else { return }
         values[new] = value; save()
     }
@@ -134,7 +154,19 @@ final class ProgressStore {
     }
 
     // Waits for the last write (before the app may be suspended).
-    func flush() { writer.flush() }
+    func flush() { writer.flush(); sizesWriter.flush() }
+
+    func displaySize(_ key: String) -> CGSize? {
+        guard let size = sizes[key], size.count == 2, size.allSatisfy({ $0.isFinite && $0 >= 32 && $0 <= 100_000 }) else { return nil }
+        return CGSize(width: size[0], height: size[1])
+    }
+
+    func setDisplaySize(_ key: String, _ size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite, size.width >= 32, size.height >= 32 else { return }
+        if let old = displaySize(key), abs(old.width / old.height - size.width / size.height) < 0.003 { return }
+        sizes[key] = [Double(size.width), Double(size.height)]
+        sizesWriter.save(json: sizes)
+    }
 
     private func save() {
         let snapshot = values
@@ -173,6 +205,7 @@ struct ViewerPoster: Codable {
     let key: String
     let frame: [Double]
     let controls: Bool
+    var currentOnly: Bool? = nil
 
     static func image(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-poster.jpg") }
     static func info(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-poster.json") }

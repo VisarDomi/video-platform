@@ -15,11 +15,16 @@ struct ViewerPlaybackPolicyTests {
         check(!bunkr.resumesBufferedPlayback(requested: true, hasData: false, ended: false, seeking: false), "empty-buffer events cannot spin playback retries")
         check(!bunkr.resumesBufferedPlayback(requested: true, hasData: true, ended: true, seeking: false), "a completed movie stays completed")
         check(!bunkr.resumesBufferedPlayback(requested: true, hasData: true, ended: false, seeking: true), "buffer events cannot race an exact seek")
-        for provider in ["tango", "fc2", "sc", "vault", "tango-live"] {
+        for provider in ["tango-live"] {
             let existing = ViewerPlaybackPolicy(provider: provider)
             check((0..<3).allSatisfy { existing.shouldPlay(position: $0, inBackground: false) }, "existing providers retain foreground previews")
             check((0..<3).map { existing.shouldPlay(position: $0, inBackground: true) } == [false, true, false], "existing providers pause background neighbours")
             check(existing.waitsToMinimizeStalling && existing.forwardBuffer(playing: true) == 0, "existing provider buffering remains system-managed")
+        }
+        for provider in ["tango", "fc2", "sc", "vault", "porntrex"] {
+            let vault = ViewerPlaybackPolicy(provider: provider)
+            check((0..<3).map { vault.shouldPlay(position: $0, inBackground: false) } == [false, true, false], "VOD providers pause neighbouring videos")
+            check(vault.waitsToMinimizeStalling && vault.forwardBuffer(playing: false) == 0.5, "VOD providers keep network startup management and small paused previews")
         }
         print("PASS: Bunkr single-player LAN policy, paused preview buffers and provider lifecycle behavior")
     }

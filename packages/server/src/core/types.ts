@@ -7,6 +7,8 @@ export type VideoItem = {
     type: VideoType;
     size: number;
     duration: number;
+    width?: number;
+    height?: number;
     isLive: boolean;
 };
 

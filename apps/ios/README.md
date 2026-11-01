@@ -36,8 +36,8 @@ download or deleting a file on the PC updates the app through the same revision
 feed contract as the other local apps. No files are moved or deleted by the app.
 `LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
 provider's `LocalMediaKind` selects HLS recordings or direct MP4s.
-Only the visible Bunkr video plays. Neighbours remain paused, with a preferred
-half-second preview buffer; the active file prefers two seconds and starts as
+Every VOD app plays only its current video. Neighbours remain paused, with a preferred
+half-second preview buffer; the active Bunkr file prefers two seconds and starts as
 soon as buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
@@ -82,7 +82,7 @@ addresses remain pinned to the same file.
     black space where needed. Scrolling can leave any part of a picture on screen; lifting a finger never moves it.
   - It works like the website's viewer (`packages/app` `routes/videoViewer.ts`) with
     AVPlayer: a continuous document of fitted videos (vertical scrolling through the list,
-    neighbours touching with no blank runways or snap positions), the upper-half horizontal
+    neighbours appearing and touching only during scrolling, with no blank runways or snap positions), the upper-half horizontal
     seek, the lower-half swipe that shows or hides the controls, the overlay with its buttons
     (mute, follow, block, +/-, save/cut/return, markers), videos muted until unmuted, progress every 3 s. Save/cut/return and markers show only for local recordings.
   - A pinch zooms the current video anywhere on screen. Zoomed, the list stays put and the
@@ -434,3 +434,16 @@ republished and HTTPS hashes verified. Private receipts are under
 `~/.cache/tango-hardening-20261031/` on the PC and
 `~/Library/Caches/ios-app-refresh/tango-hardening-20261031/` on the Mac. The protocol
 checks cover controlled rotations and observed PC hourly renewal, not a multi-day soak.
+
+Video visibility and playback are separate rules. At rest and while zoomed, only the current
+video is visible. During unzoomed vertical scrolling, neighbouring videos appear without
+changing the content offset when scrolling stops. All VOD apps pause neighbours; Tango live
+keeps its neighbours playing muted. Zoom disables carousel navigation. Old restoration
+posters containing neighbouring videos are ignored; new posters capture only the current one.
+
+Local lists include PC-probed display width/height, accounting for pixel aspect ratio and
+rotation; these dimensions persist in the list cache. Tango live reserves720×1280. A viewer
+keeps its reserved geometry stable when decoder metadata/resolution arrives. Unknown Vault
+clips reserve a viewport so their first picture cannot become a miniature portrait. Actual
+dimensions are retained in `viewer-dimensions.json` for later visits. Trusted OG/flashvars
+video dimensions are used when the playback page supplies them; CSS player size is ignored.
