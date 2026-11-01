@@ -26,7 +26,7 @@ export async function rewriteAvoidingPhrases(
     const manageServer = options.manageServer ?? true;
     try {
         if (manageServer) await server.start();
-        const response = await postJson(new URL("/v1/chat/completions", descriptorConfig.modelUrl), {
+        const request = () => postJson(new URL("/v1/chat/completions", descriptorConfig.modelUrl), {
             model: "gemma-4-E4B-it-OBLITERATED-Q8_0",
             messages: [{ role: "user", content: [{ type: "text", text: rewritePrompt(text, phrases) }] }],
             temperature: 0.2,
@@ -45,9 +45,8 @@ export async function rewriteAvoidingPhrases(
                     },
                 },
             },
-        }).catch((error: unknown) => {
-            throw manageServer ? server.withLog(error) : error;
         });
+        const response = await (manageServer ? server.requestWithRecovery(request) : request());
         if (response.status < 200 || response.status >= 300) {
             throw new Error(`Rewrite request failed (${response.status}): ${response.body.error?.message ?? "no detail"}`);
         }
