@@ -13,6 +13,8 @@ xcrun swiftc -j 2 -parse-as-library VideoApp/LocalLibrary.swift Tests/LocalRenam
 "$test_dir/local-rename-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/ViewerPlaybackPolicy.swift Tests/ViewerPlaybackPolicyTests.swift -o "$test_dir/viewer-playback-tests"
 "$test_dir/viewer-playback-tests"
+xcrun swiftc -j 2 -parse-as-library VideoApp/VideoTerminalState.swift Tests/VideoTerminalStateTests.swift -o "$test_dir/terminal-tests"
+"$test_dir/terminal-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/VideoFeedLayout.swift Tests/VideoFeedLayoutTests.swift -o "$test_dir/feed-layout-tests"
 "$test_dir/feed-layout-tests"
 for module in KitCore KitNet KitHTML; do

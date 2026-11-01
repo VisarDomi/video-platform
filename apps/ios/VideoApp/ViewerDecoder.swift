@@ -9,6 +9,7 @@ protocol ViewerDecoder: AnyObject {
     var size: CGSize { get }
     var playing: Bool { get }
     var hasPicture: Bool { get }
+    var reachedEnd: Bool { get }
     var evidence: [String: Any] { get }
     var muted: Bool { get set }
     func play()

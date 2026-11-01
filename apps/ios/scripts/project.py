@@ -49,6 +49,7 @@ def phase(target, kind, paths):
 common = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION=config.get('build', '1'), MARKETING_VERSION='1.0',
     GENERATE_INFOPLIST_FILE='NO', PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1', SWIFT_VERSION='5.0',
     IPHONEOS_DEPLOYMENT_TARGET='26.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos', SUPPORTED_PLATFORMS='iphoneos iphonesimulator')
+if probe: common['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'ORIGINAL_CODEC_PROBE'
 # Tango's Google login arrives through the Tango Login Safari helper and a shared Keychain group.
 login = config.get('tangoLogin') is True
 entitlements = generated/'Login.entitlements'
@@ -93,7 +94,7 @@ for suffix in config.get('extensions', []):
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
 if probe:
-    sources = ['VideoApp/ViewerVideo.swift', 'VideoApp/ViewerDecoder.swift', 'VideoApp/VLCVideoDecoder.swift', 'Tests/OriginalVideoProbe.swift']
+    sources = ['VideoApp/'+name+'.swift' for name in ['ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/OriginalVideoProbe.swift']
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
 kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']

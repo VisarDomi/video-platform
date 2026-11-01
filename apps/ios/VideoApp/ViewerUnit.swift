@@ -407,6 +407,13 @@ final class ViewerUnit {
         let shouldResume = resume && (snapshot.isLive || target < terminal - 0.1)
         if !shouldResume && target >= terminal - 0.1 { target = max(0, terminal - 0.1) }
         if let decoder {
+            if decoder.reachedEnd, let video {
+                // A completed native input must reopen at the requested position;
+                // sending a seek to the stopped input would be ignored.
+                self.video = nil
+                load(video, start: target, play: shouldResume)
+                return
+            }
             decoder.seek(target)
             if shouldResume { wantsPlay = true; decoder.play() }
             else if resume { wantsPlay = false; decoder.pause() }
@@ -535,6 +542,18 @@ final class ViewerUnit {
                 "stalls": log?.numberOfStalls ?? 0,
                 "droppedVideoFrames": log?.numberOfDroppedVideoFrames ?? 0]
     }
+
+    #if ORIGINAL_CODEC_PROBE
+    func beginDecoderDiagnostics(at url: URL) -> Bool {
+        #if canImport(VLCKit)
+        guard let decoder = decoder as? VLCVideoDecoder else { return false }
+        decoder.beginDiagnostics(at: url)
+        return true
+        #else
+        return false
+        #endif
+    }
+    #endif
 
     private func clearMedia() {
         decoder?.stop()

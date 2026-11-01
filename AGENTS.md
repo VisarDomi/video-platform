@@ -45,3 +45,7 @@ Zoom disables carousel navigation. Never turn a visibility transition into snapp
 
 Do not convert or transcode Bunkr videos, including separate playback copies. Serve the
 original bytes; retain/report native codec limitations rather than substituting media.
+
+Update the isolated native codec test app in place, preserving its stable bundle ID,
+container and Local Network permission. Stop its process after a run; do not uninstall
+it between tests or builds. The owner explicitly requested this on November 1.

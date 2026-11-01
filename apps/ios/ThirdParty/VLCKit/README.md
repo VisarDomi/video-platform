@@ -24,17 +24,33 @@ Neighbours prepare with VLC's native `start-paused` option and remain paused. Th
 libvlc instance, initializes media off the main thread, and uses the same native
 mute/seek/progress/background policy as the rest of the viewer.
 
+Use the bundled `avformat` MP4 parser for this fallback. The native MP4 parser in
+the pinned libvlc build repeatedly resets dav1d during paused AV1 preroll and can
+jump far beyond the requested position. This changes only the phone's container
+parser; the server and original bytes remain unchanged.
+
+Saved positions seek on the full input after it opens. Do not set `start-time`:
+libvlc then exposes a zero-based range for the remaining movie. Native seek
+completions are serialized, paused intent holds its clock, and the first restored
+picture stays hidden until a frame from the requested position is displayed.
+`VideoTerminalState` distinguishes a sampled terminal clock from failed input;
+normal EOF remains stopped through resume, and an explicit seek reopens it.
+
 The official iOS binary uses Apple's Secure Transport with the system trust
 store, including the PC CA already trusted by the phone's existing local apps.
 Certificate and hostname verification remain enabled. No TLS bypass is used.
 
 Do not play video in this Mac's simulator. Its UI checks use static real-view
-fixtures. `Tests/OriginalVideoProbe.swift` is a separate, temporary native app for
+fixtures. `Tests/OriginalVideoProbe.swift` is a separate native diagnostic app for
 physical-device-only codec tests; `DECODER_PROBE=1 scripts/project.py bunkr`
-generates it only in the QA mirror. It uses its own bundle/container and writes
-only its own diagnostic report. It is never shipped in a product app.
+generates it only in the QA mirror. It uses its own stable bundle/container and writes
+only its own diagnostic report. Update it in place and stop its process after testing;
+retain its Local Network permission for future builds. It is never shipped in a product app.
 
-The owner selected the previously playing VLCKit 4 build on November 1.
-Initial original-file playback is verified on the A14 and confirmed by the owner.
-Precise seeking and end/return behavior still need the deferred Bunkr polish pass.
-The production 3.7.3 experiment was not shipped.
+After a guarded probe build, run `scripts/check-original-video.py --app <probe.app>
+--device <UDID> --original-url <original HTTPS URL> --out <private report directory>`
+on the Mac. It waits for the one-time LAN approval, validates a fresh run ID and
+the actual native clock, and stops only its own PID. The full real-ViewerUnit
+check covers paused preparation, paused seek to 120 s, video-off audio/time,
+track return, saved 130 s restore, terminal EOF without recovery, and explicit
+replay. These checks passed on the A14 using the original AV1 file on November 1.

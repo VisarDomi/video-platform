@@ -12,12 +12,16 @@ private final class VLCPreparedMedia: @unchecked Sendable {
     }()
     let player: VLCMediaPlayer
     let media: VLCMedia
-    init?(url: URL, start: Double) {
+    init?(url: URL, start: Double, demux: String? = nil) {
         player = VLCMediaPlayer(library: Self.library)
         guard let media = VLCMedia(url: url) else { return nil }
         self.media = media
+        // VLC's native MP4 preroll path resets dav1d repeatedly on paused AV1 seeks.
+        // FFmpeg's container parser seeks the same original bytes without that reset.
+        media.addOption(":demux=\(demux ?? "avformat")")
         media.addOption(":start-paused")
-        if start > 0 { media.addOption(":start-time=\(start)") }
+        // Do not use start-time: libvlc then exposes a zero-based playback range,
+        // which would make saved positions and later seeks use different clocks.
         player.media = media
     }
 }
@@ -35,15 +39,20 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     private var initialTime: Double
     private var lastTime: Double
     private var pendingSeek: Double?
+    private var seekInFlight = false
     private var ended = false
+    private var inputFailed = false
     private let knownDuration: Double
     private let changed: () -> Void
     private let failed: () -> Void
     private var videoEnabled = true
+    private var stateEvents: [[String: Any]] = []
+    private let surface: UIView
+    private var firstPictureAfterSeek: UInt64?
 
     static func create(source: MediaSource, video: ViewerVideo, surface: UIView, start: Double,
-                       changed: @escaping () -> Void, failed: @escaping () -> Void) async -> VLCVideoDecoder? {
-        guard let core = await Task.detached(priority: .userInitiated, operation: { VLCPreparedMedia(url: source.url, start: start) }).value else { return nil }
+                       changed: @escaping () -> Void, failed: @escaping () -> Void, demux: String? = nil) async -> VLCVideoDecoder? {
+        guard let core = await Task.detached(priority: .userInitiated, operation: { VLCPreparedMedia(url: source.url, start: start, demux: demux) }).value else { return nil }
         return VLCVideoDecoder(core: core, video: video, surface: surface, start: start, changed: changed, failed: failed)
     }
 
@@ -57,35 +66,45 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         knownDuration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         self.changed = changed
         self.failed = failed
+        self.surface = surface
         super.init()
+        player.minimalTimePeriod = Int64(VideoTerminalState.clockPeriod * 1_000_000)
+        player.timeChangeUpdateInterval = VideoTerminalState.clockPeriod
         player.drawable = surface
         player.videoFitMode = .smaller
         player.delegate = self
         player.audio?.isMuted = true
+        surface.isHidden = start > 0
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.changed() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.applyPendingSeek()
+                if let before = self.firstPictureAfterSeek, self.media.statistics.displayedPictures > before, self.pendingSeek == nil {
+                    self.surface.isHidden = false
+                    self.firstPictureAfterSeek = nil
+                }
+                self.changed()
+            }
         }
+        if let timer { RunLoop.main.add(timer, forMode: .common) }
         // Native paused preparation, so neighbours can show a still frame during
         // scrolling without starting playback or audio.
         player.play()
     }
 
     var currentTime: Double {
-        guard opened else { return pendingSeek ?? initialTime }
+        if let pendingSeek { return pendingSeek }
+        guard opened, requested else { return lastTime }
         guard player.state != .stopped && player.state != .stopping else { return lastTime }
         let time = max(0, player.time.value?.doubleValue ?? 0) / 1000
-        if let pendingSeek {
-            // An asynchronous seek's old clock must not overwrite durable progress.
-            if abs(time - pendingSeek) > 1 { return pendingSeek }
-            self.pendingSeek = nil
-        }
         lastTime = time
         return time
     }
     var duration: Double { max(knownDuration, (media.length.value?.doubleValue ?? 0) / 1000) }
     var size: CGSize { player.videoSize }
     var playing: Bool { player.isPlaying && requested }
-    var hasPicture: Bool { media.statistics.displayedPictures > 0 }
+    var hasPicture: Bool { !surface.isHidden && media.statistics.displayedPictures > 0 }
+    var reachedEnd: Bool { ended }
     var muted: Bool {
         get { player.audio?.isMuted ?? true }
         set { player.audio?.isMuted = newValue }
@@ -93,19 +112,50 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
 
     func play() {
         guard !ended else { return }
+        if !requested, opened, pendingSeek == nil {
+            let raw = max(0, player.time.value?.doubleValue ?? 0) / 1000
+            if abs(raw - lastTime) > 0.25 { pendingSeek = lastTime }
+        }
         requested = true
         // A terminated input must reopen through the unit's bounded recovery at
         // its saved clock. libvlc play() alone would start that input from zero.
         if opened && (player.state == .stopped || player.state == .error) { failed(); return }
+        guard opened else { return } // Paused preparation is already opening the input.
+        if pendingSeek != nil { applyPendingSeek(); return }
         player.play()
     }
-    func pause() { requested = false; player.pause() }
+    func pause() {
+        lastTime = currentTime
+        requested = false
+        player.pause()
+    }
     func seek(_ seconds: Double) {
         initialTime = max(0, seconds)
+        lastTime = initialTime
         pendingSeek = initialTime
         ended = false
-        if opened { player.time = VLCTime(number: NSNumber(value: initialTime * 1000)) }
-        else { media.addOption(":start-time=\(initialTime)") }
+        applyPendingSeek()
+    }
+
+    private func applyPendingSeek() {
+        guard !stopped, opened, !seekInFlight, player.isSeekable, let target = pendingSeek else { return }
+        let raw = (player.time.value?.doubleValue ?? 0) / 1000
+        let milliseconds = max(Double(Int32.min), min(Double(Int32.max), ((target - raw) * 1000).rounded()))
+        seekInFlight = true
+        let pictures = media.statistics.displayedPictures
+        let accepted = player.jump(withOffset: Int32(milliseconds), completion: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped else { return }
+                self.seekInFlight = false
+                if self.pendingSeek != target { self.applyPendingSeek(); return }
+                self.pendingSeek = nil
+                self.lastTime = target
+                if self.surface.isHidden { self.firstPictureAfterSeek = pictures }
+                if self.requested { self.player.play() } else { self.player.pause() }
+                self.changed()
+            }
+        })
+        if !accepted { seekInFlight = false }
     }
 
     func setVideoEnabled(_ enabled: Bool) {
@@ -133,16 +183,24 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
 
     private func stateChanged(_ state: VLCMediaPlayerState) {
         guard !stopped else { return }
+        stateEvents.append(["state": state.rawValue, "clock": player.time.value?.doubleValue ?? -1,
+                            "position": player.position, "requested": requested])
+        if stateEvents.count > 16 { stateEvents.removeFirst() }
         if state == .playing {
             opened = true
-            if !requested { player.pause() }
+            inputFailed = false
+            if !requested || pendingSeek != nil { player.pause() }
+            applyPendingSeek()
             if !videoEnabled { player.deselectAllVideoTracks() }
         }
         if state == .paused {
             opened = true
-            if requested { player.play() }
+            if pendingSeek != nil { applyPendingSeek() }
+            else if requested { player.play() }
         }
-        if state == .stopped && opened && duration > 0 && lastTime >= duration - 1 {
+        if state == .error { inputFailed = true }
+        let nativeTime = max(lastTime, (player.time.value?.doubleValue ?? 0) / 1000)
+        if state == .stopped && opened && VideoTerminalState.reachedEnd(duration: duration, time: nativeTime, position: player.position, inputFailed: inputFailed) {
             ended = true
             lastTime = duration
         }
@@ -161,6 +219,9 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     var evidence: [String: Any] {
         let stats = media.statistics
         return ["engine": "VLCKit", "engineVersion": player.libraryInstance.version, "codec": "original", "currentTime": currentTime,
+                "nativeTime": (player.time.value?.doubleValue ?? 0) / 1000, "nativePosition": player.position,
+                "stateEvents": stateEvents,
+                "ended": ended, "inputFailed": inputFailed,
                 "duration": duration, "rate": playing ? 1 : 0, "status": player.state.rawValue,
                 "width": size.width, "height": size.height, "bytesTransferred": stats.readBytes,
                 "decodedVideoFrames": stats.decodedVideo, "displayedVideoFrames": stats.displayedPictures,

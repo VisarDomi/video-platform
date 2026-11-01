@@ -4,27 +4,27 @@
     "product": "TangoLocal",
     "bundleId": "com.visar.TangoLocal.paid",
     "url": "https://192.168.1.197:9999/videos/tango",
-    "build": "4"
+    "build": "5"
   },
   "fc2": {
     "name": "FC2 local",
     "product": "FC2Local",
     "bundleId": "com.visar.FC2Local.paid",
     "url": "https://192.168.1.197:9999/videos/fc2",
-    "build": "4"
+    "build": "5"
   },
   "sc": {
     "name": "SC local",
     "product": "SCLocal",
     "bundleId": "com.visar.SCLocal.paid",
     "url": "https://192.168.1.197:9999/videos/sc",
-    "build": "4"
+    "build": "5"
   },
   "bunkr": {
     "name": "Bunkr local",
     "product": "BunkrLocal",
     "bundleId": "com.visar.BunkrLocal.paid",
-    "build": "6",
+    "build": "7",
     "url": "https://192.168.1.197:9998/videos/bunkr",
     "mediaKind": "mp4"
   },
@@ -38,13 +38,13 @@
       "www.porntrex.com"
     ],
     "native": "vault",
-    "build": "4"
+    "build": "5"
   },
   "tango-live": {
     "name": "Tango",
     "product": "Tango",
     "bundleId": "com.visar.Tango.paid",
-    "build": "32",
+    "build": "33",
     "url": "https://tango.me/",
     "hosts": [
       "tango.me",

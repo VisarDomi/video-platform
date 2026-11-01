@@ -50,9 +50,12 @@ Its library/media setup runs off the main thread. Backgrounding disables its vid
 track while retaining audio/time, and foregrounding restores that track.
 The checksum-pinned official iOS binary, system TLS trust and renewal inputs are
 documented in [ThirdParty/VLCKit](ThirdParty/VLCKit/README.md).
-The owner chose the previously playing VLCKit 4 build on November 1. Original
-AV1 playback is verified on the A14 and confirmed by the owner; precise seek,
-end and return behavior remain for the explicitly deferred Bunkr polish pass.
+The fallback uses the bundled FFmpeg container parser to avoid the pinned native
+MP4 parser's paused AV1 seek resets. Restoration seeks on the full input without
+changing its time origin. Native seek completions preserve pause/volume intent;
+EOF stays terminal through resume/return, and seeking afterwards reopens at the
+requested time. The real player passed the original-file A14 seek, return,
+saved-position, EOF and explicit-replay checks on November 1.
 The ✏️ button beside mute renames the MP4 on the PC and updates its list/player
 name. A stable file identity keeps the current player, saved position and row
 identity intact across renames. New names keep the `.mp4` extension and cannot
