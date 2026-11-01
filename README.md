@@ -13,6 +13,10 @@ One provider I implemented myself, the other two are inspired by other github re
 # setup
 [setup notes](./notes.md)
 
+Phone dashboard: **https://192.168.1.197:8791/** — live pipeline, queue, upload
+allowance, short batches and verification history. Safari → Share → Add to Home
+Screen. [Dashboard guide](packages/pipeline/dashboard/README.md).
+
 # Docs
 
 Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:

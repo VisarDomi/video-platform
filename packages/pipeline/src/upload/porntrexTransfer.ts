@@ -10,6 +10,7 @@ export const PORNTREX_CHUNK_IDLE_MS = 60_000;
 const ENVELOPE_ALLOWANCE = 2048;
 export interface PorntrexTransferState {
     bytesObserved: number;
+    acceptedPayloadBytes: number;
     acceptedChunks: number;
     abortedChunks: number;
     claimedBytes: number;
@@ -40,7 +41,7 @@ export async function preparePorntrexTransfer(page: Page, sizeBytes: number,
         const effectiveChunkBytes = Math.min(configured > 0 ? configured : chunkBytes, chunkBytes);
         w.pageContext.upload_chunk_size = effectiveChunkBytes;
         const state: PorntrexTransferState = w.__pipelineTransfer = {
-            bytesObserved: 0, acceptedChunks: 0, abortedChunks: 0, claimedBytes: 0, failure: null,
+            bytesObserved: 0, acceptedPayloadBytes: 0, acceptedChunks: 0, abortedChunks: 0, claimedBytes: 0, failure: null,
         };
         const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
         const targets = new WeakSet<XMLHttpRequest>();
@@ -85,7 +86,7 @@ export async function preparePorntrexTransfer(page: Page, sizeBytes: number,
                 if (timer) clearInterval(timer);
                 try {
                     if (xhr.status === 200 && JSON.parse(xhr.responseText).status === "success" && !accepted.has(index)) {
-                        accepted.add(index); acceptedBytes += bytes; state.acceptedChunks++;
+                        accepted.add(index); acceptedBytes += bytes; state.acceptedPayloadBytes = acceptedBytes; state.acceptedChunks++;
                     }
                 } catch { /* The ordinary response validator reports errors. */ }
             });

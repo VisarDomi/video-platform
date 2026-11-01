@@ -6,6 +6,7 @@ never unblock recordings, grant cleanup coverage or erase provider-removal bans.
 """
 import argparse
 from collections import Counter
+from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -21,7 +22,7 @@ def removal_signature(row):
 
 
 def queue_snapshot(database_path):
-    with sqlite3.connect(Path(database_path).resolve().as_uri() + "?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect(Path(database_path).resolve().as_uri() + "?mode=ro", uri=True)) as db:
         db.row_factory = sqlite3.Row
         db.execute("BEGIN")
         return {

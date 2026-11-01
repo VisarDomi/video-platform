@@ -252,6 +252,8 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
                 await upload.locator('input[type="submit"]').click();
             });
             await request.onProgress?.("file_uploaded", transmittedBytes);
+            await request.onEvidence?.({ stage: "file_transfer_complete", bytesAcknowledged: request.sizeBytes,
+                totalBytes: request.sizeBytes });
             const metadata = page.locator("form:has(#edit_video_title)");
             if (request.title.length > 300) throw new Error("Porntrex title exceeds 300 characters");
             await page.locator("#edit_video_title").fill(request.title);
@@ -299,6 +301,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         let percent = -1;
         let movedAt = Date.now();
         let observedBytes = 0, acceptedChunks = 0, abortedChunks = 0;
+        let lastProgressReport = 0;
         // The page retries a chunk silently on network errors, so keep what
         // its chunk requests actually got back: a stall must say why.
         const chunkProblems: string[] = [];
@@ -344,6 +347,12 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             const error = (await page.locator(".form-upload .generic-error:visible").first().textContent({ timeout: 1_000 })
                 .catch(() => null))?.trim();
             const transfer = await readPorntrexTransfer(page).catch(() => null);
+            if (transfer && Date.now() - lastProgressReport >= 30_000) {
+                await request.onEvidence?.({ stage: "file_transfer_progress", bytesAcknowledged: transfer.acceptedPayloadBytes,
+                    totalBytes: request.sizeBytes, acceptedChunks: transfer.acceptedChunks,
+                    bytesObserved: transfer.bytesObserved });
+                lastProgressReport = Date.now();
+            }
             if (transfer && transfer.abortedChunks > abortedChunks) {
                 abortedChunks = transfer.abortedChunks;
                 await request.onEvidence?.({ stage: "chunk_recovery", abortedChunks,

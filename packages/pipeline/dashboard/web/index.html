@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1118">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="description" content="Your video backup engine, live from your PC.">
+  <title>Pipeline</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#overview" aria-label="Pipeline overview"><img src="/icon.svg" alt="" width="38" height="38"><span>Pipeline<small>PC → PORNTREX</small></span></a>
+    <button id="refresh" class="connection" aria-label="Refresh live data"><span class="connection-dot"></span><span id="connection-label">Connecting</span><span class="refresh-glyph">↻</span></button>
+  </header>
+  <div id="connection-banner" class="connection-banner" hidden role="status"></div>
+  <main>
+    <section id="loading" class="loading-card"><span class="eyebrow">CONNECTING TO YOUR PC</span><h1>A window into the pipeline.</h1><p>Reading the live queue…</p><div class="loading-rail"></div></section>
+    <div id="dashboard" hidden>
+      <section id="overview" class="page" aria-label="Live overview">
+        <div class="section-top"><span class="eyebrow" id="overview-date">LIVE OVERVIEW</span><span id="health-label" class="health-label">Checking status</span></div>
+        <article id="now-card" class="now-card">
+          <div class="now-top"><span id="now-state" class="stage-tag">WORKING</span><span id="job-elapsed" class="subtle"></span></div>
+          <h1 id="now-title">Your library, in motion.</h1>
+          <p id="now-alias" class="now-alias"></p>
+          <div id="now-detail" class="now-detail"></div>
+          <div id="job-progress" class="job-progress" aria-label="Transfer progress"><div id="job-fill"></div></div>
+          <div class="progress-caption"><span id="progress-detail"></span><span id="progress-number"></span></div>
+          <div id="job-extra" class="job-extra"></div>
+        </article>
+        <div id="attention" class="attention" hidden></div>
+        <div class="stat-grid" id="summary-stats"></div>
+        <section class="panel stage-panel">
+          <div class="panel-heading"><div><span class="eyebrow">FROM LIVE TO BACKED UP</span><h2>The pipeline</h2></div><span class="tiny muted">Tap a stage</span></div>
+          <div class="pipeline-map" id="pipeline-map"></div>
+          <div id="capture-strip" class="capture-strip"></div>
+        </section>
+        <div class="desktop-pair">
+          <section class="panel budget-panel">
+            <div class="panel-heading"><div><span id="budget-month" class="eyebrow">UPLOAD ALLOWANCE</span><h2>Room to move</h2></div><span class="small-tag">GB · decimal</span></div>
+            <div class="budget-layout"><div class="budget-ring">
+              <svg viewBox="0 0 180 180" role="img" aria-label="Upload allowance"><circle class="ring-track outer" cx="90" cy="90" r="77"></circle><circle id="released-ring" class="ring-released" cx="90" cy="90" r="77" pathLength="100"></circle><circle class="ring-track" cx="90" cy="90" r="64"></circle><circle id="used-ring" class="ring-used" cx="90" cy="90" r="64" pathLength="100"></circle></svg>
+              <div class="ring-label"><strong id="budget-remaining">—</strong><span>available now</span></div>
+            </div><div class="budget-numbers" id="budget-numbers"></div></div>
+            <div id="release-schedule" class="release-schedule"></div>
+            <p class="panel-note" id="budget-note"></p>
+          </section>
+          <section class="panel history-panel">
+            <div class="panel-heading"><div><span class="eyebrow">THE LAST 14 DAYS</span><h2>Steady progress</h2></div><span class="small-tag">Copies</span></div>
+            <div id="history-totals" class="history-totals"></div>
+            <div id="history-chart" class="history-chart" role="img" aria-label="Daily uploads and verifications"></div>
+            <div class="chart-legend"><span><i class="legend-dot purple"></i>Submitted</span><span><i class="legend-dot mint"></i>Verified</span></div>
+          </section>
+        </div>
+        <section class="panel shorts-panel">
+          <div class="panel-heading"><div><span class="eyebrow">SMALL CLIPS, COMPLETE STORIES</span><h2>Better together</h2></div><button class="text-button" id="show-shorts">See clips <span>↗</span></button></div>
+          <p class="section-description">Shorts wait for the same streamer and a matching picture shape.</p>
+          <div id="shorts-summary" class="shorts-summary"></div>
+          <div id="short-batches" class="short-batches"></div>
+          <p class="panel-note">Two minutes of compatible footage, then the normal conversion and verification journey.</p>
+        </section>
+        <section class="panel storage-panel">
+          <div class="panel-heading"><div><span class="eyebrow">ON YOUR PC</span><h2>Space for what’s next</h2></div><span id="disk-free" class="disk-free"></span></div>
+          <div id="storage-rail" class="storage-rail" role="img" aria-label="Disk usage"></div>
+          <div id="storage-legend" class="storage-legend"></div>
+          <p id="storage-note" class="panel-note"></p>
+        </section>
+        <section class="panel services-panel">
+          <div class="panel-heading"><div><span class="eyebrow">BEHIND THE SCENES</span><h2>The crew</h2></div><span class="tiny muted">CPU · service RAM</span></div>
+          <div id="services" class="services"></div>
+          <details class="history-details"><summary id="retained-summary">Retained history</summary><p>Known provider removals stay excluded from re-upload and cleanup. They aren’t current pipeline faults. Normal short waiting and verification delays aren’t failures either.</p><p id="monitoring-note"></p></details>
+        </section>
+      </section>
+      <section id="queue" class="page" aria-label="Pipeline queue" hidden>
+        <div class="page-title"><span class="eyebrow">OLDEST FIRST</span><h1>Waiting in line</h1><p>Known queue jobs. Newly finalized recordings appear as they’re admitted.</p></div>
+        <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="queue-search" type="search" placeholder="Find a streamer or recording" aria-label="Search queue" autocomplete="off"></div>
+        <div id="queue-filters" class="filters" role="group" aria-label="Queue filters"></div>
+        <div id="queue-count" class="list-caption"></div><div id="queue-list" class="queue-list"></div>
+        <button id="show-more" class="more-button" hidden>Show more</button>
+      </section>
+      <section id="activity" class="page" aria-label="Recent activity" hidden>
+        <div class="page-title"><span class="eyebrow">THE RUNNING STORY</span><h1>In motion</h1><p>Real transitions, as work moves through the pipeline.</p></div>
+        <div id="activity-stats" class="activity-stats"></div><div id="activity-list" class="activity-list"></div>
+      </section>
+      <footer class="app-footer"><span id="snapshot-time"></span><span>Made for your PC & your phone.</span></footer>
+    </div>
+  </main>
+  <nav class="bottom-nav" aria-label="Dashboard navigation">
+    <button data-page="overview" class="selected" aria-current="page"><span aria-hidden="true">◈</span>Overview</button>
+    <button data-page="queue"><span aria-hidden="true">≋</span>Queue</button>
+    <button data-page="activity"><span aria-hidden="true">↗︎</span>Activity</button>
+  </nav>
+  <noscript><p class="noscript">Enable JavaScript to see live pipeline updates.</p></noscript>
+</body>
+</html>

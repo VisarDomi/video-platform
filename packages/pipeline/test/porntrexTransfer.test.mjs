@@ -52,6 +52,7 @@ test('an unresponsive chunk is retried at its own index, preserving the accepted
     assert.deepEqual(f.indices,[1,2,2,3,0]);
     assert.deepEqual(Buffer.concat([...f.pieces.values()]),f.source);
     const state=await readPorntrexTransfer(f.page);
+    assert.equal(state.acceptedPayloadBytes,f.source.length);
     assert.equal(state.abortedChunks,1);assert.equal(state.failure,null);
     assert.equal(await f.page.evaluate(()=>pageContext.upload_chunk_size),2048);
     assert(claims.length>0);assert.equal(claims.at(-1),state.claimedBytes);
@@ -73,7 +74,11 @@ test('slow chunk acknowledgements count as progress even when the integer percen
     const f=await fixture(t,{delay:45});
     await preparePorntrexTransfer(f.page,f.source.length,async()=>{},{chunkBytes:2048,idleMs:1000});
     const uploader=new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused'});
-    await uploader.waitForFileTransfer(f.page,{onEvidence:async()=>{}},()=>f.page.evaluate(()=>startFixture()),{stallMs:100,pollMs:5});
+    const evidence=[];
+    await uploader.waitForFileTransfer(f.page,{sizeBytes:f.source.length,onEvidence:async value=>evidence.push(value)},()=>f.page.evaluate(()=>startFixture()),{stallMs:100,pollMs:5});
+    const telemetry=evidence.find(value=>value.stage==='file_transfer_progress');
+    assert(telemetry);assert.equal(telemetry.totalBytes,f.source.length);
+    assert(telemetry.bytesAcknowledged>=0&&telemetry.bytesAcknowledged<=f.source.length);
     assert.equal(await f.page.locator('.progressbar .text').textContent(),'0%');
     assert.deepEqual(Buffer.concat([...f.pieces.values()]),f.source);
 });

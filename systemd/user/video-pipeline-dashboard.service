@@ -1,0 +1,14 @@
+[Unit]
+Description=Pipeline phone dashboard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 "{{HOME}}/Documents/work/video/video-platform/packages/pipeline/dashboard/server.py"
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

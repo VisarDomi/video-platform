@@ -14,6 +14,7 @@ const managedFiles = [
     "video-bunkr-downloads.service",
     "video-downloader.service",
     "video-pipeline.service",
+    "video-pipeline-dashboard.service",
     "video-ptrex-session.service",
     "video-ptrex-session.timer",
     "video-processing.slice",

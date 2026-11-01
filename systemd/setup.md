@@ -11,6 +11,7 @@ installed files under `~/.config/systemd/user` directly.
 | `video-downloader.service` | `~/.local/bin/video-downloader` |
 | `video-auth.service` | `~/.local/bin/video-auth` on display `:111` |
 | `video-pipeline.service` | `npm run campaign-worker -w pipeline` on display `:111`, with network uploads on and cleanup off |
+| `video-pipeline-dashboard.service` | read-only phone PWA on HTTPS8791; foreground-only on-demand snapshots, independent of upload-worker pauses |
 | `video-ptrex-session.timer` / `.service` | shared-session health, coordinated recovery and pending phone delivery every ten minutes; never starts uploads or changes campaign intent |
 | `video-xvfb.service` | Xvfb display `:111` (1920x1080) for the auth and pipeline browsers |
 | `video-processing.slice` | the shared resource boundary below |
@@ -46,6 +47,12 @@ starting it. It uses the existing local HTTPS certificate, keeps one transfer
 active, and persists the queue before acknowledging a request. This service is
 independent of the heavy upload worker and gaming holds. Its files are in
 `~/Videos/plab/bunkr` and `~/.local/share/video-services/bunkr-downloads`.
+
+Enable `video-pipeline-dashboard.service` to keep the phone dashboard available
+at **https://192.168.1.197:8791/**. It uses the existing local certificate and
+does not depend on/start the heavy worker. Backend changes restart only this
+dashboard unit; static edits require no restart. See the
+[dashboard guide](../packages/pipeline/dashboard/README.md).
 
 Enable `video-ptrex-session.timer` independently of `video-pipeline.service`. It remains
 enabled during gaming pauses so server-side session expiry is not tied to conversion
