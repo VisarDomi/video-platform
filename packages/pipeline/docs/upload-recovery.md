@@ -111,3 +111,9 @@ and fresh deadlines, missing/changed originals, migration, legacy holds, known
 removal bans, SIGKILL at acceptance, split-part coverage and real selected-shape
 conversion. Upload-provider fixtures cover complete list checks across pagination
 and inconclusive errors. Original files are never cleanup targets.
+
+Browser launch failures retry once after one second, then use the ordinary
+15-minute pre-submission cooldown (doubling on repeated failures). Their original
+launch diagnostic is preserved. A profile lock or browser startup failure is not
+evidence of logout and must not request a password login or impose its 24-hour
+login hold. Another browser owner's process/profile lock is never removed.
