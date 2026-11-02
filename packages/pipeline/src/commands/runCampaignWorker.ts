@@ -4,6 +4,7 @@ import path from "node:path";
 import { journalPriority } from "shared";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 import { reconcileDueUploads } from "./reconcileUploads.js";
 import { campaignStep } from "./campaign.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
@@ -108,9 +109,12 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     {
         const database = new PipelineDatabase(config.databasePath);
         try {
+            database.recoverInterruptedUploads();
             database.recoverAcceptedVerifications();
             database.releasePlaceholderReferences();
             const cleared = database.releaseAllLeases();
+            const cleaned=await cleanupAcceptedConversions(database,config);
+            if(cleaned.length) console.log(JSON.stringify({event:"accepted-conversion-cleanup",results:cleaned}));
             if (cleared > 0) {
                 console.log(JSON.stringify({ event: "campaign-boot-clear-leases", cleared }));
             }

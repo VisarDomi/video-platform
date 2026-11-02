@@ -1,3 +1,5 @@
+import { cleanupAcceptedConversions } from "./acceptedConversions.js";
+import { UPLOAD_RETRY_MILLISECONDS } from "../db/pipelineDatabase.js";
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { probeDuration } from "descriptor";
 import type { PipelineConfig } from "../config.js";
@@ -157,14 +159,16 @@ export async function uploadOne(
             };
         }
 
+        const conversionCleanup=await cleanupAcceptedConversions(database,config);
         const receipt = outcome.receipt;
         return {
             recordingId,
             uploadProvider: provider,
             state: database.get(recordingId)?.state,
             transmittedBytes: receipt.transmittedBytes,
-            confirmAfter: new Date(
-                new Date(receipt.metadataSubmittedAt).getTime() + 24 * 60 * 60_000,
+            conversionCleanup,
+            confirmAfter: database.pendingConfirmationDeadline(recordingId) ?? new Date(
+                new Date(receipt.metadataSubmittedAt).getTime() + UPLOAD_RETRY_MILLISECONDS,
             ).toISOString(),
         };
     } finally {

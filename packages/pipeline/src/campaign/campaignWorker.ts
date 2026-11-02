@@ -101,7 +101,7 @@ export class CampaignWorker {
     }
 
     async step(now = new Date()): Promise<CampaignStepResult> {
-        // Disk is the truth: forget recordings whose source folder is gone.
+        // Track local availability separately; never erase remote history.
         const swept = await sweepMissingRecordings(this.database, this.config, now);
         if (swept.length > 0) {
             console.log(JSON.stringify({ event: "campaign-sweep", swept }));
@@ -141,7 +141,7 @@ export class CampaignWorker {
             };
         }
         const order = (recordings: readonly Recording[], provider: string) => {
-            const candidates = ordered(recordings, provider);
+            const candidates = ordered(recordings.filter(recording => !this.database.localSourceIsAbsent(recording.id)), provider);
             return comparison ? candidates.filter(allows).sort((a, b) =>
                 comparison.selection.findIndex((r) => r.sourcePath === a.sourcePath)
                 - comparison.selection.findIndex((r) => r.sourcePath === b.sourcePath)) : candidates;

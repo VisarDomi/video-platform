@@ -1,3 +1,4 @@
+import { UPLOAD_RETRY_MILLISECONDS } from "../db/pipelineDatabase.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
 import { MetadataRejectedError, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
@@ -137,7 +138,7 @@ export class UploadCoordinator {
         const submittedAt = new Date(receipt.metadataSubmittedAt);
         if (!Number.isFinite(submittedAt.getTime())) throw new Error("Uploader returned an invalid submission timestamp");
         // Success is never decided at submit time: the attempt parks as
-        // uncertain with the captured video ID, and the 24-hour reconcile
+        // uncertain with the captured video ID, and the seven-day reconcile
         // verifies the public video link.
         const remoteId = receipt.submittedVideoId;
         this.database.finishUploadAttempt(attemptId, {
@@ -145,10 +146,11 @@ export class UploadCoordinator {
             transmittedBytes: receipt.transmittedBytes,
             remoteId: remoteId ?? undefined,
             error: remoteId
-                ? "metadata submitted; awaiting 24-hour edit-page verification"
+                ? "metadata submitted; awaiting seven-day playback verification"
                 : "metadata submitted; submitted video ID was not captured",
+            ...(remoteId ? { acceptedAt: submittedAt } : {}),
             confirmation: {
-                confirmAfter: new Date(submittedAt.getTime() + 24 * 60 * 60_000),
+                confirmAfter: new Date(submittedAt.getTime() + UPLOAD_RETRY_MILLISECONDS),
             },
         }, submittedAt);
         return outcome;
