@@ -7,7 +7,8 @@
     "scripts": {
         "build": "node scripts/build.mjs",
         "check": "tsc --noEmit",
-        "test:filehost": "node test/filehost.mjs"
+        "test:filehost": "node test/filehost.mjs",
+        "test:filehost-album": "node test/filehost-album.mjs"
     },
     "dependencies": {
         "app": "0.0.1"
