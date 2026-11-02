@@ -44,7 +44,9 @@ The official iOS binary uses Apple's Secure Transport with the system trust
 store, including the PC CA already trusted by the phone's existing local apps.
 Certificate and hostname verification remain enabled. No TLS bypass is used.
 
-Do not play video in this Mac's simulator. Its UI checks use static real-view
+On this old Intel Mac, simulator playback checks use one actively decoded stream
+at a time under `mac-workload`. Measure codec/resolution capacity with a single
+stream before choosing a physical-phone test. Routine UI checks use static real-view
 fixtures. `Tests/OriginalVideoProbe.swift` is a separate native diagnostic app for
 physical-device-only codec tests; `DECODER_PROBE=1 scripts/project.py bunkr`
 generates it only in the QA mirror. It uses its own stable bundle/container and writes

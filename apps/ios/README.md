@@ -86,8 +86,10 @@ surface stays alive until the native stop event.
 - Never copy a Tango refresh token between devices: the PC and the phone each hold their own
   (`packages/auth/SESSION-RECOVERY.md`).
 - Never commit `Private/` (Tango's PC login key) or `build/`; both are gitignored.
-- Do not play video in the iOS simulator: it overloads the Mac. Playback is checked on the
-  phone.
+- On the shared old Intel Mac, simulator playback checks use one actively decoded
+  stream at a time, with neighbours paused and no parallel video test or guest.
+  Run through `mac-workload`; measure new codecs/resolutions before choosing the
+  physical phone. A single 720p H.264 stream was verified on November 2.
 - Routine UI, lifecycle and simulated-network checks use the Mac's virtual iPhone. Use the
   physical phone only for behavior that cannot be established there, such as its actual
   network/authentication path. Remove any temporary phone controller and verify removal.

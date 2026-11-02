@@ -1,5 +1,11 @@
 # Server Decisions
 
+## HLS media responses identify the saved container
+
+SC stores fragmented MP4 under legacy `.ts` names. HLS responses identify MP4
+from its ISO-BMFF boxes and use `video/mp4`; real transport streams keep
+`video/mp2t`. This changes only the HTTP content type, never the saved bytes.
+
 ## Finalization is non-destructive and every recording publishes
 
 For Tango, FC2, and SC, the downloader atomically writes `#EXT-X-ENDLIST` and
