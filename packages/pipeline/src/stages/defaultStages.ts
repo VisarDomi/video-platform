@@ -1,3 +1,4 @@
+import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { PipelineStages } from "../scheduler/orchestrator.js";
 import { describeValidatedArtifact } from "./describe.js";
 import { artifactRecipeReason, reuseCachedArtifact, retainUnprovenArtifact, type ArtifactCacheConfig } from "./artifactCache.js";
@@ -12,7 +13,10 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
         // artifact; several shapes are one artifact each, uploaded one after
         // another; short pieces enter automatic joining before upload.
         remux: async (recording) => {
-            const cached = cacheConfig ? await reuseCachedArtifact(recording, stagingRoot, cacheConfig) : null;
+            const database=cacheConfig ? new PipelineDatabase(cacheConfig.databasePath) : null;
+            let retryPart;
+            try {retryPart=database?.getRetryPart(recording.id);} finally {database?.close();}
+            const cached = cacheConfig && !retryPart ? await reuseCachedArtifact(recording, stagingRoot, cacheConfig) : null;
             if (cached) return { disposition: "artifact", ...cached };
             const analysis = await analyzeRecordingResolution(recording.playlistPath);
             const plan = planRecordingShapes(analysis);
@@ -20,7 +24,9 @@ export function createDefaultStages(stagingRoot: string, cacheConfig?: ArtifactC
                 "short shape: automatic same-streamer joining before upload"));
             // Small shape pieces are converted too; the campaign pools them
             // automatically instead of dropping them into manual review.
-            const groups = [...plan.upload, ...plan.manual].sort((a, b) => a.ordinal - b.ordinal);
+            const groups = [...plan.upload, ...plan.manual].sort((a, b) => a.ordinal - b.ordinal)
+                .filter(group=>!retryPart||group.part===retryPart);
+            if(!groups.length) throw new Error('Retry shape no longer exists in the unchanged source');
             if (groups.length === 1 && groups[0].part === "full") {
                 const group = groups[0];
                 await retainUnprovenArtifact(stagingRoot, recording.id, productionArtifactSuffix(group.part, group.output.rotate));

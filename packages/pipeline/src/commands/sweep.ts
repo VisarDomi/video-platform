@@ -1,73 +1,25 @@
-import { access, readdir, unlink } from "node:fs/promises";
-import path from "node:path";
-import type { PipelineConfig } from "../config.js";
-import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import { containedArtifactPath } from "../stages/remux.js";
-import { PRODUCTION_ARTIFACT_BASE } from "../stages/artifactNaming.js";
+import { access } from 'node:fs/promises';
+import type { PipelineConfig } from '../config.js';
+import type { PipelineDatabase } from '../db/pipelineDatabase.js';
 
-const SWEEP_MIN_AGE_MILLISECONDS = 24 * 60 * 60_000;
-const IN_FLIGHT_STATES = ["upload_admitted", "uploading"];
-
-// Disk is the truth: a recording whose source folder no longer exists is
-// forgotten entirely — ledger rows, confirmations, verifications — together
-// with the pipeline-owned files (staging artifact, remux output, descriptor
-// evidence). ISP billing (bandwidth_events) is never refunded and never
-// deleted. Rows younger than 24 hours and in-flight uploads are skipped.
-export async function sweepMissingRecordings(
-    database: PipelineDatabase,
-    config: Pick<PipelineConfig, "cleanupEnabled" | "stagingRoot">,
-    now = new Date(),
-): Promise<Array<{ recordingId: string; provider: string; reason: string }>> {
-    if (!config.cleanupEnabled || database.getComparisonTrial()) return [];
-    const swept: Array<{ recordingId: string; provider: string; reason: string }> = [];
-    for (const recording of database.list()) {
-        // Joined inputs are derived links; their originals and remote coverage
-        // must not disappear from the ledger when the user removes local files.
-        if (database.shortParts(undefined, recording.id).length || database.shortParts(recording.id).some(p => p.batchId)) continue;
-        if (IN_FLIGHT_STATES.includes(recording.state)) continue;
-        if (recording.leaseOwner) continue;
-        const createdAt = new Date(recording.createdAt).getTime();
-        if (!Number.isFinite(createdAt) || now.getTime() - createdAt < SWEEP_MIN_AGE_MILLISECONDS) continue;
+// Presence is independent of receipts, remote monitoring and cleanup. A user
+// deleting/restoring originals never erases history or authorizes media deletion.
+export async function sweepMissingRecordings(database: PipelineDatabase,
+    _config: Pick<PipelineConfig, 'cleanupEnabled' | 'stagingRoot'>, now = new Date()) {
+    const changes: Array<{recordingId:string;provider:string;reason:string}>=[];
+    if(database.getComparisonTrial()) return changes;
+    for(const recording of database.list()) {
         try {
             await access(recording.sourcePath);
-            continue;
-        } catch {
-            // folder is gone
-        }
-        const artifact = database.getArtifact(recording.id);
-        if (artifact) await unlink(artifact.path).catch(() => undefined);
-        for (const variant of database.listArtifactVariants(recording.id)) {
-            await unlink(variant.path).catch(() => undefined);
-        }
-        for (const reviewArtifact of database.listResolutionReviewArtifacts(recording.id)) {
-            await unlink(reviewArtifact.path).catch(() => undefined);
-        }
-        // A split can publish one side before the other side fails validation,
-        // so cover deterministic, not-yet-ledgered review outputs too.
-        for (const suffix of ["max1080p", "nonmax", "nonmax-upscale1080p", "production-upscale1080p", "retained1080p"] as const) {
-            await unlink(containedArtifactPath(config.stagingRoot, recording.id, suffix)).catch(() => undefined);
-        }
-        for (const queued of database.listQueuedProductionArtifacts(recording.id)) {
-            await unlink(queued.path).catch(() => undefined);
-        }
-        // Current production outputs, whole or one per shape, ledgered or not.
-        const prefix = `${recording.id}.${PRODUCTION_ARTIFACT_BASE}`;
-        for (const name of await readdir(config.stagingRoot).catch(() => [] as string[])) {
-            if (name.startsWith(prefix) && name.endsWith(".mp4")) {
-                await unlink(path.join(config.stagingRoot, name)).catch(() => undefined);
+            database.setLocalSourcePresence(recording.id,'present',null,now);
+        } catch(error) {
+            const code=(error as NodeJS.ErrnoException).code;
+            const missing=code==='ENOENT'||code==='ENOTDIR';
+            const reason=missing?'source folder missing; history retained':`source inaccessible: ${code}`;
+            if(database.setLocalSourcePresence(recording.id,missing?'missing':'unavailable',reason,now)) {
+                changes.push({recordingId:recording.id,provider:recording.provider,reason});
             }
         }
-        const remuxOutput = database.getRemuxOutput(recording.id);
-        if (remuxOutput) await unlink(remuxOutput).catch(() => undefined);
-        const description = database.getDescription(recording.id);
-        if (description) {
-            const stillReferenced = database.list()
-                .some((other) => other.id !== recording.id
-                    && database.getDescription(other.id)?.evidencePath === description.evidencePath);
-            if (!stillReferenced) await unlink(description.evidencePath).catch(() => undefined);
-        }
-        database.deleteRecording(recording.id);
-        swept.push({ recordingId: recording.id, provider: recording.provider, reason: "source folder missing from disk" });
     }
-    return swept;
+    return changes;
 }
