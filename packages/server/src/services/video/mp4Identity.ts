@@ -7,11 +7,11 @@ export function mp4Identity(stat: Pick<Stats, "dev" | "ino" | "birthtimeMs">): s
 export class MP4RenameError extends Error {
     constructor(readonly status: number, message: string) { super(message); }
 }
-export function mp4RenameName(value: unknown): string {
+export function mp4RenameName(value: unknown, extension = "mp4"): string {
     if (typeof value !== "string") throw new MP4RenameError(400, "Enter a filename");
     let name = value.trim().normalize("NFC");
     if (!name || name.startsWith(".") || /[\x00-\x1f\x7f/\\]/.test(name)) throw new MP4RenameError(400, "Use a filename without folders or control characters");
-    if (!/\.mp4$/i.test(name)) name += ".mp4";
+    if (!name.toLowerCase().endsWith("." + extension)) name += "." + extension;
     if (Buffer.byteLength(name, "utf8") > 255) throw new MP4RenameError(400, "The filename is too long");
     return name;
 }
