@@ -9,6 +9,14 @@ Every ordinary PC browser/authentication flow runs headful on Xvfb `:111`; never
 inherit the desktop display. Routine iPhone UI checks use the Mac virtual iPhone;
 reserve the physical device for behavior that cannot be established there.
 
+Accepted app updates use `ios-push APP` (for example `ios-push bunkr`). Wait for its
+source-captured Queued acknowledgement, continue work, then check `ios-push status
+JOB`. It asynchronously builds/signs/installs without launch and approves only the
+confirmed installed checkpoint. Read `/home/visar/Documents/work/ios-tools/push/README.md`.
+Approved Mac renewal roots may be frozen per-app checkpoints, not the mutable mirror.
+For the Infuse-parity task, the owner alone checks physical-phone fluidity; use the
+phone only to install updates.
+
 Handle routine project repairs autonomously without requesting confirmation. This includes
 Porntrex session recovery: reuse a valid shared session first; if every retained copy is
 rejected, perform one coordinated PC login through `ptrex-connect-iphone --apply

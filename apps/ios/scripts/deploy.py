@@ -12,17 +12,17 @@ registry=json.loads((APP/'providers.json').read_text())
 def remote(code):
     return subprocess.run(SSH+['/usr/bin/python3 -'],input=code,text=True,check=True)
 p=argparse.ArgumentParser();p.add_argument('provider',choices=sorted(registry))
-p.add_argument('action',choices=['sync','test','build','status','install','finish']);p.add_argument('--no-launch',action='store_true');a=p.parse_args()
+p.add_argument('action',choices=['prepare','sync','test','build','status','install','finish']);p.add_argument('--no-launch',action='store_true');a=p.parse_args()
 config=registry[a.provider]
 log=MAC+'/build/'+a.provider+'/xcode.log'
 # Approves the installed build as its renewal baseline only if it is exactly what was built (ios-tools renewal).
 # Renewal names local apps <provider>-local (see renewal.py).
 deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewal/scripts/deliver.py',step,'--repo','video-platform',
                      '--app',a.provider if config.get('hosts') else a.provider+'-local','--bundle',config['bundleId']]
-if a.action=='sync':
+if a.action in ('prepare','sync'):
     if a.provider == 'bunkr': subprocess.run(['python3', str(APP/'scripts/prepare-vlckit.py')],check=True)
     # All providers share this mirror. A local-app sync must preserve Tango's build key too.
-    stage_private_inputs(APP,registry,pathlib.Path.home()/'.local/share/video-services')
+    stage_private_inputs(APP,registry if a.action=='sync' else {a.provider:config},pathlib.Path.home()/'.local/share/video-services')
     # Hosted Safari web extensions (Tango's FC2 live and SC live) are built here, so the Mac (and
     # monthly renewal) needs no Node or Video Platform checkout.
     for suffix,extension in config.get('webExtensions',{}).items():
@@ -30,6 +30,7 @@ if a.action=='sync':
         target=APP/'build'/a.provider/suffix
         target.mkdir(parents=True,exist_ok=True)
         for name in ['manifest.json','content.js','background.js']: shutil.copyfile(ROOT/'dist/extension'/extension['source']/name,target/name)
+    if a.action=='prepare': raise SystemExit(0)
     # Sources only; build evidence and DerivedData on the Mac are preserved.
     subprocess.run(SSH+['mkdir -p '+shlex.quote(MAC+'/build/'+a.provider)],check=True)
     subprocess.run(['rsync','-az','--delete','--exclude=build/','--exclude=__pycache__/','-e',shlex.join(SSH[:-1]),str(APP)+'/',SSH[-1]+':'+MAC+'/'],check=True)
