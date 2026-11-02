@@ -4,6 +4,8 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
+import etag from 'etag';
+import http from 'node:http';
 
 test('the HLS route serves fMP4 .ts files as MP4 and keeps real transport streams unchanged',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'hls-mime-'));
@@ -16,5 +18,8 @@ test('the HLS route serves fMP4 .ts files as MP4 and keeps real transport stream
  const {default:router}=await import('../dist/api/hls.routes.js');const app=express();app.use(router);const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>{server.closeAllConnections();server.close(r);}));
  const base=`http://127.0.0.1:${server.address().port}/hls/sc/${encodeURIComponent(name)}`;
  const response=await fetch(base+'/fragment.ts');assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'video/mp4');assert.deepEqual(Buffer.from(await response.arrayBuffer()),fragment);
+ const conditional=tag=>new Promise((resolve,reject)=>{http.get(base+'/fragment.ts',{headers:{'If-None-Match':tag}},r=>{r.resume();r.on('end',()=>resolve({status:r.statusCode,type:r.headers['content-type']}));}).on('error',reject);});
+ const oldCache=await conditional(etag(fragment,{weak:true}));assert.equal(oldCache.status,200);assert.equal(oldCache.type,'video/mp4');
+ const currentCache=await conditional(response.headers.get('etag'));assert.equal(currentCache.status,304);
  const original=await fetch(base+'/transport.ts');assert.equal(original.headers.get('content-type'),'video/mp2t');assert.deepEqual(Buffer.from(await original.arrayBuffer()),ts);
 });
