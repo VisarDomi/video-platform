@@ -1,10 +1,11 @@
 import { BunkrDownload, bunkrFileURL } from "./bunkrDownload";
+import { fitBunkrText } from "./bunkrTextFit";
 import css from "./bunkrAlbum.css";
 
 type AlbumItem = { url: string; title: string; size: string; date: string; thumbnail?: string };
 type Album = { title: string; summary: string; items: AlbumItem[] };
 type Poster = { url: string; width?: number; height?: number };
-type Row = { element: HTMLElement; image: HTMLImageElement; control: BunkrDownload; item: AlbumItem; visible: boolean; posterReady: boolean; posterBusy: boolean };
+type Row = { element: HTMLElement; image: HTMLImageElement; control: BunkrDownload; textFit: ReturnType<typeof fitBunkrText>; item: AlbumItem; visible: boolean; posterReady: boolean; posterBusy: boolean };
 
 function sizeImage(image: HTMLImageElement, width: number, height: number): void {
     if (![width, height].every(value => Number.isFinite(value) && value > 0 && value <= 100_000)) return;
@@ -115,12 +116,15 @@ export function openBunkrAlbum(): void {
         const name = document.createElement("a"); name.className = "album-name"; name.href = item.url; name.textContent = item.title;
         const metadata = document.createElement("p"); metadata.className = "album-metadata"; metadata.textContent = [item.size, item.date].filter(Boolean).join(" · ");
         const button = document.createElement("button"); button.className = "album-download"; button.type = "button";
+        const textFit = fitBunkrText(details, image);
         const control = new BunkrDownload(new URL(item.url), () => {
-            button.textContent = control.label ?? "Download to PC"; button.dataset.state = control.state; button.setAttribute("aria-busy", String(control.submitting));
+            const label = control.label ?? "Download to PC";
+            if (button.textContent !== label) { button.textContent = label; textFit.refresh(); }
+            button.dataset.state = control.state; button.setAttribute("aria-busy", String(control.submitting));
         }, true);
         button.textContent = control.label ?? "Download to PC"; button.addEventListener("click", () => void control.activate());
         details.append(name, metadata, button); element.append(link, details);
-        const row = { element, image, control, item, visible: false, posterReady: false, posterBusy: false };
+        const row = { element, image, control, textFit, item, visible: false, posterReady: false, posterBusy: false };
         const poster = posters[item.url];
         if (poster?.url) { setPoster(row, poster); row.posterReady = true; } else if (item.thumbnail) image.src = item.thumbnail;
         image.addEventListener("error", () => { if (item.thumbnail && image.src !== item.thumbnail) image.src = item.thumbnail; else image.removeAttribute("src"); });
@@ -129,13 +133,14 @@ export function openBunkrAlbum(): void {
     function render(album: Album): void {
         document.title = album.title + " | Bunkr"; title.textContent = album.title; summary.textContent = album.summary;
         const wanted = new Set(album.items.map(item => item.url));
-        for (const [url, row] of rows) if (!wanted.has(url)) { observer.unobserve(row.element); row.control.dispose(); row.element.remove(); rows.delete(url); }
+        for (const [url, row] of rows) if (!wanted.has(url)) { observer.unobserve(row.element); row.control.dispose(); row.textFit.dispose(); row.element.remove(); rows.delete(url); }
         for (const [index, item] of album.items.entries()) {
             let row = rows.get(item.url); if (!row) { row = makeRow(item); rows.set(item.url, row); }
             row.item = item;
             row.element.querySelector(".album-name")!.textContent = item.title;
             row.element.querySelector(".album-metadata")!.textContent = [item.size, item.date].filter(Boolean).join(" · ");
             if (list.children[index] !== row.element) list.insertBefore(row.element, list.children[index] ?? null);
+            row.textFit.refresh();
             observer.observe(row.element);
         }
         status.textContent = album.items.length ? "" : "No files found.";

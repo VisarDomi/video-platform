@@ -34,6 +34,12 @@ list. Each row has the full filename, size/date, the `/f/` player's contact-shee
 poster and an adjacent gray PC download/status button. There is no row or image
 padding, fixed thumbnail aspect, crop or enlargement. Cached natural image
 dimensions reserve the layout before decoding. Safari owns Back navigation.
+The details keep their normal text size when they fit; a small resize-driven
+measurement shrinks the whole details block only when it is taller than its
+thumbnail, and restores the size when room returns. It recalculates after poster
+loads, rotation and status changes. CSS controls all font proportions and button
+spacing. `text-fit` currently fits line width and is unavailable in Safari, so it
+cannot provide this height-based behavior by itself.
 The file page's declared `videoCoverUrl` is read as a JSON string; its player and
 scripts are never executed by the album. The original small album thumbnail is
 retained if the file poster cannot be loaded. Visible/nearby rows fetch posters

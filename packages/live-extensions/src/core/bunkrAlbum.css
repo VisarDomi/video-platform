@@ -1,14 +1,15 @@
 :root { color-scheme: dark; background: #000; color: #eee; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #000; }
+body { background: #000; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 header h1 { font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
 header p, .album-metadata { color: #aaa; font-size: 13px; line-height: 1.3; overflow-wrap: anywhere; }
 .album-row { display: grid; grid-template-columns: fit-content(66.6667vw) minmax(0, 1fr); align-items: start; gap: 0; border-bottom: 1px solid #303030; }
 .album-preview { display: block; min-width: 0; color: inherit; }
 .album-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 48svh; object-fit: contain; }
-.album-details { min-width: 0; }
-.album-name { display: block; color: #eee; text-decoration: none; font-size: 15px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
-.album-download { display: block; width: 100%; min-height: 44px; border: 0; border-radius: 0; background: #303030; color: #eee; font: inherit; font-size: 14px; line-height: 1.2; overflow-wrap: anywhere; padding: 4px; cursor: pointer; }
+.album-details { min-width: 0; font-size: var(--album-font-size, 15px); }
+.album-name { display: block; color: #eee; text-decoration: none; font-size: 1em; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+.album-details .album-metadata { font-size: 0.8666667em; }
+.album-download { display: block; width: 100%; min-height: 3.1428572em; border: 0; border-radius: 0; background: #303030; color: #eee; font: inherit; font-size: 0.9333333em; line-height: 1.2; overflow-wrap: anywhere; padding: 0.2857143em; cursor: pointer; }
 .album-download:active { background: #484848; }
 .album-download[data-state="complete"] { color: #9ad9ac; }
 .album-download[data-state="failed"], .album-download[data-state="offline"] { color: #e8ba93; }
