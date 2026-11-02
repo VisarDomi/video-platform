@@ -4,6 +4,7 @@ import path from "path";
 import logger from "../core/logger.js";
 import * as utils from "../core/utils.js";
 import { API, FILE_EXTENSIONS, FILE_NAMES, MISC } from "../core/constants.js";
+import { hlsSegmentContentType } from "../services/hls/segmentContentType.js";
 
 const router = Router();
 
@@ -44,7 +45,7 @@ router.get("/hls/:provider/:filename/:segmentName", async (req: Request, res) =>
         const segmentPath = path.join(ref.dirPath, segmentName);
 
         const data = await fs.readFile(segmentPath);
-        const contentType = isMp4 ? API.HEADERS.MP4_CONTENT_TYPE : API.HEADERS.TS_CONTENT_TYPE;
+        const contentType = hlsSegmentContentType(data, segmentName);
         res.setHeader(API.HEADERS.CONTENT_TYPE, contentType);
         res.send(data);
 
