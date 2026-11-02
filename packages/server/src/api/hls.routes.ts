@@ -1,10 +1,12 @@
 import { Router, Request } from "express";
 import { promises as fs } from "fs";
 import path from "path";
+import { createHash } from "node:crypto";
 import logger from "../core/logger.js";
 import * as utils from "../core/utils.js";
 import { API, FILE_EXTENSIONS, FILE_NAMES, MISC } from "../core/constants.js";
 import { hlsSegmentContentType } from "../services/hls/segmentContentType.js";
+import { hlsPlaybackPresentation, isPlaybackInitialization } from "../services/hls/avcLevelContinuity.js";
 
 const router = Router();
 
@@ -18,11 +20,13 @@ router.get("/hls/:provider/:filename/playlist.m3u8", async (req, res) => {
         const ref = await utils.resolveVideo(filename, provider);
         const playlistPath = path.join(ref.dirPath, FILE_NAMES.HLS_PLAYLIST);
         const content = await fs.readFile(playlistPath, MISC.ENCODING_UTF8);
+        const presentation = await hlsPlaybackPresentation(ref.dirPath, content);
 
         res.setHeader(API.HEADERS.CONTENT_TYPE, API.HEADERS.HLS_CONTENT_TYPE);
-        res.send(content);
+        res.setHeader("Cache-Control", "no-cache");
+        res.send(presentation.playlist);
     } catch (error: any) {
-        if (error.name === "FileNotFoundError") {
+        if (error.name === "FileNotFoundError" || error.code === "ENOENT") {
             return res.status(404).send(API.MESSAGES.VIDEO_NOT_FOUND);
         }
         logger.error(`Error serving playlist for ${filename}`, { error });
@@ -44,9 +48,19 @@ router.get("/hls/:provider/:filename/:segmentName", async (req: Request, res) =>
         const ref = await utils.resolveVideo(filename, provider);
         const segmentPath = path.join(ref.dirPath, segmentName);
 
-        const data = await fs.readFile(segmentPath);
+        let data: Buffer;
+        if (isPlaybackInitialization(segmentName)) {
+            const content = await fs.readFile(path.join(ref.dirPath, FILE_NAMES.HLS_PLAYLIST), MISC.ENCODING_UTF8);
+            const presentation = await hlsPlaybackPresentation(ref.dirPath, content);
+            const generated = presentation.initializations.get(segmentName);
+            if (!generated) return res.status(404).send(API.MESSAGES.SEGMENT_NOT_FOUND);
+            data = generated;
+        } else data = await fs.readFile(segmentPath);
         const contentType = hlsSegmentContentType(data, segmentName);
         res.setHeader(API.HEADERS.CONTENT_TYPE, contentType);
+        // Invalidate a legacy byte-only validator when the container's MIME
+        // label changes, so cached Safari responses receive the corrected type.
+        res.setHeader("ETag", `W/"hls-${createHash("sha1").update(contentType).update("\0").update(data).digest("hex")}"`);
         res.send(data);
 
     } catch (err: any) {
