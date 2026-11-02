@@ -13,6 +13,7 @@ import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
+import { ChromiumPorntrexUploader } from "../dist/upload/chromiumPorntrexUploader.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
 import { campaignStatus, configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
@@ -552,3 +553,17 @@ function inputForRollover(directory) {
         durationSeconds: 10,
     };
 }
+
+test("browser launch failures use the 15-minute transport cooldown, retaining the real diagnostic", async t => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    database.setCampaignState('running');
+    const uploader = new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused'},
+        async()=>{throw Error('profile owner still closing');},async()=>{});
+    const worker = new CampaignWorker(database,config,resolver,
+        async()=>uploader.withAuthenticatedPage(async()=>{}));
+    const result=await worker.step(new Date('2026-11-02T00:00:00Z'));
+    assert.equal(result.disposition,'upload_retry_cooldown');
+    assert.equal(result.resumeAt,'2026-11-02T00:15:00.000Z');
+    assert.match(result.reason,/profile owner still closing/);
+    assert.equal(database.get(recording.id).state,'metadata_ready');
+});

@@ -290,7 +290,7 @@ server follows the account first, but only if it is not already followed.
 ## 6. Pipeline ledger, campaign and verification
 
 - **Ledger.** `pipeline/pipeline.sqlite` is SQLite in WAL mode with
-  `synchronous=FULL`, schema 14. Each state change is one durable transition,
+  `synchronous=FULL`, schema 15. Each state change is one durable transition,
   appended to `state_events`. The `upload_*` lifecycle states are independent of destination names.
 
   ```text

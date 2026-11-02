@@ -20,7 +20,7 @@ recording moves through convert → validate → describe → metadata → uploa
 online verification.
 
 - SQLite (`~/.local/share/video-services/pipeline/pipeline.sqlite`, override
-  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 14) holds recording state,
+  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 15) holds recording state,
   transition events, leases, artifact hashes, description evidence, provenance,
   metadata, upload reservations/attempts, transmitted-byte accounting and remote
   identity. Recording IDs are the source folder names (datetime + alias).

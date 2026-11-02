@@ -1,4 +1,6 @@
 import { stat } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
+import { shutdownSignal } from "../shutdown.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { chromium, type BrowserContext, type Page, type Request } from "playwright";
@@ -66,19 +68,36 @@ export function isPorntrexChunkRequest(method: string, rawUrl: string, contentTy
 
 export class ChromiumPorntrexUploader implements ProviderUploader {
     readonly provider = "porntrex" as const;
-    constructor(private readonly config: ChromiumUploaderConfig) {}
+    constructor(private readonly config: ChromiumUploaderConfig,
+        private readonly launchContext: typeof chromium.launchPersistentContext = chromium.launchPersistentContext.bind(chromium),
+        private readonly waitForLaunchRetry = () => delay(1_000, undefined, { signal: shutdownSignal }),
+    ) {}
 
     // Opens the shared session. A password login happens only when explicitly
     // allowed (the connect command): it would log the phone out. Otherwise a
     // missing login means another device took it, and the run stops.
     async withAuthenticatedPage<T>(action: (page: Page) => Promise<T>, options: { allowPasswordLogin?: boolean } = {}): Promise<T> {
-        const context = await chromium.launchPersistentContext(this.config.profilePath, {
+        const launch = () => this.launchContext(this.config.profilePath, {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
             args: ["--disable-blink-features=AutomationControlled"],
             ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
-        }).catch(() => { throw new HumanActionRequiredError("session_login", "Could not open the Porntrex browser profile; close its manual browser first"); });
+        });
+        let context: BrowserContext;
+        try {
+            context = await launch();
+        } catch (firstError) {
+            if (shutdownSignal.aborted) throw firstError;
+            // A previous context can still be releasing the profile. Retry once,
+            // without killing another owner or treating launch failure as logout.
+            await this.waitForLaunchRetry();
+            try { context = await launch(); }
+            catch (cause) {
+                const detail = cause instanceof Error ? cause.message : String(cause);
+                throw new Error(`Porntrex browser launch failed after two attempts: ${detail.slice(-4_000)}`, { cause });
+            }
+        }
         try {
             const stored = this.config.sessionFilePath ? await readPorntrexSession(this.config.sessionFilePath) : null;
             // kt_member would sign in a new session and log the phone out; the
