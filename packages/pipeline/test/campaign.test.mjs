@@ -434,7 +434,8 @@ test("trial slots survive missing sources, limits can be adjusted, and incomplet
     database.enrollCampaignTrial(recording);
     assert.equal(database.getCampaignTrialProgress()[0].admitted, 1);
     assert.equal(database.campaignTrialAllows("tango"), false);
-    database.deleteRecording(recording.id);
+    database.setLocalSourcePresence(recording.id, 'missing', 'user removed source');
+    await rm(recording.sourcePath, {recursive:true,force:true});
     assert.equal(database.campaignTrialAllows("tango"), false);
     assert.equal(database.getCampaignTrialProgress()[0].recordings[0].state, "source_missing");
     database.setCampaignState("running");

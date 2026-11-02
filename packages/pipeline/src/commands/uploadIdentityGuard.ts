@@ -1,7 +1,8 @@
+import { access } from "node:fs/promises";
 import type { PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { Recording } from "../domain/types.js";
-import { cleanupArtifact } from "../stages/cleanupArtifact.js";
+import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 
 // SQLite is the single source of truth for whether a recording is already on
 // the upload provider. The guard runs at every job entry point: a recording with an edit
@@ -16,7 +17,7 @@ export type UploadIdentityGuardOutcome =
 export async function guardUploadIdentity(
     database: PipelineDatabase,
     recording: Recording,
-    config: Pick<PipelineConfig, "cleanupEnabled">,
+    config: Pick<PipelineConfig, "cleanupEnabled"> & Partial<Pick<PipelineConfig, "stagingRoot">>,
 ): Promise<UploadIdentityGuardOutcome> {
     const identity = database.getUploadIdentity(recording.id);
     if (!identity) return { kind: "proceed" };
@@ -26,8 +27,7 @@ export async function guardUploadIdentity(
         }
         // Verified online: nothing left to do but clean the staging artifact.
         if (config.cleanupEnabled && !database.getComparisonTrial()) {
-            const artifact = database.getArtifact(recording.id);
-            if (artifact) await cleanupArtifact(artifact.path);
+            if(config.stagingRoot) await cleanupAcceptedConversions(database,{...config,stagingRoot:config.stagingRoot});
         }
         if (!database.getComparisonTrial() && database.listQueuedProductionArtifacts(recording.id).length === 0) {
             database.transitionToCleanupEligible(
@@ -36,11 +36,12 @@ export async function guardUploadIdentity(
                 new Date(),
             );
         }
-        return { kind: "verified_cleaned", remoteId: identity.remoteId, remoteUrl: identity.remoteUrl };
+        const artifact=database.getArtifact(recording.id);
+        const retained=artifact ? await access(artifact.path).then(()=>true,(error:NodeJS.ErrnoException)=>error.code!=='ENOENT') : false;
+        return { kind: retained ? "verified_retained" : "verified_cleaned", remoteId: identity.remoteId, remoteUrl: identity.remoteUrl };
     }
-    // Unverified: refuse every local job. If a pending confirmation exists,
-    // accelerate it so the next reconcile verifies the upload.
-    const scheduled = database.makePendingConfirmationDue(recording.id, new Date()) > 0;
+    // Refuse duplicate work without shortening the seven-day confirmation window.
+    const scheduled = database.hasPendingConfirmation(recording.id);
     return {
         kind: "unverified_refused",
         remoteId: identity.remoteId,
@@ -49,8 +50,8 @@ export async function guardUploadIdentity(
 }
 
 export function refusalMessage(outcome: Extract<UploadIdentityGuardOutcome, { kind: "unverified_refused" }>): string {
-    return `Recording already has an the upload provider upload (${outcome.remoteId}); refusing to start the job`
+    return `Recording already has an upload (${outcome.remoteId}); refusing to start the job`
         + (outcome.verificationScheduled
-            ? "; verification is scheduled for the next reconcile"
+            ? "; verification keeps its stored deadline"
             : " and no pending confirmation exists — manual review required");
 }

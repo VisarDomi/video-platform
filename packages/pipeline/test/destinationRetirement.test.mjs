@@ -64,7 +64,7 @@ test('schema 14 retires old copies, requeues their sources, preserves Porntrex p
     assert.equal(audit.attempts.length,4);
     assert.equal(audit.remote_uploads.length,4);
     assert.equal(raw.prepare('SELECT count(*) n FROM remote_uploads').get().n,1);
-    assert.equal(raw.prepare('SELECT version FROM schema_version').get().version,14);
+    assert.equal(raw.prepare('SELECT version FROM schema_version').get().version,15);
     assert.throws(()=>database.setActiveUploadProvider('xvideos'),/provider/);
     assert.throws(()=>raw.exec("UPDATE campaign_control SET upload_provider='xvideos'"),/CHECK/);
     const count = raw.prepare('SELECT count(*) n FROM state_events').get().n;

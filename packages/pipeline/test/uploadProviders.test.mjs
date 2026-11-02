@@ -305,3 +305,19 @@ test("Porntrex lookup reads every page of My Videos through the list's async blo
     assert.deepEqual(requested.slice(-2), ["/my/videos/", "/my/videos/?mode=async&function=get_block&block_id=list_videos_my_uploaded_videos&sort_by=&from_my_videos=2"]);
     assert.equal((await uploader.lookupUpload(page, "2026-01-01 000099 nobody")).kind, "absent");
 });
+
+test('a 404 edit page checks processing rows beyond page one; a truncated list is inconclusive',async t=>{
+ const browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});t.after(()=>browser.close());
+ const context=await browser.newContext();const page=await context.newPage();let broken=false;
+ await context.route('https://www.porntrex.com/**',route=>{
+  const url=new URL(route.request().url());
+  if(url.pathname.startsWith('/edit-video/'))return route.fulfill({status:404,body:'missing edit'});
+  const number=Number(url.searchParams.get('from_my_videos')??1);
+  if(broken&&number===2)return route.fulfill({status:502,body:'temporary outage'});
+  const ids=number===1?Array.from({length:30},(_,i)=>i+1):[31];
+  return route.fulfill({contentType:'text/html',body:`<div id="list_videos_my_uploaded_videos"><h2>My Videos (31)</h2><a data-parameters="is_private:0">Public (31)</a>${ids.map(id=>id===31?`<div class="video-item processing" data-item-id="31"><span class="line-processing">Processing</span><p class="inf"><a href="">T [r31]</a></p></div>`:`<div data-item-id="${id}"><p class="inf"><a href="https://www.porntrex.com/video/${id}/slug/">T [r${id}]</a></p></div>`).join('')}</div>`});
+ });
+ const uploader=new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused',email:'fake',password:'fake'});
+ assert.equal((await uploader.probeUploadStatus(page,'31')).processing,true);
+ broken=true;await assert.rejects(uploader.probeUploadStatus(page,'31'),/incomplete/);
+});

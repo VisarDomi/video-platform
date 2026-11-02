@@ -141,8 +141,8 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         }).catch(() => true);
     }
 
-    async lookupUpload(page: Page, identity: string): Promise<
-        { kind: "found"; remoteId: string; remoteUrl: string } | { kind: "absent" | "ambiguous" }
+    async lookupUpload(page: Page, identity: string, exactRemoteId?: string): Promise<
+        { kind: "found"; remoteId: string; remoteUrl: string; processing?: boolean; failed?: boolean } | { kind: "absent" | "ambiguous" }
     > {
         await page.goto(`${ORIGIN}/my/videos/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         await passPorntrexAgeGate(page);
@@ -210,7 +210,10 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         }
         if (!listEnded && entries.size - (countsProcessing ? 0 : processing.size) !== expected) throw new Error("Porntrex uploads list scan was incomplete");
         // A failed upload holds no video: it is no copy of the recording.
-        const matches = [...entries.values()].filter(row => !failed.has(row.remoteId) && matchesPorntrexIdentity(row.title, identity));
+        const matches = [...entries.values()].filter(row => exactRemoteId ? row.remoteId === exactRemoteId
+            : !failed.has(row.remoteId) && matchesPorntrexIdentity(row.title, identity));
+        if(exactRemoteId && matches.length===1) return {kind:'found',...matches[0],
+            processing:processing.has(exactRemoteId),failed:failed.has(exactRemoteId)};
         return matches.length === 1 ? { kind: "found", ...matches[0] }
             : { kind: matches.length > 1 ? "ambiguous" : "absent" };
     }
@@ -277,7 +280,7 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             await request.onEvidence?.({ stage: "metadata_prepared", provider: this.provider, visibility: "public" });
             const submittedAt = new Date();
             await metadata.locator('input[type="submit"]').click();
-            // Do not equate a submit click with acceptance. Store uncertainty and verify later.
+            // A submit click is not acceptance: capture the listed remote ID before deleting local bytes.
             // The new video is listed (as processing) within moments; give it a
             // minute so its ID is captured now rather than recovered tomorrow.
             let remoteId: string | null = null;
@@ -389,33 +392,20 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         }
     }
 
-    // Whether My Videos lists the upload with Porntrex's "Error" badge (its own
-    // processing failed). Pages are read until the row is found or the list ends.
-    private async listedAsFailed(page: Page, uploadId: string): Promise<boolean> {
-        for (let pageNumber = 1; pageNumber <= 1000; pageNumber++) {
-            const response = await page.goto(`${ORIGIN}${pageNumber === 1 ? "/my/videos/" : porntrexUploadsPagePath(pageNumber)}`,
-                { waitUntil: "domcontentloaded", timeout: 30_000 });
-            if (pageNumber === 1) await passPorntrexAgeGate(page);
-            if (!response?.ok() || await page.locator("[data-item-id]").count() === 0) return false;
-            const row = page.locator(`[data-item-id="${uploadId}"]`);
-            if (await row.count()) {
-                return await row.first().evaluate(item => item.classList.contains("error") || !!item.querySelector(".line-error"));
-            }
-        }
-        return false;
-    }
-
     async probeUploadStatus(page: Page, uploadId: string, probe = run) {
         if (!/^\d+$/.test(uploadId)) throw new Error("Invalid Porntrex edit ID");
         const response = await page.goto(`${ORIGIN}/edit-video/${uploadId}/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
         if (response?.status() === 404) {
             // Porntrex also 404s the edit page while a new video is processing.
             // Only an ID absent from the uploads list is really gone.
-            await page.goto(`${ORIGIN}/my/videos/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
-            await passPorntrexAgeGate(page);
-            await page.locator(LIST).waitFor({ state: "visible", timeout: 15_000 });
-            if (await page.locator(`${LIST} [data-item-id="${uploadId}"]`).count()) {
-                return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex is still processing the video", processing: true };
+            const listed=await this.lookupUpload(page,'',uploadId);
+            if(listed.kind==='found' && listed.failed) return {outcome:'missing' as const,remoteUrl:null,
+                reason:'Porntrex processing failed; no video is published'};
+            if (listed.kind==='found') {
+                if(listed.processing) return { outcome: "not_ready" as const, remoteUrl: null,
+                    reason: "Porntrex is still processing the video", processing: true };
+                return {outcome:'not_ready' as const,remoteUrl:listed.remoteUrl,
+                    reason:'Published upload remains listed; edit page temporarily unavailable'};
             }
             return { outcome: "missing" as const, remoteUrl: null, reason: "Porntrex edit page returned 404 and the uploads list does not contain it" };
         }
@@ -425,15 +415,17 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
         const link = page.locator(`a[href^="${ORIGIN}/video/${uploadId}/"]`).first();
         const remoteUrl = await link.getAttribute("href");
         if (!remoteUrl) {
-            // Checked a day after submission. Porntrex's "Error" can clear (a
-            // failed upload was published about ten hours later), but one that
-            // still stands after a day is blocked for review, not re-uploaded:
-            // the same file may fail again, and an Error row cannot be deleted.
-            if (await this.listedAsFailed(page, uploadId)) {
-                return { outcome: "missing" as const, remoteUrl: null, stored,
-                    reason: "Porntrex still marks the upload \"Error\" in My Videos a day after submission; no video is published. Review the artifact before `npm run retry`" };
-            }
-            return { outcome: "not_ready" as const, remoteUrl: null, reason: "Porntrex has no published video link yet", stored };
+            // A failed provider job is distinct from a network/authentication
+            // failure reading My Videos. Only a complete scan establishes it.
+            const listed=await this.lookupUpload(page,'',uploadId);
+            if(listed.kind==='found' && listed.failed) return {outcome:'missing' as const,remoteUrl:null,stored,
+                reason:'Porntrex processing failed; no video is published'};
+            if(listed.kind==='absent') return {outcome:'missing' as const,remoteUrl:null,stored,
+                reason:'Upload is absent from the complete authenticated list'};
+            if(listed.kind==='found' && !listed.processing) return {outcome:'not_ready' as const,
+                remoteUrl:listed.remoteUrl,stored,reason:'Published entry remains listed; edit page has no playback link'};
+            return { outcome: 'not_ready' as const, remoteUrl: null,
+                reason: 'Porntrex has no published video link yet', processing: true, stored };
         }
         await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
         const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({

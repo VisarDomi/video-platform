@@ -156,7 +156,7 @@ normal pipeline recording named `<first-recording prefix> joined-<hash>`. Its du
 input playlist has per-clip discontinuities and distinct init maps, under
 `artifacts/production-v6/joined-sources/`. Media entries link to unchanged
 originals, so the derived inputs retain no extra media bytes. The normal
-conversion, validation, descriptor, metadata, upload and 24-hour verification
+conversion, validation, descriptor, metadata, upload and seven-day verification
 stages process the batch. Actual encoded duration is checked too: an unsent batch
 still too short returns for more footage rather than nesting joined batches.
 Preparing batches does not change queue priority: the campaign compares capture
@@ -214,13 +214,44 @@ campaign step is `resource_wait`, retried every 30 seconds, and the recording
 keeps its state. Started on a machine short of memory, the server is killed by
 the kernel and the recording would fail.
 
-All validated outputs are kept by default. With `VIDEO_PIPELINE_CLEANUP=1` (and
-no comparison queue) the worker deletes a verified-online upload's staging
-artifact, and forgets recordings older than 24 hours whose source folder is
-gone, together with their pipeline files (leased recordings and in-flight
-uploads are skipped; `bandwidth_events` are never deleted). The managed service
-sets `VIDEO_PIPELINE_CLEANUP=0`. Original downloader/editor folders are never
-touched by that automatic cleanup.
+### Accepted conversions and seven-day confirmation
+
+The managed service sets `VIDEO_PIPELINE_CLEANUP=1`. This deletes **only matching
+pipeline conversion MP4s after durable provider acceptance**: the complete file
+transfer and successful metadata submission have a captured remote ID. A progress
+counter, acknowledged chunk, submit click, or uncertain submission without an ID
+cannot authorize deletion. Comparison-trial evidence and legacy published
+rendition holds remain retained; unmatched older files are not guessed from names.
+
+Before transfer, `upload_artifact_receipts` snapshots each part's path, size,
+SHA-256, source identity and submitted metadata. Acceptance and its seven-day
+deadline commit before deletion. Cleanup checks staging containment, regular files,
+exact bytes and concurrent work, unlinks the MP4, flushes the directory and then
+checkpoints deletion. A restart retries interrupted cleanup, including the crash
+window after the provider ID was saved but before the uploader returned. Artifact
+ledger rows remain available after their file is gone.
+
+Seven days after acceptance, check the known remote ID and require the existing
+Full-HD playback verification. If ready, record verification; only full verified
+coverage of every required part/batch makes the original cleanup-eligible. If the
+never-verified submission is definitively absent, failed processing or still
+processing without a public copy, queue conversion/upload from the unchanged
+original again. Retry only that part/batch, retaining other parts. A successful
+retry deletes its new conversion and starts a **new** seven-day window. Other
+recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
+a published but uncertain rendition is retained for verification. Known provider
+removals and previously verified copies later removed remain restoration bans.
+All retry traffic counts against the existing monthly allowance.
+
+Original downloader/editor folders are **never automatically deleted or moved**.
+Local presence lives separately in `local_source_presence`; source deletion never
+erases recordings, state events, attempts, receipts, provider IDs, removal bans or
+byte accounting. Remote confirmation continues without an original. An absent or
+changed source cannot be rebuilt: retain the pending check and source-unavailable
+retry evidence, without blocking unrelated work. Restoring an unchanged source
+lets the next confirmation queue its retry. There is no destructive missing-source
+sweep. `VIDEO_PIPELINE_CLEANUP=0` can retain conversion files without disabling
+source-presence tracking or seven-day verification/retry.
 
 ### Move files to the Desktop for manual deletion
 
@@ -288,7 +319,7 @@ and is meant for bounded integration testing.
 The `video-pipeline.service` user unit (`systemd/user/` at the repository
 root) runs `npm run campaign-worker -w pipeline` (`campaign-worker` requires
 `VIDEO_PIPELINE_SERVICE_MODE=1`) with `VIDEO_PIPELINE_NETWORK_UPLOADS=1`,
-`VIDEO_PIPELINE_CLEANUP=0` and `DISPLAY=:111`. It idles while SQLite says
+`VIDEO_PIPELINE_CLEANUP=1` and `DISPLAY=:111`. It idles while SQLite says
 paused, clears stale leases and half-written conversion files when it starts,
 verifies due uploads inline, and
 sends desktop notifications for attention pauses, cooldowns, rejected words,
@@ -349,7 +380,7 @@ admissions.
 performs any pending rollover and arms a selection-only comparison queue,
 leaving the campaign paused. While that queue exists the worker processes and
 uploads only selected recordings, never discovers others, pauses when a
-selected recording fails, keeps every artifact (cleanup and the source sweep
+selected recording fails, keeps every artifact (accepted-conversion cleanup and presence tracking
 are off), and titles uploads with the diagnostic suffix
 `[<recording folder> | production-v6 | <part>]`. No command removes the queue;
 only the next production rollover clears it.
@@ -395,8 +426,8 @@ pending remote copy in the ledger, passed `resolution-policy-v6`, fits the
 provider's duration/size limits, contains no learned rejected phrase, has no
 copy in a synchronized provider inventory, fits the monthly budget, and (for a
 retry) is not found by an exact lookup. A submitted upload is never accepted on
-submit alone: the attempt parks as uncertain and is verified about 24 hours
-later. Recovery rules are in `docs/upload-recovery.md`.
+submit alone: durable complete-file/metadata acceptance and a captured ID release
+only the matching conversion; playback is verified seven days after acceptance. Recovery rules are in `docs/upload-recovery.md`.
 
 ### Porntrex
 

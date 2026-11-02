@@ -11,47 +11,50 @@ An upload attempt is committed before network transfer, with a `retry_not_before
 after its start stored at creation. While the file is in flight the persisted phase stays `started`;
 `transfer_started` records that the transfer began.
 
-A provider ID is saved on the attempt as soon as it is captured. Acceptance, confirmation completion,
-remote identity and verified recording state commit in one transaction. After an interruption,
-recovery returns accepted-but-unverified attempts to verification, not to uploading, releases
-reservations that never started an attempt, and marks an attempt interrupted after its transfer began
-as uncertain, to be checked 24 hours later.
+`upload_artifact_receipts` snapshots each attempt's exact generated path, size,
+SHA-256, source fingerprint and submitted metadata before transfer. Complete file
+acceptance plus a captured remote ID after metadata submission commits `accepted_at`
+and `verify_after` (seven days later); `upload_uncertain` still means playback has
+not yet verified. `VIDEO_PIPELINE_CLEANUP=1` immediately unlinks only the matching
+MP4, flushes its directory, then checkpoints `deleted_at`. Missing/already-deleted
+files are idempotent; mismatched bytes, symlinks, active work, comparison evidence,
+known removals and legacy uncertain rendition holds do not authorize deletion.
+
+Acceptance commits before unlink. A crash after capturing the remote ID restores
+the same original deadline, bills transferred bytes, and resumes cleanup. A crash
+after unlink retries only the deletion checkpoint. An uncertain submission without
+an ID retains its conversion until exact recovery establishes acceptance. Unused
+reservations are released; failures before metadata submission remain normal
+retryable transfers. Every transmitted byte stays charged.
 
 ## Reconciliation
 
-- The first check is due 24 hours after submission; unresolved verification and lookup checks recur
-  daily. A Porntrex video that is still processing is checked again after two hours.
-- Without a stored ID, look the upload up by its exact identity suffix. Porntrex scans every page of My Videos and
-  also accepts the user's manual uploads whose title ends with the unbracketed identity. A Porntrex row
-  marked "Error" (Porntrex's own processing failed: no link, Edit disabled) counts toward the list
-  total but is no copy of the recording; any other row without a link stops the scan.
-- One exact match: persist its provider ID and verify playback: a stream at least 1080 tall on its
-  short side (1920×1080, or 1440×1080 for a 4:3 upload; 0.5% tolerance).
-- Known ID: keep checking that upload. Processing delays, missing playback tiers and provider errors
-  never authorize a new upload.
-- A known ID whose edit page answers HTTP 404 (on Porntrex: and absent from My Videos) was removed by
-  the provider. The recording is retained and the removal is kept in
-  `provider_removals`: that provider never gets it again, including in a joined batch.
-  A newly confirmed loss is reported once; after acknowledgement it appears as
-  retained history in `scripts/babysit_health.py`, rather than a current pipeline
-  failure. Protective blocked states and cleanup exclusions remain unchanged.
-- A known Porntrex ID without a published link that My Videos still marks "Error" at the check a day
-  after submission is blocked for review the same way rather than re-uploaded, since the same file may
-  fail again and the Error row cannot be deleted. ("Error" can clear: one upload was published about
-  ten hours later.)
-- A complete authenticated search records `absent` from a full list whose row count equals the
-  Public/Private tab totals, or, since those totals still count a video Porntrex has removed, a list
-  that ends short of them: after a full page the next page answers 404 twice, 2 seconds apart. It is not proof that the provider never received any bytes. No new upload
-  is eligible until the attempt's seven-day deadline; the retry looks up again immediately before
-  transfer.
-- Authentication errors, unexpected pages, incomplete rows, unexpected pagination and ambiguous matches
-  do not establish absence. They remain pending for another lookup.
-- Attempts without transfer-start or byte evidence do not hold the seven-day deadline. Neither do
-  definitive failures in which no video can exist: a metadata refusal, a transfer that stopped before
-  the metadata form, or any Porntrex failure before its metadata form was submitted (Porntrex creates
-  the video only on that submit; such uncertain attempts are settled as failures on the next campaign
-  step or reconcile).
-  Login and provider cooldowns still apply.
+- Check accepted uploads seven days after acceptance. A captured ID or identity
+  guard never accelerates this deadline. An unknown submission may have an earlier
+  identity lookup; recovered acceptance keeps the original seven-day deadline.
+- Require a published slug URL and actual Full-HD playback dimensions (1920×1080,
+  or 1440×1080 for 4:3, with the existing tolerance). Labels alone are insufficient.
+- A never-verified accepted submission definitively absent, marked processing
+  failure, or still processing without a public copy after its week is queued for
+  conversion/upload from the unchanged original. Retry only the affected part or
+  joined batch; retain other queued parts and all old IDs/receipts. A successful
+  retry deletes its new conversion and starts a fresh seven-day window.
+- Missing/changed originals defer rebuilding and keep remote checks pending.
+  Other recordings continue. `local_source_presence` tracks local absence without
+  deleting recording, receipt, state-event, removal or bandwidth history.
+- A known removal ban or a previously verified copy later removed never authorizes
+  restoration, including inside joined batches. Existing acknowledged losses stay
+  retained history, not current queue failures. Legacy published rendition holds
+  retain their conversions; published but uncertain quality keeps checking.
+- A 404 edit page is not absence: scan **all** of My Videos, including processing
+  and failed rows beyond page one. A complete list must match the Public/Private
+  totals, or end after a full page with two subsequent 404s two seconds apart.
+  A listed published copy with an unavailable edit page is inconclusive.
+- Auth/network failures, incomplete rows/pagination, ambiguous identity matches and
+  failed CDN probes remain pending; they never authorize deletion or another upload.
+  Exact identity lookup immediately before transfer remains duplicate protection.
+- Attempts with neither transfer-start nor byte evidence, and definitive pre-submit
+  failures, do not hold a weekly retry deadline. Login/provider cooldowns still apply.
 
 Transfer diagnostics observe the page's same-origin multipart chunk POSTs to
 `/upload-video/`, as well as the older `mode=async&action=upload_file` URL.
@@ -102,3 +105,9 @@ seven-day timing across reopen, visibility and rejection flags that outlive the 
 reference fallback, atomic verification rollback, accepted-but-unverified recovery, unused reservations,
 artifact flushing, and SIGKILL after transfer/ID persistence.
 `test/workerRecovery.test.mjs` exercises actual worker/encoder interruption and restart.
+
+`test/acceptedRetention.test.mjs` covers acceptance/deletion/reopen, seven-day retry
+and fresh deadlines, missing/changed originals, migration, legacy holds, known
+removal bans, SIGKILL at acceptance, split-part coverage and real selected-shape
+conversion. Upload-provider fixtures cover complete list checks across pagination
+and inconclusive errors. Original files are never cleanup targets.

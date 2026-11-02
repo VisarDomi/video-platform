@@ -361,7 +361,7 @@ test("the upload identity guard refuses unverified and cleans verified recording
     }, now);
 
     // Unverified identity: every job refuses, and the pending confirmation is
-    // accelerated so the next reconcile verifies it.
+    // retained without changing its deadline.
     const unverified = await guardUploadIdentity(database, database.get(recording.id), { cleanupEnabled: true });
     assert.deepEqual(unverified, {
         kind: "unverified_refused",
@@ -378,10 +378,10 @@ test("the upload identity guard refuses unverified and cleans verified recording
     assert.equal(confirmation.attemptId, attemptId);
     const verified = await guardUploadIdentity(database, database.get(recording.id), { cleanupEnabled: true });
     assert.deepEqual(verified, {
-        kind: "verified_cleaned",
+        kind: "verified_retained",
         remoteId: "91362268",
         remoteUrl: "https://www.porntrex.com/video.abc123/title",
     });
     assert.equal(database.get(recording.id)?.state, "cleanup_eligible");
-    await assert.rejects(access(artifactPath), /ENOENT/);
+    await access(artifactPath); // No matching acceptance snapshot: retain unproven bytes.
 });

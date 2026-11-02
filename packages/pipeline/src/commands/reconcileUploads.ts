@@ -1,12 +1,28 @@
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
-import { cleanupArtifact } from "../stages/cleanupArtifact.js";
+import { cleanupAcceptedConversions } from "./acceptedConversions.js";
+import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import type { ChromiumPorntrexUploader } from "../upload/chromiumPorntrexUploader.js";
 import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 import { swappedWords, type StoredPorntrexMetadata } from "../upload/porntrexMetadata.js";
+
+
+async function retrySourceUnchanged(database: PipelineDatabase, id: string): Promise<boolean> {
+    const recording=database.get(id);
+    if(!recording || database.providerRemovals(id).length) return false;
+    const inspection=await inspectFinalizedRecording(recording.sourcePath,recording.provider,recording.sourceKind);
+    if(inspection.status!=='finalized' || inspection.recording.sourceFingerprint!==recording.sourceFingerprint) return false;
+    for(const member of database.shortParts(undefined,id)) {
+        const original=database.get(member.recordingId);
+        if(!original || original.sourceFingerprint!==member.sourceFingerprint
+            || database.shortParts(undefined,original.id).length
+            || !await retrySourceUnchanged(database,original.id)) return false;
+    }
+    return true;
+}
 
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
     browserOverride?: Pick<ChromiumPorntrexUploader, "withAuthenticatedPage" | "probeUploadStatus">
@@ -24,6 +40,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         }
         results.push(...database.recoverInterruptedUploads(now));
         database.recoverAcceptedVerifications(now);
+        results.push(...await cleanupAcceptedConversions(database,config,now));
         results.push(...database.settleUnsubmittedAttempts("porntrex", now)
             .map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" })));
         // One login flow, then every due confirmation is checked on that same
@@ -41,7 +58,23 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
                 let probe = remoteId ? await browser.probeUploadStatus(page, remoteId) : null;
-                const removed = (id: string, reason: string | undefined) => {
+                const removed = async (id: string, reason: string | undefined) => {
+                    if(database.acceptedUpload(confirmation.attemptId)) {
+                        const accepted=database.acceptedUpload(confirmation.attemptId)!;
+                        if(now.toISOString()<accepted.verifyAfter) {
+                            database.postponeConfirmation(confirmation.attemptId,'seven-day acceptance window',now,Date.parse(accepted.verifyAfter)-now.getTime());
+                            return;
+                        }
+                        const ready=await retrySourceUnchanged(database,confirmation.recordingId);
+                        const queued=database.retryAcceptedConversion(confirmation.attemptId,ready,
+                            ready ? 'not playable seven days after acceptance; convert and upload again'
+                                : 'not playable after seven days; original source missing or changed, history retained',now);
+                        if(queued || !ready) {
+                            if(!queued) database.postponeConfirmation(confirmation.attemptId,'retry awaits unchanged original; continue remote verification',now);
+                            results.push({recordingId:confirmation.recordingId,disposition:queued?'conversion_retry_queued':'retry_source_unavailable',remoteId:id});
+                            return;
+                        }
+                    }
                     // The provider gave this video an ID, so it existed; now it is
                     // gone (404 and unlisted). Never back to that provider.
                     database.markProviderRemoved(confirmation.attemptId, id,
@@ -49,7 +82,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     results.push({ recordingId: confirmation.recordingId, disposition: "provider_removed", remoteId: id });
                 };
                 if (remoteId && probe?.outcome === "missing") {
-                    removed(remoteId, probe.reason);
+                    await removed(remoteId, probe.reason);
                     continue;
                 }
                 if (!remoteId) {
@@ -62,6 +95,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         if (lookup.kind === "found") {
                             remoteId = lookup.remoteId;
                             database.attachUncertainRemote(confirmation.attemptId, remoteId);
+                            database.acknowledgeRecoveredAcceptance(confirmation.attemptId);
+                            await cleanupAcceptedConversions(database,config,now);
                         }
                         const requeued = database.recordUploadLookup(confirmation.attemptId, lookup.kind, now);
                         database.recordUploadEvidence(confirmation.attemptId, { stage: "filename_lookup", identity, ...lookup }, now);
@@ -81,9 +116,15 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     });
                     continue;
                 }
+                const accepted=database.acceptedUpload(confirmation.attemptId);
+                if(accepted && accepted.verifyAfter>now.toISOString()) {
+                    database.postponeConfirmation(confirmation.attemptId,'seven-day acceptance window',now,Date.parse(accepted.verifyAfter)-now.getTime());
+                    results.push({recordingId:confirmation.recordingId,disposition:'acceptance_confirmed',remoteId});
+                    continue;
+                }
                 probe ??= await browser.probeUploadStatus(page, remoteId);
                 if (probe.outcome === "missing") {
-                    removed(remoteId, probe.reason);
+                    await removed(remoteId, probe.reason);
                     continue;
                 }
                 const { stored, ...probeEvidence } = probe as typeof probe & { stored?: StoredPorntrexMetadata | null };
@@ -100,27 +141,10 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     }
                 }
                 if (probe.outcome === "online" && probe.remoteUrl) {
-                    const verifiedArtifact = database.getArtifact(confirmation.recordingId);
-                    const afterVerification = database.verifyUpload(
-                        confirmation.attemptId,
-                        remoteId,
-                        probe.remoteUrl,
-                        now,
-                    );
-                    // Verified online: clean up only the pipeline staging
-                    // artifact. Original recording folders are left untouched.
-                    if (config.cleanupEnabled && !database.getComparisonTrial()) {
-                        if (verifiedArtifact) {
-                            await cleanupArtifact(verifiedArtifact.path);
-                            if (afterVerification.state === "upload_verified") database.transition(
-                                confirmation.recordingId,
-                                "upload_verified",
-                                "cleanup_eligible",
-                                "verified online; pipeline artifact cleaned",
-                                now,
-                            );
-                        }
-                    }
+                    const afterVerification = database.verifyUpload(confirmation.attemptId,remoteId,probe.remoteUrl,now);
+                    await cleanupAcceptedConversions(database,config,now);
+                    if(config.cleanupEnabled && afterVerification.state==='upload_verified' && !database.getComparisonTrial()) database.transition(
+                        confirmation.recordingId,'upload_verified','cleanup_eligible','all required parts verified online',now);
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "online",
@@ -128,7 +152,14 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         remoteUrl: probe.remoteUrl,
                     });
                 } else {
-                    // Porntrex publishes up to about a day after upload: while it is
+                    // A confirmed processing/non-public copy still absent at its
+                    // seven-day deadline is rebuilt; transport/probe failures are
+                    // inconclusive and published low-resolution legacy copies stay held.
+                    if(probe.processing === true && database.acceptedUpload(confirmation.attemptId)) {
+                        await removed(remoteId,probe.reason);
+                        continue;
+                    }
+                    // While acceptance is unknown,
                     // still processing, look again in two hours instead of a day.
                     const processing = (probe as { processing?: boolean }).processing === true
                         || (probe as { retrySoon?: boolean }).retrySoon === true;

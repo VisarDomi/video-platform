@@ -343,27 +343,30 @@ server follows the account first, but only if it is not already followed.
   use the same policy. A quota wait retries automatically with running intent.
   Every transmitted byte, including failed and retried transfers, goes to
   `bandwidth_events`, which nothing ever deletes.
-- **Success is never decided at submit.** Once metadata may have been submitted,
-  the attempt is `upload_uncertain` with a confirmation due 24 h later. A failure
-  before submission is a plain failure (on Porntrex: before the
-  `metadata_submitting` phase, since the video exists only once its form is
-  submitted). A started transfer holds a 7-day duplicate-safety window
-  (`UPLOAD_RETRY_MILLISECONDS`); an uncertain attempt with no remote ID is requeued
-  only after a complete negative lookup past that deadline. A video whose ID
-  vanishes from the provider is retained locally and excluded from cleanup and
-  another upload to that provider. New losses are investigated/reported once.
-  Acknowledged provider losses are historical exclusions, not pipeline faults:
-  `scripts/babysit_health.py` separates them from actionable failures without
-  deleting SQLite evidence or changing protective `blocked` states. Its exact
-  acknowledgement cannot hide a later, different failure on the recording.
-- **Cleanup is off.** The managed unit sets `VIDEO_PIPELINE_CLEANUP=0`, so
-  verified artifacts stay on disk and the source-missing sweep (which needs
-  cleanup) does not run. The campaign never removes source recordings.
-  `move-conversions` stages ledger-approved conversions older than seven days on
-  the Desktop; `move-recordings` stages unchanged, fully verified sources older
-  than one calendar month. Both only move files for manual review/deletion under
-  `Desktop/video-pipeline/`, retaining the upload ledger and writing manifests.
-  Rules and commands: [manual review](packages/pipeline/setup.md#move-files-to-the-desktop-for-manual-deletion).
+- **Acceptance releases conversion space; verification grants backup coverage.**
+  A completed transfer plus successful metadata submission and a captured remote
+  ID commits an immutable artifact/source/metadata receipt and a seven-day
+  confirmation deadline. The managed worker (`VIDEO_PIPELINE_CLEANUP=1`) immediately
+  deletes only that exact generated MP4; chunks/progress or a submit click alone
+  cannot authorize deletion. Hash/path guards and a durable deletion checkpoint
+  make interrupted cleanup idempotent. Comparison evidence, unmatched files and
+  legacy uncertain published renditions remain retained.
+- **Seven days after acceptance**, require Full-HD playback. A never-verified
+  submission confirmed missing, failed processing or still processing without a
+  public copy is converted/uploaded again from its unchanged original. Retry only
+  the affected part/batch; a new acceptance starts a fresh seven-day window and
+  deletes its new conversion. Other work continues while waiting. Network/auth
+  failures are inconclusive. Known removal bans and previously verified copies
+  later removed never authorize restoration, even inside joined batches. Every
+  required part must verify before an original is cleanup-eligible.
+- **Source absence never erases history.** Local presence is tracked separately.
+  Recordings, events, receipts, remote IDs, removal bans and byte accounting stay
+  recorded after the owner deletes originals. Remote checks continue; missing or
+  changed sources defer rebuilds without blocking the rest of the queue. The
+  destructive source-missing sweep is removed. Original deletion remains manual.
+  `move-conversions` and `move-recordings` remain explicit review commands; neither
+  is scheduled or run automatically. Acknowledged provider losses remain history,
+  not current pipeline faults (`scripts/babysit_health.py`).
 - **Review and retry.** `review` lists blocked recordings with reasons,
   unresolved provenance and manual pieces. `retry <ID>` returns a failed or
   blocked recording to the stage it left.
@@ -418,8 +421,9 @@ server follows the account first, but only if it is not already followed.
 - **Porntrex verification.** The edit page must show a published link, and
   ffprobe must find a `/get_file/` rendition at least 1080 tall on its short side
   (1920×1080, or 1440×1080 for a 4:3 upload; 0.5% tolerance); labels count for
-  nothing. A
-  video still processing is checked again after 2 h, anything else after 24 h.
+  nothing. Accepted submissions wait seven days, then confirmed non-public
+  processing/missing copies retry conversion. Inconclusive CDN/rendition checks
+  retry verification after 2 h or 24 h without sending media again.
   Words Porntrex swapped are learned as rejected phrases. A transfer is abandoned
   after 10 minutes without byte/acknowledgement progress, a definitive rejection,
   or exhausted chunk retries. KVS chunks are capped at 4 MiB; a request idle for
@@ -484,7 +488,7 @@ server follows the account first, but only if it is not already followed.
   |---|---|
   | `video-processing.slice` | `CPUQuota=600%`, `MemoryHigh=70%`, `MemoryMax=80%`, `MemorySwapMax=0` |
   | `video-server.service` | in the slice, `CPUWeight=1000` |
-  | `video-pipeline.service` | in the slice, `CPUWeight=100`; `DISPLAY=:111`, `NETWORK_UPLOADS=1`, `CLEANUP=0`, `SERVICE_MODE=1` |
+  | `video-pipeline.service` | in the slice, `CPUWeight=100`; `DISPLAY=:111`, `NETWORK_UPLOADS=1`, `CLEANUP=1`, `SERVICE_MODE=1` |
   | `video-finalize-library-single` scope | `CPUWeight=1000` |
   | `video-auth.service`, `video-downloader.service` | outside the slice |
   | `video-xvfb.service` | `Xvfb :111` for headful Chromium; others use only `After=`, so enable it explicitly |

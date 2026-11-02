@@ -32,7 +32,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -48,7 +48,7 @@ const LEGACY_PART_CHECKS: ReadonlyArray<readonly [string, string]> = [
     ["CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p'))", `CHECK (${partCheck("artifact_part")})`],
     ["CHECK (part IN ('max1080p', 'nonmax1080p'))", `CHECK (${queuedPartCheck("part")})`],
 ];
-const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
+export const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
 
 interface RecordingRow {
     id: string;
@@ -669,6 +669,7 @@ export class PipelineDatabase {
             destination TEXT PRIMARY KEY, retired_at TEXT NOT NULL, evidence_json TEXT NOT NULL
         ) STRICT`);
         if (version.version < 14) retireUploadDestination(this.database);
+        this.initializeRetention(version.version < 15 || isNewDatabase);
         // Older code stored metadata word rejections as a visibility warning,
         // which also blocked their retry. Split them out once; learn the words.
         for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
@@ -684,6 +685,149 @@ export class PipelineDatabase {
             isNewDatabase ? CURRENT_PRODUCTION_VERSION : "legacy-production-v1",
             new Date().toISOString(),
         );
+    }
+
+    private initializeRetention(migrate: boolean): void {
+        this.transaction(() => {
+            this.database.exec(`CREATE TABLE IF NOT EXISTS upload_artifact_receipts (
+                attempt_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL, artifact_part TEXT NOT NULL,
+                path TEXT NOT NULL, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL, source_path TEXT NOT NULL, metadata_json TEXT NOT NULL,
+                accepted_at TEXT, verify_after TEXT, deleted_at TEXT, cleanup_error TEXT, retention_hold TEXT
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS conversion_retries (
+                attempt_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL, artifact_part TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL
+            ) STRICT;
+            CREATE TABLE IF NOT EXISTS local_source_presence (
+                recording_id TEXT PRIMARY KEY, status TEXT NOT NULL CHECK(status IN ('present','missing','unavailable')),
+                checked_at TEXT NOT NULL, reason TEXT
+            ) STRICT`);
+            if (!migrate) return;
+            // Only exact current-part evidence can authorize legacy cleanup. Never
+            // infer receipts for older/unmatched files from a filename or remote ID.
+            this.database.exec(`INSERT OR IGNORE INTO upload_artifact_receipts
+                (attempt_id, recording_id, artifact_part, path, size_bytes, sha256, source_fingerprint,
+                 source_path, metadata_json, accepted_at, verify_after, retention_hold)
+                SELECT a.id, a.recording_id, a.artifact_part, p.path, p.size_bytes, p.sha256,
+                    r.source_fingerprint, r.source_path,
+                    json_object('title', m.title, 'description', m.description, 'tags', json(m.tags_json)),
+                    a.completed_at, strftime('%Y-%m-%dT%H:%M:%fZ', a.completed_at, '+7 days'),
+                    CASE WHEN NOT EXISTS (SELECT 1 FROM remote_uploads u WHERE u.attempt_id=a.id)
+                        AND EXISTS (SELECT 1 FROM json_each(a.evidence_json) e
+                        WHERE json_extract(e.value,'$.stage')='playback_verification'
+                        AND json_extract(e.value,'$.outcome')='not_ready'
+                        AND json_extract(e.value,'$.remoteUrl') IS NOT NULL
+                        AND COALESCE(json_extract(e.value,'$.retrySoon'),0)=0)
+                        THEN 'legacy published rendition remains uncertain; retain conversion' END
+                FROM upload_attempts a JOIN recordings r ON r.id=a.recording_id
+                JOIN artifacts p ON p.recording_id=r.id AND p.part=a.artifact_part
+                JOIN descriptions d ON d.recording_id=r.id AND d.artifact_sha256=p.sha256
+                JOIN upload_metadata m ON m.recording_id=r.id
+                WHERE a.provider='porntrex' AND a.status IN ('accepted','uncertain')
+                    AND a.remote_id IS NOT NULL AND a.completed_at IS NOT NULL
+                    AND p.validated_at <= a.started_at
+                    AND (a.phase='metadata_submitting' AND a.transmitted_bytes>0 OR EXISTS
+                        (SELECT 1 FROM remote_uploads u WHERE u.attempt_id=a.id))
+                    AND NOT EXISTS (SELECT 1 FROM provider_removals x WHERE x.recording_id=r.id)`);
+            this.database.exec(`UPDATE upload_confirmations SET confirm_after =
+                (SELECT verify_after FROM upload_artifact_receipts x WHERE x.attempt_id=upload_confirmations.attempt_id)
+                WHERE status='pending' AND attempt_id IN
+                    (SELECT attempt_id FROM upload_artifact_receipts WHERE accepted_at IS NOT NULL AND retention_hold IS NULL);
+                UPDATE upload_attempts SET retry_not_before =
+                    (SELECT verify_after FROM upload_artifact_receipts x WHERE x.attempt_id=upload_attempts.id)
+                WHERE id IN (SELECT attempt_id FROM upload_artifact_receipts WHERE accepted_at IS NOT NULL);
+                UPDATE schema_version SET version=15`);
+        });
+    }
+
+    pendingAcceptedConversions(): Array<{ attemptId: string; recordingId: string; part: string;
+        path: string; sizeBytes: number; sha256: string; sourcePath: string }> {
+        return this.database.prepare(`SELECT x.attempt_id AS attemptId, x.recording_id AS recordingId,
+            x.artifact_part AS part, x.path, x.size_bytes AS sizeBytes, x.sha256, x.source_path AS sourcePath
+            FROM upload_artifact_receipts x JOIN upload_attempts a ON a.id=x.attempt_id
+            WHERE x.accepted_at IS NOT NULL AND x.deleted_at IS NULL AND x.retention_hold IS NULL
+                AND a.remote_id IS NOT NULL AND a.status IN ('uncertain','accepted')
+                AND NOT EXISTS (SELECT 1 FROM provider_removals b WHERE b.recording_id=x.recording_id)
+                AND NOT EXISTS (SELECT 1 FROM recordings r WHERE r.id=x.recording_id AND r.lease_owner IS NOT NULL)
+                AND NOT EXISTS (SELECT 1 FROM upload_attempts busy WHERE busy.recording_id=x.recording_id AND busy.status='started')
+            ORDER BY x.accepted_at`).all() as unknown as ReturnType<PipelineDatabase['pendingAcceptedConversions']>;
+    }
+
+    recordConversionDeletion(attemptId: string, error: string | null, now = new Date()): void {
+        this.database.prepare(`UPDATE upload_artifact_receipts SET cleanup_error=?,
+            deleted_at=CASE WHEN ? IS NULL THEN ? ELSE deleted_at END WHERE attempt_id=?`)
+            .run(error, error, now.toISOString(), attemptId);
+    }
+
+    setLocalSourcePresence(id: string, status: 'present' | 'missing' | 'unavailable', reason: string | null, now = new Date()): boolean {
+        const old = this.database.prepare('SELECT status, reason FROM local_source_presence WHERE recording_id=?')
+            .get(id) as { status: string; reason: string | null } | undefined;
+        this.database.prepare(`INSERT INTO local_source_presence VALUES(?,?,?,?) ON CONFLICT(recording_id)
+            DO UPDATE SET status=excluded.status, checked_at=excluded.checked_at, reason=excluded.reason`)
+            .run(id,status,now.toISOString(),reason);
+        return old?.status !== status || old?.reason !== reason;
+    }
+
+    localSourceIsAbsent(id: string): boolean {
+        return !!this.database.prepare(`SELECT 1 FROM local_source_presence WHERE recording_id=? AND status<>'present'`).get(id);
+    }
+
+    getRetryPart(id: string): ProductionArtifactPart | null {
+        const row = this.database.prepare(`SELECT artifact_part FROM conversion_retries
+            WHERE recording_id=? AND status='queued' ORDER BY created_at DESC LIMIT 1`).get(id) as { artifact_part: ProductionArtifactPart } | undefined;
+        return row?.artifact_part ?? null;
+    }
+
+    // Only never-verified accepted submissions enter this automatic retry. Known
+    // removals and verified ledger receipts remain permanent restoration bans.
+    retryAcceptedConversion(attemptId: string, sourceReady: boolean, reason: string, now = new Date()): boolean {
+        return this.transaction(() => {
+            const row = this.database.prepare(`SELECT x.*, a.remote_id FROM upload_artifact_receipts x
+                JOIN upload_attempts a ON a.id=x.attempt_id JOIN recordings r ON r.id=x.recording_id
+                WHERE x.attempt_id=? AND x.accepted_at IS NOT NULL AND x.retention_hold IS NULL
+                    AND x.verify_after<=? AND x.source_fingerprint=r.source_fingerprint AND a.status IN ('uncertain','accepted')
+                    AND a.artifact_part=(SELECT part FROM artifacts WHERE recording_id=r.id)
+                    AND r.state IN ('upload_uncertain','uploaded')
+                    AND NOT EXISTS (SELECT 1 FROM provider_removals b WHERE b.recording_id=r.id)
+                    AND NOT EXISTS (SELECT 1 FROM remote_uploads u WHERE u.recording_id=r.id AND u.artifact_part=a.artifact_part)`)
+                .get(attemptId,now.toISOString()) as {recording_id:string; artifact_part:ProductionArtifactPart; source_fingerprint:string} | undefined;
+            if (!row) return false;
+            this.database.prepare(`INSERT INTO conversion_retries VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(attempt_id) DO UPDATE SET status=excluded.status, reason=excluded.reason`)
+                .run(attemptId,row.recording_id,row.artifact_part,row.source_fingerprint,
+                    sourceReady ? 'queued' : 'source_unavailable',reason,now.toISOString());
+            if (!sourceReady) return false;
+            this.database.prepare(`UPDATE upload_attempts SET status='failed',error=? WHERE id=?`).run(reason,attemptId);
+            this.database.prepare(`UPDATE upload_confirmations SET status='absent',checked_at=? WHERE attempt_id=?`).run(now.toISOString(),attemptId);
+            // Snapshots above retain the sent text and artifact identity. The
+            // working caches may now be regenerated, without touching other parts.
+            this.database.prepare('DELETE FROM descriptions WHERE recording_id=?').run(row.recording_id);
+            this.database.prepare('DELETE FROM upload_metadata WHERE recording_id=?').run(row.recording_id);
+            this.database.prepare('DELETE FROM remux_outputs WHERE recording_id=?').run(row.recording_id);
+            const r=this.requireRecording(row.recording_id);
+            this.updateStateInTransaction(r.id,r.state,'server_ready',reason,now.toISOString());
+            return true;
+        });
+    }
+
+    acknowledgeRecoveredAcceptance(attemptId: string): void {
+        this.transaction(() => {
+            const a=this.database.prepare(`SELECT remote_id, completed_at FROM upload_attempts
+                WHERE id=? AND phase='metadata_submitting' AND transmitted_bytes>0 AND remote_id IS NOT NULL`)
+                .get(attemptId) as {completed_at:string} | undefined;
+            if(!a?.completed_at) return;
+            const deadline=new Date(Date.parse(a.completed_at)+UPLOAD_RETRY_MILLISECONDS).toISOString();
+            this.database.prepare(`UPDATE upload_artifact_receipts SET accepted_at=?,verify_after=?
+                WHERE attempt_id=? AND accepted_at IS NULL`).run(a.completed_at,deadline,attemptId);
+        });
+    }
+
+    acceptedUpload(attemptId: string): { acceptedAt: string; verifyAfter: string } | null {
+        const row=this.database.prepare(`SELECT accepted_at AS acceptedAt, verify_after AS verifyAfter
+            FROM upload_artifact_receipts WHERE attempt_id=? AND accepted_at IS NOT NULL AND retention_hold IS NULL`)
+            .get(attemptId) as {acceptedAt:string; verifyAfter:string} | undefined;
+        return row ?? null;
     }
 
     close(): void { this.database.close(); }
@@ -1221,8 +1365,9 @@ export class PipelineDatabase {
 
     getCampaignTrialProgress(): Array<{ provider: string; admitted: number; recordings: Array<{ id: string; state: string }> }> {
         const rows = this.database.prepare(`
-            SELECT t.recording_id AS id, t.provider, COALESCE(r.state, 'source_missing') AS state
+            SELECT t.recording_id AS id, t.provider, CASE WHEN p.status IN ('missing','unavailable') THEN 'source_missing' ELSE COALESCE(r.state, 'source_missing') END AS state
             FROM campaign_trial_recordings t LEFT JOIN recordings r ON r.id = t.recording_id
+            LEFT JOIN local_source_presence p ON p.recording_id=t.recording_id
             ORDER BY t.admitted_at, t.recording_id
         `).all() as unknown as Array<{ id: string; provider: string; state: string }>;
         return ["tango", "fc2", "sc"].map((provider) => ({
@@ -1802,7 +1947,7 @@ export class PipelineDatabase {
         }
         const timestamp = now.toISOString();
         this.transaction(() => {
-            this.database.prepare("DELETE FROM production_artifact_queue WHERE recording_id = ?").run(id);
+            if (!this.getRetryPart(id)) this.database.prepare("DELETE FROM production_artifact_queue WHERE recording_id = ?").run(id);
             this.database.prepare(`
                 INSERT INTO artifacts (recording_id, part, path, size_bytes, sha256, validated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -2159,6 +2304,13 @@ export class PipelineDatabase {
                 ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?)
             `).run(attemptId, reservationId, id, reservation.artifact_part, reservation.provider, timestamp,
                 new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString());
+            const artifact=this.getArtifact(id);
+            const recording=this.requireRecording(id);
+            if (artifact) this.database.prepare(`INSERT INTO upload_artifact_receipts
+                (attempt_id,recording_id,artifact_part,path,size_bytes,sha256,source_fingerprint,source_path,metadata_json)
+                VALUES(?,?,?,?,?,?,?,?,?)`).run(attemptId,id,reservation.artifact_part,artifact.path,
+                    artifact.sizeBytes,artifact.sha256,recording.sourceFingerprint,recording.sourcePath,
+                    JSON.stringify({metadata:this.getUploadMetadata(id),description:this.getDescription(id),provenance:this.getProvenance(id)}));
             this.updateStateInTransaction(id, "upload_admitted", "uploading", "upload attempt started", timestamp);
         });
         return attemptId;
@@ -2269,7 +2421,7 @@ export class PipelineDatabase {
                             attempt_id, recording_id, confirm_after, status, checked_at
                         ) VALUES (?, ?, ?, 'pending', NULL)
                     `).run(attempt.id, attempt.recording_id,
-                        new Date(now.getTime() + 24 * 60 * 60_000).toISOString());
+                        (this.acceptedUpload(attempt.id)?.verifyAfter ?? new Date(now.getTime() + 24 * 60 * 60_000).toISOString()));
                     this.updateStateInTransaction(attempt.recording_id, "uploading", "upload_uncertain",
                         "interrupted after upload may have started; acceptance requires confirmation", timestamp);
                 } else {
@@ -2292,6 +2444,7 @@ export class PipelineDatabase {
         remoteUrl?: string;
         error?: string;
         confirmation?: { confirmAfter: Date };
+        acceptedAt?: Date;
     }, now = new Date()): Recording {
         if (!Number.isSafeInteger(outcome.transmittedBytes) || outcome.transmittedBytes < 0) {
             throw new Error("transmittedBytes must be a nonnegative integer");
@@ -2347,6 +2500,17 @@ export class PipelineDatabase {
                     ) VALUES (?, ?, ?, 'pending', NULL)
                 `).run(attemptId, recordingId,
                     outcome.confirmation.confirmAfter.toISOString());
+            }
+            if (outcome.acceptedAt && outcome.remoteId && outcome.status !== 'failed') {
+                const acceptedAt=outcome.acceptedAt.toISOString();
+                const verifyAfter=new Date(outcome.acceptedAt.getTime()+UPLOAD_RETRY_MILLISECONDS).toISOString();
+                this.database.prepare(`UPDATE upload_artifact_receipts SET accepted_at=COALESCE(accepted_at,?),verify_after=COALESCE(verify_after,?) WHERE attempt_id=?`)
+                    .run(acceptedAt,verifyAfter,attemptId);
+                this.database.prepare(`UPDATE upload_confirmations SET confirm_after=? WHERE attempt_id=? AND status='pending'`)
+                    .run(this.acceptedUpload(attemptId)?.verifyAfter ?? verifyAfter,attemptId);
+                this.database.prepare(`UPDATE upload_attempts SET retry_not_before=? WHERE id=?`).run(this.acceptedUpload(attemptId)?.verifyAfter ?? verifyAfter,attemptId);
+                this.database.prepare(`UPDATE conversion_retries SET status='completed' WHERE recording_id=? AND status='queued'`)
+                    .run(recordingId);
             }
             const next: PipelineState = outcome.status === "accepted"
                 ? "uploaded"
@@ -2410,6 +2574,16 @@ export class PipelineDatabase {
             remoteUrl: row.remote_url,
             verifiedAt: row.verified_at,
         }));
+    }
+
+    pendingConfirmationDeadline(id: string): string | null {
+        const row=this.database.prepare(`SELECT confirm_after FROM upload_confirmations
+            WHERE recording_id=? AND status='pending' ORDER BY confirm_after LIMIT 1`).get(id) as {confirm_after:string} | undefined;
+        return row?.confirm_after ?? null;
+    }
+
+    hasPendingConfirmation(id: string): boolean {
+        return !!this.database.prepare(`SELECT 1 FROM upload_confirmations WHERE recording_id=? AND status='pending'`).get(id);
     }
 
     makePendingConfirmationDue(id: string, now = new Date()): number {
@@ -2509,24 +2683,6 @@ export class PipelineDatabase {
         }));
     }
 
-    // Disk is the source of truth: the source folder is gone, so forget the
-    // recording entirely — except the ISP billing truth in bandwidth_events.
-    deleteRecording(id: string): void {
-        this.transaction(() => {
-            if (this.shortParts(undefined, id).length || this.shortParts(id).some(part => part.batchId)) return;
-            this.database.prepare("DELETE FROM short_parts WHERE recording_id = ?").run(id);
-            for (const table of [
-                "upload_confirmations", "upload_attempts", "upload_reservations",
-                "remote_uploads", "recording_provenance", "upload_metadata",
-                "descriptions", "production_artifact_queue", "resolution_review_artifacts", "artifact_variants",
-                "remux_outputs", "artifacts", "manual_pieces", "state_events",
-            ]) {
-                this.database.prepare(`DELETE FROM ${table} WHERE recording_id = ?`).run(id);
-            }
-            this.database.prepare("DELETE FROM recordings WHERE id = ?").run(id);
-        });
-    }
-
     // The folder's video already exists on the upload provider: park it as uncertain with
     // the known edit ID and let the daily reconcile confirm it online.
     parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = "porntrex"): Recording {
@@ -2623,17 +2779,18 @@ export class PipelineDatabase {
     // never sends bytes; it restores a pending check of the already known ID.
     recoverAcceptedVerifications(now = new Date()): number {
         return this.transaction(() => {
-            const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
+            const rows = this.database.prepare(`SELECT a.id, a.recording_id, COALESCE(x.verify_after, strftime('%Y-%m-%dT%H:%M:%fZ', a.completed_at, '+7 days')) AS deadline FROM upload_attempts a
+                LEFT JOIN upload_artifact_receipts x ON x.attempt_id=a.id
                 JOIN recordings r ON r.id = a.recording_id JOIN artifacts p ON p.recording_id = r.id
                 WHERE r.state = 'uploaded' AND a.status = 'accepted' AND a.artifact_part = p.part
                     AND a.remote_id IS NOT NULL AND NOT EXISTS
                     (SELECT 1 FROM remote_uploads u WHERE u.recording_id = r.id AND u.artifact_part = p.part)`)
-                .all() as unknown as Array<{ id: string; recording_id: string }>;
+                .all() as unknown as Array<{ id: string; recording_id: string; deadline: string }>;
             for (const row of rows) {
                 this.database.prepare(`UPDATE upload_attempts SET status = 'uncertain' WHERE id = ?`).run(row.id);
                 this.database.prepare(`INSERT INTO upload_confirmations (attempt_id, recording_id, confirm_after, status, checked_at)
                     VALUES (?, ?, ?, 'pending', NULL) ON CONFLICT(attempt_id) DO UPDATE SET status = 'pending', confirm_after = excluded.confirm_after`)
-                    .run(row.id, row.recording_id, now.toISOString());
+                    .run(row.id, row.recording_id, row.deadline ?? now.toISOString());
                 this.updateStateInTransaction(row.recording_id, "uploaded", "upload_uncertain",
                     "restore interrupted acceptance-to-verification check", now.toISOString());
             }
@@ -2732,9 +2889,10 @@ export class PipelineDatabase {
         const rows = this.database.prepare(`
             SELECT c.*, a.recording_id, a.provider
             FROM upload_confirmations c JOIN upload_attempts a ON a.id = c.attempt_id
-            WHERE c.status = 'pending' AND c.confirm_after <= ?
+            LEFT JOIN upload_artifact_receipts x ON x.attempt_id=a.id
+            WHERE (x.verify_after IS NULL OR x.verify_after <= ?) AND c.status = 'pending' AND c.confirm_after <= ?
             ORDER BY c.confirm_after, c.attempt_id
-        `).all(now.toISOString()) as unknown as Array<{
+        `).all(now.toISOString(), now.toISOString()) as unknown as Array<{
             attempt_id: string;
             provider: string;
             recording_id: string;
@@ -2773,6 +2931,13 @@ export class PipelineDatabase {
             if (evidence.stage === "remote_identity_captured" && typeof evidence.remoteId === "string" && /^\d+$/.test(evidence.remoteId)) {
                 this.database.prepare(`UPDATE upload_attempts SET remote_id = ?
                     WHERE id = ? AND status IN ('started', 'uncertain') AND remote_id IS NULL`).run(evidence.remoteId, attemptId);
+                const a=this.database.prepare(`SELECT phase FROM upload_attempts WHERE id=?`).get(attemptId) as {phase:string};
+                if(a.phase==='metadata_submitting' && history.some(item=>(item as {stage?:string}).stage==='file_transfer_complete')) {
+                    const deadline=new Date(now.getTime()+UPLOAD_RETRY_MILLISECONDS).toISOString();
+                    this.database.prepare(`UPDATE upload_artifact_receipts SET accepted_at=?,verify_after=?
+                        WHERE attempt_id=? AND accepted_at IS NULL`).run(now.toISOString(),deadline,attemptId);
+                    this.database.prepare('UPDATE upload_attempts SET retry_not_before=? WHERE id=?').run(deadline,attemptId);
+                }
             }
         });
     }
