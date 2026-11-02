@@ -35,6 +35,10 @@ completions are serialized, paused intent holds its clock, and the first restore
 picture stays hidden until a frame from the requested position is displayed.
 `VideoTerminalState` distinguishes a sampled terminal clock from failed input;
 normal EOF remains stopped through resume, and an explicit seek reopens it.
+After video-only suspension, wait for UIKit activation before restoring the video
+output. Re-select and preroll the same input at its current clock; otherwise a
+VP9 Matroska track can stall between random-access points. This preserves a
+queued user seek and play/pause intent without resolving or reopening the source.
 
 The official iOS binary uses Apple's Secure Transport with the system trust
 store, including the PC CA already trusted by the phone's existing local apps.

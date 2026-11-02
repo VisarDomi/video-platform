@@ -52,6 +52,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     private let changed: () -> Void
     private let failed: () -> Void
     private var videoEnabled = true
+    private var videoRestorePending = false
     private var stateEvents: [[String: Any]] = []
     private let surface: UIView
     private var firstPictureAfterSeek: UInt64?
@@ -84,6 +85,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.restoreVideoIfReady()
                 self.applyPendingSeek()
                 if let before = self.firstPictureAfterSeek, self.media.statistics.displayedPictures > before, self.pendingSeek == nil {
                     self.surface.isHidden = false
@@ -165,11 +167,32 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     }
 
     func setVideoEnabled(_ enabled: Bool) {
+        let restoring = enabled && !videoEnabled
         videoEnabled = enabled
         // Keep audio and the media clock running through lock/background. Removing
         // only the video track prevents background rendering without restarting it.
-        if enabled { if !player.videoTracks.isEmpty { player.selectTrack(at: 0, type: .video) } }
-        else { player.deselectAllVideoTracks() }
+        if enabled {
+            if restoring { videoRestorePending = true }
+            restoreVideoIfReady()
+        }
+        else { videoRestorePending = false; player.deselectAllVideoTracks() }
+    }
+
+    private func restoreVideoIfReady() {
+        // willEnterForeground can still report a background application. Do not
+        // create the native video output until UIKit has actually activated it.
+        guard !stopped, videoRestorePending, videoEnabled, opened,
+              UIApplication.shared.applicationState == .active, !player.videoTracks.isEmpty else { return }
+        videoRestorePending = false
+        let position = currentTime
+        player.selectTrack(at: 0, type: .video)
+        // VP9 Matroska needs random-access preroll after video-only suspension.
+        // Rejoin the current clock on this input, preserving a queued user seek.
+        if !ended, pendingSeek == nil {
+            lastTime = position
+            pendingSeek = position
+            applyPendingSeek()
+        }
     }
 
     func stop() {
