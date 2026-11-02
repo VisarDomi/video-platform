@@ -16,6 +16,13 @@ is not rebuilt or patched. Generated binaries and the verification receipt stay
 outside Git. Deployment copies them with the sources, and Bunkr's renewal inputs
 include the staged framework, receipt, wrapper and preparation script.
 
+Only the runtime frameworks enter these checkpoints. The upstream archive's
+debug symbols stay in the PC dependency cache for on-demand symbolication; the
+outer XCFramework metadata does not advertise unshipped symbol directories.
+This removes about 600 MiB of debug data from each source capture and Mac build
+without changing either runtime binary. Preparation is serialized, validates the
+cache layout and binary hashes, and repairs interrupted archive/receipt writes.
+
 Only Bunkr links VLCKit. The common viewer selects it for original AV1/VP9/VP8
 files, MKV/WebM/AVI/TS containers, or when AVFoundation fails to produce a Bunkr picture. Supported files keep
 AVFoundation. This changes decoding on the phone; the PC serves original bytes.
