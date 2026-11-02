@@ -6,12 +6,13 @@ import path from "node:path";
 import { mp4Identity, mp4RenameName, MP4RenameError, type MP4Rename, type MP4RenameHooks } from "./mp4Identity.js";
 
 import { mediaMetadata, type MediaMetadata } from "./displayMetadata.js";
+import { originalVideoExtension, originalVideoName } from "./originalVideo.js";
 export interface MP4Video { filename: string; fileId: string; type: "original"; size: number; duration: number; isLive: false; width?: number; height?: number; videoCodec?: string; frameRate?: number }
 interface Entry { video: MP4Video; mtimeMs: number; ctimeMs: number; inode: number }
 interface Change { revision: number; item?: MP4Video; removed?: { filename: string; type: "original" } }
 type Probe = (filename: string) => Promise<number | MediaMetadata>;
 export function mp4Name(filename: unknown): filename is string {
-    return typeof filename === "string" && !filename.startsWith(".") && !/[\x00/\\]/.test(filename) && /\.mp4$/i.test(filename);
+    return originalVideoName(filename);
 }
 
 // The same revision/long-poll contract as recording lists, with flat completed MP4 files.
@@ -166,7 +167,6 @@ export class MP4Library {
     async file(filename: unknown): Promise<string | undefined> {
         if (!mp4Name(filename)) return undefined;
         await this.start();
-        await this.scanning.catch(() => undefined);
         if (this.aliases[filename]) return this.fileById(this.aliases[filename]);
         const file = path.join(this.directory, filename);
         const stat = await lstat(file).catch(() => undefined);
@@ -174,7 +174,9 @@ export class MP4Library {
     }
     async videoById(id: string): Promise<MP4Video | undefined> {
         if (!/^[a-f0-9]{24}$/.test(id)) return undefined;
-        await this.start(); await this.scanning.catch(() => undefined);
+        // A metadata probe for another new file must not hold existing playback
+        // requests. fileById still verifies the actual inode and refreshes a miss.
+        await this.start();
         return [...this.entries.values()].find(entry => entry.video.fileId === id)?.video;
     }
     async fileById(id: string): Promise<string | undefined> {
@@ -208,7 +210,7 @@ export class MP4Library {
         catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
         if (change.version !== 1 || !["prepared", "linked"].includes(change.stage) || !Number.isSafeInteger(change.bytes) || change.bytes <= 0
             || !Array.isArray(change.jobs) || change.jobs.some(id => typeof id !== "string") || !/^[a-f0-9]{24}$/.test(change.fileId)
-            || !mp4Name(change.from) || mp4RenameName(change.to) !== change.to || change.from === change.to) {
+            || !mp4Name(change.from) || mp4RenameName(change.to, originalVideoExtension(change.from)) !== change.to || change.from === change.to) {
             throw new Error("Invalid Bunkr rename journal");
         }
         const source = path.join(this.directory, change.from), target = path.join(this.directory, change.to);
@@ -247,11 +249,12 @@ export class MP4Library {
         await this.clearJournal();
     }
     async renameFile(id: string, expected: unknown, requested: unknown): Promise<MP4Video> {
-        const name = mp4RenameName(requested); await this.start();
+        await this.start();
         const operation = this.scanning.catch(() => undefined).then(async () => {
             await this.recoverRename(); await this.scan();
             const current = [...this.entries.values()].find(entry => entry.video.fileId === id)?.video;
             if (!current) throw new MP4RenameError(404, "The video no longer exists");
+            const name = mp4RenameName(requested, originalVideoExtension(current.filename));
             if (current.filename === name) return current; // Safe acknowledgement retry.
             if (current.filename !== expected) throw new MP4RenameError(409, "The filename changed; refresh it before renaming");
             if (await lstat(path.join(this.directory, name)).catch(() => undefined)) throw new MP4RenameError(409, "A file with that name already exists");

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { MP4Library } from "../services/video/mp4Library.js";
 import { MP4RenameError } from "../services/video/mp4Identity.js";
+import { originalVideoContentType } from "../services/video/originalVideo.js";
 
 export function createBunkrLibraryRoutes(library: MP4Library) {
     const router = Router();
@@ -39,7 +40,7 @@ export function createBunkrLibraryRoutes(library: MP4Library) {
     router.get("/media/bunkr/id/:id", async (req, res) => {
         const file = await library.fileById(req.params.id);
         if (!file) { res.status(404).end(); return; }
-        res.type("video/mp4").set("Cache-Control", "private, no-cache");
+        res.type(originalVideoContentType(file)).set("Cache-Control", "private, no-cache");
         res.sendFile(file, { dotfiles: "deny", acceptRanges: true, cacheControl: false }, error => {
             if (!error || req.aborted || res.destroyed) return;
             if (res.headersSent) { res.destroy(); return; }
@@ -52,7 +53,7 @@ export function createBunkrLibraryRoutes(library: MP4Library) {
         if (!file) { res.status(404).end(); return; }
         // sendFile streams bytes with HEAD, ETag, If-Range and single byte-range support.
         // Never read a multi-gigabyte MP4 into Node memory or remux it for playback.
-        res.type("video/mp4").set("Cache-Control", "private, no-cache");
+        res.type(originalVideoContentType(file)).set("Cache-Control", "private, no-cache");
         res.sendFile(file, { dotfiles: "deny", acceptRanges: true, cacheControl: false }, error => {
             if (!error || req.aborted || res.destroyed) return;
             if (res.headersSent) { res.destroy(); return; }

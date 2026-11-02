@@ -6,6 +6,7 @@ import os from "node:os";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { mp4Identity, MP4RenameError, type MP4Rename } from "./video/mp4Identity.js";
+import { originalVideoName } from "./video/originalVideo.js";
 
 const DOMAINS = new Set(["bunkr.si", "bunkr.ph", "bunkr.cr"]);
 export function bunkrPage(value: unknown): URL {
@@ -65,7 +66,7 @@ export async function resolveBunkr(page: string, fetcher: Fetcher = fetch): Prom
     if (typeof meta.mediafiles !== "string" || typeof meta.path !== "string" || typeof meta.original !== "string") throw new Error("Invalid Bunkr metadata");
     const raw = allowedURL(meta.mediafiles + meta.path);
     const filename = meta.original.replace(/[\x00-\x1f\x7f/\\:]/g, "_").replace(/^\.+/, "_").slice(0, 180);
-    if (!/\.(mp4|m4v|mov|mkv|webm|avi|ts)$/i.test(filename)) throw new Error("Bunkr file is not a video");
+    if (!originalVideoName(filename)) throw new Error("Bunkr file is not a video");
     const signed = JSON.parse(await smallText(await request(fetcher,
         `https://glb-apisign.cdn.cr/sign?path=${encodeURIComponent(decodeURIComponent(raw.pathname))}`))) as { token?: string; ex?: number | string };
     if (typeof signed.token !== "string" || !signed.token || !/^\d+$/.test(String(signed.ex))) throw new Error("Invalid Bunkr signature");

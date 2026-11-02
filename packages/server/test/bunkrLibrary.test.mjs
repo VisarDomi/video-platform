@@ -17,7 +17,7 @@ async function fixture(t,probe=async()=>12.5){
 }
 test('only completed nonempty MP4 files are listed, with real size and cached duration',async t=>{
     let probes=0;const f=await fixture(t,async()=>{probes++;return 12.5;});
-    for(const name of ['a.mp4','b.MP4','c.mp4.part','c.mp4.part.retained-123','.hidden.mp4','empty.mp4','readme.txt'])await writeFile(path.join(f.directory,name),name==='empty.mp4'?'':'video-bytes');
+    for(const name of ['a.mp4','b.MP4','c.mp4.part','c.mp4.part.retained-123','.hidden.mp4','empty.mp4','readme.txt','mp4'])await writeFile(path.join(f.directory,name),name==='empty.mp4'?'':'video-bytes');
     await mkdir(path.join(f.directory,'folder.mp4'));await writeFile(path.join(f.root,'outside.mp4'),'outside');await symlink(path.join(f.root,'outside.mp4'),path.join(f.directory,'link.mp4'));
     const rows=await f.library.videos();assert.ok(rows.every(row=>/^[a-f0-9]{24}$/.test(row.fileId)));
     assert.deepEqual(rows.map(({fileId,...row})=>row),['a.mp4','b.MP4'].map(filename=>({filename,type:'original',size:11,duration:12.5,isLive:false})));
@@ -37,6 +37,36 @@ test('atomic publication, file changes and manual deletion arrive through the re
     await rm(path.join(f.directory,'new.mp4'));await f.library.refresh();
     const removed=await f.library.changes(changed.revision,first.epoch);assert.deepEqual(removed.changes.at(-1).removed,{filename:'new.mp4',type:'original'});
     assert.deepEqual((await f.library.changes(undefined,'old epoch')).videos,[]);
+});
+test('every accepted original container is listed and restored; incomplete downloads remain private',async t=>{
+    const f=await fixture(t);
+    const names=['a.mp4','b.mkv','c.webm','d.M4V','e.mov','f.avi','g.ts'];
+    for(const name of [...names,'pending.webm.part','retained.mkv.part.retained-123'])await writeFile(path.join(f.directory,name),'original bytes');
+    assert.deepEqual((await f.library.videos()).map(v=>v.filename),names);
+    await f.library.stop();
+    const restarted=new MP4Library(f.directory,f.options);t.after(()=>restarted.stop());
+    assert.deepEqual((await restarted.videos()).map(v=>v.filename),names);
+    const before=await restarted.changes(undefined,undefined);
+    const waiting=restarted.changes(before.revision,before.epoch,5000);
+    await rename(path.join(f.directory,'pending.webm.part'),path.join(f.directory,'pending.webm'));
+    assert.ok((await waiting).changes.some(c=>c.item?.filename==='pending.webm'),'WebM publication wakes the same revision feed');
+});
+test('probing an unrelated new video cannot block existing byte-range playback lookup',async t=>{
+    let unblock,entered;
+    const waiting=new Promise(resolve=>entered=resolve),blocked=new Promise(resolve=>unblock=resolve);
+    const f=await fixture(t,async file=>{if(file.endsWith('new.webm')){entered();await blocked;}return 12.5;});
+    await writeFile(path.join(f.directory,'existing.mp4'),'original bytes');
+    const [existing]=await f.library.videos();
+    await writeFile(path.join(f.directory,'new.webm'),'new original bytes');
+    const scan=f.library.refresh();await waiting;
+    let timer;
+    try{
+        const ready=await Promise.race([
+            Promise.all([f.library.fileById(existing.fileId),f.library.file(existing.filename)]),
+            new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('existing playback waited for unrelated metadata')),1000);}),
+        ]);
+        assert.deepEqual(ready,[path.join(f.directory,existing.filename),path.join(f.directory,existing.filename)]);
+    }finally{clearTimeout(timer);unblock();await scan;}
 });
 test('client disconnect and service shutdown release waiting long polls',async t=>{
     const f=await fixture(t);const initial=await f.library.changes(undefined,undefined);
@@ -74,4 +104,15 @@ test('MP4 routes stream byte ranges and HEAD for seeking; partials, symlinks and
     const rows=await(await fetch(base+'/api/videos?provider=bunkr')).json();assert.equal(rows[0].filename,name);
     const feed=await(await fetch(base+'/api/videos/changes?provider=bunkr')).json();assert.equal(feed.videos[0].size,4096);
     assert.deepEqual((await readdir(f.directory)).sort(),[name,'link.mp4','unfinished.mp4.part'].sort(),'listing and playback never move or rewrite media');
+});
+test('non-MP4 originals retain their container type and exact bytes on both playback routes',async t=>{
+    const f=await fixture(t);const bytes=Buffer.from('unchanged original video bytes');
+    for(const extension of ['mkv','webm'])await writeFile(path.join(f.directory,'original.'+extension),bytes);
+    const app=express();app.use(createBunkrLibraryRoutes(f.library));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+    const base=`http://127.0.0.1:${server.address().port}`;
+    for(const video of await f.library.videos())for(const address of [`/media/bunkr/id/${video.fileId}`,'/media/bunkr/'+video.filename]){
+        const response=await fetch(base+address,{headers:{Range:'bytes=2-8'}});
+        assert.equal(response.status,206);assert.equal(response.headers.get('content-type'),video.filename.endsWith('.mkv')?'video/x-matroska':'video/webm');
+        assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes.subarray(2,9));
+    }
 });

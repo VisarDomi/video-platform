@@ -38,3 +38,8 @@ existing stat-fingerprint metadata cache. Neither path transcodes or changes med
 
 Bunkr playback serves original files byte-for-byte. Automatic conversion/transcoding is
 not permitted. Codec incompatibility must be reported without rewriting or substituting media.
+The queue and local library use the same completed-container contract (MP4, M4V,
+MOV, MKV, WebM, AVI and TS); partially downloaded files remain private. Playback
+lookups verify a published file's identity without waiting for metadata probes
+of unrelated new files. Renames preserve the original container extension and
+their existing durable file identity/journal.

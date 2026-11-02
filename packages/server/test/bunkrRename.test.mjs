@@ -30,6 +30,18 @@ test('rename preserves bytes, identity, old playback URLs and progress keys acro
     await f.library.stop();const restarted=new MP4Library(f.directory,f.options);t.after(()=>restarted.stop());
     assert.equal((await restarted.videos())[0].fileId,original.fileId);assert.equal(await restarted.file(original.filename),path.join(f.directory,after.filename));
 });
+test('renaming WebM and MKV preserves their original container through restart',async t=>{
+    const f=await fixture(t);await rm(path.join(f.directory,'original.mp4'));
+    for(const extension of ['mkv','webm'])await writeFile(path.join(f.directory,'original.'+extension),f.bytes);
+    const original=await f.library.videos();
+    for(const video of original){
+        const extension=path.extname(video.filename);
+        const renamed=await f.library.renameFile(video.fileId,video.filename,'New title');
+        assert.equal(renamed.filename,'New title'+extension);assert.equal(renamed.fileId,video.fileId);
+    }
+    await f.library.stop();const restarted=new MP4Library(f.directory,f.options);t.after(()=>restarted.stop());
+    for(const video of original){assert.deepEqual(await readFile(await restarted.file(video.filename)),f.bytes);}
+});
 test('collisions and stale filenames never overwrite or rename another video',async t=>{
     const f=await fixture(t);await writeFile(path.join(f.directory,'occupied.mp4'),'other media');const original=(await f.library.videos()).find(row=>row.filename==='original.mp4');
     await assert.rejects(f.library.renameFile(original.fileId,original.filename,'occupied'),e=>e.status===409);
@@ -74,12 +86,12 @@ test('a file already streaming remains byte-identical through a rename',async t=
     while(true){const part=await reader.read();if(part.done)break;chunks.push(Buffer.from(part.value));}
     assert.deepEqual(Buffer.concat(chunks),bytes);assert.deepEqual(await readFile(path.join(f.directory,'Streaming continues.mp4')),bytes);
 });
-test('completed download receipts follow the rename without losing original source history',async t=>{
+for(const extension of ['mp4','mkv','webm'])test('completed '+extension+' download is listed and its receipt follows rename',async t=>{
     const f=await fixture(t);await rm(path.join(f.directory,'original.mp4'));
     const fetcher=async input=>{
         const url=new URL(input);
         if(url.pathname.startsWith('/f/'))return new Response('<a href="https://dl.bunkr.cr/file/42">Download</a>');
-        if(url.pathname==='/api/_001_v2')return Response.json({mediafiles:'https://edge.cdn.cr',path:'/video.mp4',original:'clip.mp4'});
+        if(url.pathname==='/api/_001_v2')return Response.json({mediafiles:'https://edge.cdn.cr',path:'/video.'+extension,original:'clip.'+extension});
         if(url.pathname==='/sign')return Response.json({token:'fixture',ex:123});
         return new Response(f.bytes,{headers:{'content-length':String(f.bytes.length),etag:'"same"'}});
     };
