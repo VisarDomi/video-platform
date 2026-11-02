@@ -6,7 +6,10 @@ import { webkit } from 'playwright-core';
 
 const content=fs.readFileSync('dist/extension/bunkr/content.js','utf8');
 const manifest=JSON.parse(fs.readFileSync('dist/extension/bunkr/manifest.json','utf8'));
-for(const domain of ['si','ph','cr'])assert.ok(manifest.content_scripts[0].matches.includes(`https://bunkr.${domain}/*`));
+for(const domain of ['si','ph','cr']){
+    assert.ok(manifest.content_scripts.some(script=>script.run_at==='document_start'&&script.matches.includes(`https://bunkr.${domain}/a/*`)));
+    assert.ok(manifest.content_scripts.some(script=>script.run_at==='document_end'&&script.matches.includes(`https://bunkr.${domain}/f/*`)));
+}
 assert.ok(manifest.host_permissions.includes('https://192.168.1.197:9998/*'));
 let listener;const calls=[];
 vm.runInNewContext(fs.readFileSync('dist/extension/bunkr/background.js','utf8'),{

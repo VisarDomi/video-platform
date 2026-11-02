@@ -27,6 +27,22 @@ the site's Download button works normally for a new download. A known active PC
 job stays attached during a connection loss, avoiding an accidental duplicate
 download on the phone. An explicit retry is idempotent.
 
+On `/a/<id>` it takes over the document at `document_start`, using the same
+`window.stop()` / document rewrite boundary as Manga Reader and Stream Viewer.
+The page contains only the full album title/totals and a tightly packed file
+list. Each row has the full filename, size/date, the `/f/` player's contact-sheet
+poster and an adjacent gray PC download/status button. There is no row or image
+padding, fixed thumbnail aspect, crop or enlargement. Cached natural image
+dimensions reserve the layout before decoding. Safari owns Back navigation.
+The file page's declared `videoCoverUrl` is read as a JSON string; its player and
+scripts are never executed by the album. The original small album thumbnail is
+retained if the file poster cannot be loaded. Visible/nearby rows fetch posters
+and PC status with at most three concurrent requests of each kind; hidden rows
+stop polling. Album and file-page buttons share `core/bunkrDownload.ts`, including
+refresh restoration, offline progress, explicit retry, and lost-acknowledgement
+lookup. Browsing never submits a download. `/f/` keeps its original page layout
+and existing native-download fallback when no PC job is known.
+
 The independent `video-bunkr-downloads.service` on HTTPS :9998 resolves Bunkr's numeric metadata and expiring signature itself; Safari
 can close after acceptance. `/api/bunkr/health` advertises this capability;
 `POST /api/bunkr/downloads` accepts a file-page URL with the extension's
@@ -77,6 +93,7 @@ redirect loops.
 npm run build -w live-extensions            # all three extensions
 npm run check -w live-extensions            # type check
 node packages/live-extensions/test/bunkr.mjs # mobile WebKit + background fixtures
+node packages/live-extensions/test/bunkr-album.mjs # takeover, intrinsic dimensions, full text, packed rows and status/recovery
 ```
 
 The build writes `manifest.json`, `content.js`, and `background.js` to
