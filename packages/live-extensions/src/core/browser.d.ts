@@ -12,3 +12,4 @@ declare module "*.css" {
     const css: string;
     export default css;
 }
+declare module "*.css" { const value: string; export default value; }

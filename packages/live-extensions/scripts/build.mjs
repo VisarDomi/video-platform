@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSIONS = {
     'ladder-live': { name: 'LADDER live', site: 'LADDER', matches: ['https://ladder-live.example/*'], api: '/api/ladder' },
     'fmp4-live': { name: 'FMP4 live', site: 'Fmp4Live', matches: ['https://fmp4-live.example/*', 'https://*.fmp4-live.example/*'], api: '/api/fmp4' },
-    'filehost': { name: 'FileHost to PC', site: 'FileHost', version: '1.0.2', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
+    'filehost': { name: 'FileHost to PC', site: 'FileHost', version: '1.1.0', matches: ['https://file-host.example/*', 'https://file-host.example/*', 'https://file-host.example/*'], api: '/api/filehost' },
 };
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(EXTENSIONS);
 for (const key of names) {
@@ -24,8 +24,10 @@ for (const key of names) {
         description: key === 'filehost' ? 'Send FileHost video downloads to your PC on the home network. Hosted by TsLive.' : `Add or remove the open ${extension.site} streamer from the PC download list. Hosted by TsLive.`,
         host_permissions: [...extension.matches, `https://192.168.1.197:${key === 'filehost' ? 9998 : 9999}/*`],
         background: { scripts: ['background.js'], service_worker: 'background.js', persistent: false },
-        content_scripts: [{ matches: extension.matches, js: ['content.js'],
-            run_at: key === 'ladder-live' ? 'document_start' : 'document_end', all_frames: false }],
+        content_scripts: key === 'filehost' ? [
+            { matches: extension.matches.map(url => url.replace('/*', '/a/*')), js: ['content.js'], run_at: 'document_start', all_frames: false },
+            { matches: extension.matches.map(url => url.replace('/*', '/f/*')), js: ['content.js'], run_at: 'document_end', all_frames: false },
+        ] : [{ matches: extension.matches, js: ['content.js'], run_at: key === 'ladder-live' ? 'document_start' : 'document_end', all_frames: false }],
     }, null, 2) + '\n');
     console.log(`Built ${extension.name} into dist/extension/${key}`);
 }
