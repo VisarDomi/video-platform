@@ -40,6 +40,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     let checkpoint: CheckpointWriter
     private(set) var viewer: ViewerController?
     private let stateWriter: BackgroundWriter
+    #if targetEnvironment(simulator)
+    var configureTestViewer: ((ViewerController) -> Void)?
+    #endif
     private var forwardPan: UIScreenEdgePanGestureRecognizer!
 
     init(viewerProvider: String, directory: URL, media: ViewerMedia) {
@@ -395,6 +398,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     private func buildViewer() -> ViewerController {
         let controller = ViewerController(provider: viewerProvider, host: self, media: media, progress: progress, checkpoint: checkpoint)
+        #if targetEnvironment(simulator)
+        configureTestViewer?(controller)
+        #endif
         controller.loadViewIfNeeded()
         return controller
     }

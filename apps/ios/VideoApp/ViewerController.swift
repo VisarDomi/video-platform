@@ -51,6 +51,15 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var initialPositionApplied = false
     var restoredTop: CGFloat?
     #if targetEnvironment(simulator)
+    func configureNavigationCheck(image: UIImage) { fixtureImage = image }
+    private var capturedMutationCheck: ViewerVideo?
+    func captureMutationCheck() { capturedMutationCheck = currentVideo }
+    func completeMutationCheck(type: String) {
+        guard let previous = capturedMutationCheck ?? currentVideo else { return }
+        capturedMutationCheck = nil
+        replaceCurrent(previous.setting("type", type), replacing: previous)
+    }
+
     private var fixtureImage: UIImage?
     private var fixtureLateMetadata = false
     #endif
@@ -187,7 +196,11 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
         geometryDirty = true
         currentIndex = index
+        #if targetEnvironment(simulator)
+        if fixtureImage == nil { FrameMonitor.shared.measure("open.session") { beginSession() } }
+        #else
         FrameMonitor.shared.measure("open.session") { beginSession() }
+        #endif
         UIApplication.shared.isIdleTimerDisabled = true
         let center = NotificationCenter.default
         observers = [
@@ -220,6 +233,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         // The saved time at once (not 0:00 until the player reports it).
         let start = savedTime(video), duration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         if !video.liveStream && duration > 0 { overlay.setTimeline(TimelineSnapshot(currentTime: start, duration: duration, seekMax: duration)) }
+        #if targetEnvironment(simulator)
+        if let fixtureImage {
+            active.configureZoomCheck(video: video, size: aspect(of: video), image: fixtureImage)
+            reveal()
+            return
+        }
+        #endif
         active.load(video, start: start, play: true)
         revealTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.reveal() }
@@ -295,16 +315,18 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             host.remove(current.filename)
             return
         }
-        guard let current, let index = filtered.firstIndex(where: {
-            $0.same(current) || ($0.pageUrl != nil && $0.pageUrl == current.pageUrl)
-        }) else {
+        guard let current else { return }
+        let matching = filtered.filter { $0.sameRecording(current) }
+        guard let index = filtered.firstIndex(where: { $0.same(current) })
+                ?? filtered.firstIndex(where: { $0.pageUrl != nil && $0.pageUrl == current.pageUrl })
+                ?? (matching.count == 1 ? filtered.firstIndex(where: { $0.sameRecording(current) }) : nil) else {
             if returnsWhenGone { slideAway() }
             return
         }
         var anchor = documentAnchor
         let updated = filtered[index]
         if anchor?.key == current.key { anchor?.key = updated.key }
-        if let reserved = reservedAspects[current.key] { reservedAspects[updated.key] = reserved }
+        carryGeometry(from: current, to: updated)
         let size = measuredSizes[current.key] ?? active.presentationSize
         if size.width > 0, size.height > 0 {
             measuredSizes[updated.key] = size
@@ -314,11 +336,16 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
         geometryDirty = true
         currentIndex = index
-        layoutFeed(anchor: anchor)
         if current.progressKey != filtered[index].progressKey, current.size == filtered[index].size {
             progress.migrate(from: current.progressKey, to: filtered[index].progressKey)
         }
-        active.update(filtered[index])
+        if current.type != updated.type {
+            for unit in units where unit !== active && unit.video?.sameRecording(current) == true { unit.clear() }
+            progress.set(updated.progressKey, 0)
+            loadVariant(filtered[index], in: active, play: active.wantsPlay)
+        }
+        else { active.update(filtered[index]) }
+        layoutFeed(anchor: anchor)
         overlay.setVideo(filtered[index])
         if revealed { loadEdgeUnits() }
     }
@@ -424,6 +451,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if fixtureImage != nil {
             overlay.setVideo(currentVideo)
             overlay.setInteractive(!unsettled)
+            if let video = currentVideo { host.highlight(video.filename, reveal: false); saveCheckpoint() }
             return
         }
         #endif
@@ -501,6 +529,20 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if let index = videos.firstIndex(where: { $0.same(video) }) { videos[index] = video }
         for unit in units where unit.video?.same(video) == true { unit.update(video) }
         if currentVideo?.same(video) == true { overlay.setVideo(video) }
+    }
+
+    private func carryGeometry(from old: ViewerVideo, to new: ViewerVideo) {
+        guard old.key != new.key else { return }
+        if let size = reservedAspects[old.key] { reservedAspects[new.key] = size }
+        if let size = measuredSizes[old.key] { measuredSizes[new.key] = size }
+        if let size = progress.displaySize(old.key) { progress.setDisplaySize(new.key, size) }
+    }
+
+    private func loadVariant(_ video: ViewerVideo, in unit: ViewerUnit, play: Bool) {
+        #if targetEnvironment(simulator)
+        if let fixtureImage { unit.configureZoomCheck(video: video, size: aspect(of: video), image: fixtureImage); return }
+        #endif
+        unit.load(video, start: 0, play: play)
     }
 
     // MARK: the feed
@@ -826,7 +868,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                 "key": currentVideo?.key ?? "", "name": currentVideo?.filename ?? "", "visiblePlayers": units.filter { $0.video != nil && !$0.view.isHidden }.count, "players": units.compactMap { unit -> [String: Any]? in
                     guard let video = unit.video else { return nil }
                     return ["key": video.key, "frame": rect(unit.view.convert(unit.view.bounds, to: view)), "visible": !unit.view.isHidden]
-                }]
+                }, "frameKey": geometryKeys.indices.contains(currentIndex) ? geometryKeys[currentIndex] : "",
+                "unitKey": active.video?.key ?? ""]
     }
     #endif
 
@@ -972,8 +1015,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                     let playlist = try await Playlist.fetch(url)
                     try await ViewerPC.cut(video, keep: playlist.keep(markers: markers, playbackDuration: playbackDuration))
                 }
-                segments = []
-                replaceCurrent(video.setting("type", "edited"))
+                replaceCurrent(video.setting("type", "edited"), replacing: video)
             } catch { mutationFailed(error) }
         }
     }
@@ -983,17 +1025,39 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         Task {
             do {
                 try await ViewerPC.returnOriginal(video)
-                replaceCurrent(video.setting("type", "original"))
+                replaceCurrent(video.setting("type", "original"), replacing: video)
             } catch { mutationFailed(error) }
         }
     }
 
-    private func replaceCurrent(_ video: ViewerVideo) {
-        guard videos.indices.contains(currentIndex) else { return }
-        videos[currentIndex] = video
-        overlay.setSegments(segments)
-        active.load(video, start: 0, play: true)
-        activateCurrent()
+    private func replaceCurrent(_ video: ViewerVideo, replacing previous: ViewerVideo) {
+        guard !closed else { host.changed(video); return }
+        guard let index = videos.firstIndex(where: { $0.same(previous) }) ?? videos.firstIndex(where: { $0.same(video) }) else { host.changed(video); return }
+        let selected = currentVideo?.sameRecording(previous) == true
+        let alreadySelected = selected && active.video?.same(video) == true
+        let selectedKey = currentVideo?.key
+        var anchor = documentAnchor
+        if anchor?.key == previous.key { anchor?.key = video.key }
+        carryGeometry(from: previous, to: video)
+        for unit in units where (!selected || unit !== active) && unit.video?.sameRecording(previous) == true { unit.clear() }
+        if !alreadySelected { progress.set(video.progressKey, 0) }
+        // A change feed may already contain the edited row when the action's
+        // acknowledgement arrives. Replace once, retaining this document slot.
+        let insertion = videos[..<index].filter { !$0.same(previous) && !$0.same(video) }.count
+        videos.removeAll { $0.same(previous) || $0.same(video) }
+        videos.insert(video, at: insertion)
+        if selected { currentIndex = insertion }
+        else if let selectedKey, let current = videos.firstIndex(where: { $0.key == selectedKey }) { currentIndex = current }
+        geometryDirty = true
+        if selected {
+            segments = []
+            overlay.setSegments(segments)
+            if active.video?.same(video) == true { active.update(video) }
+            else { loadVariant(video, in: active, play: true) }
+        }
+        layoutFeed(anchor: anchor)
+        loadEdgeUnits()
+        if selected { activateCurrent() }
         host.changed(video)
     }
 
@@ -1177,6 +1241,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func enteringForeground() {
+        #if targetEnvironment(simulator)
+        if fixtureImage != nil { return }
+        #endif
         for unit in units { unit.setVideoEnabled(true) }
         for unit in units where unit.video != nil {
             if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: false) { unit.resume(liveEdge: unit !== active) }
@@ -1186,6 +1253,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // A call or Siri paused playback; videos carry on afterwards.
     private func interruptionEnded() {
+        #if targetEnvironment(simulator)
+        if fixtureImage != nil { return }
+        #endif
         active.resume(liveEdge: false)
         if !inBackground && playbackPolicy.playsNeighbors { for unit in units where unit !== active && unit.video != nil { unit.resume(liveEdge: true) } }
     }

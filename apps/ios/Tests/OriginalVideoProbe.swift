@@ -18,6 +18,12 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var logging = false
     private var runID = ""
+    private var testDuration = 412.270295
+    private var teardownMilliseconds: [Double] = []
+    private var heartbeat: Timer?
+    private var lastHeartbeat = 0.0
+    private var teardownWindowUntil = 0.0
+    private var teardownWorstGapMs = 0.0
     private let output = URL.documentsDirectory.appendingPathComponent("decoder-probe.json")
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -28,7 +34,13 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
         if let index = CommandLine.arguments.firstIndex(of: "-probe-run"), CommandLine.arguments.count > index + 1 { runID = CommandLine.arguments[index + 1] }
         let pending: [String: Any] = ["runID": runID, "complete": false, "transportReady": false, "samples": []]
         if let data = try? JSONSerialization.data(withJSONObject: pending) { try? data.write(to: output, options: .atomic) }
-        video = ViewerVideo(["filename": "original-codec-probe.mp4", "provider": "bunkr", "videoCodec": "av1", "duration": 412.270295,
+        var codec = "av1"
+        var filename = "original-codec-probe.mp4"
+        if let index = CommandLine.arguments.firstIndex(of: "-filename"), CommandLine.arguments.count > index + 1 { filename = CommandLine.arguments[index + 1] }
+        if let index = CommandLine.arguments.firstIndex(of: "-codec"), CommandLine.arguments.count > index + 1 { codec = CommandLine.arguments[index + 1] }
+        if let index = CommandLine.arguments.firstIndex(of: "-duration"), CommandLine.arguments.count > index + 1,
+           let duration = Double(CommandLine.arguments[index + 1]), duration > 150 { testDuration = duration }
+        video = ViewerVideo(["filename": filename, "provider": "bunkr", "videoCodec": codec, "duration": testDuration,
                              "media": ["url": url.absoluteString, "kind": "mp4"]])
         application.isIdleTimerDisabled = true
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -64,6 +76,22 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
                 return
             }
             backgroundTask = application.beginBackgroundTask(withName: "Original video codec check")
+            lastHeartbeat = CACurrentMediaTime()
+            heartbeat = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let now = CACurrentMediaTime()
+                    if now <= self.teardownWindowUntil { self.teardownWorstGapMs = max(self.teardownWorstGapMs, (now - self.lastHeartbeat) * 1000) }
+                    self.lastHeartbeat = now
+                }
+            }
+            // Returning while an input is still opening must release it too,
+            // including a late factory result from a recycled unit.
+            for _ in 0..<3 {
+                unit.load(video, start: 0, play: true)
+                try? await Task.sleep(for: .milliseconds(20))
+                clearMeasured()
+            }
             unit.load(video, start: 0, play: false)
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.sample() }
@@ -91,23 +119,36 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
         if tick == 19 { unit.setVideoEnabled(true) }
         if tick == 23, let video {
             savedTime = unit.snapshot().currentTime
-            unit.clear(); logging = false
+            clearMeasured(); logging = false
             unit.load(video, start: savedTime, play: true)
         }
-        if tick == 28 { unit.seek(410.27, resume: true) }
+        if tick == 28 { unit.seek(testDuration - 2, resume: true) }
         if tick == 33 { unit.resume(liveEdge: false); unit.play() }
         if tick == 35 { unit.seek(3, resume: true); logging = false }
-        let complete = tick >= 40
+        if tick == 40 { clearMeasured() }
+        let complete = tick >= 41
         if complete {
-            unit.clear(); timer?.invalidate(); timer = nil
+            timer?.invalidate(); timer = nil
+            heartbeat?.invalidate(); heartbeat = nil
             UIApplication.shared.isIdleTimerDisabled = false
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        let report: [String: Any] = ["runID": runID, "complete": complete, "transportReady": true, "samples": samples, "os": UIDevice.current.systemVersion]
+        let report: [String: Any] = ["runID": runID, "complete": complete, "transportReady": true, "samples": samples,
+                                   "teardownMilliseconds": teardownMilliseconds, "retiringDecoders": VLCVideoDecoder.retiringCount,
+                                   "teardownWorstGapMs": teardownWorstGapMs,
+                                   "os": UIDevice.current.systemVersion]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: output, options: .atomic) }
         if complete && backgroundTask != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTask); backgroundTask = .invalid
         }
+    }
+
+    private func clearMeasured() {
+        let start = CACurrentMediaTime()
+        lastHeartbeat = start
+        teardownWindowUntil = start + 1
+        unit.clear()
+        teardownMilliseconds.append((CACurrentMediaTime() - start) * 1000)
     }
 
     func unitSource(_ video: ViewerVideo) async throws -> MediaSource {

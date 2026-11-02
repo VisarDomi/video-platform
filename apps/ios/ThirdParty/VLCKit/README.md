@@ -17,7 +17,7 @@ outside Git. Deployment copies them with the sources, and Bunkr's renewal inputs
 include the staged framework, receipt, wrapper and preparation script.
 
 Only Bunkr links VLCKit. The common viewer selects it for original AV1/VP9/VP8
-MP4s, or when AVFoundation fails to produce a Bunkr picture. Supported files keep
+files, MKV/WebM/AVI/TS containers, or when AVFoundation fails to produce a Bunkr picture. Supported files keep
 AVFoundation. This changes decoding on the phone; the PC serves original bytes.
 A permanent child surface stays under the same fitted/zoomed shared player view.
 Neighbours prepare with VLC's native `start-paused` option and remain paused. The player shares one
@@ -56,6 +56,14 @@ the actual native clock, and stops only its own PID. The full real-ViewerUnit
 check covers paused preparation, paused seek to 120 s, video-off audio/time,
 track return, saved 130 s restore, terminal EOF without recovery, and explicit
 replay. These checks passed on the A14 using the original AV1 file on November 1.
+
+The probe also accepts `--original-file <original>` with `--filename`, `--codec`
+and `--duration` for a device-local check of another original container. It copies
+bytes without conversion and needs no phone Local Network approval. It checks
+main-thread teardown duration, subsequent event-loop stalls and retired-player cleanup as
+well as the shared playback timeline. Use the simulator-only
+`scripts/check-navigation.py` for the real list/back/forward/relaunch path, with
+static player surfaces and no video decoding.
 
 Finish the task with `scripts/check-original-video.py --cleanup --device <UDID>
 --out <private report directory>`. This removes only the isolated diagnostic app,

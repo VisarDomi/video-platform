@@ -13,9 +13,9 @@ struct RegistryTests {
             check(product["hosts"] == nil && product["native"] == nil && product["url"] as? String == "https://192.168.1.197:9999/videos/\(provider)", "\(provider) lists the PC's recordings")
         }
         let bunkr = registry["bunkr"] ?? [:]
-        check(bunkr["name"] as? String == "Bunkr local" && bunkr["mediaKind"] as? String == "mp4"
+        check(bunkr["name"] as? String == "Bunkr local" && bunkr["mediaKind"] as? String == "file"
               && bunkr["url"] as? String == "https://192.168.1.197:9998/videos/bunkr"
-              && bunkr["hosts"] == nil && bunkr["native"] == nil, "Bunkr local lists the PC MP4 library")
+              && bunkr["hosts"] == nil && bunkr["native"] == nil, "Bunkr local lists the original-file library")
         check(registry["vault"]?["native"] as? String == "vault" && registry["vault"]?["hosts"] as? [String] == ["porntrex.com", "www.porntrex.com"], "Video Vault lists only Porntrex")
         check(registry["tango-live"]?["native"] as? String == "tango" && registry["tango-live"]?["tangoLogin"] as? Bool == true
               && registry["tango-live"]?["extensions"] as? [String] == ["Login", "FC2Live", "SCLive", "Bunkr"], "Tango lists natively and keeps its Safari extensions")

@@ -11,7 +11,7 @@ in the [NativeKit guide](../../../../ios-tools/native/README.md).
 | `tango` | Tango local | `com.visar.TangoLocal.paid` | the PC's recordings API (`https://192.168.1.197:9999`) |
 | `fc2` | FC2 local | `com.visar.FC2Local.paid` | the PC's recordings API |
 | `sc` | SC local | `com.visar.SCLocal.paid` | the PC's recordings API |
-| `bunkr` | Bunkr local | `com.visar.BunkrLocal.paid` | completed MP4s in `~/Videos/plab/bunkr/`, HTTPS :9998 |
+| `bunkr` | Bunkr local | `com.visar.BunkrLocal.paid` | completed original videos in `~/Videos/plab/bunkr/`, HTTPS :9998 |
 | `vault` | Video Vault | `com.visar.Ptrex.paid` | the Porntrex uploads pages (`native`) |
 | `tango-live` | Tango | `com.visar.Tango.paid` | Tango's gateway API (`native`) |
 
@@ -26,23 +26,27 @@ whose title carries the recording in brackets, `[YYYY-MM-DD HHMMSS streamer]` (a
 adds ` | part N`); other uploads stay on the sites but are not listed. Cached rows for a retired provider are excluded from the list.
 
 **Bunkr local** uses the same native library/viewer experience with the PC's flat
-MP4 files. It has cached lists and saved playback positions, automatic list updates,
+original files. It has cached lists and saved playback positions, automatic list updates,
 seeking, gestures, lock-screen/background audio and viewer restoration. The files
 stream directly from `video-bunkr-downloads.service` on HTTPS :9998 using byte
 ranges; no HLS conversion, streamer membership or recording-edit actions are
-involved. Rows show the actual MP4 size and probed duration. `.part`, retained
+involved. The queue and library share one accepted-container contract: MP4, M4V,
+MOV, MKV, WebM, AVI and TS. Rows show actual size and probed duration. `.part`, retained
 fragments, hidden files and symbolic links are excluded. Publishing a completed
 download or deleting a file on the PC updates the app through the same revision
 feed contract as the other local apps. No files are moved or deleted by the app.
 `LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
-provider's `LocalMediaKind` selects HLS recordings or direct MP4s.
+provider's `LocalMediaKind` selects HLS recordings or original files (`file`);
+the legacy `mp4` descriptor remains readable. Existing playback lookups use the
+last published index and verify the file identity, without waiting for unrelated
+new-file metadata probes.
 Every VOD app plays only its current video. Neighbours remain paused, with a preferred
 half-second preview buffer; the active Bunkr file prefers two seconds and starts as
 soon as buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
 bytes and dropped frames without URLs or credentials.
-Original AV1/VP9/VP8 Bunkr files use VLCKit's native decoder behind the same
+Original AV1/VP9/VP8 files and MKV/WebM/AVI/TS containers use VLCKit's native decoder behind the same
 `ViewerUnit`; supported files keep AVFoundation. No file is converted, replaced
 or proxied into another format. The alternate engine retains the shared controls,
 fitted surface, zoom, current-only visibility, paused neighbours and saved timeline.
@@ -56,13 +60,22 @@ changing its time origin. Native seek completions preserve pause/volume intent;
 EOF stays terminal through resume/return, and seeking afterwards reopens at the
 requested time. The real player passed the original-file A14 seek, return,
 saved-position, EOF and explicit-replay checks on November 1.
-The ✏️ button beside mute renames the MP4 on the PC and updates its list/player
+The ✏️ button beside mute renames the original file on the PC and updates its list/player
 name. A stable file identity keeps the current player, saved position and row
-identity intact across renames. New names keep the `.mp4` extension and cannot
+identity intact across renames. New names keep the source container's extension and cannot
 overwrite another file. A lost reply is checked with a read before reporting
 failure. The download receipt follows the new name and retains its original
 name. File renames are journaled for recovery after power loss; old playback
 addresses remain pinned to the same file.
+OK, Cut and Return Original replace a recording variant atomically: its layout key,
+reserved geometry, player and checkpoint refer to the same slot. A list response
+that arrives before the action acknowledgement uses the same variant transition;
+a delayed result targets its original recording instead of whichever video is
+currently selected. The local cache incorporates the acknowledged result and
+rejects older in-flight list responses.
+The native decoder retires its stopped input asynchronously, so returning to the
+list does not synchronously wait for libvlc destruction. Its original drawing
+surface stays alive until the native stop event.
 
 ## Rules
 

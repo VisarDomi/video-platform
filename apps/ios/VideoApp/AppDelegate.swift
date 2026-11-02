@@ -31,6 +31,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
              "source": Bundle.main.object(forInfoDictionaryKey: "VideoSourceRevision") as? String ?? ""]
         }
         #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-navigation-check") {
+            window.rootViewController = ListNavigationChecks()
+            window.makeKeyAndVisible()
+            self.window = window
+            TestHooks.shared.start()
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-tango-network-check") {
             window.rootViewController = TangoNetworkChecks()
             window.makeKeyAndVisible()

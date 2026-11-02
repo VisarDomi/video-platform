@@ -47,7 +47,7 @@ state=pathlib.Path({MAC!r})/'build'/{a.provider!r}/'build-status.json'
 state.parent.mkdir(parents=True,exist_ok=True)
 state.write_text(json.dumps({{'running':True,'exit':None}}))
 command=['sudo','-n','launchctl','asuser','501','sudo','-n','-H','-u','visar','/usr/bin/env',
-         'DEVELOPMENT_TEAM='+{TEAM!r},'SIGNING_DEVICE='+{DEVICE!r},'/usr/bin/caffeinate','-i',
+         'DEVELOPMENT_TEAM='+{TEAM!r},'SIGNING_DEVICE='+{DEVICE!r},
          '/usr/bin/python3',{MAC!r}+'/scripts/build-provider.py',{a.provider!r}]
 with pathlib.Path({log!r}).open('w') as output:
     result=subprocess.run(command,cwd={MAC!r},stdout=output,stderr=subprocess.STDOUT)

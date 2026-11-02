@@ -3,7 +3,10 @@ import Foundation
 import FoundationNetworking
 #endif
 
-enum LocalMediaKind: String, Sendable { case hls, mp4 }
+enum LocalMediaKind: String, Sendable {
+    case hls, file, mp4 // mp4 remains readable for older saved/configured descriptors.
+    var originalFile: Bool { self != .hls }
+}
 
 // A recording as the PC lists it.
 struct ServerVideo: Codable, Sendable, Equatable {
@@ -71,13 +74,13 @@ struct LocalLibraryFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
-func localMP4Name(_ value: String) throws -> String {
+func localMP4Name(_ value: String, extension fileExtension: String = "mp4") throws -> String {
     var name = value.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
     guard !name.isEmpty, !name.hasPrefix("."), !name.contains("/"), !name.contains("\\"),
           !name.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
         throw LocalLibraryFailure(message: "Use a filename without folders or control characters.")
     }
-    if !name.lowercased().hasSuffix(".mp4") { name += ".mp4" }
+    if !name.lowercased().hasSuffix("." + fileExtension) { name += "." + fileExtension }
     guard name.utf8.count <= 255 else { throw LocalLibraryFailure(message: "The filename is too long.") }
     return name
 }
@@ -117,8 +120,8 @@ struct LocalAPI: Sendable {
     }
 
     func mediaURL(_ filename: String, fileId: String? = nil) -> URL {
-        if mediaKind == .mp4, let fileId { return server.appendingPathComponent("media").appendingPathComponent(provider).appendingPathComponent("id").appendingPathComponent(fileId) }
-        if mediaKind == .mp4 { return server.appendingPathComponent("media").appendingPathComponent(provider).appendingPathComponent(filename) }
+        if mediaKind.originalFile, let fileId { return server.appendingPathComponent("media").appendingPathComponent(provider).appendingPathComponent("id").appendingPathComponent(fileId) }
+        if mediaKind.originalFile { return server.appendingPathComponent("media").appendingPathComponent(provider).appendingPathComponent(filename) }
         return server.appendingPathComponent("hls").appendingPathComponent(provider).appendingPathComponent(filename).appendingPathComponent("playlist.m3u8")
     }
 
@@ -138,8 +141,8 @@ struct LocalAPI: Sendable {
     }
 
     func rename(_ video: ServerVideo, to proposed: String) async throws -> LocalRenameResult {
-        guard provider == "bunkr", mediaKind == .mp4, let id = video.fileId else { throw LocalLibraryFailure(message: "Reconnect to the PC before renaming this video.") }
-        let name = try localMP4Name(proposed)
+        guard provider == "bunkr", mediaKind.originalFile, let id = video.fileId else { throw LocalLibraryFailure(message: "Reconnect to the PC before renaming this video.") }
+        let name = try localMP4Name(proposed, extension: (video.filename as NSString).pathExtension.lowercased())
         let endpoint = server.appendingPathComponent("api/bunkr/files").appendingPathComponent(id)
         var request = URLRequest(url: endpoint.appendingPathComponent("rename"), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         request.httpMethod = "POST"
@@ -173,7 +176,7 @@ struct LocalAPI: Sendable {
         var raw: [String: Any] = [
             "filename": video.filename, "type": video.type, "size": video.size, "duration": video.duration, "isLive": video.isLive,
             // `local` means the recording playlist/edit contract in the shared viewer.
-            // Flat MP4s use its Video Vault playback path, without streamer/edit actions.
+            // Original files use its VOD playback path, without streamer/edit actions.
             "provider": provider, "local": mediaKind == .hls, "live": false,
             "media": ["url": mediaURL(video.filename, fileId: video.fileId).absoluteString, "kind": mediaKind.rawValue],
         ]

@@ -190,6 +190,23 @@ final class LocalListController: VideoListController {
 
     // MARK: ViewerHost
 
+    override func changed(_ video: ViewerVideo) {
+        guard items.contains(where: { $0.filename == video.filename }) else { return }
+        // OK/Cut/Return is a confirmed variant change, not a second recording.
+        // An older in-flight list response cannot undo its acknowledged result.
+        mutationGeneration += 1
+        renameBarrier = nil
+        let item = ServerVideo(filename: video.filename, type: video.type, size: video.size,
+                               duration: (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0, isLive: video.isLive,
+                               fileId: video.fileId, width: video.displaySize.map { Double($0.width) },
+                               height: video.displaySize.map { Double($0.height) }, videoCodec: video.raw["videoCodec"] as? String,
+                               frameRate: (video.raw["frameRate"] as? NSNumber)?.doubleValue)
+        var next = items.filter { $0.filename != video.filename }
+        next.insert(item, at: next.insertionIndex(for: item))
+        publish(next)
+        cacheWriter.save(json: ListCache(provider: provider, epoch: epoch ?? "", revision: revision ?? 0, videos: items))
+    }
+
     // Local recordings always have their source; asked anyway, it is the PC's playlist.
     override func resolve(_ video: ViewerVideo) async throws -> MediaSource {
         if let media = video.media { return media }

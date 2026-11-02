@@ -10,7 +10,7 @@ def validate(report, run_id):
     samples = {r['second']: r for r in report['samples']}
     raw = lambda n: samples[n].get('nativeTime', -1)
     assert samples[2]['rate'] == 0 and samples[2]['unitTime'] < .2, 'Paused neighbour advanced'
-    assert samples[8]['displayedVideoFrames'] > 20, 'Original AV1 picture missing'
+    assert samples[8]['displayedVideoFrames'] > 20, 'Original video picture missing'
     assert abs(raw(10) - raw(9)) < .25, 'Pause did not hold clock'
     assert 119.5 <= raw(12) <= 120.5 and 121 <= raw(16) <= 125, 'Native seek jumped or stalled'
     base = samples[8]['sourceResolutions']
@@ -23,19 +23,27 @@ def validate(report, run_id):
     assert samples[35]['sourceResolutions'] == base + 1, 'EOF triggered recovery'
     assert samples[40]['sourceResolutions'] == base + 2 and 3 <= raw(40) <= 9, 'Seek after EOF did not reopen correctly'
     assert all(r['muted'] for r in samples.values()), 'Muted test unexpectedly enabled sound'
+    assert len(report['teardownMilliseconds']) == 5 and max(report['teardownMilliseconds']) < 50, 'Decoder teardown blocked the UI thread'
+    assert report['retiringDecoders'] == 0, 'Stopped decoder lifetime leaked'
+    assert report['teardownWorstGapMs'] < 100, 'Native teardown stalled the UI after returning to the list'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', type=pathlib.Path)
     parser.add_argument('--device', required=True)
-    parser.add_argument('--original-url')
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument('--original-url')
+    source.add_argument('--original-file', type=pathlib.Path, help='Copy original bytes into the test container; no phone LAN permission needed')
+    parser.add_argument('--codec', default='av1', choices=['av1', 'vp9', 'vp8', 'h264', 'hevc'])
+    parser.add_argument('--filename', default='original-codec-probe.mp4')
+    parser.add_argument('--duration', type=float, default=412.270295)
     parser.add_argument('--out', type=pathlib.Path, required=True)
     parser.add_argument('--cleanup', action='store_true', help='Finish the testing session: uninstall only the diagnostic app and verify cleanup')
     parser.add_argument('--tools', type=pathlib.Path, default=pathlib.Path.home() / 'Developer/ios-tools/native/scripts')
     args = parser.parse_args()
-    if not args.cleanup and (args.app is None or args.original_url is None):
-        parser.error('--app and --original-url are required for a test run')
+    if not args.cleanup and (args.app is None or (args.original_url is None and args.original_file is None)):
+        parser.error('--app and --original-url or --original-file are required for a test run')
     args.out.mkdir(parents=True, exist_ok=True)
     run_id = str(uuid.uuid4())
     pid = None
@@ -85,9 +93,13 @@ def main():
         try:
             # In-place replacement preserves the test app's TCC approval and container.
             run(args.tools / 'phone-install', '--device', args.device, args.app, timeout=180)
+            if args.original_file:
+                device('copy', 'to', '--domain-type', 'appDataContainer', '--domain-identifier', BUNDLE,
+                       '--source', args.original_file, '--destination', 'Documents/original.mp4', timeout=180)
             launch = args.out / 'launch.json'
             device('process', 'launch', '--json-output', launch, '--terminate-existing', BUNDLE, '--',
-                   '-original-url', args.original_url, '-probe-run', run_id)
+                   '-original-url', 'probe-local' if args.original_file else args.original_url, '-probe-run', run_id,
+                   '-codec', args.codec, '-duration', str(args.duration), '-filename', args.filename)
             pid = json.loads(launch.read_text())['result']['process']['processIdentifier']
             time.sleep(44)
             report_path = args.out / 'decoder-probe.json'

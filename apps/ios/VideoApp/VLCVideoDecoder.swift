@@ -30,6 +30,12 @@ private final class VLCPreparedMedia: @unchecked Sendable {
 // VLCKit supplies dav1d; supported codecs continue using the system player.
 @MainActor
 final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
+    // libvlc stop is asynchronous, but releasing its player before the stopped
+    // event waits for teardown. Keep that lifetime off the viewer's close/reuse
+    // path, while the native output finishes using its original surface.
+    private static var retiring: [UUID: VLCVideoDecoder] = [:]
+    static var retiringCount: Int { retiring.count }
+    private var retirement: UUID?
     private let player: VLCMediaPlayer
     private let media: VLCMedia
     private var timer: Timer?
@@ -167,12 +173,27 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     }
 
     func stop() {
+        guard !stopped else { return }
         stopped = true
         requested = false
         timer?.invalidate(); timer = nil
-        player.delegate = nil
+        if player.state == .stopped {
+            finishRetirement()
+            return
+        }
+        let id = UUID()
+        retirement = id
+        Self.retiring[id] = self
         player.stop()
+    }
+
+    private func finishRetirement() {
+        player.delegate = nil
         player.drawable = nil
+        if let retirement {
+            self.retirement = nil
+            Self.retiring.removeValue(forKey: retirement)
+        }
     }
 
     // VLCKit delivers delegate notifications on its main event queue. Keep late
@@ -182,7 +203,11 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     }
 
     private func stateChanged(_ state: VLCMediaPlayerState) {
-        guard !stopped else { return }
+        if stopped {
+            if state == .stopped { finishRetirement() }
+            else if state == .playing || state == .paused { player.stop() }
+            return
+        }
         stateEvents.append(["state": state.rawValue, "clock": player.time.value?.doubleValue ?? -1,
                             "position": player.position, "requested": requested])
         if stateEvents.count > 16 { stateEvents.removeFirst() }
@@ -221,6 +246,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         return ["engine": "VLCKit", "engineVersion": player.libraryInstance.version, "codec": "original", "currentTime": currentTime,
                 "nativeTime": (player.time.value?.doubleValue ?? 0) / 1000, "nativePosition": player.position,
                 "stateEvents": stateEvents,
+                "retiringDecoders": Self.retiringCount,
                 "ended": ended, "inputFailed": inputFailed,
                 "duration": duration, "rate": playing ? 1 : 0, "status": player.state.rawValue,
                 "width": size.width, "height": size.height, "bytesTransferred": stats.readBytes,

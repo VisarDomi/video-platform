@@ -26,7 +26,11 @@ struct ViewerVideo: @unchecked Sendable {
     var local: Bool { raw["local"] as? Bool ?? false }
     var liveStream: Bool { raw["live"] as? Bool ?? false }
     var media: MediaSource? { MediaSource(raw["media"]) }
-    var needsAlternateDecoder: Bool { provider == "bunkr" && ["av1", "vp9", "vp8"].contains((raw["videoCodec"] as? String ?? "").lowercased()) }
+    var needsAlternateDecoder: Bool {
+        let codec = (raw["videoCodec"] as? String ?? "").lowercased()
+        let container = (filename as NSString).pathExtension.lowercased()
+        return ["av1", "vp9", "vp8"].contains(codec) || ["mkv", "webm", "avi", "ts"].contains(container)
+    }
     var displaySize: CGSize? {
         if provider == "tango-live" { return CGSize(width: 720, height: 1280) }
         guard let width = raw["displayWidth"] as? Double, let height = raw["displayHeight"] as? Double,
@@ -47,6 +51,12 @@ struct ViewerVideo: @unchecked Sendable {
     func same(_ other: ViewerVideo) -> Bool {
         if let id = fileId, let otherId = other.fileId { return id == otherId && type == other.type }
         return filename == other.filename && type == other.type
+    }
+
+    func sameRecording(_ other: ViewerVideo) -> Bool {
+        guard provider == other.provider else { return false }
+        if let id = fileId, let otherId = other.fileId { return id == otherId }
+        return filename == other.filename
     }
 
     // What its row shows (VideoRowCell.show): two lists whose rows look the same need no reload.

@@ -34,6 +34,15 @@ struct LocalLibraryTests {
         var renamed = identified; renamed.filename = "A renamed movie.mp4"
         check(identified.key == renamed.key, "rename keeps the list/progress identity")
         check(mp4.mediaURL(identified.filename, fileId: identified.fileId) == mp4.mediaURL(renamed.filename, fileId: renamed.fileId), "rename keeps the byte-range playback URL")
+        let originalFiles = LocalAPI(server: mp4.server, provider: "bunkr", mediaKind: .file)
+        check(originalFiles.mediaURL(identified.filename, fileId: identified.fileId) == mp4.mediaURL(identified.filename, fileId: identified.fileId), "original-file mode preserves legacy MP4 playback addresses")
+        for fileExtension in ["mkv", "webm"] {
+            var video = identified; video.filename = "Original." + fileExtension
+            let description = originalFiles.describeRaw(video)
+            check((description["media"] as? [String: String])?["kind"] == "file", "non-MP4 originals retain a generic file source")
+            let renamed = try localMP4Name("New title", extension: fileExtension)
+            check(renamed == "New title." + fileExtension, "rename preserves the source container")
+        }
         let delta = ChangeSet(epoch: "fixture", revision: 6, videos: nil, changes: [
             ChangeSet.Change(revision: 5, item: renamed, removed: nil),
             ChangeSet.Change(revision: 6, item: nil, removed: ChangeSet.Removed(filename: identified.filename, type: identified.type)),
