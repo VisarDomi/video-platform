@@ -1,10 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 
 let stopping = false;
+const stopController = new AbortController();
+export const shutdownSignal = stopController.signal;
 
 // Called by the service's SIGTERM/SIGINT handler.
 export function markStopping(): void {
     stopping = true;
+    stopController.abort();
 }
 
 // Whether the service is stopping. systemd signals the whole unit at once, so a
