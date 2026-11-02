@@ -230,3 +230,31 @@ test('retry conversion encodes only the selected shape from a real multi-shape p
  const {readdir}=await import('node:fs/promises');
  assert.deepEqual((await readdir(f.config.stagingRoot)).filter(name=>name.endsWith('.mp4')),[`${f.r.id}.production-v6-shape2-ccw.mp4`]);
 });
+
+test('long startup recovery keeps the heartbeat fresh and closes its timer afterwards',async t=>{
+ const f=await fixture(t);const {recoverWorkerAtBoot}=await import('../dist/commands/runCampaignWorker.js');
+ const {setTimeout:delay}=await import('node:timers/promises');const signal=new AbortController().signal;
+ await recoverWorkerAtBoot(f.config,signal,async(_db,_config,_now,receivedSignal)=>{
+  assert.equal(receivedSignal,signal);
+  const before=f.raw.prepare('SELECT updated_at FROM worker_heartbeat').get().updated_at;
+  await delay(60);
+  assert(f.raw.prepare('SELECT updated_at FROM worker_heartbeat').get().updated_at>before);
+  return [];
+ },10);
+ const after=f.raw.prepare('SELECT updated_at FROM worker_heartbeat').get().updated_at;
+ await delay(30);assert.equal(f.raw.prepare('SELECT updated_at FROM worker_heartbeat').get().updated_at,after);
+});
+
+test('stopping during a conversion hash cancels cleanup without a deletion or failure checkpoint',async t=>{
+ const f=await fixture(t);await submit(f);
+ const {cleanupAcceptedConversions}=await import('../dist/commands/acceptedConversions.js');
+ const {artifactSha256}=await import('../dist/stages/validateArtifact.js');
+ const controller=new AbortController();controller.abort();
+ assert.deepEqual(await cleanupAcceptedConversions(f.db,f.config,start,controller.signal),[]);
+ await access(f.artifact.path);
+ const row=f.raw.prepare('SELECT deleted_at,cleanup_error FROM upload_artifact_receipts').get();
+ assert.equal(row.deleted_at,null);assert.equal(row.cleanup_error,null);
+ const large=path.join(f.root,'hash-cancel.mp4');await writeFile(large,Buffer.alloc(32*1024*1024,1));
+ const during=new AbortController();const timer=setTimeout(()=>during.abort(),1);
+ await assert.rejects(artifactSha256(large,during.signal),error=>error.name==='AbortError');clearTimeout(timer);
+});

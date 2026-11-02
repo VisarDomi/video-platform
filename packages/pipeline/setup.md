@@ -227,7 +227,9 @@ Before transfer, `upload_artifact_receipts` snapshots each part's path, size,
 SHA-256, source identity and submitted metadata. Acceptance and its seven-day
 deadline commit before deletion. Cleanup checks staging containment, regular files,
 exact bytes and concurrent work, unlinks the MP4, flushes the directory and then
-checkpoints deletion. A restart retries interrupted cleanup, including the crash
+checkpoints deletion. The startup pass keeps a live heartbeat; stopping the worker
+interrupts hashing without deleting or failing the unfinished receipt. A restart
+retries interrupted cleanup, including the crash
 window after the provider ID was saved but before the uploader returned. Artifact
 ledger rows remain available after their file is gone.
 

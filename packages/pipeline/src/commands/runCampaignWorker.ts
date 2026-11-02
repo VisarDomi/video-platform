@@ -102,32 +102,32 @@ async function removePartialArtifacts(stagingRoot: string): Promise<Array<{ name
     return removed;
 }
 
-export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
-    // The pipeline is single-flight by construction: any lease present at
-    // boot belongs to a dead process. Clear them so a restart resumes
-    // immediately instead of waiting out the 30-minute stage lease.
-    {
-        const database = new PipelineDatabase(config.databasePath);
-        try {
-            database.recoverInterruptedUploads();
-            database.recoverAcceptedVerifications();
-            database.releasePlaceholderReferences();
-            const cleared = database.releaseAllLeases();
-            const cleaned=await cleanupAcceptedConversions(database,config);
-            if(cleaned.length) console.log(JSON.stringify({event:"accepted-conversion-cleanup",results:cleaned}));
-            if (cleared > 0) {
-                console.log(JSON.stringify({ event: "campaign-boot-clear-leases", cleared }));
-            }
-        } finally {
-            database.close();
-        }
-        // The same holds for a half-written conversion or cache copy: nothing
-        // adopts it, and a killed encoder would otherwise leave it forever.
-        const partials = await removePartialArtifacts(config.stagingRoot);
-        if (partials.length > 0) {
-            console.log(JSON.stringify({ event: "campaign-boot-clear-partials", removed: partials }));
-        }
+export async function recoverWorkerAtBoot(config: PipelineConfig, signal: AbortSignal,
+    cleanup = cleanupAcceptedConversions, heartbeatMilliseconds = 30_000): Promise<void> {
+    const database = new PipelineDatabase(config.databasePath);
+    database.writeWorkerHeartbeat();
+    const heartbeat = setInterval(() => database.writeWorkerHeartbeat(), heartbeatMilliseconds);
+    try {
+        database.recoverInterruptedUploads();
+        database.recoverAcceptedVerifications();
+        database.releasePlaceholderReferences();
+        const cleared = database.releaseAllLeases();
+        const cleaned = await cleanup(database, config, new Date(), signal);
+        if (cleaned.length) console.log(JSON.stringify({ event: "accepted-conversion-cleanup", results: cleaned }));
+        if (cleared > 0) console.log(JSON.stringify({ event: "campaign-boot-clear-leases", cleared }));
+    } finally {
+        clearInterval(heartbeat);
+        database.close();
     }
+}
+
+export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
+    // Boot recovery is single-flight but still reports liveness and can be stopped.
+    await recoverWorkerAtBoot(config, signal);
+    if (signal.aborted) return;
+    // Half-written conversions/cache copies are not adoptable completed artifacts.
+    const partials = await removePartialArtifacts(config.stagingRoot);
+    if (partials.length > 0) console.log(JSON.stringify({ event: "campaign-boot-clear-partials", removed: partials }));
     // Heartbeat on its own timer so manual *-one commands can tell the
     // campaign is alive even mid-step (a single step can take minutes).
     const heartbeat = setInterval(() => {
