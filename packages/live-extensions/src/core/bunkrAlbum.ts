@@ -36,13 +36,14 @@ export function parseBunkrAlbum(html: string, base: string): Album {
     return { title: doc.querySelector("h1")!.textContent?.trim() || "Bunkr", summary: doc.querySelector(".visitors .font-semibold")?.textContent?.trim() ?? "", items };
 }
 export function parseBunkrPoster(html: string, base: string): string | undefined {
-    const doc = new DOMParser().parseFromString(html, "text/html");
     // The player builds its video lazily. Read its JSON string literal rather
     // than executing page scripts or guessing a larger thumbnail's filename.
     const literal = html.match(/\bvideoCoverUrl\s*=\s*("(?:\\.|[^"\\])*")/);
     let cover: string | undefined;
     try { if (literal) cover = imageURL(JSON.parse(literal[1]), base); } catch { /* Use declared HTML metadata below. */ }
-    return cover ?? imageURL(doc.querySelector("video[data-poster]")?.getAttribute("data-poster"), base)
+    if (cover) return cover;
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return imageURL(doc.querySelector("video[data-poster]")?.getAttribute("data-poster"), base)
         ?? imageURL(doc.querySelector("video[poster]")?.getAttribute("poster"), base)
         ?? imageURL(doc.querySelector('meta[property="og:image"]')?.getAttribute("content"), base);
 }
@@ -52,7 +53,7 @@ export function openBunkrAlbum(): void {
     let posters: Record<string, Poster> = {};
     try { const saved = JSON.parse(sessionStorage.getItem(posterKey) ?? "{}"); if (saved && typeof saved === "object") posters = saved; } catch { /* Optional cache. */ }
     // The established manga/stream-viewer takeover, before asynchronous work.
-    window.stop(); document.open(); document.write("<!doctype html><html><head></head><body></body></html>"); document.close();
+    window.stop(); document.open(); document.close();
     if (!document.documentElement) document.appendChild(document.createElement("html"));
     if (!document.doctype) document.insertBefore(document.implementation.createDocumentType("html", "", ""), document.documentElement);
     if (!document.head) document.documentElement.appendChild(document.createElement("head"));
