@@ -104,7 +104,7 @@ nothing (only logs and diagnostic screenshots stay in package folders):
 - `~/.config/video-services/` (files mode 600): `auth-accounts.json` (the accounts
   `video-auth` keeps signed in; `VIDEO_AUTH_ACCOUNTS_FILE` overrides),
   `upload-providers.json` (Porntrex credentials) and `porntrex-session.json`.
-- `~/.config/chromium-agent/`: the pipeline's Chromium profile.
+- `~/.local/share/video-services/pipeline/browser/`: the pipeline-owned persistent Chromium profile, beside its database; general agent browsing uses a separate profile.
 - `~/.local/share/mkcert/pwa/`: the server's HTTPS certificate (without it the server
   falls back to HTTP).
 - `~/Videos/downloads/<provider>/{downloaded,edited,trash}`: recordings

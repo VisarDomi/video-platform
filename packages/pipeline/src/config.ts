@@ -34,6 +34,12 @@ export interface PipelineConfig {
 const dataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
     ?? path.join(os.homedir(), ".local", "share", "video-services");
 const providers = ["tango", "fc2", "sc"];
+const databasePath = process.env.VIDEO_PIPELINE_DB
+    ?? path.join(dataRoot, "pipeline", "pipeline.sqlite");
+// A persistent service owns its own profile, beside its database. General agent
+// browsing must never contend for its singleton lock or cookie-storage backend.
+const browserProfilePath = process.env.VIDEO_PORNTREX_BROWSER_PROFILE
+    ?? path.join(path.dirname(databasePath), "browser");
 const artifactsRoot = process.env.VIDEO_PIPELINE_ARTIFACTS_ROOT
     ?? process.env.VIDEO_PIPELINE_STAGING
     ?? path.join(dataRoot, "pipeline", "artifacts");
@@ -56,21 +62,18 @@ const manualRemuxRoots: DiscoveryRoot[] = providers.flatMap((provider) => {
 export const pipelineConfig: PipelineConfig = {
     finalizationDatabasePath: process.env.VIDEO_FINALIZATION_DB
         ?? path.join(dataRoot, "finalization.sqlite"),
-    databasePath: process.env.VIDEO_PIPELINE_DB
-        ?? path.join(dataRoot, "pipeline", "pipeline.sqlite"),
+    databasePath,
     artifactsRoot,
     stagingRoot: path.join(artifactsRoot, CURRENT_PRODUCTION_VERSION),
     manualStagingRoot: path.join(artifactsRoot, CURRENT_PRODUCTION_VERSION, "manual"),
     discoveryRoots,
     manualRemuxRoots,
     serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
-    browserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
-        ?? path.join(os.homedir(), ".config", "chromium-agent"),
+    browserProfilePath,
     chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
     credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
-    porntrexBrowserProfilePath: process.env.VIDEO_PORNTREX_BROWSER_PROFILE
-        ?? path.join(os.homedir(), ".config", "chromium-agent"),
+    porntrexBrowserProfilePath: browserProfilePath,
     porntrexSessionPath: process.env.VIDEO_PORNTREX_SESSION_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "porntrex-session.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",

@@ -450,6 +450,12 @@ server follows the account first, but only if it is not already followed.
   remains paused. The owner authorizes coordinated recovery without further confirmation;
   the managed job enables this recovery explicitly. It never starts the upload service,
   and a worker's authentication-only pause resumes only after phone synchronization.
+- **Browser ownership.** The upload service owns `browser/` beside its pipeline database, separate from
+  general agent/everyday Chromium profiles. Its session JSON stays authoritative;
+  setup imports only PHPSESSID/confirmed without another password login. Reserved
+  shared profiles/aliases are refused before launch, preventing singleton-lock and
+  credential-store interference. The dedicated profile stays persistent on Xvfb
+  `:111` with a fixed encrypted GNOME backend.
 - **Network gating and browsers.** Real uploads and verification need
   `VIDEO_PIPELINE_NETWORK_UPLOADS=1`, which the managed unit sets. Each Porntrex
   operation closes its browser context on success or failure, releasing the profile lock.

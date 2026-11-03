@@ -81,8 +81,9 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             executablePath: this.config.executablePath,
             headless: this.config.headless ?? false,
             viewport: null,
-            args: ["--disable-blink-features=AutomationControlled"],
-            ignoreDefaultArgs: ["--enable-automation", "--disable-extensions"],
+            args: ["--disable-blink-features=AutomationControlled", "--password-store=gnome-libsecret",
+                "--disable-features=DbusSecretPortal,SecretPortalKeyProviderUseForEncryption"],
+            ignoreDefaultArgs: ["--enable-automation", "--disable-extensions", "--password-store=basic", "--use-mock-keychain"],
         });
         let context: BrowserContext;
         try {

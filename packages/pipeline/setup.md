@@ -434,7 +434,15 @@ only the matching conversion; playback is verified seven days after acceptance. 
 ### Porntrex
 
 Uploads are public, in the Webcam category. The profile is `VIDEO_PORNTREX_BROWSER_PROFILE` (else
-`~/.config/chromium-agent`). Porntrex
+`browser/` beside the configured pipeline database, normally
+`~/.local/share/video-services/pipeline/browser/`). This directory belongs only
+to the pipeline and its coordinated session recovery. It is persistent across
+reboots; never point it at the general agent or everyday Chromium profile. The
+factory rejects those reserved paths and aliases. No live general profile is
+copied, moved or closed during setup: the existing shared Porntrex JSON supplies
+only its two authorized cookies. Headful service Chromium stays on Xvfb `:111`,
+with a fixed GNOME encrypted cookie backend and without Playwright's basic/mock
+keychain defaults. Porntrex
 keeps one session per account, so the pipeline and the Video Vault iPhone app
 share one session, stored in `~/.config/video-services/porntrex-session.json`
 (chmod 600; override `VIDEO_PORNTREX_SESSION_FILE`). The pipeline never signs
