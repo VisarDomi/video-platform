@@ -17,7 +17,8 @@ if key == 'bunkr':
     # large vendored Swift core. The isolated direct-core build uses this same
     # optimized code path; full debug output exceeded the guarded build window.
     swift_flags += ' -gline-tables-only'
-    compiler_settings += ['GCC_GENERATE_DEBUGGING_SYMBOLS=NO', 'DEBUG_INFORMATION_FORMAT=dwarf',
+    compiler_settings += ['SWIFT_OPTIMIZATION_LEVEL=-Osize',
+                          'GCC_GENERATE_DEBUGGING_SYMBOLS=NO', 'DEBUG_INFORMATION_FORMAT=dwarf',
                           'SWIFT_SERIALIZE_DEBUGGING_OPTIONS=NO']
 compiler_settings += ['OTHER_SWIFT_FLAGS='+swift_flags]
 if os.environ.get('DECODER_PROBE') == '1':
