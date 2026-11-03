@@ -434,7 +434,15 @@ only the matching conversion; playback is verified seven days after acceptance. 
 ### VideoHost
 
 Uploads are public, in the Webcam category. The profile is `VIDEO_VIDEOHOST_BROWSER_PROFILE` (else
-`~/.config/chromium-agent`). VideoHost
+`browser/` beside the configured pipeline database, normally
+`~/.local/share/video-services/pipeline/browser/`). This directory belongs only
+to the pipeline and its coordinated session recovery. It is persistent across
+reboots; never point it at the general agent or everyday Chromium profile. The
+factory rejects those reserved paths and aliases. No live general profile is
+copied, moved or closed during setup: the existing shared VideoHost JSON supplies
+only its two authorized cookies. Headful service Chromium stays on Xvfb `:111`,
+with a fixed GNOME encrypted cookie backend and without Playwright's basic/mock
+keychain defaults. VideoHost
 keeps one session per account, so the pipeline and the uploads iPhone app
 share one session, stored in `~/.config/video-services/videohost-session.json`
 (chmod 600; override `VIDEO_VIDEOHOST_SESSION_FILE`). The pipeline never signs
