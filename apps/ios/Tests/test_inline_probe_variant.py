@@ -9,6 +9,25 @@ import unittest
 
 
 class ProbeVariant(unittest.TestCase):
+    def test_performance_preflight_rejects_product_and_lifecycle_variants(self):
+        script = pathlib.Path(__file__).resolve().parents[1] / 'scripts/check-inline-performance.py'
+        environment = {k: v for k, v in os.environ.items() if k != 'IOS_WORKLOAD_ACTIVE'}
+        with tempfile.TemporaryDirectory() as folder:
+            app = pathlib.Path(folder) / 'Probe.app'; app.mkdir()
+            command = [sys.executable, str(script), '--app', str(app), '--validate-build']
+            for bundle, quick, performance, expected in [
+                ('com.visar.BunkrLocal.paid', False, True, 1),
+                ('com.visar.OriginalVideoProbe.paid', True, False, 1),
+                ('com.visar.OriginalVideoProbe.paid', True, True, 1),
+                ('com.visar.OriginalVideoProbe.paid', False, True, 0),
+            ]:
+                info = dict(CFBundleIdentifier=bundle, InlineCodecQuickProbe=quick,
+                            InlineCodecPerformanceProbe=performance,
+                            UIApplicationSceneManifest=dict(UIApplicationSupportsMultipleScenes=False))
+                (app / 'Info.plist').write_bytes(plistlib.dumps(info))
+                result = subprocess.run(command, env=environment, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+
     def test_artifact_preflight_needs_no_guest_and_rejects_older_variant(self):
         script = pathlib.Path(__file__).resolve().parents[1] / 'scripts/check-inline-simulator.py'
         environment = {k: v for k, v in os.environ.items() if k != 'IOS_WORKLOAD_ACTIVE'}

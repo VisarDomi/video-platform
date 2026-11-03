@@ -13,8 +13,11 @@ key = sys.argv[1]
 config = registry[key]
 probe = os.environ.get('DECODER_PROBE') == '1'
 quick_probe = os.environ.get('INLINE_CODEC_QUICK') == '1'
-if quick_probe and not (probe and os.environ.get('SIMULATOR')):
-    raise SystemExit('INLINE_CODEC_QUICK requires DECODER_PROBE=1 and SIMULATOR=1')
+performance_probe = os.environ.get('INLINE_CODEC_PERFORMANCE') == '1'
+if (quick_probe or performance_probe) and not (probe and os.environ.get('SIMULATOR')):
+    raise SystemExit('Inline codec checks require DECODER_PROBE=1 and SIMULATOR=1')
+if quick_probe and performance_probe:
+    raise SystemExit('Select exactly one inline codec diagnostic')
 if probe:
     assert key == 'bunkr'
     config = dict(config, product='OriginalVideoProbe', name='Original video check', bundleId='com.visar.OriginalVideoProbe.paid', build='1')
@@ -28,7 +31,8 @@ if local_app:
 if not os.environ.get('SIMULATOR'):
     app_sources = [p for p in app_sources if Path(p).name not in {'ZoomChecks.swift','ListNavigationChecks.swift','TangoNetworkChecks.swift'}]
 if probe:
-    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/InlineQuickProbe.swift' if quick_probe else 'Tests/OriginalVideoProbe.swift']
+    check_source = 'InlinePerformanceProbe' if performance_probe else 'InlineQuickProbe' if quick_probe else 'OriginalVideoProbe'
+    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/'+check_source+'.swift']
 source_hash = hashlib.sha256(key.encode())
 source_files = [root/p for p in app_sources] + list((root/'Kit/Sources').rglob('*.swift'))
 source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
@@ -167,8 +171,8 @@ else:
     info['LocalProvider'] = key
     info['LocalMediaKind'] = config.get('mediaKind', 'hls')
 if probe: info.pop('UIApplicationSceneManifest', None)
-if quick_probe:
-    info['InlineCodecQuickProbe'] = True
+if quick_probe or performance_probe:
+    info['InlineCodecPerformanceProbe' if performance_probe else 'InlineCodecQuickProbe'] = True
     info['CFBundleURLTypes'] = [dict(CFBundleURLName='Inline decoder check', CFBundleURLSchemes=['inline-codec-probe'])]
     info['UIApplicationSceneManifest'] = dict(UIApplicationSupportsMultipleScenes=False,
         UISceneConfigurations={'UIWindowSceneSessionRoleApplication': [dict(UISceneConfigurationName='Inline decoder check',

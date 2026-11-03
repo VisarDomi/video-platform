@@ -33,14 +33,18 @@ enum ViewerDecoders {
                      changed: @escaping () -> Void, failed: @escaping () -> Void) async -> (any ViewerDecoder)? {
         guard !Task.isCancelled else { return nil }
         #if canImport(AetherEngine)
+        let codec = (video.raw["videoCodec"] as? String)?.lowercased()
         #if ORIGINAL_CODEC_PROBE
         let requiresHardware = false  // Exercise lifecycle even on CPU-only simulator runtimes.
+        let direct = (codec == "vp9" || codec == "av1") && !CommandLine.arguments.contains("-force-vlc")
         #else
-        let requiresHardware = true
+        let requiresHardware = codec == "vp9"
+        let direct = codec == "vp9" || codec == "av1"
         #endif
-        // First migration step: VP9 can use Apple's supplemental hardware decoder.
-        // Keep the established paths for other codecs until their own measurements pass.
-        if (video.raw["videoCodec"] as? String)?.lowercased() == "vp9",
+        // VP9 requires Apple's supplemental hardware decoder. AV1 uses the direct
+        // sample-buffer path with dav1d where hardware decoding is unavailable.
+        // Unsupported inputs retain the established fallback below.
+        if direct,
            let decoder = await FFmpegVideoDecoder.create(source: source, video: video, surface: surface, start: start, changed: changed, failed: failed, requiresHardware: requiresHardware) {
             return decoder
         }

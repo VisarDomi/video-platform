@@ -18,3 +18,10 @@ ffmpeg -nostdin -filter_threads 2 \
 
 The checked-in bytes are authoritative; encoder versions can produce different
 bytes with the same command. This fixture belongs only to simulator checks.
+
+`inline-av1-opus.webm` uses the same synthetic test pattern, tone, dimensions,
+frame rate, duration and two-second keyframe interval, encoded with SVT-AV1
+(preset 12, CRF 40, two logical processors) and mono Opus. It is also CC0 and
+test-only. No recording is used or converted.
+
+SHA-256: `3ccea15a50dde6cad66b9ed6fe31b9d3dd7acb10285eb22257ff8a8c49404fed`.

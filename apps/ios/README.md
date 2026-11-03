@@ -37,7 +37,10 @@ download or deleting a file on the PC updates the app through the same revision
 feed contract as the other local apps. No files are moved or deleted by the app.
 `LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
 provider's `LocalMediaKind` selects HLS recordings or original files (`file`);
-the legacy `mp4` descriptor remains readable. Existing playback lookups use the
+the legacy `mp4` descriptor remains readable. Filename-to-file-ID progress migration
+indexes only legacy rows once per update, avoiding repeated full-library scans
+on the UI thread. This same implementation serves all four local providers.
+Existing playback lookups use the
 last published index and verify the file identity, without waiting for unrelated
 new-file metadata probes.
 Every VOD app plays only its current video. Neighbours remain paused, with a preferred
@@ -48,8 +51,9 @@ the end of a movie. Original video resolution and bytes are unchanged. Bounded
 bytes and dropped frames without URLs or credentials.
 Original AV1/VP9/VP8 files and MKV/WebM/AVI/TS containers use alternate native decoding behind the same
 `ViewerUnit`; supported files keep AVFoundation. VP9 first tries the direct
-FFmpeg/VideoToolbox backend when a real hardware session opens; other fallback
-formats and unsupported hardware retain VLCKit. The direct backend and its
+FFmpeg/VideoToolbox backend when a real hardware session opens. AV1 uses the
+same direct sample-buffer renderer with dav1d when hardware decoding is absent;
+other fallback formats and failed preparation retain VLCKit. The direct backend and its
 validation runbook are documented in [ThirdParty/AetherCore](ThirdParty/AetherCore/README.md).
 No file is converted, replaced
 or proxied into another format. The alternate engine retains the shared controls,

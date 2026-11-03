@@ -26,8 +26,8 @@ private final class VLCPreparedMedia: @unchecked Sendable {
     }
 }
 
-// Bunkr's original AV1 files need a decoder absent from AVFoundation on the A14.
-// VLCKit supplies dav1d; supported codecs continue using the system player.
+// Original inputs not accepted by the direct backend retain this decoder fallback.
+// AVFoundation-compatible sources continue using the system player.
 @MainActor
 final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     // libvlc stop is asynchronous, but releasing its player before the stopped

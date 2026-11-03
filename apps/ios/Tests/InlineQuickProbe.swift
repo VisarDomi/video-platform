@@ -7,7 +7,9 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
     var window: UIWindow?
     private let unit = ViewerUnit()
     private let output = URL.documentsDirectory.appendingPathComponent("inline-quick.json")
-    private let url = URL.documentsDirectory.appendingPathComponent("inline-vp9-opus.webm")
+    private var codec: String { CommandLine.arguments.contains("-av1-check") ? "av1" : "vp9" }
+    private var filename: String { "inline-\(codec)-opus.webm" }
+    private var url: URL { URL.documentsDirectory.appendingPathComponent(filename) }
     private let clipDuration = 20.008
     private var samples: [[String: Any]] = []
     private var resolutions = 0
@@ -104,7 +106,7 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             try await wait("warm background entered",seconds:90) { window?.windowScene?.activationState == .background }
             record("await warm foreground")
             try await wait("warm foreground entered",seconds:90) { window?.windowScene?.activationState == .foregroundActive }
-            let video = ViewerVideo(["filename":"inline-vp9-opus.webm","provider":"bunkr","videoCodec":"vp9","duration":clipDuration])!
+            let video = ViewerVideo(["filename":filename,"provider":"bunkr","videoCodec":codec,"duration":clipDuration])!
             delaySource = true
             unit.load(video,start:0,play:false)
             try await Task.sleep(for:.milliseconds(40))

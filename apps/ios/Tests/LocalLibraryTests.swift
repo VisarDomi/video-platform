@@ -31,7 +31,38 @@ struct LocalLibraryTests {
         let restored = try JSONDecoder().decode(ListCache.self, from: JSONEncoder().encode(cache))
         check(restored.videos == [item], "offline list cache retains MP4 metadata")
         var identified = item; identified.fileId = String(repeating: "a", count: 24)
+        check(localProgressMigrations(from: [item], to: [item]).isEmpty, "HLS catalogs without stable file IDs skip migration")
+        check(localProgressMigrations(from: restored.videos, to: [identified]) == [LocalProgressMigration(filename: filename, fileId: identified.fileId!)], "old filename progress migrates to the stable file identity")
+        check(localProgressMigrations(from: [identified], to: [identified]).isEmpty, "identified caches have no legacy migration work")
+        var changedBytes = identified; changedBytes.size += 1
+        var changedDuration = identified; changedDuration.duration += 1
+        check(localProgressMigrations(from: [item], to: [changedBytes, changedDuration, item]).isEmpty, "different content and missing new identities do not inherit progress")
+        var editedIdentity = identified; editedIdentity.type = "edited"
+        check(localProgressMigrations(from: [item, item], to: [identified, editedIdentity]) == [identified, editedIdentity].map { LocalProgressMigration(filename: $0.filename, fileId: $0.fileId!) }, "variants retain the old filename migration contract without duplicate matches")
+        // Compare against the previous migration rule across mixed old/new caches,
+        // additions, removals, duplicate filenames and metadata replacements.
+        for seed in 0..<50 {
+            let prior = (0..<120).map { index -> ServerVideo in
+                var row = item
+                row.filename = "Video \((index + seed) % 40).mp4"
+                row.size = Double(index % 11); row.duration = Double((index + seed) % 7)
+                row.fileId = (index + seed) % 3 == 0 ? nil : "id-\(index)"
+                return row
+            }
+            let next = prior.enumerated().compactMap { index, row -> ServerVideo? in
+                guard (index + seed) % 5 != 0 else { return nil }
+                var updated = row; updated.fileId = "stable-\(index)"
+                if (index + seed) % 4 == 0 { updated.duration += 1 }
+                return updated
+            }
+            let expected = next.compactMap { row -> LocalProgressMigration? in
+                guard let id = row.fileId, prior.contains(where: { $0.fileId == nil && $0.filename == row.filename && $0.size == row.size && $0.duration == row.duration }) else { return nil }
+                return LocalProgressMigration(filename: row.filename, fileId: id)
+            }
+            check(localProgressMigrations(from: prior, to: next) == expected, "indexed migrations preserve the previous matching rule")
+        }
         var renamed = identified; renamed.filename = "A renamed movie.mp4"
+        check(localProgressMigrations(from: [item], to: [renamed]).isEmpty, "an unrelated renamed file does not take filename progress")
         check(identified.key == renamed.key, "rename keeps the list/progress identity")
         check(mp4.mediaURL(identified.filename, fileId: identified.fileId) == mp4.mediaURL(renamed.filename, fileId: renamed.fileId), "rename keeps the byte-range playback URL")
         let originalFiles = LocalAPI(server: mp4.server, provider: "bunkr", mediaKind: .file)

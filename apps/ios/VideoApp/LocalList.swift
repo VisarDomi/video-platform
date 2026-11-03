@@ -139,10 +139,8 @@ final class LocalListController: VideoListController {
 
     private func publish(_ next: [ServerVideo], rows: [ViewerVideo]? = nil, looks: [ViewerVideo.Look]? = nil) {
         let highlighted = items.first { $0.filename == highlight }
-        for item in next {
-            if let id = item.fileId, items.contains(where: { $0.fileId == nil && $0.filename == item.filename && $0.size == item.size && $0.duration == item.duration }) {
-                progress.migrate(from: item.filename, to: id)
-            }
+        for migration in localProgressMigrations(from: items, to: next) {
+            progress.migrate(from: migration.filename, to: migration.fileId)
         }
         items = next
         setVideos(rows ?? next.map(api.describe), looks: looks)

@@ -13,7 +13,10 @@ not force software video decoding. A successful hardware session requires
 `kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder`.
 VP9 registers Apple's supplemental decoder when the OS exposes that API. AV1
 uses software on hardware without an AV1 decoder. Supported original files keep
-AVFoundation; The first rollout candidate selects this backend only after a real VP9 hardware session opens; AV1 and other fallback formats retain VLC until their separate checks pass. VLC also remains the preparation fallback during the migration.
+AVFoundation. VP9 selects this backend only after a real hardware session opens;
+AV1 also selects the direct renderer, using dav1d when hardware decoding is
+unavailable. VLC remains the preparation fallback and handles other unsupported
+formats. All of these choices stay behind the same shared viewer adapter.
 
 Dependencies:
 
@@ -69,8 +72,9 @@ Before booting that guest, verify the completed artifact with
 --validate-build`. The explicit quick-probe marker distinguishes it from the
 older codec diagnostic that shares its stable bundle ID.
 
-The checksum-pinned synthetic VP9/Opus fixture is checked in under
-`Tests/Fixtures`; `--prepare-fixture` stages it without network access. Its twenty
+The checksum-pinned synthetic VP9/Opus and AV1/Opus fixtures are checked in under
+`Tests/Fixtures`; `--codec av1` selects the AV1 lifecycle check and
+`--prepare-fixture` stages either without network access. Their twenty
 seconds leave time for a genuine app switch on the slower Mac. See the adjacent
 fixture README for its generation command.
 This check deliberately permits software fallback on the simulator, where the
@@ -89,3 +93,15 @@ The VLC fallback prepares a paused first picture with its native frame-step API
 after the absolute initial seek; the step callback confirms the image without
 starting playback. Normal play, pause and explicit seek retain the shared unit's
 intent.
+
+Build with `SIMULATOR=1 DECODER_PROBE=1 INLINE_CODEC_PERFORMANCE=1` instead of
+`INLINE_CODEC_QUICK=1` for the controlled performance comparison. Validate its
+artifact with `scripts/check-inline-performance.py --app /path/to/app
+--validate-build`, then run it with `--device UUID --app /path/to/app --out
+/private/evidence/directory` inside the guarded guest.
+`Tests/InlinePerformanceProbe.swift` measures the actual `ViewerUnit` during
+paused preparation, paused idle and sustained playback. It is simulator-only,
+uses the same synthetic clip for both backends and can force the VLC control
+with the probe-only `-force-vlc` argument. Reverse backend order on the repeat;
+separate startup from steady-state CPU and memory. These measurements do not
+establish physical-phone performance or hardware-decoding capability.

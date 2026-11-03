@@ -2,8 +2,8 @@
 """Check the real inline decoder in an explicitly guarded virtual iPhone only."""
 import argparse,hashlib,json,os,pathlib,plistlib,shutil,subprocess,time,uuid
 BUNDLE='com.visar.OriginalVideoProbe.paid'
-FIXTURE_SOURCE=pathlib.Path(__file__).resolve().parents[1]/'Tests/Fixtures/inline-vp9-opus.webm'
-FIXTURE_SHA='d8d798cd9049d2d5c4eb7a94edce87819113997aab80bf521a00a3b369e5f3f4'
+FIXTURES={'vp9':'d8d798cd9049d2d5c4eb7a94edce87819113997aab80bf521a00a3b369e5f3f4',
+          'av1':'3ccea15a50dde6cad66b9ed6fe31b9d3dd7acb10285eb22257ff8a8c49404fed'}
 
 def validate_build(app):
  info=plistlib.loads((app/'Info.plist').read_bytes())
@@ -11,11 +11,12 @@ def validate_build(app):
  assert any('inline-codec-probe' in row.get('CFBundleURLSchemes',[]) for row in info.get('CFBundleURLTypes',[])),'Missing simulator return URL'
  assert info.get('UIApplicationSceneManifest'),'Missing real-app scene lifecycle'
 
-def fixture(path):
+def fixture(path,codec='vp9'):
  path.parent.mkdir(parents=True,exist_ok=True)
  if not path.exists():
-  shutil.copy2(FIXTURE_SOURCE,path)
- assert hashlib.sha256(path.read_bytes()).hexdigest()==FIXTURE_SHA,'VP9/Opus fixture changed'
+  source=pathlib.Path(__file__).resolve().parents[1]/('Tests/Fixtures/inline-'+codec+'-opus.webm')
+  shutil.copy2(source,path)
+ assert hashlib.sha256(path.read_bytes()).hexdigest()==FIXTURES[codec],codec+'/Opus fixture changed'
  return path
 
 def main():
@@ -23,13 +24,15 @@ def main():
  parser.add_argument('--device')
  parser.add_argument('--app',type=pathlib.Path)
  parser.add_argument('--out',type=pathlib.Path)
- parser.add_argument('--fixture',type=pathlib.Path,default=pathlib.Path.home()/'.cache/video-ios-fixtures/inline-vp9-opus.webm')
+ parser.add_argument('--codec',choices=sorted(FIXTURES),default='vp9')
+ parser.add_argument('--fixture',type=pathlib.Path)
  parser.add_argument('--prepare-fixture',action='store_true')
  parser.add_argument('--validate-build',action='store_true',help='Check the diagnostic variant before booting a guest')
  parser.add_argument('--cleanup',action='store_true',help='Remove only this diagnostic app after its testing session')
  args=parser.parse_args()
+ if args.fixture is None:args.fixture=pathlib.Path.home()/('.cache/video-ios-fixtures/inline-'+args.codec+'-opus.webm')
  if args.prepare_fixture:
-  print(fixture(args.fixture));return
+  print(fixture(args.fixture,args.codec));return
  if args.validate_build:
   if not args.app:parser.error('--validate-build requires --app')
   validate_build(args.app);print('PASS quick-probe build identity');return
@@ -46,16 +49,17 @@ def main():
   assert sim('get_app_container',args.device,BUNDLE,'app',check=False).returncode!=0,'Diagnostic app remains installed'
   return
  validate_build(args.app)
- fixture(args.fixture)
+ fixture(args.fixture,args.codec)
  args.out.mkdir(parents=True,exist_ok=True)
  for name in ['runtime.stdout.log','runtime.stderr.log']:(args.out/name).write_text('')
  sim('install',args.device,args.app,timeout=240)
  container=pathlib.Path(sim('get_app_container',args.device,BUNDLE,'data').stdout.strip())
- shutil.copy2(args.fixture,container/'Documents/inline-vp9-opus.webm')
+ shutil.copy2(args.fixture,container/('Documents/inline-'+args.codec+'-opus.webm'))
  identity=str(uuid.uuid4());report=None;background=False;foreground=False;captured=False;warm_returned=False;warm_captured=False;picture_captured=False;fallback_captured=False
  try:
   result=sim('launch','--terminate-running-process','--stdout='+str(args.out/'runtime.stdout.log'),
-             '--stderr='+str(args.out/'runtime.stderr.log'),args.device,BUNDLE,'-probe-run',identity)
+             '--stderr='+str(args.out/'runtime.stderr.log'),args.device,BUNDLE,'-probe-run',identity,
+             *(['-av1-check'] if args.codec=='av1' else []))
   (args.out/'launch.txt').write_text(result.stdout+result.stderr)
   deadline=time.monotonic()+270
   while time.monotonic()<deadline:
