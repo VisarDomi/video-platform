@@ -2606,9 +2606,6 @@ public final class AetherEngine: ObservableObject {
     var activeEmbeddedSubtitleStreamIndex: Int32 = -1
 
 
-    /// #95 audio tap lifecycle owner; nil when no tap installed. Torn down by stopInternal.
-    var audioTapController: AudioTapController?
-
     /// #77: in-band CEA-608 tap state. The tap owns the cue buffer and publishes snapshots; `ccCueSnapshot`
     /// is the latest, mirrored into `subtitleCues` while the CC track is active.
     var closedCaptionTap: ClosedCaptionTap?
@@ -8314,17 +8311,6 @@ public final class AetherEngine: ObservableObject {
         // surfaced `.masterPlaylistRejected` instead of falling back (#849).
         masterFallbackUsed = false
         masterRefusedByDisplay = false
-        // #95: stop the tap reader before the session (and its SegmentCache) goes away.
-        // #356: counterpart to the install line, because a session-preserving reload lands here
-        // too. The host sees its stream finish and has to re-install; without this the device log
-        // shows a tap that was installed once and then simply stopped delivering.
-        if audioTapController != nil {
-            EngineLog.emit("[AetherEngine] audio tap torn down with the session "
-                + "(a reload finishes the stream; re-install to follow the new one)",
-                category: .engine)
-        }
-        audioTapController?.teardown()
-        audioTapController = nil
         // #214 follow-up: the confirmation ledger is NOT cleared here. It is keyed to loadedURL and a
         // session-preserving reload runs through stopInternal too; clearing would re-pay the pass on
         // every audio switch. A new item invalidates it in startAtmosConfirmation().

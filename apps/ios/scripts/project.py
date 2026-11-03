@@ -19,11 +19,19 @@ if probe:
     assert key == 'bunkr'
     config = dict(config, product='OriginalVideoProbe', name='Original video check', bundleId='com.visar.OriginalVideoProbe.paid', build='1')
 product = config['product']
-source_hash = hashlib.sha256(key.encode())
-source_files = list((root/'VideoApp').glob('*.swift')) + list((root/'Shared').glob('*.swift')) + list((root/'Kit/Sources').rglob('*.swift'))
-source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
+local_app = not bool(config.get('native'))
+app_sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
+if local_app:
+    online_sources = {'Tango.swift','TangoList.swift','TangoPCLogin.swift','TangoRenewalLifetime.swift',
+                      'TangoNetworkChecks.swift','Vault.swift','VaultList.swift'}
+    app_sources = [p for p in app_sources if Path(p).name not in online_sources and p != 'Shared/Login.swift']
+if not os.environ.get('SIMULATOR'):
+    app_sources = [p for p in app_sources if Path(p).name not in {'ZoomChecks.swift','ListNavigationChecks.swift','TangoNetworkChecks.swift'}]
 if probe:
-    source_files.append(root/'Tests'/('InlineQuickProbe.swift' if quick_probe else 'OriginalVideoProbe.swift'))
+    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/InlineQuickProbe.swift' if quick_probe else 'Tests/OriginalVideoProbe.swift']
+source_hash = hashlib.sha256(key.encode())
+source_files = [root/p for p in app_sources] + list((root/'Kit/Sources').rglob('*.swift'))
+source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
 if key == 'bunkr':
     source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py',
                      root/'ThirdParty/AetherCore/Package.swift', root/'ThirdParty/FFmpegBuild/Package.swift',
@@ -59,7 +67,8 @@ def phase(target, kind, paths):
 common = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION=config.get('build', '1'), MARKETING_VERSION='1.0',
     GENERATE_INFOPLIST_FILE='NO', PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1', SWIFT_VERSION='5.0',
     IPHONEOS_DEPLOYMENT_TARGET='26.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos', SUPPORTED_PLATFORMS='iphoneos iphonesimulator')
-if probe: common['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'ORIGINAL_CODEC_PROBE'
+conditions = (['LOCAL_VIDEO_PROVIDER'] if local_app else []) + (['ORIGINAL_CODEC_PROBE'] if probe else [])
+if conditions: common['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = ' '.join(conditions)
 # Tango's Google login arrives through the Tango Login Safari helper and a shared Keychain group.
 login = config.get('tangoLogin') is True
 entitlements = generated/'Login.entitlements'
@@ -102,13 +111,13 @@ for suffix in config.get('extensions', []):
                 remoteGlobalIDString=ident(name+'Target'), remoteInfo=name)
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
-sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
-if probe:
-    sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/InlineQuickProbe.swift' if quick_probe else 'Tests/OriginalVideoProbe.swift']
+sources = app_sources
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
-kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
-if os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
+kit_names = ['KitCore', 'KitNet', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
+if not local_app: kit_names += ['KitHTML']
+if probe: kit_names = ['KitCore']
+elif os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name) for name in kit_names]
 packages = [kit]
 if key == 'bunkr':

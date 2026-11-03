@@ -4,10 +4,8 @@ import AVFoundation
 
 #if canImport(UIKit)
 import UIKit
-import SwiftUI
 #elseif canImport(AppKit)
 import AppKit
-import SwiftUI
 #endif
 
 /// A single render surface owned by AetherEngine.
@@ -166,76 +164,4 @@ public final class AetherPlayerView: PlatformBaseView, HeldStillSurface {
 public typealias PlatformBaseView = UIView
 #elseif canImport(AppKit)
 public typealias PlatformBaseView = NSView
-#endif
-
-// MARK: - SwiftUI wrapper
-
-#if canImport(UIKit)
-/// SwiftUI surface for embedding AetherEngine playback.
-///
-/// ```swift
-/// AetherPlayerSurface(engine: engine)
-///     .ignoresSafeArea()
-/// ```
-public struct AetherPlayerSurface: UIViewRepresentable {
-    private let engine: AetherEngine
-
-    public init(engine: AetherEngine) {
-        self.engine = engine
-    }
-
-    public func makeUIView(context: Context) -> AetherPlayerView {
-        let view = AetherPlayerView()
-        engine.bind(view: view)
-        return view
-    }
-
-    public func updateUIView(_ uiView: AetherPlayerView, context: Context) {
-        // #188: when a host swaps its AetherEngine instance at the same structural
-        // position, SwiftUI reuses this platform view and only calls updateUIView,
-        // so the new engine's bind(view:) never runs from makeUIView. Rebinding here
-        // points the new engine at the reused view and re-attaches its layer; bind is
-        // idempotent for the steady-state existing === view case, so this is cheap.
-        engine.bind(view: uiView)
-    }
-
-    public static func dismantleUIView(_ uiView: AetherPlayerView, coordinator: ()) {
-        // AE#536: unbind now, not in a later Task. A surface remounted by identity
-        // is dismantled after the incoming one was bound, and SwiftUI may have
-        // rebound the outgoing view on its way out; unbinding it here hands the
-        // layer back to the incoming view at once. Identity-guarded, so it never
-        // detaches a successor.
-        MainActor.assumeIsolated {
-            uiView.bindingEngine?.unbind(view: uiView)
-        }
-    }
-}
-#elseif canImport(AppKit)
-public struct AetherPlayerSurface: NSViewRepresentable {
-    private let engine: AetherEngine
-
-    public init(engine: AetherEngine) {
-        self.engine = engine
-    }
-
-    public func makeNSView(context: Context) -> AetherPlayerView {
-        let view = AetherPlayerView()
-        engine.bind(view: view)
-        return view
-    }
-
-    public func updateNSView(_ nsView: AetherPlayerView, context: Context) {
-        // #188: rebind on update so an engine swap at the same structural position
-        // takes over the reused view. Idempotent for the steady-state case.
-        engine.bind(view: nsView)
-    }
-
-    public static func dismantleNSView(_ nsView: AetherPlayerView, coordinator: ()) {
-        // AE#536: unbind synchronously so the layer moves to a surface bound
-        // after this one instead of waiting for the next session.
-        MainActor.assumeIsolated {
-            nsView.bindingEngine?.unbind(view: nsView)
-        }
-    }
-}
 #endif
