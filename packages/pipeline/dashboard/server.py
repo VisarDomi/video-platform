@@ -10,6 +10,7 @@ import signal
 import ssl
 import threading
 import time
+import traceback
 from urllib.parse import urlsplit
 
 from collector import snapshot, read_services, latest_worker_step
@@ -58,9 +59,12 @@ class Snapshot:
                 self.cached = (200, {"ok": True, "snapshot": value})
             except Exception as error:
                 # A missing/busy/broken data source must not turn into live zeroes.
-                if self.last_error != type(error).__name__:
-                    print("Dashboard snapshot unavailable:", type(error).__name__, flush=True)
-                    self.last_error = type(error).__name__
+                origin = traceback.extract_tb(error.__traceback__)[-1]
+                signature = (type(error).__name__, Path(origin.filename).name, origin.lineno)
+                if self.last_error != signature:
+                    # Source location only: exception text may include private data.
+                    print("Dashboard snapshot unavailable:", signature[0], f"at {signature[1]}:{signature[2]}", flush=True)
+                    self.last_error = signature
                 self.cached = (503, {"ok": False, "message": "Live pipeline data is unavailable.", "snapshot": self.last_good})
             self.last_read = time.monotonic()
             return self.cached

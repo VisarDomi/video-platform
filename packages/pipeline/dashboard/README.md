@@ -53,6 +53,8 @@ every five seconds while visible; hidden pages stop requests and abort pending
 ones. Foregrounding and reconnection refresh immediately. A service worker
 caches only the shell; API responses are network-only. One last-good snapshot
 on the phone supports offline reload, explicitly labeled **Saved / Last seen**.
+A newly discovered capture with no media directory yet is omitted until its
+first folder is published; it cannot invalidate the other dashboard cards.
 An unavailable data source returns the previous snapshot as stale, never fresh
 zero counts. There is no sampler, scheduled task, persistent metrics database or
 new provider/authentication session.
