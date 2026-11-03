@@ -202,6 +202,9 @@ export class PipelineDatabase {
     constructor(databasePath: string) {
         if (databasePath !== ":memory:") mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
         this.database = new DatabaseSync(databasePath);
+        // Auth maintenance and the worker can start together after reboot. Set
+        // the bounded wait before even reading/initializing schema metadata.
+        this.database.exec("PRAGMA busy_timeout = 30000");
         const existingSchema = this.database.prepare(`
             SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'
         `).get() as { present: number } | undefined;
@@ -210,7 +213,6 @@ export class PipelineDatabase {
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
             PRAGMA foreign_keys = ON;
-            PRAGMA busy_timeout = 5000;
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER NOT NULL
             ) STRICT;
@@ -688,6 +690,11 @@ export class PipelineDatabase {
     }
 
     private initializeRetention(migrate: boolean): void {
+        // Normal opens need no write transaction for already committed schema.
+        // A new/interrupted database still creates every missing table below.
+        if (!migrate && (this.database.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
+            WHERE type='table' AND name IN ('upload_artifact_receipts','conversion_retries','local_source_presence')`)
+            .get() as { count: number }).count === 3) return;
         this.transaction(() => {
             this.database.exec(`CREATE TABLE IF NOT EXISTS upload_artifact_receipts (
                 attempt_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL, artifact_part TEXT NOT NULL,

@@ -117,3 +117,10 @@ Browser launch failures retry once after one second, then use the ordinary
 launch diagnostic is preserved. A profile lock or browser startup failure is not
 evidence of logout and must not request a password login or impose its 24-hour
 login hold. Another browser owner's process/profile lock is never removed.
+
+SQLite startup applies its bounded30-second busy timeout before any schema work,
+so concurrently starting worker/auth-maintenance processes can wait for an active
+writer. Already committed retention tables are inspected without acquiring another
+write transaction on every open. Missing tables still recover through normal
+initialization. `test/databaseStartup.test.mjs` covers real cross-process contention
+beyond five seconds and interrupted retention initialization in temporary databases.
