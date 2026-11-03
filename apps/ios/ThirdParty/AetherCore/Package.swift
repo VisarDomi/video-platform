@@ -1,0 +1,3 @@
+// swift-tools-version: 6.1
+import PackageDescription
+let package = Package(name: "AetherEngine", platforms: [.iOS(.v18), .macOS(.v15)], products: [.library(name: "AetherEngine", targets: ["AetherEngine"])], dependencies: [.package(path: "../FFmpegBuild"), .package(path: "../LibDovi")], targets: [.target(name: "AetherEngine", dependencies: [.product(name: "AetherFFmpegBuild", package: "FFmpegBuild"), .product(name: "Dovi", package: "LibDovi")], resources: [.copy("Resources/silent-atmos.mp4"), .copy("Resources/PrivacyInfo.xcprivacy")], linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("AVKit"), .linkedFramework("CoreMedia"), .linkedFramework("CoreVideo"), .linkedFramework("VideoToolbox"), .linkedFramework("AudioToolbox")])])

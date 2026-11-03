@@ -20,7 +20,9 @@ log=MAC+'/build/'+a.provider+'/xcode.log'
 deliver=lambda step:['/usr/bin/python3','/Users/visar/Developer/ios-tools/renewal/scripts/deliver.py',step,'--repo','video-platform',
                      '--app',a.provider if config.get('hosts') else a.provider+'-local','--bundle',config['bundleId']]
 if a.action in ('prepare','sync'):
-    if a.provider == 'bunkr': subprocess.run(['python3', str(APP/'scripts/prepare-vlckit.py')],check=True)
+    if a.provider == 'bunkr':
+        subprocess.run(['python3', str(APP/'scripts/prepare-vlckit.py')],check=True)
+        subprocess.run(['python3', str(APP/'scripts/prepare-ffmpeg.py')],check=True)
     # All providers share this mirror. A local-app sync must preserve Tango's build key too.
     stage_private_inputs(APP,registry if a.action=='sync' else {a.provider:config},pathlib.Path.home()/'.local/share/video-services')
     # Hosted Safari web extensions (Tango's FC2 live and SC live) are built here, so the Mac (and

@@ -12,6 +12,9 @@ if len(sys.argv) != 2 or sys.argv[1] not in registry: raise SystemExit('Supply e
 key = sys.argv[1]
 config = registry[key]
 probe = os.environ.get('DECODER_PROBE') == '1'
+quick_probe = os.environ.get('INLINE_CODEC_QUICK') == '1'
+if quick_probe and not (probe and os.environ.get('SIMULATOR')):
+    raise SystemExit('INLINE_CODEC_QUICK requires DECODER_PROBE=1 and SIMULATOR=1')
 if probe:
     assert key == 'bunkr'
     config = dict(config, product='OriginalVideoProbe', name='Original video check', bundleId='com.visar.OriginalVideoProbe.paid', build='1')
@@ -19,7 +22,14 @@ product = config['product']
 source_hash = hashlib.sha256(key.encode())
 source_files = list((root/'VideoApp').glob('*.swift')) + list((root/'Shared').glob('*.swift')) + list((root/'Kit/Sources').rglob('*.swift'))
 source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
-if key == 'bunkr': source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py']
+if probe:
+    source_files.append(root/'Tests'/('InlineQuickProbe.swift' if quick_probe else 'OriginalVideoProbe.swift'))
+if key == 'bunkr':
+    source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py',
+                     root/'ThirdParty/AetherCore/Package.swift', root/'ThirdParty/FFmpegBuild/Package.swift',
+                     root/'ThirdParty/LibDovi/Package.swift', root/'scripts/prepare-ffmpeg.py', root/'scripts/verify-ffmpeg.py']
+    source_files += list((root/'ThirdParty/AetherCore/Sources').rglob('*'))
+    source_files = [p for p in source_files if p.is_file()]
 for source in sorted(source_files):
     source_hash.update(str(source.relative_to(root)).encode()+b'\0')
     source_hash.update(hashlib.sha256(source.read_bytes()).digest())
@@ -94,7 +104,7 @@ for suffix in config.get('extensions', []):
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
 if probe:
-    sources = ['VideoApp/'+name+'.swift' for name in ['ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/OriginalVideoProbe.swift']
+    sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/InlineQuickProbe.swift' if quick_probe else 'Tests/OriginalVideoProbe.swift']
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
 kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
@@ -105,9 +115,14 @@ if key == 'bunkr':
     decoder_package = obj('DecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/VLCKit', generated))
     packages.append(decoder_package)
     kit_products.append(obj('DecoderProduct', 'XCSwiftPackageProductDependency', productName='VLCKit', package=decoder_package))
+    direct_package = obj('DirectDecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/AetherCore', generated))
+    packages.append(direct_package)
+    # Both libraries export FFmpeg symbols. The new ABI must precede VLC's older
+    # copy; verify-ffmpeg.py rejects any mixed binding in the linked executable.
+    kit_products.insert(0, obj('DirectDecoderProduct', 'XCSwiftPackageProductDependency', productName='AetherEngine', package=direct_package))
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
                  files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
-resources = ['ThirdParty/VLCKit/LICENSE.txt'] if key == 'bunkr' else []
+resources = ['ThirdParty/VLCKit/LICENSE.txt', 'ThirdParty/OriginalDecoderLicenses'] if key == 'bunkr' else []
 phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
 if embedded:
     phases.append(obj('Embed', 'PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=13,
@@ -143,6 +158,12 @@ else:
     info['LocalProvider'] = key
     info['LocalMediaKind'] = config.get('mediaKind', 'hls')
 if probe: info.pop('UIApplicationSceneManifest', None)
+if quick_probe:
+    info['InlineCodecQuickProbe'] = True
+    info['CFBundleURLTypes'] = [dict(CFBundleURLName='Inline decoder check', CFBundleURLSchemes=['inline-codec-probe'])]
+    info['UIApplicationSceneManifest'] = dict(UIApplicationSupportsMultipleScenes=False,
+        UISceneConfigurations={'UIWindowSceneSessionRoleApplication': [dict(UISceneConfigurationName='Inline decoder check',
+        UISceneDelegateClassName='$(PRODUCT_MODULE_NAME).InlineProbeScene')]})
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')

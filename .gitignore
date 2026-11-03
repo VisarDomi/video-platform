@@ -17,3 +17,7 @@ apps/ios/Private/
 apps/ios/ThirdParty/VLCKit/VLCKit.xcframework/
 apps/ios/ThirdParty/VLCKit/MobileVLCKit.xcframework/
 apps/ios/ThirdParty/VLCKit/binary-receipt.json
+apps/ios/ThirdParty/FFmpegBuild/Sources/*.xcframework/
+apps/ios/ThirdParty/FFmpegBuild/binary-receipt.json
+apps/ios/ThirdParty/LibDovi/Dovi.xcframework/
+apps/ios/ThirdParty/LibDovi/binary-receipt.json

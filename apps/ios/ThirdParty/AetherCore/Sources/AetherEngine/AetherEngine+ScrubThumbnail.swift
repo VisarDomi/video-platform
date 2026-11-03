@@ -1,0 +1,264 @@
+import Foundation
+import CoreGraphics
+
+extension AetherEngine {
+
+    /// The 2026-09-02 Whole Title trace opened 30 software decoders in 20 seconds while
+    /// scrubbing three resident 100 MB segments and back. Six keeps that small working set
+    /// warm; each extractor maps its segment file (audit SEG-2), so the entries hold clean
+    /// file-backed pages rather than heap copies, and the bound remains fixed.
+    nonisolated static let scrubThumbnailExtractorLimit = 6
+    public func clearResidentPreviewFrames() {
+        for entry in scrubThumbnailExtractors {
+            Task { await entry.extractor.clearResidentPreviewCache() }
+        }
+    }
+
+    /// Timestamped production preview. All reads come from existing resident
+    /// bytes; a missing target never opens a second connection or seeks playback.
+    public func scrubPreviewFrame(atSeconds seconds: Double, refined: Bool, maxWidth: Int = 320,
+                                  isCancelled: @escaping @Sendable () -> Bool) async -> ScrubFrame? {
+        guard seconds.isFinite, !Task.isCancelled, !isCancelled() else { return nil }
+        let gen = loadGeneration
+        guard let session = nativeVideoSession else {
+            guard let host = softwareHost else { return nil }
+            if softwareStillsFromLocalFile {
+                let result = await localSoftwareStill(atSessionSeconds: seconds, refined: refined,
+                                                      maxWidth: maxWidth, isCancelled: isCancelled)
+                return gen == loadGeneration && !Task.isCancelled && !isCancelled() ? result : nil
+            }
+            let result = await host.scrubPreviewFrame(atSessionSeconds: seconds, refined: refined,
+                                                     maxWidth: maxWidth, isCancelled: isCancelled)
+            return gen == loadGeneration && !Task.isCancelled && !isCancelled() ? result : nil
+        }
+        guard session.yieldsStills else { return nil }
+        // Freeze both axes. VOD segment indices use the plan's keyframe origin;
+        // the segment's bytes retain their own epoch normalization after restart.
+        let origin = sourcePresentationOrigin
+        let live = isLive
+        // Live: the same stable session-to-output shift `liveScrubThumbnail` uses (#712), frozen
+        // here so the request and its result convert on one axis even if the shift moves meanwhile.
+        let liveShift = liveSessionShiftSeconds
+        let sourceTarget = PresentationAxis.source(displayTime: seconds, origin: origin)
+        let output = live ? seconds - liveShift
+            : sourceTarget - session.firstKeyframeSeconds
+        let planOrigin = session.firstKeyframeSeconds - origin
+        let source = await BlockingWork.detached(priority: .utility) { [session] in
+            session.scrubThumbnailSource(atSeconds: output)
+        }.value
+        guard gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        guard let source else {
+            guard !live else { return nil }
+            return await ladderPreviewFrame(session: session, outputSeconds: output, planOrigin: planOrigin,
+                                            maxWidth: maxWidth, generation: gen, isCancelled: isCancelled)
+        }
+        guard let carried = source.carriedOffset else { return nil }
+        let extractor: FrameExtractor
+        if let index = scrubThumbnailExtractors.firstIndex(where: { $0.segmentIndex == source.segmentIndex }) {
+            let hit = scrubThumbnailExtractors.remove(at: index)
+            if hit.extractor.residentIdentity == source.identity {
+                scrubThumbnailExtractors.append(hit); extractor = hit.extractor
+            } else {
+                Task { await hit.extractor.shutdown() }
+                guard let reader = source.makeReader() else { return nil }
+                extractor = FrameExtractor(residentReader: reader, formatHint: "mp4", identity: source.identity)
+                scrubThumbnailExtractors.append((source.segmentIndex, extractor))
+            }
+        } else {
+            guard let reader = source.makeReader() else { return nil }
+            extractor = FrameExtractor(residentReader: reader, formatHint: "mp4", identity: source.identity)
+            scrubThumbnailExtractors.append((source.segmentIndex, extractor))
+            trimScrubThumbnailExtractors()
+        }
+        guard let frame = await extractor.residentPreview(rawTarget: live ? output : sourceTarget - carried,
+                    refined: refined, maxWidth: maxWidth, isCancelled: isCancelled),
+              gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        let stillOwned = await BlockingWork.detached(priority: .utility) { [session] in
+            guard let current = session.scrubThumbnailSource(atSeconds: output) else { return false }
+            return current.identity == source.identity && current.carriedOffset == source.carriedOffset
+        }.value
+        guard stillOwned, gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        guard let actual = live ? Optional(frame.actualSeconds + liveShift)
+            : ScrubSegmentTime.displayTime(rawPTS: frame.actualSeconds, carriedOffset: carried, displayOrigin: origin)
+        else { return nil }
+        let rangeStart = live ? source.startSeconds + liveShift : source.startSeconds + planOrigin
+        return ScrubFrame(image: frame.image, actualSeconds: actual, refined: frame.refined,
+                         validRange: rangeStart..<(rangeStart + source.durationSeconds))
+    }
+
+    /// The answer for a VOD position nothing resident covers: the nearest keyframe the still ladder
+    /// read while the link was idle (`KeyframeStillLadder`). Its `actualSeconds` and `validRange` name
+    /// the rung's own segment, so a host can tell it from a frame at the target. Never reads the source.
+    private func ladderPreviewFrame(session: HLSVideoEngine, outputSeconds: Double, planOrigin: Double,
+                                    maxWidth: Int, generation gen: UInt64,
+                                    isCancelled: @escaping @Sendable () -> Bool) async -> ScrubFrame? {
+        let rung = await BlockingWork.detached(priority: .utility) { [session] in
+            session.stillLadderFrame(atSeconds: outputSeconds)
+        }.value
+        guard let rung, gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        let key = Self.ladderStillKey(segmentIndex: rung.segmentIndex)
+        let extractor: FrameExtractor
+        if let index = scrubThumbnailExtractors.firstIndex(where: { $0.segmentIndex == key }) {
+            let hit = scrubThumbnailExtractors.remove(at: index)
+            scrubThumbnailExtractors.append(hit)
+            extractor = hit.extractor
+        } else {
+            extractor = FrameExtractor(residentReader: rung.makeReader(), formatHint: "mp4",
+                                       identity: "ladder:\(rung.segmentIndex)")
+            scrubThumbnailExtractors.append((key, extractor))
+            trimScrubThumbnailExtractors()
+        }
+        guard let frame = await extractor.residentPreview(rawTarget: 0, refined: false, maxWidth: maxWidth,
+                                                          isCancelled: isCancelled),
+              gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        let start = rung.startSeconds + planOrigin
+        return ScrubFrame(image: frame.image, actualSeconds: start, refined: false,
+                          validRange: start..<(start + rung.durationSeconds))
+    }
+
+    /// Ladder stills share the extractor LRU with resident segments under keys no segment carries
+    /// (below `localSoftwareStillKey`).
+    nonisolated static func ladderStillKey(segmentIndex: Int) -> Int { -2 - segmentIndex }
+
+    /// Engine half of the ladder's 1 Hz tick: the session decides, this hands it the playhead and
+    /// the contiguous buffer ahead of it. Skipped while a seek is pending, when both point at a
+    /// position the picture has not reached.
+    func tickKeyframeStillLadder() {
+        guard !isLive, pendingRecoverySeekClockTarget == nil,
+              let session = nativeVideoSession, let host = nativeHost else { return }
+        let playhead = host.renderedTime
+        let ahead = session.contiguousForwardReadAheadSeconds(playlistSeconds: playhead)
+        session.stillLadderTick(playheadPlaylistSeconds: playhead, forwardBufferSeconds: ahead)
+    }
+
+    /// Cache-backed scrub still for the active native session (live or VOD). Decodes from
+    /// already-produced SegmentCache bytes, so it never opens a second connection and works
+    /// on single-connection sources (debrid/torrent HTTP links, #106) where the
+    /// FrameExtractor's second demuxer is refused. Returns nil when there is no native
+    /// session, the segment is not resident (not yet produced far ahead of the playhead, or
+    /// evicted past the retention budget), or decode fails; a nil is the correct
+    /// "not available yet" and hosts show time-only. `seconds` is session-timeline
+    /// (seekableLiveRange axis) for live, playlist/output seconds for VOD.
+    public func scrubThumbnail(atSeconds seconds: Double, maxWidth: Int = 320) async -> CGImage? {
+        if isLive {
+            return await liveScrubThumbnail(atSessionSeconds: seconds, maxWidth: maxWidth)
+        }
+        return await vodScrubThumbnail(atSeconds: seconds, maxWidth: maxWidth)
+    }
+
+    /// VOD arm of `scrubThumbnail`. `!isLive` guards direct callers: `nativeVideoSession` is
+    /// non-nil for live too, and `scrubThumbnailSource` no longer self-gates on isLiveSession,
+    /// so a VOD decode must not run against a live session (whose seam-shift axis differs).
+    /// Hands the extractor exactly one segment (init + the seg containing `seconds`) and seeks
+    /// to 0: thumbnail mode returns the first frame after the seek, so 0 lands on that segment's
+    /// first keyframe whether its fMP4 tfdt is absolute or zero-based (post-restart). This makes
+    /// the decode axis-independent and correct by construction. Per-segment granularity.
+    ///
+    /// A software session (AE#605) has no segments; it decodes the still out of the packet cache
+    /// its seeks already land in, keyframe to target, on the same session axis `seek(to:)` takes.
+    /// One that plays a local file keeps no cache and reads the file instead (see
+    /// `softwareStillsFromLocalFile`). Either way the picture is the base layer, so a Dolby Vision
+    /// Profile 7 title needs no enhancement layer to show a still.
+    public func vodScrubThumbnail(atSeconds seconds: Double, maxWidth: Int = 320) async -> CGImage? {
+        guard !isLive else { return nil }
+        guard let session = nativeVideoSession else {
+            guard let host = softwareHost else { return nil }
+            let gen = loadGeneration
+            if softwareStillsFromLocalFile {
+                let frame = await localSoftwareStill(atSessionSeconds: seconds, refined: false,
+                                                     maxWidth: maxWidth, isCancelled: { false })
+                return loadGeneration == gen ? frame?.image : nil
+            }
+            let image = await host.vodScrubStill(atSessionSeconds: seconds, maxWidth: maxWidth)
+            return loadGeneration == gen ? image : nil
+        }
+        guard session.yieldsStills else { return nil }
+        let gen = loadGeneration
+        let source = await BlockingWork.detached(priority: .userInitiated) { [session] in
+            session.scrubThumbnailSource(atSeconds: seconds)
+        }.value
+        // Guard against zap/stop clearing the LRU: a stale extractor's segment indices
+        // collide with the next source's.
+        guard let source, loadGeneration == gen else { return nil }
+        let extractor: FrameExtractor
+        if let idx = scrubThumbnailExtractors.firstIndex(where: { $0.segmentIndex == source.segmentIndex }) {
+            let hit = scrubThumbnailExtractors.remove(at: idx)
+            scrubThumbnailExtractors.append(hit)
+            extractor = hit.extractor
+        } else {
+            guard let reader = source.makeReader() else { return nil }
+            extractor = FrameExtractor(reader: reader, formatHint: "mp4")
+            scrubThumbnailExtractors.append((source.segmentIndex, extractor))
+            trimScrubThumbnailExtractors()
+        }
+        return await extractor.thumbnail(at: 0, maxWidth: maxWidth)
+    }
+
+    /// Enforce the cache-backed still LRU after a miss. Kept internal so the exact six-entry
+    /// eviction boundary can be pinned without opening a playback session.
+    func trimScrubThumbnailExtractors() {
+        while scrubThumbnailExtractors.count > Self.scrubThumbnailExtractorLimit {
+            let evicted = scrubThumbnailExtractors.removeFirst()
+            Task { await evicted.extractor.shutdown() }
+        }
+    }
+
+    /// A key no segment carries, for the one extractor a local-file software session keeps in
+    /// `scrubThumbnailExtractors` (teardown and the stale-generation clear already cover that list).
+    nonisolated static let localSoftwareStillKey = -1
+
+    /// True when a software VOD session plays a local file whose frames can become stills. Such a
+    /// session keeps no packet cache, because re-reading the file is a page-cache hit, so its stills
+    /// are decoded from the file by a `FrameExtractor`. That opens no connection to any origin, which
+    /// is what the cache exists to avoid. False for a Dolby Vision Profile 5 / 10.0 file without the
+    /// `DolbyVisionStillReshaping` trait, which `FrameDecodeContext` refuses every still of.
+    var softwareStillsFromLocalFile: Bool {
+        guard let softwareHost, !isLive, !isCustomSource, loadedURL?.isFileURL == true,
+              softwareHost.videoYieldsStills else { return false }
+        return !softwareHost.servesPacketCacheStills
+    }
+
+    /// The still for a local-file software session. `refined` asks for the frame at the target, not
+    /// the keyframe before it. The extractor takes the source axis, which `seek(to:)` also lands on
+    /// after its session-to-source shift. It decodes the base layer, the same picture the host's
+    /// own decoder shows for a dual-layer Dolby Vision title.
+    func localSoftwareStill(atSessionSeconds seconds: Double, refined: Bool, maxWidth: Int,
+                            isCancelled: @escaping @Sendable () -> Bool) async -> ScrubFrame? {
+        guard let host = softwareHost, softwareStillsFromLocalFile, seconds.isFinite, seconds >= 0 else { return nil }
+        let gen = loadGeneration
+        let extractor: FrameExtractor
+        if let held = scrubThumbnailExtractors.first(where: { $0.segmentIndex == Self.localSoftwareStillKey }) {
+            extractor = held.extractor
+        } else {
+            guard let made = makeFrameExtractor() else { return nil }
+            scrubThumbnailExtractors.append((Self.localSoftwareStillKey, made))
+            extractor = made
+        }
+        let source = host.sourceSeconds(forSession: seconds)
+        guard let still = await extractor.boundedLocalStill(at: source, refined: refined, maxWidth: maxWidth,
+                                                            isCancelled: isCancelled),
+              gen == loadGeneration, !Task.isCancelled, !isCancelled() else { return nil }
+        // The time of the frame that was decoded, back on the session axis. A source that stamps no
+        // frame time can only be labelled with the request.
+        let zero = host.sourceSeconds(forSession: 0)
+        let actual = still.decodedSeconds.map { max(0, $0 - zero) } ?? seconds
+        return ScrubFrame(image: still.image, actualSeconds: actual, refined: refined)
+    }
+
+    /// True when the active session can serve cache-backed stills from `scrubThumbnail` with no
+    /// second connection: any native session (live or VOD, SegmentCache), a software live session
+    /// (DVR packet ring, #544), a software VOD session reading a remote source (packet cache,
+    /// AE#605) and one playing a local file (decoded from the file, no connection at all). False
+    /// before load. Hosts on a single-connection source should gate the
+    /// scrub-preview affordance on this: true means use `scrubThumbnail`; false means hide
+    /// the preview rather than show blank frames from a refused second-connection
+    /// FrameExtractor (#106). It reports capability, not per-frame availability: transient
+    /// nils from `scrubThumbnail` while a segment is still being produced are expected. False as well
+    /// on a Dolby Vision Profile 5 / 10.0 session in a build without the `DolbyVisionStillReshaping`
+    /// trait, where no frame can become a correct still; `scrubPreviewDrawsInView` covers that source.
+    public var supportsCacheBackedStills: Bool {
+        if let session = nativeVideoSession { return session.yieldsStills }
+        guard let softwareHost else { return false }
+        return isLive || softwareHost.servesPacketCacheStills || softwareStillsFromLocalFile
+    }
+}

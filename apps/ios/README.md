@@ -46,8 +46,12 @@ soon as buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
 bytes and dropped frames without URLs or credentials.
-Original AV1/VP9/VP8 files and MKV/WebM/AVI/TS containers use VLCKit's native decoder behind the same
-`ViewerUnit`; supported files keep AVFoundation. No file is converted, replaced
+Original AV1/VP9/VP8 files and MKV/WebM/AVI/TS containers use alternate native decoding behind the same
+`ViewerUnit`; supported files keep AVFoundation. VP9 first tries the direct
+FFmpeg/VideoToolbox backend when a real hardware session opens; other fallback
+formats and unsupported hardware retain VLCKit. The direct backend and its
+validation runbook are documented in [ThirdParty/AetherCore](ThirdParty/AetherCore/README.md).
+No file is converted, replaced
 or proxied into another format. The alternate engine retains the shared controls,
 fitted surface, zoom, current-only visibility, paused neighbours and saved timeline.
 Its library/media setup runs off the main thread. Backgrounding disables its video

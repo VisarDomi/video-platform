@@ -31,6 +31,21 @@ enum ViewerDecoders {
 
     static func make(source: MediaSource, video: ViewerVideo, surface: UIView, start: Double,
                      changed: @escaping () -> Void, failed: @escaping () -> Void) async -> (any ViewerDecoder)? {
+        guard !Task.isCancelled else { return nil }
+        #if canImport(AetherEngine)
+        #if ORIGINAL_CODEC_PROBE
+        let requiresHardware = false  // Exercise lifecycle even on CPU-only simulator runtimes.
+        #else
+        let requiresHardware = true
+        #endif
+        // First migration step: VP9 can use Apple's supplemental hardware decoder.
+        // Keep the established paths for other codecs until their own measurements pass.
+        if (video.raw["videoCodec"] as? String)?.lowercased() == "vp9",
+           let decoder = await FFmpegVideoDecoder.create(source: source, video: video, surface: surface, start: start, changed: changed, failed: failed, requiresHardware: requiresHardware) {
+            return decoder
+        }
+        #endif
+        guard !Task.isCancelled else { return nil }
         #if canImport(VLCKit)
         return await VLCVideoDecoder.create(source: source, video: video, surface: surface, start: start, changed: changed, failed: failed)
         #else

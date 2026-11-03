@@ -56,6 +56,10 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     private var stateEvents: [[String: Any]] = []
     private let surface: UIView
     private var firstPictureAfterSeek: UInt64?
+    private var steppedPicture = false
+    private var frameStepInFlight = false
+    private var frameStepAttempts = 0
+    private var frameStepEvents: [[String: Any]] = []
 
     static func create(source: MediaSource, video: ViewerVideo, surface: UIView, start: Double,
                        changed: @escaping () -> Void, failed: @escaping () -> Void, demux: String? = nil) async -> VLCVideoDecoder? {
@@ -69,7 +73,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         media = core.media
         initialTime = max(0, start)
         lastTime = max(0, start)
-        pendingSeek = start > 0 ? start : nil
+        pendingSeek = max(0, start)
         knownDuration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         self.changed = changed
         self.failed = failed
@@ -87,6 +91,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
                 guard let self else { return }
                 self.restoreVideoIfReady()
                 self.applyPendingSeek()
+                self.preparePausedPicture()
                 if let before = self.firstPictureAfterSeek, self.media.statistics.displayedPictures > before, self.pendingSeek == nil {
                     self.surface.isHidden = false
                     self.firstPictureAfterSeek = nil
@@ -111,7 +116,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     var duration: Double { max(knownDuration, (media.length.value?.doubleValue ?? 0) / 1000) }
     var size: CGSize { player.videoSize }
     var playing: Bool { player.isPlaying && requested }
-    var hasPicture: Bool { !surface.isHidden && media.statistics.displayedPictures > 0 }
+    var hasPicture: Bool { !surface.isHidden && (steppedPicture || media.statistics.displayedPictures > 0) }
     var reachedEnd: Bool { ended }
     var muted: Bool {
         get { player.audio?.isMuted ?? true }
@@ -138,6 +143,8 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         player.pause()
     }
     func seek(_ seconds: Double) {
+        steppedPicture = false
+        frameStepAttempts = 0
         initialTime = max(0, seconds)
         lastTime = initialTime
         pendingSeek = initialTime
@@ -158,12 +165,42 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
                 if self.pendingSeek != target { self.applyPendingSeek(); return }
                 self.pendingSeek = nil
                 self.lastTime = target
-                if self.surface.isHidden { self.firstPictureAfterSeek = pictures }
-                if self.requested { self.player.play() } else { self.player.pause() }
+                if self.surface.isHidden || !self.requested { self.firstPictureAfterSeek = pictures }
+                if self.requested { self.player.play() }
+                else { self.player.pause(); self.preparePausedPicture() }
                 self.changed()
             }
         })
         if !accepted { seekInFlight = false }
+    }
+
+    private func preparePausedPicture() {
+        guard !stopped, !requested, opened, videoEnabled,
+              UIApplication.shared.applicationState == .active,
+              player.state == .paused, pendingSeek == nil, !seekInFlight,
+              !frameStepInFlight, frameStepAttempts < 2,
+              !hasPicture || firstPictureAfterSeek != nil else { return }
+        // start-paused can stop before the decoder has supplied a picture.
+        // VLCKit's native step requests one displayed frame without playback.
+        frameStepAttempts += 1
+        frameStepInFlight = true
+        player.gotoNextFrame()
+    }
+
+    nonisolated func mediaPlayer(_ player: VLCMediaPlayer, nextFrameSteppedWith result: VLCMediaPlayerFrameStepResult) {
+        Task { @MainActor [weak self] in
+            guard let self, !self.stopped else { return }
+            self.frameStepInFlight = false
+            self.frameStepEvents.append(["result": result.rawValue, "clock": self.player.time.value?.doubleValue ?? -1])
+            if self.frameStepEvents.count > 16 { self.frameStepEvents.removeFirst() }
+            if result == .success, self.pendingSeek == nil, !self.seekInFlight {
+                self.steppedPicture = true
+                self.firstPictureAfterSeek = nil
+                if self.videoEnabled { self.surface.isHidden = false }
+            }
+            if self.requested { self.player.play() }
+            self.changed()
+        }
     }
 
     func setVideoEnabled(_ enabled: Bool) {
@@ -245,6 +282,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
             opened = true
             if pendingSeek != nil { applyPendingSeek() }
             else if requested { player.play() }
+            else { preparePausedPicture() }
         }
         if state == .error { inputFailed = true }
         let nativeTime = max(lastTime, (player.time.value?.doubleValue ?? 0) / 1000)
@@ -269,6 +307,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         return ["engine": "VLCKit", "engineVersion": player.libraryInstance.version, "codec": "original", "currentTime": currentTime,
                 "nativeTime": (player.time.value?.doubleValue ?? 0) / 1000, "nativePosition": player.position,
                 "stateEvents": stateEvents,
+                "frameStepEvents": frameStepEvents,
                 "retiringDecoders": Self.retiringCount,
                 "ended": ended, "inputFailed": inputFailed,
                 "duration": duration, "rate": playing ? 1 : 0, "status": player.state.rawValue,
