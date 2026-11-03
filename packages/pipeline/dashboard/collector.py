@@ -123,7 +123,12 @@ def captures(data_root, downloads_root):
     data = read_json(data_root / "live-status.json", {}) or {}
     result = []
     for item in data.get("downloads", [])[:100]:
-        folder = Path(item.get("segmentsDirPath", "/nonexistent"))
+        # Discovery publishes this row before its first media directory exists.
+        # It is not yet a recording and must not invalidate every other card.
+        directory = item.get("segmentsDirPath")
+        if not isinstance(directory, str) or not directory:
+            continue
+        folder = Path(directory)
         # Signed URLs and filesystem paths are deliberately never returned.
         row = {"alias": str(item.get("alias") or item.get("streamerId") or "Recording"),
                "provider": folder.parent.parent.parent.name if folder.parent.name == ".active" else None,

@@ -181,6 +181,27 @@ class DashboardDataTests(unittest.TestCase):
         for forbidden in ['must-not-leak','masterPlaylistUrl','segmentsDirPath','/private/file.mp4',str(folder)]:
             self.assertNotIn(forbidden,body)
 
+    def test_new_capture_without_a_media_directory_keeps_the_api_available(self):
+        folder = self.downloads/'sc/downloaded/.active/2026-11-03 133300 active'
+        folder.mkdir(parents=True)
+        (folder/'playlist.m3u8').write_text('#EXTM3U\n#EXTINF:2,\n1.ts\n')
+        (self.root/'live-status.json').write_text(json.dumps({'downloads':[
+            {'alias':'starting','segmentsDirPath':None},
+            {'alias':'active','segmentsDirPath':str(folder)},
+        ]}))
+        with patch('server.read_services', return_value=({},None)), patch('server.latest_worker_step',return_value=None):
+            server=create_server('127.0.0.1',0,self.root,self.downloads,reader=lambda *a,**k:self.read())
+            thread=threading.Thread(target=server.serve_forever);thread.start()
+            try:
+                conn=http.client.HTTPConnection('127.0.0.1',server.server_port)
+                conn.request('GET','/api/dashboard');response=conn.getresponse();body=json.loads(response.read());conn.close()
+                self.assertEqual(response.status,200)
+                self.assertTrue(body['ok']);self.assertTrue(body['snapshot']['fresh'])
+                self.assertEqual([r['alias'] for r in body['snapshot']['captures']],['active'])
+                self.assertEqual(body['snapshot']['captures'][0]['segments'],1)
+            finally:
+                server.shutdown();thread.join();server.server_close()
+
 
 class DashboardHTTPTests(unittest.TestCase):
     def test_private_network_allowlist(self):
