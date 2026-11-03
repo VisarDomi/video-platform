@@ -9,6 +9,7 @@ import {
     type MediaIntegrityReport,
     type MediaIntegrityWarning,
 } from "./mediaIntegrityFinalizer.js";
+import { finalizeFmp4Capture } from "./fmp4CaptureFinalization.js";
 import { dropEntriesWithoutMedia } from "./emptyEntries.js";
 import { type FinalizationCheckpointStore, playlistFingerprint } from "./finalizationCheckpointStore.js";
 import {
@@ -18,8 +19,9 @@ import {
 
 // Finalization is NON-DESTRUCTIVE: it may rewrite playlist.m3u8 (durations,
 // discontinuity tags, entries whose files hold no bytes) but never removes an
-// entry that holds media and never moves or deletes a media file. Problems are
-// reported as warnings on the report.
+// entry that holds media and never moves or deletes an original media file.
+// A mixed AVC capture may produce lossless sample-copy fragments and a matching
+// initialization map; its originals and playlist journal remain available.
 export interface FinalizedRecordingProcessorDependencies {
     // Playlist-only repair; returns findings to record as warnings.
     readonly repairPlaylist?: (streamPath: string) => Promise<readonly MediaIntegrityWarning[] | void>;
@@ -63,8 +65,9 @@ export async function findUnreferencedMediaFiles(streamPath: string): Promise<st
         .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
 
-async function defaultRepairPlaylist(streamPath: string): Promise<MediaIntegrityWarning[]> {
+async function defaultRepairPlaylist(streamPath: string, store?: FinalizationCheckpointStore): Promise<{ warnings: MediaIntegrityWarning[]; preservedNames: string[] }> {
     const { dropped } = await dropEntriesWithoutMedia(streamPath);
+    const fmp4 = await finalizeFmp4Capture(streamPath, store);
     const restarts = await annotateCompoundSequenceRestarts(streamPath);
     await repairPlaylistDurations(streamPath, { apply: true });
     const empty: MediaIntegrityWarning[] = dropped.length === 0 ? [] : [{
@@ -72,7 +75,7 @@ async function defaultRepairPlaylist(streamPath: string): Promise<MediaIntegrity
         message: `${dropped.length} entr${dropped.length === 1 ? "y" : "ies"} whose file holds no bytes (a power loss) left the playlist; the files stay on disk`,
         names: dropped,
     }];
-    return restarts.restartSegmentNames.length === 0 ? empty : [...empty, {
+    const sequence: MediaIntegrityWarning[] = restarts.restartSegmentNames.length === 0 ? [] : [{
         kind: "sequence-restart",
         message: `provider media sequence restarted ${restarts.restartSegmentNames.length} time(s); every segment kept`
             + (restarts.insertedDiscontinuityCount > 0
@@ -80,6 +83,7 @@ async function defaultRepairPlaylist(streamPath: string): Promise<MediaIntegrity
                 : ""),
         names: [...restarts.restartSegmentNames],
     }];
+    return { preservedNames: fmp4.preservedNames, warnings: [...fmp4.warnings, ...empty, ...sequence] };
 }
 
 // A journal left by the retired destructive repair is resolved without moving
@@ -130,8 +134,14 @@ export async function processFinalizedRecording(
         }
     }
 
-    const repairPlaylist = dependencies.repairPlaylist ?? defaultRepairPlaylist;
-    const listUnreferenced = dependencies.listUnreferenced ?? findUnreferencedMediaFiles;
+    const preserved = new Set<string>();
+    const repairPlaylist = dependencies.repairPlaylist ?? (async (folder: string) => {
+        const result = await defaultRepairPlaylist(folder, options.checkpointStore);
+        result.preservedNames.forEach(name => preserved.add(name));
+        return result.warnings;
+    });
+    const listUnreferenced = dependencies.listUnreferenced ?? (async (folder: string) =>
+        (await findUnreferencedMediaFiles(folder)).filter(name => !preserved.has(name)));
     const validate = dependencies.validate ?? finalizeMediaIntegrity;
 
     const findings: MediaIntegrityWarning[] = retiredJournal ? [retiredJournal] : [];

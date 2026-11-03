@@ -18,13 +18,22 @@ Processing a pending recording (`processFinalizedRecording`):
    Its tags that still apply (a discontinuity, an init map) pass to the next
    entry, which starts after a discontinuity where media resumes. The file
    stays on disk; a missing file is not judged.
-1. Provider sequence restarts (a compound segment name whose sequence does not
+1. Finalized AVC fMP4 captures are indexed before publication. A level-only
+   in-band SPS change at an indexed IDR gets a matching copied initialization
+   map and a discontinuity. If the change falls inside a media file/moof,
+   sample-copy fragments split it at that video sample and the nearest whole AAC
+   packet boundary. Every encoded sample, DTS, duration, composition offset and
+   flag is compared before publication; no decoding/re-encoding or retiming.
+   Original fragments and initialization files remain byte-identical.
+   Unsupported layouts/configuration changes stay unchanged and receive a
+   `decoder-boundary-unrepaired` warning.
+2. Provider sequence restarts (a compound segment name whose sequence does not
    increase) are kept; a missing `#EXT-X-DISCONTINUITY` is added before each
    one and the restarts are reported as a `sequence-restart` warning.
-2. PlaylistAuthority repairs `#EXTINF`/`#EXT-X-TARGETDURATION` (below).
-3. Media files in the folder that the playlist does not reference are listed as
+3. PlaylistAuthority repairs `#EXTINF`/`#EXT-X-TARGETDURATION` (below).
+4. Media files in the folder that the playlist does not reference are listed as
    an `unreferenced-media` warning and left in place.
-4. Validation decodes each native run (segments between discontinuities and
+5. Validation decodes each native run (segments between discontinuities and
    init-map changes; a single-run playlist is decoded directly) with one strict
    ffmpeg pass. If that fails, MPEG-TS segments are decoded one by one, and a
    segment that fails alone is decoded again after its same-run predecessor (a
@@ -36,14 +45,20 @@ Processing a pending recording (`processFinalizedRecording`):
    validator cannot interpret, or validation that cannot complete for a reason
    in the recording, publishes unvalidated with a `validation-incomplete`
    warning.
-5. Each published recording logs one line. It is a warning when the report has
-   a finding other than damaged segments, or damaged segments beyond 2% of the
+6. Each published recording logs one line. It is a warning when the report has
+   a finding other than successful lossless splits or damaged segments, or damage beyond 2% of the
    playlist; damage below that comes from the stream itself (most Tango
    recordings carry a few corrupted macroblocks) and is an info line.
 
-Finalization may rewrite only `playlist.m3u8` (durations, discontinuity tags,
-and entries whose files hold no bytes). It never removes an entry that holds
-media and never moves or deletes a media file.
+Finalization may rewrite `playlist.m3u8` and create lossless sample-copy
+fragments/init maps. It never discards captured media or moves/deletes an original.
+The original playlist, source fingerprints, generated-file hashes and prepared/
+published phase are durably journaled in `finalization_meta` before publication.
+Generated files are fsynced and linked exclusively; the playlist is replaced only
+after all outputs are durable and source identity is rechecked. Restarting after
+either publication boundary completes idempotently. A user-modified playlist or
+source is never restored/overwritten. Pending-to-visible rename uses the same
+logical journal key. Retained originals are not unexpected unreferenced files.
 
 The report (version 2, validator revision 5) has status `ready` (published,
 possibly with `warnings`), `empty` (no playlist entries), or `failed`. `failed`
@@ -115,6 +130,12 @@ neither stream has a positive duration.
 continues, and Safari presents that interval as frozen video with continuing
 audio. A video-only duration would make the playlist timeline shorter than what
 Safari plays and make time-based editing inaccurate.
+
+For supported fMP4 captures, sample clocks similarly set adjacent video-start
+EXTINF values and the actual audio/video end at a provider cut or tail. This
+avoids cumulative rounding drift. Real long-duration held frames remain long;
+metadata repair cannot create motion absent from the capture. Shared HLS serving
+always returns the stored playlist and file bytes without playback-time healing.
 
 ## Library finalization is explicit
 

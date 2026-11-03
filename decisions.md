@@ -124,14 +124,17 @@ server follows the account first, but only if it is not already followed.
 
   The queue is one deduplicating FIFO with `os.availableParallelism()` workers. Each
   worker waits 15 s between recordings (`QUEUE_COOLDOWN_MS`).
-- **Finalization is non-destructive.** It may rewrite only `playlist.m3u8`
-  (durations, discontinuity tags, and entries whose files hold no bytes after a
-  power loss). It never removes an entry that holds media and never moves or
-  deletes a media file.
+- **Finalization is non-destructive.** It may rewrite `playlist.m3u8`
+  and create lossless fMP4 sample-copy fragments/maps at proven level-only AVC
+  changes on indexed IDRs. Every encoded sample and clock is retained; originals
+  are never moved/deleted. A durable restart journal preserves the old playlist
+  and fingerprints before atomic publication. Unsupported changes stay unchanged
+  with a finding. See `packages/server/decisions.md`.
   - Problems become `warnings` on a `ready` report and the recording still
     publishes. The kinds are `empty-entries`, `damaged-segments`,
     `unattributed-damage`, `validation-incomplete`, `unreferenced-media`,
-    `sequence-restart` and `retired-repair-journal`.
+    `sequence-restart`, `retired-repair-journal`, `decoder-boundary-split` and
+    `decoder-boundary-unrepaired`.
   - `failed` means only that the environment failed (ffmpeg could not run, or I/O
     failed). It is retried later.
   - `empty` (no entries and no unreferenced media) moves the folder to desktop
@@ -150,8 +153,8 @@ server follows the account first, but only if it is not already followed.
   video PTS of adjacent MPEG-TS segments, read from the bytes. ffprobe runs only
   where bytes cannot answer (before a discontinuity, the tail, a failed byte
   probe), falling back to `max(video, audio)` stream duration, then
-  `format.duration`. Writes are temp file, fsync, rename. fMP4 playlists
-  (`#EXT-X-MAP`) are skipped (`fmp4-map`). Why: Safari/iOS plays the media
+  `format.duration`. Writes are temp file, fsync, rename. The separate fMP4 finalization pass derives durations from indexed sample
+  clocks; MPEG-TS PlaylistAuthority skips maps (`fmp4-map`). Why: Safari/iOS plays the media
   timeline, not the MPEG-TS container span. One measured recording had 2247.68 s
   of container time against 2127.75 s of video, which misplaces segment names and
   edit cuts.

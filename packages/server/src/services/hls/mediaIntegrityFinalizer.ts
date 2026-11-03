@@ -70,7 +70,9 @@ export type MediaIntegrityWarningKind =
     // Entries whose provider sequence restarted (regressed); kept, with a discontinuity.
     | "sequence-restart"
     // A destructive repair journal from an older server was cleared; nothing was moved.
-    | "retired-repair-journal";
+    | "retired-repair-journal"
+    | "decoder-boundary-split"
+    | "decoder-boundary-unrepaired";
 
 export interface MediaIntegrityWarning {
     kind: MediaIntegrityWarningKind;
@@ -843,7 +845,7 @@ export function startMediaIntegrityFinalizer(): void {
         // recordings) and need nothing: an info line. Any other finding, or damage
         // beyond MINOR_DAMAGE_FRACTION, is a warning.
         const damaged = warnings.find((warning) => warning.kind === "damaged-segments")?.names?.length ?? 0;
-        const notable = warnings.some((warning) => warning.kind !== "damaged-segments")
+        const notable = warnings.some((warning) => warning.kind !== "decoder-boundary-split" && warning.kind !== "damaged-segments")
             || damaged > MINOR_DAMAGE_FRACTION * (result.report.segmentCount ?? 0);
         if (warnings.length > 0) logger.log(notable ? "warn" : "info", "[Finalization] published recording with warnings", details);
         else logger.info("[Finalization] published recording", details);
