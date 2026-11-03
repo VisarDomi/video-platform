@@ -38,7 +38,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             TestHooks.shared.start()
             return
         }
-        #if !LOCAL_VIDEO_PROVIDER
         if ProcessInfo.processInfo.arguments.contains("-tango-network-check") {
             window.rootViewController = TangoNetworkChecks()
             window.makeKeyAndVisible()
@@ -46,7 +45,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             TestHooks.shared.start()
             return
         }
-        #endif
         if ProcessInfo.processInfo.arguments.contains("-zoom-check") {
             window.rootViewController = ZoomChecks()
             window.makeKeyAndVisible()
@@ -65,20 +63,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             let local = LocalListController(provider: provider, server: server, mediaKind: kind)
             (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
             list = local
+        } else if info["NativeList"] as? String == "tango" {
+            let tango = TangoListController()
+            (resumed, paused) = ({ [weak tango] in tango?.resumed(afterBackground: $0) }, { [weak tango] in tango?.paused() })
+            list = tango
         } else {
-            #if LOCAL_VIDEO_PROVIDER
-            preconditionFailure("LocalProvider is required in a local app's Info.plist")
-            #else
-            if info["NativeList"] as? String == "tango" {
-                let tango = TangoListController()
-                (resumed, paused) = ({ [weak tango] in tango?.resumed(afterBackground: $0) }, { [weak tango] in tango?.paused() })
-                list = tango
-            } else {
-                let vault = VaultListController()
-                (resumed, paused) = ({ [weak vault] in vault?.resumed(afterBackground: $0) }, { [weak vault] in vault?.paused() })
-                list = vault
-            }
-            #endif
+            let vault = VaultListController()
+            (resumed, paused) = ({ [weak vault] in vault?.resumed(afterBackground: $0) }, { [weak vault] in vault?.paused() })
+            list = vault
         }
         self.list = list
         AppLifecycle.shared.onActive(resumed)

@@ -23,7 +23,7 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
                             + (['Private'] if product.get('native') == 'tango' else [])
                             + ['build/' + provider + '/' + suffix for suffix in web]
-                            + (['ThirdParty/VLCKit', 'scripts/prepare-vlckit.py', 'ThirdParty/AetherCore',
+                            + (['Bunkr', 'ThirdParty/VLCKit', 'scripts/prepare-vlckit.py', 'ThirdParty/AetherCore',
                                 'ThirdParty/FFmpegBuild', 'ThirdParty/LibDovi', 'ThirdParty/OriginalDecoderLicenses',
                                 'scripts/prepare-ffmpeg.py', 'scripts/verify-ffmpeg.py'] if provider == 'bunkr' else []),
                      build=['/usr/bin/python3', 'scripts/build-provider.py', provider],

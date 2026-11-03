@@ -11,21 +11,16 @@ final class ViewerMedia {
     private let jar: CookieJar?
     private let userAgent: String?
     private let referer: ((ViewerVideo) -> String?)?
-    #if !LOCAL_VIDEO_PROVIDER
     private let tango: TangoPlaylists?
-    #endif
 
     // Local apps: their recordings need neither cookies nor a Referer.
     init() {
         jar = nil
         userAgent = nil
         referer = nil
-        #if !LOCAL_VIDEO_PROVIDER
         tango = nil
-        #endif
     }
 
-    #if !LOCAL_VIDEO_PROVIDER
     init(jar: CookieJar, userAgent: String, referer: @escaping (ViewerVideo) -> String?) {
         self.jar = jar
         self.userAgent = userAgent
@@ -42,15 +37,9 @@ final class ViewerMedia {
 
     func start() { tango?.tokens.start() }
     func stop() { tango?.tokens.stop() }
-    #else
-    func start() {}
-    func stop() {}
-    #endif
 
     func asset(_ source: MediaSource, for video: ViewerVideo) async -> AVURLAsset {
-        #if !LOCAL_VIDEO_PROVIDER
         if let tango, video.liveStream { return tango.asset(source.url) }
-        #endif
         guard let jar, !video.local else { return AVURLAsset(url: source.url) }
         var headers: [String: String] = [:]
         if let referer = referer?(video) { headers["Referer"] = referer }
@@ -62,7 +51,6 @@ final class ViewerMedia {
 // Tango's master and media playlists through a resource loader: each request (including a
 // live media playlist's reloads) is fetched with the current stream tokens. Playlist addresses
 // keep the loader's scheme; segment, key and map addresses become absolute https.
-#if !LOCAL_VIDEO_PROVIDER
 final class TangoPlaylists: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
     static let scheme = "tangohls"
     let tokens: TangoSession
@@ -133,4 +121,3 @@ final class TangoPlaylists: NSObject, AVAssetResourceLoaderDelegate, @unchecked 
         return line.replacingCharacters(in: start.upperBound..<end, with: transform(String(line[start.upperBound..<end])))
     }
 }
-#endif

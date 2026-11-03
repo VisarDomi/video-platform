@@ -59,3 +59,9 @@ container and Local Network permission between runs in the same testing session.
 Stop its process after each run. When the task is finished, uninstall the diagnostic
 app and verify it and its process are absent; do not leave test apps on the phone.
 Use `apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private directory>`.
+
+Provider-specific performance work must stay inside that provider. Bunkr-only
+player/model/build overrides live in `apps/ios/Bunkr` and are selected only for
+Bunkr. Other providers retain their original shipped shared engine. Do not tune
+shared HLS serving, playback policy or another provider as a side effect of a
+Bunkr task. HLS serving returns the stored playlists and segments unchanged.

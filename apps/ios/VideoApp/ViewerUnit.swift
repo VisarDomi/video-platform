@@ -62,7 +62,6 @@ final class ViewerUnit {
     private var playRequestedAt: CFTimeInterval?
     private var playStartedMs: Double?
     private var decoder: (any ViewerDecoder)?
-    private var decoderLoadTask: Task<Void, Never>?
     private var decoderSurface: UIView?
     private var alternateKey: String?
     private var videoEnabled = true
@@ -151,32 +150,28 @@ final class ViewerUnit {
         failures = 0
         view.isHidden = false
         resolving = true
-        let loading = Task { [weak self] in
+        Task { [weak self] in
             guard let self, let delegate else { return }
-            defer { if token == self.token { self.decoderLoadTask = nil } }
             do {
                 let source = try await delegate.unitSource(video)
-                guard token == self.token, !Task.isCancelled else { return }
+                guard token == self.token else { return }
                 if alternate {
                     await attachDecoder(source, video: video, token: token)
                     return
                 }
                 let asset = await delegate.unitAsset(source, for: video)
-                guard token == self.token, !Task.isCancelled else { return }
+                guard token == self.token else { return }
                 resolving = false
                 attach(AVPlayerItem(asset: asset), token: token)
                 if video.local { refreshPlaylist(video, token: token) }
             } catch {
-                guard token == self.token, !Task.isCancelled else { return }
+                guard token == self.token else { return }
                 resolving = false
                 if case ViewerFailure.authentication = error { delegate.unitNeedsLogin(self) }
                 else if video.liveStream { delegate.unitUnavailable(self) }
                 else { print("Video source resolution failed:", error.localizedDescription); scheduleRecovery() }
             }
         }
-        // Source generation already protects visibility. Cancellation also lets
-        // the original-file backend close a superseded open before it finishes.
-        if alternate && video.provider == "bunkr" { decoderLoadTask = loading }
     }
 
     private func attach(_ item: AVPlayerItem, token: Int) {
@@ -561,8 +556,6 @@ final class ViewerUnit {
     #endif
 
     private func clearMedia() {
-        decoderLoadTask?.cancel()
-        decoderLoadTask = nil
         decoder?.stop()
         decoder = nil
         decoderSurface?.removeFromSuperview()
@@ -582,10 +575,8 @@ final class ViewerUnit {
         seekTarget = nil
         seeking = false
         seekDone = []
-        if player.currentItem != nil {
-            player.pause()
-            player.replaceCurrentItem(with: nil)
-        }
+        player.pause()
+        player.replaceCurrentItem(with: nil)
         if presentationSize != .zero {
             presentationSize = .zero
             delegate?.unitGeometryChanged(self)

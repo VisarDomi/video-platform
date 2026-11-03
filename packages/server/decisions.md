@@ -1,28 +1,5 @@
 # Server Decisions
 
-## HLS media responses identify the saved container
-
-SC stores fragmented MP4 under legacy `.ts` names. HLS responses identify MP4
-from its ISO-BMFF boxes and use `video/mp4`; real transport streams keep
-`video/mp2t`. This changes only the HTTP content type, never the saved bytes.
-
-Completed AVC/fMP4 recordings may contain an encoder level update inside a
-fragment while their captured initialization still declares `avc1` with the old
-SPS. The playback view detects level-only updates from indexed video samples.
-It serves a discontinuity and a derived `avc3` initialization for a mixed fragment,
-then another discontinuity with a matching `avc1` initialization for the stable
-epoch that follows. A/V endpoint deltas provide accurate `EXTINF` values without
-accumulating the overlap between neighbouring AAC packets. Actual held-video
-intervals remain part of the timeline.
-
-These are deterministic HTTP presentation metadata: original playlists, init
-files, fragments, indexes and every media byte remain unchanged. Generated map
-addresses rebuild after a reboot; the bounded cache is optional and checks the
-playlist and referenced file sizes/mtimes before reuse. Deleted sources return 404.
-Live recordings, other codecs and unsupported broader parameter changes keep
-their original presentation. This path never encodes, drops or duplicates footage
-and never changes upload/cleanup evidence.
-
 ## Finalization is non-destructive and every recording publishes
 
 For Tango, FC2, and SC, the downloader atomically writes `#EXT-X-ENDLIST` and

@@ -35,11 +35,10 @@ MOV, MKV, WebM, AVI and TS. Rows show actual size and probed duration. `.part`, 
 fragments, hidden files and symbolic links are excluded. Publishing a completed
 download or deleting a file on the PC updates the app through the same revision
 feed contract as the other local apps. No files are moved or deleted by the app.
-`LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
+`VideoApp/LocalLibrary.swift` owns the shared Foundation-only API/cache models; the
 provider's `LocalMediaKind` selects HLS recordings or original files (`file`);
-the legacy `mp4` descriptor remains readable. Filename-to-file-ID progress migration
-indexes only legacy rows once per update, avoiding repeated full-library scans
-on the UI thread. This same implementation serves all four local providers.
+the legacy `mp4` descriptor remains readable. Bunkr alone uses the indexed
+filename-to-file-ID migration in its provider override.
 Existing playback lookups use the
 last published index and verify the file identity, without waiting for unrelated
 new-file metadata probes.
@@ -484,3 +483,10 @@ keeps its reserved geometry stable when decoder metadata/resolution arrives. Unk
 clips reserve a viewport so their first picture cannot become a miniature portrait. Actual
 dimensions are retained in `viewer-dimensions.json` for later visits. Trusted OG/flashvars
 video dimensions are used when the playback page supplies them; CSS player size is ignored.
+
+Bunkr performance code is isolated in `Bunkr/`: its decoder adapters, player/model
+overrides and build settings are selected only for the Bunkr target. The five
+other apps use the original shipped shared engine (`b09884d`), including the
+accepted scroll/visibility and recording-variant fixes. Their current login/API
+contracts are retained. The HLS server serves the stored playlist and fragment
+bytes directly; it does not derive decoder epochs or replacement initializations.

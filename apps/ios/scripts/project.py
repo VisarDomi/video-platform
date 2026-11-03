@@ -8,40 +8,21 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 registry = json.loads((root/'providers.json').read_text())
+if len(sys.argv) > 1 and sys.argv[1] == 'bunkr':
+    script = root/'Bunkr/project.py'
+    os.execv(sys.executable, [sys.executable, str(script), *sys.argv[1:]])
 if len(sys.argv) != 2 or sys.argv[1] not in registry: raise SystemExit('Supply exactly one provider: ' + ', '.join(registry))
 key = sys.argv[1]
 config = registry[key]
 probe = os.environ.get('DECODER_PROBE') == '1'
-quick_probe = os.environ.get('INLINE_CODEC_QUICK') == '1'
-performance_probe = os.environ.get('INLINE_CODEC_PERFORMANCE') == '1'
-if (quick_probe or performance_probe) and not (probe and os.environ.get('SIMULATOR')):
-    raise SystemExit('Inline codec checks require DECODER_PROBE=1 and SIMULATOR=1')
-if quick_probe and performance_probe:
-    raise SystemExit('Select exactly one inline codec diagnostic')
 if probe:
     assert key == 'bunkr'
     config = dict(config, product='OriginalVideoProbe', name='Original video check', bundleId='com.visar.OriginalVideoProbe.paid', build='1')
 product = config['product']
-local_app = not bool(config.get('native'))
-app_sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
-if local_app:
-    online_sources = {'Tango.swift','TangoList.swift','TangoPCLogin.swift','TangoRenewalLifetime.swift',
-                      'TangoNetworkChecks.swift','Vault.swift','VaultList.swift'}
-    app_sources = [p for p in app_sources if Path(p).name not in online_sources and p != 'Shared/Login.swift']
-if not os.environ.get('SIMULATOR'):
-    app_sources = [p for p in app_sources if Path(p).name not in {'ZoomChecks.swift','ListNavigationChecks.swift','TangoNetworkChecks.swift'}]
-if probe:
-    check_source = 'InlinePerformanceProbe' if performance_probe else 'InlineQuickProbe' if quick_probe else 'OriginalVideoProbe'
-    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/'+check_source+'.swift']
 source_hash = hashlib.sha256(key.encode())
-source_files = [root/p for p in app_sources] + list((root/'Kit/Sources').rglob('*.swift'))
+source_files = list((root/'VideoApp').glob('*.swift')) + list((root/'Shared').glob('*.swift')) + list((root/'Kit/Sources').rglob('*.swift'))
 source_files += [root/'providers.json', root/'scripts/project.py', root/'scripts/build-provider.py', root/'Kit/Package.swift']
-if key == 'bunkr':
-    source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py',
-                     root/'ThirdParty/AetherCore/Package.swift', root/'ThirdParty/FFmpegBuild/Package.swift',
-                     root/'ThirdParty/LibDovi/Package.swift', root/'scripts/prepare-ffmpeg.py', root/'scripts/verify-ffmpeg.py']
-    source_files += list((root/'ThirdParty/AetherCore/Sources').rglob('*'))
-    source_files = [p for p in source_files if p.is_file()]
+if key == 'bunkr': source_files += [root/'ThirdParty/VLCKit/Package.swift', root/'scripts/prepare-vlckit.py']
 for source in sorted(source_files):
     source_hash.update(str(source.relative_to(root)).encode()+b'\0')
     source_hash.update(hashlib.sha256(source.read_bytes()).digest())
@@ -71,8 +52,7 @@ def phase(target, kind, paths):
 common = dict(CODE_SIGN_STYLE='Automatic', CURRENT_PROJECT_VERSION=config.get('build', '1'), MARKETING_VERSION='1.0',
     GENERATE_INFOPLIST_FILE='NO', PRODUCT_NAME='$(TARGET_NAME)', TARGETED_DEVICE_FAMILY='1', SWIFT_VERSION='5.0',
     IPHONEOS_DEPLOYMENT_TARGET='26.0', CLANG_ENABLE_MODULES='YES', SDKROOT='iphoneos', SUPPORTED_PLATFORMS='iphoneos iphonesimulator')
-conditions = (['LOCAL_VIDEO_PROVIDER'] if local_app else []) + (['ORIGINAL_CODEC_PROBE'] if probe else [])
-if conditions: common['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = ' '.join(conditions)
+if probe: common['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = 'ORIGINAL_CODEC_PROBE'
 # Tango's Google login arrives through the Tango Login Safari helper and a shared Keychain group.
 login = config.get('tangoLogin') is True
 entitlements = generated/'Login.entitlements'
@@ -115,27 +95,25 @@ for suffix in config.get('extensions', []):
                 remoteGlobalIDString=ident(name+'Target'), remoteInfo=name)
     dependencies.append(obj('dependency'+suffix, 'PBXTargetDependency', target=ident(name+'Target'), targetProxy=proxy))
 
-sources = app_sources
+sources = sorted(str(p.relative_to(root)) for p in (root/'VideoApp').glob('*.swift')) + ['Shared/Login.swift']
+if key == 'bunkr':
+    overrides = {p.name: str(p.relative_to(root)) for p in (root/'Bunkr').glob('*.swift')}
+    sources = [overrides.pop(Path(p).name, p) for p in sources] + sorted(overrides.values())
+if probe:
+    sources = ['VideoApp/'+name+'.swift' for name in ['ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/OriginalVideoProbe.swift']
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
 kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
-kit_names = ['KitCore', 'KitNet', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
-if not local_app: kit_names += ['KitHTML']
-if probe: kit_names = ['KitCore']
-elif os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
+kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
+if os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name) for name in kit_names]
 packages = [kit]
 if key == 'bunkr':
     decoder_package = obj('DecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/VLCKit', generated))
     packages.append(decoder_package)
     kit_products.append(obj('DecoderProduct', 'XCSwiftPackageProductDependency', productName='VLCKit', package=decoder_package))
-    direct_package = obj('DirectDecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/AetherCore', generated))
-    packages.append(direct_package)
-    # Both libraries export FFmpeg symbols. The new ABI must precede VLC's older
-    # copy; verify-ffmpeg.py rejects any mixed binding in the linked executable.
-    kit_products.insert(0, obj('DirectDecoderProduct', 'XCSwiftPackageProductDependency', productName='AetherEngine', package=direct_package))
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
                  files=[obj('KitBuild'+ref, 'PBXBuildFile', productRef=ref) for ref in kit_products], runOnlyForDeploymentPostprocessing=0)
-resources = ['ThirdParty/VLCKit/LICENSE.txt', 'ThirdParty/OriginalDecoderLicenses'] if key == 'bunkr' else []
+resources = ['ThirdParty/VLCKit/LICENSE.txt'] if key == 'bunkr' else []
 phases = [phase(product, 'Sources', sources), phase(product, 'Resources', resources), frameworks]
 if embedded:
     phases.append(obj('Embed', 'PBXCopyFilesBuildPhase', buildActionMask=2147483647, dstPath='', dstSubfolderSpec=13,
@@ -171,12 +149,6 @@ else:
     info['LocalProvider'] = key
     info['LocalMediaKind'] = config.get('mediaKind', 'hls')
 if probe: info.pop('UIApplicationSceneManifest', None)
-if quick_probe or performance_probe:
-    info['InlineCodecPerformanceProbe' if performance_probe else 'InlineCodecQuickProbe'] = True
-    info['CFBundleURLTypes'] = [dict(CFBundleURLName='Inline decoder check', CFBundleURLSchemes=['inline-codec-probe'])]
-    info['UIApplicationSceneManifest'] = dict(UIApplicationSupportsMultipleScenes=False,
-        UISceneConfigurations={'UIWindowSceneSessionRoleApplication': [dict(UISceneConfigurationName='Inline decoder check',
-        UISceneDelegateClassName='$(PRODUCT_MODULE_NAME).InlineProbeScene')]})
 (generated/'Info.plist').write_bytes(plistlib.dumps(info))
 product_group = obj('Products', 'PBXGroup', children=products, name='Products', sourceTree='<group>')
 group = obj('Main', 'PBXGroup', children=files+[product_group], sourceTree='<group>')

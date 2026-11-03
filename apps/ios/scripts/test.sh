@@ -7,9 +7,9 @@ test_dir=$(mktemp -d "${TMPDIR:-/tmp}/video-tests.XXXXXX")
 trap 'rm -rf "$test_dir"' EXIT
 xcrun swiftc -j 2 -parse-as-library Tests/RegistryTests.swift -o "$test_dir/registry-tests"
 "$test_dir/registry-tests"
-xcrun swiftc -j 2 -parse-as-library VideoApp/LocalLibrary.swift Tests/LocalLibraryTests.swift -o "$test_dir/local-library-tests"
+xcrun swiftc -j 2 -parse-as-library Bunkr/LocalLibrary.swift Tests/LocalLibraryTests.swift -o "$test_dir/local-library-tests"
 "$test_dir/local-library-tests"
-xcrun swiftc -j 2 -parse-as-library VideoApp/LocalLibrary.swift Tests/LocalRenameClientTests.swift -o "$test_dir/local-rename-tests"
+xcrun swiftc -j 2 -parse-as-library Bunkr/LocalLibrary.swift Tests/LocalRenameClientTests.swift -o "$test_dir/local-rename-tests"
 "$test_dir/local-rename-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/ViewerPlaybackPolicy.swift Tests/ViewerPlaybackPolicyTests.swift -o "$test_dir/viewer-playback-tests"
 "$test_dir/viewer-playback-tests"

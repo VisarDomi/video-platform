@@ -48,33 +48,6 @@ struct ListCache: Codable {
     var videos: [ServerVideo]
 }
 
-struct LocalProgressMigration: Equatable, Sendable {
-    var filename: String
-    var fileId: String
-}
-
-// Old caches keyed progress by filename. Only those legacy rows need matching;
-// already identified libraries must not pay a full-library scan for every row.
-func localProgressMigrations(from current: [ServerVideo], to next: [ServerVideo]) -> [LocalProgressMigration] {
-    // HLS recording providers have no file IDs; avoid allocating an index they
-    // will never consult. This is the usual path for SC, FC2 and Tango local.
-    guard next.contains(where: { $0.fileId != nil }) else { return [] }
-    struct Identity: Hashable {
-        var filename: String
-        var size: Double
-        var duration: Double
-        init(_ video: ServerVideo) {
-            filename = video.filename; size = video.size; duration = video.duration
-        }
-    }
-    let legacy = Set(current.lazy.filter { $0.fileId == nil }.map(Identity.init))
-    guard !legacy.isEmpty else { return [] }
-    return next.compactMap { video in
-        guard let id = video.fileId, legacy.contains(Identity(video)) else { return nil }
-        return LocalProgressMigration(filename: video.filename, fileId: id)
-    }
-}
-
 struct ChangeSet: Decodable {
     struct Removed: Decodable { var filename: String; var type: String }
     struct Change: Decodable { var revision: Int; var item: ServerVideo?; var removed: Removed? }
