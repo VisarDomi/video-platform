@@ -163,6 +163,20 @@ class DashboardDataTests(unittest.TestCase):
         data=self.read(worker_step={"disposition":"monthly_quota_wait","reason":"old wait"})
         self.assertEqual(data["campaign"]["state"],"running")
 
+    def test_missing_idle_worker_telemetry_is_unknown_until_the_next_successful_read(self):
+        self.db.execute("UPDATE recordings SET state='metadata_ready' WHERE state='uploading'")
+        self.db.execute("UPDATE upload_attempts SET status='submitted'")
+        self.db.commit()
+        before = hashlib.sha256(self.path.read_bytes()).digest()
+        self.assertEqual(self.read(worker_step=None)['campaign']['state'], 'status_unavailable')
+        data = self.read(worker_step={'disposition':'monthly_quota_wait', 'reason':''})
+        self.assertEqual(data['campaign']['state'], 'monthly_quota_wait')
+        self.assertEqual(data['health']['attention'], 0)
+        self.assertEqual(hashlib.sha256(self.path.read_bytes()).digest(), before)
+        self.db.execute("UPDATE campaign_control SET state='paused'")
+        self.db.commit()
+        self.assertEqual(self.read(worker_step=None)['campaign']['state'], 'paused')
+
     def test_active_unit_without_a_fresh_heartbeat_is_not_reported_as_running_normally(self):
         self.db.execute("UPDATE worker_heartbeat SET updated_at='2026-10-31T23:00:00Z'")
         self.db.commit()

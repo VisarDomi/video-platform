@@ -59,6 +59,12 @@ An unavailable data source returns the previous snapshot as stale, never fresh
 zero counts. There is no sampler, scheduled task, persistent metrics database or
 new provider/authentication session.
 
+An idle worker's current wait comes from its bounded journal read. If that read
+is temporarily unavailable, the dashboard says status unavailable while retaining
+the independently measured budget, queue and heartbeat. It does not infer running
+activity from campaign intent; the next successful snapshot restores the wait.
+Manual pauses and stopped services still take precedence.
+
 Install with the repository's normal unit sync, then enable only this service:
 
 ```sh

@@ -314,6 +314,10 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         state = "worker_stopped"
     elif control["state"] == "paused":
         state = "cooldown" if control["resume_at"] else "finishing" if active else "paused"
+    elif not active and worker_step is None:
+        # A bounded journal lookup can fail during boot or disk contention.
+        # Running intent plus a heartbeat cannot establish the current wait.
+        state = "status_unavailable"
     elif not active and worker_step and worker_step["disposition"] in ("monthly_quota_wait", "resource_wait"):
         state = worker_step["disposition"]
     heartbeat = stamp(health["worker_heartbeat"])
