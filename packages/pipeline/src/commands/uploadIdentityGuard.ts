@@ -40,7 +40,7 @@ export async function guardUploadIdentity(
         const retained=artifact ? await access(artifact.path).then(()=>true,(error:NodeJS.ErrnoException)=>error.code!=='ENOENT') : false;
         return { kind: retained ? "verified_retained" : "verified_cleaned", remoteId: identity.remoteId, remoteUrl: identity.remoteUrl };
     }
-    // Refuse duplicate work without shortening the seven-day confirmation window.
+    // Refuse duplicate work without shortening the stored daily verification schedule or seven-day retry gate.
     const scheduled = database.hasPendingConfirmation(recording.id);
     return {
         kind: "unverified_refused",

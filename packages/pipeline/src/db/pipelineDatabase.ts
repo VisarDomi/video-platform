@@ -32,7 +32,7 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -48,6 +48,7 @@ const LEGACY_PART_CHECKS: ReadonlyArray<readonly [string, string]> = [
     ["CHECK (artifact_part IN ('full', 'max1080p', 'nonmax1080p'))", `CHECK (${partCheck("artifact_part")})`],
     ["CHECK (part IN ('max1080p', 'nonmax1080p'))", `CHECK (${queuedPartCheck("part")})`],
 ];
+export const UPLOAD_CHECK_MILLISECONDS = 24 * 60 * 60_000;
 export const UPLOAD_RETRY_MILLISECONDS = 7 * 24 * 60 * 60_000;
 
 interface RecordingRow {
@@ -672,6 +673,7 @@ export class PipelineDatabase {
         ) STRICT`);
         if (version.version < 14) retireUploadDestination(this.database);
         this.initializeRetention(version.version < 15 || isNewDatabase);
+        this.initializeDailyUploadChecks(version.version < 16 || isNewDatabase);
         // Older code stored metadata word rejections as a visibility warning,
         // which also blocked their retry. Split them out once; learn the words.
         for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
@@ -738,13 +740,32 @@ export class PipelineDatabase {
                         (SELECT 1 FROM remote_uploads u WHERE u.attempt_id=a.id))
                     AND NOT EXISTS (SELECT 1 FROM provider_removals x WHERE x.recording_id=r.id)`);
             this.database.exec(`UPDATE upload_confirmations SET confirm_after =
-                (SELECT verify_after FROM upload_artifact_receipts x WHERE x.attempt_id=upload_confirmations.attempt_id)
+                (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', accepted_at, '+1 day') FROM upload_artifact_receipts x WHERE x.attempt_id=upload_confirmations.attempt_id)
                 WHERE status='pending' AND attempt_id IN
                     (SELECT attempt_id FROM upload_artifact_receipts WHERE accepted_at IS NOT NULL AND retention_hold IS NULL);
                 UPDATE upload_attempts SET retry_not_before =
                     (SELECT verify_after FROM upload_artifact_receipts x WHERE x.attempt_id=upload_attempts.id)
                 WHERE id IN (SELECT attempt_id FROM upload_artifact_receipts WHERE accepted_at IS NOT NULL);
                 UPDATE schema_version SET version=15`);
+        });
+    }
+
+    private initializeDailyUploadChecks(migrate: boolean): void {
+        if (!migrate) return;
+        this.transaction(() => {
+            // The immutable verify_after column is the seven-day retry gate,
+            // independent of the mutable next-check schedule. Pull old weekly
+            // checks forward once; reopening must never reset daily backoff.
+            this.database.exec(`UPDATE upload_confirmations AS c SET confirm_after = MIN(confirm_after,
+                (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MAX(x.accepted_at, COALESCE(c.checked_at,x.accepted_at)), '+1 day')
+                    FROM upload_artifact_receipts x WHERE x.attempt_id=c.attempt_id))
+                WHERE c.status='pending' AND c.attempt_id IN (
+                    SELECT x.attempt_id FROM upload_artifact_receipts x JOIN upload_attempts a ON a.id=x.attempt_id
+                    WHERE x.accepted_at IS NOT NULL
+                        AND a.status IN ('uncertain','accepted')
+                        AND NOT EXISTS (SELECT 1 FROM provider_removals b WHERE b.recording_id=x.recording_id)
+                        AND NOT EXISTS (SELECT 1 FROM remote_uploads u WHERE u.attempt_id=x.attempt_id));
+                UPDATE schema_version SET version=16`);
         });
     }
 
@@ -830,10 +851,10 @@ export class PipelineDatabase {
         });
     }
 
-    acceptedUpload(attemptId: string): { acceptedAt: string; verifyAfter: string } | null {
-        const row=this.database.prepare(`SELECT accepted_at AS acceptedAt, verify_after AS verifyAfter
+    acceptedUpload(attemptId: string): { acceptedAt: string; retryAfter: string } | null {
+        const row=this.database.prepare(`SELECT accepted_at AS acceptedAt, verify_after AS retryAfter
             FROM upload_artifact_receipts WHERE attempt_id=? AND accepted_at IS NOT NULL AND retention_hold IS NULL`)
-            .get(attemptId) as {acceptedAt:string; verifyAfter:string} | undefined;
+            .get(attemptId) as {acceptedAt:string; retryAfter:string} | undefined;
         return row ?? null;
     }
 
@@ -2428,7 +2449,7 @@ export class PipelineDatabase {
                             attempt_id, recording_id, confirm_after, status, checked_at
                         ) VALUES (?, ?, ?, 'pending', NULL)
                     `).run(attempt.id, attempt.recording_id,
-                        (this.acceptedUpload(attempt.id)?.verifyAfter ?? new Date(now.getTime() + 24 * 60 * 60_000).toISOString()));
+                        new Date(Date.parse(this.acceptedUpload(attempt.id)?.acceptedAt ?? now.toISOString()) + UPLOAD_CHECK_MILLISECONDS).toISOString());
                     this.updateStateInTransaction(attempt.recording_id, "uploading", "upload_uncertain",
                         "interrupted after upload may have started; acceptance requires confirmation", timestamp);
                 } else {
@@ -2514,8 +2535,8 @@ export class PipelineDatabase {
                 this.database.prepare(`UPDATE upload_artifact_receipts SET accepted_at=COALESCE(accepted_at,?),verify_after=COALESCE(verify_after,?) WHERE attempt_id=?`)
                     .run(acceptedAt,verifyAfter,attemptId);
                 this.database.prepare(`UPDATE upload_confirmations SET confirm_after=? WHERE attempt_id=? AND status='pending'`)
-                    .run(this.acceptedUpload(attemptId)?.verifyAfter ?? verifyAfter,attemptId);
-                this.database.prepare(`UPDATE upload_attempts SET retry_not_before=? WHERE id=?`).run(this.acceptedUpload(attemptId)?.verifyAfter ?? verifyAfter,attemptId);
+                    .run(new Date(Date.parse(this.acceptedUpload(attemptId)?.acceptedAt ?? acceptedAt) + UPLOAD_CHECK_MILLISECONDS).toISOString(),attemptId);
+                this.database.prepare(`UPDATE upload_attempts SET retry_not_before=? WHERE id=?`).run(this.acceptedUpload(attemptId)?.retryAfter ?? verifyAfter,attemptId);
                 this.database.prepare(`UPDATE conversion_retries SET status='completed' WHERE recording_id=? AND status='queued'`)
                     .run(recordingId);
             }
@@ -2786,7 +2807,7 @@ export class PipelineDatabase {
     // never sends bytes; it restores a pending check of the already known ID.
     recoverAcceptedVerifications(now = new Date()): number {
         return this.transaction(() => {
-            const rows = this.database.prepare(`SELECT a.id, a.recording_id, COALESCE(x.verify_after, strftime('%Y-%m-%dT%H:%M:%fZ', a.completed_at, '+7 days')) AS deadline FROM upload_attempts a
+            const rows = this.database.prepare(`SELECT a.id, a.recording_id, strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(x.accepted_at,a.completed_at), '+1 day') AS deadline FROM upload_attempts a
                 LEFT JOIN upload_artifact_receipts x ON x.attempt_id=a.id
                 JOIN recordings r ON r.id = a.recording_id JOIN artifacts p ON p.recording_id = r.id
                 WHERE r.state = 'uploaded' AND a.status = 'accepted' AND a.artifact_part = p.part
@@ -2896,10 +2917,9 @@ export class PipelineDatabase {
         const rows = this.database.prepare(`
             SELECT c.*, a.recording_id, a.provider
             FROM upload_confirmations c JOIN upload_attempts a ON a.id = c.attempt_id
-            LEFT JOIN upload_artifact_receipts x ON x.attempt_id=a.id
-            WHERE (x.verify_after IS NULL OR x.verify_after <= ?) AND c.status = 'pending' AND c.confirm_after <= ?
+            WHERE c.status = 'pending' AND c.confirm_after <= ?
             ORDER BY c.confirm_after, c.attempt_id
-        `).all(now.toISOString(), now.toISOString()) as unknown as Array<{
+        `).all(now.toISOString()) as unknown as Array<{
             attempt_id: string;
             provider: string;
             recording_id: string;
@@ -3247,7 +3267,7 @@ export class PipelineDatabase {
         }>).map((row) => ({ provider: row.provider, remoteId: row.remote_id, status: row.status }));
     }
 
-    postponeConfirmation(attemptId: string, reason: string, now = new Date(), delayMilliseconds = 24 * 60 * 60_000): void {
+    postponeConfirmation(attemptId: string, reason: string, now = new Date(), delayMilliseconds = UPLOAD_CHECK_MILLISECONDS): void {
         const update = this.database.prepare(`UPDATE upload_confirmations SET confirm_after = ?, checked_at = ?
             WHERE attempt_id = ? AND status = 'pending'`)
             .run(new Date(now.getTime() + delayMilliseconds).toISOString(), now.toISOString(), attemptId);
