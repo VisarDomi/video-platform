@@ -19,3 +19,13 @@ export function hasFullHdPlayback(renditions: readonly PlaybackRendition[]): boo
     // slightly. This tolerance is far below the gap between 720p and 1080p.
     return renditions.some(({ width, height }) => Math.min(width, height) >= 1080 * 0.995);
 }
+
+// The player's qualities: video_url, video_alt_url, video_alt_url2… each with a
+// `<key>_text` label ("720p HD", "1080p FHD"). Porntrex scales by height, so a
+// portrait "720p" is 406x720; only the probe says what a tier really holds.
+export function playerTiers(html: string): Array<{ label: string; url: string }> {
+    const fields = new Map([...html.matchAll(/\b(video_(?:alt_)?url\d*(?:_text)?)\s*:\s*'([^']*)'/g)].map((match) => [match[1], match[2]]));
+    return [...fields].filter(([key, value]) => !key.endsWith("_text") && value.includes("/get_file/"))
+        .map(([key, url]) => ({ label: fields.get(`${key}_text`) ?? "", url }))
+        .sort((left, right) => Number(right.label.match(/(\d{3,4})p/)?.[1] ?? 0) - Number(left.label.match(/(\d{3,4})p/)?.[1] ?? 0));
+}

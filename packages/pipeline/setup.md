@@ -500,7 +500,8 @@ submitted, so a failure before that click is a plain failure with no weekly
 hold; after it, the pipeline tries for about a minute to read the new video's
 ID from My Videos (otherwise reconciliation finds it by its title suffix).
 Verification opens `/edit-video/<id>/`, follows the published `/video/<id>/`
-link and probes each MP4 download link, highest label first, for a Full-HD
+link and probes the actual player MP4 sources, highest label first, with download
+links as fallback, for a Full-HD
 version (at least 1080 on its short side). A video still processing is checked again after 24 hours.
 An advertised Full-HD link whose playback probe fails is recorded as unavailable and
 also retried after 24 hours, even when a lower tier works; it is never verified from

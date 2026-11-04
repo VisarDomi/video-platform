@@ -226,7 +226,7 @@ test("multipart chunk failures are captured before the submit callback can respo
     } finally { await page.close(); await waiting.catch(() => {}); }
 });
 
-test("an unavailable advertised Full-HD tier stays unverified and retries sooner even if 720p works", async t => {
+test("an unavailable advertised Full-HD tier stays unverified for rechecking even if 720p works", async t => {
     const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true });
     t.after(() => browser.close());
     const page = await browser.newPage();
@@ -320,4 +320,19 @@ test('a 404 edit page checks processing rows beyond page one; a truncated list i
  const uploader=new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused',email:'fake',password:'fake'});
  assert.equal((await uploader.probeUploadStatus(page,'31')).processing,true);
  broken=true;await assert.rejects(uploader.probeUploadStatus(page,'31'),/incomplete/);
+});
+
+test('verification uses the real Full-HD player stream when download links fail', async t => {
+    const browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true});
+    t.after(()=>browser.close());const page=await browser.newPage();
+    await page.route('https://www.porntrex.com/**',route=>route.fulfill({contentType:'text/html',body:
+        route.request().url().includes('/edit-video/')?'<a href="https://www.porntrex.com/video/55/fixture">Published</a>':
+        `<script>window.params={video_url:'https://www.porntrex.com/get_file/high.mp4?ov=1',video_url_text:'1080p FHD'};</script><a href="/get_file/high.mp4?download=true">MP4 1080p</a>`}));
+    const uploader=new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused'}),probed=[];
+    const probe=async(_command,args)=>{const url=args.at(-1);probed.push(url);if(url.includes('download=true'))throw Object.assign(new Error('download endpoint failed'),{stderr:'Server returned 404 Not Found'});return{stdout:JSON.stringify({streams:[{width:1920,height:1080}]})};};
+    const result=await uploader.probeUploadStatus(page,'55',probe);
+    assert.equal(result.outcome,'online');assert.equal(result.renditions[0].height,1080);
+    assert.deepEqual(probed,['https://www.porntrex.com/get_file/high.mp4?ov=1']);
+    const lower=await uploader.probeUploadStatus(page,'55',async()=>({stdout:JSON.stringify({streams:[{width:1280,height:720}]})}));
+    assert.equal(lower.outcome,'not_ready','a player quality label cannot establish Full-HD dimensions');
 });

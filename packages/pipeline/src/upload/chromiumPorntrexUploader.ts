@@ -8,7 +8,7 @@ import { HumanActionRequiredError, type ChromiumUploaderConfig } from "./browser
 import { submitPasswordLogin } from "./passwordLogin.js";
 import { hasDiagnosticUploadIdentity } from "../metadata/composeUploadMetadata.js";
 import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
-import { hasFullHdPlayback } from "./playbackQuality.js";
+import { hasFullHdPlayback, playerTiers } from "./playbackQuality.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
 import { parsePorntrexEditPage, porntrexUploadsPagePath, type StoredPorntrexMetadata } from "./porntrexMetadata.js";
 import { preparePorntrexTransfer, readPorntrexTransfer } from "./porntrexTransfer.js";
@@ -44,7 +44,7 @@ export async function passPorntrexAgeGate(page: Page): Promise<void> {
     await overlay.waitFor({ state: "hidden", timeout: 10_000 });
 }
 
-// Every MP4 download link, highest labelled tier first. The label is only an
+// Every player/download candidate, highest labelled tier first. The label is only an
 // ordering hint (portrait videos may be labelled by their long side); the
 // probed stream's pixels decide Full HD.
 export function orderPlaybackCandidates(rows: ReadonlyArray<{ url: string; label: string }>): Array<{ url: string; label: string }> {
@@ -448,9 +448,15 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
                 reason: 'Porntrex has no published video link yet', processing: true, stored };
         }
         await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const candidates = orderPlaybackCandidates(await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
-            url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
-        }))));
+        // Download endpoints can 404/time out while the actual player stream
+        // works. Probe those source URLs first, retaining downloads as fallback;
+        // labels still only order candidates, never establish playable quality.
+        const candidates = orderPlaybackCandidates([
+            ...playerTiers(await page.content()),
+            ...await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
+                url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
+            }))),
+        ]);
         const renditions: Array<{ width: number; height: number; label: string }> = [];
         const unavailableRenditions: Array<{ label: string; reason: string }> = [];
         for (const candidate of candidates) {
