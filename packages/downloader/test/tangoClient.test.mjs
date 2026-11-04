@@ -58,3 +58,29 @@ test('malformed Tango lookup is unavailable, not an offline snapshot', async (t)
     mockFetch(t, async () => Response.json({ error: 'unavailable' }));
     assert.equal(await client().getLiveStreamsByAccountIds(['configured']), null);
 });
+
+test('a confirmed empty Tango result may omit records and still proves no accounts are live', async (t) => {
+    const api = client();
+    mockFetch(t, async () => Response.json({ records: [{ stream: {
+        encryptedAccountId: 'configured', id: 'live', masterListUrl: 'https://example.test/master.m3u8',
+        status: 'LIVING', streamKind: 'PUBLIC',
+    } }] }));
+    assert.equal((await api.getLiveStreamsByAccountIds(['configured'])).live.size, 1);
+    mockFetch(t, async () => Response.json({ code: 'OK', totalCount: 0, requestId: 'empty-result' }));
+    const empty = await api.getLiveStreamsByAccountIds(['configured']);
+    assert.notEqual(empty, null);
+    assert.equal(empty.live.size, 0);
+    assert.equal(empty.rejected.size, 0);
+});
+
+test('missing records prove absence only with the explicit successful zero-count response', async (t) => {
+    const api = client();
+    for (const response of [
+        { code: 'ERROR', totalCount: 0 }, { code: 'OK', totalCount: 1 },
+        { totalCount: 0 }, { code: 'OK' }, { code: 'OK', totalCount: 0, records: null },
+        { code: 'OK', totalCount: '0' },
+    ]) {
+        mockFetch(t, async () => Response.json(response));
+        assert.equal(await api.getLiveStreamsByAccountIds(['configured']), null);
+    }
+});

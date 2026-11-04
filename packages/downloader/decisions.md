@@ -149,7 +149,11 @@ transport failure. Shared snapshot reconciliation owns the recording lifecycle:
   `statusChangedAt` from the cam detail API, re-read once a minute while a
   streamer stays live.
 - **Tango:** bulk account lookup with `streamId`, restricted to `tango.txt`,
-  once a second. File replacements reload targets (the directory is watched),
+  once a second. A successful `code: "OK", totalCount: 0` result may omit
+  `records`; it is an authoritative empty snapshot, so cached live entries
+  clear and existing offline confirmation rules apply. Other absent/malformed
+  records or unsuccessful lookups stay inconclusive. File replacements reload
+  targets (the directory is watched),
   and a new recording identity replaces even a session with an empty or missing
   folder. A live-playlist HTTP 404 ends the session; authentication, network,
   and server failures remain retryable, polled again after 1 second

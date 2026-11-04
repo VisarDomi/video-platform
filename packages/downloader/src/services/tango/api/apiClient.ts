@@ -119,11 +119,15 @@ export class ApiClient implements IStreamProvider {
                 },
             );
 
-            if (!response || !Array.isArray(response.records)) return null;
+            // Tango's successful empty protobuf JSON omits the repeated field.
+            // Only its explicit OK/zero result establishes absence; malformed
+            // payloads and failed lookups must never end an existing capture.
+            const records = Array.isArray(response?.records) ? response.records
+                : response?.code === "OK" && response.totalCount === 0 && response.records === undefined ? [] : null;
+            if (records === null) return null;
 
             const live = new Map<string, TangoLiveStream>();
             const rejected = new Map<string, RejectedStreamInfo>();
-            const records = response.records;
             const requestedIds = new Set(accountIds);
 
             for (const record of records) {
