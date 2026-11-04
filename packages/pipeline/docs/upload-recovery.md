@@ -36,7 +36,9 @@ retryable transfers. Every transmitted byte stays charged.
   Recovered acceptance preserves both clocks. Schema16 atomically repairs existing
   weekly confirmation dates and leaves later daily backoff intact on reopen.
 - Require a published slug URL and actual Full-HD playback dimensions (1920×1080,
-  or 1440×1080 for 4:3, with the existing tolerance). Labels alone are insufficient.
+  or 1440×1080 for 4:3, with the existing tolerance). Probe player-source URLs
+  first, with download endpoints as fallback: a download URL can fail while its
+  player stream works. Labels alone are insufficient.
 - A never-verified accepted submission definitively absent, marked processing
   failure, or still processing without a public copy after its week is queued for
   conversion/upload from the unchanged original. Retry only the affected part or
