@@ -1,5 +1,5 @@
 import { cleanupAcceptedConversions } from "./acceptedConversions.js";
-import { UPLOAD_RETRY_MILLISECONDS } from "../db/pipelineDatabase.js";
+import { UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import { assessFinalArtifact, policyForUploadProvider } from "shared";
 import { probeDuration } from "descriptor";
 import type { PipelineConfig } from "../config.js";
@@ -168,7 +168,7 @@ export async function uploadOne(
             transmittedBytes: receipt.transmittedBytes,
             conversionCleanup,
             confirmAfter: database.pendingConfirmationDeadline(recordingId) ?? new Date(
-                new Date(receipt.metadataSubmittedAt).getTime() + UPLOAD_RETRY_MILLISECONDS,
+                new Date(receipt.metadataSubmittedAt).getTime() + UPLOAD_CHECK_MILLISECONDS,
             ).toISOString(),
         };
     } finally {

@@ -49,9 +49,10 @@ async function submit(f, id='123') {
 }
 const browser = probe => ({withAuthenticatedPage:async run=>run({}),probeUploadStatus:probe});
 
-test('acceptance starts a seven-day window; cleanup needs durable matching bytes and survives reopen',async t=>{
+test('acceptance starts daily checks and a seven-day retry window; cleanup needs durable matching bytes and survives reopen',async t=>{
  const f=await fixture(t);await submit(f);
- assert.deepEqual(f.db.dueUploadConfirmations(day(6)),[]);
+ assert.deepEqual(f.db.dueUploadConfirmations(day(.99)),[]);
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
  assert.equal(f.db.dueUploadConfirmations(day(7)).length,1);
  const { cleanupAcceptedConversions } = await import('../dist/commands/acceptedConversions.js');
  await cleanupAcceptedConversions(f.db,f.config,start);
@@ -68,7 +69,8 @@ test('never-verified missing copy rebuilds after seven days without erasing its 
  const f=await fixture(t);await submit(f);
  let calls=0;
  const probe=browser(async()=>{calls++;return {outcome:'missing',reason:'confirmed absent',remoteUrl:null};});
- await reconcileDueUploads(f.config,day(6),probe);assert.equal(calls,0);
+ await reconcileDueUploads(f.config,day(6),probe);assert.equal(calls,1);
+ assert.equal(f.db.get(f.r.id).state,'upload_uncertain');
  await reconcileDueUploads(f.config,day(7),probe);
  assert.equal(f.db.get(f.r.id).state,'server_ready');
  assert.equal(f.db.getRetryPart(f.r.id),'full');
@@ -129,8 +131,9 @@ test('network failure is inconclusive; confirmed processing after a week retries
  const reservation=f.db.reserveUpload(f.r.id,20,day(8));
  const attempt=f.db.beginUpload(f.r.id,reservation,day(8));
  f.db.finishUploadAttempt(attempt,{status:'uncertain',remoteId:'124',transmittedBytes:10,acceptedAt:day(8),confirmation:{confirmAfter:day(15)}},day(8));
- assert.equal(f.db.dueUploadConfirmations(day(14)).length,0);
- assert.equal(f.db.dueUploadConfirmations(day(15)).length,1);
+ assert.equal(f.db.dueUploadConfirmations(day(8.99)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(9)).length,1);
+ assert.equal(f.db.acceptedUpload(attempt).retryAfter,day(15).toISOString());
  assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM upload_attempts').get().n,2);
  assert.equal(f.db.uploadUsage('2026-10').spent,20);
 });
@@ -145,12 +148,13 @@ test('a known provider removal still blocks both cleanup and retry',async t=>{
  assert.equal(f.db.get(f.r.id).state,'blocked');
 });
 
-test('legacy migration is idempotent, moves acceptance deadlines to a week, and retains rendition holds',async t=>{
+test('legacy migration is idempotent, starts daily checks, and retains rendition holds',async t=>{
  const f=await fixture(t);await submit(f);
  f.raw.exec('DELETE FROM upload_artifact_receipts;UPDATE schema_version SET version=14');
  f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?').run(day(1).toISOString());
  let migrated=new PipelineDatabase(f.config.databasePath);migrated.close();
- assert.equal(f.db.dueUploadConfirmations(day(6)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(.99)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
  assert.equal(f.db.dueUploadConfirmations(day(7)).length,1);
  const first=f.raw.prepare('SELECT * FROM upload_artifact_receipts').get();
  migrated=new PipelineDatabase(f.config.databasePath);migrated.close();
@@ -182,7 +186,8 @@ test('SIGKILL after durable acceptance resumes deletion and the original seven-d
  const {cleanupAcceptedConversions}=await import('../dist/commands/acceptedConversions.js');
  await cleanupAcceptedConversions(f.db,f.config,day(1));
  await assert.rejects(access(f.artifact.path),{code:'ENOENT'});
- assert.equal(f.db.dueUploadConfirmations(day(6)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(.99)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
  assert.equal(f.db.dueUploadConfirmations(day(7)).length,1);
  assert.equal(f.db.uploadUsage('2026-10').spent,10);
 });
@@ -257,4 +262,70 @@ test('stopping during a conversion hash cancels cleanup without a deletion or fa
  const large=path.join(f.root,'hash-cancel.mp4');await writeFile(large,Buffer.alloc(32*1024*1024,1));
  const during=new AbortController();const timer=setTimeout(()=>during.abort(),1);
  await assert.rejects(artifactSha256(large,during.signal),error=>error.name==='AbortError');clearTimeout(timer);
+});
+
+test('daily Full-HD verification completes before the seven-day retry deadline',async t=>{
+ const f=await fixture(t);await submit(f);let probes=0;
+ assert.equal(f.db.dueUploadConfirmations(day(.99)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
+ await reconcileDueUploads(f.config,day(1),browser(async()=>{probes++;return{outcome:'online',remoteUrl:'https://www.porntrex.com/video/123/title/'};}));
+ assert.equal(probes,1);assert.equal(f.db.listVerifiedUploadParts(f.r.id).length,1);
+ assert.equal(f.raw.prepare('SELECT verify_after FROM upload_artifact_receipts').get().verify_after,day(7).toISOString());
+ assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM conversion_retries').get().n,0);
+});
+
+test('daily absent-copy checks retain identity and never re-upload before the seventh day',async t=>{
+ const f=await fixture(t);await submit(f);let probes=0;
+ for(let n=1;n<7;n++){
+  await reconcileDueUploads(f.config,day(n),browser(async()=>{probes++;return{outcome:'missing',remoteUrl:null,reason:'Confirmed absent'};}));
+  assert.equal(probes,n);assert.equal(f.db.get(f.r.id).state,'upload_uncertain');
+  assert.equal(f.db.providerRemovals(f.r.id).length,0);
+  assert.equal(f.db.dueUploadConfirmations(day(n+.99)).length,0);
+  assert.equal(f.db.dueUploadConfirmations(day(n+1)).length,1);
+  assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM upload_attempts').get().n,1);
+ }
+ await reconcileDueUploads(f.config,day(7),browser(async()=>({outcome:'missing',remoteUrl:null,reason:'Still absent'})));
+ assert.equal(f.db.get(f.r.id).state,'server_ready');assert.equal(f.db.getRetryPart(f.r.id),'full');
+ assert.equal(f.db.uploadUsage('2026-10').spent,10);
+});
+
+test('daily schedule migration preserves retry receipts and never resets a later daily backoff on reopen',async t=>{
+ const f=await fixture(t);await submit(f);const receipt=f.raw.prepare('SELECT * FROM upload_artifact_receipts').get();
+ f.raw.exec('UPDATE schema_version SET version=15');
+ f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?,checked_at=NULL').run(day(7).toISOString());
+ f.raw.exec("UPDATE campaign_control SET state='paused'");
+ let reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
+ assert.deepEqual(f.raw.prepare('SELECT * FROM upload_artifact_receipts').get(),receipt);
+ assert.equal(f.db.getCampaignControl().state,'paused');
+ const attempt=f.raw.prepare('SELECT id FROM upload_attempts').get().id;
+ f.db.postponeConfirmation(attempt,'temporary network error',day(1));
+ reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(2)).length,1);
+});
+
+test('processing is checked daily and can rebuild only after its seven-day acceptance deadline',async t=>{
+ const f=await fixture(t);await submit(f);const processing=browser(async()=>({outcome:'not_ready',remoteUrl:null,processing:true,reason:'Still processing'}));
+ await reconcileDueUploads(f.config,day(1),processing);
+ assert.equal(f.db.dueUploadConfirmations(day(1.5)).length,0);
+ assert.equal(f.db.dueUploadConfirmations(day(2)).length,1);
+ await reconcileDueUploads(f.config,day(6),processing);
+ assert.equal(f.db.get(f.r.id).state,'upload_uncertain');
+ await reconcileDueUploads(f.config,day(7),processing);
+ assert.equal(f.db.get(f.r.id).state,'server_ready');
+});
+
+test('daily schedule migration rolls back atomically if its schema commit is interrupted',async t=>{
+ const f=await fixture(t);await submit(f);
+ f.raw.exec('UPDATE schema_version SET version=15');
+ f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?').run(day(7).toISOString());
+ f.raw.exec("CREATE TRIGGER interrupt_daily_schema BEFORE UPDATE ON schema_version WHEN NEW.version=16 BEGIN SELECT RAISE(ABORT,'migration interrupted'); END");
+ assert.throws(()=>new PipelineDatabase(f.config.databasePath),/migration interrupted/);
+ assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,15);
+ assert.equal(f.raw.prepare('SELECT confirm_after FROM upload_confirmations').get().confirm_after,day(7).toISOString());
+ f.raw.exec('DROP TRIGGER interrupt_daily_schema');
+ const reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
+ assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,16);
+ assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
 });

@@ -82,14 +82,14 @@ test("uploads report shows processing, then published with the stored metadata c
     await assert.rejects(porntrexUploadsReport(config, 25, new Date(), async () => ({ status: 302, location: "/", html: "" })), /not logged in/);
 });
 
-for (const waiting of [{ processing: true }, { retrySoon: true }]) test(`a video awaiting processing or available Full-HD bytes retries in two hours: ${JSON.stringify(waiting)}`, async t => {
+for (const waiting of [{ processing: true }, { retrySoon: true }]) test(`a video awaiting processing or available Full-HD bytes retries daily: ${JSON.stringify(waiting)}`, async t => {
     const { config, db, r, start } = await fixture(t);
     const due = new Date(start.getTime() + 864e5 + 1000);
     await reconcileDueUploads(config, due, { withAuthenticatedPage: async run => run({}),
         probeUploadStatus: async () => ({ outcome: "not_ready", remoteUrl: null, reason: "Porntrex Full-HD playback is not available", ...waiting }) });
     assert.equal(db.get(r.id).state, "upload_uncertain");
-    assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 - 1000)).length, 0);
-    assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 2 * 36e5 + 1000)).length, 1);
+    assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 24 * 36e5 - 1000)).length, 0);
+    assert.equal(db.dueUploadConfirmations(new Date(due.getTime() + 24 * 36e5 + 1000)).length, 1);
 });
 
 test("words Porntrex swapped are learned only from tight, word-for-word changes", () => {

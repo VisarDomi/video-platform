@@ -293,7 +293,7 @@ server follows the account first, but only if it is not already followed.
 ## 6. Pipeline ledger, campaign and verification
 
 - **Ledger.** `pipeline/pipeline.sqlite` is SQLite in WAL mode with
-  `synchronous=FULL`, schema 15. Each state change is one durable transition,
+  `synchronous=FULL`, schema 16. Each state change is one durable transition,
   appended to `state_events`. The `upload_*` lifecycle states are independent of destination names.
 
   ```text
@@ -348,15 +348,16 @@ server follows the account first, but only if it is not already followed.
   `bandwidth_events`, which nothing ever deletes.
 - **Acceptance releases conversion space; verification grants backup coverage.**
   A completed transfer plus successful metadata submission and a captured remote
-  ID commits an immutable artifact/source/metadata receipt and a seven-day
-  confirmation deadline. The managed worker (`VIDEO_PIPELINE_CLEANUP=1`) immediately
+  ID commits an immutable artifact/source/metadata receipt, a first daily
+  verification check and a seven-day retry deadline. The managed worker (`VIDEO_PIPELINE_CLEANUP=1`) immediately
   deletes only that exact generated MP4; chunks/progress or a submit click alone
   cannot authorize deletion. Hash/path guards and a durable deletion checkpoint
   make interrupted cleanup idempotent. Comparison evidence, unmatched files and
   legacy uncertain published renditions remain retained.
-- **Seven days after acceptance**, require Full-HD playback. A never-verified
+- **Check availability daily**, starting 24 hours after acceptance; verify as soon
+  as Full-HD playback passes. Only after seven days may a never-verified
   submission confirmed missing, failed processing or still processing without a
-  public copy is converted/uploaded again from its unchanged original. Retry only
+  public copy be converted/uploaded again from its unchanged original. Retry only
   the affected part/batch; a new acceptance starts a fresh seven-day window and
   deletes its new conversion. Other work continues while waiting. Network/auth
   failures are inconclusive. Known removal bans and previously verified copies
@@ -424,9 +425,9 @@ server follows the account first, but only if it is not already followed.
 - **Porntrex verification.** The edit page must show a published link, and
   ffprobe must find a `/get_file/` rendition at least 1080 tall on its short side
   (1920×1080, or 1440×1080 for a 4:3 upload; 0.5% tolerance); labels count for
-  nothing. Accepted submissions wait seven days, then confirmed non-public
-  processing/missing copies retry conversion. Inconclusive CDN/rendition checks
-  retry verification after 2 h or 24 h without sending media again.
+  nothing. Accepted submissions are checked daily and verify when ready. Only confirmed
+  non-public processing/missing copies at least seven days old retry conversion.
+  Inconclusive CDN/rendition checks retry daily without sending media again.
   Words Porntrex swapped are learned as rejected phrases. A transfer is abandoned
   after 10 minutes without byte/acknowledgement progress, a definitive rejection,
   or exhausted chunk retries. KVS chunks are capped at 4 MiB; a request idle for

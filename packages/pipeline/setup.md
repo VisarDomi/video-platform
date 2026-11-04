@@ -20,7 +20,7 @@ recording moves through convert → validate → describe → metadata → uploa
 online verification.
 
 - SQLite (`~/.local/share/video-services/pipeline/pipeline.sqlite`, override
-  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 15) holds recording state,
+  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 16) holds recording state,
   transition events, leases, artifact hashes, description evidence, provenance,
   metadata, upload reservations/attempts, transmitted-byte accounting and remote
   identity. Recording IDs are the source folder names (datetime + alias).
@@ -156,7 +156,7 @@ normal pipeline recording named `<first-recording prefix> joined-<hash>`. Its du
 input playlist has per-clip discontinuities and distinct init maps, under
 `artifacts/production-v6/joined-sources/`. Media entries link to unchanged
 originals, so the derived inputs retain no extra media bytes. The normal
-conversion, validation, descriptor, metadata, upload and seven-day verification
+conversion, validation, descriptor, metadata, upload and daily verification
 stages process the batch. Actual encoded duration is checked too: an unsent batch
 still too short returns for more footage rather than nesting joined batches.
 Preparing batches does not change queue priority: the campaign compares capture
@@ -214,7 +214,7 @@ campaign step is `resource_wait`, retried every 30 seconds, and the recording
 keeps its state. Started on a machine short of memory, the server is killed by
 the kernel and the recording would fail.
 
-### Accepted conversions and seven-day confirmation
+### Accepted conversions and daily confirmation
 
 The managed service sets `VIDEO_PIPELINE_CLEANUP=1`. This deletes **only matching
 pipeline conversion MP4s after durable provider acceptance**: the complete file
@@ -224,8 +224,8 @@ cannot authorize deletion. Comparison-trial evidence and legacy published
 rendition holds remain retained; unmatched older files are not guessed from names.
 
 Before transfer, `upload_artifact_receipts` snapshots each part's path, size,
-SHA-256, source identity and submitted metadata. Acceptance and its seven-day
-deadline commit before deletion. Cleanup checks staging containment, regular files,
+SHA-256, source identity and submitted metadata. Acceptance, the first daily
+check and the seven-day retry deadline commit before deletion. Cleanup checks staging containment, regular files,
 exact bytes and concurrent work, unlinks the MP4, flushes the directory and then
 checkpoints deletion. The startup pass keeps a live heartbeat; stopping the worker
 interrupts hashing without deleting or failing the unfinished receipt. A restart
@@ -233,14 +233,14 @@ retries interrupted cleanup, including the crash
 window after the provider ID was saved but before the uploader returned. Artifact
 ledger rows remain available after their file is gone.
 
-Seven days after acceptance, check the known remote ID and require the existing
-Full-HD playback verification. If ready, record verification; only full verified
-coverage of every required part/batch makes the original cleanup-eligible. If the
-never-verified submission is definitively absent, failed processing or still
-processing without a public copy, queue conversion/upload from the unchanged
-original again. Retry only that part/batch, retaining other parts. A successful
-retry deletes its new conversion and starts a **new** seven-day window. Other
-recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
+Check the known remote ID every 24 hours from acceptance and require the existing
+Full-HD playback verification. A ready copy verifies on that check, even during
+its first week; only full verified coverage of every required part/batch makes the original cleanup-eligible. If the
+never-verified submission is still definitively absent, failed processing or still
+processing without a public copy at least seven days after acceptance, queue
+conversion/upload from the unchanged original again. Retry only that part/batch, retaining other parts. A successful
+retry deletes its new conversion and starts a **new** seven-day retry window
+and daily checks. Other recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
 a published but uncertain rendition is retained for verification. Known provider
 removals and previously verified copies later removed remain restoration bans.
 All retry traffic counts against the existing monthly allowance.
@@ -253,7 +253,7 @@ changed source cannot be rebuilt: retain the pending check and source-unavailabl
 retry evidence, without blocking unrelated work. Restoring an unchanged source
 lets the next confirmation queue its retry. There is no destructive missing-source
 sweep. `VIDEO_PIPELINE_CLEANUP=0` can retain conversion files without disabling
-source-presence tracking or seven-day verification/retry.
+source-presence tracking or daily verification/seven-day retry.
 
 ### Move files to the Desktop for manual deletion
 
@@ -300,6 +300,13 @@ Tests use temporary folders and databases:
 `python3 -m unittest discover -s scripts -p 'test_video_cleanup.py'` from the
 repository root. Direct entry points are `scripts/move-conversions` and
 `scripts/move-recordings`; both support explicit root/database arguments for tests.
+
+The schema-16 migration brings existing pending acceptance checks forward to the
+next daily date using acceptance/last-check timestamps. It commits atomically,
+preserves immutable retry deadlines and every receipt/removal ban, and does not
+reset a later daily backoff when reopened. The existing `verify_after` receipt
+column stores the seven-day retry gate; `upload_confirmations.confirm_after` is
+the next availability check. There is no extra timer or recurring task.
 
 ## Durable campaign controls
 
@@ -429,7 +436,7 @@ provider's duration/size limits, contains no learned rejected phrase, has no
 copy in a synchronized provider inventory, fits the monthly budget, and (for a
 retry) is not found by an exact lookup. A submitted upload is never accepted on
 submit alone: durable complete-file/metadata acceptance and a captured ID release
-only the matching conversion; playback is verified seven days after acceptance. Recovery rules are in `docs/upload-recovery.md`.
+only the matching conversion; playback is checked daily; seven days is only the re-upload gate. Recovery rules are in `docs/upload-recovery.md`.
 
 ### Porntrex
 
@@ -494,9 +501,9 @@ hold; after it, the pipeline tries for about a minute to read the new video's
 ID from My Videos (otherwise reconciliation finds it by its title suffix).
 Verification opens `/edit-video/<id>/`, follows the published `/video/<id>/`
 link and probes each MP4 download link, highest label first, for a Full-HD
-version (at least 1080 on its short side). A video still processing is checked again after two hours.
+version (at least 1080 on its short side). A video still processing is checked again after 24 hours.
 An advertised Full-HD link whose playback probe fails is recorded as unavailable and
-also retried after two hours, even when a lower tier works; it is never verified from
+also retried after 24 hours, even when a lower tier works; it is never verified from
 the label alone or reported as having no Full-HD tier. Words
 Porntrex silently replaced in the stored title/description are learned as
 rejected phrases.

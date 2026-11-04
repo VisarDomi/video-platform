@@ -14,14 +14,14 @@ after its start stored at creation. While the file is in flight the persisted ph
 `upload_artifact_receipts` snapshots each attempt's exact generated path, size,
 SHA-256, source fingerprint and submitted metadata before transfer. Complete file
 acceptance plus a captured remote ID after metadata submission commits `accepted_at`
-and `verify_after` (seven days later); `upload_uncertain` still means playback has
+and `verify_after` (the seven-day retry gate), plus a first check 24 hours later; `upload_uncertain` still means playback has
 not yet verified. `VIDEO_PIPELINE_CLEANUP=1` immediately unlinks only the matching
 MP4, flushes its directory, then checkpoints `deleted_at`. Missing/already-deleted
 files are idempotent; mismatched bytes, symlinks, active work, comparison evidence,
 known removals and legacy uncertain rendition holds do not authorize deletion.
 
 Acceptance commits before unlink. A crash after capturing the remote ID restores
-the same original deadline, bills transferred bytes, and resumes cleanup. A crash
+the same original retry deadline and daily check schedule, bills transferred bytes, and resumes cleanup. A crash
 after unlink retries only the deletion checkpoint. An uncertain submission without
 an ID retains its conversion until exact recovery establishes acceptance. Unused
 reservations are released; failures before metadata submission remain normal
@@ -29,16 +29,19 @@ retryable transfers. Every transmitted byte stays charged.
 
 ## Reconciliation
 
-- Check accepted uploads seven days after acceptance. A captured ID or identity
-  guard never accelerates this deadline. An unknown submission may have an earlier
-  identity lookup; recovered acceptance keeps the original seven-day deadline.
+- Check accepted uploads every 24 hours, starting one day after acceptance, and
+  verify a ready Full-HD copy immediately on that check. An unknown submission
+  also gets daily identity checks. The independent seven-day deadline controls
+  only when another conversion/upload may be attempted; it never delays a check.
+  Recovered acceptance preserves both clocks. Schema16 atomically repairs existing
+  weekly confirmation dates and leaves later daily backoff intact on reopen.
 - Require a published slug URL and actual Full-HD playback dimensions (1920×1080,
   or 1440×1080 for 4:3, with the existing tolerance). Labels alone are insufficient.
 - A never-verified accepted submission definitively absent, marked processing
   failure, or still processing without a public copy after its week is queued for
   conversion/upload from the unchanged original. Retry only the affected part or
   joined batch; retain other queued parts and all old IDs/receipts. A successful
-  retry deletes its new conversion and starts a fresh seven-day window.
+  retry deletes its new conversion and starts a fresh seven-day retry window with daily checks.
 - Missing/changed originals defer rebuilding and keep remote checks pending.
   Other recordings continue. `local_source_presence` tracks local absence without
   deleting recording, receipt, state-event, removal or bandwidth history.
@@ -101,7 +104,7 @@ local database commit atomically. Reconciliation handles that external boundary.
 ## Verification coverage
 
 `test/recoveryPolicy.test.mjs` covers exact identity recovery, negative/ambiguous/error lookup handling,
-seven-day timing across reopen, visibility and rejection flags that outlive the evidence history,
+daily checks and seven-day retry timing across reopen, visibility and rejection flags that outlive the evidence history,
 reference fallback, atomic verification rollback, accepted-but-unverified recovery, unused reservations,
 artifact flushing, and SIGKILL after transfer/ID persistence.
 `test/workerRecovery.test.mjs` exercises actual worker/encoder interruption and restart.

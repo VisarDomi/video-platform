@@ -138,7 +138,7 @@ test("schema eleven widens the artifact part checks to shapes without losing row
     assert.equal(migrated.integrityCheck(), "ok");
     const inspection = new DatabaseSync(databasePath, { readOnly: true });
     t.after(() => inspection.close());
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 15);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 16);
     assert.equal(inspection.prepare("SELECT remote_id FROM remote_uploads WHERE attempt_id = 'attempt-1'").get().remote_id, "123");
     const write = new DatabaseSync(databasePath);
     t.after(() => write.close());
@@ -179,7 +179,7 @@ test("schema six migrates remote uploads and marks the old production generation
     assert.equal(migrated.integrityCheck(), "ok");
     migrated.close();
     const inspection = new DatabaseSync(databasePath);
-    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 15);
+    assert.equal(inspection.prepare("SELECT version FROM schema_version").get().version, 16);
     assert.equal(inspection.prepare("SELECT version FROM production_version").get().version, "legacy-production-v1");
     const columns = inspection.prepare("PRAGMA table_info(remote_uploads)").all().map((column) => column.name);
     assert(columns.includes("artifact_part"));
@@ -772,7 +772,7 @@ test("blocked recordings unblock back to their pre-block state", async (t) => {
     assert.equal(database.get(recording.id).blockReason, null);
 });
 
-test("the upload coordinator parks submit success as uncertain until seven-day video-link verification", async (t) => {
+test("the upload coordinator parks submit success as uncertain until daily video-link verification", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
@@ -803,13 +803,13 @@ test("the upload coordinator parks submit success as uncertain until seven-day v
         visibility: "private",
     }, now);
     assert.equal(calls, 1);
-    // Submit success is NOT accepted immediately: it waits for the seven-day
+    // Submit success is NOT accepted immediately: it waits for daily
     // public video-link verification.
     assert.equal(database.get(recording.id)?.state, "upload_uncertain");
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 525, reserved: 0 });
-    assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-19T07:59:59Z")), []);
+    assert.deepEqual(database.dueUploadConfirmations(new Date("2026-08-13T07:59:59Z")), []);
 
-    const after = new Date("2026-08-19T08:00:00Z");
+    const after = new Date("2026-08-13T08:00:00Z");
     const [confirmation] = database.dueUploadConfirmations(after);
     assert.ok(confirmation);
     assert.deepEqual(database.getUncertainUploadRemote(confirmation.attemptId), {

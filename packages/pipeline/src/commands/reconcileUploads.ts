@@ -1,5 +1,5 @@
 import type { PipelineConfig } from "../config.js";
-import { PipelineDatabase } from "../db/pipelineDatabase.js";
+import { PipelineDatabase, UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import type { ChromiumPorntrexUploader } from "../upload/chromiumPorntrexUploader.js";
@@ -61,8 +61,9 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 const removed = async (id: string, reason: string | undefined) => {
                     if(database.acceptedUpload(confirmation.attemptId)) {
                         const accepted=database.acceptedUpload(confirmation.attemptId)!;
-                        if(now.toISOString()<accepted.verifyAfter) {
-                            database.postponeConfirmation(confirmation.attemptId,'seven-day acceptance window',now,Date.parse(accepted.verifyAfter)-now.getTime());
+                        if(now.toISOString()<accepted.retryAfter) {
+                            database.postponeConfirmation(confirmation.attemptId,reason ?? 'Copy is not ready; check daily before the seven-day retry deadline',now,UPLOAD_CHECK_MILLISECONDS);
+                            results.push({recordingId:confirmation.recordingId,disposition:'not_ready',remoteId:id,reason});
                             return;
                         }
                         const ready=await retrySourceUnchanged(database,confirmation.recordingId);
@@ -116,12 +117,6 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     });
                     continue;
                 }
-                const accepted=database.acceptedUpload(confirmation.attemptId);
-                if(accepted && accepted.verifyAfter>now.toISOString()) {
-                    database.postponeConfirmation(confirmation.attemptId,'seven-day acceptance window',now,Date.parse(accepted.verifyAfter)-now.getTime());
-                    results.push({recordingId:confirmation.recordingId,disposition:'acceptance_confirmed',remoteId});
-                    continue;
-                }
                 probe ??= await browser.probeUploadStatus(page, remoteId);
                 if (probe.outcome === "missing") {
                     await removed(remoteId, probe.reason);
@@ -159,12 +154,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                         await removed(remoteId,probe.reason);
                         continue;
                     }
-                    // While acceptance is unknown,
-                    // still processing, look again in two hours instead of a day.
-                    const processing = (probe as { processing?: boolean }).processing === true
-                        || (probe as { retrySoon?: boolean }).retrySoon === true;
                     database.postponeConfirmation(confirmation.attemptId,
-                        probe.reason ?? "Full-HD playback not yet confirmed", now, processing ? 2 * 60 * 60_000 : 24 * 60 * 60_000);
+                        probe.reason ?? "Full-HD playback not yet confirmed", now, UPLOAD_CHECK_MILLISECONDS);
                     results.push({
                         recordingId: confirmation.recordingId,
                         disposition: "not_ready",

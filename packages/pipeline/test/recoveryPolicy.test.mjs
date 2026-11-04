@@ -59,9 +59,8 @@ test("production filename recovery attaches existing ID and atomically verifies 
         assert.equal(identity, r.id);
         return { kind: "found", remoteId: "91957324", remoteUrl: "https://www.porntrex.com/video.example/test" };
     }));
-    assert.equal(db.get(r.id).state, "upload_uncertain");
-    await reconcileDueUploads(config, day(7), browser(async()=>{throw Error('known ID must not search');}));
     assert.equal(db.get(r.id).state, "upload_verified");
+    assert.equal(db.dueUploadConfirmations(day(7)).length, 0);
     assert.equal(db.getUploadIdentity(r.id).remoteId, "91957324");
     assert.equal(db.uploadUsage("2026-09").spent, spent);
 });
