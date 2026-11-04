@@ -447,12 +447,13 @@ export class ChromiumPorntrexUploader implements ProviderUploader {
             return { outcome: 'not_ready' as const, remoteUrl: null,
                 reason: 'Porntrex has no published video link yet', processing: true, stored };
         }
-        await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        const playbackResponse = await page.goto(remoteUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
         // Download endpoints can 404/time out while the actual player stream
         // works. Probe those source URLs first, retaining downloads as fallback;
         // labels still only order candidates, never establish playable quality.
         const candidates = orderPlaybackCandidates([
-            ...playerTiers(await page.content()),
+            // Player scripts may remove their configuration from the DOM.
+            ...playerTiers(playbackResponse?.ok() ? await playbackResponse.text() : await page.content()),
             ...await page.locator('a[href*="/get_file/"]').evaluateAll(links => links.map(link => ({
                 url: link.getAttribute("href") ?? "", label: link.textContent?.trim() ?? "",
             }))),

@@ -327,7 +327,7 @@ test('verification uses the real Full-HD player stream when download links fail'
     t.after(()=>browser.close());const page=await browser.newPage();
     await page.route('https://www.porntrex.com/**',route=>route.fulfill({contentType:'text/html',body:
         route.request().url().includes('/edit-video/')?'<a href="https://www.porntrex.com/video/55/fixture">Published</a>':
-        `<script>window.params={video_url:'https://www.porntrex.com/get_file/high.mp4?ov=1',video_url_text:'1080p FHD'};</script><a href="/get_file/high.mp4?download=true">MP4 1080p</a>`}));
+        `<script>window.params={video_url:'https://www.porntrex.com/get_file/high.mp4?ov=1',video_url_text:'1080p FHD'};document.currentScript.remove();</script><a href="/get_file/high.mp4?download=true">MP4 1080p</a>`}));
     const uploader=new ChromiumPorntrexUploader({executablePath:'unused',profilePath:'unused'}),probed=[];
     const probe=async(_command,args)=>{const url=args.at(-1);probed.push(url);if(url.includes('download=true'))throw Object.assign(new Error('download endpoint failed'),{stderr:'Server returned 404 Not Found'});return{stdout:JSON.stringify({streams:[{width:1920,height:1080}]})};};
     const result=await uploader.probeUploadStatus(page,'55',probe);
