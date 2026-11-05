@@ -43,7 +43,7 @@ export interface AccessFailureContext {
 export interface IDownloadSession {
     // An aborted request returns null and records no failure.
     fetchPlaylist(url: string, signal?: AbortSignal): Promise<string | null>;
-    fetchSegment(url: string): Promise<SegmentFetchResult>;
+    fetchSegment(url: string, signal?: AbortSignal): Promise<SegmentFetchResult>;
     getLastPlaylistFailure?(): PlaylistFetchFailure | null;
 }
 

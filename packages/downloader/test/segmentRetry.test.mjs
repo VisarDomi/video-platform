@@ -251,3 +251,32 @@ test('a written segment the provider cannot read stays on disk and is fetched ag
     assert.deepEqual((await readdir(f.root)).sort(),
         ['0_recording_10.ts', '2_recording_10.ts', '3_recording_11.ts', 'playlist.m3u8']);
 });
+
+test('a terminal segment failure cancels unused requests before the recording retries',async t=>{
+    let cancelled=false;
+    const f=await fixture(t,async(url,signal)=>{
+        if(url.endsWith('/a.ts'))return{data:null,retryable:false,status:404};
+        return await new Promise(resolve=>{
+            const timer=setTimeout(()=>resolve({data:null,retryable:true}),1200);
+            signal?.addEventListener('abort',()=>{cancelled=true;clearTimeout(timer);resolve({data:null,retryable:true});},{once:true});
+        });
+    });
+    const begin=Date.now();const result=await f.run();
+    assert.equal(result.exitReason,'segment-failed');assert.equal(cancelled,true);
+    assert.ok(Date.now()-begin<700,'unused network work delayed the next capture attempt');
+    assert.equal(f.disk.materialized,false);
+    assert.deepEqual((await f.manager.identifyNewSegments(playlist,line=>line)).map(s=>s.providerSequence),[10,11]);
+});
+
+test('SC segment cancellation reaches the HTTP request instead of waiting for its timeout',async t=>{
+    const {ScClient}=await import('../dist/services/sc/api/scClient.js');
+    let requestSignal;
+    t.mock.method(globalThis,'fetch',async(_url,options)=>{
+        requestSignal=options.signal;
+        return await new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('cancelled','AbortError')),{once:true}));
+    });
+    const controller=new AbortController();
+    const pending=new ScClient().createDownloadSession().fetchSegment('https://example.test/segment.ts',controller.signal);
+    controller.abort();const result=await pending;
+    assert.equal(requestSignal.aborted,true);assert.equal(result.data,null);assert.equal(result.retryable,true);
+});

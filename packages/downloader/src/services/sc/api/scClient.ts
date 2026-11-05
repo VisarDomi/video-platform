@@ -526,11 +526,11 @@ class ScDownloadSession implements IDownloadSession {
         return this.lastPlaylistFailure ? { ...this.lastPlaylistFailure } : null;
     }
 
-    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
+    public async fetchSegment(tsUrl: string, signal?: AbortSignal): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             const response = await fetch(tsUrl, {
                 headers: CDN_HEADERS,
-                signal: AbortSignal.timeout(CDN_FETCH_TIMEOUT_MS),
+                signal: requestSignal(CDN_FETCH_TIMEOUT_MS, signal),
             });
             if (response.ok) {
                 const data = Buffer.from(await response.arrayBuffer());

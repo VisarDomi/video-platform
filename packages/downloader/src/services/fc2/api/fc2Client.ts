@@ -397,12 +397,12 @@ class Fc2DownloadSession implements IDownloadSession {
         }
     }
 
-    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
+    public async fetchSegment(tsUrl: string, signal?: AbortSignal): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             this.client._touchSession(tsUrl);
             const response = await fetch(tsUrl, {
                 headers: this.HEADERS,
-                signal: AbortSignal.timeout(Fc2DownloadSession.FETCH_TIMEOUT_MS),
+                signal: requestSignal(Fc2DownloadSession.FETCH_TIMEOUT_MS, signal),
             });
             if (response.ok) {
                 const arr = await response.arrayBuffer();

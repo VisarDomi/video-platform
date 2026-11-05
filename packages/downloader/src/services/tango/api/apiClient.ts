@@ -286,10 +286,10 @@ class TangoDownloadSession implements IDownloadSession {
         }
     }
 
-    public async fetchSegment(tsUrl: string): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
+    public async fetchSegment(tsUrl: string, signal?: AbortSignal): Promise<import("../../core/interfaces.js").SegmentFetchResult> {
         try {
             const tsResponse = await fetch(tsUrl, {
-                signal: AbortSignal.timeout(TangoDownloadSession.FETCH_TIMEOUT_MS),
+                signal: requestSignal(TangoDownloadSession.FETCH_TIMEOUT_MS, signal),
             });
             if (tsResponse.ok) {
                 const tsBuffer = await tsResponse.arrayBuffer();

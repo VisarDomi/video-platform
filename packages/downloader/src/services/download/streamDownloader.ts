@@ -33,6 +33,7 @@ export class StreamDownloader {
     private accessIncidents: AccessIncidentTracker;
     private _aborted = false;
     private rejectedCount = 0;
+    private activeSegmentRequests: AbortController | null = null;
 
     constructor(handle: DownloadHandle, provider: IStreamProvider, accessIncidents: AccessIncidentTracker) {
         this.handle = handle;
@@ -42,6 +43,7 @@ export class StreamDownloader {
 
     public abort(): void {
         this._aborted = true;
+        this.activeSegmentRequests?.abort();
     }
 
     // Fetches segments four at a time; the consumer reads the results in order.
@@ -53,6 +55,8 @@ export class StreamDownloader {
         isStale: () => boolean,
     ) {
         let stopped = false;
+        const requests = new AbortController();
+        this.activeSegmentRequests = requests;
         let next = 0;
         let active = 0;
         const cancelled: SegmentFetchResult = { data: null, retryable: true };
@@ -65,7 +69,7 @@ export class StreamDownloader {
                 let result = cancelled;
                 try {
                     while (!shouldStop()) {
-                        result = await session.fetchSegment(job.segment.remoteUrl);
+                        result = await session.fetchSegment(job.segment.remoteUrl, requests.signal);
                         if (result.data || !result.retryable) break;
                         logger.debug(`[StreamDownloader] ${alias} segment fetch failed — retrying`, {
                             segment: job.segment.localName,
@@ -98,7 +102,12 @@ export class StreamDownloader {
         return {
             result: (index: number) => jobs[index].result,
             add,
-            async close() { stopped = true; await Promise.all(workers); },
+            close: async () => {
+                stopped = true;
+                requests.abort();
+                try { await Promise.all(workers); }
+                finally { if (this.activeSegmentRequests === requests) this.activeSegmentRequests = null; }
+            },
         };
     }
 

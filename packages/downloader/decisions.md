@@ -389,3 +389,13 @@ minutes-long gaps in a live recording.
 ## Rule
 
 - Keep downloader concerns separate from server/API concerns.
+
+## In-flight requests stop with their capture attempt
+
+Every prefetched media request carries the attempt's abort signal through the
+provider's HTTP deadline. A terminal segment failure or shutdown cancels unused
+requests before joining the fetch workers, so a discarded batch cannot hold the
+next live-playlist poll for another CDN timeout. This does not advance the
+provider sequence or change already committed media; retries retain the existing
+recording identity and playlist. Ordinary slow downloads still poll the playlist
+while waiting and save media in order.
