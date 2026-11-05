@@ -25,6 +25,10 @@ Processing a pending recording (`processFinalizedRecording`):
    packet boundary. Every encoded sample, DTS, duration, composition offset and
    flag is compared before publication; no decoding/re-encoding or retiming.
    Original fragments and initialization files remain byte-identical.
+   High-profile avcC chroma/bit-depth fields and indexed SPS-extension NALs are
+   validated and retained verbatim; valid extensions are not damage. Malformed
+   or unindexed extensions stay unsupported. This matches the record layout in
+   [FFmpeg's AVC muxer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/avc.c).
    Unsupported layouts/configuration changes stay unchanged and receive a
    `decoder-boundary-unrepaired` warning.
 2. Provider sequence restarts (a compound segment name whose sequence does not
