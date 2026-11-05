@@ -47,7 +47,25 @@ export function readAvcInitialization(bytes: Buffer): AvcInitialization | null {
         const size = bytes.readUInt16BE(at + 6), spsAt = at + 8, countAt = spsAt + size;
         if (size < 4 || bytes[countAt] !== 1) throw new Error("Unsupported AVC parameter sets");
         const ppsAt = countAt + 3, ppsSize = bytes.readUInt16BE(countAt + 1);
-        if (!ppsSize || ppsAt + ppsSize !== avcc.at + avcc.size) throw new Error("Unsupported AVC extensions");
+        const end = avcc.at + avcc.size;
+        let extra = ppsAt + ppsSize;
+        if (!ppsSize || extra > end) throw new Error("Invalid AVC parameter sets");
+        // High profiles carry chroma/bit-depth fields and optional SPS_EXT NALs
+        // after PPS. These are configuration bytes, not trailing media. Validate
+        // their index and preserve them verbatim in any copied initialization.
+        if (extra < end) {
+            if ([66, 77, 88].includes(bytes[at + 1]) || extra + 4 > end
+                || (bytes[extra] & 0xfc) !== 0xfc || (bytes[extra + 1] & 0xf8) !== 0xf8
+                || (bytes[extra + 2] & 0xf8) !== 0xf8) throw new Error("Invalid AVC extension header");
+            const count = bytes[extra + 3]; extra += 4;
+            for (let i = 0; i < count; i++) {
+                if (extra + 2 > end) throw new Error("Truncated AVC extension index");
+                const length = bytes.readUInt16BE(extra); extra += 2;
+                if (!length || extra + length > end || (bytes[extra] & 31) !== 13) throw new Error("Invalid AVC extension payload");
+                extra += length;
+            }
+            if (extra !== end) throw new Error("Unindexed AVC extension bytes");
+        }
         const sps = bytes.subarray(spsAt, spsAt + size), pps = bytes.subarray(ppsAt, ppsAt + ppsSize);
         if ((sps[0] & 31) !== 7 || (pps[0] & 31) !== 8) throw new Error("Invalid AVC parameter sets");
         found = { bytes, video: id, sps, pps, spsAt, levelAt: at + 3, lengthBytes: (bytes[at + 4] & 3) + 1 };

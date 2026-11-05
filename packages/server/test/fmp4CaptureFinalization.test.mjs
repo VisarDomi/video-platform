@@ -12,11 +12,11 @@ import { finalizeFmp4Capture } from '../dist/services/hls/fmp4CaptureFinalizatio
 import { avcNals, readAvcInitialization, readCaptureChunks, writeCaptureChunk } from '../dist/services/hls/fmp4Samples.js';
 
 const hash = b => createHash('sha256').update(b).digest('hex');
-async function fixture(t, modify = () => {}) {
+async function fixture(t, modify = () => {}, profile = 'baseline') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'avc-capture-'));
   t.after(() => rm(root, {recursive:true,force:true}));
   const folder = path.join(root,'recording'); await mkdir(folder);
-  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=10','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset','ultrafast','-profile:v','baseline','-bf','0','-g','10','-sc_threshold','0','-x264-params','repeat-headers=1','-c:a','aac','-hls_time','3','-hls_segment_type','fmp4','-hls_fmp4_init_filename','init.mp4','-hls_segment_filename',path.join(folder,'part%d.ts'),'-f','hls',path.join(folder,'playlist.m3u8')]);
+  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=10','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset',profile==='high'?'medium':'ultrafast','-profile:v',profile,'-bf','0','-g','10','-sc_threshold','0','-x264-params','repeat-headers=1','-c:a','aac','-hls_time','3','-hls_segment_type','fmp4','-hls_fmp4_init_filename','init.mp4','-hls_segment_filename',path.join(folder,'part%d.ts'),'-f','hls',path.join(folder,'playlist.m3u8')]);
   const initBytes = await readFile(path.join(folder,'init.mp4'));
   const init = readAvcInitialization(initBytes);
   const chunks = readCaptureChunks(await readFile(path.join(folder,'part0.ts')),init);
@@ -148,4 +148,16 @@ test('a generated filename conflict cannot replace pre-existing bytes',async t=>
   assert.equal(await readFile(path.join(f.folder,conflict),'utf8'),'pre-existing bytes');
   assert.equal(await readFile(path.join(f.folder,'playlist.m3u8'),'utf8'),f.playlist);
   assert.deepEqual(await readFile(path.join(f.folder,'part0.ts')),f.original);
+});
+
+test('High-profile initialization extensions are retained through a lossless IDR split',async t=>{
+  const f=await fixture(t,()=>{},'high');
+  assert.equal(f.init.sps[1],100);
+  const result=await finalizeFmp4Capture(f.folder,f.store);assert.equal(result.changed,true);
+  const {p}=await published(f);assert.equal(p.segments.length,2);
+  const patched=await readFile(path.join(f.folder,p.segments[1].mapUri));
+  const differences=[...patched].flatMap((v,i)=>v===f.initBytes[i]?[]:[i]);
+  assert.deepEqual(differences,[f.init.levelAt,f.init.spsAt+3].sort((a,b)=>a-b));
+  const malformed=Buffer.from(f.initBytes);const avcc=malformed.indexOf(Buffer.from('avcC'));const end=avcc-4+malformed.readUInt32BE(avcc-4);malformed[end-1]=1;
+  assert.throws(()=>readAvcInitialization(malformed),/extension/i,'a truncated SPS-extension entry cannot be trusted');
 });
