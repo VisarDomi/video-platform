@@ -76,7 +76,9 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         media = core.media
         initialTime = max(0, start)
         lastTime = max(0, start)
-        seekState.request(max(0, start))
+        var initialSeek = ChasingSeek()
+        initialSeek.request(max(0, start))
+        seekState = initialSeek
         knownDuration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         self.changed = changed
         self.failed = failed

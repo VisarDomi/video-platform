@@ -67,7 +67,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         stateWriter = BackgroundWriter(url: directory.appendingPathComponent("list-state.json"), label: "list-state")
         let state = try? DurableFile.readJSON(State.self, from: stateWriter.url)
         highlight = state?.highlight
-        if let top = state?.top, let offset = state?.offset { savedTop = (top, CGFloat(offset)) }
+        if let top = state?.top, let offset = state?.offset { positionState = .awaiting((top, CGFloat(offset))) }
         super.init(nibName: nil, bundle: nil)
     }
 

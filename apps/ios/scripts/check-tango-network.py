@@ -2,8 +2,8 @@
 """Guarded real UIKit list/login regression with synthetic HTTP; never plays video."""
 import argparse,json,subprocess,time,urllib.parse,urllib.request
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--device',required=True);p.add_argument('--app',required=True);p.add_argument('--out',required=True);p.add_argument('--ca');a=p.parse_args()
-out=Path(a.out);out.mkdir(parents=True,exist_ok=True);tool=str(Path.home()/'Developer/ios-tools/native/scripts/apple-tool');bundle='com.visar.Tango.paid'
+p=argparse.ArgumentParser();p.add_argument('--bundle',default='com.visar.Tango.paid');p.add_argument('--device',required=True);p.add_argument('--app',required=True);p.add_argument('--out',required=True);p.add_argument('--ca');a=p.parse_args()
+out=Path(a.out);out.mkdir(parents=True,exist_ok=True);tool=str(Path.home()/'Developer/ios-tools/native/scripts/apple-tool');bundle=a.bundle
 subprocess.run([str(Path.home()/'Developer/ios-tools/native/scripts/mac-workload'),'assert-simulator','--device',a.device],check=True)
 def sim(*args,timeout=45,check=True):return subprocess.run([tool,'simctl',*args],timeout=timeout,check=check,capture_output=True,text=True)
 def hook(path,**query):

@@ -86,6 +86,11 @@ public final class BackgroundTransfers: NSObject, URLSessionDownloadDelegate, @u
         return item
     }
 
+    static func liveFiles(_ tasks: [URLSessionTask]) -> Set<String> {
+        Set(tasks.filter { $0.state == .running || $0.state == .suspended }
+            .compactMap { $0.taskDescription.flatMap(decode)?.file })
+    }
+
     public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                            completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         if let answer = trust?.evaluate(challenge) { completionHandler(answer.0, answer.1) }
@@ -124,7 +129,7 @@ private actor BackgroundTransferOwnership {
         let ticket = state.handOff()
         let tasks = await session.allTasks
         guard state.ownsHandoff(ticket) else { return }
-        var running = Set(tasks.compactMap { $0.taskDescription.flatMap(BackgroundTransfers.decode)?.file })
+        var running = BackgroundTransfers.liveFiles(tasks)
         for item in items where BackgroundTransfers.safe(item.file) && running.insert(item.file).inserted {
             var request = URLRequest(url: item.url)
             for (name, value) in item.headers { request.setValue(value, forHTTPHeaderField: name) }
