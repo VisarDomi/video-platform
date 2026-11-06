@@ -162,6 +162,11 @@ transport failure. Shared snapshot reconciliation owns the recording lifecycle:
   recovery line. The master is used only to select the
   initial live URL: master failures never end a recording, and polling and
   retries keep the selected live URL without refreshing the master.
+- **FC2 control replies** match the initial HLS request ID captured for that
+  socket. Another channel's handshake or heartbeat may advance the shared
+  outgoing counter, but cannot invalidate an outstanding reply. Unsolicited
+  replies before the socket sends its request are ignored. A late close from
+  a replaced socket cannot close its newer session for that channel.
 - **FC2:** the adult all-channel list (`allchannellist.php`) with `start_time`,
   polled every 30 seconds. A transport failure gets one retry after one second,
   with a fresh request deadline; HTTP refusals and malformed responses do not retry.

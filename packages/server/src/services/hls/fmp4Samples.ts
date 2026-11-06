@@ -16,7 +16,7 @@ const children = (b: Buffer, p: Mp4Box, skip = 0) => mp4Boxes(b, p.at + p.header
 const child = (b: Buffer, p: Mp4Box, type: string, skip = 0) => children(b, p, skip).find(x => x.type === type);
 export interface CaptureTrack { id: number; kind: string; scale: number; duration: number; size: number; flags: number }
 export interface AvcInitialization {
-    bytes: Buffer; tracks: Map<number, CaptureTrack>; video: number; sps: Buffer; pps: Buffer;
+    bytes: Buffer; tracks: Map<number, CaptureTrack>; audioDescriptions: Map<number, Buffer>; video: number; sps: Buffer; pps: Buffer;
     lengthBytes: number; levelAt: number; spsAt: number;
 }
 export function readAvcInitialization(bytes: Buffer): AvcInitialization | null {
@@ -28,7 +28,8 @@ export function readAvcInitialization(bytes: Buffer): AvcInitialization | null {
         if (bytes.readUInt32BE(at + 4) !== 1) throw new Error("Multiple sample descriptions");
         defaults.set(bytes.readUInt32BE(at), [bytes.readUInt32BE(at + 8), bytes.readUInt32BE(at + 12), bytes.readUInt32BE(at + 16)]);
     }
-    const tracks = new Map<number, CaptureTrack>(); let found: Omit<AvcInitialization, "tracks"> | null = null;
+    const tracks = new Map<number, CaptureTrack>(), audioDescriptions = new Map<number, Buffer>();
+    let found: Omit<AvcInitialization, "tracks" | "audioDescriptions"> | null = null;
     for (const trak of children(bytes, moov).filter(x => x.type === "trak")) {
         const tkhd = child(bytes, trak, "tkhd"), mdia = child(bytes, trak, "mdia"); if (!tkhd || !mdia) continue;
         const mdhd = child(bytes, mdia, "mdhd"), hdlr = child(bytes, mdia, "hdlr"); if (!mdhd || !hdlr) continue;
@@ -37,9 +38,12 @@ export function readAvcInitialization(bytes: Buffer): AvcInitialization | null {
         const kind = bytes.toString("ascii", hdlr.at + hdlr.header + 8, hdlr.at + hdlr.header + 12), def = defaults.get(id) ?? [0, 0, 0];
         if (!scale || !["vide", "soun"].includes(kind)) throw new Error("Unsupported capture track");
         tracks.set(id, { id, kind, scale, duration: def[0], size: def[1], flags: def[2] });
-        if (kind !== "vide") continue;
         const minf = child(bytes, mdia, "minf"), stbl = minf && child(bytes, minf, "stbl"), stsd = stbl && child(bytes, stbl, "stsd");
         if (!stsd) throw new Error("Missing sample description");
+        if (kind === "soun") {
+            audioDescriptions.set(id, bytes.subarray(stsd.at + stsd.header + 8, stsd.at + stsd.size));
+            continue;
+        }
         const entries = children(bytes, stsd, 8); if (entries.length !== 1 || entries[0].type !== "avc1" || found) throw new Error("Unsupported AVC descriptions");
         const avcc = child(bytes, entries[0], "avcC", 78); if (!avcc) throw new Error("Missing AVC configuration");
         const at = avcc.at + avcc.header;
@@ -70,14 +74,43 @@ export function readAvcInitialization(bytes: Buffer): AvcInitialization | null {
         if ((sps[0] & 31) !== 7 || (pps[0] & 31) !== 8) throw new Error("Invalid AVC parameter sets");
         found = { bytes, video: id, sps, pps, spsAt, levelAt: at + 3, lengthBytes: (bytes[at + 4] & 3) + 1 };
     }
-    return found ? { ...found, tracks } : null;
+    return found ? { ...found, tracks, audioDescriptions } : null;
+}
+export function compatibleCaptureInitializations(left: AvcInitialization, right: AvcInitialization): boolean {
+    return left.video === right.video && left.lengthBytes === right.lengthBytes && left.tracks.size === right.tracks.size
+        && [...left.tracks].every(([id, track]) => {
+            const other = right.tracks.get(id);
+            return other && track.kind === other.kind && track.scale === other.scale && track.duration === other.duration
+                && track.size === other.size && track.flags === other.flags
+                && (track.kind !== "soun" || left.audioDescriptions.get(id)!.equals(right.audioDescriptions.get(id)!));
+        });
 }
 export interface CaptureSample { bytes: Buffer; dts: number; duration: number; cto: number; flags: number }
 export interface CaptureRun { track: CaptureTrack; samples: CaptureSample[] }
 export interface CaptureChunk { sequence: number; runs: CaptureRun[]; bytes: Buffer }
+function validateSeekTrailer(data: Buffer, trailer: Mp4Box, init: AvcInitialization): void {
+    const fields = children(data, trailer), footer = fields.at(-1);
+    if (!footer || footer.type !== "mfro" || footer.size !== footer.header + 8
+        || data.readUInt32BE(footer.at + footer.header) !== 0
+        || data.readUInt32BE(footer.at + footer.header + 4) !== trailer.size) throw new Error("Invalid mfra seek-index footer");
+    for (const index of fields.slice(0, -1)) {
+        const at = index.at + index.header;
+        if (index.type !== "tfra" || index.size < index.header + 16 || data[at] > 1
+            || data.readUIntBE(at + 1, 3) !== 0 || !init.tracks.has(data.readUInt32BE(at + 4))) throw new Error("Unsupported mfra seek index");
+        const lengths = data.readUInt32BE(at + 8), count = data.readUInt32BE(at + 12);
+        if (lengths & ~0x3f) throw new Error("Invalid seek-index reserved bits");
+        const entrySize = (data[at] === 1 ? 16 : 8)
+            + ((lengths >> 4 & 3) + 1) + ((lengths >> 2 & 3) + 1) + ((lengths & 3) + 1);
+        if (index.size !== index.header + 16 + count * entrySize) throw new Error("Truncated or unindexed seek-index entries");
+    }
+}
 export function readCaptureChunks(data: Buffer, init: AvcInitialization): CaptureChunk[] {
     const top = mp4Boxes(data), chunks: CaptureChunk[] = [];
-    if (top.some(b => !["sidx", "styp", "moof", "mdat"].includes(b.type))) throw new Error("Unsupported fragment boxes");
+    if (top.some(b => !["sidx", "styp", "moof", "mdat", "mfra"].includes(b.type))) throw new Error("Unsupported fragment boxes");
+    for (const [i, box] of top.entries()) if (box.type === "mfra") {
+        if (i !== top.length - 1 || top[i - 1]?.type !== "mdat") throw new Error("Misplaced mfra seek-index trailer");
+        validateSeekTrailer(data, box, init);
+    }
     if (top.some((b, i) => b.type === "mdat" && top[i - 1]?.type !== "moof")) throw new Error("Unindexed media box");
     for (const [index, moof] of top.entries()) {
         if (moof.type !== "moof") continue;

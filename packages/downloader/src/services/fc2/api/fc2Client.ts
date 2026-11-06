@@ -128,6 +128,7 @@ export class Fc2Client implements IStreamProvider {
 
             const ws = new WebSocket(wsUrl);
             let isResolved = false;
+            let hlsRequestId: number | null = null;
             const pendingRequests = new Map<number, (data: any) => void>();
 
             const safeResolve = (val: string | null) => {
@@ -156,8 +157,8 @@ export class Fc2Client implements IStreamProvider {
                     const msg = JSON.parse(event.data as string);
 
                     if (msg.name === "connect_complete") {
-                        this.msgId++;
-                        ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: this.msgId }));
+                        hlsRequestId = ++this.msgId;
+                        ws.send(JSON.stringify({ name: "get_hls_information", arguments: {}, id: hlsRequestId }));
                     }
                     else if (msg.name === "_response_") {
                         const reqId = msg.id;
@@ -169,7 +170,7 @@ export class Fc2Client implements IStreamProvider {
                             return;
                         }
 
-                        if (reqId === this.msgId && !isResolved) {
+                        if (hlsRequestId !== null && reqId === hlsRequestId && !isResolved) {
                             const best = Fc2QualitySelector.selectBestPlaylist(msg.arguments);
 
                             if (best) {
@@ -212,7 +213,7 @@ export class Fc2Client implements IStreamProvider {
             };
 
             ws.onclose = () => {
-                if (this.sessions.has(channelId)) {
+                if (this.sessions.get(channelId)?.ws === ws) {
                     logger.debug(`[FC2] WebSocket closed remotely for ${channelId}`);
                     this._closeSession(channelId);
                 } else if (!isResolved) {

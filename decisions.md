@@ -125,8 +125,9 @@ server follows the account first, but only if it is not already followed.
   The queue is one deduplicating FIFO with `os.availableParallelism()` workers. Each
   worker waits 15 s between recordings (`QUEUE_COOLDOWN_MS`).
 - **Finalization is non-destructive.** It may rewrite `playlist.m3u8`
-  and create lossless fMP4 sample-copy fragments/maps at proven level-only AVC
-  changes on indexed IDRs. Every encoded sample and clock is retained; originals
+  and create lossless fMP4 sample-copy fragments/maps at proven AVC changes
+  on indexed IDRs, reusing exact compatible headers already in that capture
+  (or cloning level-only changes). Every encoded sample and clock is retained; originals
   are never moved/deleted. A durable restart journal preserves the old playlist
   and fingerprints before atomic publication. Unsupported changes stay unchanged
   with a finding. See `packages/server/decisions.md`.
