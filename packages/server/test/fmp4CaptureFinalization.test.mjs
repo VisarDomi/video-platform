@@ -9,14 +9,14 @@ import { parseNativeMediaPlaylist } from 'shared';
 import { FinalizationCheckpointStore } from '../dist/services/hls/finalizationCheckpointStore.js';
 import { processFinalizedRecording } from '../dist/services/hls/finalizedRecordingProcessor.js';
 import { finalizeFmp4Capture } from '../dist/services/hls/fmp4CaptureFinalization.js';
-import { avcNals, readAvcInitialization, readCaptureChunks, writeCaptureChunk } from '../dist/services/hls/fmp4Samples.js';
+import { avcNals, readAvcInitialization, readCaptureChunks, writeCaptureChunk, splitCaptureChunk } from '../dist/services/hls/fmp4Samples.js';
 
 const hash = b => createHash('sha256').update(b).digest('hex');
-async function fixture(t, modify = () => {}, profile = 'baseline') {
+async function fixture(t, modify = () => {}, profile = 'baseline', size = '160x90') {
   const root = await mkdtemp(path.join(os.tmpdir(), 'avc-capture-'));
   t.after(() => rm(root, {recursive:true,force:true}));
   const folder = path.join(root,'recording'); await mkdir(folder);
-  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=10','-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset',profile==='high'?'medium':'ultrafast','-profile:v',profile,'-bf','0','-g','10','-sc_threshold','0','-x264-params','repeat-headers=1','-c:a','aac','-hls_time','3','-hls_segment_type','fmp4','-hls_fmp4_init_filename','init.mp4','-hls_segment_filename',path.join(folder,'part%d.ts'),'-f','hls',path.join(folder,'playlist.m3u8')]);
+  execFileSync('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i',`testsrc2=size=${size}:rate=10`,'-f','lavfi','-i','sine=frequency=440:sample_rate=48000','-t','2','-c:v','libx264','-preset',profile==='high'?'medium':'ultrafast','-profile:v',profile,'-bf','0','-g','10','-sc_threshold','0','-x264-params','repeat-headers=1','-c:a','aac','-hls_time','3','-hls_segment_type','fmp4','-hls_fmp4_init_filename','init.mp4','-hls_segment_filename',path.join(folder,'part%d.ts'),'-f','hls',path.join(folder,'playlist.m3u8')]);
   const initBytes = await readFile(path.join(folder,'init.mp4'));
   const init = readAvcInitialization(initBytes);
   const chunks = readCaptureChunks(await readFile(path.join(folder,'part0.ts')),init);
@@ -47,7 +47,7 @@ async function published(f) {
     const init = readAvcInitialization(await readFile(path.join(f.folder,s.mapUri)));
     const cs = readCaptureChunks(await readFile(path.join(f.folder,s.name)),init);
     for (const v of cs.flatMap(c=>c.runs).filter(r=>r.track.kind==='vide').flatMap(r=>r.samples)) {
-      for (const n of avcNals(v,init.lengthBytes)) if ((n[0]&31)===7) assert.equal(n[3],init.sps[3]);
+      for (const n of avcNals(v,init.lengthBytes)) if ((n[0]&31)===7) assert.deepEqual(n,init.sps);
     }
     chunks.push(...cs);
   }
@@ -160,4 +160,80 @@ test('High-profile initialization extensions are retained through a lossless IDR
   assert.deepEqual(differences,[f.init.levelAt,f.init.spsAt+3].sort((a,b)=>a-b));
   const malformed=Buffer.from(f.initBytes);const avcc=malformed.indexOf(Buffer.from('avcC'));const end=avcc-4+malformed.readUInt32BE(avcc-4);malformed[end-1]=1;
   assert.throws(()=>readAvcInitialization(malformed),/extension/i,'a truncated SPS-extension entry cannot be trusted');
+});
+
+test('a complete mfra seek-index trailer permits lossless splitting and is retained in the original',async t=>{
+  const f=await fixture(t);
+  const u32=n=>{const b=Buffer.alloc(4);b.writeUInt32BE(n);return b;};
+  const u64=n=>{const b=Buffer.alloc(8);b.writeBigUInt64BE(BigInt(n));return b;};
+  const box=(type,...parts)=>{const data=Buffer.concat(parts);return Buffer.concat([u32(data.length+8),Buffer.from(type),data]);};
+  const indices=f.chunks[0].runs.map((run,index)=>box('tfra',u32(0x01000000),u32(run.track.id),u32(0),u32(1),
+      u64(run.samples[0].dts),u64(f.initBytes.length),Buffer.from([index+1,1,1])));
+  const mfra=box('mfra',...indices,box('mfro',u32(0),u32(8+indices.reduce((n,b)=>n+b.length,0)+16)));
+  f.original=Buffer.concat([f.original,mfra]);await writeFile(path.join(f.folder,'part0.ts'),f.original);
+  const result=await finalizeFmp4Capture(f.folder,f.store);
+  assert.equal(result.changed,true);assert.equal((await published(f)).p.segments.length,2);
+  const malformed=Buffer.from(f.original);malformed[malformed.length-1]^=1;
+  assert.throws(()=>readCaptureChunks(malformed,f.init),/seek|mfra|index|trailer/i);
+  assert.throws(()=>readCaptureChunks(Buffer.concat([f.original,Buffer.from('extra media')]),f.init));
+});
+
+async function knownShapeMaps(t,early=false){
+  const f=await fixture(t,({sps})=>{sps[3]-=1;});
+  const next=await fixture(t,({sps})=>{sps[3]-=1;},'baseline','320x180');
+  const first=f.chunks[0],second=next.chunks[0];
+  for(const run of second.runs){const prev=first.runs.find(r=>r.track.id===run.track.id);const end=prev.samples.at(-1).dts+prev.samples.at(-1).duration;for(const sample of run.samples)sample.dts+=end;}
+  const video=second.runs.find(r=>r.track.kind==='vide');const [inside,tail]=splitCaptureChunk(second,next.init.video,video.samples[10].dts);
+  const runs=first.runs.map(r=>({track:r.track,samples:[...r.samples,...inside.runs.find(x=>x.track.id===r.track.id).samples]}));
+  const mixed={sequence:first.sequence,runs,bytes:writeCaptureChunk(first.sequence,runs)};
+  await writeFile(path.join(f.folder,'init_next.mp4'),next.initBytes);await writeFile(path.join(f.folder,'tail.ts'),tail.bytes);
+  let lines=['#EXTM3U','#EXT-X-VERSION:7','#EXT-X-TARGETDURATION:4','#EXT-X-MAP:URI="init.mp4"'];
+  if(early){const v=mixed.runs.find(r=>r.track.kind==='vide');const [prefix,middle]=splitCaptureChunk(mixed,f.init.video,v.samples[19].dts);f.original=prefix.bytes;f.chunks=[prefix,middle,tail];await writeFile(path.join(f.folder,'middle.ts'),middle.bytes);lines.push('#EXTINF:1.9,','part0.ts','#EXT-X-DISCONTINUITY','#EXT-X-MAP:URI="init_next.mp4"','#EXTINF:1.1,','middle.ts');}
+  else{f.original=mixed.bytes;f.chunks=[mixed,tail];lines.push('#EXTINF:3,','part0.ts','#EXT-X-MAP:URI="init_next.mp4"');}
+  lines.push('#EXTINF:1,','tail.ts','#EXT-X-ENDLIST','');f.playlist=lines.join('\n');await writeFile(path.join(f.folder,'part0.ts'),f.original);await writeFile(path.join(f.folder,'playlist.m3u8'),f.playlist);return f;
+}
+
+test('an in-fragment shape change reuses its already captured compatible future initialization',async t=>{
+  const f=await knownShapeMaps(t);const result=await finalizeFmp4Capture(f.folder,f.store);
+  assert.equal(result.changed,true);const {p}=await published(f);assert.equal(p.segments.length,3);
+  assert.deepEqual(p.segments.map(s=>s.mapUri),['init.mp4','init_next.mp4','init_next.mp4']);
+});
+
+test('an initialization announced before the old trailing frame moves to the actual IDR sample',async t=>{
+  const f=await knownShapeMaps(t,true);const result=await finalizeFmp4Capture(f.folder,f.store);
+  assert.equal(result.changed,true);const {p}=await published(f);assert.equal(p.segments.length,4);
+  assert.deepEqual(p.segments.map(s=>s.mapUri),['init.mp4','init.mp4','init_next.mp4','init_next.mp4']);
+  assert.equal(p.segments[1].metadata.includes('#EXT-X-DISCONTINUITY'),false);
+  assert.equal(p.segments[2].metadata.includes('#EXT-X-DISCONTINUITY'),true);
+});
+
+test('captured video configuration cannot borrow an incompatible audio initialization',async t=>{
+  const f=await knownShapeMaps(t);const map=await readFile(path.join(f.folder,'init_next.mp4'));
+  const init=readAvcInitialization(map);const audio=[...init.audioDescriptions.values()][0];
+  audio.writeUInt16BE(audio.readUInt16BE(24)===1?2:1,24);await writeFile(path.join(f.folder,'init_next.mp4'),map);
+  const result=await finalizeFmp4Capture(f.folder,f.store);assert.equal(result.changed,false);
+  assert.equal(result.warnings[0].kind,'decoder-boundary-unrepaired');
+  assert.equal(await readFile(path.join(f.folder,'playlist.m3u8'),'utf8'),f.playlist);
+  assert.deepEqual(await readFile(path.join(f.folder,'part0.ts')),f.original);
+});
+
+test('captured-map alignment resumes after its durable preparation checkpoint',async t=>{
+  const f=await knownShapeMaps(t,true),put=f.store.setMeta.bind(f.store);
+  f.store.setMeta=(key,value)=>{put(key,value);if(value.phase==='prepared')throw Error('simulated interruption');};
+  await assert.rejects(finalizeFmp4Capture(f.folder,f.store),/simulated interruption/);
+  assert.equal(await readFile(path.join(f.folder,'playlist.m3u8'),'utf8'),f.playlist);
+  f.store.setMeta=put;const result=await finalizeFmp4Capture(f.folder,f.store);
+  assert.equal(result.changed,true);await published(f);
+});
+
+test('a provider discontinuity before its later captured map aligns to the changed IDR',async t=>{
+  const f=await knownShapeMaps(t,true);
+  f.playlist=f.playlist.replace('#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_next.mp4"','#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init.mp4"');
+  f.playlist=f.playlist.replace('#EXTINF:1,\ntail.ts','#EXT-X-MAP:URI="init_next.mp4"\n#EXTINF:1,\ntail.ts');
+  await writeFile(path.join(f.folder,'playlist.m3u8'),f.playlist);
+  assert.equal((await finalizeFmp4Capture(f.folder,f.store)).changed,true);
+  const {p}=await published(f);
+  assert.equal(p.segments[1].metadata.includes('#EXT-X-DISCONTINUITY'),false);
+  assert.equal(p.segments[2].mapUri,'init_next.mp4');
+  assert.equal(p.segments[2].metadata.includes('#EXT-X-DISCONTINUITY'),true);
 });

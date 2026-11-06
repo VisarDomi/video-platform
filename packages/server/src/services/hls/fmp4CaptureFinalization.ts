@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseNativeMediaPlaylist, type NativeMediaSegment } from "shared";
 import type { FinalizationCheckpointStore } from "./finalizationCheckpointStore.js";
 import type { MediaIntegrityWarning } from "./mediaIntegrityFinalizer.js";
-import { assertCaptureSamplesPreserved, avcNals, initializationAtLevel, readAvcInitialization, readCaptureChunks, splitCaptureChunk,
+import { assertCaptureSamplesPreserved, avcNals, compatibleCaptureInitializations, initializationAtLevel, readAvcInitialization, readCaptureChunks, splitCaptureChunk,
     type AvcInitialization, type CaptureChunk } from "./fmp4Samples.js";
 
 const hash = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
@@ -12,7 +12,7 @@ interface Source { name: string; size: number; mtime: number; ino: number; sha: 
 interface Output { name: string; sha: string; size: number }
 interface Journal {
     version: 1; phase: "prepared" | "published"; originalPlaylist: string; candidatePlaylist: string;
-    sources: Source[]; outputs: Output[]; preservedNames: string[]; splitNames: string[]; corrections: number;
+    sources: Source[]; outputs: Output[]; preservedNames: string[]; splitNames: string[]; corrections: number; mapCorrections?: string[];
 }
 export interface Fmp4CaptureResult { warnings: MediaIntegrityWarning[]; preservedNames: string[]; changed: boolean }
 const unchanged = (): Fmp4CaptureResult => ({ warnings: [], preservedNames: [], changed: false });
@@ -39,8 +39,10 @@ async function exclusive(folder: string, name: string, bytes: Buffer): Promise<v
 }
 
 function finding(journal: Journal): MediaIntegrityWarning[] {
-    return journal.splitNames.length ? [{ kind: "decoder-boundary-split",
-        message: `losslessly split ${journal.splitNames.length} mixed AVC fragment(s) at IDR configuration boundaries; original files retained`, names: journal.splitNames }] : [];
+    const names = [...new Set([...journal.splitNames, ...(journal.mapCorrections ?? [])])];
+    if (!names.length) return [];
+    return [{ kind: "decoder-boundary-split", names,
+        message: `aligned ${names.length} AVC fragment(s) with captured decoder configurations; losslessly split ${journal.splitNames.length} mixed fragment(s); original files retained` }];
 }
 async function verifyOutputs(folder: string, journal: Journal): Promise<void> {
     for (const file of journal.outputs) {
@@ -55,7 +57,7 @@ async function verifySources(folder: string, sources: Source[]): Promise<void> {
 }
 interface PlannedSegment {
     source: NativeMediaSegment; name: string; map: string; boundary: boolean;
-    start: number; end: number; duration: number;
+    start: number; end: number; duration: number; continuesPrevious: boolean;
 }
 function clock(chunks: CaptureChunk[]): { start: number; end: number } {
     const video = chunks.flatMap(c => c.runs.filter(r => r.track.kind === "vide").flatMap(r => r.samples.map(s => ({
@@ -83,7 +85,9 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
     }
     const playlist = parseNativeMediaPlaylist(text);
     const sources: Source[] = [], outputs = new Map<string, Buffer>(), preserved = new Set<string>(), splitNames: string[] = [];
-    const initializations = new Map<string, AvcInitialization>(); let active: Buffer | null = null, previousMap: string | null = null;
+    interface Configuration { map: string; init: AvcInitialization; sps: Buffer; pps: Buffer }
+    const initializations = new Map<string, AvcInitialization>(), mapCorrections = new Set<string>();
+    let active: Configuration | null = null, previousMap: string | null = null, lastVideoEnd: number | null = null;
     const planned: PlannedSegment[] = [];
     const read = async (name: string) => {
         const filename = path.join(folder, name), stat = await fs.lstat(filename);
@@ -91,62 +95,91 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
         const bytes = await fs.readFile(filename);
         sources.push({ name, size: stat.size, mtime: stat.mtimeMs, ino: stat.ino, sha: hash(bytes) }); return bytes;
     };
+    const configuration = (sps: Buffer, pps: Buffer, reference: Configuration): Configuration => {
+        for (const [map, candidate] of initializations) {
+            if (candidate.sps.equals(sps) && candidate.pps.equals(pps)
+                && compatibleCaptureInitializations(reference.init, candidate)) return { map, init: candidate, sps, pps };
+        }
+        if (!pps.equals(reference.pps)) throw new Error("No compatible captured initialization for PPS change");
+        const bytes = initializationAtLevel(reference.init, sps), map = `init_split_${hash(bytes).slice(0, 16)}.mp4`;
+        const init = readAvcInitialization(bytes)!;
+        outputs.set(map, bytes); initializations.set(map, init);
+        return { map, init, sps: init.sps, pps: init.pps };
+    };
     try {
+        // A matching provider initialization may be announced a fragment late.
+        // Only headers already registered by this capture are eligible, and all
+        // audio descriptions, track clocks/defaults and NAL lengths must agree.
         for (const segment of playlist.segments) {
             if (!segment.mapUri) return unchanged();
             if (segment.mapLine?.includes("BYTERANGE=")) throw new Error("Unsupported ranged initialization map");
-            let init = initializations.get(segment.mapUri);
-            if (!init) {
-                const value = readAvcInitialization(await read(segment.mapUri)); if (!value) return unchanged();
-                init = value; initializations.set(segment.mapUri, init);
+            if (!initializations.has(segment.mapUri)) {
+                const init = readAvcInitialization(await read(segment.mapUri)); if (!init) return unchanged();
+                initializations.set(segment.mapUri, init);
             }
-            if (previousMap !== segment.mapUri || segment.metadata.includes("#EXT-X-DISCONTINUITY")) active = init.sps;
+        }
+        for (const segment of playlist.segments) {
+            const init = initializations.get(segment.mapUri!)!;
+            const bytes = await read(segment.name), chunks = readCaptureChunks(bytes, init);
+            const videoSamples = chunks.flatMap(c => c.runs.filter(r => r.track.id === init.video).flatMap(r => r.samples));
+            const firstSample = videoSamples[0];
+            const continuous = !!(active && firstSample && lastVideoEnd === firstSample.dts
+                && compatibleCaptureInitializations(active.init, init));
+            const metadataBoundary = previousMap !== segment.mapUri || segment.metadata.includes("#EXT-X-DISCONTINUITY");
+            // Conversely a provider MAP can precede the IDR by an old P-frame.
+            // Keep its proven previous decoder context only with continuous
+            // decode clocks and an explicit changed configuration/IDR later here.
+            const earlyMap = !!(active && metadataBoundary && continuous && firstSample
+                && !avcNals(firstSample, init.lengthBytes).some(n => (n[0] & 31) === 5)
+                && videoSamples.slice(1).some(sample => {
+                    const nals = avcNals(sample, init.lengthBytes);
+                    return nals.some(n => (n[0] & 31) === 5) && nals.some(n =>
+                        (n[0] & 31) === 7 && !n.equals(active!.sps) || (n[0] & 31) === 8 && !n.equals(active!.pps));
+                }));
+            if (!active || metadataBoundary && !earlyMap) active = { map: segment.mapUri!, init, sps: init.sps, pps: init.pps };
             previousMap = segment.mapUri;
-            const bytes = await read(segment.name), chunks = readCaptureChunks(bytes, init), groups: { sps: Buffer; chunks: CaptureChunk[] }[] = [];
-            let pending: CaptureChunk[] = [], groupSps = active!;
-            const flush = () => { if (pending.length) groups.push({ sps: groupSps, chunks: pending }); pending = []; };
+            const groups: { config: Configuration; chunks: CaptureChunk[] }[] = [];
+            let pending: CaptureChunk[] = [], groupConfig = active!;
+            const flush = () => { if (pending.length) groups.push({ config: groupConfig, chunks: pending }); pending = []; };
             for (const originalChunk of chunks) {
                 let remaining = originalChunk;
-                const video = originalChunk.runs.find(r => r.track.id === init!.video);
-                for (const sample of video?.samples ?? []) {
-                    const nals = avcNals(sample, init.lengthBytes); let next = active!, seenPicture = false;
+                for (const sample of originalChunk.runs.find(r => r.track.id === init.video)?.samples ?? []) {
+                    const nals = avcNals(sample, init.lengthBytes); let sps = active!.sps, pps = active!.pps, seenPicture = false;
                     for (const nal of nals) {
                         const type = nal[0] & 31;
-                        if (type === 7 && !nal.equals(next)) {
+                        if ((type === 7 && !nal.equals(sps)) || (type === 8 && !nal.equals(pps))) {
                             if (seenPicture) throw new Error("AVC configuration changes inside one coded sample");
-                            initializationAtLevel(init, nal); next = nal;
+                            if (type === 7) sps = nal; else pps = nal;
                         }
-                        if (type === 8 && !nal.equals(init.pps)) throw new Error("Unsupported PPS change");
                         if (type >= 1 && type <= 5) seenPicture = true;
                     }
-                    if (next.equals(active!)) continue;
+                    if (sps.equals(active!.sps) && pps.equals(active!.pps)) continue;
                     if (!nals.some(n => (n[0] & 31) === 5) || sample.flags & 0x10000) throw new Error("AVC change is not at an indexed IDR sample");
-                    const first = remaining.runs.find(r => r.track.id === init!.video)!.samples[0];
-                    if (sample !== first) {
+                    const next = configuration(sps, pps, active!);
+                    if (!compatibleCaptureInitializations(init, next.init)) throw new Error("Captured decoder clocks or audio descriptions disagree");
+                    if (sample !== remaining.runs.find(r => r.track.id === init.video)!.samples[0]) {
                         const parts = splitCaptureChunk(remaining, init.video, sample.dts);
                         pending.push(parts[0]); remaining = parts[1];
                     }
-                    flush(); active = next; groupSps = active;
+                    flush(); active = next; groupConfig = active;
                 }
                 pending.push(remaining);
             }
             flush();
             const split = groups.length > 1;
-            if (split) assertCaptureSamplesPreserved(chunks,
-                readCaptureChunks(Buffer.concat(groups.flatMap(g => g.chunks.map(c => c.bytes))), init));
-            if (split) { splitNames.push(segment.name); preserved.add(segment.name); }
+            if (split) {
+                assertCaptureSamplesPreserved(chunks, readCaptureChunks(Buffer.concat(groups.flatMap(g => g.chunks.map(c => c.bytes))), init));
+                splitNames.push(segment.name); preserved.add(segment.name);
+            }
             for (const [part, group] of groups.entries()) {
-                let map = segment.mapUri;
-                if (!group.sps.equals(init.sps)) {
-                    const initialization = initializationAtLevel(init, group.sps); map = `init_split_${hash(initialization).slice(0, 16)}.mp4`;
-                    outputs.set(map, initialization); preserved.add(segment.mapUri);
-                }
+                const map = group.config.map;
+                if (map !== segment.mapUri) { mapCorrections.add(segment.name); preserved.add(segment.mapUri!); }
                 const name = split ? `_split_${hash(bytes).slice(0, 16)}_${part}.ts` : segment.name;
                 if (split) outputs.set(name, Buffer.concat(group.chunks.map(c => c.bytes)));
-                const timing = clock(group.chunks);
-                planned.push({ source: segment, name, map, boundary: part > 0 || segment.metadata.includes("#EXT-X-DISCONTINUITY"),
-                    ...timing, duration: segment.durationSeconds });
+                planned.push({ source: segment, name, map, boundary: part > 0 || segment.metadata.includes("#EXT-X-DISCONTINUITY") && !earlyMap,
+                    ...clock(group.chunks), duration: segment.durationSeconds, continuesPrevious: part > 0 || continuous });
             }
+            const last = videoSamples.at(-1); lastVideoEnd = last ? last.dts + last.duration : null;
         }
     } catch (error) {
         if (["EIO", "EACCES", "EPERM", "ENOSPC", "EROFS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
@@ -156,9 +189,8 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
     for (const [index, segment] of planned.entries()) {
         const next = planned[index + 1];
         // Across a generated configuration cut the clocks have not reset. Across
-        // a provider cut/map change use the actual end of this source run.
-        const continuous = next && next.source.mapUri === segment.source.mapUri
-            && (!next.source.metadata.includes("#EXT-X-DISCONTINUITY") || next.source === segment.source);
+        // a clock break use the actual end of this source run.
+        const continuous = next?.continuesPrevious;
         const duration = continuous && next.start > segment.start ? next.start - segment.start : segment.end - segment.start;
         if (!Number.isFinite(duration) || duration <= 0) return unchanged();
         if (Math.abs(duration - segment.duration) > .0000005) corrections++;
@@ -176,10 +208,10 @@ export async function finalizeFmp4Capture(folder: string, store?: FinalizationCh
         lines.push(`#EXTINF:${segment.duration.toFixed(9)},`, segment.name);
     }
     lines.push("#EXT-X-ENDLIST", ""); const candidate = lines.join("\n");
-    if (!outputs.size && !corrections) return unchanged();
+    if (!outputs.size && !corrections && !mapCorrections.size) return unchanged();
     const journal: Journal = { version: 1, phase: "prepared", originalPlaylist: text, candidatePlaylist: candidate, sources,
         outputs: [...outputs].map(([name, bytes]) => ({ name, sha: hash(bytes), size: bytes.length })),
-        preservedNames: [...preserved], splitNames, corrections };
+        preservedNames: [...preserved], splitNames, corrections, mapCorrections: [...mapCorrections] };
     store.setMeta(key, journal);
     for (const [name, bytes] of outputs) await exclusive(folder, name, bytes);
     await syncDirectory(folder); await verifySources(folder, sources);
