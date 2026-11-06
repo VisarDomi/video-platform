@@ -277,8 +277,8 @@ final class ViewerUnit {
         decoderSurface = surface
         decoder = prepared
         playback.resolved()
-        playback.ready()
         guard decoder != nil else { surface.removeFromSuperview(); decoderSurface = nil; scheduleRecovery(); return }
+        playback.ready()
         decoder?.muted = player.isMuted
         decoder?.setVideoEnabled(videoEnabled)
         if wantsPlay { decoder?.play() }

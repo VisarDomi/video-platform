@@ -24,7 +24,7 @@
     "name": "Bunkr local",
     "product": "BunkrLocal",
     "bundleId": "com.visar.BunkrLocal.paid",
-    "build": "13",
+    "build": "14",
     "url": "https://192.168.1.197:9998/videos/bunkr",
     "mediaKind": "file"
   },
