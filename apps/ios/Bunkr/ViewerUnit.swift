@@ -305,7 +305,11 @@ final class ViewerUnit {
         guard token == self.token else { return }
         emitTime()
         reconcileFinalization()
-        if !timeline.snapshot().isLive && video?.liveStream != true { playback.end() }
+        if !timeline.snapshot().isLive && video?.liveStream != true {
+            guard playback.acceptsEnd(seeking: seekState.target != nil, current: player.currentTime().seconds,
+                                      duration: player.currentItem?.duration.seconds ?? .nan) else { return }
+            playback.end()
+        }
         if video?.liveStream == true { delegate?.unitUnavailable(self) }
     }
 
@@ -446,9 +450,14 @@ final class ViewerUnit {
     private func chase() {
         guard let request = seekState.begin() else { return }
         let mediaGeneration = token
-        player.seek(to: CMTime(seconds: request.target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        player.seek(to: CMTime(seconds: request.target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             MainActor.assumeIsolated {
                 guard let self, self.token == mediaGeneration else { return }
+                guard finished else {
+                    self.seekState.rejected(request)
+                    self.scheduleRecovery()
+                    return
+                }
                 switch self.seekState.complete(request) {
                 case .ignored: return
                 case .retry: self.chase()

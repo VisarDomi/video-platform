@@ -255,11 +255,11 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         }
         if state == .error { lifecycle.fail() }
         let nativeTime = max(lastTime, (player.time.value?.doubleValue ?? 0) / 1000)
-        if state == .stopped && opened && VideoTerminalState.reachedEnd(duration: duration, time: nativeTime, position: player.position, inputFailed: inputFailed) {
+        if state == .stopped && opened && VideoTerminalState.reachedEnd(duration: duration, time: nativeTime, position: player.position, inputFailed: inputFailed, seeking: pendingSeek != nil) {
             lifecycle.end()
             lastTime = duration
         }
-        if state == .error || (state == .stopped && opened && requested && !ended) { failed() }
+        if state == .error || (state == .stopped && opened && (requested || pendingSeek != nil) && !ended) { failed() }
         changed()
     }
 

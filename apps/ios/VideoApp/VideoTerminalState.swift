@@ -9,8 +9,8 @@ enum VideoTerminalState {
     // even with a shorter requested notification period (observed on iOS).
     static let maximumClockTail = 2.0
 
-    static func reachedEnd(duration: Double, time: Double, position: Double, inputFailed: Bool) -> Bool {
-        guard !inputFailed, duration.isFinite, duration > 0, time.isFinite,
+    static func reachedEnd(duration: Double, time: Double, position: Double, inputFailed: Bool, seeking: Bool = false) -> Bool {
+        guard !inputFailed, !seeking, duration.isFinite, duration > 0, time.isFinite,
               position.isFinite, time > 0, position > 0 else { return false }
         let tail = min(maximumClockTail, duration / 2)
         return time >= duration - tail && position >= 1 - tail / duration
