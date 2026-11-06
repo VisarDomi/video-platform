@@ -18,9 +18,14 @@ Processing a pending recording (`processFinalizedRecording`):
    Its tags that still apply (a discontinuity, an init map) pass to the next
    entry, which starts after a discontinuity where media resumes. The file
    stays on disk; a missing file is not judged.
-1. Finalized AVC fMP4 captures are indexed before publication. A level-only
-   in-band SPS change at an indexed IDR gets a matching copied initialization
-   map and a discontinuity. If the change falls inside a media file/moof,
+1. Finalized AVC fMP4 captures are indexed before publication. An in-band SPS/PPS
+   change at an indexed IDR gets its exact already-captured initialization map
+   and a discontinuity. Track IDs, clocks/defaults, NAL length and the complete
+   audio sample descriptions must match. Without a matching captured map only
+   a level-only SPS change can clone its existing initialization. Provider MAPs
+   announced late align to the actual change; a MAP announced before an old
+   trailing P-frame moves to the proven matching IDR, with continuous decode
+   clocks and matching audio required. If the change falls inside a media file/moof,
    sample-copy fragments split it at that video sample and the nearest whole AAC
    packet boundary. Every encoded sample, DTS, duration, composition offset and
    flag is compared before publication; no decoding/re-encoding or retiming.
@@ -29,6 +34,10 @@ Processing a pending recording (`processFinalizedRecording`):
    validated and retained verbatim; valid extensions are not damage. Malformed
    or unindexed extensions stay unsupported. This matches the record layout in
    [FFmpeg's AVC muxer](https://github.com/FFmpeg/FFmpeg/blob/master/libavformat/avc.c).
+   A closing `mfra` seek-index trailer is inspected as metadata: validate its
+   `tfra` record lengths and `mfro` size/footer, with no hidden/unindexed bytes.
+   Original trailers remain in their original files; generated sample-copy
+   fragments omit obsolete source offsets, just as they omit source sidx indexes.
    Unsupported layouts/configuration changes stay unchanged and receive a
    `decoder-boundary-unrepaired` warning.
 2. Provider sequence restarts (a compound segment name whose sequence does not
