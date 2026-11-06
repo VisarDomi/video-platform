@@ -20,6 +20,7 @@ final class VaultListController: VideoListController {
     private var fresh: [VaultVideo] = []
     private var notices: [VaultNotice] = []
     private var loading: Task<Void, Never>?
+    private var listing = OperationState()
     private var lastLoad: Date?
 
     init() {
@@ -71,6 +72,7 @@ final class VaultListController: VideoListController {
     // Porntrex from its first page, behind the rows already shown; each page joins in order.
     override func reload() {
         loading?.cancel()
+        let operation = listing.begin()
         fresh = []
         lastLoad = Date()
         loading = Task { [weak self] in
@@ -81,7 +83,7 @@ final class VaultListController: VideoListController {
                 do {
                     let page = try await Vault.page(http, cursor: cursor)
                     guard !Task.isCancelled else { return }
-                    await absorb(page)
+                    await absorb(page, operation: operation)
                     guard !Task.isCancelled else { return }
                     hideFailure()
                     if refresh.isRefreshing { refresh.endRefreshing() }
@@ -96,7 +98,7 @@ final class VaultListController: VideoListController {
                     delay = min(delay * 2, 30)
                 }
             }
-            self?.loading = nil
+            if let self, self.listing.finish(operation) { self.loading = nil }
         }
     }
 
@@ -104,7 +106,8 @@ final class VaultListController: VideoListController {
     // what was listed remains, except the rows of a site that could not be listed.
     // The merging, ordering and matching of every row happen off the main thread (a page
     // arrives every second or so while the list may be scrolling); only the result is set.
-    private func absorb(_ page: Vault.Page) async {
+    private func absorb(_ page: Vault.Page, operation: OperationState.ID) async {
+        guard listing.owns(operation), !Task.isCancelled else { return }
         let done = page.next == nil
         let (previous, current) = (self.fresh, shown)
         let (fresh, shown, built) = await Task.detached(priority: .userInitiated) {
@@ -113,6 +116,7 @@ final class VaultListController: VideoListController {
             let shown = Vault.order(Vault.unique(fresh + earlier))
             return (fresh, shown, Self.rows(shown))
         }.value
+        guard listing.owns(operation), !Task.isCancelled else { return }
         self.fresh = done ? [] : fresh
         self.shown = shown
         notices = page.notices

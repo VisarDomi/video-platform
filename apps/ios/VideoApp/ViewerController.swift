@@ -67,23 +67,25 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var currentIndex: Int
     private var segments: [Double] = []
     private var controlsVisible = true
-    private var unsettled = false
+    private var interaction = ViewerInteractionState()
+    private var presentation = ViewerPresentationState()
+    private var unsettled: Bool { interaction.scrolling }
     private var programmatic = false
-    private var touching = false
+    private var touching: Bool { interaction.touching }
     private var lastProgressSave: CFTimeInterval = 0
     private var lastNowPlaying: CFTimeInterval = 0
     private var discovered = Set<String>()
     private var removed = Set<String>()
-    private var revealed = false
+    private var revealed: Bool { presentation.revealed }
     private var revealTimer: Timer?
-    private var zoomed = false
+    private var zoomed: Bool { interaction.zoomed }
     private var seekPan: UIPanGestureRecognizer!
     private var edgePan: UIScreenEdgePanGestureRecognizer!
     private var seekBase: Double = 0
     private var seeking = false
     private var observers: [NSObjectProtocol] = []
     private var lastBounds: CGSize = .zero
-    private var closed = false
+    private var closed: Bool { presentation.closed }
     // Restoring after a relaunch: the last picture over the feed until the player has its own.
     var restoring = false
     private var poster: UIImageView?
@@ -175,7 +177,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         view.addGestureRecognizer(seekPan)
         let contact = ContactRecognizer { [weak self] down in
             guard let self else { return }
-            touching = down
+            interaction.contact(down)
+            updateUnitVisibility()
             if !down { DispatchQueue.main.async { [weak self] in self?.settle() } }
         }
         contact.delegate = self
@@ -191,6 +194,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // The list's videos from `index`: the session begins and the selected video loads.
     func open(videos: [ViewerVideo], index: Int) {
+        presentation.open()
         loadViewIfNeeded()
         self.videos = videos
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
@@ -369,8 +373,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     private func reveal() {
-        guard !revealed, !closed else { return }
-        revealed = true
+        guard presentation.reveal() else { return }
         revealTimer?.invalidate()
         layoutFeed()
         placeInitialVideo()
@@ -629,7 +632,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // Idle only commits state and any deferred metadata. It never chooses a landing position.
     private func settle() {
         guard !zoomed, !touching, !feed.isDragging, !feed.isDecelerating, !closed else { return }
-        unsettled = false
+        interaction.settle()
         selectVisibleVideo()
         overlay.setInteractive(true)
         updateUnitVisibility()
@@ -656,7 +659,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             removePoster()
             if !revealed { reveal(); feed.alpha = 1 }
             monitor(true)
-            unsettled = true
+            interaction.drag()
             overlay.setInteractive(false)
             updateUnitVisibility()
         }
@@ -677,7 +680,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if scrollView === feed && !decelerate { monitor(false); settle() }
+        if scrollView === feed {
+            interaction.dragEnded(decelerating: decelerate)
+            if !decelerate { monitor(false); settle() }
+        }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -699,9 +705,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         guard scrollView === zoom, !zoomed else { return }
-        zoomed = true
+        interaction.pinch()
         feed.isScrollEnabled = false
-        unsettled = false
+        interaction.settle()
         monitor(false)
         overlay.setInteractive(true)
         updateUnitVisibility()
@@ -715,12 +721,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
-        if scrollView === zoom && scale <= 1.01 { exitZoom() }
+        guard scrollView === zoom else { return }
+        if scale <= 1.01 { exitZoom() } else { interaction.magnify() }
     }
 
     private func exitZoom() {
         guard zoomed else { return }
-        zoomed = false
+        interaction.unzoom()
         zoom.setZoomScale(1, animated: false)
         feed.isScrollEnabled = true
         settle()
@@ -737,7 +744,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         measuredSizes[video.key] = size
         geometryDirty = true
         fixtureImage = image
-        revealed = true
+        presentation.reveal()
         feed.alpha = 1
         view.layoutIfNeeded()
         layoutFeed()
@@ -766,7 +773,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         else { active.configureZoomCheck(video: videos[currentIndex], size: aspect(of: videos[currentIndex]), image: image) }
         geometryDirty = true
         initialPositionApplied = false
-        revealed = true
+        presentation.reveal()
         feed.alpha = 1
         view.layoutIfNeeded()
         layoutFeed()
@@ -839,7 +846,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         initialPositionApplied = false
         geometryDirty = true
         active.configureZoomCheck(video: videos[currentIndex], size: aspect(of: videos[currentIndex]), image: image)
-        revealed = true
+        presentation.reveal()
         feed.alpha = 1
         view.layoutIfNeeded()
         layoutFeed()
@@ -1263,8 +1270,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // `reveal`: the list scrolls the last viewed row into view (not for a forward swipe that
     // was let go).
     func close(reveal: Bool = true) {
-        guard !closed else { return }
-        closed = true
+        guard presentation.close() else { return }
         monitor(false)
         // The list is scrolled right after (measured: the frames of the next second are kept).
         FrameMonitor.shared.scrolling(true)

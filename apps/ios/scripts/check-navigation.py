@@ -42,6 +42,14 @@ try:
     for provider in ['bunkr', 'sc', 'fc2', 'tango', 'vault', 'tango-live']:
         sim('terminate', args.device, bundle, check=False)
         launch(provider, reset=True)
+        # Saving a restored anchor must not put the list back into its initial
+        # positioning phase, nor discard the anchor before applying it.
+        list_place = action('navigation-list-scroll', offset=347.25)
+        action('navigation-flush')
+        sim('terminate', args.device, bundle)
+        list_restored = launch(provider)
+        assert list_restored['viewer'] == '' and list_restored['firstRow'] == list_place['firstRow'], (list_place, list_restored)
+        assert abs(list_restored['offset'] - list_place['offset']) < .5, (list_place, list_restored)
         opened = action('navigation-open', row=50)
         assert opened['viewer'] == 'Video 050.mp4', opened
         mutations = []
@@ -82,7 +90,7 @@ try:
         assert restored['viewer'] == 'Video 050.mp4', restored
         assert restored['viewerState']['key'] == before['viewerState']['key'], (before, restored)
         action('navigation-back')
-        report.append(dict(provider=provider, opened=opened, back=back, arrived=arrived, restored=restored, mutations=mutations))
+        report.append(dict(provider=provider, listPlace=list_place, listRestored=list_restored, opened=opened, back=back, arrived=arrived, restored=restored, mutations=mutations))
         print('PASS shared navigation:', provider, flush=True)
     sim('io', args.device, 'screenshot', str(args.out / 'restored-list.png'))
 finally:

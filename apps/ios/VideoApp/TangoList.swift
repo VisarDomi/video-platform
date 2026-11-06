@@ -22,7 +22,7 @@ final class TangoListController: VideoListController {
     private var loading: Task<Void, Never>?
     private var lastSuccess: Date?
     private var lastError: String?
-    private var requestGeneration = 0
+    private var listOperation = OperationState()
     private var retry: Task<Void, Never>?
     private var retryDelay: Double = 1
     private var active = true
@@ -122,7 +122,7 @@ final class TangoListController: VideoListController {
 
     func paused() {
         active = false
-        requestGeneration += 1
+        listOperation.cancel()
         loading?.cancel(); loading = nil
         retry?.cancel(); retry = nil
         refresh.endRefreshing()
@@ -161,16 +161,15 @@ final class TangoListController: VideoListController {
         guard active else { return }
         retry?.cancel(); retry = nil
         loading?.cancel()
-        requestGeneration += 1
-        let generation = requestGeneration
+        let operation = listOperation.begin()
         loading = Task { [weak self] in
             guard let self else { return }
             defer {
-                if generation == requestGeneration { refresh.endRefreshing(); loading = nil }
+                if listOperation.finish(operation) { refresh.endRefreshing(); loading = nil }
             }
             do {
                 let fresh = try await session.live()
-                guard !Task.isCancelled, generation == requestGeneration else { return }
+                guard !Task.isCancelled, listOperation.owns(operation) else { return }
                 lastSuccess = Date()
                 lastError = nil
                 retryDelay = 1
@@ -180,12 +179,12 @@ final class TangoListController: VideoListController {
                 hideFailure()
                 hideLogin()
             } catch TangoError.loginRequired {
-                guard !Task.isCancelled, generation == requestGeneration else { return }
+                guard !Task.isCancelled, listOperation.owns(operation) else { return }
                 lastError = TangoError.loginRequired.localizedDescription
                 if hasAutomaticRecovery {hideLogin();if streams.isEmpty {showFailure("Restoring Tango’s saved login…")}}
                 else {showLogin("Tango login is required.")}
             } catch TangoError.verificationRequired {
-                guard !Task.isCancelled, generation == requestGeneration else { return }
+                guard !Task.isCancelled, listOperation.owns(operation) else { return }
                 lastError = TangoError.verificationRequired.localizedDescription
                 if hasAutomaticRecovery {
                     if !Tango.deviceContextComplete(jar.all){showLogin("Tango’s updated API needs the complete sign-in context once.")}
@@ -200,7 +199,7 @@ final class TangoListController: VideoListController {
                     self?.loadList()
                 }
             } catch {
-                guard !Task.isCancelled, generation == requestGeneration else { return }
+                guard !Task.isCancelled, listOperation.owns(operation) else { return }
                 lastError = error.localizedDescription
                 if !Task.isCancelled, loginView != nil { showLogin("Can't reach Tango to check the login.\n\(error.localizedDescription)") }
                 else if !Task.isCancelled, streams.isEmpty { showFailure("Can't reach Tango.\n\(error.localizedDescription)") }

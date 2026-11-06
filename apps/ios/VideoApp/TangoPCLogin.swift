@@ -13,7 +13,8 @@ final class TangoPCLogin {
     private let http: HTTPClient
     private let pendingFile: URL?
     private var selected: URL?
-    private var running: Task<[HTTPCookie], Error>?
+    private enum LoginOperation { case idle, connecting(Task<[HTTPCookie], Error>) }
+    private var operation = LoginOperation.idle
     private struct Pending: Codable { var id: String; var owner: String }
     private var pending: Pending?
 
@@ -43,10 +44,12 @@ final class TangoPCLogin {
     }
 
     func newSession(refreshToken: String? = nil) async throws -> [HTTPCookie] {
-        if let running { return try await running.value }
-        let task = Task { try await self.perform(refreshToken: refreshToken) }
-        running = task
-        defer { running = nil }
+        if case .connecting(let task) = operation { return try await task.value }
+        let task = Task {
+            defer { self.operation = .idle }
+            return try await self.perform(refreshToken: refreshToken)
+        }
+        operation = .connecting(task)
         return try await task.value
     }
 

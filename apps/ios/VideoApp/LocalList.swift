@@ -17,7 +17,7 @@ final class LocalListController: VideoListController {
     private var epoch: String?
     private var revision: Int?
     private var following: Task<Void, Never>?
-    private var feedGeneration = 0
+    private var feedState = OperationState()
     private var active = true
     private var mutationGeneration = 0
     private var renameBarrier: LocalRevisionBarrier?
@@ -62,6 +62,7 @@ final class LocalListController: VideoListController {
     func paused() {
         active = false
         following?.cancel()
+        feedState.cancel()
         following = nil
         flushState()
         cacheWriter.flush()
@@ -73,8 +74,7 @@ final class LocalListController: VideoListController {
     // (first time, after the PC restarted, or too far behind) or only what changed.
     private func follow() {
         guard following == nil, active else { return }
-        feedGeneration += 1
-        let feed = feedGeneration
+        let feed = feedState.begin()
         following = Task { [weak self] in
             var delay = 1.0
             while !Task.isCancelled {
@@ -96,13 +96,14 @@ final class LocalListController: VideoListController {
                     delay = min(delay * 2, 30)
                 }
             }
-            if let self, self.feedGeneration == feed { self.following = nil }
+            if let self, self.feedState.finish(feed) { self.following = nil }
         }
     }
 
     // Pulling down asks for the whole list again.
     override func reload() {
         following?.cancel()
+        feedState.cancel()
         following = nil
         epoch = nil
         revision = nil

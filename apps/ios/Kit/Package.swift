@@ -38,6 +38,8 @@ let package = Package(
         // The PC backups of the apps' own data (PCBackup.swift).
         .target(name: "KitBackup", dependencies: ["KitCore", "KitNet"]),
         .testTarget(name: "KitCoreTests", dependencies: ["KitCore"]),
+        .testTarget(name: "KitLifecycleTests", dependencies: ["KitLifecycle"]),
+        .testTarget(name: "KitBackupTests", dependencies: ["KitBackup"]),
         .testTarget(name: "KitNetTests", dependencies: ["KitNet"]),
         .testTarget(name: "KitHTMLTests", dependencies: ["KitHTML"]),
     ]

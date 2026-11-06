@@ -48,8 +48,15 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     private var forward: [any LiveScreen] = []
     private var savedForward: [SavedStack.Entry] = []
     private var forwardPan: UIScreenEdgePanGestureRecognizer!
-    private var interactiveForward: UIPercentDrivenInteractiveTransition?
-    private var pushingForward = false
+    private enum ForwardState {
+        case idle, requested
+        case interactive(UIPercentDrivenInteractiveTransition)
+        case finishing(UIPercentDrivenInteractiveTransition)
+    }
+    private var forwardState = ForwardState.idle
+    private var interactiveForward: UIPercentDrivenInteractiveTransition? {
+        switch forwardState { case .interactive(let driver), .finishing(let driver): return driver; default: return nil }
+    }
     private var saveScheduled = false
     private var warmed = false
 
@@ -116,8 +123,8 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     }
 
     public func goForward(animated: Bool = true) {
-        guard let screen = takeForward() else { return }
-        pushingForward = true
+        guard case .idle = forwardState, transitionCoordinator == nil, let screen = takeForward() else { return }
+        forwardState = .requested
         pushViewController(screen, animated: animated)
     }
 
@@ -162,6 +169,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     public func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         // A screen that left the stack by going back becomes the next forward screen.
         if let coordinator = transitionCoordinator, coordinator.isCancelled { return }
+        if case .requested = forwardState { forwardState = .idle }
         screenChanged()
     }
 
@@ -211,7 +219,8 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
             return (topViewController as? any LiveScreen)?.allowsEdgeBack ?? true
         }
         if gestureRecognizer === forwardPan {
-            return canGoForward && transitionCoordinator == nil
+            if case .idle = forwardState { return canGoForward && transitionCoordinator == nil }
+            return false
         }
         return true
     }
@@ -227,19 +236,18 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
         let progress = min(max(-pan.translation(in: view).x / width, 0), 1)
         switch pan.state {
         case .began:
-            guard let screen = takeForward() else { return }
-            interactiveForward = UIPercentDrivenInteractiveTransition()
-            pushingForward = true
+            guard case .idle = forwardState, transitionCoordinator == nil, let screen = takeForward() else { return }
+            forwardState = .interactive(UIPercentDrivenInteractiveTransition())
             pushViewController(screen, animated: true)
         case .changed:
             interactiveForward?.update(progress)
         case .ended:
             let velocity = -pan.velocity(in: view).x
             if progress > 0.33 || velocity > 600 { interactiveForward?.finish() } else { interactiveForward?.cancel() }
-            interactiveForward = nil
+            if let driver = interactiveForward { forwardState = .finishing(driver) }
         default:
             interactiveForward?.cancel()
-            interactiveForward = nil
+            if let driver = interactiveForward { forwardState = .finishing(driver) }
         }
     }
 
@@ -251,10 +259,13 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
 
     public func navigationController(_ navigationController: UINavigationController, animationControllerFor operation: UINavigationController.Operation,
                                      from fromVC: UIViewController, to toVC: UIViewController) -> (any UIViewControllerAnimatedTransitioning)? {
-        guard operation == .push, pushingForward else { return nil }
-        pushingForward = false
-        return ForwardPush(onCancel: { [weak self] in
-            if let screen = toVC as? any LiveScreen { self?.forward.append(screen) }
+        guard operation == .push else { return nil }
+        switch forwardState { case .requested, .interactive: break; default: return nil }
+        return ForwardPush(onFinish: { [weak self] cancelled in
+            guard let self else { return }
+            if cancelled, let screen = toVC as? any LiveScreen { forward.append(screen) }
+            forwardState = .idle
+            screenChanged()
         })
     }
 }
@@ -262,8 +273,8 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
 // The forward push follows the finger from the right edge, the mirror of the system's back.
 @MainActor
 final class ForwardPush: NSObject, UIViewControllerAnimatedTransitioning {
-    private let onCancel: () -> Void
-    init(onCancel: @escaping () -> Void) { self.onCancel = onCancel }
+    private let onFinish: (Bool) -> Void
+    init(onFinish: @escaping (Bool) -> Void) { self.onFinish = onFinish }
 
     nonisolated func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval { 0.3 }
 
@@ -287,8 +298,9 @@ final class ForwardPush: NSObject, UIViewControllerAnimatedTransitioning {
                 to.view.layer.shadowOpacity = 0
                 from.view.frame = context.initialFrame(for: from)
                 let cancelled = context.transitionWasCancelled
-                if cancelled { to.view.removeFromSuperview(); self.onCancel() }
+                if cancelled { to.view.removeFromSuperview() }
                 context.completeTransition(!cancelled)
+                self.onFinish(cancelled)
             }
         }
     }

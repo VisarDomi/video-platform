@@ -39,20 +39,23 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     private let player: VLCMediaPlayer
     private let media: VLCMedia
     private var timer: Timer?
-    private var requested = false
-    private var opened = false
-    private var stopped = false
+    private var lifecycle = DecoderLifecycle()
+    private var requested: Bool { lifecycle.requested }
+    private var opened: Bool { lifecycle.opened }
+    private var stopped: Bool { lifecycle.stopping }
     private var initialTime: Double
     private var lastTime: Double
-    private var pendingSeek: Double?
-    private var seekInFlight = false
-    private var ended = false
-    private var inputFailed = false
+    private var seekState = ChasingSeek()
+    private var pendingSeek: Double? { seekState.target }
+    private var seekInFlight: Bool { seekState.isInFlight }
+    private var ended: Bool { lifecycle.terminal }
+    private var inputFailed: Bool { lifecycle.failed }
     private let knownDuration: Double
     private let changed: () -> Void
     private let failed: () -> Void
-    private var videoEnabled = true
-    private var videoRestorePending = false
+    private var output = VideoOutputState.enabled
+    private var videoEnabled: Bool { output.requested }
+    private var videoRestorePending: Bool { output.needsRestore }
     private var stateEvents: [[String: Any]] = []
     private let surface: UIView
     private var firstPictureAfterSeek: UInt64?
@@ -69,7 +72,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         media = core.media
         initialTime = max(0, start)
         lastTime = max(0, start)
-        pendingSeek = start > 0 ? start : nil
+        if start > 0 { seekState.request(start) }
         knownDuration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
         self.changed = changed
         self.failed = failed
@@ -103,7 +106,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     var currentTime: Double {
         if let pendingSeek { return pendingSeek }
         guard opened, requested else { return lastTime }
-        guard player.state != .stopped && player.state != .stopping else { return lastTime }
+        guard player.state != .stopped && player.state != .stopping && player.state != .error else { return lastTime }
         let time = max(0, player.time.value?.doubleValue ?? 0) / 1000
         lastTime = time
         return time
@@ -122,9 +125,9 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         guard !ended else { return }
         if !requested, opened, pendingSeek == nil {
             let raw = max(0, player.time.value?.doubleValue ?? 0) / 1000
-            if abs(raw - lastTime) > 0.25 { pendingSeek = lastTime }
+            if abs(raw - lastTime) > 0.25 { seekState.request(lastTime) }
         }
-        requested = true
+        lifecycle.play()
         // A terminated input must reopen through the unit's bounded recovery at
         // its saved clock. libvlc play() alone would start that input from zero.
         if opened && (player.state == .stopped || player.state == .error) { failed(); return }
@@ -134,48 +137,49 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     }
     func pause() {
         lastTime = currentTime
-        requested = false
+        lifecycle.pause()
         player.pause()
     }
     func seek(_ seconds: Double) {
         initialTime = max(0, seconds)
         lastTime = initialTime
-        pendingSeek = initialTime
-        ended = false
+        seekState.request(initialTime)
+        lifecycle.seek()
         applyPendingSeek()
     }
 
     private func applyPendingSeek() {
-        guard !stopped, opened, !seekInFlight, player.isSeekable, let target = pendingSeek else { return }
+        guard !stopped, opened, !seekInFlight, player.isSeekable, pendingSeek != nil else { return }
+        guard let request = seekState.begin() else { return }
+        let target = request.target
         let raw = (player.time.value?.doubleValue ?? 0) / 1000
         let milliseconds = max(Double(Int32.min), min(Double(Int32.max), ((target - raw) * 1000).rounded()))
-        seekInFlight = true
         let pictures = media.statistics.displayedPictures
         let accepted = player.jump(withOffset: Int32(milliseconds), completion: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.stopped else { return }
-                self.seekInFlight = false
-                if self.pendingSeek != target { self.applyPendingSeek(); return }
-                self.pendingSeek = nil
+                switch self.seekState.complete(request) {
+                case .ignored: return
+                case .retry: self.applyPendingSeek(); return
+                case .settled: break
+                }
                 self.lastTime = target
                 if self.surface.isHidden { self.firstPictureAfterSeek = pictures }
                 if self.requested { self.player.play() } else { self.player.pause() }
                 self.changed()
             }
         })
-        if !accepted { seekInFlight = false }
+        if !accepted { seekState.rejected(request) }
     }
 
     func setVideoEnabled(_ enabled: Bool) {
-        let restoring = enabled && !videoEnabled
-        videoEnabled = enabled
+        output.request(enabled)
         // Keep audio and the media clock running through lock/background. Removing
         // only the video track prevents background rendering without restarting it.
         if enabled {
-            if restoring { videoRestorePending = true }
             restoreVideoIfReady()
         }
-        else { videoRestorePending = false; player.deselectAllVideoTracks() }
+        else { player.deselectAllVideoTracks() }
     }
 
     private func restoreVideoIfReady() {
@@ -183,22 +187,23 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
         // create the native video output until UIKit has actually activated it.
         guard !stopped, videoRestorePending, videoEnabled, opened,
               UIApplication.shared.applicationState == .active, !player.videoTracks.isEmpty else { return }
-        videoRestorePending = false
+        output.restored()
         let position = currentTime
         player.selectTrack(at: 0, type: .video)
         // VP9 Matroska needs random-access preroll after video-only suspension.
         // Rejoin the current clock on this input, preserving a queued user seek.
         if !ended, pendingSeek == nil {
             lastTime = position
-            pendingSeek = position
+            seekState.request(position)
             applyPendingSeek()
         }
     }
 
     func stop() {
         guard !stopped else { return }
-        stopped = true
-        requested = false
+        lifecycle.stop()
+        seekState.cancel()
+        lifecycle.pause()
         timer?.invalidate(); timer = nil
         if player.state == .stopped {
             finishRetirement()
@@ -211,6 +216,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     }
 
     private func finishRetirement() {
+        lifecycle.retired()
         player.delegate = nil
         player.drawable = nil
         if let retirement {
@@ -235,21 +241,20 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
                             "position": player.position, "requested": requested])
         if stateEvents.count > 16 { stateEvents.removeFirst() }
         if state == .playing {
-            opened = true
-            inputFailed = false
+            guard lifecycle.openedInput() else { if player.isPlaying { player.pause() }; return }
             if !requested || pendingSeek != nil { player.pause() }
             applyPendingSeek()
             if !videoEnabled { player.deselectAllVideoTracks() }
         }
         if state == .paused {
-            opened = true
+            guard lifecycle.openedInput() else { if player.isPlaying { player.pause() }; return }
             if pendingSeek != nil { applyPendingSeek() }
             else if requested { player.play() }
         }
-        if state == .error { inputFailed = true }
+        if state == .error { lifecycle.fail() }
         let nativeTime = max(lastTime, (player.time.value?.doubleValue ?? 0) / 1000)
         if state == .stopped && opened && VideoTerminalState.reachedEnd(duration: duration, time: nativeTime, position: player.position, inputFailed: inputFailed) {
-            ended = true
+            lifecycle.end()
             lastTime = duration
         }
         if state == .error || (state == .stopped && opened && requested && !ended) { failed() }

@@ -47,14 +47,21 @@ public final class PCBackup {
     private let capture: () -> [String: Any]
     private let restore: (Any) throws -> Void
     private let stats: (Any) throws -> String
+    private enum SaveState {
+        case idle
+        case uploading(Task<(label: String, stats: String)?, Error>)
+    }
+    private var saveState = SaveState.idle
+    private var identityGeneration: UInt64 = 0
 
     // `scope`: "<app>:<provider>" (e.g. "gallery-reader:hitomi").
     public init(scope: String, base: URL, key: String, trust: LocalTrust?, directory: URL,
-                capture: @escaping () -> [String: Any], restore: @escaping (Any) throws -> Void, stats: @escaping (Any) throws -> String) {
+                capture: @escaping () -> [String: Any], restore: @escaping (Any) throws -> Void, stats: @escaping (Any) throws -> String,
+                configure: (@Sendable (URLSessionConfiguration) -> Void)? = nil) {
         self.scope = scope
         self.base = base
         self.key = key
-        http = HTTPClient(.init(trust: trust, connectionsPerHost: 2, requestTimeout: 8, resourceTimeout: 8))
+        http = HTTPClient(.init(trust: trust, connectionsPerHost: 2, requestTimeout: 8, resourceTimeout: 8, configure: configure))
         identityFile = directory.appendingPathComponent("backup-identity.json")
         self.capture = capture
         self.restore = restore
@@ -64,6 +71,7 @@ public final class PCBackup {
     public var identity: BackupIdentity? {
         get { try? DurableFile.readJSON(BackupIdentity.self, from: identityFile) }
         set {
+            identityGeneration &+= 1
             if let newValue { try? DurableFile.writeJSON(newValue, to: identityFile) }
             else { try? FileManager.default.removeItem(at: identityFile) }
         }
@@ -106,27 +114,44 @@ public final class PCBackup {
     // Uploads the current data; nil when the PC is unavailable.
     @discardableResult
     public func save() async throws -> (label: String, stats: String)? {
+        if case .uploading(let task) = saveState {
+            _ = try? await task.value
+            return try await save()
+        }
+        let generation = identityGeneration
+        let task = Task { @MainActor in
+            defer { self.saveState = .idle }
+            return try await self.performSave(generation: generation)
+        }
+        saveState = .uploading(task)
+        return try await task.value
+    }
+
+    private func performSave(generation: UInt64) async throws -> (label: String, stats: String)? {
+        guard generation == identityGeneration else { return nil }
         guard let current = identity else { throw BackupError.invalid("Choose Backup or Restore first") }
         let data = capture()
         let summary = try stats(data)
         var body: [String: Any] = ["label": current.label, "data": data]
         body["baseRevision"] = current.revision ?? NSNull()
-        guard let text = try await request("PUT", body: try JSONSerialization.data(withJSONObject: body), id: current.id) else { return nil }
+        guard let text = try await request("PUT", body: try JSONSerialization.data(withJSONObject: body), id: current.id, generation: generation) else { return nil }
         guard let saved = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any], saved["id"] as? String == current.id,
               let revision = (saved["current"] as? [String: Any])?["revision"] as? String else { throw BackupError.invalid("Unexpected backup acknowledgement") }
+        guard generation == identityGeneration, identity?.id == current.id else { return nil }
         var acknowledged = current
         acknowledged.revision = revision
         identity = acknowledged
         return (current.label, summary)
     }
 
-    private func request(_ method: String, body: Data? = nil, id: String? = nil) async throws -> String? {
+    private func request(_ method: String, body: Data? = nil, id: String? = nil, generation: UInt64? = nil) async throws -> String? {
         let path = "api/reader-backups/" + scope.replacingOccurrences(of: ":", with: "/") + (id.map { "/" + $0 } ?? "")
         let request = HTTPRequest(base.appendingPathComponent(path), method: method,
                                   headers: ["Content-Type": "application/json", "X-Reader-Backup-Key": key], body: body,
                                   retry: .never, accept: Set(300...599))
         let response: HTTPResponse
         do { response = try await http.send(request) } catch { return nil }
+        if let generation, generation != identityGeneration { return nil }
         if response.status >= 500 { return nil }
         guard (200..<300).contains(response.status) else {
             if response.status == 409 { identity = nil }

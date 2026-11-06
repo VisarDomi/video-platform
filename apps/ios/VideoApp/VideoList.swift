@@ -28,8 +28,21 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     private(set) var marks: [String: String] = [:]
     var bytesPerSecond = 2_300_000.0 / 8
     private(set) var highlight: String?
-    private var savedTop: (key: String, offset: CGFloat)?
-    private var positioned = false
+    private enum PositionState {
+        case awaiting((key: String, offset: CGFloat)?)
+        case restored((key: String, offset: CGFloat)?)
+    }
+    private var positionState = PositionState.awaiting(nil)
+    private var positioned: Bool { if case .restored = positionState { return true }; return false }
+    private var savedTop: (key: String, offset: CGFloat)? {
+        get { switch positionState { case .awaiting(let anchor), .restored(let anchor): return anchor } }
+        set {
+            switch positionState {
+            case .awaiting: positionState = .awaiting(newValue)
+            case .restored: positionState = .restored(newValue)
+            }
+        }
+    }
     // A list that arrived while the rows were moving (see setVideos).
     private var pending: (videos: [ViewerVideo], marks: [String: String], looks: [ViewerVideo.Look]?)?
     private var looks: [ViewerVideo.Look] = []
@@ -218,7 +231,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     // Once, after layout: the saved place, else the highlighted row centred.
     private func positionOnce() {
         guard !positioned, loaded, table.bounds.height > 0, !videos.isEmpty else { return }
-        positioned = true
+        positionState = .restored(savedTop)
         if let savedTop, videos.contains(where: { $0.key == savedTop.key }) { restore(savedTop); return }
         guard let highlight, let row = videos.firstIndex(where: { $0.filename == highlight }) else { return }
         table.layoutIfNeeded()
@@ -393,8 +406,12 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     // The next viewer, built ahead while nothing moves (a finger down or a moving list or
     // viewer waits), so a tap only fills it: once the list is up and after each opening.
-    private var spare: ViewerController?
-    private var spareTimer: Timer?
+    private enum SpareState {
+        case absent
+        case scheduled(Timer)
+        case ready(ViewerController)
+    }
+    private var spareState = SpareState.absent
 
     private func buildViewer() -> ViewerController {
         let controller = ViewerController(provider: viewerProvider, host: self, media: media, progress: progress, checkpoint: checkpoint)
@@ -406,22 +423,25 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     }
 
     func prepareSpare(after delay: TimeInterval = 1.5) {
-        guard spare == nil, spareTimer == nil else { return }
-        spareTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+        guard case .absent = spareState else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.buildSpare() }
         }
+        spareState = .scheduled(timer)
     }
 
     private func buildSpare() {
-        spareTimer = nil
-        guard spare == nil else { return }
+        if case .ready = spareState { return }
+        spareState = .absent
         if rowsMoving || UIApplication.shared.applicationState != .active { prepareSpare(after: 1); return }
-        spare = FrameMonitor.shared.measure("viewer.spare") { buildViewer() }
+        spareState = .ready(FrameMonitor.shared.measure("viewer.spare") { buildViewer() })
     }
 
     private func takeSpare() -> ViewerController? {
-        defer { spare = nil; prepareSpare() }
-        return spare
+        guard case .ready(let controller) = spareState else { prepareSpare(); return nil }
+        spareState = .absent
+        prepareSpare()
+        return controller
     }
 
     // MARK: ViewerHost (subclasses answer what their videos need)

@@ -50,16 +50,20 @@ final class FFmpegVideoDecoder: ViewerDecoder {
     private let failed: () -> Void
     private var timer: Timer?
     private var subscriptions = Set<AnyCancellable>()
-    private var requested = false
-    private var stopped = false
+    private var lifecycle = DecoderLifecycle()
+    private var requested: Bool { lifecycle.requested }
+    private var stopped: Bool { lifecycle.stopping }
     private var picture = false
     private var mutedValue = true
-    private var videoEnabled = true
-    private var videoRestorePending = false
-    private var target: Double?
+    private var output = VideoOutputState.enabled
+    private var videoEnabled: Bool { output.requested }
+    private var videoRestorePending: Bool { output.needsRestore }
+    private var seekState = ChasingSeek()
+    private var target: Double? { seekState.target }
+    private var lastTime: Double = 0
     private var seekTask: Task<Void, Never>?
     private var reading = false
-    private var terminal = false
+    private var terminal: Bool { lifecycle.terminal }
     private var rendered = 0
     private var dropped = 0
     private var corrupted = 0
@@ -129,6 +133,8 @@ final class FFmpegVideoDecoder: ViewerDecoder {
               !requiresHardware || engine.inlineHardwareDecoder == true else {
             throw NSError(domain: "Original decoder unavailable", code: 1)
         }
+        lifecycle.openedInput()
+        lastTime = max(0, seconds)
         engine.volume = mutedValue ? 0 : 1
         // load(autoplay:false) opens the input without starting its feed loops.
         // Start them and park the clock synchronously for a paused first picture.
@@ -147,8 +153,8 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         }.store(in: &subscriptions)
         engine.$state.sink { [weak self] state in
             guard let self, !self.stopped else { return }
-            if case .ended = state { self.terminal = true }
-            if case .error = state { self.failed() }
+            if case .ended = state, self.target == nil { self.lastTime = self.duration; self.lifecycle.end() }
+            if case .error = state { self.lifecycle.fail(); self.failed() }
             self.changed()
         }.store(in: &subscriptions)
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
@@ -176,7 +182,13 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         #endif
     }
 
-    var currentTime: Double { target ?? max(0, engine.currentTime) }
+    var currentTime: Double {
+        if let target { return target }
+        guard !lifecycle.failed, !stopped, !terminal else { return lastTime }
+        let time = engine.currentTime
+        if time.isFinite && time >= 0 { lastTime = time }
+        return lastTime
+    }
     var duration: Double { max(engine.duration, (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0) }
     var size: CGSize { video.displaySize ?? engine.softwareDisplaySize ?? CGSize(width: CGFloat(engine.sourceVideoWidth), height: CGFloat(engine.sourceVideoHeight)) }
     var playing: Bool { requested && engine.state == .playing }
@@ -189,51 +201,49 @@ final class FFmpegVideoDecoder: ViewerDecoder {
 
     func play() {
         guard !stopped, !terminal else { return }
-        requested = true
+        lifecycle.play()
         if target == nil { engine.play() }
     }
     func pause() {
-        requested = false
+        lifecycle.pause()
         engine.pause()
     }
     func seek(_ seconds: Double) {
         guard !stopped, seconds.isFinite else { return }
-        terminal = false
-        target = duration > 0 ? min(duration, max(0, seconds)) : max(0, seconds)
+        lifecycle.seek()
+        let target = duration > 0 ? min(duration, max(0, seconds)) : max(0, seconds)
+        seekState.request(target)
+        lastTime = target
         guard seekTask == nil else { return }
         seekTask = Task { [weak self] in
             guard let self else { return }
-            while let next = self.target, !self.stopped {
+            defer { self.seekTask = nil; self.changed() }
+            seekLoop: while !self.stopped, !Task.isCancelled, let request = self.seekState.begin() {
                 if self.engine.state == .ended {
-                    // The engine's ended session is terminal, including seek().
-                    // Only an explicit seek reopens the same original input;
-                    // ordinary play/resume above never restarts it.
                     self.picture = false
-                    do { try await self.prepare(at: next) }
+                    do { try await self.prepare(at: request.target) }
                     catch {
-                        self.target = nil
-                        if !self.stopped, !Task.isCancelled { self.failed() }
+                        self.seekState.cancel()
+                        if !self.stopped, !Task.isCancelled { self.lifecycle.fail(); self.failed() }
                         break
                     }
-                } else {
-                    await self.engine.seek(to: next, exact: true)
+                } else { await self.engine.seek(to: request.target, exact: true) }
+                guard !self.stopped, !Task.isCancelled, !self.lifecycle.failed else { break }
+                switch self.seekState.complete(request) {
+                case .ignored: break seekLoop
+                case .retry: continue
+                case .settled(let target): self.lastTime = target
                 }
-                guard !self.stopped, !Task.isCancelled else { break }
-                if self.target != next { continue }
-                self.target = nil
                 if self.requested { self.engine.play() } else { self.engine.pause() }
             }
-            self.seekTask = nil
-            self.changed()
         }
     }
     func setVideoEnabled(_ enabled: Bool) {
         guard videoEnabled != enabled else { return }
-        videoEnabled = enabled
+        output.request(enabled)
         if enabled {
             restoreVideoIfReady()
         } else {
-            videoRestorePending = true
             engine.setInlineVideoEnabled(false)
             display.isHidden = true
         }
@@ -242,7 +252,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
     private func restoreVideoIfReady() {
         guard !stopped, videoEnabled, videoRestorePending,
               UIApplication.shared.applicationState == .active else { return }
-        videoRestorePending = false
+        output.restored()
         let position = currentTime
         engine.setInlineVideoEnabled(true)
         display.isHidden = false
@@ -253,11 +263,12 @@ final class FFmpegVideoDecoder: ViewerDecoder {
     }
     func stop() {
         guard !stopped else { return }
-        stopped = true
+        lifecycle.stop()
         timer?.invalidate(); timer = nil
-        seekTask?.cancel(); seekTask = nil
+        seekTask?.cancel(); seekTask = nil; seekState.cancel()
         subscriptions.removeAll()
         engine.stop(resetDisplayCriteria: false, finalTeardown: true)
+        lifecycle.retired()
         engine.unbind(view: display)
         display.removeFromSuperview()
     }

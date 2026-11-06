@@ -35,6 +35,13 @@ final class ListNavigationChecks: VideoListController {
         super.viewDidLoad()
         setVideos(fixtureRows)
         TestHooks.shared.register("navigation-state") { [weak self] _ in self?.state() ?? [:] }
+        TestHooks.shared.register("navigation-list-scroll") { [weak self] query in
+            guard let self, viewer == nil else { return [:] }
+            table.contentOffset.y = CGFloat(Double(query["offset"] ?? "0") ?? 0)
+            table.layoutIfNeeded()
+            scrollViewDidEndDragging(table, willDecelerate: false)
+            return state()
+        }
         TestHooks.shared.register("navigation-open") { [weak self] query in
             guard let self, let row = Int(query["row"] ?? ""), videos.indices.contains(row) else { return [:] }
             table.scrollToRow(at: IndexPath(row: row, section: 0), at: .middle, animated: false)

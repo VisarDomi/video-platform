@@ -13,6 +13,8 @@ xcrun swiftc -j 2 -parse-as-library Bunkr/LocalLibrary.swift Tests/LocalRenameCl
 "$test_dir/local-rename-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/ViewerPlaybackPolicy.swift Tests/ViewerPlaybackPolicyTests.swift -o "$test_dir/viewer-playback-tests"
 "$test_dir/viewer-playback-tests"
+xcrun swiftc -j 2 -parse-as-library VideoApp/VideoPlaybackState.swift VideoApp/DecoderLifecycle.swift VideoApp/ChasingSeek.swift VideoApp/ViewerInteractionState.swift Tests/StateMachineTests.swift -o "$test_dir/state-machine-tests"
+"$test_dir/state-machine-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/VideoTerminalState.swift Tests/VideoTerminalStateTests.swift -o "$test_dir/terminal-tests"
 "$test_dir/terminal-tests"
 xcrun swiftc -j 2 -parse-as-library VideoApp/VideoFeedLayout.swift Tests/VideoFeedLayoutTests.swift -o "$test_dir/feed-layout-tests"

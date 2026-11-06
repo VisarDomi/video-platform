@@ -252,10 +252,31 @@ actor TangoSession {
     typealias BeginRenewal = @Sendable () async -> FinishRenewal
     let jar: CookieJar
     private let session: URLSession
-    private var refreshing: Task<Void, Error>?
-    private var stream: (header: String, expires: Date)?
-    private var streamTask: Task<Void, Error>?
-    private var loop: Task<Void, Never>?
+    private enum Renewal {
+        case idle
+        case renewing(Task<Void, Error>)
+        case cooldown(until: Date, failure: Error)
+    }
+    private var renewal = Renewal.idle
+    private var refreshing: Task<Void, Error>? {
+        if case .renewing(let task) = renewal { return task }; return nil
+    }
+    private var nextRefreshAttempt: Date {
+        if case .cooldown(let until, _) = renewal { return until }; return .distantPast
+    }
+    private enum StreamCredential {
+        case missing
+        case usable(header: String, expires: Date)
+        var value: (header: String, expires: Date)? {
+            if case .usable(let header, let expires) = self { return (header, expires) }; return nil
+        }
+    }
+    private enum StreamRefresh { case idle, authorizing(Task<Void, Error>) }
+    private enum Maintenance { case stopped, running(Task<Void, Never>) }
+    private var streamCredential = StreamCredential.missing
+    private var streamRefresh = StreamRefresh.idle
+    private var maintenance = Maintenance.stopped
+    private var stream: (header: String, expires: Date)? { streamCredential.value }
     private let diagnostics: BackgroundWriter?
     private var events: [NetworkEvent] = []
     private let loginRecovery: LoginRecovery?
@@ -264,8 +285,6 @@ actor TangoSession {
     private nonisolated let identity: TangoIdentity
     private let beginRenewal: BeginRenewal?
     private var proactiveRefresh: Task<Void, Never>?
-    private var nextRefreshAttempt = Date.distantPast
-    private var lastRefreshFailure: Error?
     private var browserRequiredFor: String?
     private var rejectedAccessToken: String?
     private var nativeRenewals=0
@@ -398,23 +417,20 @@ actor TangoSession {
     // One refresh at a time; callers share it. A 401/403 means the login is gone.
     func refresh() async throws {
         if let refreshing { return try await refreshing.value }
-        if Date() < nextRefreshAttempt, let lastRefreshFailure { throw lastRefreshFailure }
+        if case .cooldown(let until, let failure) = renewal, Date() < until { throw failure }
         let task = Task {
             let finish=await self.beginRenewal?()
             do{try await self.renewSession();await finish?()}
             catch{await finish?();throw error}
         }
-        refreshing = task
-        defer { refreshing = nil }
+        renewal = .renewing(task)
         do {
             try await task.value
-            lastRefreshFailure = nil
-            nextRefreshAttempt = .distantPast
+            renewal = .idle
         } catch {
-            lastRefreshFailure = error
-            if case TangoError.verificationRequired = error {
-                nextRefreshAttempt = Date().addingTimeInterval(120)
-            } else { nextRefreshAttempt = Date().addingTimeInterval(30) }
+            let delay: TimeInterval
+            if case TangoError.verificationRequired = error { delay = 120 } else { delay = 30 }
+            renewal = .cooldown(until: Date().addingTimeInterval(delay), failure: error)
             throw error
         }
     }
@@ -423,8 +439,7 @@ actor TangoSession {
         // Never cancel an in-flight rotating-token request; allow one new attempt after
         // a real reconnection/foreground/manual retry once that owner has finished.
         guard refreshing == nil else { return }
-        nextRefreshAttempt = .distantPast
-        lastRefreshFailure = nil
+        renewal = .idle
     }
 
     private func renewSession(allowSetup:Bool=true) async throws {
@@ -493,7 +508,7 @@ actor TangoSession {
         let refresh = credentials.contains { $0.name == "Tango-RT" } ? [] : jar.all.filter { $0.name == "Tango-RT" }
         guard Tango.storeLogin(credentials + refresh, in: jar,allowExpiredAccess:allowExpiredAccess) else { throw TangoError.verificationRequired }
         if cookie("Tango-ST")?.value != rejectedAccessToken {rejectedAccessToken=nil}
-        stream = nil
+        streamCredential = .missing
     }
 
     // Gateway requests with the session's cookies; a 401/403 refreshes once more.
@@ -524,18 +539,19 @@ actor TangoSession {
     nonisolated func stop() { Task { await end() } }
 
     private func begin() {
-        guard loop == nil else { return }
-        loop = Task {
+        guard case .stopped = maintenance else { return }
+        let task = Task {
             while !Task.isCancelled {
                 do { try await refreshStream() } catch { print("Tango stream tokens:", error.localizedDescription) }
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+        maintenance = .running(task)
     }
 
     private func end() {
-        loop?.cancel()
-        loop = nil
+        if case .running(let task) = maintenance { task.cancel() }
+        maintenance = .stopped
     }
 
     // A playlist with fresh stream tokens; a 401 renews them once more.
@@ -553,10 +569,12 @@ actor TangoSession {
     }
 
     private func refreshStream() async throws {
-        if let streamTask { return try await streamTask.value }
-        let task = Task { try await self.renewStream() }
-        streamTask = task
-        defer { streamTask = nil }
+        if case .authorizing(let task) = streamRefresh { return try await task.value }
+        let task = Task {
+            defer { self.streamRefresh = .idle }
+            try await self.renewStream()
+        }
+        streamRefresh = .authorizing(task)
         try await task.value
     }
 
@@ -577,7 +595,7 @@ actor TangoSession {
             let values = Dictionary(HTTPCookie.cookies(withResponseHeaderFields: answer.headers, for: Tango.tokenURL).map { ($0.name, $0.value) }, uniquingKeysWith: { $1 })
             guard answer.status == 200, let tt = values["tt"], let ttu = values["ttu"], let tte = values["tte"] else { throw URLError(.badServerResponse) }
             keepSupplemental(answer.headers,url:Tango.tokenURL,access:st)
-            stream = ("tt=\(tt);ttu=\(ttu);tte=\(tte)", Double(tte).map(Date.init(timeIntervalSince1970:)) ?? Date().addingTimeInterval(10))
+            streamCredential = .usable(header: "tt=\(tt);ttu=\(ttu);tte=\(tte)", expires: Double(tte).map(Date.init(timeIntervalSince1970:)) ?? Date().addingTimeInterval(10))
             return
         }
         throw TangoError.verificationRequired

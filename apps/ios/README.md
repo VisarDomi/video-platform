@@ -490,3 +490,13 @@ other apps use the original shipped shared engine (`b09884d`), including the
 accepted scroll/visibility and recording-variant fixes. Their current login/API
 contracts are retained. The HLS server serves the stored playlist and fragment
 bytes directly; it does not derive decoder epochs or replacement initializations.
+
+## Explicit state transitions
+
+Runtime workflow states and ownership invariants are catalogued in
+[the shared state inventory](../../../../ios-tools/native/state-machines.json).
+Tasks may publish only for their current owner. A cancelled caller releases its
+own transfer lease, and callbacks from an older operation cannot finish a newer
+one. Playback intent, readiness, terminal media, foreground ownership and gesture
+visibility are separate machines. Recovery reuses the existing durable data and
+bundle identities; it does not clear sessions, progress or caches.

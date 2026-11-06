@@ -51,8 +51,33 @@ public final class ImagePipeline {
     private final class Pending {
         let request: Request
         var completions: [UInt64: (Result<UIImage, Error>) -> Void] = [:]
-        var task: Task<Void, Never>?
-        var ahead = false
+        enum Phase {
+            case queued
+            case running(Task<Void, Never>, ahead: Bool)
+            case cancelled(Task<Void, Never>, ahead: Bool)
+            case finished
+        }
+        var phase = Phase.queued
+        var task: Task<Void, Never>? {
+            switch phase { case .running(let task, _), .cancelled(let task, _): return task; default: return nil }
+        }
+        var queued: Bool { if case .queued = phase { return true }; return false }
+        func cancel() {
+            switch phase {
+            case .running(let task, let ahead): task.cancel(); phase = .cancelled(task, ahead: ahead)
+            case .queued: phase = .finished
+            default: break
+            }
+        }
+        func finish() -> (ahead: Bool, cancelled: Bool)? {
+            let result: (Bool, Bool)
+            switch phase {
+            case .running(_, let ahead): result = (ahead, false)
+            case .cancelled(_, let ahead): result = (ahead, true)
+            default: return nil
+            }
+            phase = .finished; return result
+        }
         init(_ request: Request) { self.request = request }
     }
 
@@ -70,14 +95,18 @@ public final class ImagePipeline {
     private var runningAhead = 0
     private var nextID: UInt64 = 0
     private var ticketKeys: [UInt64: String] = [:]
-    private var restoreBudget: CFTimeInterval = 0
+    private enum Restoration {
+        case inactive
+        case frames(budget: CFTimeInterval, remaining: Int, deadline: CFTimeInterval)
+    }
+    private var restoration = Restoration.inactive
     private var restoreLink: CADisplayLink?
-    private var restoreFrames = 0
-    private var restoreEnds: CFTimeInterval = 0
     public private(set) var restoredNow = 0
     // Within a relaunch's first frames (screens may read what they show from disk at once then;
     // afterwards they ask in the background).
-    public var isRestoring: Bool { restoreBudget > 0 }
+    public var isRestoring: Bool {
+        if case .frames(let budget, _, _) = restoration { return budget > 0 }; return false
+    }
 
     public init(memoryLimit: Int = 192 << 20, concurrency: Int = 4) {
         cache.totalCostLimit = memoryLimit
@@ -94,9 +123,8 @@ public final class ImagePipeline {
     // The frames are counted once the screen is up (a slow launch can take several before its
     // first layout); at most `timeout` seconds in all.
     public func beginRestore(budget: CFTimeInterval = 1.5, frames: Int = 4, timeout: CFTimeInterval = 3) {
-        restoreBudget = budget
-        restoreFrames = frames
-        restoreEnds = CACurrentMediaTime() + timeout
+        restoreLink?.invalidate()
+        restoration = .frames(budget: budget, remaining: frames, deadline: CACurrentMediaTime() + timeout)
         let link = CADisplayLink(target: RestoreTicker { [weak self] in self?.restoreTick() }, selector: #selector(RestoreTicker.fire))
         link.add(to: .main, forMode: .common)
         restoreLink = link
@@ -105,17 +133,21 @@ public final class ImagePipeline {
     private func restoreTick() {
         let shown = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
             .contains { $0.isKeyWindow && $0.rootViewController?.viewIfLoaded?.window != nil }
-        if shown { restoreFrames -= 1 }
-        guard restoreFrames <= 0 || CACurrentMediaTime() > restoreEnds else { return }
-        restoreBudget = 0
+        guard case .frames(let budget, let remaining, let deadline) = restoration else { return }
+        let next = remaining - (shown ? 1 : 0)
+        guard next <= 0 || CACurrentMediaTime() > deadline else {
+            restoration = .frames(budget: budget, remaining: next, deadline: deadline); return
+        }
+        restoration = .inactive
         restoreLink?.invalidate()
         restoreLink = nil
     }
 
     private func restoreNow(_ request: Request) -> UIImage? {
-        guard restoreBudget > 0, let file = request.localFile else { return nil }
+        guard case .frames(let budget, let remaining, let deadline) = restoration, budget > 0,
+              let file = request.localFile else { return nil }
         let start = CACurrentMediaTime()
-        defer { restoreBudget -= CACurrentMediaTime() - start }
+        defer { restoration = .frames(budget: budget - (CACurrentMediaTime() - start), remaining: remaining, deadline: deadline) }
         guard let image = try? Self.decodeNow(file, fit: request.fit) else { return nil }
         restoredNow += 1
         cache.setObject(image, forKey: Self.cacheKey(request.key, request.fit), cost: Self.cost(image))
@@ -150,7 +182,7 @@ public final class ImagePipeline {
         guard let key = ticketKeys.removeValue(forKey: ticket.id), let entry = pending[key] else { return }
         entry.completions[ticket.id] = nil
         guard entry.completions.isEmpty else { return }
-        entry.task?.cancel()
+        entry.cancel()
         pending[key] = nil
     }
 
@@ -160,17 +192,16 @@ public final class ImagePipeline {
         while running < concurrency {
             if queueStale && (queue.isEmpty || CACurrentMediaTime() - sortedAt > 0.1) { sortQueue() }
             guard let key = queue.last else { return }
-            guard let entry = pending[key], entry.task == nil else { queue.removeLast(); continue }
+            guard let entry = pending[key], entry.queued else { queue.removeLast(); continue }
             // The queue is nearest first: once the next is off the screen, so is the rest.
             let ahead = entry.request.priority() > 0
             if ahead && runningAhead >= aheadConcurrency { return }
             queue.removeLast()
             running += 1
             if ahead { runningAhead += 1 }
-            entry.ahead = ahead
             let request = entry.request
             let priority: TaskPriority = ahead ? .utility : .userInitiated
-            entry.task = Task(priority: priority) { [weak self] in
+            let task = Task(priority: priority) { [weak self] in
                 let result: Result<UIImage, Error>
                 do {
                     let file: URL
@@ -183,20 +214,22 @@ public final class ImagePipeline {
                 } catch { result = .failure(error) }
                 self?.finish(key, entry: entry, result: result)
             }
+            entry.phase = .running(task, ahead: ahead)
         }
     }
 
     private func finish(_ key: String, entry: Pending, result: Result<UIImage, Error>) {
+        guard let finished = entry.finish() else { return }
         running -= 1
-        if entry.ahead { runningAhead -= 1 }
+        if finished.ahead { runningAhead -= 1 }
         if pending[key] === entry { pending[key] = nil }
-        if case .success(let image) = result {
+        if !finished.cancelled, case .success(let image) = result {
             cache.setObject(image, forKey: key as NSString, cost: Self.cost(image))
         }
         FrameMonitor.shared.measure("images.deliver") {
             for (id, completion) in entry.completions {
-                ticketKeys[id] = nil
-                if !(entry.task?.isCancelled ?? false) { completion(result) }
+                guard ticketKeys.removeValue(forKey: id) != nil else { continue }
+                if !finished.cancelled { completion(result) }
             }
         }
         pump()
@@ -204,7 +237,7 @@ public final class ImagePipeline {
 
     // The nearest (lowest priority value) last, so popLast takes it.
     private func sortQueue() {
-        queue = pending.filter { $0.value.task == nil }
+        queue = pending.filter { $0.value.queued }
             .map { (key: $0.key, priority: $0.value.request.priority()) }
             .sorted { $0.priority > $1.priority }
             .map(\.key)
