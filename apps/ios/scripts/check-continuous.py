@@ -53,6 +53,18 @@ try:
   for first,second in zip(visible,visible[1:]):assert abs(first[1]+first[3]-second[1])<.5,(first,second)
   scrolls.append(result)
  report['freeScroll']=scrolls;shot('video-partial')
+ handoffs=[]
+ for _ in range(20):
+  trace=action('feed-touch-handoff')['frames'];first=trace[0]['state']
+  assert first['visiblePlayers']>1,trace
+  for frame in trace[:-1]:
+   current=frame['state']
+   assert current['visiblePlayers']==first['visiblePlayers'],frame
+   same_position(first,current)
+  assert trace[-1]['state']['visiblePlayers']==1,trace[-1]
+  same_position(first,trace[-1]['state'])
+  handoffs.append(trace)
+ report['touchMomentumHandoffs']=handoffs
  before=state();action('zoom-scale',scale=2.5);during=state()
  assert during['carouselEnabled'] is False
  action('zoom-scale',scale=1);after=state();same_position(before,after)

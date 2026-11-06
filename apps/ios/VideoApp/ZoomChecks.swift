@@ -49,6 +49,7 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
         TestHooks.shared.register("feed-scroll") { [weak self] query in
             self?.viewer?.checkFeedScroll(delta: CGFloat(Double(query["delta"] ?? "0") ?? 0), end: query["end"] != "0") ?? [:]
         }
+        TestHooks.shared.register("feed-touch-handoff") { [weak self] _ in self?.viewer?.checkGestureHandoff() ?? [:] }
         TestHooks.shared.register("feed-cache") { [weak self] _ in self?.viewer?.checkDimensionCache() ?? [:] }
         TestHooks.shared.register("feed-arrival") { [weak self] query in
             self?.viewer?.checkMetadataArrival(width: CGFloat(Double(query["width"] ?? "720") ?? 720),

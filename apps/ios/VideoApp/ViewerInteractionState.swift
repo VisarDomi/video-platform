@@ -1,20 +1,25 @@
 import Foundation
 
 struct ViewerInteractionState: Equatable {
-    enum Motion { case rest, contact, dragging, decelerating }
+    enum Contact { case up, down }
+    enum Motion { case rest, dragging, decelerating }
     enum Zoom { case minimum, pinching, magnified }
     private(set) var motion = Motion.rest
+    private(set) var contactState = Contact.up
     private(set) var zoom = Zoom.minimum
-    var touching: Bool { motion == .contact || motion == .dragging }
+    var touching: Bool { contactState == .down }
     var scrolling: Bool { motion == .dragging || motion == .decelerating }
     var zoomed: Bool { zoom != .minimum }
     var revealsNeighbors: Bool { scrolling && !zoomed }
     mutating func contact(_ down: Bool) {
-        if down && motion != .dragging { motion = .contact }
-        else if !down && motion == .contact { motion = .rest }
+        contactState = down ? .down : .up
     }
     mutating func drag() { guard !zoomed else { return }; motion = .dragging }
-    mutating func dragEnded(decelerating: Bool) { motion = decelerating ? .decelerating : .rest }
+    mutating func dragEnded(decelerating: Bool) {
+        // UIKit's drag-end and contact-up callbacks can arrive in either order.
+        // Only the controller's validated settle event ends visibility.
+        if decelerating { motion = .decelerating }
+    }
     mutating func settle() { motion = .rest }
     mutating func pinch() { zoom = .pinching; motion = .rest }
     mutating func magnify() { zoom = .magnified }

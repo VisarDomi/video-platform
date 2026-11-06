@@ -179,7 +179,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let contact = ContactRecognizer { [weak self] down in
             guard let self else { return }
             interaction.contact(down)
-            updateUnitVisibility()
             if !down { DispatchQueue.main.async { [weak self] in self?.settle() } }
         }
         contact.delegate = self
@@ -825,6 +824,24 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let before = zoomCheckState
         if end { scrollViewDidEndDragging(feed, willDecelerate: false) }
         return ["before": before, "after": zoomCheckState]
+    }
+
+    func checkGestureHandoff() -> [String: Any] {
+        var frames: [[String: Any]] = []
+        func sample(_ event: String) {
+            // Geometry/player callbacks may refresh visibility between any two
+            // UIKit gesture callbacks, including while a new finger is down.
+            updateUnitVisibility()
+            frames.append(["event": event, "state": zoomCheckState])
+        }
+        interaction.contact(true); scrollViewWillBeginDragging(feed); sample("drag")
+        interaction.contact(false); scrollViewDidEndDragging(feed, willDecelerate: true); sample("coast")
+        interaction.contact(true); sample("retouch")
+        scrollViewWillBeginDragging(feed); sample("redrag")
+        scrollViewDidEndDragging(feed, willDecelerate: false); sample("drag-end-held")
+        interaction.contact(false); sample("contact-up")
+        settle(); sample("settled")
+        return ["frames": frames]
     }
 
     func checkFeedMetadata() -> [String: Any] {
