@@ -34,3 +34,14 @@ struct VideoPlaybackState: Equatable {
     }
     func mayResumeSeek(_ ticket: UInt64) -> Bool { ticket == action && canPlay }
 }
+
+// The selected video's explicit user intent survives foregrounding, audio
+// interruptions and list refreshes. Neighbour policy and selecting a new video
+// are separate events; a lifecycle callback is never a user Play command.
+struct ViewerPlaybackIntent {
+    private(set) var intent = VideoPlaybackState.Intent.playing
+    var wantsPlay: Bool { intent == .playing }
+    mutating func select() { intent = .playing }
+    mutating func request(_ intent: VideoPlaybackState.Intent) { self.intent = intent }
+    func allows(current: Bool, policy: Bool) -> Bool { policy && (!current || wantsPlay) }
+}

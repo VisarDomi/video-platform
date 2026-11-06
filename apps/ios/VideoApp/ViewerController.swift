@@ -67,6 +67,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var currentIndex: Int
     private var segments: [Double] = []
     private var controlsVisible = true
+    private var playbackIntent = ViewerPlaybackIntent()
     private var interaction = ViewerInteractionState()
     private var presentation = ViewerPresentationState()
     private var unsettled: Bool { interaction.scrolling }
@@ -195,6 +196,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // The list's videos from `index`: the session begins and the selected video loads.
     func open(videos: [ViewerVideo], index: Int) {
         presentation.open()
+        playbackIntent.select()
         loadViewIfNeeded()
         self.videos = videos
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
@@ -244,24 +246,38 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             return
         }
         #endif
-        active.load(video, start: start, play: true)
+        active.load(video, start: start, play: playbackIntent.wantsPlay)
         revealTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.reveal() }
         }
     }
 
+    private func shouldPlay(current: Bool, inBackground: Bool) -> Bool {
+        playbackIntent.allows(current: current, policy: playbackPolicy.shouldPlay(position: current ? 1 : 0, inBackground: inBackground))
+    }
+
+    private func userPlayback(_ intent: VideoPlaybackState.Intent) {
+        playbackIntent.request(intent)
+        if playbackIntent.wantsPlay { active.play() } else { active.pause() }
+    }
+
+    private func seekCurrent(_ time: Double, resume: Bool) {
+        if resume { playbackIntent.request(.playing) }
+        active.seek(time, resume: resume)
+    }
+
     private func beginSession() {
         session.begin(.init(
-            play: { [weak self] in self?.active.play() },
-            pause: { [weak self] in self?.active.pause() },
+            play: { [weak self] in self?.userPlayback(.playing) },
+            pause: { [weak self] in self?.userPlayback(.paused) },
             toggle: { [weak self] in
                 guard let self else { return }
-                active.wantsPlay ? active.pause() : active.play()
+                userPlayback(active.wantsPlay ? .paused : .playing)
             },
             step: { [weak self] direction in self?.step(direction) },
             seek: { [weak self] time in
                 guard let self, !self.live else { return }
-                self.active.seek(time, resume: true)
+                self.seekCurrent(time, resume: true)
             }))
         session.setAudible(false)
         media.start()
@@ -418,10 +434,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                     if fixtureLateMetadata { unit.configurePendingMetadataCheck(video: video) }
                     else { unit.configureZoomCheck(video: video, size: aspect(of: video), image: fixtureImage) }
                 } else {
-                    unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: index == currentIndex ? 1 : 0, inBackground: inBackground))
+                    unit.load(video, start: savedTime(video), play: shouldPlay(current: index == currentIndex, inBackground: inBackground))
                 }
                 #else
-                unit.load(video, start: savedTime(video), play: playbackPolicy.shouldPlay(position: index == currentIndex ? 1 : 0, inBackground: inBackground))
+                unit.load(video, start: savedTime(video), play: shouldPlay(current: index == currentIndex, inBackground: inBackground))
                 #endif
             }
             if geometry.frames.indices.contains(index) { unit.view.frame = geometry.frames[index] }
@@ -462,7 +478,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         monitor.measure("activate.play") {
             for unit in units where unit.video != nil {
                 if unit !== active { unit.muted = true }
-                if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: inBackground) { unit.play() }
+                if shouldPlay(current: unit === active, inBackground: inBackground) { unit.play() }
                 else { unit.pause() }
             }
         }
@@ -523,6 +539,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
         message.isHidden = true
         currentIndex = min(index, videos.count - 1)
+        playbackIntent.select()
         geometryDirty = true
         loadEdgeUnits()
         activateCurrent()
@@ -622,6 +639,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if index != currentIndex {
             saveProgress()
             currentIndex = index
+            playbackIntent.select()
             returnsWhenGone = false
             segments = []
             loadEdgeUnits()
@@ -916,13 +934,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             let max = live ? 0 : active.snapshot().seekMax
             guard max > 0 else { return }
             let target = seekBase + Double(translation.x / view.bounds.width * Self.seekSecondsPerWidth)
-            active.seek(Swift.max(0, Swift.min(max, target)), resume: false)
+            seekCurrent(Swift.max(0, Swift.min(max, target)), resume: false)
         case .ended:
-            if seeking { active.play() }
+            if seeking { userPlayback(.playing) }
             else if abs(translation.x) > 80 { setControlsVisible(translation.x > 0) }
             seeking = false
         default:
-            if seeking { active.play() }
+            if seeking { if playbackIntent.wantsPlay { active.play() } else { active.pause() } }
             seeking = false
         }
     }
@@ -957,7 +975,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     // MARK: overlay actions
 
-    func overlaySeek(_ time: Double, resume: Bool) { active.seek(time, resume: resume) }
+    func overlaySeek(_ time: Double, resume: Bool) { seekCurrent(time, resume: resume) }
 
     func overlayToggleMuteOrUndo() {
         if !segments.isEmpty {
@@ -1060,7 +1078,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             segments = []
             overlay.setSegments(segments)
             if active.video?.same(video) == true { active.update(video) }
-            else { loadVariant(video, in: active, play: true) }
+            else { loadVariant(video, in: active, play: playbackIntent.wantsPlay) }
         }
         layoutFeed(anchor: anchor)
         loadEdgeUnits()
@@ -1074,6 +1092,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         videos.remove(at: currentIndex)
         if videos.isEmpty { close(); return }
         currentIndex = min(currentIndex, videos.count - 1)
+        playbackIntent.select()
         geometryDirty = true
         loadEdgeUnits()
         activateCurrent()
@@ -1253,7 +1272,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         #endif
         for unit in units { unit.setVideoEnabled(true) }
         for unit in units where unit.video != nil {
-            if playbackPolicy.shouldPlay(position: unit === active ? 1 : 0, inBackground: false) { unit.resume(liveEdge: unit !== active) }
+            if shouldPlay(current: unit === active, inBackground: false) { unit.resume(liveEdge: unit !== active) }
             else { unit.pause() }
         }
     }
@@ -1263,7 +1282,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         #if targetEnvironment(simulator)
         if fixtureImage != nil { return }
         #endif
-        active.resume(liveEdge: false)
+        if playbackIntent.wantsPlay { active.resume(liveEdge: false) } else { active.pause() }
         if !inBackground && playbackPolicy.playsNeighbors { for unit in units where unit !== active && unit.video != nil { unit.resume(liveEdge: true) } }
     }
 

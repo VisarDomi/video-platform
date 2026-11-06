@@ -19,6 +19,11 @@ struct DecoderLifecycle: Equatable {
     @discardableResult mutating func openedInput() -> Bool {
         guard !terminal && !stopping else { return false }; phase = .ready; return true
     }
+    @discardableResult mutating func observedPause() -> Bool {
+        // A late pause after an input error is not evidence that it recovered.
+        // Only an actual ready/playing input may clear the failure.
+        guard !failed else { return false }; return openedInput()
+    }
     mutating func fail() { guard !terminal && !stopping else { return }; phase = .failed(wasReady: opened) }
     mutating func end() { guard !failed && !stopping else { return }; phase = .ended; intent = .paused }
     mutating func seek() { if terminal { phase = .ready } }

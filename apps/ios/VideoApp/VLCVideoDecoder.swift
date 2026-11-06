@@ -249,7 +249,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
             if !videoEnabled { player.deselectAllVideoTracks() }
         }
         if state == .paused {
-            guard lifecycle.openedInput() else { if player.isPlaying { player.pause() }; return }
+            guard lifecycle.observedPause() else { if player.isPlaying { player.pause() }; return }
             if pendingSeek != nil { applyPendingSeek() }
             else if requested { player.play() }
         }
