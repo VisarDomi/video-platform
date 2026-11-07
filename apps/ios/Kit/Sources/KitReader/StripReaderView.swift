@@ -487,7 +487,10 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         FrameMonitor.shared.scrolling(moving)
     }
 
-    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { interaction.drag(); monitor(true) }
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pinnedTop = nil
+        interaction.drag(); monitor(true)
+    }
 
     public func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
         pinchQuality = zoomBucket

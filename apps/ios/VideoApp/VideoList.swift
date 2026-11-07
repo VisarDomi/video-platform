@@ -56,6 +56,9 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     private let stateWriter: BackgroundWriter
     #if targetEnvironment(simulator)
     var configureTestViewer: ((ViewerController) -> Void)?
+    var checkListAnchor: [String: Any] {
+        topAnchor().map { ["key": $0.key, "offset": Double($0.offset)] } ?? [:]
+    }
     #endif
     private var forwardPan: UIScreenEdgePanGestureRecognizer!
 

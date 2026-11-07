@@ -19,8 +19,12 @@ final class ListNavigationChecks: VideoListController {
         let directory = URL.documentsDirectory.appendingPathComponent("navigation-check/" + provider)
         if arguments.contains("-reset-navigation-check") { try? FileManager.default.removeItem(at: directory) }
         super.init(viewerProvider: provider, directory: directory, media: ViewerMedia())
-        let picture = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 18)).image { context in
-            UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 32, height: 18))
+        let picture = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 36)).image { context in
+            UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 36))
+            UIColor.white.setFill()
+            for x in stride(from: 0, through: 64, by: 8) { context.fill(CGRect(x: x, y: 0, width: 1, height: 36)) }
+            for y in stride(from: 0, through: 36, by: 6) { context.fill(CGRect(x: 0, y: y, width: 64, height: 1)) }
+            UIColor.systemPink.setFill(); context.fill(CGRect(x: 3, y: 0, width: 2, height: 36))
         }
         configureTestViewer = { $0.configureNavigationCheck(image: picture) }
         fixtureRows = (0..<120).map { index in
@@ -103,6 +107,7 @@ final class ListNavigationChecks: VideoListController {
         let row = table.indexPathsForVisibleRows?.first?.row
         return ["provider": sourceProvider, "rows": videos.count, "highlight": highlight ?? "",
                 "viewer": viewer?.currentVideo?.filename ?? "", "offset": table.contentOffset.y,
+                "anchor": checkListAnchor,
                 "firstRow": row.map { videos[$0].filename } ?? "", "openMs": lastOpenMs, "closeMs": lastCloseMs,
                 "viewerState": viewer?.zoomCheckState ?? [:]]
     }
