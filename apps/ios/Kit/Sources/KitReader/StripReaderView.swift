@@ -305,13 +305,18 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         let target = min(max(0, y), maxOffset)
         let targetX = x.map { min(max(0, $0), max(0, scrollView.contentSize.width - scrollView.bounds.width)) } ?? scrollView.contentOffset.x
         let pixels = max(1, window?.screen.scale ?? traitCollection.displayScale)
+        // A saved document-origin remainder may put the requested coordinate
+        // just outside a quantized scroll boundary. Preserve that subpixel
+        // remainder; larger out-of-range requests still use the legal clamp.
+        let preciseY = abs(y - target) <= 1 / pixels ? y : target
+        let preciseX = x.flatMap { abs($0 - targetX) <= 1 / pixels ? $0 : nil } ?? targetX
         let rounded = CGPoint(x: (targetX * pixels).rounded() / pixels, y: (target * pixels).rounded() / pixels)
         if abs(scrollView.contentOffset.x - rounded.x) > 0.001 || abs(scrollView.contentOffset.y - rounded.y) > 0.001 {
             scrollView.contentOffset = CGPoint(x: targetX, y: target)
         }
         let zoom = max(scrollView.zoomScale, 0.001)
-        offsetCorrection.y += (scrollView.contentOffset.y - target) / zoom
-        if x != nil { offsetCorrection.x += (scrollView.contentOffset.x - targetX) / zoom }
+        offsetCorrection.y += (scrollView.contentOffset.y - preciseY) / zoom
+        if x != nil { offsetCorrection.x += (scrollView.contentOffset.x - preciseX) / zoom }
         positionContent()
     }
 
