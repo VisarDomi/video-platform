@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { FileSystemManager } from "../dist/common/fileSystemManager.js";
 
 import { DiskSession } from "../dist/services/download/diskSession.js";
 import { PlaylistManager } from "../dist/services/download/playlistManager.js";
@@ -258,6 +259,24 @@ test("resume drops a torn playlist tail, re-appends the written media, and never
     ].join("\n"), (line) => `https://example.test/${line}`);
     assert.deepEqual(next.map((segment) => segment.providerSequence), [12]);
     assert.equal(next[0].localName, formatSegmentName(2, recordingId, 12));
+});
+
+test("resume cannot publish readable orphan bytes when their durability barrier fails", async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-orphan-flush-"));
+    t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
+    const first = formatSegmentName(0, "stream", 10), orphan = formatSegmentName(1, "stream", 11);
+    await writeFile(path.join(root, first), "committed media");
+    await writeFile(path.join(root, orphan), "received orphan");
+    const playlist = `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n${first}\n`;
+    await writeFile(path.join(root, "playlist.m3u8"), playlist);
+    t.mock.method(FileSystemManager, "syncExistingFile", async (filePath) => {
+        assert.equal(filePath, path.join(root, orphan));
+        throw Object.assign(new Error("recovered media flush failed"), { code: "EIO" });
+    });
+    const manager = new PlaylistManager(new DiskSession("alias", { update() {} }, async () => root, root), "stream");
+    await assert.rejects(manager.initializeFromExistingPlaylist(), /recovered media flush failed/);
+    assert.equal(await readFile(path.join(root, "playlist.m3u8"), "utf8"), playlist);
+    assert.equal(await readFile(path.join(root, orphan), "utf8"), "received orphan");
 });
 
 test("resume keeps unreferenced media that is empty, unreadable, or older than the tail on disk without re-appending", async (t) => {

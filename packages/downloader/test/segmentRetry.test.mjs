@@ -280,3 +280,17 @@ test('SC segment cancellation reaches the HTTP request instead of waiting for it
     controller.abort();const result=await pending;
     assert.equal(requestSignal.aborted,true);assert.equal(result.data,null);assert.equal(result.retryable,true);
 });
+
+test('a media flush failure keeps received bytes but cannot commit a playlist entry',async t=>{
+    const {promises:fs}=await import('node:fs');const nativeOpen=fs.open;
+    t.mock.method(fs,'open',async(file,...args)=>{
+        const handle=await nativeOpen(file,...args);
+        if(!String(file).endsWith('.ts'))return handle;
+        return{writeFile:(...args)=>handle.writeFile(...args),sync:async()=>{throw Object.assign(Error('flush failed'),{code:'EIO'});},close:()=>handle.close()};
+    });
+    const f=await fixture(t,async()=>({data:Buffer.from('received media')}));let references=0;
+    f.manager.appendSegmentToPlaylist=async()=>{references++;};
+    const result=await f.run();assert.equal(result.exitReason,'segment-failed');assert.equal(references,0);
+    assert.equal(await readFile(path.join(f.root,'0_recording_10.ts'),'utf8'),'received media');
+    assert.equal((await readdir(f.root)).includes('playlist.m3u8'),false);
+});
