@@ -84,6 +84,11 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var failures: [Int: (attempts: Int, retryAt: CFTimeInterval)] = [:]
     private var laidOutWidth: CGFloat = 0
     private var laidOutHeight: CGFloat = 0
+    private enum GeometryPhase: Equatable { case ready, updating }
+    private var geometryPhase = GeometryPhase.ready
+    // UIScrollView quantizes offsets to physical pixels. Keep the subpixel
+    // remainder in document coordinates so successive size corrections do not drift.
+    private var offsetCorrection = CGPoint.zero
     private enum Restoration { case ready, pending(StripPosition), applying(StripPosition) }
     private var restoration = Restoration.ready
     private var pendingPosition: StripPosition? {
@@ -210,7 +215,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var screenAnchor: (index: Int, top: CGFloat)? {
         guard layoutPosition != nil, !tops.isEmpty else { return nil }
         let index = pageIndex(atContentY: centreContentY)
-        return (index, tops[index] * scrollView.zoomScale - scrollView.contentOffset.y)
+        return (index, convert(CGPoint(x: 0, y: tops[index]), from: content).y)
     }
 
     // MARK: position
@@ -254,12 +259,12 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         pendingTop = nil
         pinnedTop = nil
         let scale = CGFloat(position.zoom?.scale ?? 1)
+        offsetCorrection = .zero
         scrollView.setZoomScale(min(max(scale, scrollView.minimumZoomScale), scrollView.maximumZoomScale), animated: false)
-        content.center = CGPoint(x: laidOutWidth * scrollView.zoomScale / 2, y: content.bounds.height * scrollView.zoomScale / 2)
+        positionContent()
         let y = tops[position.index] + heights[position.index] * (position.point ?? position.fraction)
-        setCentre(contentY: y)
-        let x = CGFloat(position.zoom?.x ?? 0.5) * laidOutWidth * scrollView.zoomScale - scrollView.bounds.width / 2
-        scrollView.contentOffset.x = min(max(0, x), max(0, scrollView.contentSize.width - scrollView.bounds.width))
+        let x = CGFloat(position.zoom?.x ?? 0.5) * laidOutWidth * scrollView.zoomScale + content.frame.minX - scrollView.bounds.width / 2
+        setOffset(y * scrollView.zoomScale + content.frame.minY - scrollView.bounds.height / 2, x: x)
         restoration = .ready
         updateVisible()
     }
@@ -290,15 +295,31 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     }
 
     private func setCentre(contentY y: CGFloat) {
-        setOffset(y * scrollView.zoomScale - scrollView.bounds.height / 2)
+        setOffset(y * scrollView.zoomScale + content.frame.minY - scrollView.bounds.height / 2)
     }
 
-    private func setOffset(_ y: CGFloat) {
-        if geometryInMotion, abs(scrollView.contentOffset.y - y) <= 0.001 { return }
+    private func setOffset(_ y: CGFloat, x: CGFloat? = nil) {
+        let previous = geometryPhase; geometryPhase = .updating
+        defer { geometryPhase = previous; if previous == .ready { updateVisible() } }
         let maxOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
         let target = min(max(0, y), maxOffset)
-        guard abs(scrollView.contentOffset.y - target) > 0.001 else { return }
-        scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: target)
+        let targetX = x.map { min(max(0, $0), max(0, scrollView.contentSize.width - scrollView.bounds.width)) } ?? scrollView.contentOffset.x
+        let pixels = max(1, window?.screen.scale ?? traitCollection.displayScale)
+        let rounded = CGPoint(x: (targetX * pixels).rounded() / pixels, y: (target * pixels).rounded() / pixels)
+        if abs(scrollView.contentOffset.x - rounded.x) > 0.001 || abs(scrollView.contentOffset.y - rounded.y) > 0.001 {
+            scrollView.contentOffset = CGPoint(x: targetX, y: target)
+        }
+        let zoom = max(scrollView.zoomScale, 0.001)
+        offsetCorrection.y += (scrollView.contentOffset.y - target) / zoom
+        if x != nil { offsetCorrection.x += (scrollView.contentOffset.x - targetX) / zoom }
+        positionContent()
+    }
+
+    private func positionContent() {
+        guard laidOutWidth > 0 else { return }
+        let zoom = scrollView.zoomScale
+        content.center = CGPoint(x: max(laidOutWidth * zoom, scrollView.bounds.width) / 2 + offsetCorrection.x * zoom,
+                                 y: content.bounds.height * zoom / 2 + offsetCorrection.y * zoom)
     }
 
     // The page containing content y (clamped to the first and last page).
@@ -332,6 +353,8 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private func relayoutNow(keeping anchor: StripPosition?, screen: (index: Int, top: CGFloat)?) {
         let width = bounds.width
         guard width > 0 else { return }
+        let previous = geometryPhase; geometryPhase = .updating
+        defer { geometryPhase = previous; if previous == .ready { updateVisible() } }
         laidOutWidth = width
         laidOutHeight = bounds.height
         tops = []
@@ -345,8 +368,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         }
         let total = y + padding
         let zoom = scrollView.zoomScale
+        offsetCorrection = CGPoint(x: screen == nil ? 0 : offsetCorrection.x, y: 0)
         content.bounds = CGRect(x: 0, y: 0, width: width, height: total)
-        content.center = CGPoint(x: width * zoom / 2, y: total * zoom / 2)
+        positionContent()
         scrollView.contentSize = CGSize(width: width * zoom, height: total * zoom)
         for (index, cell) in cells { cell.frame = frame(of: index) }
         layoutFooter()
@@ -366,7 +390,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     // MARK: visible pages
 
     private func updateVisible() {
-        guard viewportReady, !isRestoringPosition, !tops.isEmpty else { return }
+        guard geometryPhase == .ready, viewportReady, !isRestoringPosition, !tops.isEmpty else { return }
         let visible = visibleContent
         let visibleTop = visible.minY, visibleHeight = visible.height
         let margin = visibleHeight * preloadScreens
@@ -501,8 +525,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
 
     public func scrollViewDidZoom(_ scrollView: UIScrollView) {
         // Keep a page narrower than the screen centred horizontally (zooming out bounces).
-        let offsetX = max(0, (scrollView.bounds.width - scrollView.contentSize.width) / 2)
-        content.center.x = scrollView.contentSize.width / 2 + offsetX
+        positionContent()
         updateVisible()
     }
 
