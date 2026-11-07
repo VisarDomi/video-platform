@@ -59,7 +59,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func completeMutationCheck(type: String) {
         guard let previous = capturedMutationCheck ?? currentVideo else { return }
         capturedMutationCheck = nil
-        replaceCurrent(previous.setting("type", type), replacing: previous)
+        replaceCurrent(previous.withVariant(type), replacing: previous)
     }
 
     private var fixtureImage: UIImage?
@@ -235,7 +235,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         overlay.setUiVisible(controlsVisible)
         overlay.setMuted(true)
         // The saved time at once (not 0:00 until the player reports it).
-        let start = savedTime(video), duration = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
+        let start = savedTime(video), duration = video.duration
         if !video.liveStream && duration > 0 { overlay.setTimeline(TimelineSnapshot(currentTime: start, duration: duration, seekMax: duration)) }
         #if targetEnvironment(simulator)
         if let fixtureImage {
@@ -323,7 +323,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let current = active.video
         var filtered = (live ? list.filter { !removed.contains($0.filename) } : list).map { video in
             guard let size = measuredSizes[video.key] else { return video }
-            return video.setting("viewerWidth", Double(size.width)).setting("viewerHeight", Double(size.height))
+            return video.withViewerSize(size)
         }
         // A live stream that ended before this list arrived: the next one takes its place.
         if let current, live, removed.contains(current.filename) {
@@ -348,7 +348,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         let size = measuredSizes[current.key] ?? active.presentationSize
         if size.width > 0, size.height > 0 {
             measuredSizes[updated.key] = size
-            filtered[index] = updated.setting("viewerWidth", Double(size.width)).setting("viewerHeight", Double(size.height))
+            filtered[index] = updated.withViewerSize(size)
         }
         videos = filtered
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
@@ -582,9 +582,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if let size = video.displaySize { return size }
         if let size = measuredSizes[video.key] { return size }
         if let size = progress.displaySize(video.key) { return size }
-        if let width = video.raw["viewerWidth"] as? Double, let height = video.raw["viewerHeight"] as? Double,
-           width.isFinite, height.isFinite, width >= 32, height >= 32 { return CGSize(width: width, height: height) }
-        return nil
+        return video.viewerSize
     }
 
     private func aspect(of video: ViewerVideo) -> CGSize {
@@ -732,7 +730,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
               unit.presentationSize.height >= 32, measuredSizes[video.key] != unit.presentationSize else { return }
         measuredSizes[video.key] = unit.presentationSize
         progress.setDisplaySize(video.key, unit.presentationSize)
-        videos[index] = videos[index].setting("viewerWidth", Double(unit.presentationSize.width)).setting("viewerHeight", Double(unit.presentationSize.height))
+        videos[index] = videos[index].withViewerSize(unit.presentationSize)
         saveCheckpoint()
     }
 
@@ -876,18 +874,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func checkFeedRefresh() -> [String: Any] {
         let before = zoomCheckState
         var fresh = videos.map { video -> ViewerVideo in
-            var raw = video.raw
-            raw.removeValue(forKey: "viewerWidth")
-            raw.removeValue(forKey: "viewerHeight")
-            if video.same(currentVideo!) { raw["fileId"] = "fixture-stable-identity" }
-            return ViewerVideo(raw)!
+            video.checkReloadedMetadata(identity: video.same(currentVideo!) ? "fixture-stable-identity" : nil)
         }
         fresh.insert(ViewerVideo(["filename": "Inserted fixture", "provider": "sc", "local": true])!, at: 0)
         updateList(fresh)
         saveCheckpoint()
         savePoster()
         checkpoint.flush()
-        let savedSizes = ViewerCheckpoint.load(checkpoint.directory)?.videos.filter { $0.raw["viewerWidth"] != nil }.count ?? 0
+        let savedSizes = ViewerCheckpoint.load(checkpoint.directory)?.videos.filter { $0.viewerSize != nil }.count ?? 0
         return ["before": before, "after": zoomCheckState, "savedSizes": savedSizes,
                 "posterFrame": ViewerPoster.load(checkpoint.directory)?.poster.frame ?? []]
     }
@@ -1087,7 +1081,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                     let playlist = try await Playlist.fetch(url)
                     try await ViewerPC.cut(video, keep: playlist.keep(markers: markers, playbackDuration: playbackDuration))
                 }
-                replaceCurrent(video.setting("type", "edited"), replacing: video)
+                replaceCurrent(video.withVariant("edited"), replacing: video)
             } catch { mutationFailed(error) }
         }
     }
@@ -1097,7 +1091,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         Task {
             do {
                 try await ViewerPC.returnOriginal(video)
-                replaceCurrent(video.setting("type", "original"), replacing: video)
+                replaceCurrent(video.withVariant("original"), replacing: video)
             } catch { mutationFailed(error) }
         }
     }
@@ -1150,7 +1144,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         Task {
             do {
                 try await host.follow(video, !video.following)
-                replace(video.setting("following", !video.following))
+                replace(video.withFollowing(!video.following))
             } catch { print("Follow failed:", error.localizedDescription) }
         }
     }
@@ -1189,7 +1183,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     func unitLiveChanged(_ unit: ViewerUnit, _ isLive: Bool) {
         guard let video = unit.video, video.isLive != isLive else { return }
-        let updated = video.setting("isLive", isLive)
+        let updated = video.withLiveStatus(isLive)
         if let index = videos.firstIndex(where: { $0.same(video) }) { videos[index] = updated }
         unit.update(updated)
         if unit === active { overlay.setVideo(updated) }

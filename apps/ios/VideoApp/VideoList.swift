@@ -85,6 +85,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     override func viewDidLoad() {
         super.viewDidLoad()
         AppLifecycle.shared.onResignActive { [weak self] in self?.flushState() }
+        AppLifecycle.shared.onBackground { [weak self] in self?.flushModelState() }
         view.backgroundColor = .black
         table.backgroundColor = .black
         table.separatorStyle = .none
@@ -267,9 +268,13 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     }
     func scrollViewDidScrollToTop(_ scrollView: UIScrollView) { applyPending(); savePlace() }
 
-    func flushState(captureViewer: Bool = true) {
+    func flushState() {
+        viewer?.captureState()
+        flushModelState()
+    }
+
+    private func flushModelState() {
         savePlace()
-        if captureViewer { viewer?.captureState() }
         stateWriter.flush()
         progress.flush()
         checkpoint.flush()
@@ -593,7 +598,7 @@ final class VideoRowCell: UITableViewCell {
         name.textColor = video.isLive ? UIColor(red: 1, green: 0.42, blue: 0.42, alpha: 1)
             : video.edited ? UIColor(red: 0.94, green: 0.63, blue: 0.31, alpha: 1) : .white
         mark.text = siteMark
-        let seconds = (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0
+        let seconds = video.duration
         if video.liveStream {
             duration.text = "LIVE"
             size.text = ""

@@ -126,7 +126,6 @@ final class TangoListController: VideoListController {
         loading?.cancel(); loading = nil
         retry?.cancel(); retry = nil
         refresh.endRefreshing()
-        flushState(captureViewer: false)
         jar.flush()
     }
 

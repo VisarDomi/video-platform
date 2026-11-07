@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import UIKit
 import KitCore
+import KitLifecycle
 
 // A screen in the live stack. Screens below the top stay alive (their views, scroll offsets,
 // loaded images), which is what WebKit's back-forward cache gave by chance and may drop:
@@ -49,6 +50,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
 
     private let writer: BackgroundWriter
     private let factory: Factory
+    private weak var stateStore: (any CheckpointStore)?
     private var forward: [any LiveScreen] = []
     private var savedForward: [SavedStack.Entry] = []
     private var forwardPan: UIScreenEdgePanGestureRecognizer!
@@ -64,9 +66,11 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     private var saveScheduled = false
     private var warmed = false
 
-    public init(file: URL, factory: @escaping Factory, root: @autoclosure () -> any LiveScreen) {
+    public init(file: URL, factory: @escaping Factory, root: @autoclosure () -> any LiveScreen,
+                stateStore: (any CheckpointStore)? = nil) {
         writer = BackgroundWriter(url: file, label: "kit-navigation")
         self.factory = factory
+        self.stateStore = stateStore
         let saved = (try? DurableFile.readJSON(SavedStack.self, from: file)) ?? SavedStack()
         let screens = saved.back.compactMap { factory($0.route, $0.state) }
         super.init(nibName: nil, bundle: nil)
@@ -88,6 +92,10 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
         forwardPan.edges = .right
         forwardPan.delegate = self
         view.addGestureRecognizer(forwardPan)
+        if stateStore != nil {
+            AppLifecycle.shared.onResignActive { [weak self] in self?.flush() }
+            AppLifecycle.shared.onResignActiveAsync { [weak self] in await self?.stateStore?.finishWrites() }
+        }
     }
 
     // After a relaunch the screens below the top are built too, off screen at the screen's size,
@@ -159,6 +167,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     public func flush() {
         save()
         writer.flush()
+        stateStore?.flush()
     }
 
     private func takeForward() -> (any LiveScreen)? {

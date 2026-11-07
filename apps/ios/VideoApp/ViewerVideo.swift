@@ -6,7 +6,7 @@ import KitCore
 // kept as they came, plus what the viewer knows without asking.
 // Its fields are JSON values, never changed in place: safe to build off the main thread.
 struct ViewerVideo: @unchecked Sendable {
-    private(set) var raw: [String: Any]
+    fileprivate var raw: [String: Any]
 
     init?(_ value: Any?) {
         guard let raw = value as? [String: Any], let filename = raw["filename"] as? String, !filename.isEmpty,
@@ -26,6 +26,15 @@ struct ViewerVideo: @unchecked Sendable {
     var local: Bool { raw["local"] as? Bool ?? false }
     var liveStream: Bool { raw["live"] as? Bool ?? false }
     var media: MediaSource? { MediaSource(raw["media"]) }
+    var declaredDuration: Double? { (raw["duration"] as? NSNumber)?.doubleValue }
+    var duration: Double { declaredDuration ?? 0 }
+    var videoCodec: String? { raw["videoCodec"] as? String }
+    var frameRate: Double? { (raw["frameRate"] as? NSNumber)?.doubleValue }
+    var viewerSize: CGSize? {
+        guard let width = raw["viewerWidth"] as? Double, let height = raw["viewerHeight"] as? Double,
+              width.isFinite, height.isFinite, width >= 32, height >= 32 else { return nil }
+        return CGSize(width: width, height: height)
+    }
     var needsAlternateDecoder: Bool {
         let codec = (raw["videoCodec"] as? String ?? "").lowercased()
         let container = (filename as NSString).pathExtension.lowercased()
@@ -74,7 +83,26 @@ struct ViewerVideo: @unchecked Sendable {
         Look(filename: filename, type: type, name: name, isLive: isLive, liveStream: liveStream, duration: (raw["duration"] as? NSNumber)?.doubleValue ?? 0, size: size)
     }
 
-    func setting(_ field: String, _ value: Any) -> ViewerVideo {
+    func withVariant(_ type: String) -> ViewerVideo { setting("type", type) }
+    func withFollowing(_ following: Bool) -> ViewerVideo { setting("following", following) }
+    func withLiveStatus(_ live: Bool) -> ViewerVideo { setting("isLive", live) }
+    func withViewerSize(_ size: CGSize) -> ViewerVideo {
+        var copy = self
+        copy.raw["viewerWidth"] = Double(size.width)
+        copy.raw["viewerHeight"] = Double(size.height)
+        return copy
+    }
+
+    #if targetEnvironment(simulator)
+    func checkReloadedMetadata(identity: String?) -> ViewerVideo {
+        var copy = self
+        copy.raw.removeValue(forKey: "viewerWidth"); copy.raw.removeValue(forKey: "viewerHeight")
+        if let identity { copy.raw["fileId"] = identity }
+        return copy
+    }
+    #endif
+
+    private func setting(_ field: String, _ value: Any) -> ViewerVideo {
         var copy = self
         copy.raw[field] = value
         // A PC recording's playlist URL names the recording, not its type (the server finds the

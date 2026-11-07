@@ -64,7 +64,6 @@ final class LocalListController: VideoListController {
         following?.cancel()
         feedState.cancel()
         following = nil
-        flushState(captureViewer: false)
     }
 
     override func flushCachedList() { cacheWriter.flush() }
@@ -156,7 +155,7 @@ final class LocalListController: VideoListController {
     override func rename(_ video: ViewerVideo, to name: String) async throws -> ViewerVideo {
         guard provider == "bunkr", let id = video.fileId else { throw LocalLibraryFailure(message: "Reconnect to the PC before renaming this video.") }
         let selected = ServerVideo(filename: video.filename, type: video.type, size: video.size,
-                                   duration: (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0, isLive: false, fileId: id)
+                                   duration: video.duration, isLive: false, fileId: id)
         do {
             let result = try await api.rename(selected, to: name)
             mutationGeneration += 1; renameBarrier = LocalRevisionBarrier(epoch: result.epoch, revision: result.revision)
@@ -199,10 +198,10 @@ final class LocalListController: VideoListController {
         mutationGeneration += 1
         renameBarrier = nil
         let item = ServerVideo(filename: video.filename, type: video.type, size: video.size,
-                               duration: (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0, isLive: video.isLive,
+                               duration: video.duration, isLive: video.isLive,
                                fileId: video.fileId, width: video.displaySize.map { Double($0.width) },
-                               height: video.displaySize.map { Double($0.height) }, videoCodec: video.raw["videoCodec"] as? String,
-                               frameRate: (video.raw["frameRate"] as? NSNumber)?.doubleValue)
+                               height: video.displaySize.map { Double($0.height) }, videoCodec: video.videoCodec,
+                               frameRate: video.frameRate)
         var next = items.filter { $0.filename != video.filename }
         next.insert(item, at: next.insertionIndex(for: item))
         publish(next)

@@ -62,7 +62,6 @@ final class VaultListController: VideoListController {
     }
 
     func paused() {
-        flushState(captureViewer: false)
         jar.flush()
     }
 

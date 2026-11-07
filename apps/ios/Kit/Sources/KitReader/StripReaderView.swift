@@ -21,6 +21,13 @@ public struct StripPosition: Codable, Sendable, Equatable {
         self.aspect = aspect.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         self.point = point.flatMap { $0.isFinite ? $0 : nil }
     }
+
+    // Rebase between document and chapter indices without dropping viewport fields.
+    public func at(index: Int) -> StripPosition {
+        var position = self
+        position.index = index
+        return position
+    }
 }
 
 public struct StripPage: Sendable, Equatable {
@@ -64,18 +71,20 @@ public extension StripReaderDelegate {
 // near the screen hold decoded images; every page loads when it comes near.
 @MainActor
 public final class StripReaderView: UIView, UIScrollViewDelegate {
+    public enum PageGeometry: Sendable { case adaptive, measured }
     public weak var delegate: StripReaderDelegate?
-    public let pipeline: ImagePipeline
-    // Height of a page whose size is unknown, for a given page width.
-    public var placeholderHeight: (CGFloat) -> CGFloat = { $0 * 1.5 }
-    // How many screens beyond the visible one hold decoded pages.
-    public var preloadScreens: CGFloat = 1.5
-    // Consumers that publish decoder-measured page boxes keep that geometry
-    // through downsampling and quality upgrades. Other readers retain their policy.
-    public var locksPageDimensions = false
-    public let scrollView = UIScrollView()
-
-    public private(set) var pages: [StripPage] = []
+    private let pipeline: ImagePipeline
+    private let geometry: PageGeometry
+    private let preloadScreens: CGFloat = 1.5
+    private var locksPageDimensions: Bool { if case .measured = geometry { return true }; return false }
+    private func placeholderHeight(_ width: CGFloat) -> CGFloat { locksPageDimensions ? 0 : width * 1.5 }
+    private let scrollView = UIScrollView()
+    private var pages: [StripPage] = []
+    public var pageCount: Int { pages.count }
+    #if targetEnvironment(simulator)
+    public var testScrollView: UIScrollView { scrollView }
+    public var testPageAspects: [CGFloat] { pages.compactMap(\.aspect) }
+    #endif
     private let content = UIView()
     private var tops: [CGFloat] = []
     private var heights: [CGFloat] = []
@@ -118,8 +127,9 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
     private var pendingImages: [Int: UIImage] = [:]
     private var measuredImages = Set<String>()
 
-    public init(pipeline: ImagePipeline) {
+    public init(pipeline: ImagePipeline, geometry: PageGeometry = .adaptive) {
         self.pipeline = pipeline
+        self.geometry = geometry
         super.init(frame: .zero)
         backgroundColor = .black
         scrollView.delegate = self
@@ -234,7 +244,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         case .ready: return currentPosition ?? layoutPosition
         }
     }
-    public var isRestoringPosition: Bool { if case .ready = restoration { return pendingTop != nil }; return true }
+    private var isRestoringPosition: Bool { if case .ready = restoration { return pendingTop != nil }; return true }
 
     // Puts `position` at the screen's centre (applied after the first layout if needed).
     public func scroll(to position: StripPosition) {

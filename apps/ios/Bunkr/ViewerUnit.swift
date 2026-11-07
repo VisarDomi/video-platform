@@ -544,7 +544,7 @@ final class ViewerUnit {
 
     var playbackEvidence: [String: Any] {
         if let decoder {
-            return decoder.evidence.merging(["video": video?.filename ?? "", "videoCodec": video?.raw["videoCodec"] ?? "unknown",
+            return decoder.evidence.merging(["video": video?.filename ?? "", "videoCodec": video?.videoCodec ?? "unknown",
                                               "wantsPlay": wantsPlay, "activationMs": playStartedMs ?? -1]) { _, new in new }
         }
         let item = player.currentItem, log = item?.accessLog()?.events.last

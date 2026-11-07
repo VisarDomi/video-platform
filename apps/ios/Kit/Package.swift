@@ -27,7 +27,7 @@ let package = Package(
         .target(name: "KitNet", dependencies: ["KitCore"]),
         .target(name: "KitHTML"),
         .target(name: "KitImages", dependencies: ["KitCore"]),
-        .target(name: "KitNavigation", dependencies: ["KitCore"]),
+        .target(name: "KitNavigation", dependencies: ["KitCore", "KitLifecycle"]),
         .target(name: "KitLists", dependencies: ["KitCore", "KitImages"]),
         .target(name: "KitReader", dependencies: ["KitCore", "KitImages"]),
         .target(name: "KitLifecycle", dependencies: ["KitCore", "KitNet"]),

@@ -33,7 +33,7 @@ enum ViewerDecoders {
                      changed: @escaping () -> Void, failed: @escaping () -> Void) async -> (any ViewerDecoder)? {
         guard !Task.isCancelled else { return nil }
         #if canImport(AetherEngine)
-        let codec = (video.raw["videoCodec"] as? String)?.lowercased()
+        let codec = (video.videoCodec)?.lowercased()
         #if ORIGINAL_CODEC_PROBE
         let requiresHardware = false  // Exercise lifecycle even on CPU-only simulator runtimes.
         let direct = (codec == "vp9" || codec == "av1") && !CommandLine.arguments.contains("-force-vlc")

@@ -59,10 +59,10 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
         TestHooks.shared.register("feed-refresh") { [weak self] _ in self?.viewer?.checkFeedRefresh() ?? [:] }
         TestHooks.shared.register("reader-scroll") { [weak self] query in
             guard let self, let strip else { return [:] }
-            strip.scrollViewWillBeginDragging(strip.scrollView)
-            strip.scrollView.contentOffset.y += CGFloat(Double(query["delta"] ?? "0") ?? 0)
+            strip.scrollViewWillBeginDragging(strip.testScrollView)
+            strip.testScrollView.contentOffset.y += CGFloat(Double(query["delta"] ?? "0") ?? 0)
             let before = snapshot()
-            if query["end"] != "0" { strip.scrollViewDidEndDragging(strip.scrollView, willDecelerate: false) }
+            if query["end"] != "0" { strip.scrollViewDidEndDragging(strip.testScrollView, willDecelerate: false) }
             return ["before": before, "after": snapshot()]
         }
         TestHooks.shared.register("zoom-metadata") { [weak self] _ in
@@ -74,7 +74,7 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
         TestHooks.shared.register("zoom-layout-check") { [weak self] _ in
             guard let self, let strip else { return [:] }
             let before = snapshot()
-            let scroll = strip.scrollView
+            let scroll = strip.testScrollView
             scroll.delegate?.scrollViewWillBeginZooming?(scroll, with: strip.viewForZooming(in: scroll))
             strip.setAspect(0.18, at: 0)
             strip.append([StripPage(key: "appended", aspect: 0.2)])
@@ -145,17 +145,17 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
 
     private func beginPinch() {
         if let viewer { viewer.beginZoomCheck() }
-        else if let strip { strip.scrollView.delegate?.scrollViewWillBeginZooming?(strip.scrollView, with: strip.viewForZooming(in: strip.scrollView)) }
+        else if let strip { strip.testScrollView.delegate?.scrollViewWillBeginZooming?(strip.testScrollView, with: strip.viewForZooming(in: strip.testScrollView)) }
     }
 
     private func applyScale(_ scale: CGFloat) {
         if let viewer { viewer.setZoomCheckScale(scale, animated: false) }
-        else { strip?.scrollView.setZoomScale(scale, animated: false) }
+        else { strip?.testScrollView.setZoomScale(scale, animated: false) }
     }
 
     private func endPinch() {
         if let viewer { viewer.endZoomCheck() }
-        else if let strip { strip.scrollViewDidEndZooming(strip.scrollView, with: strip.viewForZooming(in: strip.scrollView), atScale: strip.scrollView.zoomScale) }
+        else if let strip { strip.scrollViewDidEndZooming(strip.testScrollView, with: strip.viewForZooming(in: strip.testScrollView), atScale: strip.testScrollView.zoomScale) }
     }
 
     private func calibration(_ size: CGSize) -> UIImage {
@@ -178,16 +178,16 @@ final class ZoomChecks: UIViewController, StripReaderDelegate {
 
     private func snapshot() -> [String: Any] {
         if let viewer { return viewer.zoomCheckState.merging(["kind": "video"]) { a, _ in a } }
-        guard let strip, let content = strip.viewForZooming(in: strip.scrollView) else { return [:] }
+        guard let strip, let content = strip.viewForZooming(in: strip.testScrollView) else { return [:] }
         var images: [String] = []
         func visit(_ node: UIView) {
             if let image = node as? UIImageView, image.image != nil, !image.isHidden { images.append(String(describing: ObjectIdentifier(image))) }
             node.subviews.forEach(visit)
         }
         visit(content)
-        return ["kind": "reader", "scale": strip.scrollView.zoomScale, "contentHeight": content.bounds.height,
-                "pages": strip.pages.count, "images": images, "state": strip.state,
-                "offset": strip.scrollView.contentOffset.y]
+        return ["kind": "reader", "scale": strip.testScrollView.zoomScale, "contentHeight": content.bounds.height,
+                "pages": strip.pageCount, "images": images, "state": strip.state,
+                "offset": strip.testScrollView.contentOffset.y]
     }
 
     private func startTrace() {

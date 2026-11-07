@@ -1,5 +1,12 @@
 # iPhone apps
 
+ViewerVideo owns the provider payload and exposes named metadata and mutation operations;
+controllers/decoders do not read or edit its JSON dictionary. VideoListController owns both
+resign and background checkpoint phases, including cached-list dependencies. Provider lists
+only pause/resume their own work and cannot select partial checkpoint behavior. Bunkr's
+separate build-selected decoder and performance implementations remain isolated.
+
+
 Six iPhone apps share one Swift host (`VideoApp/`). `providers.json` is the registry;
 `scripts/project.py <provider>` generates that provider's project and Info.plist. Every app
 is a native list with the native viewer over it; no app shows a website. Code shared with the

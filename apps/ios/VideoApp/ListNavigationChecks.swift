@@ -73,7 +73,7 @@ final class ListNavigationChecks: VideoListController {
         }
         TestHooks.shared.register("navigation-edit-arrival") { [weak self] query in
             guard let self, let current = viewer?.currentVideo else { return [:] }
-            fixtureRows = fixtureRows.map { $0.sameRecording(current) ? $0.setting("type", query["type"] ?? "edited") : $0 }
+            fixtureRows = fixtureRows.map { $0.sameRecording(current) ? $0.withVariant(query["type"] ?? "edited") : $0 }
             setVideos(fixtureRows)
             return state()
         }

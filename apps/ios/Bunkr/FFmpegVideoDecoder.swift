@@ -95,7 +95,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
             engine.volume = 0
             engine.videoGravity = .resizeAspect
             var options = LoadOptions(suppressDisplayCriteria: true, displayCriteriaOwner: .host, matchContentEnabled: false,
-                                      declaredDurationSeconds: (video.raw["duration"] as? NSNumber)?.doubleValue,
+                                      declaredDurationSeconds: video.declaredDuration,
                                       probesize: 1_000_000, maxAnalyzeDuration: 1_000_000,
                                       skipsContainerAttachments: true, sessionCacheByteBudget: 16 * 1024 * 1024,
                                       softwarePacketCacheStorage: .memory, autoplay: false, preferredDecodePath: .software)
@@ -189,7 +189,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         if time.isFinite && time >= 0 { lastTime = time }
         return lastTime
     }
-    var duration: Double { max(engine.duration, (video.raw["duration"] as? NSNumber)?.doubleValue ?? 0) }
+    var duration: Double { max(engine.duration, video.duration) }
     var size: CGSize { video.displaySize ?? engine.softwareDisplaySize ?? CGSize(width: CGFloat(engine.sourceVideoWidth), height: CGFloat(engine.sourceVideoHeight)) }
     var playing: Bool { requested && engine.state == .playing }
     var hasPicture: Bool { !stopped && picture && videoEnabled && !videoRestorePending }
@@ -273,7 +273,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         display.removeFromSuperview()
     }
     var evidence: [String: Any] {
-        var value: [String: Any] = ["engine": "FFmpeg/VideoToolbox", "codec": video.raw["videoCodec"] ?? "unknown",
+        var value: [String: Any] = ["engine": "FFmpeg/VideoToolbox", "codec": video.videoCodec ?? "unknown",
          "hardwareDecoder": engine.inlineHardwareDecoder ?? false, "hardwareKnown": engine.inlineHardwareDecoder != nil,
          "audioDelivery": engine.audioDelivery.rawValue,
          "currentTime": currentTime, "nativeTime": max(0, engine.currentTime), "hasPicture": hasPicture, "duration": duration, "rate": playing ? 1 : 0,
