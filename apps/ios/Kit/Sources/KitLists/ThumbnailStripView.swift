@@ -36,6 +36,8 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
     // Failed thumbnails: attempts so far (asked again after 1, 2, 4... up to 30 seconds while
     // on screen, as a dropped connection comes back).
     private var failures: [Int: Int] = [:]
+    private enum Placement { case ready, pending(CGFloat) }
+    private var placement = Placement.ready
 
     public init(pipeline: ImagePipeline, itemSize: CGSize = CGSize(width: 100, height: 300)) {
         self.pipeline = pipeline
@@ -64,23 +66,38 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
     override public func layoutSubviews() {
         super.layoutSubviews()
         collectionView.frame = bounds
+        applyPlacement()
     }
 
     public func setKeys(_ keys: [String], offset: CGFloat = 0) {
         cancelAll()
         failures.removeAll()
         self.keys = keys
+        placement = .pending(offset)
         collectionView.reloadData()
-        collectionView.layoutIfNeeded()
-        self.offset = offset
+        applyPlacement()
     }
 
     public var offset: CGFloat {
-        get { collectionView.contentOffset.x }
-        set {
-            let maxOffset = max(0, CGFloat(keys.count) * itemSize.width - collectionView.bounds.width)
-            collectionView.contentOffset = CGPoint(x: min(max(0, newValue), maxOffset), y: 0)
+        get {
+            if case .pending(let offset) = placement { return offset }
+            return collectionView.contentOffset.x
         }
+        set {
+            placement = .pending(newValue)
+            applyPlacement()
+        }
+    }
+
+    private func applyPlacement() {
+        guard case .pending(let offset) = placement,
+              collectionView.bounds.width > 0, collectionView.bounds.height > 0 else { return }
+        // UICollectionView discards an offset applied before its first real layout.
+        // Keep the requested position authoritative until the row has usable geometry.
+        collectionView.layoutIfNeeded()
+        let maxOffset = max(0, CGFloat(keys.count) * itemSize.width - collectionView.bounds.width)
+        placement = .ready
+        collectionView.contentOffset = CGPoint(x: min(max(0, offset), maxOffset), y: 0)
     }
 
     // Images that failed are asked again (a thumbnail that finished downloading).
@@ -131,6 +148,8 @@ public final class ThumbnailStripView: UIView, UICollectionViewDataSource, UICol
         pipeline.prioritiesChanged()
         if scrollView.isDragging || scrollView.isDecelerating { delegate?.stripDidScroll(self) }
     }
+
+    public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { placement = .ready }
 
     // The first thumbnail on screen.
     public var firstVisibleIndex: Int { max(0, Int(collectionView.contentOffset.x / max(itemSize.width, 1))) }
