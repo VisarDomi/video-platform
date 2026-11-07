@@ -296,11 +296,13 @@ export class PlaylistManager {
                     logger.warn(`[PlaylistManager] Unreferenced fragment has no initialization map on disk; kept on disk, not re-appended: ${name}`);
                     continue;
                 }
+                await FileSystemManager.syncExistingFile(path.join(this.disk.dirPath, applicable));
                 if (applicable !== activeMap) {
                     this.bufferQualityChange(applicable);
                     activeMap = applicable;
                 }
             }
+            await FileSystemManager.syncExistingFile(filePath);
             const duration = inspection.duration !== undefined && inspection.duration > 0
                 ? inspection.duration
                 : provisionalDuration;

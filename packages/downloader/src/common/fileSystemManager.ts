@@ -15,25 +15,39 @@ export class FileSystemManager {
     }
 
     public static async writeFile(filePath: string, data: string | Uint8Array): Promise<boolean> {
-        try {
-            await fs.writeFile(filePath, data);
-            return true;
-        } catch (error: any) {
-            logger.error(`Failed to write file: ${filePath}`, { error: error.message });
-            return false;
-        }
+        return this.writeFileAtomic(filePath, data);
+    }
+
+    private static async syncDirectory(directoryPath: string): Promise<void> {
+        const directory = await fs.open(directoryPath, constants.O_RDONLY);
+        try { await directory.sync(); } finally { await directory.close(); }
+    }
+
+    // Recovery may find bytes left by an interrupted/failed write. Reading
+    // them successfully is not a durability barrier before referencing them.
+    public static async syncExistingFile(filePath: string): Promise<void> {
+        const handle = await fs.open(filePath, constants.O_RDONLY);
+        try { await handle.sync(); } finally { await handle.close(); }
+        await this.syncDirectory(path.dirname(filePath));
     }
 
     // Never overwrites: "exists" when the name is taken, "failed" (logged) otherwise.
     public static async writeFileExclusive(filePath: string, data: string | Uint8Array): Promise<"written" | "exists" | "failed"> {
+        let handle;
         try {
-            await fs.writeFile(filePath, data, { flag: "wx" });
+            handle = await fs.open(filePath, "wx");
+            await handle.writeFile(data);
+            await handle.sync();
+            await handle.close(); handle = undefined;
+            await this.syncDirectory(path.dirname(filePath));
             return "written";
         } catch (error: any) {
             if (error.code === "EEXIST") return "exists";
-            logger.error(`Failed to exclusively write file: ${filePath}`, { error: error.message });
+            logger.error(`Failed to durably write exclusive file: ${filePath}`, { error: error.message });
+            // Preserve any bytes the device accepted; a failed flush must not
+            // claim success or authorize a playlist reference.
             return "failed";
-        }
+        } finally { await handle?.close().catch(() => {}); }
     }
 
     public static async writeFileAtomic(filePath: string, data: string | Uint8Array): Promise<boolean> {
@@ -62,13 +76,18 @@ export class FileSystemManager {
     }
 
     public static async appendFile(filePath: string, data: string): Promise<boolean> {
+        let handle;
         try {
-            await fs.appendFile(filePath, data);
+            handle = await fs.open(filePath, "a");
+            await handle.writeFile(data);
+            await handle.sync();
+            await handle.close(); handle = undefined;
+            await this.syncDirectory(path.dirname(filePath));
             return true;
         } catch (error: any) {
-            logger.error(`Failed to append to file: ${filePath}`, { error: error.message });
+            logger.error(`Failed to durably append to file: ${filePath}`, { error: error.message });
             return false;
-        }
+        } finally { await handle?.close().catch(() => {}); }
     }
 
     public static async pathExists(filePath: string): Promise<boolean> {
@@ -105,6 +124,16 @@ export class FileSystemManager {
     public static async ensureDirExists(dirPath: string): Promise<boolean> {
         try {
             await fs.mkdir(dirPath, { recursive: true });
+            // A durable payload is not reachable after reboot unless every
+            // newly created path component is durable too. This runs only at
+            // directory setup/materialization, not for each media fragment.
+            let current = path.resolve(dirPath);
+            while (true) {
+                await this.syncDirectory(current);
+                const parent = path.dirname(current);
+                if (parent === current) break;
+                current = parent;
+            }
             return true;
         } catch (error: any) {
             logger.error(`Failed to create directory: ${dirPath}`, { error: error.message });

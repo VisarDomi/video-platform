@@ -80,6 +80,17 @@ old maximum.
 
 ## Received media is never deleted
 
+Capture commits payloads before playlist references: an exclusive media/init
+write flushes the file, closes it, and flushes its parent directory before
+reporting success. Playlist appends flush their contents and directory too;
+new recording directories flush every ancestor link before materialization
+succeeds. Atomic playlist replacement retains its file/rename/directory barriers.
+A failed write or flush stops the attempt without claiming success or deleting
+received bytes. Recovery flushes readable orphan media and its applicable init
+map before re-appending it. These barriers prevent a reboot from preserving a
+playlist entry ahead of its captured payload; they cannot reconstruct bytes lost
+before the fix or protect against storage hardware that ignores flush requests.
+
 An empty response body is not written. A written file that the provider's
 validator cannot read stays on disk. Either way the segment is not handled: the
 batch stops (later segments wait, keeping playlist order) and the next poll
