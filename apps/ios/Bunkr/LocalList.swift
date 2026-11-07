@@ -64,9 +64,10 @@ final class LocalListController: VideoListController {
         following?.cancel()
         feedState.cancel()
         following = nil
-        flushState()
-        cacheWriter.flush()
+        flushState(captureViewer: false)
     }
+
+    override func flushCachedList() { cacheWriter.flush() }
 
     // MARK: following the PC
 

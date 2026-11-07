@@ -1,5 +1,6 @@
 import UIKit
 import KitCore
+import KitLifecycle
 
 // A video list as the website showed it, native: rows of name, duration (and a site mark) and
 // estimated size; the last viewed row highlighted; rows open the native viewer over the list,
@@ -80,6 +81,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        AppLifecycle.shared.onResignActive { [weak self] in self?.flushState() }
         view.backgroundColor = .black
         table.backgroundColor = .black
         table.separatorStyle = .none
@@ -262,11 +264,18 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     }
     func scrollViewDidScrollToTop(_ scrollView: UIScrollView) { applyPending(); savePlace() }
 
-    func flushState() {
+    func flushState(captureViewer: Bool = true) {
+        savePlace()
+        if captureViewer { viewer?.captureState() }
         stateWriter.flush()
         progress.flush()
+        checkpoint.flush()
+        flushCachedList()
         DebugState.shared.write(to: directory)
     }
+
+    // A durable row anchor must not refer to a list still waiting in a writer queue.
+    func flushCachedList() {}
 
     // MARK: failure
 
@@ -330,8 +339,13 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
 
     // A killed app reopens its viewer; the list catches up underneath.
     private func restoreViewer() {
-        guard let saved = ViewerCheckpoint.load(directory) else { return }
-        showViewer(videos: saved.videos, index: saved.videos.firstIndex { $0.key == saved.current } ?? 0, restoring: true)
+        guard let saved = ViewerCheckpoint.load(directory), saved.visibility == .open else { return }
+        showViewer(videos: saved.videos, index: saved.videos.firstIndex { $0.key == saved.current } ?? 0, restoration: saved)
+    }
+
+    private func lastViewport(for video: ViewerVideo) -> ViewerCheckpoint? {
+        guard let saved = ViewerCheckpoint.load(directory), saved.visibility == .closed, saved.current == video.key else { return nil }
+        return saved
     }
 
     // MARK: forward
@@ -348,7 +362,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
     func goForward() {
         guard viewer == nil, let index = forwardIndex else { return }
         savePlace()
-        showViewer(videos: videos, index: index)
+        showViewer(videos: videos, index: index, restoration: lastViewport(for: videos[index]))
         viewer?.returnsWhenGone = true
     }
 
@@ -361,7 +375,7 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         case .began:
             guard viewer == nil, let index = forwardIndex else { return }
             savePlace()
-            showViewer(videos: videos, index: index)
+            showViewer(videos: videos, index: index, restoration: lastViewport(for: videos[index]))
             viewer?.returnsWhenGone = true
             viewer?.view.layer.shadowOpacity = 0.5
             viewer?.view.transform = CGAffineTransform(translationX: width - x, y: 0)
@@ -377,15 +391,17 @@ class VideoListController: UIViewController, UITableViewDataSource, UITableViewD
         }
     }
 
-    private func showViewer(videos: [ViewerVideo], index: Int, restoring: Bool = false) {
-        FrameMonitor.shared.measure("viewer.open") { showViewerNow(videos: videos, index: index, restoring: restoring) }
+    private func showViewer(videos: [ViewerVideo], index: Int, restoration: ViewerCheckpoint? = nil) {
+        FrameMonitor.shared.measure("viewer.open") { showViewerNow(videos: videos, index: index, restoration: restoration) }
     }
 
-    private func showViewerNow(videos: [ViewerVideo], index: Int, restoring: Bool) {
+    private func showViewerNow(videos: [ViewerVideo], index: Int, restoration: ViewerCheckpoint?) {
         viewer?.close()
         let controller = takeSpare() ?? FrameMonitor.shared.measure("open.init") { buildViewer() }
-        controller.restoring = restoring
-        if restoring { controller.restoredTop = ViewerCheckpoint.load(directory)?.top.map { CGFloat($0) } }
+        controller.restoring = restoration != nil
+        controller.restoredTop = restoration?.top.map { CGFloat($0) }
+        controller.restoredZoom = restoration?.zoom
+        controller.restoredControls = restoration?.controls
         controller.open(videos: videos, index: index)
         controller.onClose = { [weak self, weak controller] in
             guard let self, let controller else { return }

@@ -126,10 +126,11 @@ final class TangoListController: VideoListController {
         loading?.cancel(); loading = nil
         retry?.cancel(); retry = nil
         refresh.endRefreshing()
-        flushState()
+        flushState(captureViewer: false)
         jar.flush()
-        keptWriter.flush()
     }
+
+    override func flushCachedList() { keptWriter.flush() }
 
     // A confirmed Safari import moves in; then the list, or the login screen. A sign-in screen
     // already showing stays until the session has worked (a token Tango then rejects would

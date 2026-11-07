@@ -62,10 +62,11 @@ final class VaultListController: VideoListController {
     }
 
     func paused() {
-        flushState()
+        flushState(captureViewer: false)
         jar.flush()
-        keptWriter.flush()
     }
+
+    override func flushCachedList() { keptWriter.flush() }
 
     // MARK: the list
 

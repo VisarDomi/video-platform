@@ -187,10 +187,14 @@ final class ProgressStore {
 
 // The open viewer, so a killed app reopens it like a restored Safari tab reopens its page.
 struct ViewerCheckpoint {
+    enum Visibility: String { case open, closed }
     let provider: String
     let videos: [ViewerVideo]
     let current: String
     var top: Double? = nil
+    var zoom: ZoomState? = nil
+    var controls: Bool? = nil
+    var visibility = Visibility.open
 
     fileprivate static func url(_ directory: URL) -> URL { directory.appendingPathComponent("viewer-checkpoint.json") }
 
@@ -199,12 +203,21 @@ struct ViewerCheckpoint {
               let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let provider = raw["provider"] as? String, let current = raw["current"] as? String,
               let videos = (raw["videos"] as? [Any])?.compactMap(ViewerVideo.init), !videos.isEmpty else { return nil }
-        return ViewerCheckpoint(provider: provider, videos: videos, current: current, top: raw["top"] as? Double)
+        let zoom = (raw["zoom"] as? [String: Double]).flatMap { value -> ZoomState? in
+            guard let scale = value["scale"], let x = value["x"], let y = value["y"] else { return nil }
+            return ZoomState(scale: scale, x: x, y: y)
+        }
+        return ViewerCheckpoint(provider: provider, videos: videos, current: current, top: raw["top"] as? Double,
+                                zoom: zoom, controls: raw["controls"] as? Bool,
+                                visibility: (raw["visibility"] as? String).flatMap(Visibility.init(rawValue:)) ?? .open)
     }
 
     fileprivate var raw: [String: Any] {
         var result: [String: Any] = ["provider": provider, "current": current, "videos": videos.map(\.raw)]
         if let top, top.isFinite { result["top"] = top }
+        if let zoom { result["zoom"] = ["scale": zoom.scale, "x": zoom.x, "y": zoom.y] }
+        if let controls { result["controls"] = controls }
+        result["visibility"] = visibility.rawValue
         return result
     }
 }

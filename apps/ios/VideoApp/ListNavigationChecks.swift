@@ -39,7 +39,7 @@ final class ListNavigationChecks: VideoListController {
             guard let self, viewer == nil else { return [:] }
             table.contentOffset.y = CGFloat(Double(query["offset"] ?? "0") ?? 0)
             table.layoutIfNeeded()
-            scrollViewDidEndDragging(table, willDecelerate: false)
+            if query["end"] != "0" { scrollViewDidEndDragging(table, willDecelerate: false) }
             return state()
         }
         TestHooks.shared.register("navigation-open") { [weak self] query in
@@ -74,11 +74,15 @@ final class ListNavigationChecks: VideoListController {
             return state()
         }
         TestHooks.shared.register("feed-scroll") { [weak self] query in
-            _ = self?.viewer?.checkFeedScroll(delta: CGFloat(Double(query["delta"] ?? "0") ?? 0), end: true)
+            _ = self?.viewer?.checkFeedScroll(delta: CGFloat(Double(query["delta"] ?? "0") ?? 0), end: query["end"] != "0")
+            return self?.state() ?? [:]
+        }
+        TestHooks.shared.register("navigation-zoom") { [weak self] query in
+            _ = self?.viewer?.checkViewportZoom(scale: query["scale"].flatMap(Double.init), x: query["x"].flatMap(Double.init), y: query["y"].flatMap(Double.init))
             return self?.state() ?? [:]
         }
         TestHooks.shared.register("navigation-flush") { [weak self] _ in
-            self?.flushState(); self?.checkpoint.flush(); return self?.state() ?? [:]
+            self?.flushState(); return self?.state() ?? [:]
         }
         TestHooks.shared.register("navigation-arrival") { [weak self] _ in
             guard let self else { return [:] }

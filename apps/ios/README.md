@@ -84,6 +84,13 @@ The native decoder retires its stopped input asynchronously, so returning to the
 list does not synchronously wait for libvlc destruction. Its original drawing
 surface stays alive until the native stop event.
 
+Viewport restoration samples the current list and viewer on resigning active, even
+before a scroll settles, and drains list metadata plus position writers. The checkpoint
+stores fitted-document offset, zoom/pan and control visibility. Its explicit open/closed
+state lets Forward restore the last viewport while a relaunch after closing still opens
+the list. Closed checkpoints retain only the selected video's metadata. Existing playback
+save cadence is unchanged; restoration does not add a faster timer.
+
 ## Rules
 
 - Never uninstall an app to update it: `install` replaces it in place. Uninstalling signs

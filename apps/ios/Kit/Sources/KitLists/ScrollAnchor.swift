@@ -7,9 +7,13 @@ import UIKit
 public struct ScrollAnchor: Codable, Sendable, Equatable {
     public var key: String
     public var fraction: Double
-    public init(key: String, fraction: Double) {
+    public var offset: Double?
+    public var width: Double?
+    public init(key: String, fraction: Double, offset: Double? = nil, width: Double? = nil) {
         self.key = key
         self.fraction = min(max(fraction.isFinite ? fraction : 0, 0), 1)
+        self.offset = offset.flatMap { $0.isFinite ? $0 : nil }
+        self.width = width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 }
 
@@ -21,7 +25,8 @@ public enum ScrollAnchoring {
         let line = scrollView.contentOffset.y + scrollView.bounds.height / 2
         guard let hit = items.first(where: { $0.frame.minY <= line && line < $0.frame.maxY })
                 ?? items.min(by: { abs($0.frame.midY - line) < abs($1.frame.midY - line) }) else { return nil }
-        return ScrollAnchor(key: hit.key, fraction: Double((line - hit.frame.minY) / max(hit.frame.height, 1)))
+        return ScrollAnchor(key: hit.key, fraction: Double((line - hit.frame.minY) / max(hit.frame.height, 1)),
+                            offset: Double(line - hit.frame.minY), width: Double(scrollView.bounds.width))
     }
 
     // Scrolls so the anchor is back at the middle; false when the item is not in `frame`. It needs
@@ -30,7 +35,9 @@ public enum ScrollAnchoring {
     @discardableResult
     public static func restore(_ anchor: ScrollAnchor, in scrollView: UIScrollView, frame: CGRect?) -> Bool {
         guard let frame else { return false }
-        let line = frame.minY + frame.height * anchor.fraction
+        let sameWidth = anchor.width.map { abs($0 - Double(scrollView.bounds.width)) < 0.01 } ?? false
+        let distance = sameWidth ? anchor.offset.map { CGFloat($0) } : nil
+        let line = frame.minY + (distance ?? frame.height * anchor.fraction)
         // Before the first layout the content size is not known yet: no end to keep within.
         let maxOffset = scrollView.contentSize.height <= 0 ? CGFloat.greatestFiniteMagnitude : max(-scrollView.adjustedContentInset.top,
                             scrollView.contentSize.height + scrollView.adjustedContentInset.bottom - scrollView.bounds.height)

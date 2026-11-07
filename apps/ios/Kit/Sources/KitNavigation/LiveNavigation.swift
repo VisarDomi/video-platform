@@ -13,11 +13,15 @@ public protocol LiveScreen: UIViewController {
     var route: Data { get }
     // The screen's own state (scroll anchor, strip offsets), nil when it has none.
     func savedState() -> Data?
+    // Capture the live viewport into any progress/position stores before serializing
+    // the stack. This must not schedule another navigation save or load a view.
+    func captureState()
     // false while the screen owns the left edge (a zoomed picture pans there).
     var allowsEdgeBack: Bool { get }
 }
 
 public extension LiveScreen {
+    func captureState() {}
     var allowsEdgeBack: Bool { true }
     // Call when the screen's state changed (a scroll settled); the stack is saved soon after.
     func stateChanged() { (navigationController as? LiveNavigationController)?.screenChanged() }
@@ -116,6 +120,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
 
     // Replaces the top screen (a page change that adds no history entry).
     public func replaceTop(with screen: any LiveScreen) {
+        (topViewController as? any LiveScreen)?.captureState()
         var stack = viewControllers
         if stack.isEmpty { stack = [screen] } else { stack[stack.count - 1] = screen }
         setViewControllers(stack, animated: false)
@@ -144,6 +149,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     }
 
     private func saveNow() {
+        (topViewController as? any LiveScreen)?.captureState()
         let stack = SavedStack(back: screens.map { SavedStack.Entry(route: $0.route, state: $0.savedState()) },
                                forward: forward.reversed().map { SavedStack.Entry(route: $0.route, state: $0.savedState()) }.reversed() + savedForward)
         writer.save(json: stack)
@@ -166,6 +172,11 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
 
     // MARK: going back keeps the screen for going forward
 
+    override public func pushViewController(_ viewController: UIViewController, animated: Bool) {
+        (topViewController as? any LiveScreen)?.captureState()
+        super.pushViewController(viewController, animated: animated)
+    }
+
     public func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         // A screen that left the stack by going back becomes the next forward screen.
         if let coordinator = transitionCoordinator, coordinator.isCancelled { return }
@@ -174,6 +185,7 @@ public final class LiveNavigationController: UINavigationController, UINavigatio
     }
 
     override public func popViewController(animated: Bool) -> UIViewController? {
+        (topViewController as? any LiveScreen)?.captureState()
         let popped = super.popViewController(animated: animated)
         guard let screen = popped as? any LiveScreen else { return popped }
         if let coordinator = transitionCoordinator {

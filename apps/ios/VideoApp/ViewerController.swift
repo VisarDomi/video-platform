@@ -50,6 +50,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var geometryDirty = true
     private var initialPositionApplied = false
     var restoredTop: CGFloat?
+    var restoredZoom: ZoomState?
+    var restoredControls: Bool?
     #if targetEnvironment(simulator)
     func configureNavigationCheck(image: UIImage) { fixtureImage = image }
     private var capturedMutationCheck: ViewerVideo?
@@ -196,6 +198,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func open(videos: [ViewerVideo], index: Int) {
         presentation.open()
         playbackIntent.select()
+        if let restoredControls { controlsVisible = restoredControls }
         loadViewIfNeeded()
         self.videos = videos
         indexes = Dictionary(uniqueKeysWithValues: videos.enumerated().map { ($0.element.key, $0.offset) })
@@ -220,10 +223,6 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
                 MainActor.assumeIsolated { if ended { self?.interruptionEnded() } }
             },
         ]
-
-        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.savePoster() }
-        })
 
         // The selected video gets the network first; its neighbours load once it has a picture.
         FrameMonitor.shared.measure("open.load") { loadFirst() }
@@ -381,10 +380,23 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         progress.set(video.progressKey, active.snapshot().currentTime)
     }
 
-    private func saveCheckpoint() {
+    private func saveCheckpoint(visibility: ViewerCheckpoint.Visibility = .open) {
         guard let video = currentVideo else { return }
-        let top = pictureFrame(at: currentIndex).map { $0.minY - feed.contentOffset.y }
-        checkpoint.save(ViewerCheckpoint(provider: provider, videos: videos, current: video.key, top: top.map(Double.init)))
+        let top = initialPositionApplied ? pictureFrame(at: currentIndex).map { $0.minY - feed.contentOffset.y } : restoredTop
+        let state = !initialPositionApplied ? restoredZoom : zoom.zoomScale > 1.001 ? ZoomState(scale: Double(zoom.zoomScale),
+            x: Double((zoom.contentOffset.x + zoom.bounds.width / 2) / max(1, zoom.contentSize.width)),
+            y: Double((zoom.contentOffset.y + zoom.bounds.height / 2) / max(1, zoom.contentSize.height))) : nil
+        checkpoint.save(ViewerCheckpoint(provider: provider, videos: visibility == .closed ? [video] : videos, current: video.key, top: top.map(Double.init),
+                                         zoom: state, controls: controlsVisible, visibility: visibility))
+    }
+
+    func captureState() {
+        guard !closed, isViewLoaded else { return }
+        saveProgress()
+        saveCheckpoint()
+        savePoster()
+        progress.flush()
+        checkpoint.flush()
     }
 
     private func reveal() {
@@ -631,6 +643,14 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         initialPositionApplied = true
         let frame = geometry.frames[currentIndex]
         setOffset(restoredTop.map { (pictureFrame(at: currentIndex)?.minY ?? frame.minY) - $0 } ?? (frame.midY - feed.bounds.height / 2))
+        if let state = restoredZoom {
+            zoom.setZoomScale(CGFloat(min(max(state.scale, 1), 5)), animated: false)
+            zoom.contentOffset = CGPoint(
+                x: min(max(0, CGFloat(state.x) * zoom.contentSize.width - zoom.bounds.width / 2), max(0, zoom.contentSize.width - zoom.bounds.width)),
+                y: min(max(0, CGFloat(state.y) * zoom.contentSize.height - zoom.bounds.height / 2), max(0, zoom.contentSize.height - zoom.bounds.height)))
+            if zoom.zoomScale > 1.01 { interaction.magnify(); feed.isScrollEnabled = false }
+            restoredZoom = nil
+        }
     }
 
     private func selectVisibleVideo() {
@@ -891,6 +911,16 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     }
 
     func setZoomCheckScale(_ scale: CGFloat, animated: Bool) { zoom.setZoomScale(scale, animated: animated) }
+    func checkViewportZoom(scale: Double?, x: Double?, y: Double?) -> [String: Any] {
+        if let scale {
+            scrollViewWillBeginZooming(zoom, with: viewport)
+            zoom.setZoomScale(CGFloat(scale), animated: false)
+            scrollViewDidEndZooming(zoom, with: viewport, atScale: zoom.zoomScale)
+        }
+        if let x { zoom.contentOffset.x = CGFloat(x) }
+        if let y { zoom.contentOffset.y = CGFloat(y) }
+        return zoomCheckState
+    }
     func beginZoomCheck() { scrollViewWillBeginZooming(zoom, with: viewForZooming(in: zoom)) }
     func endZoomCheck() { scrollViewDidEndZooming(zoom, with: viewForZooming(in: zoom), atScale: zoom.zoomScale) }
 
@@ -1256,7 +1286,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private func savePosterNow() {
         // Still showing the saved poster: it stays the one to show.
         guard poster == nil else { return }
-        guard revealed, !zoomed, let video = currentVideo, active.presentationSize != .zero else { checkpoint.clearPoster(); return }
+        guard revealed, let video = currentVideo, active.presentationSize != .zero else { checkpoint.clearPoster(); return }
         // Several partially visible videos can now share the viewport. Preserve that first
         // frame as a whole, rather than restoring only the active video's rectangle.
         let rect = viewport.bounds
@@ -1265,7 +1295,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         for unit in units where unit !== active { unit.view.isHidden = true }
         let image = UIGraphicsImageRenderer(bounds: rect).image { _ in viewport.drawHierarchy(in: rect, afterScreenUpdates: false) }
         for (index, unit) in units.enumerated() { unit.view.isHidden = visibility[index] }
-        let frame = viewport.convert(rect, to: view)
+        let frame = rect
         checkpoint.savePoster(ViewerPoster(key: video.key, frame: [frame.minX, frame.minY, frame.width, frame.height].map(Double.init), controls: controlsVisible, currentOnly: true),
                               image: image)
     }
@@ -1279,7 +1309,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         for unit in units where unit !== active { unit.pause() }
         saveProgress()
         progress.flush()
-        saveCheckpoint()
+        // The viewport was captured on resign; drain any later metadata write.
         checkpoint.flush()
     }
 
@@ -1320,7 +1350,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         // Written in the background (the progress stays in memory; leaving the app waits for it).
         FrameMonitor.shared.measure("close.save") {
             saveProgress()
-            checkpoint.clear()
+            saveCheckpoint(visibility: .closed)
             checkpoint.clearPoster()
         }
         removePoster()
