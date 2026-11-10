@@ -334,7 +334,28 @@ the runbook's known-hosts file; it falls back to the Mac's Wi-Fi automatically w
 Ethernet is down, see `mac-connect --check`). Mac mirror:
 `/Users/visar/Developer/video-platform/apps/ios`. The phone
 (`00008101-000639912881401E`) is paired with the Mac over Wi-Fi (no cable); paid team
-`65U58U86DD`. From this folder:
+`65U58U86DD`.
+
+Routine delivery uses the durable queue from the repository root
+([ios-push](../../../../ios-tools/push/README.md)); it prepares, freezes the source,
+builds, signs, installs in place and approves renewal without launching the app:
+
+```sh
+ios-push tango-local        # or fc2-local, sc-local, vault, tango (tango-live), bunkr
+ios-push status JOB         # only "installed" confirms the phone has it
+```
+
+Every provider except Bunkr builds the same `VideoApp` target (module `VideoApp`, product name
+from `providers.json`) generated at `build/app/VideoApp.xcodeproj`, in the shared
+`build/app/DerivedData` and `build/app/native`; each bundle is cloned to its provider's
+`build/<key>/native/` path. ios-push builds these providers in one stable compiler workspace
+(`shared` in ios-tools `push/projects.json`), so after a shared change only the first provider of
+a batch compiles the app module: on the Intel Mac the following providers took 38–40 s instead of
+169–215 s, and a five-app batch finished in 8.6 instead of 18 minutes (signed validation builds).
+The stable path matters: the app module does not hit Xcode's compilation cache from another
+checkpoint path. Bunkr keeps its own target, builder (`Bunkr/`) and workspace.
+
+The lower-level commands remain for diagnosis, one provider at a time. From this folder:
 
 ```sh
 python3 scripts/deploy.py <provider> sync      # rsyncs sources to the Mac; Tango also builds its web extensions and stages its PC login key

@@ -1,4 +1,9 @@
-"""Generate the shared VideoApp host for exactly one provider from providers.json."""
+"""Generate the shared VideoApp host for exactly one provider from providers.json.
+
+Every provider's main app is the same target, VideoApp (module VideoApp, product name from the
+provider), in one project at build/app/VideoApp.xcodeproj: identical compiler inputs, so the
+providers share compiled modules (DerivedData and Xcode's compilation cache). Per-provider files
+(Info.plists, entitlements, staged web extensions) stay in build/<key>/."""
 import hashlib
 import json
 import os
@@ -28,8 +33,9 @@ for source in sorted(source_files):
     source_hash.update(hashlib.sha256(source.read_bytes()).digest())
 source_revision = source_hash.hexdigest()[:16]
 generated = root/'build'/key
-projectdir = generated/(product+'.xcodeproj')
+projectdir = root/'build'/'app'/'VideoApp.xcodeproj'
 projectdir.mkdir(parents=True, exist_ok=True)
+generated.mkdir(parents=True, exist_ok=True)
 objects = {}
 def ident(name): return hashlib.sha256(name.encode()).hexdigest()[:24].upper()
 def obj(label, isa, **fields):
@@ -102,13 +108,13 @@ if key == 'bunkr':
 if probe:
     sources = ['VideoApp/'+name+'.swift' for name in ['ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','VideoPlaybackState','DecoderLifecycle','ChasingSeek','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/OriginalVideoProbe.swift']
 # NativeKit (apps/ios/Kit, vendored from ios-tools native/Kit) as a local package.
-kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', generated))
+kit = obj('KitPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'Kit', projectdir.parent))
 kit_names = ['KitCore', 'KitNet', 'KitHTML', 'KitLifecycle', 'KitMigration', 'KitTestHooks']
 if os.environ.get('SIMULATOR'): kit_names += ['KitReader']  # Static zoom checks only.
 kit_products = [obj('KitProduct'+name, 'XCSwiftPackageProductDependency', productName=name) for name in kit_names]
 packages = [kit]
 if key == 'bunkr':
-    decoder_package = obj('DecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/VLCKit', generated))
+    decoder_package = obj('DecoderPackage', 'XCLocalSwiftPackageReference', relativePath=os.path.relpath(root/'ThirdParty/VLCKit', projectdir.parent))
     packages.append(decoder_package)
     kit_products.append(obj('DecoderProduct', 'XCSwiftPackageProductDependency', productName='VLCKit', package=decoder_package))
 frameworks = obj(product+'Frameworks', 'PBXFrameworksBuildPhase', buildActionMask=2147483647,
@@ -120,11 +126,12 @@ if embedded:
                       files=embedded, name='Embed App Extensions', runOnlyForDeploymentPostprocessing=0))
 product_ref = obj('Product', 'PBXFileReference', explicitFileType='wrapper.application', includeInIndex=0, path=product+'.app', sourceTree='BUILT_PRODUCTS_DIR')
 products.insert(0, product_ref)
-settings = dict(common, INFOPLIST_FILE=str(generated/'Info.plist'), PRODUCT_BUNDLE_IDENTIFIER=config['bundleId'])
+settings = dict(common, INFOPLIST_FILE=str(generated/'Info.plist'), PRODUCT_BUNDLE_IDENTIFIER=config['bundleId'],
+                PRODUCT_NAME=product, PRODUCT_MODULE_NAME='VideoApp')
 if key == 'bunkr': settings['LD_RUNPATH_SEARCH_PATHS'] = '$(inherited) @executable_path/Frameworks'
 if login: settings['CODE_SIGN_ENTITLEMENTS'] = str(entitlements)
 targets.insert(0, obj('Target', 'PBXNativeTarget', buildConfigurationList=config_list(product, settings), buildPhases=phases, buildRules=[],
-    dependencies=dependencies, name=product, productName=product, productReference=product_ref, productType='com.apple.product-type.application',
+    dependencies=dependencies, name='VideoApp', productName=product, productReference=product_ref, productType='com.apple.product-type.application',
     packageProductDependencies=kit_products))
 # Safari's iPhone orientations; no icon or launch artwork, like the other personal apps.
 # The native viewer plays on through lock and the background (audio), and reaches the PC's
