@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import KitCore
 import KitNet
 
@@ -34,9 +37,15 @@ public final class BackgroundTransfers: NSObject, URLSessionDownloadDelegate, @u
     private let connections: Int
     private let ownership = BackgroundTransferOwnership()
     private lazy var session: URLSession = {
+#if canImport(Darwin)
         let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+#else
+        let configuration = URLSessionConfiguration.default  // Linux logic tests: no background sessions
+#endif
         configuration.isDiscretionary = false
+#if canImport(Darwin)
         configuration.sessionSendsLaunchEvents = true
+#endif
         configuration.httpMaximumConnectionsPerHost = connections
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
@@ -147,3 +156,12 @@ private actor BackgroundTransferOwnership {
         state.reclaimed(ticket)
     }
 }
+
+#if !canImport(Darwin)
+// Linux (logic tests on the PC): corelibs URLSession has only the callback form.
+extension URLSession {
+    var allTasks: [URLSessionTask] {
+        get async { await withCheckedContinuation { continuation in getAllTasks { continuation.resume(returning: $0) } } }
+    }
+}
+#endif

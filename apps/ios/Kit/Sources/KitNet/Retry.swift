@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // When a failed request is tried again. The apps' shared rule (manga, gallery and Ytb
 // Models.swift): idempotent reads retry on lost connectivity and on 408/429/5xx (honouring

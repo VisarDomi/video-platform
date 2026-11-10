@@ -6,6 +6,16 @@ import PackageDescription
 // (native/scripts/vendor-kit.py). KitCore, KitNet, KitHTML and KitLifecycle's transfers
 // build on macOS too, so their tests run with `swift test` on the Mac; the UI modules
 // compile to nothing outside iOS.
+#if os(Linux)
+// Logic tests on the PC (native/scripts/linux-swift): KitHTML's libxml2 is the SDK's module on
+// Apple platforms and Linux/libxml2 here.
+let htmlDependencies: [Target.Dependency] = ["libxml2"]
+let linuxTargets: [Target] = [.systemLibrary(name: "libxml2", path: "Linux/libxml2")]
+#else
+let htmlDependencies: [Target.Dependency] = []
+let linuxTargets: [Target] = []
+#endif
+
 let package = Package(
     name: "NativeKit",
     platforms: [.iOS(.v26), .macOS(.v15)],
@@ -25,7 +35,7 @@ let package = Package(
     targets: [
         .target(name: "KitCore"),
         .target(name: "KitNet", dependencies: ["KitCore"]),
-        .target(name: "KitHTML"),
+        .target(name: "KitHTML", dependencies: htmlDependencies),
         .target(name: "KitImages", dependencies: ["KitCore"]),
         .target(name: "KitNavigation", dependencies: ["KitCore", "KitLifecycle"]),
         .target(name: "KitLists", dependencies: ["KitCore", "KitImages"]),
@@ -42,5 +52,5 @@ let package = Package(
         .testTarget(name: "KitBackupTests", dependencies: ["KitBackup"]),
         .testTarget(name: "KitNetTests", dependencies: ["KitNet"]),
         .testTarget(name: "KitHTMLTests", dependencies: ["KitHTML"]),
-    ]
+    ] + linuxTargets
 )

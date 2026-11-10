@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import KitCore
 
 // The app's cookies, owned by the app: one jar per app, saved in its data folder, written

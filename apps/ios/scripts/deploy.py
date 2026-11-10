@@ -39,7 +39,8 @@ if a.action in ('prepare','sync'):
     for suffix in config.get('webExtensions',{}):
         subprocess.run(['rsync','-az','--delete','-e',shlex.join(SSH[:-1]),str(APP/'build'/a.provider/suffix)+'/',SSH[-1]+':'+MAC+'/build/'+a.provider+'/'+suffix+'/'],check=True)
 elif a.action=='test':
-    subprocess.run(SSH+['/bin/bash '+shlex.quote(MAC+'/scripts/test.sh')],check=True)
+    # Logic tests run on this PC (Swift for Linux; ios-tools native/README.md). The Mac builds.
+    subprocess.run(['/bin/bash',str(APP/'scripts/test.sh')],check=True)
 elif a.action=='build':
     # New embedded extensions change both expected identities and renewal inputs.
     # Register them before the build receipt is fingerprinted.

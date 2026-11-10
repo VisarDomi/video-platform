@@ -359,7 +359,7 @@ The lower-level commands remain for diagnosis, one provider at a time. From this
 
 ```sh
 python3 scripts/deploy.py <provider> sync      # rsyncs sources to the Mac; Tango also builds its web extensions and stages its PC login key
-python3 scripts/deploy.py <provider> test      # the apps' Swift tests on the Mac (scripts/test.sh)
+python3 scripts/deploy.py <provider> test      # the apps' Swift tests, on this PC (scripts/test.sh)
 python3 scripts/deploy.py <provider> build     # attached GUI session, signing lock
 python3 scripts/deploy.py <provider> status
 python3 scripts/deploy.py <provider> install   # verifies, installs over, approves for renewal, launches
@@ -380,7 +380,7 @@ left the screen.
 
 ### Tests
 
-`test` runs `scripts/test.sh` on the Mac: the registry (`Tests/RegistryTests.swift`),
+`test` runs `scripts/test.sh` on this PC (Swift 6.2.4 for Linux, ~9 s; it also runs on the Mac, ~40 s): the registry (`Tests/RegistryTests.swift`),
 MP4/HLS local-library URLs, descriptors and offline cache (`Tests/LocalLibraryTests.swift`), Video
 Vault's scrapers and list rules (`VaultTests.swift`), and Tango's list rules
 (`TangoTests.swift`: the gateway's answers, followed streams first, then recommendations,

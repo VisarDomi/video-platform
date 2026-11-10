@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import KitCore
 
 public struct HTTPRequest: Sendable {
@@ -97,7 +100,9 @@ public final class HTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskD
         session.httpMaximumConnectionsPerHost = configuration.connectionsPerHost
         session.timeoutIntervalForRequest = configuration.requestTimeout
         session.timeoutIntervalForResource = configuration.resourceTimeout
+#if canImport(Darwin)
         session.waitsForConnectivity = configuration.waitsForConnectivity
+#endif
         configuration.configure?(session)
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -161,7 +166,7 @@ public final class HTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskD
         let box = TaskBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                let task = session.downloadTask(with: urlRequest) { [configuration] location, response, error in
+                let finish: @Sendable (URL?, URLResponse?, Error?) -> Void = { [configuration] location, response, error in
                     do {
                         if let error { throw error }
                         guard let location, let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
@@ -172,6 +177,19 @@ public final class HTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskD
                         continuation.resume(returning: http)
                     } catch { continuation.resume(throwing: error) }
                 }
+#if canImport(Darwin)
+                let task = session.downloadTask(with: urlRequest, completionHandler: finish)
+#else
+                // Linux (logic tests on the PC): corelibs' download tasks produce no file when a
+                // URLProtocol stub serves them, so the body arrives in memory and is staged here.
+                let task = session.dataTask(with: urlRequest) { data, response, error in
+                    let staged = data.flatMap { body -> URL? in
+                        let file = FileManager.default.temporaryDirectory.appendingPathComponent("kit-download-" + UUID().uuidString)
+                        return (try? body.write(to: file)) == nil ? nil : file
+                    }
+                    finish(staged, response, error)
+                }
+#endif
                 task.priority = request.priority
                 box.set(task)
                 task.resume()

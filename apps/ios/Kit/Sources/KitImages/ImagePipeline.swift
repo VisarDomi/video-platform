@@ -1,3 +1,4 @@
+#if canImport(ImageIO)
 import Foundation
 import ImageIO
 import KitCore
@@ -312,3 +313,4 @@ public enum ImageError: LocalizedError {
         switch self { case .unreadable(let url): "The image \(url.lastPathComponent) could not be decoded." }
     }
 }
+#endif
