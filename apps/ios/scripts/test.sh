@@ -33,3 +33,9 @@ finish_compiles
 "$test_dir/tango-tests"
 "$test_dir/tango-session-tests"
 "$test_dir/tango-pc-tests"
+# The build and delivery scripts' own checks: dependency staging after a power cut, the FFmpeg ABI
+# binding check, provider isolation, private inputs, probe variants and delivery validation.
+if ! PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests -p 'test_*.py' > "$test_dir/python.log" 2>&1; then
+  cat "$test_dir/python.log"; exit 1
+fi
+echo "PASS: build and delivery script checks (Tests/test_*.py)"
