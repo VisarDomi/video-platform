@@ -316,7 +316,10 @@ final class SoftwarePacketReadAhead: @unchecked Sendable {
         applyCacheTimingLocked()
         let hasCoverage = !sourceRepositioning && !resetPending && retainedPacketsUsableLocked
             && seconds.isFinite && (frontierLocked(at: seconds).map { $0 > seconds } ?? false)
-        let candidates = hasCoverage ? keyframes.filter { $0.seconds <= seconds }
+        // Local change: half a millisecond of slack. A target that names a keyframe arrives
+        // through seconds arithmetic and can sit one bit under the keyframe's own value; without
+        // the slack the restore starts a whole group of pictures early (see `keyframeLanding`).
+        let candidates = hasCoverage ? keyframes.filter { $0.seconds <= seconds + 0.0005 }
             .sorted { $0.seconds < $1.seconds } : []
         // A previous recovery/key picture supplies open-GOP/audio preroll when still retained, except
         // where a keyframe needs none (`anchorsOnLastKeyframe`).

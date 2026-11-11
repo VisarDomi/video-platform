@@ -123,6 +123,7 @@ final class VLCVideoDecoder: NSObject, ViewerDecoder, VLCMediaPlayerDelegate {
     var playing: Bool { player.isPlaying && requested }
     var hasPicture: Bool { !surface.isHidden && (steppedPicture || media.statistics.displayedPictures > 0) }
     var reachedEnd: Bool { ended }
+    var frameSerial: Int { Int(media.statistics.displayedPictures) + (steppedPicture ? 1 : 0) }
     var muted: Bool {
         get { player.audio?.isMuted ?? true }
         set { player.audio?.isMuted = newValue }

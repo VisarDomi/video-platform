@@ -8,6 +8,23 @@ extension AetherEngine {
         else { softwareHost?.enterBackgroundAudioOnly() }
     }
     public var inlineAudioClock: Double? { softwareHost?.inlineAudioClock }
+
+    /// Seeks and saved start positions land on keyframes (`InlineKeyframeLanding`). Set before
+    /// the first load; read when a session opens.
+    public nonisolated static var inlineKeyframeSeeks: Bool {
+        get { InlineKeyframeLanding.enabled }
+        set { InlineKeyframeLanding.enabled = newValue }
+    }
+
+    /// One seek of a gesture that began at `origin`. False when the picture already showing is
+    /// the nearest one the decoder can give and nothing was sought.
+    @discardableResult
+    public func inlineSeek(to seconds: Double, from origin: Double) async -> Bool {
+        softwareHost?.inlineSeekOrigin = origin
+        if softwareHost?.inlineSeekStays(forSession: seconds) == true { return false }
+        await seek(to: seconds, exact: false)
+        return true
+    }
     /// The host uses this only after a successful load. HardwareVideoDecoder
     /// requires a real hardware session, so software fallback cannot report true.
     public var inlineHardwareDecoder: Bool? {

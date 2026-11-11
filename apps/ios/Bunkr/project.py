@@ -33,7 +33,7 @@ if not os.environ.get('SIMULATOR'):
     app_sources = [p for p in app_sources if Path(p).name not in {'ZoomChecks.swift','ListNavigationChecks.swift','TangoNetworkChecks.swift'}]
 if probe:
     check_source = 'InlinePerformanceProbe' if performance_probe else 'InlineQuickProbe' if quick_probe else 'OriginalVideoProbe'
-    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','VideoPlaybackState','DecoderLifecycle','ChasingSeek','ViewerUnit','ViewerHost','ViewerPlaybackPolicy']] + ['Tests/'+check_source+'.swift']
+    app_sources = ['VideoApp/'+name+'.swift' for name in ['FFmpegVideoDecoder','ViewerVideo','ViewerDecoder','VLCVideoDecoder','VideoTerminalState','VideoPlaybackState','DecoderLifecycle','ChasingSeek','ViewerUnit','ViewerHost','ViewerPlaybackPolicy','NeighbourPoster']] + ['Tests/'+check_source+'.swift']
 overrides = {p.name: str(p.relative_to(root)) for p in (root/'Bunkr').glob('*.swift')}
 app_sources = [overrides.get(Path(p).name, p) for p in app_sources]
 if not probe:

@@ -434,6 +434,14 @@ final class SoftwarePlaybackHost {
     /// dav1d decoding AV1, set per session: seeks land on the nearest indexed keyframe (`SWKeyframeSnap`),
     /// out of the index's keyframes in source seconds as `refreshSnapKeyframes` last read them.
     private var snapsSeeksToKeyframes = false
+    /// Inline host: where the gesture that issues the current seeks began (session axis). A drag
+    /// sends many seeks; measured from the moving playhead they would cross each other.
+    var inlineSeekOrigin: Double?
+    /// Inline host: Matroska fills its index from the Cues at the first reposition.
+    private var inlineIndexComplete = false
+    /// Inline host: the keyframe (source seconds) a paused seek left the picture on, until
+    /// playback or another seek moves it.
+    private var inlineStandingKeyframe: Double?
     private var snapKeyframeSeconds: [Double] = []
 
     // MARK: - Live / DVR
@@ -1452,6 +1460,11 @@ final class SoftwarePlaybackHost {
                     + "pts=\(String(format: "%.3f", pts.seconds))s",
                     category: .swPlayback
                 )
+            } else if InlineKeyframeLanding.enabled, self.takePausedBeforeFirstFrame() {
+                // Inline host: the first frame after a seek under pause (a drag's still), shown
+                // the way the session's first frame is.
+                self.renderer.drainReorderBuffer()
+                self.presentFirstFrameUnderPause(pts: pts.seconds, generation: self.decodeGeneration)
             }
         }
 
@@ -1599,8 +1612,11 @@ final class SoftwarePlaybackHost {
             self?.onClockHoldTransition?(transition)
         }
         // dav1d decoding AV1: seeks land on keyframes (`SWKeyframeSnap`).
-        snapsSeeksToKeyframes = SWKeyframeSnap.enabled && videoDecoder is SoftwareVideoDecoder
-            && vStream.pointee.codecpar?.pointee.codec_id == AV_CODEC_ID_AV1
+        snapsSeeksToKeyframes = InlineKeyframeLanding.enabled
+            || (SWKeyframeSnap.enabled && videoDecoder is SoftwareVideoDecoder
+                && vStream.pointee.codecpar?.pointee.codec_id == AV_CODEC_ID_AV1)
+        // MP4 holds its whole sample table from the open; Matroska reads its Cues at a reposition.
+        inlineIndexComplete = dem.containerFormatName?.split(separator: ",").contains("mov") == true
         snapKeyframeSeconds = []
         refreshSnapKeyframes()
         // AE#395: the route this session plays into, the counterpart of the native host's line. Without
@@ -1643,15 +1659,45 @@ final class SoftwarePlaybackHost {
             }
             EngineLog.emit("[SWReposition] flags=\(outcome == .landed ? 0 : 1)", category: .swPlayback)
             guard outcome == .landed else { throw HostError.repositionFailed }
+            // Inline host: a saved position starts on the keyframe the reposition stands on, one
+            // decoded picture, rather than decoding from that keyframe up to the saved position.
+            var landedStart = sourceStart
+            if InlineKeyframeLanding.enabled {
+                inlineIndexComplete = true
+                let streamIndex = videoStreamIndex, timeBase = videoTimeBaseSeconds
+                let keys = await BlockingWork.detached(priority: .userInitiated) {
+                    dem.indexedKeyframes(streamIndex: streamIndex).map { Double($0) * timeBase }.sorted()
+                }.value
+                guard !stopRequested, !Task.isCancelled else { throw CancellationError() }
+                snapKeyframeSeconds = keys
+                if let key = InlineKeyframeLanding.start(target: sourceStart, keyframes: keys) { landedStart = key }
+            }
             // Mirror seek() skip-PTS + clock alignment so demux drops pre-keyframe frames and synchronizer starts at the resume offset.
-            let startTime = CMTime(seconds: sourceStart, preferredTimescale: 90000)
+            let startTime = CMTime(seconds: landedStart, preferredTimescale: 90000)
             videoDecoder.skipUntilPTS = startTime
             renderer.setSkipThreshold(startTime)
             initialClockTime = startTime
-            currentTime = start
-            sourceClockSeconds = sourceStart
+            currentTime = max(0, start - (sourceStart - landedStart))
+            sourceClockSeconds = landedStart
         } else {
             initialClockTime = .zero
+            // Inline host: Matroska reads its Cues at the first reposition, and until then the
+            // first seek has no keyframes to land on and decodes its way to the target. Standing
+            // on the start again reads them now (they sit in the file's tail, already fetched).
+            if InlineKeyframeLanding.enabled, dem.isSourceSeekable,
+               dem.containerFormatName?.split(separator: ",").contains("matroska") == true {
+                let origin = max(0, dem.resolvedSourceStartOrigin)
+                let outcome = await reposition(dem, origin.isFinite ? origin : 0, Self.seekBudgetSeconds, seekQueue,
+                                               { [weak self] in self?.stopRequested ?? true })
+                guard !stopRequested, !Task.isCancelled, outcome != .superseded else { throw CancellationError() }
+                guard outcome == .landed else { throw HostError.repositionFailed }
+                let streamIndex = videoStreamIndex, timeBase = videoTimeBaseSeconds
+                snapKeyframeSeconds = await BlockingWork.detached(priority: .userInitiated) {
+                    dem.indexedKeyframes(streamIndex: streamIndex).map { Double($0) * timeBase }.sorted()
+                }.value
+                guard !stopRequested, !Task.isCancelled else { throw CancellationError() }
+                inlineIndexComplete = true
+            }
         }
 
         // A local path is left on the direct loop: the spool exists to avoid a second trip to a
@@ -1748,6 +1794,7 @@ final class SoftwarePlaybackHost {
     // MARK: - Transport
 
     func play() {
+        inlineStandingKeyframe = nil
         guard !stopRequested, failure == nil else { return }
         renderer.recoverAfterSuspensionIfNeeded()
         audioOutput?.setPlaybackEnabled(true)
@@ -2382,7 +2429,7 @@ final class SoftwarePlaybackHost {
     /// which a slow remote read holds (#254). Matroska reads its Cues only when the demuxer
     /// repositions, so the list is read again after every landing; until then the packet cache's
     /// retained keyframes are the ones a seek can snap to (`SWKeyframeSnap.candidates`).
-    private func refreshSnapKeyframes() {
+    private func refreshSnapKeyframes(afterReposition: Bool = false) {
         guard snapsSeeksToKeyframes, let dem = demuxer else { return }
         let streamIndex = videoStreamIndex
         let timeBase = videoTimeBaseSeconds
@@ -2395,7 +2442,11 @@ final class SoftwarePlaybackHost {
                 EngineLog.emit("[SWHost] keyframe-snapped seeks: \(keys.count) indexed keyframes",
                                category: .swPlayback)
             }
-            self.snapKeyframeSeconds = keys
+            // An index only grows; a read that began before a reposition must not replace the
+            // list that reposition filled in.
+            if keys.count >= self.snapKeyframeSeconds.count { self.snapKeyframeSeconds = keys }
+            // Complete only once the list read after the reposition is the one in use.
+            if afterReposition { self.inlineIndexComplete = true }
         }
     }
 
@@ -2405,6 +2456,16 @@ final class SoftwarePlaybackHost {
     func keyframeLanding(forSession seconds: Double) -> Double? {
         guard snapsSeeksToKeyframes, !isLive else { return nil }
         let sourceSeconds = SWClockAnchorPolicy.sourceSeconds(forSession: seconds, sessionZeroSeconds: clockSessionZero)
+        if InlineKeyframeLanding.enabled {
+            guard case .keyframe(let key) = inlineLanding(forSource: sourceSeconds) else { return nil }
+            EngineLog.emit("[SWHost] inline seek lands on keyframe target_s=\(String(format: "%.3f", sourceSeconds)) "
+                           + "keyframe_s=\(String(format: "%.3f", key))", category: .swPlayback)
+            // The keyframe's own value, carried to the session axis the way `sourceSeconds`
+            // carries it back. `seconds + key - sourceSeconds` can come out one bit under the
+            // keyframe, and the packet cache then restores to the keyframe before it: a whole
+            // group of pictures decoded and discarded before anything shows.
+            return clockSessionZero > 0 ? key - clockSessionZero : key
+        }
         guard let snapped = SWKeyframeSnap.snappedSeconds(
             target: sourceSeconds, current: sourceClockSeconds,
             keyframes: SWKeyframeSnap.candidates(retained: vodPacketReadAhead?.retainedKeyframeSeconds ?? [],
@@ -2412,6 +2473,32 @@ final class SoftwarePlaybackHost {
         EngineLog.emit("[SWHost] seek snapped to keyframe target_s=\(String(format: "%.3f", sourceSeconds)) "
                        + "keyframe_s=\(String(format: "%.3f", snapped))", category: .swPlayback)
         return seconds + snapped - sourceSeconds
+    }
+
+    private func inlineLanding(forSource sourceSeconds: Double) -> InlineKeyframeLanding.Landing {
+        let origin = inlineSeekOrigin.map {
+            SWClockAnchorPolicy.sourceSeconds(forSession: $0, sessionZeroSeconds: clockSessionZero)
+        } ?? sourceClockSeconds
+        return InlineKeyframeLanding.landing(
+            target: sourceSeconds, origin: origin,
+            keyframes: SWKeyframeSnap.candidates(retained: vodPacketReadAhead?.retainedKeyframeSeconds ?? [],
+                                                 indexed: snapKeyframeSeconds),
+            indexComplete: inlineIndexComplete, decodesFast: usesHardwareVideoDecoder)
+    }
+
+    /// Inline host: true when the picture already showing is the nearest one a seek to `seconds`
+    /// (session axis) could give, so the host issues no seek at all.
+    func inlineSeekStays(forSession seconds: Double) -> Bool {
+        guard InlineKeyframeLanding.enabled, snapsSeeksToKeyframes, !isLive, !didReachEnd else { return false }
+        let sourceSeconds = SWClockAnchorPolicy.sourceSeconds(forSession: seconds, sessionZeroSeconds: clockSessionZero)
+        switch inlineLanding(forSource: sourceSeconds) {
+        case .stay: return true
+        case .exact: return false
+        case .keyframe(let key):
+            // A drag asks for the same keyframe with many touch samples; the paused clock
+            // already stands on it. Seeking again would discard and repeat its decode.
+            return !seekInFlight && inlineStandingKeyframe.map { abs($0 - key) < 0.001 } == true
+        }
     }
 
     /// #254: the demuxer reposition is awaited off the main actor. It used to run inline here, and
@@ -2426,6 +2513,7 @@ final class SoftwarePlaybackHost {
         // reposition can tell on `seekQueue` whether a newer seek has already taken over.
         bumpSeekGeneration()
         let generation = seekGeneration
+        inlineStandingKeyframe = nil
         residentRangePublication.invalidate()
         didReachEnd = false
         didParkClockAtEnd = false
@@ -2458,8 +2546,20 @@ final class SoftwarePlaybackHost {
         // pre-seek clock. Keep that order if either step moves. (The clock sample is not atomic either,
         // see where `setRenderClock` is called; a skewed sample corrects itself within one sweep.)
         #endif
-        videoDecoder.flush()
-        audioDecoder?.flush()
+        if InlineKeyframeLanding.enabled, !isLive {
+            // Inline host: a decoder's flush waits for the pictures it is in the middle of (a
+            // software decoder's worker threads, VideoToolbox's asynchronous frames), which held
+            // the main thread for up to 0.4 s of a drag in the virtual iPhone. Awaited off it.
+            // The window opens first, so a seek arriving during the wait inherits this one's
+            // resume intent (#292) instead of reading the parked `isPlaying`.
+            seekInFlight = true
+            let video = videoDecoder, audio = audioDecoder
+            await BlockingWork.detached(priority: .userInitiated) { video.flush(); audio?.flush() }.value
+            guard seekGeneration == generation, !stopRequested else { return .superseded }
+        } else {
+            videoDecoder.flush()
+            audioDecoder?.flush()
+        }
         // Hold the last frame through the seek (don't blank the display) so the viewer sees the previous
         // frame until the post-seek frame decodes, instead of a black flash (issue #90). Stop/teardown and
         // background-return still clear via the default.
@@ -2577,6 +2677,11 @@ final class SoftwarePlaybackHost {
             // Paused seek: anchor at target with rate 0 so play() resumes from the seek position (without this, scrubs freeze or drop all samples).
             audioOutput?.seekClock(to: targetTime, rate: 0)
             pausedByHost = true
+            inlineStandingKeyframe = sourceSeconds
+            // Inline host: a seek under pause is a drag asking for a still. The loops park on a
+            // paused transport, so nothing would be decoded until play; let them run for this
+            // one frame, as before a session's first (`PausedFirstFrame`).
+            if InlineKeyframeLanding.enabled, demuxLoopStarted { pausedBeforeFirstFrame = true }
         }
         // Arm now so the demux loop doesn't re-arm at stale initialClockTime (a pre-first-audio seek snapped back to session start without this).
         clockArmed = true
@@ -2584,7 +2689,7 @@ final class SoftwarePlaybackHost {
         // reads from here belongs to this position. Closing the window releases the loop.
         noteSeekSettled(generation)
         if let cacheGeneration { packetSource?.endSeek(cacheGeneration, sourceClock: sourceSeconds) }
-        refreshSnapKeyframes()
+        refreshSnapKeyframes(afterReposition: !cacheHit)
         return outcome
     }
 

@@ -17,6 +17,7 @@ compile viewer-playback-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-libr
 compile state-machine-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library VideoApp/VideoPlaybackState.swift VideoApp/DecoderLifecycle.swift VideoApp/ChasingSeek.swift VideoApp/ViewerInteractionState.swift Tests/StateMachineTests.swift
 compile terminal-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library VideoApp/VideoTerminalState.swift Tests/VideoTerminalStateTests.swift
 compile feed-layout-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library VideoApp/VideoFeedLayout.swift Tests/VideoFeedLayoutTests.swift
+compile keyframe-landing-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library ThirdParty/AetherCore/Sources/AetherEngine/Native/InlineKeyframeLanding.swift Tests/InlineKeyframeLandingTests.swift
 compile vault-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -lKitHTML "${XML_FLAGS[@]}" -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Vault.swift Tests/VaultTests.swift
 compile tango-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Tango.swift Tests/TangoTests.swift
 compile tango-session-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Tango.swift Tests/TangoSessionTests.swift
@@ -29,6 +30,7 @@ finish_compiles
 "$test_dir/state-machine-tests"
 "$test_dir/terminal-tests"
 "$test_dir/feed-layout-tests"
+"$test_dir/keyframe-landing-tests"
 "$test_dir/vault-tests"
 "$test_dir/tango-tests"
 "$test_dir/tango-session-tests"

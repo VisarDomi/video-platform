@@ -32,6 +32,23 @@ Dependencies:
   use video-only recovery: the same renderer retains its picture and audio keeps
   its clock. Paused inputs may seek to recover their still. The native check reads
   the synchronizer directly to verify return continuity.
+  Local keyframe landing (`Native/InlineKeyframeLanding.swift`, switched on by
+  `AetherEngine.inlineKeyframeSeeks`; upstream snaps dav1d seeks only, measured from
+  the moving playhead): `load(startPosition:)` starts on the keyframe at or before
+  the position, `inlineSeek(to:from:)` lands on a keyframe on the target's side of
+  the gesture's origin for every decoder (exact inside the origin's group of
+  pictures on a hardware decoder, nothing sent when the keyframe already stands),
+  Matroska reads its Cues at the open, and a seek under pause runs the loops for
+  its one frame (`PausedFirstFrame`, upstream: before a session's first frame
+  only). Two fixes ride with it: the landing carries the keyframe's own value
+  instead of `seconds + key - sourceSeconds`, which could come out one bit under
+  the keyframe, and `SoftwarePacketReadAhead.prepareSeek` compares keyframes with
+  half a millisecond of slack; without them a cached seek restarted from the
+  keyframe before and decoded a whole group of pictures before showing anything.
+  With the landing on, a seek's decoder flush is awaited off the main actor (it
+  waits for the decoder's in-flight pictures; the seek window opens first so a
+  seek arriving meanwhile inherits the resume intent).
+  `Tests/InlineKeyframeLandingTests.swift` covers the landing rule on the PC.
 - FFmpegBuild 3.12.1, revision `9c87af0231fd1403654c14a0e867fe8aa43c5bea`:
   <https://github.com/superuser404notfound/FFmpegBuild>. FFmpeg8.1.3 + dav1d1.5.4;
   see its `BUILD-INFO.txt`, build script and license records for exact patches,
@@ -78,9 +95,13 @@ The checksum-pinned synthetic VP9/Opus and AV1/Opus fixtures are checked in unde
 seconds leave time for a genuine app switch on the slower Mac. See the adjacent
 fixture README for its generation command.
 This check deliberately permits software fallback on the simulator, where the
-hardware capability differs from the Mac host. It covers paused preparation and
-seek, actual app background/foreground with the audio clock advancing, a returned
+hardware capability differs from the Mac host. It covers a paused neighbour's still
+without a decoder, a drag's keyframes under pause (forward, further, back), actual
+app background/foreground with the audio clock advancing, a returned
 video frame, saved restoration, stopped EOF, explicit replay and UI teardown.
+The simulator slices of FFmpeg and dav1d are built without assembly, so its decode
+rates say nothing about the phone's. `scripts/check-bunkr-fluidity.py`
+([Bunkr/README.md](../../Bunkr/README.md)) times the real app on the original files.
 Every run stops the diagnostic process. At the end of the testing session, use
 `--device UUID --cleanup` inside the same guarded guest to remove the diagnostic
 app; never uninstall/reinstall it between attempts just to reset permissions.

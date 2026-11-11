@@ -79,12 +79,14 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             let video = ViewerVideo(["filename": "performance.webm", "provider": "bunkr", "videoCodec": codec,
                                      "duration": 20.008, "displayWidth": 1280.0, "displayHeight": 720.0])!
             wall = CACurrentMediaTime(); usedCPU = cpu(); worstGapMs = 0
-            unit.load(video, start: 0, play: false)
+            // Opened, shown and paused: the state of the video the user stopped on.
+            unit.load(video, start: 0, play: true)
             let deadline = CACurrentMediaTime() + 20
             while !unit.hasPicture {
                 guard CACurrentMediaTime() < deadline else { throw NSError(domain: "No paused picture", code: 1) }
                 try await Task.sleep(for: .milliseconds(20))
             }
+            unit.pause()
             sample("paused picture ready", wall: wall, cpu: usedCPU)
             wall = CACurrentMediaTime(); usedCPU = cpu(); worstGapMs = 0
             try await Task.sleep(for: .seconds(3))

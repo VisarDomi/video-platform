@@ -2,6 +2,7 @@
 import AetherEngine
 import AVFoundation
 import Combine
+import KitCore
 import UIKit
 import VideoToolbox
 
@@ -67,6 +68,14 @@ final class FFmpegVideoDecoder: ViewerDecoder {
     private var rendered = 0
     private var dropped = 0
     private var corrupted = 0
+    private var seekStartedAt: CFTimeInterval?
+    private var seekEvidence: [String: Any] = ["seeks": 0]
+    // Where the playhead was when the current gesture's seeks began: they land on keyframes
+    // between there and the finger. The gesture ends when playback is asked to continue.
+    private var seekOrigin: Double?
+    private var seekGestureOpen = false
+    // A paused still restored after the background returns to its exact picture.
+    private var exactTarget: Double?
     #if ORIGINAL_CODEC_PROBE
     private let frameTimes = InlineProbeFrameTimes()
     #endif
@@ -82,27 +91,31 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         var prepared: FFmpegVideoDecoder?
         do {
             try Task.checkCancellation()
-            let engine = try AetherEngine()
-            let display = AetherPlayerView(frame: surface.bounds)
-            display.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            display.isUserInteractionEnabled = false
-            surface.addSubview(display)
-            engine.bind(view: display)
-            engine.rendererAudioSessionActivationEnabled = false
-            engine.deactivatesAudioSessionOnStop = false
-            engine.backgroundPlaybackEnabled = true
-            engine.automaticallyRewindsBeforePlay = false
-            engine.volume = 0
-            engine.videoGravity = .resizeAspect
-            var options = LoadOptions(suppressDisplayCriteria: true, displayCriteriaOwner: .host, matchContentEnabled: false,
-                                      declaredDurationSeconds: video.declaredDuration,
-                                      probesize: 1_000_000, maxAnalyzeDuration: 1_000_000,
-                                      skipsContainerAttachments: true, sessionCacheByteBudget: 16 * 1024 * 1024,
-                                      softwarePacketCacheStorage: .memory, autoplay: false, preferredDecodePath: .software)
-            options.maxConcurrentSourceRequests = 2
-            let decoder = FFmpegVideoDecoder(engine: engine, display: display, video: video,
-                                            sourceURL: source.url, options: options, requiresHardware: requiresHardware,
-                                            changed: changed, failed: failed)
+            // Seeks and saved positions land on keyframes: one decoded picture each.
+            AetherEngine.inlineKeyframeSeeks = true
+            let decoder = try FrameMonitor.shared.measure("unit.decoder") { () throws -> FFmpegVideoDecoder in
+                let engine = try AetherEngine()
+                let display = AetherPlayerView(frame: surface.bounds)
+                display.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                display.isUserInteractionEnabled = false
+                surface.addSubview(display)
+                engine.bind(view: display)
+                engine.rendererAudioSessionActivationEnabled = false
+                engine.deactivatesAudioSessionOnStop = false
+                engine.backgroundPlaybackEnabled = true
+                engine.automaticallyRewindsBeforePlay = false
+                engine.volume = 0
+                engine.videoGravity = .resizeAspect
+                var options = LoadOptions(suppressDisplayCriteria: true, displayCriteriaOwner: .host, matchContentEnabled: false,
+                                          declaredDurationSeconds: video.declaredDuration,
+                                          probesize: 1_000_000, maxAnalyzeDuration: 1_000_000,
+                                          skipsContainerAttachments: true, sessionCacheByteBudget: 16 * 1024 * 1024,
+                                          softwarePacketCacheStorage: .memory, autoplay: false, preferredDecodePath: .software)
+                options.maxConcurrentSourceRequests = 2
+                return FFmpegVideoDecoder(engine: engine, display: display, video: video,
+                                          sourceURL: source.url, options: options, requiresHardware: requiresHardware,
+                                          changed: changed, failed: failed)
+            }
             prepared = decoder
             try await decoder.prepare(at: start)
             decoder.startObserving()
@@ -194,6 +207,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
     var playing: Bool { requested && engine.state == .playing }
     var hasPicture: Bool { !stopped && picture && videoEnabled && !videoRestorePending }
     var reachedEnd: Bool { terminal }
+    var frameSerial: Int { engine.softwareHostFramesEnqueued }
     var muted: Bool {
         get { mutedValue }
         set { mutedValue = newValue; engine.volume = newValue ? 0 : 1 }
@@ -201,20 +215,33 @@ final class FFmpegVideoDecoder: ViewerDecoder {
 
     func play() {
         guard !stopped, !terminal else { return }
+        seekGestureOpen = false
         lifecycle.play()
         if target == nil { engine.play() }
     }
     func pause() {
+        seekGestureOpen = false
         lifecycle.pause()
         engine.pause()
     }
-    func seek(_ seconds: Double) {
+    func seek(_ seconds: Double) { seek(seconds, exact: false) }
+
+    private func seek(_ seconds: Double, exact: Bool) {
         guard !stopped, seconds.isFinite else { return }
+        // The exact restore of a paused still is no gesture: it has no origin and no play to end it.
+        if !exact, !seekGestureOpen {
+            seekOrigin = currentTime
+            seekGestureOpen = true
+            // Stills between a gesture's seeks: its first seek already lands paused.
+            engine.pause()
+        }
         lifecycle.seek()
         let target = duration > 0 ? min(duration, max(0, seconds)) : max(0, seconds)
+        exactTarget = exact ? target : nil
         seekState.request(target)
         lastTime = target
         guard seekTask == nil else { return }
+        seekStartedAt = CACurrentMediaTime()
         seekTask = Task { [weak self] in
             guard let self else { return }
             defer { self.seekTask = nil; self.changed() }
@@ -227,14 +254,36 @@ final class FFmpegVideoDecoder: ViewerDecoder {
                         if !self.stopped, !Task.isCancelled { self.lifecycle.fail(); self.failed() }
                         break
                     }
-                } else { await self.engine.seek(to: request.target, exact: true) }
+                } else if self.exactTarget == request.target {
+                    await self.engine.seek(to: request.target, exact: true)
+                } else {
+                    let shown = self.engine.softwareHostFramesEnqueued
+                    let moved = await self.engine.inlineSeek(to: request.target, from: self.seekOrigin ?? request.target)
+                    // A drag's next touch sample is already waiting. Seeking again at once would
+                    // discard this keyframe before it is drawn and the drag would show nothing
+                    // until the finger rests: let the picture reach the screen first.
+                    let deadline = CACurrentMediaTime() + 0.5
+                    while moved, self.seekGestureOpen, !self.stopped, !Task.isCancelled,
+                          self.engine.softwareHostFramesEnqueued == shown, CACurrentMediaTime() < deadline {
+                        try? await Task.sleep(for: .milliseconds(8))
+                    }
+                }
                 guard !self.stopped, !Task.isCancelled, !self.lifecycle.failed else { break }
                 switch self.seekState.complete(request) {
                 case .ignored: break seekLoop
                 case .retry: continue
-                case .settled(let target): self.lastTime = target
+                case .settled(let target):
+                    // The picture's own time: the keyframe the seek landed on.
+                    let landed = self.engine.currentTime
+                    self.lastTime = landed.isFinite && landed >= 0 ? landed : target
+                    if let started = self.seekStartedAt {
+                        self.seekEvidence = ["seeks": (self.seekEvidence["seeks"] as? Int ?? 0) + 1, "lastSeekTarget": target,
+                                             "lastSeekMs": (CACurrentMediaTime() - started) * 1000, "lastSeekLanded": self.lastTime]
+                        self.seekStartedAt = nil
+                    }
                 }
-                if self.requested { self.engine.play() } else { self.engine.pause() }
+                // A drag shows stills between its seeks; the finger lifting (play) continues.
+                if self.requested && !self.seekGestureOpen { self.engine.play() } else { self.engine.pause() }
             }
         }
     }
@@ -259,7 +308,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
         // Playing audio keeps its clock and queued samples. Video resumes on a
         // keyframe while the same surface retains its picture. A paused input
         // needs a still at its saved clock; no audio is running in that case.
-        if !terminal, !requested, target == nil { seek(position) }
+        if !terminal, !requested, target == nil { seek(position, exact: true) }
     }
     func stop() {
         guard !stopped else { return }
@@ -280,6 +329,7 @@ final class FFmpegVideoDecoder: ViewerDecoder {
          "width": size.width, "height": size.height, "decodedVideoFrames": engine.softwareHostFramesEnqueued,
          "retiringDecoders": AetherEngine.inlineRetiringDecoderCount,
          "route": engine.videoRoute.rawValue, "ended": terminal]
+        value.merge(seekEvidence) { _, new in new }
         #if ORIGINAL_CODEC_PROBE
         value["displayedVideoFrames"] = rendered
         value["droppedVideoFrames"] = dropped

@@ -67,6 +67,31 @@ final class ViewerUnit {
     private var decoderSurface: UIView?
     private var alternateKey: String?
     private var videoEnabled = true
+    // Bounded seek evidence for the playback samples: how long the last request took to show.
+    private var seekRequestedAt: CFTimeInterval?
+    private var seekEvidence: [String: Any] = ["seeks": 0]
+    // Where the playhead was when the current gesture's seeks began. Its seeks land on
+    // keyframes between there and the finger, so they never cross it.
+    private var seekOrigin: Double?
+    private var seekGestureOpen = false
+    // The keyframe the gesture's last seek landed on.
+    private var seekLanding: Double?
+    private var completedSeeks = 0
+    // A drag holds playback still between its seeks; the finger lifting continues it.
+    private var scrubHold = false
+    // A paused neighbour holds no player: its media opens when it becomes the video being
+    // watched. Until then it shows a still of the keyframe it will open on (NeighbourPoster).
+    private var staged: (video: ViewerVideo, alternate: Bool, token: Int)?
+    private let posterView = UIImageView()
+    private var posterAttempted = false
+    // While the document scrolls, stopping the video left behind and opening the one that
+    // took the middle both wait for it to rest (Neighbours): each costs the main thread
+    // frames that a moving document would show as a stutter.
+    private var pausePending = false
+    private var startPending = false
+    private var deferredAt: CFTimeInterval = 0
+    private var posterReady: NSKeyValueObservation?
+    private var pausedAt: CFTimeInterval = 0
 
     init() {
         player.isMuted = true
@@ -83,6 +108,16 @@ final class ViewerUnit {
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 4), queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.timeUpdate() }
         }
+        posterView.contentMode = .scaleAspectFit
+        posterView.backgroundColor = .black
+        posterView.isHidden = true
+        posterView.frame = view.bounds
+        posterView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(posterView)
+        posterReady = view.playerLayer.observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.updatePoster() }
+        }
+        Neighbours.units.add(self)
     }
 
     var muted: Bool {
@@ -103,6 +138,8 @@ final class ViewerUnit {
     }
 
     var hasMedia: Bool { video != nil && !view.isHidden }
+    var clockSeconds: Double { currentSeconds() }
+    var frameSerial: Int { decoder?.frameSerial ?? (completedSeeks + (view.playerLayer.isReadyForDisplay ? 1 : 0)) }
 
     #if targetEnvironment(simulator)
     func configureZoomCheck(video: ViewerVideo, size: CGSize, image: UIImage) {
@@ -131,6 +168,10 @@ final class ViewerUnit {
     #endif
 
     func load(_ video: ViewerVideo, start: Double, play: Bool) {
+        FrameMonitor.shared.measure("unit.load") { loadNow(video, start: start, play: play) }
+    }
+
+    private func loadNow(_ video: ViewerVideo, start: Double, play: Bool) {
         let alternate = ViewerDecoders.available && (video.needsAlternateDecoder || alternateKey == video.key)
         if let current = self.video, current.same(video), (player.currentItem != nil || decoder != nil), alternate == (decoder != nil) {
             self.video = video
@@ -149,7 +190,85 @@ final class ViewerUnit {
         playRequestedAt = play ? CACurrentMediaTime() : nil
         playStartedMs = nil
         failures = 0
+        pausedAt = CACurrentMediaTime()
         view.isHidden = false
+        showPoster(video, at: start, token: token)
+        // Only the video being watched opens its media. A paused neighbour shows its still.
+        if play { beginMedia(video, alternate: alternate, token: token) }
+        else {
+            staged = (video, alternate, token)
+            Neighbours.changed()
+        }
+        reportKnownSize(video, token: token, attempt: 0)
+    }
+
+    // The PC probed the picture's size: the viewer shows the video (its still, then its
+    // first picture) without waiting for the player to report it. A viewer that is being
+    // opened has not laid out its document yet; it is told once it has.
+    private func reportKnownSize(_ video: ViewerVideo, token: Int, attempt: Int) {
+        guard token == self.token, let size = video.displaySize, presentationSize == .zero else { return }
+        let document = view.superview?.superview as? UIScrollView
+        guard let document, document.bounds.height > 0, document.window != nil else {
+            guard attempt < 60 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { [weak self] in
+                self?.reportKnownSize(video, token: token, attempt: attempt + 1)
+            }
+            return
+        }
+        presentationSize = size
+        delegate?.unitGeometryChanged(self)
+    }
+
+    private func showPoster(_ video: ViewerVideo, at seconds: Double, token: Int) {
+        posterAttempted = false
+        posterView.image = NeighbourPoster.cached(video, at: seconds)
+        updatePoster()
+        guard posterView.image == nil else { return }
+        Task { [weak self] in
+            guard let image = await NeighbourPoster.stored(video, at: seconds), let self, token == self.token,
+                  self.posterView.image == nil else { return }
+            self.posterView.image = image
+            self.updatePoster()
+        }
+    }
+
+    // The still covers the unit until its player has a picture of its own.
+    private func updatePoster() {
+        let hidden = posterView.image == nil || hasPicture
+        if posterView.isHidden != hidden { posterView.isHidden = hidden }
+    }
+
+    var showsPoster: Bool { !posterView.isHidden }
+
+    // Neighbours' turn for this unit: read its keyframe from the original file.
+    fileprivate var needsPoster: Bool { staged != nil && posterView.image == nil && !posterAttempted }
+    fileprivate func makePoster() async {
+        guard let video, let delegate else { return }
+        let token = token, seconds = startTime
+        posterAttempted = true
+        guard let source = try? await delegate.unitSource(video), token == self.token,
+              let image = await NeighbourPoster.make(video, source: source, at: seconds), token == self.token else { return }
+        posterView.image = image
+        updatePoster()
+    }
+
+    // A neighbour that was watched keeps its player for a quick return; an older one gives
+    // it up and becomes a still at the place it stopped.
+    fileprivate var holdsPausedMedia: Bool {
+        video != nil && staged == nil && !wantsPlay && (decoder != nil || player.currentItem != nil || decoderLoadTask != nil)
+    }
+    fileprivate var pausedSince: CFTimeInterval { pausedAt }
+    fileprivate func releaseMedia() {
+        guard let video, holdsPausedMedia, view.isHidden else { return }
+        let time = currentSeconds()
+        self.video = nil
+        load(video, start: time, play: false)
+        // Still a neighbour at rest: only the viewer shows it, while the document scrolls.
+        view.isHidden = true
+    }
+
+    private func beginMedia(_ video: ViewerVideo, alternate: Bool, token: Int) {
+        staged = nil
         let loading = Task { [weak self] in
             guard let self, let delegate else { return }
             defer { if token == self.token { self.decoderLoadTask = nil } }
@@ -176,6 +295,25 @@ final class ViewerUnit {
         // Source generation already protects visibility. Cancellation also lets
         // the original-file backend close a superseded open before it finishes.
         if alternate && video.provider == "bunkr" { decoderLoadTask = loading }
+    }
+
+    // The unit became the one being watched.
+    fileprivate func beginStagedMedia() {
+        guard let staged, staged.token == token else { staged = nil; return }
+        beginMedia(staged.video, alternate: staged.alternate, token: staged.token)
+    }
+
+    fileprivate var isStaged: Bool { staged != nil }
+    // Requested, and not yet seen moving for half a second (four seconds at most).
+    fileprivate var isStarting: Bool {
+        guard wantsPlay, video != nil, staged == nil, let requested = playRequestedAt else { return false }
+        let now = CACurrentMediaTime()
+        guard let started = playStartedMs else { return now - requested < 4 }
+        return now - (requested + started / 1000) < 0.5
+    }
+    fileprivate var viewportDistance: CGFloat {
+        guard let feed = view.superview?.superview as? UIScrollView else { return .greatestFiniteMagnitude }
+        return abs(view.frame.midY - (feed.contentOffset.y + feed.bounds.height / 2))
     }
 
     private func attach(_ item: AVPlayerItem, token: Int) {
@@ -215,13 +353,18 @@ final class ViewerUnit {
         notifications.append(center.addObserver(forName: AVPlayerItem.playbackStalledNotification, object: item, queue: .main) { [weak self] _ in
             // AVPlayer waits for data by itself; a stall that leaves it stopped is nudged back.
             MainActor.assumeIsolated {
-                guard let self, token == self.token, self.playback.canPlay else { return }
+                guard let self, token == self.token, self.playback.canPlay, !self.scrubHold else { return }
                 self.player.play()
             }
         })
+        // The item opens on the keyframe at or before the saved position: one decoded picture.
+        // Loading from zero and then seeking exactly decodes up to a whole group of pictures.
+        if startTime > 0, video?.liveStream != true {
+            item.seek(to: CMTime(seconds: startTime, preferredTimescale: 600), toleranceBefore: .positiveInfinity,
+                      toleranceAfter: .zero, completionHandler: nil)
+        }
         FrameMonitor.shared.measure("unit.attach") { player.replaceCurrentItem(with: item) }
-        // Nothing to seek to: play at once, as the web unit did before its metadata arrived.
-        if startTime <= 0 || video?.liveStream == true { if wantsPlay { player.play() } }
+        if wantsPlay { player.play() }
     }
 
     private func statusChanged(_ item: AVPlayerItem, token: Int) {
@@ -232,10 +375,7 @@ final class ViewerUnit {
             timeline.observe(player)
             if !started {
                 playback.ready()
-                let snapshot = timeline.snapshot()
-                if startTime > 0 && !snapshot.isLive {
-                    seek(to: timeline.clamp(startTime)) { [weak self] in if let self, self.wantsPlay { self.player.play() } }
-                } else if wantsPlay { player.play() }
+                if wantsPlay { player.play() }
             }
             emitTime()
             resumeBufferedPlayback(item, token: token)
@@ -267,7 +407,7 @@ final class ViewerUnit {
         surface.isUserInteractionEnabled = false
         surface.clipsToBounds = true
         surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(surface)
+        view.insertSubview(surface, belowSubview: posterView)
         let prepared = await ViewerDecoders.make(source: source, video: video, surface: surface, start: startTime,
             changed: { [weak self] in
                 guard let self, self.token == token else { return }
@@ -291,7 +431,7 @@ final class ViewerUnit {
     // Resume only the selected, requested video when data returns; never undo a user pause.
     private func resumeBufferedPlayback(_ item: AVPlayerItem, token: Int) {
         guard token == self.token, item === player.currentItem, item.status == .readyToPlay,
-              player.timeControlStatus == .paused else { return }
+              player.timeControlStatus == .paused, !scrubHold else { return }
         let time = player.currentTime().seconds, end = item.loadedTimeRanges.last?.timeRangeValue.end.seconds ?? 0
         let duration = item.duration.seconds
         let ended = duration.isFinite && duration > 0 && time >= duration - 0.1
@@ -315,9 +455,7 @@ final class ViewerUnit {
 
     // As in Stream Viewer: a live stream that "plays" without any picture has ended.
     private func timeControlChanged() {
-        if player.timeControlStatus == .playing, let requested = playRequestedAt, playStartedMs == nil {
-            playStartedMs = (CACurrentMediaTime() - requested) * 1000
-        }
+        notePlaybackStarted()
         pictureCheck?.invalidate()
         pictureCheck = nil
         guard (video?.liveStream == true || video?.provider == "bunkr"), player.timeControlStatus == .playing else { return }
@@ -358,6 +496,10 @@ final class ViewerUnit {
     }
 
     func clear() {
+        // Left while it was open: the place it stopped at is where it opens next time.
+        if let video, staged == nil, decoder != nil || player.currentItem != nil, !video.liveStream, let source = video.media {
+            NeighbourPoster.keep(video, source: source, at: currentSeconds())
+        }
         token += 1
         clearMedia()
         video = nil
@@ -366,11 +508,39 @@ final class ViewerUnit {
         view.isHidden = true
     }
 
-    func update(_ video: ViewerVideo) { self.video = video }
+    func update(_ video: ViewerVideo) {
+        self.video = video
+        // The viewer calls this for every unit it keeps, on every scroll step.
+        Neighbours.noteScroll(document)
+    }
 
-    func play() {
+    fileprivate var document: UIScrollView? { view.superview?.superview as? UIScrollView }
+    fileprivate var hasDeferredWork: Bool { pausePending || startPending }
+    fileprivate var deferredSince: CFTimeInterval { deferredAt }
+    fileprivate func runDeferred() {
+        if pausePending { pauseMedia() }
+        guard startPending else { return }
+        startPending = false
+        if wantsPlay, staged != nil { beginStagedMedia() }
+    }
+
+    func play() { FrameMonitor.shared.measure("unit.play") { playNow() } }
+
+    private func playNow() {
         if !wantsPlay { playRequestedAt = CACurrentMediaTime(); playStartedMs = nil }
+        seekGestureOpen = false
+        scrubHold = false
         guard playback.play() else { return }
+        // Scrolled back before it was stopped: it never stopped.
+        pausePending = false
+        if staged != nil {
+            if Neighbours.documentMoving(document) {
+                startPending = true
+                deferredAt = CACurrentMediaTime()
+                Neighbours.changed()
+            } else { beginStagedMedia() }
+            return
+        }
         if let decoder { decoder.play(); return }
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: true)
         if let item = player.currentItem, item.status == .failed { reload(); return }
@@ -378,8 +548,25 @@ final class ViewerUnit {
         if started { player.play() }
     }
 
-    func pause() {
+    func pause() { FrameMonitor.shared.measure("unit.pause") { pauseNow() } }
+
+    private func pauseNow() {
+        if wantsPlay { pausedAt = CACurrentMediaTime() }
+        scrubHold = false
         playback.pause()
+        startPending = false
+        if holdsPausedMedia || staged != nil { Neighbours.changed() }
+        // Left behind by a scroll: the viewer has muted it, and it stops when the document
+        // rests. Any other pause (the user's, the background) stops it now.
+        if Neighbours.documentMoving(document), decoder != nil || player.currentItem != nil {
+            if !pausePending { pausePending = true; deferredAt = CACurrentMediaTime() }
+            return
+        }
+        pauseMedia()
+    }
+
+    private func pauseMedia() {
+        pausePending = false
         decoder?.pause()
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: false)
         player.pause()
@@ -391,6 +578,9 @@ final class ViewerUnit {
         guard video != nil else { return }
         if !wantsPlay { playRequestedAt = CACurrentMediaTime(); playStartedMs = nil }
         guard playback.play() else { return }
+        pausePending = false
+        startPending = false
+        if staged != nil { beginStagedMedia(); return }
         if let decoder { decoder.play(); return }
         player.currentItem?.preferredForwardBufferDuration = playbackPolicy.forwardBuffer(playing: true)
         if resolving { return }
@@ -413,6 +603,7 @@ final class ViewerUnit {
     func seek(_ time: Double, resume: Bool) {
         let snapshot = snapshot()
         guard snapshot.seekMax > 0 else { return }
+        if !seekGestureOpen { seekOrigin = snapshot.currentTime; seekLanding = nil; seekGestureOpen = true }
         let terminal = (snapshot.seekableEnd ?? 0) > 0 ? min(snapshot.seekableEnd!, snapshot.seekMax) : snapshot.seekMax
         var target = max(0, min(time, snapshot.seekMax))
         let shouldResume = resume && (snapshot.isLive || target < terminal - 0.1)
@@ -429,12 +620,21 @@ final class ViewerUnit {
             decoder.seek(target)
             if shouldResume { decoder.play() }
             else if resume { decoder.pause() }
+            if resume { seekGestureOpen = false }
             emitTime()
             return
         }
-        if resume { player.pause() }
+        // A drag shows stills: playing on between its seeks would restart buffering and sound
+        // for every touch sample. The finger lifting (play) continues from the last still.
+        scrubHold = !resume
+        player.pause()
+        // A drag's first touch samples carry no movement: the picture showing is the one asked for.
+        if !resume, seekState.target == nil, let seekOrigin, abs(target - seekOrigin) < 0.25 || showsLanding(for: target) { return }
         seek(to: target) { [weak self] in
-            guard let self, shouldResume, resume, self.playback.mayResumeSeek(seekAction) else { return }
+            guard let self, resume else { return }
+            // A jump is one gesture; a drag keeps its origin until the finger lifts (play).
+            self.seekGestureOpen = false
+            guard shouldResume, self.playback.mayResumeSeek(seekAction) else { return }
             self.player.play()
         }
         emitTime()
@@ -442,15 +642,33 @@ final class ViewerUnit {
 
     // One seek in flight, chasing the newest target (Apple QA1820), so scrubbing stays smooth.
     private func seek(to seconds: Double, then done: (() -> Void)? = nil) {
+        if seekRequestedAt == nil { seekRequestedAt = CACurrentMediaTime() }
         seekState.request(CMTime(seconds: seconds, preferredTimescale: 600).seconds)
         if let done { seekDone.append(done) }
         if !seeking { chase() }
     }
 
+    // The landing a forward seek shows is the nearest keyframe not before the origin; a
+    // backward one, the keyframe at or before the target. While the target stays between the
+    // origin and the last landing, the same keyframe would be shown again.
+    private func showsLanding(for target: Double) -> Bool {
+        guard seekGestureOpen, let origin = seekOrigin, let landing = seekLanding else { return false }
+        return target > origin ? landing >= target && landing >= origin : landing <= target && landing <= origin
+    }
+
     private func chase() {
         guard let request = seekState.begin() else { return }
+        if showsLanding(for: request.target) { seekFinished(request); return }
         let mediaGeneration = token
-        player.seek(to: CMTime(seconds: request.target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+        // A keyframe shows at once; an exact landing decodes every picture from the keyframe
+        // before it (up to seven seconds of 4K here). Backward, the keyframe at or before the
+        // target. Forward, the nearest keyframe that is not before the gesture's origin, so a
+        // drag never shows an earlier picture than the one it started from.
+        let origin = seekOrigin ?? request.target
+        let forward = request.target > origin
+        let before = forward ? CMTime(seconds: request.target - origin, preferredTimescale: 600) : CMTime.positiveInfinity
+        let after = forward ? CMTime.positiveInfinity : CMTime.zero
+        player.seek(to: CMTime(seconds: request.target, preferredTimescale: 600), toleranceBefore: before, toleranceAfter: after) { [weak self] finished in
             MainActor.assumeIsolated {
                 guard let self, self.token == mediaGeneration else { return }
                 guard finished else {
@@ -458,14 +676,26 @@ final class ViewerUnit {
                     self.scheduleRecovery()
                     return
                 }
-                switch self.seekState.complete(request) {
-                case .ignored: return
-                case .retry: self.chase()
-                case .settled:
-                    let done = self.seekDone; self.seekDone = []
-                    done.forEach { $0() }
-                }
+                self.completedSeeks += 1
+                let landed = self.player.currentTime().seconds
+                if landed.isFinite { self.seekLanding = landed }
+                self.seekFinished(request)
             }
+        }
+    }
+
+    private func seekFinished(_ request: ChasingSeek.Request) {
+        switch seekState.complete(request) {
+        case .ignored: return
+        case .retry: chase()
+        case .settled:
+            if let started = seekRequestedAt {
+                seekEvidence = ["seeks": (seekEvidence["seeks"] as? Int ?? 0) + 1, "lastSeekTarget": request.target,
+                                "lastSeekMs": (CACurrentMediaTime() - started) * 1000, "lastSeekLanded": player.currentTime().seconds]
+                seekRequestedAt = nil
+            }
+            let done = seekDone; seekDone = []
+            done.forEach { $0() }
         }
     }
 
@@ -481,7 +711,16 @@ final class ViewerUnit {
 
     private func observe() { timeline.observe(player, current: currentSeconds()) }
 
+    // Playing with a picture on screen: the request has become playback.
+    private func notePlaybackStarted() {
+        guard decoder == nil, playStartedMs == nil, let requested = playRequestedAt,
+              player.timeControlStatus == .playing, view.playerLayer.isReadyForDisplay else { return }
+        playStartedMs = (CACurrentMediaTime() - requested) * 1000
+    }
+
     private func timeUpdate() {
+        notePlaybackStarted()
+        updatePoster()
         if let decoder {
             if decoder.reachedEnd { playback.end() }
             if decoder.playing { failures = 0; recovery?.invalidate(); recovery = nil }
@@ -489,7 +728,7 @@ final class ViewerUnit {
                 presentationSize = decoder.size
                 delegate?.unitGeometryChanged(self)
             }
-            if decoder.playing, let requested = playRequestedAt, playStartedMs == nil {
+            if decoder.playing, decoder.hasPicture, let requested = playRequestedAt, playStartedMs == nil {
                 playStartedMs = (CACurrentMediaTime() - requested) * 1000
             }
         }
@@ -547,7 +786,8 @@ final class ViewerUnit {
             return decoder.evidence.merging(["video": video?.filename ?? "", "videoCodec": video?.videoCodec ?? "unknown",
                                               "wantsPlay": wantsPlay, "activationMs": playStartedMs ?? -1]) { _, new in new }
         }
-        let item = player.currentItem, log = item?.accessLog()?.events.last
+        // The access log waits for the item; it is read only once the item plays.
+        let item = player.currentItem, log = started && !seeking && item?.status == .readyToPlay ? item?.accessLog()?.events.last : nil
         let finite = { (value: Double) in value.isFinite ? value : 0 }
         let end = item?.loadedTimeRanges.last?.timeRangeValue.end.seconds ?? 0
         return ["video": video?.filename ?? "", "wantsPlay": wantsPlay, "rate": Double(player.rate),
@@ -558,7 +798,7 @@ final class ViewerUnit {
                 "activationMs": playStartedMs ?? -1, "bytesTransferred": log?.numberOfBytesTransferred ?? 0,
                 "observedMbps": finite(log?.observedBitrate ?? 0) / 1_000_000,
                 "stalls": log?.numberOfStalls ?? 0,
-                "droppedVideoFrames": log?.numberOfDroppedVideoFrames ?? 0]
+                "droppedVideoFrames": log?.numberOfDroppedVideoFrames ?? 0].merging(seekEvidence) { _, new in new }
     }
 
     #if ORIGINAL_CODEC_PROBE
@@ -595,6 +835,17 @@ final class ViewerUnit {
         notifications = []
         seekState.cancel()
         seekDone = []
+        seekRequestedAt = nil
+        seekEvidence = ["seeks": 0]
+        seekOrigin = nil
+        seekLanding = nil
+        seekGestureOpen = false
+        scrubHold = false
+        staged = nil
+        pausePending = false
+        startPending = false
+        posterView.image = nil
+        posterView.isHidden = true
         if player.currentItem != nil {
             player.pause()
             player.replaceCurrentItem(with: nil)
@@ -602,6 +853,69 @@ final class ViewerUnit {
         if presentationSize != .zero {
             presentationSize = .zero
             delegate?.unitGeometryChanged(self)
+        }
+    }
+}
+
+// Only the video being watched holds a player. This keeps the others cheap: it gives up the
+// players of neighbours left behind (all but the last one watched, for a quick return) and
+// reads the stills of neighbours that have none yet, one at a time, nearest the screen
+// first, and never while the watched video is still starting.
+@MainActor
+private enum Neighbours {
+    static let units = NSHashTable<ViewerUnit>.weakObjects()
+    private static var timer: Timer?
+    private static var reading = false
+
+    private static var offset: CGFloat = 0
+    private static var scrolledAt: CFTimeInterval = 0
+
+    static func noteScroll(_ document: UIScrollView?) {
+        guard let y = document?.contentOffset.y, y != offset else { return }
+        offset = y
+        scrolledAt = CACurrentMediaTime()
+    }
+
+    // A finger or momentum moves it, or it moved within the last few frames.
+    static func documentMoving(_ document: UIScrollView?) -> Bool {
+        noteScroll(document)
+        guard let document else { return false }
+        return document.isDragging || document.isDecelerating || CACurrentMediaTime() - scrolledAt < 0.06
+    }
+
+    static func changed() {
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { _ in MainActor.assumeIsolated { pump() } }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private static func pump() {
+        let all = units.allObjects
+        // What a scroll put off: once the document rests, or after 0.6 s of a slow drag.
+        let deferred = all.filter(\.hasDeferredWork)
+        if !deferred.isEmpty {
+            let now = CACurrentMediaTime()
+            for unit in deferred where !documentMoving(unit.document) || now - unit.deferredSince > 0.6 { unit.runDeferred() }
+        }
+        let starting = all.contains(where: \.isStarting)
+        // A paused player is only given up while another video is being watched, never the
+        // one the user paused; and not before it has been still for a moment.
+        if all.contains(where: \.wantsPlay), !starting {
+            let now = CACurrentMediaTime()
+            let paused = all.filter(\.holdsPausedMedia).sorted { $0.pausedSince > $1.pausedSince }
+            for unit in paused.dropFirst() where now - unit.pausedSince > 1 { unit.releaseMedia() }
+        }
+        let waiting = all.filter(\.needsPoster)
+        if !reading, !starting, let next = waiting.min(by: { $0.viewportDistance < $1.viewportDistance }) {
+            reading = true
+            Task {
+                await next.makePoster()
+                reading = false
+            }
+        }
+        if waiting.isEmpty, !reading, all.filter(\.holdsPausedMedia).count <= 1, !all.contains(where: \.hasDeferredWork) {
+            timer?.invalidate(); timer = nil
         }
     }
 }

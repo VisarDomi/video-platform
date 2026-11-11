@@ -65,6 +65,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             let local = LocalListController(provider: provider, server: server, mediaKind: kind)
             (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
             list = local
+            #if targetEnvironment(simulator)
+            FluidityChecks.shared.install(local)
+            #endif
         } else {
             #if LOCAL_VIDEO_PROVIDER
             preconditionFailure("LocalProvider is required in a local app's Info.plist")

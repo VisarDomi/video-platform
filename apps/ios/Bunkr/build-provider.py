@@ -43,9 +43,11 @@ def verify_decoder(platform):
 # SIMULATOR=1: an unsigned simulator build (build/<key>/native/Release-iphonesimulator), no signing lock.
 if os.environ.get('SIMULATOR'):
     subprocess.run([sys.executable,str(root/'scripts/project.py'),key],check=True)
+    # The virtual iPhone runs the build host's architecture; the other slice is never launched.
+    host_slice=['ARCHS='+os.uname().machine,'ONLY_ACTIVE_ARCH=YES']
     subprocess.run(['xcodebuild','-project',str(root/'build'/key/(product+'.xcodeproj')),'-scheme',product,
         '-derivedDataPath',str(root/'build'/key/'DerivedData'),'-configuration','Release','-sdk','iphonesimulator',
-        '-destination','generic/platform=iOS Simulator','-jobs','2',*compiler_settings,'SYMROOT='+str(root/'build'/key/'native'),'CODE_SIGNING_ALLOWED=NO','build'],cwd=root,check=True)
+        '-destination','generic/platform=iOS Simulator','-jobs','2',*compiler_settings,*host_slice,'SYMROOT='+str(root/'build'/key/'native'),'CODE_SIGNING_ALLOWED=NO','build'],cwd=root,check=True)
     verify_decoder('iphonesimulator')
     raise SystemExit(0)
 lockpath=pathlib.Path.home()/'Library/Caches/ios-app-refresh/signing.lock'

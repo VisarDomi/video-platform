@@ -102,12 +102,13 @@ def main():
   assert not any(row.get('endedBeforePlayout') for row in report['samples']),'EOF published before queued tail played'
   empty_phases={'retirement complete','failed','superseded source cancelled','superseded decoder closed',
                 'prewarm Settings','warm Settings accepted','warm Settings refused','warm background entered',
-                'await warm foreground','warm foreground entered','fallback retirement complete'}
+                'await warm foreground','warm foreground entered','fallback retirement complete',
+                'neighbour still','await picture capture','picture captured','restored still'}
   for row in report['samples']:
    if row.get('phase') in empty_phases:continue
    expected='VLCKit' if row.get('phase','').startswith('fallback ') else 'FFmpeg/VideoToolbox'
    assert row.get('engine')==expected,'Unexpected decoder in '+str(row.get('phase'))
-  print('PASS paused picture/seek, audio-only background/foreground, saved restoration, stopped EOF/replay, bounded UI teardown and legacy fallback')
+  print('PASS neighbour still without a decoder, keyframe drag, audio-only background/foreground, saved restoration, stopped EOF/replay, bounded UI teardown and legacy fallback')
  finally:
   if report and report.get('error'):
    sim('io',args.device,'screenshot',args.out/'failed-state.png',check=False)

@@ -11,6 +11,8 @@ protocol ViewerDecoder: AnyObject {
     var hasPicture: Bool { get }
     var reachedEnd: Bool { get }
     var evidence: [String: Any] { get }
+    // Pictures handed to the screen so far: a seek or a start is visible once this moves.
+    var frameSerial: Int { get }
     var muted: Bool { get set }
     func play()
     func pause()
@@ -37,6 +39,11 @@ enum ViewerDecoders {
         #if ORIGINAL_CODEC_PROBE
         let requiresHardware = false  // Exercise lifecycle even on CPU-only simulator runtimes.
         let direct = (codec == "vp9" || codec == "av1") && !CommandLine.arguments.contains("-force-vlc")
+        #elseif targetEnvironment(simulator)
+        // The virtual iPhone has no hardware decoder session. It still takes the engine the
+        // phone takes, so what is measured there is the phone's own path.
+        let requiresHardware = false
+        let direct = codec == "vp9" || codec == "av1"
         #else
         let requiresHardware = codec == "vp9"
         let direct = codec == "vp9" || codec == "av1"

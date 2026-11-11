@@ -49,12 +49,18 @@ filename-to-file-ID migration in its provider override.
 Existing playback lookups use the
 last published index and verify the file identity, without waiting for unrelated
 new-file metadata probes.
-Every VOD app plays only its current video. Neighbours remain paused, with a preferred
-half-second preview buffer; the active Bunkr file prefers two seconds and starts as
-soon as buffered data permits. Buffer recovery respects manual pause, seeks and
+Every VOD app plays only its current video. In Bunkr local only that video holds a
+player: a paused neighbour shows a still of the keyframe its saved position opens on,
+read once from the original file and kept on the phone, and the video last watched
+keeps its paused player for a quick return. A saved position opens on its keyframe, a
+seek shows a keyframe on the finger's side of where the gesture began, a drag holds
+playback and shows a still per seek, and stopping or opening a video waits until the
+document rests. The active file prefers a two-second buffer and starts as soon as
+buffered data permits. Buffer recovery respects manual pause, seeks and
 the end of a movie. Original video resolution and bytes are unchanged. Bounded
 `bunkrPlayback` debug samples record activation delay, buffer state, transferred
-bytes and dropped frames without URLs or credentials.
+bytes, dropped frames and the last seek without URLs or credentials. The design, its
+virtual-iPhone measurements and its limits are in [Bunkr/README.md](Bunkr/README.md).
 Original AV1/VP9/VP8 files and MKV/WebM/AVI/TS containers use alternate native decoding behind the same
 `ViewerUnit`; supported files keep AVFoundation. VP9 first tries the direct
 FFmpeg/VideoToolbox backend when a real hardware session opens. AV1 uses the
@@ -63,7 +69,7 @@ other fallback formats and failed preparation retain VLCKit. The direct backend 
 validation runbook are documented in [ThirdParty/AetherCore](ThirdParty/AetherCore/README.md).
 No file is converted, replaced
 or proxied into another format. The alternate engine retains the shared controls,
-fitted surface, zoom, current-only visibility, paused neighbours and saved timeline.
+fitted surface, zoom, current-only visibility and saved timeline.
 Its library/media setup runs off the main thread. Backgrounding disables its video
 track while retaining audio/time, and foregrounding restores that track.
 The checksum-pinned official iOS binary, system TLS trust and renewal inputs are
@@ -72,8 +78,10 @@ The fallback uses the bundled FFmpeg container parser to avoid the pinned native
 MP4 parser's paused AV1 seek resets. Restoration seeks on the full input without
 changing its time origin. Native seek completions preserve pause/volume intent;
 EOF stays terminal through resume/return, and seeking afterwards reopens at the
-requested time. The real player passed the original-file A14 seek, return,
-saved-position, EOF and explicit-replay checks on November 1.
+requested time's keyframe. The real player passed the original-file A14 seek, return,
+saved-position, EOF and explicit-replay checks on November 1; the phone check's
+expectations (`scripts/check-original-video.py`) follow the keyframe landings but have
+not been run on the phone since.
 The ✏️ button beside mute renames the original file on the PC and updates its list/player
 name. A stable file identity keeps the current player, saved position and row
 identity intact across renames. New names keep the source container's extension and cannot
@@ -398,6 +406,12 @@ actions. It reproduces baseline portrait clipping, duplicate video surfaces and 
 reader relayout, then checks fit, stable layer identity, carousel locking, portrait/landscape
 zoom, deferred reader metadata and retained image surfaces. The fixtures and their commands
 compile only for the simulator; they cannot run in phone builds.
+
+`scripts/check-bunkr-fluidity.py` times the real Bunkr app in the virtual iPhone against the
+PC's original files: opening at a saved position, a drag, two jumps, a swipe to the next
+video and reopening, with the main thread's frame gaps (`Bunkr/README.md` has the command
+and the November 11 results). It plays one 4K video at a time, as the viewer does.
+`Tests/InlineKeyframeLandingTests.swift` (PC) checks where seeks and saved positions land.
 
 `Tests/TangoSessionTests.swift` checks single-flight challenge recovery, no re-login during
 outages, cooldowns, account preservation, durable cookie scopes and valid-token renewal.

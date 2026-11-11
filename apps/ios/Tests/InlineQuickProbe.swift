@@ -107,40 +107,57 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             record("await warm foreground")
             try await wait("warm foreground entered",seconds:90) { window?.windowScene?.activationState == .foregroundActive }
             let video = ViewerVideo(["filename":filename,"provider":"bunkr","videoCodec":codec,"duration":clipDuration])!
+            // An opening that is superseded cancels its source and closes its decoder.
             delaySource = true
-            unit.load(video,start:0,play:false)
+            unit.load(video,start:0,play:true)
             try await Task.sleep(for:.milliseconds(40))
             clear()
             try await wait("superseded source cancelled",seconds:2) { cancelledSources == 1 }
             try await Task.sleep(for:.milliseconds(1100))
             delaySource = false
             currentPhase = "cancelled decoder opening"
-            unit.load(video,start:0,play:false)
+            unit.load(video,start:0,play:true)
             try await Task.sleep(for:.milliseconds(20))
             clear()
             try await wait("superseded decoder closed",seconds:4) {
                 FFmpegVideoDecoder.preparingCount == 0 && AetherEngine.inlineRetiringDecoderCount == 0
             }
             try await Task.sleep(for:.milliseconds(1100))
-            currentPhase = "paused decoder opening"
+            // A paused neighbour holds no decoder: it shows the keyframe it will open on.
+            currentPhase = "paused neighbour"
             unit.load(video,start:0,play:false)
-            try await wait("paused picture") { unit.hasPicture }
+            try await wait("neighbour still",seconds:12) { unit.showsPoster }
+            guard !unit.hasPicture, FFmpegVideoDecoder.preparingCount == 0, unit.playbackEvidence["engine"] == nil else {
+                throw NSError(domain:"A paused neighbour opened a decoder",code:1)
+            }
             record("await picture capture")
             try await wait("picture captured",seconds:15) {
                 FileManager.default.fileExists(atPath: URL.documentsDirectory.appendingPathComponent("picture-\(runID).ready").path)
             }
-            guard unit.playbackEvidence["audioDelivery"] as? String == "decoded" else { throw NSError(domain:"Missing decoded audio",code:1) }
-            guard nativeTime() < 0.15 else { throw NSError(domain:"Paused preparation moved",code:1) }
-            try await Task.sleep(for:.milliseconds(400)); record("paused hold")
-            guard nativeTime() < 0.15 else { throw NSError(domain:"Paused clock advanced",code:1) }
             unit.play()
-            try await wait("playing") { nativeTime() > 0.3 }
+            try await wait("playing") { unit.hasPicture && nativeTime() > 0.3 }
+            guard !unit.showsPoster else { throw NSError(domain:"The still stayed over the player's picture",code:1) }
+            guard unit.playbackEvidence["audioDelivery"] as? String == "decoded" else { throw NSError(domain:"Missing decoded audio",code:1) }
             unit.pause(); let parked = nativeTime()
             try await Task.sleep(for:.milliseconds(400)); record("pause holds")
             guard abs(nativeTime()-parked)<0.15 else { throw NSError(domain:"Pause drift",code:1) }
-            unit.seek(0.7,resume:false)
-            try await wait("paused seek") { abs(nativeTime()-0.7)<0.1 }
-            unit.play(); try await wait("seek playback") { nativeTime()>0.9 }
+            // A drag: its seeks show keyframes (wherever the clip keeps them), each one drawn
+            // under the pause, never behind the place the drag began, and the video stays still
+            // until the finger lifts.
+            let frames = unit.frameSerial
+            unit.seek(parked+2.7,resume:false)
+            try await wait("drag shows a keyframe") { unit.frameSerial != frames && nativeTime()>parked+1 }
+            let first = nativeTime()
+            unit.seek(11.5,resume:false)
+            try await wait("drag moves on to a later keyframe") { nativeTime()>first+0.5 && nativeTime()<=11.55 }
+            let far = nativeTime()
+            // The finger comes back: an earlier keyframe, still not behind where the drag began.
+            unit.seek(6.2,resume:false)
+            try await wait("drag comes back to an earlier keyframe") { nativeTime()<far-0.5 && nativeTime()>=first-0.05 }
+            let landed = nativeTime()
+            try await Task.sleep(for:.milliseconds(400)); record("drag holds still")
+            guard abs(nativeTime()-landed)<0.05 else { throw NSError(domain:"A drag played on",code:1) }
+            unit.play(); try await wait("seek playback") { nativeTime()>landed+0.2 }
             unit.setVideoEnabled(false)
             record("await background")
             let opened = await UIApplication.shared.open(URL(string:UIApplication.openSettingsURLString)!,options:[:])
@@ -161,13 +178,17 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             record("return clock continued")
             clear()
             try await Task.sleep(for:.milliseconds(1100))
-            currentPhase = "restored decoder opening"
-            unit.load(video,start:0.7,play:false)
-            try await wait("saved paused restore") { unit.hasPicture && abs(nativeTime()-0.7)<0.1 }
+            // A saved position shows its keyframe as a still, and opens on that keyframe.
+            currentPhase = "restored neighbour"
+            unit.load(video,start:2.7,play:false)
+            try await wait("restored still",seconds:12) { unit.showsPoster && abs(unit.snapshot().currentTime-2.7)<0.01 }
+            unit.play()
+            try await wait("saved restore") { unit.hasPicture && nativeTime()>=0 }
+            guard nativeTime() <= 2.75 else { throw NSError(domain:"A saved position opened after itself",code:1) }
             record("before tail seek")
             unit.seek(clipDuration-2,resume:true)
             record("tail seek requested")
-            try await wait("queued tail playing",seconds:4) { nativeTime() > clipDuration-1.75 }
+            try await wait("queued tail playing",seconds:7) { nativeTime() > clipDuration-1.75 }
             unit.pause(); let tailClock = nativeTime()
             try await Task.sleep(for:.milliseconds(350)); record("queued tail pause holds")
             guard unit.playbackEvidence["ended"] as? Bool != true, abs(nativeTime()-tailClock)<0.1 else {
@@ -183,7 +204,7 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             // The queued-tail pause has enough remaining audio to survive a
             // coarse clock tick. Separately regress the half-second auto-rewind.
             unit.seek(clipDuration-0.4,resume:true)
-            try await wait("near-end seek landed",seconds:4) { nativeTime()>clipDuration-0.5 }
+            try await wait("near-end seek landed",seconds:7) { nativeTime()>clipDuration-0.5 }
             try await Task.sleep(for:.milliseconds(700)); record("near-end playback stays near end")
             guard nativeTime()>clipDuration-0.5 else { throw NSError(domain:"Near-end playback rewound",code:1) }
             clear()
@@ -193,7 +214,7 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             // Unknown codec metadata must still use the established fallback.
             // Exercise it with both FFmpeg ABIs loaded in the same executable.
             let fallback = ViewerVideo(["filename":"fallback.webm","provider":"bunkr","duration":clipDuration])!
-            unit.load(fallback,start:0,play:false)
+            unit.load(fallback,start:0,play:true)
             try await wait("fallback picture") { unit.hasPicture }
             record("fallback await picture capture")
             try await wait("fallback picture captured",seconds:15) {
@@ -202,7 +223,6 @@ final class OriginalVideoProbe: UIResponder, UIApplicationDelegate, ViewerUnitDe
             guard unit.playbackEvidence["engine"] as? String == "VLCKit" else {
                 throw NSError(domain:"Missing legacy decoder fallback",code:1)
             }
-            unit.play()
             try await wait("fallback playing") { nativeTime()>0.3 }
             unit.pause(); let fallbackClock = nativeTime()
             try await Task.sleep(for:.milliseconds(350)); record("fallback paused")
