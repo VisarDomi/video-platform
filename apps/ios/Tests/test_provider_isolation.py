@@ -8,7 +8,9 @@ class ProviderIsolation(unittest.TestCase):
   for key,config in registry.items():
    with self.subTest(provider=key):
     subprocess.run([sys.executable,str(ROOT/'scripts/project.py'),key],env=env,check=True,capture_output=True)
-    project=(ROOT/'build'/key/(config['product']+'.xcodeproj/project.pbxproj')).read_text()
+    # Bunkr's own generator writes its project per provider; every other provider shares one.
+    path=(ROOT/'build'/key/(config['product']+'.xcodeproj') if key=='bunkr' else ROOT/'build'/'app'/'VideoApp.xcodeproj')
+    project=(path/'project.pbxproj').read_text()
     sources=re.findall(r'"path" = "([^"\n]+\.swift)"',project)
     special=[p for p in sources if '/ios/Bunkr/' in p]
     if key=='bunkr':
