@@ -1,67 +1,38 @@
-The coding agent owns this repository and the recordings it manages: any file may be changed, this one included. The user's only manual task is deleting old recordings to free disk space, so a recording that disappears is expected, not an error.
+# Video platform
 
-The phone apps are for exploring; the PC pipeline is the backup engine. Keep the
-phone's ordinary provider session renewal independent of the PC. Initial setup or
-an API migration may use the PC/Safari helper once; normal expiry, backgrounding
-and network changes must renew the existing session automatically. PC recording
-and phone sessions have separate refresh-token families and one owner each.
-Every ordinary PC browser/authentication flow runs headful on Xvfb `:111`; never
-inherit the desktop display. Routine iPhone UI checks use the Mac virtual iPhone;
-reserve the physical device for behavior that cannot be established there.
+Agent owns repo/recordings; user deletion of originals is normal. Read README.md,
+notes.md, decisions.md and affected package docs; iOS: apps/ios/README.md,
+../../ios-tools/native/README.md; access: ../../../environment/mac-access.md.
 
-Accepted app updates use `ios-push APP` (for example `ios-push bunkr`). Wait for its
-source-captured Queued acknowledgement, continue work, then check `ios-push status
-JOB`. It asynchronously builds/signs/installs without launch and approves only the
-confirmed installed checkpoint. Read `/home/visar/Documents/work/ios-tools/push/README.md`.
-Approved Mac renewal roots may be frozen per-app checkpoints, not the mutable mirror.
-For the Infuse-parity task, the owner alone checks physical-phone fluidity; use the
-phone only to install updates.
-
-Handle routine project repairs autonomously without requesting confirmation. This includes
-Porntrex session recovery: reuse a valid shared session first; if every retained copy is
-rejected, perform one coordinated PC login through `ptrex-connect-iphone --apply
---allow-password-login`, share it immediately with Video Vault and verify both devices.
-This coordinated recovery is authorized; do not ask again. Never log in independently on
-the phone or present `kt_member`. Keep the user's upload/gaming hold intact throughout.
-Session maintenance continues while the resource-heavy upload worker is stopped. The
-managed job repairs confirmed authentication loss automatically, preferring any valid
-phone copy before a password login and retaining failed phone delivery for retry. Never
-turn a provider outage into a new login, repeat password logins for delivery failures,
-or resume a gaming hold as a side effect of authentication repair.
-
-## Start here
-
-- [README.md](README.md): what the system does, and a map of every doc.
-- [notes.md](notes.md): setup: packages, services, logs, data outside the repository, download lists.
-- [decisions.md](decisions.md): the system's rules and why they hold.
-- [apps/ios/README.md](apps/ios/README.md): the six iPhone apps: behaviour, rules, build, deploy, tests, frame reports, renewal.
-- Each package's own docs sit next to its code (`packages/<name>/`, `systemd/`): an overview (`README.md` or `setup.md`) and its rules (`decisions.md`); README.md's Docs section lists them all.
-- [NativeKit guide](../../ios-tools/native/README.md): the shared iPhone modules, vendoring into `apps/ios/Kit`, main-thread rules, relaunch restore, FrameMonitor, simulator limits.
-- [Mac and phone access](../../../environment/mac-access.md): SSH to the Mac, UDIDs, signing.
-- [Renewal](../../ios-tools/renewal/README.md): the monthly re-signing of the paid apps.
-
-The viewer follows the user directly: free continuous scrolling, content loading in place,
-and pinch zoom of the same content. Never add snapping, automatic centering, page landing,
-runways or repositioning when scrolling stops. Loading, refreshes and player reuse preserve
-the visible position. Cached next chapters must append during continuous scrolling; do not
-require a scroll-end or settled-page check. Explicit navigation and restoration are separate.
-
-Video visibility is independent of scrolling coordinates: at rest or while zoomed only
-the current video is shown. Neighbours appear only during an unzoomed vertical scroll.
-Every VOD provider pauses neighbours; only Tango live keeps neighbours playing muted.
-Zoom disables carousel navigation. Never turn a visibility transition into snapping.
-
-Do not convert or transcode Bunkr videos, including separate playback copies. Serve the
-original bytes; retain/report native codec limitations rather than substituting media.
-
-Update the isolated native codec test app in place, preserving its stable bundle ID,
-container and Local Network permission between runs in the same testing session.
-Stop its process after each run. When the task is finished, uninstall the diagnostic
-app and verify it and its process are absent; do not leave test apps on the phone.
-Use `apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private directory>`.
-
-Provider-specific performance work must stay inside that provider. Bunkr-only
-player/model/build overrides live in `apps/ios/Bunkr` and are selected only for
-Bunkr. Other providers retain their original shipped shared engine. Do not tune
-shared HLS serving, playback policy or another provider as a side effect of a
-Bunkr task. HLS serving returns the stored playlists and segments unchanged.
+- Phone explores; PC backs up. Phone renewal survives expiry/background/network
+  changes independently; PC/phone have separate rotating token families, one owner
+  each. Initial setup/API migration may use the PC helper once.
+- Routine PC browser/auth runs headful on Xvfb :111 under existing profile ownership.
+  Never use the desktop, kill another owner, delete its lock or copy an active profile.
+- Porntrex repair is preauthorized: reuse valid shared/phone sessions; only if all
+  are rejected use `ptrex-connect-iphone --apply --allow-password-login` once,
+  share with Video Vault and verify both. No independent phone login or kt_member.
+  Outages/delivery failures do not justify another login; retry phone delivery.
+  Session maintenance continues during upload/gaming holds; never resume the worker.
+- Test, then `ios-push APP`; read ../../ios-tools/push/README.md. Captured/queued is
+  not installed: check `ios-push status JOB`. Preserve frozen approved renewal roots;
+  mutable mirrors are not approval. Routine UI QA uses the Mac virtual iPhone;
+  Infuse/Bunkr fluidity is owner-tested, phone installation only.
+- Continuous scrolling/pinch follows the user. Loading, refresh, reuse and chapter
+  append preserve position while scrolling; no snapping, centering, runways or
+  settled-page gates. Explicit navigation/restoration are separate.
+- At rest/zoom show only current video; neighbours appear during unzoomed vertical
+  scrolling. VOD neighbours pause; Tango live neighbours play muted. Zoom disables
+  carousel navigation; visibility never initiates snapping.
+- Bunkr serves original bytes: no transcoding or playback copies. Keep overrides
+  selected only in apps/ios/Bunkr. Preserve other providers' shipped engine and
+  shared HLS playlists/segments byte-for-byte; report native codec limits.
+- Codec diagnostic: stable identity/container/Local Network permission within a
+  session; stop after each run. Finally uninstall and verify app/process absence:
+  apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private-dir>.
+- Diagnose source/history, installed artifacts and backend before asking the owner.
+  Restore the full causal path, preserving unrelated fixes; verify other providers.
+- Missing originals retain catalogue, remote IDs, upload/removal receipts and
+  re-upload bans. Conversion cleanup is separate; download lists live outside Git.
+- Children inherit provider/data/device/hold limits, ownership, tests and delivery
+  proof. Inspect partial effects before retrying; preflight refusal is not Swift failure.
