@@ -1,10 +1,11 @@
 # Sourced by the apps' scripts/test.sh: one compiler setup for the PC (Linux, the normal place
-# to run these logic tests) and the Mac (xcrun). Sets SWIFTC, JOBS, DYLIB, XML_FLAGS and
+# to run these logic tests) and the Mac (xcrun). Sets SWIFTC, SWIFT, JOBS, DYLIB, XML_FLAGS and
 # library_flags NAME (the shared-library identity flags for libNAME), and the cached builders
 # kit_libraries and build_linux_shims below.
 kit_linux_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 if [[ $(uname) == Darwin ]]; then
   SWIFTC=(xcrun swiftc)
+  SWIFT=(xcrun swift)
   JOBS=2
   DYLIB=dylib
   library_flags() { printf '%s\n' -Xlinker -install_name -Xlinker "@rpath/lib$1.dylib"; }
@@ -17,6 +18,7 @@ else
     exit 1
   fi
   SWIFTC=("$swiftc_path")
+  SWIFT=("$(dirname "$swiftc_path")/swift")
   JOBS=$(nproc)
   DYLIB=so
   library_flags() { printf '%s\n' -Xlinker -soname -Xlinker "lib$1.so"; }
