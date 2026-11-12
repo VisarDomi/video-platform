@@ -7,10 +7,12 @@ private final class BrokerHTTP: URLProtocol, @unchecked Sendable {
     static var failNext = false
     static var ids: [String] = []
     static var hosts: [String] = []
+    static var gatewayKeys: [String: Set<String>] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let method = request.httpMethod ?? "GET"
+        Self.lock.withLock { Self.gatewayKeys[request.url!.host!, default: []].insert(request.value(forHTTPHeaderField: "X-PC-Apps-Key") ?? "") }
         if method == "POST" {
             let fail = Self.lock.withLock { () -> Bool in
                 Self.ids.append(request.value(forHTTPHeaderField: "X-Phone-Request-ID") ?? "")
@@ -55,6 +57,21 @@ struct TangoPCLoginTests {
         precondition(hosts.allSatisfy{$0=="remote.invalid"}, "Unavailable LAN never receives the credential POST")
         restored.acceptedSession()
         precondition(!FileManager.default.fileExists(atPath:pending.path), "Only committed credentials acknowledge the handoff")
+        // Away from home the PC's public address is asked too, and only it gets the gateway's key.
+        BrokerHTTP.lock.withLock { BrokerHTTP.gatewayKeys = [:]; BrokerHTTP.hosts = [] }
+        let away = TangoPCLogin(directory: directory, key: "fixture-key", endpoints: [URL(string:"https://lan.invalid")!],
+            away: URL(string:"https://public.invalid/video")!, gatewayKey: "gateway-fixture", configure: { $0.protocolClasses = [BrokerHTTP.self] })!
+        let reachable = await away.available()
+        precondition(reachable, "The public address answers when home is down")
+        _ = try await away.newSession(refreshToken:"fixture-owned-refresh")
+        away.acceptedSession()
+        let (keys, posted) = BrokerHTTP.lock.withLock { (BrokerHTTP.gatewayKeys, BrokerHTTP.hosts) }
+        precondition(keys["public.invalid"] == ["gateway-fixture"] && keys["lan.invalid"] == [""], "Only the public address gets the gateway key: \(keys)")
+        precondition(posted == ["public.invalid"], "The login goes once, to the address that answered")
+        let homeOnly = TangoPCLogin(directory: directory, key: "fixture-key", endpoints: [URL(string:"https://lan.invalid")!],
+            configure: { $0.protocolClasses = [BrokerHTTP.self] })!
+        let unreachable = await homeOnly.available()
+        precondition(!unreachable, "Without the gateway key the PC is asked at home only")
         print("PASS: native PC login remote fallback, durable lost-response handoff, one caller and acknowledgment")
     }
 }

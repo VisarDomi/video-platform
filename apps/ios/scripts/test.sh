@@ -21,6 +21,7 @@ compile keyframe-landing-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-lib
 compile vault-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -lKitHTML "${XML_FLAGS[@]}" -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Vault.swift Tests/VaultTests.swift
 compile tango-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Tango.swift Tests/TangoTests.swift
 compile tango-session-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Tango.swift Tests/TangoSessionTests.swift
+compile pc-reach-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library VideoApp/PCReach.swift Tests/PCReachTests.swift
 compile tango-pc-tests ${SHIM_FLAGS[@]+"${SHIM_FLAGS[@]}"} -parse-as-library -I "$test_dir" -L "$test_dir" -lKitCore -lKitNet -Xlinker -rpath -Xlinker "$test_dir" VideoApp/Tango.swift VideoApp/TangoPCLogin.swift Tests/TangoPCLoginTests.swift
 finish_compiles
 "$test_dir/registry-tests"
@@ -35,6 +36,7 @@ finish_compiles
 "$test_dir/tango-tests"
 "$test_dir/tango-session-tests"
 "$test_dir/tango-pc-tests"
+"$test_dir/pc-reach-tests"
 # The build and delivery scripts' own checks: dependency staging after a power cut, the FFmpeg ABI
 # binding check, provider isolation, private inputs, probe variants and delivery validation.
 if ! PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests -p 'test_*.py' > "$test_dir/python.log" 2>&1; then

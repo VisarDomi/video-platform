@@ -2,9 +2,10 @@ import Foundation
 
 // The PC's website API, which the native viewer calls itself: a recording's save, cut and return
 // (packages/app src/providers/local.ts) and the download lists behind the +/- button
-// (src/services/downloadList.ts). The phone trusts the PC's certificate.
+// (src/services/downloadList.ts). The phone trusts the PC's certificate. The download lists
+// also answer away from home, through the PC's public address (PCReach); recordings do not.
 enum ViewerPC {
-    static let server = URL(string: "https://192.168.1.197:9999")!
+    static let server = PCReach.home
     static let listNames = ["tango": "Tango", "fc2": "FC2", "sc": "SC"]
 
     struct Failure: LocalizedError {
@@ -43,19 +44,34 @@ enum ViewerPC {
         try await request("api/videos/\(video.filename)/original", query: ["provider": video.provider], post: true)
     }
 
+    // A download-list answer from either of the PC's addresses, read like `request`'s.
+    private static func listed(_ answer: PCReach.Answer, _ path: String) throws -> Any? {
+        let body = try? JSONSerialization.jsonObject(with: answer.data, options: [.fragmentsAllowed])
+        guard (200...299).contains(answer.status) else {
+            throw Failure(status: answer.status, message: (body as? [String: Any])?["error"] as? String ?? "\(path) failed: \(answer.status)")
+        }
+        return body
+    }
+
     static func member(_ list: String, _ identifier: String) async throws -> Bool {
-        guard let member = (try await request("api/\(list)/member", query: ["identifier": identifier]) as? [String: Any])?["member"] as? Bool
+        let path = "api/\(list)/member"
+        guard let member = (try listed(await PCReach.shared.read(path, query: ["identifier": identifier]), path) as? [String: Any])?["member"] as? Bool
         else { throw Failure(status: 0, message: "Download-list membership was not answered") }
         return member
     }
     static func exists(_ list: String, _ identifier: String) async throws -> Bool {
-        guard let exists = (try await request("api/\(list)/exists", query: ["identifier": identifier]) as? [String: Any])?["exists"] as? Bool
+        let path = "api/\(list)/exists"
+        guard let exists = (try listed(await PCReach.shared.read(path, query: ["identifier": identifier]), path) as? [String: Any])?["exists"] as? Bool
         else { throw Failure(status: 0, message: "The provider lookup was not answered") }
         return exists
     }
+    // Sent once, to the address that just answered the membership question (PCReach.write).
     static func change(_ list: String, _ identifier: String, add: Bool) async throws {
-        let result = try await request("api/\(list)/\(add ? "add" : "remove")", json: ["identifier": identifier]) as? [String: Any]
-        guard result?["success"] as? Bool == true else { throw Failure(status: 0, message: "Download-list update was not confirmed") }
+        let path = "api/\(list)/\(add ? "add" : "remove")"
+        let answer = try await PCReach.shared.write(path, json: JSONSerialization.data(withJSONObject: ["identifier": identifier]),
+                                                    probe: "api/\(list)/member", probeQuery: ["identifier": identifier])
+        guard (try listed(answer, path) as? [String: Any])?["success"] as? Bool == true
+        else { throw Failure(status: 0, message: "Download-list update was not confirmed") }
     }
 }
 

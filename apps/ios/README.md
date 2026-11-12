@@ -249,6 +249,17 @@ save cadence is unchanged; restoration does not add a faster timer.
     shared login automatically. Phone delivery failures retry without another password
     login; a valid retained phone session is preferred over creating a replacement.
   - The +/- button asks the PC's three download lists directly (`ViewerPC.swift`).
+  - Away from home the lists and Tango's **Log in from the PC** still work (`PCReach.swift`,
+    `TangoPCLogin.swift`): the home address `https://192.168.1.197:9999` is asked first for
+    2 s, then `https://pc-apps.veron3.space/video` (Hetzner; environment
+    `services/hetzner-pc`, "pc-apps"), which passes only `member`, `exists`, `add`, `remove`
+    and `phone-session` and asks for `X-PC-Apps-Key`. The key is staged from the PC's
+    `~/.local/share/hetzner-pc/keys/video-actions.key` into the ignored `Private/pc-apps-key`
+    (`scripts/private_inputs.py`) and built in as Info.plist `PCAppsKey` for Video Vault and
+    Tango; without it they are home-only. Home is skipped for 45 s after it failed. A status
+    from either address is final, and an add or remove is sent once, to the address that just
+    answered the membership question. Recordings (video, save, cut, return), the local apps
+    and the Safari extensions stay on the home network.
 - **Tango** (`VideoApp/TangoList.swift`) opens with its last list (`tango-list.json`) and
   asks Tango's gateway for a new one behind it: followed streams first, then
   recommendations, one per streamer, never blocked ones; the order then stays while
@@ -292,7 +303,7 @@ save cadence is unchanged; restoration does not add a faster timer.
     Keychain (service `TangoLogin`, account `session`, this device only); the app moves a
     confirmed import into its jar and empties the inbox. (Google refuses sign-in inside an
     app's web view, and no Apple API gives an app the cookies a site sets in Safari.)
-  - On the home network the login screen also offers **Log in from the PC**: the PC
+  - When the PC answers (at home, or away through its public address) the login screen also offers **Log in from the PC**: the PC
     (`POST /api/tango/phone-session`, packages/server, with the key built into the app from
     `Private/tango-phone-key`) signs in with a fresh browser profile
     (`packages/auth` `phoneSession.ts`), returns that new session and drops the profile, so

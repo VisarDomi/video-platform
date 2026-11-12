@@ -7,8 +7,12 @@ import KitNet
 // lost responses and app relaunch. The PC retains its answer until acknowledged.
 @MainActor
 final class TangoPCLogin {
-    nonisolated static let endpoints = ["https://192.168.1.197:9999", "https://z440.tailf47c4e.ts.net:9999"].map { URL(string: $0)! }
+    // The PC at home, and away from home through its public address, whose gateway asks for
+    // its own key (Info.plist PCAppsKey; environment services/hetzner-pc "pc-apps").
+    nonisolated static let endpoints = [URL(string: "https://192.168.1.197:9999")!]
+    nonisolated static let away = URL(string: "https://pc-apps.veron3.space/video")!
     private let bases: [URL]
+    private let gateway: (base: URL, key: String)?
     private let key: String
     private let http: HTTPClient
     private let pendingFile: URL?
@@ -19,20 +23,38 @@ final class TangoPCLogin {
     private var pending: Pending?
 
     init?(directory: URL? = nil, key supplied: String? = nil, endpoints: [URL] = TangoPCLogin.endpoints,
+          away: URL = TangoPCLogin.away, gatewayKey suppliedGateway: String? = nil,
           configure: (@Sendable (URLSessionConfiguration) -> Void)? = nil) {
         guard let key = supplied ?? Bundle.main.object(forInfoDictionaryKey: "TangoPhoneKey") as? String, !key.isEmpty else { return nil }
-        self.key = key; bases = endpoints
+        self.key = key
+        // Without the gateway's key the PC is asked at home only.
+        if let gatewayKey = suppliedGateway ?? Bundle.main.object(forInfoDictionaryKey: "PCAppsKey") as? String, !gatewayKey.isEmpty {
+            gateway = (away, gatewayKey); bases = endpoints + [away]
+        } else {
+            gateway = nil; bases = endpoints
+        }
         pendingFile = directory?.appendingPathComponent("tango-pc-request.json")
         pending = pendingFile.flatMap { try? DurableFile.readJSON(Pending.self, from: $0) }
         http = HTTPClient(.init(connectionsPerHost: 2, requestTimeout: 200, resourceTimeout: 220, configure: configure))
     }
 
+    // The phone's key for the PC, plus the gateway's key on the public address.
+    private func headers(_ base: URL, _ more: [String: String] = [:]) -> [String: String] {
+        Self.headers(base, key: key, gateway: gateway, more)
+    }
+    nonisolated private static func headers(_ base: URL, key: String, gateway: (base: URL, key: String)?, _ more: [String: String] = [:]) -> [String: String] {
+        var headers = more
+        headers["X-Phone-Key"] = key
+        if let gateway, gateway.base == base { headers["X-PC-Apps-Key"] = gateway.key }
+        return headers
+    }
+
     func available() async -> Bool {
-        let (http, key, bases) = (http, key, bases)
+        let (http, key, bases, gateway) = (http, key, bases, gateway)
         let endpoint = await withTaskGroup(of: URL?.self, returning: URL?.self) { group in
             for base in bases { group.addTask {
                 guard let response = try? await http.send(HTTPRequest(base.appendingPathComponent("api/tango/phone-session"),
-                    headers: ["X-Phone-Key": key], retry: .never, timeout: 3, accept: Set(300...599))), response.status == 200,
+                    headers: Self.headers(base, key: key, gateway: gateway), retry: .never, timeout: 3, accept: Set(300...599))), response.status == 200,
                       (try? response.json([String: Bool].self))?["available"] == true else { return nil }
                 return base
             } }
@@ -61,7 +83,7 @@ final class TangoPCLogin {
             pending = fresh
         }
         guard let pending, await available(), let selected else { throw TangoError.verificationRequired }
-        let headers = ["X-Phone-Key": key, "X-Phone-Request-ID": pending.id, "Content-Type": "application/json"]
+        let headers = headers(selected, ["X-Phone-Request-ID": pending.id, "Content-Type": "application/json"])
         // The persistent phone profile is the sole RT owner. Native credentials
         // are never sent back for another process to replay or overwrite it.
         let body = Data("{\"setup\":true}".utf8)
@@ -87,10 +109,10 @@ final class TangoPCLogin {
         self.pending = nil
         if let pendingFile { try? FileManager.default.removeItem(at: pendingFile) }
         guard let selected else { return }
-        let (http, key) = (http, key)
+        let (http, headers) = (http, headers(selected, ["X-Phone-Request-ID": pending.id]))
         Task {
             _ = try? await http.send(HTTPRequest(selected.appendingPathComponent("api/tango/phone-session"), method: "DELETE",
-                headers: ["X-Phone-Key": key, "X-Phone-Request-ID": pending.id], retry: .never, timeout: 5, accept: Set(300...599)))
+                headers: headers, retry: .never, timeout: 5, accept: Set(300...599)))
         }
     }
 }

@@ -21,7 +21,8 @@ for provider, product in json.loads((root / 'providers.json').read_text()).items
                      bundleIds=[product['bundleId']] + [product['bundleId'] + '.' + suffix for suffix in extensions],
                      inputs=['VideoApp', 'Shared', 'Kit', 'providers.json', 'scripts/project.py', 'scripts/build-provider.py']
                             + (['Login'] if 'Login' in extensions else []) + (['Extension'] if web else [])
-                            + (['Private'] if product.get('native') == 'tango' else [])
+                            + (['Private'] if product.get('native') == 'tango' else
+                               ['Private/pc-apps-key'] if product.get('native') else [])
                             + ['build/' + provider + '/' + suffix for suffix in web]
                             + (['Bunkr', 'ThirdParty/VLCKit', 'scripts/prepare-vlckit.py', 'ThirdParty/AetherCore',
                                 'ThirdParty/FFmpegBuild', 'ThirdParty/LibDovi', 'ThirdParty/OriginalDecoderLicenses',

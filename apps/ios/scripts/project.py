@@ -150,6 +150,10 @@ if config.get('native'):
     # The PC's Tango login for this phone needs its key (a private build input, never in Git).
     key = root/'Private'/'tango-phone-key'
     if config['native'] == 'tango' and key.exists(): info['TangoPhoneKey'] = key.read_text().strip()
+    # Away from home the download lists (and Tango's PC login) go through the PC's public
+    # address, which asks for this key (VideoApp/PCReach.swift). Private too; without it: home only.
+    apps_key = root/'Private'/'pc-apps-key'
+    if apps_key.exists(): info['PCAppsKey'] = apps_key.read_text().strip()
 else:
     info['NSLocalNetworkUsageDescription'] = 'Open your PC\'s ' + config['name'].removesuffix(' local') + ' videos on your home network.'
     # A native list on the PC's API (VideoApp/LocalList.swift) instead of the website.

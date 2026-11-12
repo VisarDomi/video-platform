@@ -35,4 +35,19 @@ class PrivateInputsTests(unittest.TestCase):
             self.assertEqual((data / 'tango-phone-key').read_bytes(), original)
 
 
+    def test_the_public_address_key_is_staged_for_apps_with_download_lists_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            app = Path(root) / 'app'; app.mkdir(); data = Path(root) / 'data'
+            key = Path(root) / 'video-actions.key'; key.write_text('k' * 43); key.chmod(0o600)
+            module.stage_private_inputs(app, {'bunkr': {}, 'tango': {}}, data, key)
+            self.assertFalse((app / 'Private').exists())
+            module.stage_private_inputs(app, {'vault': {'native': 'vault'}}, data, key)
+            self.assertEqual((app / 'Private/pc-apps-key').read_text(), 'k' * 43)
+            self.assertEqual((app / 'Private/pc-apps-key').stat().st_mode & 0o777, 0o600)
+            self.assertFalse((app / 'Private/tango-phone-key').exists())
+            (app / 'Private/pc-apps-key').unlink()
+            module.stage_private_inputs(app, {'vault': {'native': 'vault'}}, data, Path(root) / 'missing.key')
+            self.assertFalse((app / 'Private/pc-apps-key').exists())
+
+
 if __name__ == '__main__': unittest.main()
