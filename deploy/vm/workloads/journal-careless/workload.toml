@@ -1,5 +1,8 @@
+# The same as journal-careful except for the two classic mistakes: it
+# acknowledges a record before fsync, and it rewrites the state file in place
+# (truncate, then write). Expected to fail some cycles; that is the point.
 name = "journal-careless"
-description = "Append checksummed records and replace a state file, careless variant"
+description = "acknowledge before fsync; state rewritten in place"
 include = ["../shared/journal.py"]
 packages = ["python3"]
 setup = "python3 journal.py setup"

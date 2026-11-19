@@ -1,0 +1,18 @@
+{
+  "cache": "writeback",
+  "complete": true,
+  "cycles": 30,
+  "cycles_done": 30,
+  "error": 0,
+  "fail": 0,
+  "failed_cycles": [],
+  "max_ms": 5000,
+  "mean_acks": 629.57,
+  "mean_boot_s": 6.3,
+  "mean_cycle_s": 11.12,
+  "min_ms": 500,
+  "pass": 30,
+  "run": "20261119-124646-journal-careful-s101",
+  "seed": 101,
+  "workload": "journal-careful"
+}
