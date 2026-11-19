@@ -192,15 +192,15 @@ export class StreamDownloader {
 
         this.handle.update({ liveUrl });
 
-        const edgeMatch = liveUrl.match(/\/(b-hls-\d+)\//);
-        const edge = edgeMatch ? edgeMatch[1] : "unknown";
-        logger.debug(`[StreamDownloader] START ${alias} edge=${edge}`, {
+        // Which copy (CDN edge) serves this variant; null for single-copy sites.
+        const edge = this.provider.edgeOf?.(liveUrl) ?? null;
+        logger.debug(`[StreamDownloader] START ${alias} edge=${edge ?? "unknown"}`, {
             variant: this.provider.describeVariant?.(liveUrl) ?? null,
             variantPath: new URL(liveUrl).pathname,
         });
 
         let session = this.provider.createDownloadSession();
-        playlistManager.setEdge(liveUrl);
+        playlistManager.setEdge(edge);
 
         return await this.downloadLoop(alias, masterUrl, liveUrl, session, playlistManager, initTracker, disk);
     }
@@ -283,7 +283,7 @@ export class StreamDownloader {
         }
 
         const normalize = (url: string) =>
-            url.split("?")[0].replace(/cdnhost\.(org|com|net)/g, "cdnhost._");
+            this.provider.variantKey?.(url) ?? url.split("?")[0];
 
         if (normalize(betterUrl) === normalize(currentLiveUrl)) {
             logger.debug(`[StreamDownloader] ${alias} quality check: no change`);
@@ -370,11 +370,10 @@ export class StreamDownloader {
                 }
 
                 const oldEdge = playlistManager.timeline.edge;
-                const newEdgeMatch = recovered.match(/\/(b-hls-\d+)\//);
-                const newEdge = newEdgeMatch ? newEdgeMatch[1] : null;
+                const newEdge = this.provider.edgeOf?.(recovered) ?? null;
 
                 if (newEdge && newEdge !== oldEdge) {
-                    playlistManager.setEdge(recovered);
+                    playlistManager.setEdge(newEdge);
                     playlistManager.onEdgeSwitch(oldEdge, newEdge);
                     logger.debug(`[StreamDownloader] ${alias} EDGE-SWITCH ${oldEdge ?? "none"} → ${newEdge}`, {
                         variant: this.provider.describeVariant?.(recovered) ?? null,

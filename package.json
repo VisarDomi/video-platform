@@ -49,6 +49,7 @@
     },
     "workspaces": [
         "packages/shared",
+        "packages/sdk",
         "packages/auth",
         "packages/descriptor",
         "packages/pipeline",

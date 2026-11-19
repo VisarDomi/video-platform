@@ -348,10 +348,10 @@ export class PlaylistManager {
         this.baselineProviderSequence = providerSequence;
     }
 
-    public setEdge(variantUrl: string): void {
-        const edgeMatch = variantUrl.match(/\/(b-hls-\d+)\//);
-        if (edgeMatch) {
-            this._timeline.edge = edgeMatch[1];
+    // The copy (CDN edge) now being read, as the site names it; null keeps the current one.
+    public setEdge(edge: string | null): void {
+        if (edge) {
+            this._timeline.edge = edge;
         }
     }
 
