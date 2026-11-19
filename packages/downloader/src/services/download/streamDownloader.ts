@@ -112,7 +112,7 @@ export class StreamDownloader {
     }
 
     // A playlist request can stall for seconds while a fresh one answers at
-    // once, and for TsLive the stream token expires in flight. A second request
+    // once, and a short-lived stream token can expire in flight. A second request
     // starts if the first has not answered within PLAYLIST_HEDGE_MS; the first
     // answer is used and the other request is aborted.
     private async fetchPlaylist(session: IDownloadSession, url: string): Promise<string | null> {

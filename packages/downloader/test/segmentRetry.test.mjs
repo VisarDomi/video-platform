@@ -8,7 +8,7 @@ import { PlaylistManager } from '../dist/services/download/playlistManager.js';
 import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
 import { AccessIncidentTracker } from '../dist/services/download/accessIncidentTracker.js';
-import { ApiClient } from '../dist/services/tslive/api/apiClient.js';
+import { validateTsSegment } from './helpers/tsValidator.mjs';
 import { PlaylistNotFoundError } from '../dist/services/core/playlistNotFoundError.js';
 
 const playlist = '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:1,\na.ts\n#EXTINF:1,\nb.ts\n#EXT-X-ENDLIST\n';
@@ -24,7 +24,7 @@ async function fixture(t, fetchSegment) {
         providerName: 'tslive', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist: async () => playlist, fetchSegment }),
-        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+        validateSegment: validateTsSegment,
     };
     const downloader = new StreamDownloader(handle, provider, new AccessIncidentTracker());
     return { root, disk, manager, tracker, downloader, provider,
@@ -79,7 +79,7 @@ test('a slow segment does not stop polling: media listed meanwhile is saved, not
         providerName: 'tslive', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
-        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+        validateSegment: validateTsSegment,
     };
     const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
         .run('https://example.test/master.m3u8', manager, tracker, disk);
@@ -109,28 +109,13 @@ test('a playlist that ends while a slow segment downloads still saves that segme
         providerName: 'tslive', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
-        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+        validateSegment: validateTsSegment,
     };
     const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
         .run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk);
     assert.equal(result.exitReason, 'playlist-not-found');
     const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
     assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)), ['10.ts', '11.ts']);
-});
-
-test('HTTP 429 is retried like a network error; other HTTP errors end the attempt', async (t) => {
-    const { ScClient } = await import('../dist/services/fmp4/api/scClient.js');
-    let status = 429;
-    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status }));
-    const fmp4 = new ScClient().createDownloadSession();
-    assert.deepEqual(await fmp4.fetchSegment('https://example.test/a.ts'), { data: null, retryable: true, status: 429 });
-    status = 404;
-    assert.deepEqual(await fmp4.fetchSegment('https://example.test/a.ts'), { data: null, retryable: false, status: 404 });
-    const tslive = new ApiClient(async () => ({})).createDownloadSession();
-    status = 429;
-    assert.equal((await tslive.fetchSegment('https://example.test/a.ts')).retryable, true);
-    status = 403;
-    assert.equal((await tslive.fetchSegment('https://example.test/a.ts')).retryable, false);
 });
 
 test('a rate-limited playlist is polled again without variant recovery', { timeout: 15000 }, async (t) => {
@@ -155,7 +140,7 @@ test('a rate-limited playlist is polled again without variant recovery', { timeo
             getLastPlaylistFailure: () => lastFailure,
             fetchSegment: async url => ({ data: Buffer.from(`unprobeable media: ${url}`) }),
         }),
-        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+        validateSegment: validateTsSegment,
     };
     const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
         .run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk);
@@ -266,19 +251,6 @@ test('a terminal segment failure cancels unused requests before the recording re
     assert.ok(Date.now()-begin<700,'unused network work delayed the next capture attempt');
     assert.equal(f.disk.materialized,false);
     assert.deepEqual((await f.manager.identifyNewSegments(playlist,line=>line)).map(s=>s.providerSequence),[10,11]);
-});
-
-test('FMP4 segment cancellation reaches the HTTP request instead of waiting for its timeout',async t=>{
-    const {ScClient}=await import('../dist/services/fmp4/api/scClient.js');
-    let requestSignal;
-    t.mock.method(globalThis,'fetch',async(_url,options)=>{
-        requestSignal=options.signal;
-        return await new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('cancelled','AbortError')),{once:true}));
-    });
-    const controller=new AbortController();
-    const pending=new ScClient().createDownloadSession().fetchSegment('https://example.test/segment.ts',controller.signal);
-    controller.abort();const result=await pending;
-    assert.equal(requestSignal.aborted,true);assert.equal(result.data,null);assert.equal(result.retryable,true);
 });
 
 test('a media flush failure keeps received bytes but cannot commit a playlist entry',async t=>{

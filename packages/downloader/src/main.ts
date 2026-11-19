@@ -17,4 +17,10 @@ async function main() {
     await downloaderService.start();
 }
 
-void main();
+// A startup failure (a missing or invalid sites file, a plug-in that does not load) is
+// fatal: the service exits non-zero and systemd retries it.
+main().catch((error: any) => {
+    logger.error(`[General] Startup failed: ${error?.message ?? String(error)}`);
+    process.exitCode = 1;
+    setTimeout(() => process.exit(1), 1_000).unref();
+});

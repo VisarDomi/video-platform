@@ -1,59 +1,28 @@
 import logger from "../common/logger.js";
 import { DownloadsManager } from "./state/downloadsManager.js";
-
-import { ApiClient } from "./tslive/api/apiClient.js";
-import { StreamDiscoveryService } from "./tslive/discovery/streamDiscoveryService.js";
-import { TsLiveTargetManager } from "./tslive/discovery/targetManager.js";
-
-import { createLadderTargetManager } from "./ladder/discovery/targetManager.js";
-import { LadderClient } from "./ladder/api/ladderClient.js";
-import { LadderDiscoveryService } from "./ladder/discovery/discoveryService.js";
-
-import { ScTargetManager } from "./fmp4/discovery/targetManager.js";
-import { ScClient } from "./fmp4/api/scClient.js";
-import { ScDiscoveryService } from "./fmp4/discovery/discoveryService.js";
+import { DiscoveryLoop } from "./common/discoveryLoop.js";
+import { TargetManager } from "./common/targetManager.js";
+import { loadCaptureSites } from "./sites.js";
 
 export class DownloaderService {
-    private streamDiscoveryService: StreamDiscoveryService;
-    private ladderDiscoveryService: LadderDiscoveryService;
-    private scDiscoveryService: ScDiscoveryService;
-    private downloadsManager: DownloadsManager;
-
     private constructor(
-        streamDiscoveryService: StreamDiscoveryService,
-        ladderDiscoveryService: LadderDiscoveryService,
-        scDiscoveryService: ScDiscoveryService,
-        downloadsManager: DownloadsManager,
+        private readonly loops: DiscoveryLoop[],
+        private readonly downloadsManager: DownloadsManager,
     ) {
-        this.streamDiscoveryService = streamDiscoveryService;
-        this.ladderDiscoveryService = ladderDiscoveryService;
-        this.scDiscoveryService = scDiscoveryService;
-        this.downloadsManager = downloadsManager;
         logger.debug("[General] DownloaderService initialized.");
     }
 
+    // Loads the sites named in the sites file and reads each one's download list.
     public static async create(): Promise<DownloaderService> {
+        const sites = await loadCaptureSites();
         const downloadsManager = await DownloadsManager.create();
-
-        const apiClient = new ApiClient();
-        const tsliveTargetManager = TsLiveTargetManager.create();
-        const streamDiscoveryService = new StreamDiscoveryService(apiClient, tsliveTargetManager, downloadsManager);
-
-        const ladderTargetManager = createLadderTargetManager();
-        const ladderClient = new LadderClient();
-        const ladderDiscoveryService = new LadderDiscoveryService(ladderTargetManager, ladderClient, downloadsManager);
-
-        const scTargetManager = ScTargetManager.create();
-        const scClient = new ScClient();
-        await scClient.init();
-        const scDiscoveryService = new ScDiscoveryService(scTargetManager, scClient, downloadsManager);
-
-        return new DownloaderService(
-            streamDiscoveryService,
-            ladderDiscoveryService,
-            scDiscoveryService,
+        const loops = sites.map((site) => new DiscoveryLoop(
+            site,
+            site.capture,
+            TargetManager.create({ filePath: site.downloadList, catalog: site.catalog, log: site.log }),
             downloadsManager,
-        );
+        ));
+        return new DownloaderService(loops, downloadsManager);
     }
 
     public async shutdown(): Promise<void> {
@@ -62,11 +31,6 @@ export class DownloaderService {
 
     public async start() {
         logger.info("[General] Starting all services...");
-
-        void this.streamDiscoveryService.start();
-
-        this.ladderDiscoveryService.start();
-
-        this.scDiscoveryService.start();
+        for (const loop of this.loops) void loop.start();
     }
 }

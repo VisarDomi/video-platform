@@ -205,15 +205,22 @@ offline.
 
 ## Discovery normalizes to session candidates
 
-Provider discovery code owns only provider-specific knowledge: target parsing,
-status APIs, public/paid rules, stream-name refresh, and master URL derivation.
-Once a provider has a candidate (`streamerId`, `alias`, `recordingId`,
-`masterPlaylistUrl`, optional resume folder), `startStreamSession` owns the
-common lifecycle: add to `DownloadsManager`, create `StreamSession`, register
-abort/finalize/completion, and update zero-segment cooldown state.
+Sites are plug-ins (`private/plugins/<site>` for the real ones). A site owns only
+its own knowledge: the list line format (`catalog.parseTargetLine`), its status
+API and cadence (`capture.lookup`, `pollIntervalMs`, `pollFromStart`), public/paid
+rules, identity refresh, and master URL derivation (`capture.resolveMaster`, called
+just before a capture starts). One generic `DiscoveryLoop` per site owns the rest:
+reading the list (`TargetManager`), ending removed targets' sessions, reconciling
+with the folders on disk, the 60 s terminal rule, cooldowns, the "a new recording
+identity replaces the running session" rule (TsLive's before the move; every site's
+now), and starting sessions. Once the loop has a candidate (`streamerId`, `alias`,
+`recordingId`, `masterPlaylistUrl`, optional resume folder), `startStreamSession`
+owns the common lifecycle: add to `DownloadsManager`, create `StreamSession`,
+register abort/finalize/completion, and update zero-segment cooldown state.
 
 **Why:** One writer for download lifecycle registration keeps logs and
-cooldowns consistent across providers.
+cooldowns consistent across providers, and a new site cannot weaken a session
+rule.
 
 ## Download loop: only the loop changes its state
 
@@ -381,8 +388,10 @@ unavailable without payment.
 
 ## No token cache: read from disk on every request
 
-The TsLive client reads tokens through `readTokens()` (`packages/shared`), which
-reads the session file on every call. There is no watcher and no cache.
+The TsLive client reads tokens through its plug-in's `readTokens()`
+(`private/plugins/tslive/src/tokens.ts`, the same file and fields as
+`packages/shared`'s, which the server still uses), which reads the session file on
+every call. There is no watcher and no cache.
 
 **Why:** Stream tokens live 10 seconds and are refreshed every 5. Any cache age
 is subtracted from the time left for the request; a disk read is cheap next to
@@ -390,7 +399,9 @@ the network fetch that follows.
 
 ## Named timing constants
 
-Loop and polling timings are named constants in `src/common/timing.ts`.
+Loop and polling timings are named constants in `src/common/timing.ts`; each
+site's own timings (discovery cadence, handshake timeouts) are named in its
+plug-in's `src/timing.ts`.
 Thresholds that belong to one rule are named next to it
 (`SEQUENCE_RESTART_MARGIN_SEGMENTS`, `EDGE_DEDUP_MAX_OVERLAP_MS`,
 `REJECTED_SEGMENT_MAX_ATTEMPTS`, the reconciler's `TERMINAL_CONFIRMATION_MS`).
