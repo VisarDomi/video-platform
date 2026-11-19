@@ -13,6 +13,8 @@
 //       MPEG-TS geometry via ffprobe, for validateSegment
 //   inspectFragment, dropZeroSizeSamples
 //       fMP4 fragment index checks and the zero-size sample repair
+//   targetMembershipIdentifiers
+//       every name a listed target answers to (ID, label, former names)
 
 export { CDN_FETCH_TIMEOUT_MS, requestSignal, resolveSegmentUrl } from "./http.js";
 export { PlaylistNotFoundError } from "./playlistNotFoundError.js";
@@ -20,3 +22,4 @@ export { formatTimestampForPath, normalizeRecordingId } from "./recordingId.js";
 export { probeSegmentDimensions } from "./segmentDimensions.js";
 export { dropZeroSizeSamples, inspectFragment } from "./fmp4Fragment.js";
 export type { FragmentInspection, FragmentRepair } from "./fmp4Fragment.js";
+export { targetMembershipIdentifiers } from "./targets.js";

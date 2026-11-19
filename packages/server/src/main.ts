@@ -8,12 +8,10 @@ import logger from "./core/logger.js";
 import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
-import ladderRouter from "./api/providers/ladder.routes.js";
-import scRouter from "./api/providers/fmp4.routes.js";
-import tsliveRouter from "./api/providers/tslive.routes.js";
+import { createListRoutes } from "./api/providers/list-routes.js";
 import { createPhoneSessionRoutes } from "./api/providers/phone-session.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
-import { startScAliasRefresh } from "./services/scAliasRefreshService.js";
+import { loadServerSites } from "./sites.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
 import { startLibraryIndexes } from "./services/video/library-index.js";
@@ -47,15 +45,21 @@ async function startServer() {
     process.exit(1);
   }
 
-  startAliasRefresh();
-  startScAliasRefresh();
+  // Every site in the sites file; a missing or invalid file stops the server here.
+  const sites = await loadServerSites();
+  const listSites = sites.flatMap((site) => site.instance.catalog
+    ? [{ id: site.id, label: site.label, log: site.context.log, listPath: site.context.paths.downloadList, catalog: site.instance.catalog }]
+    : []);
+
+  startAliasRefresh(listSites);
   startMediaIntegrityFinalizer();
   startDiskSpaceMonitor();
   startLibraryIndexes();
 
-  app.use("/", ladderRouter);
-  app.use("/", scRouter);
-  app.use("/", tsliveRouter);
+  // /api/<site>/{list,add,remove,member,exists,resolve} for every site with a catalog.
+  for (const site of listSites) {
+    app.use("/", createListRoutes({ id: site.id, filePath: site.listPath, catalog: site.catalog }));
+  }
   app.use("/", createPhoneSessionRoutes());
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);

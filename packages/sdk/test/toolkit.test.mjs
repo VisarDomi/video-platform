@@ -7,6 +7,8 @@ import {
     PlaylistNotFoundError,
     requestSignal,
     resolveSegmentUrl,
+    targetKey,
+    targetMembershipIdentifiers,
 } from "../dist/index.js";
 
 test("the shared request timeout stays 30 s", () => {
@@ -53,4 +55,18 @@ test("a missing playlist is recognized by brand, also from another copy of the c
     assert.ok(foreign instanceof PlaylistNotFoundError);
     assert.ok(!(new Error("x") instanceof PlaylistNotFoundError));
     assert.ok(!(null instanceof PlaylistNotFoundError));
+});
+
+// Moved from shared/test/pins.test.mjs with the same assertion (the helper moved here so
+// the core and the catalogs share it).
+test("pin: the names a listed target answers to: ID, label, former names, trimmed, unique", () => {
+    const fmp4 = { id: "20000002", label: "synthetic_room" };
+    assert.deepEqual(targetMembershipIdentifiers(fmp4, [" old_room ", "synthetic_room", ""]),
+        ["20000002", "synthetic_room", "old_room"]);
+    assert.deepEqual(targetMembershipIdentifiers(fmp4), ["20000002", "synthetic_room"]);
+});
+
+test("a list knows an entry by its ID, or by its label while it has none", () => {
+    assert.equal(targetKey({ id: "20000002", label: "synthetic_room" }), "20000002");
+    assert.equal(targetKey({ id: "", label: "unresolved" }), "unresolved");
 });

@@ -12,6 +12,7 @@
         "typescript": "^5.4.5"
     },
     "dependencies": {
+        "sdk": "1.0.0",
         "winston": "^3.19.0"
     }
 }

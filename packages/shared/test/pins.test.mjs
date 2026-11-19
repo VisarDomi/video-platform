@@ -2,8 +2,11 @@
 // Change them only on purpose:
 //   - the TsLive token file: a different path or field name turns every TsLive
 //     playlist request into a 401 loop;
-//   - list line formats and the recording identity: they decide which streamer a
-//     folder belongs to and which list line a target is written as;
+//   - the recording identity: it decides which streamer a folder belongs to (the
+//     list line formats and source links moved with the site catalogs: they are
+//     pinned in private/test/pinsListsAndTokens.test.mjs, the pipeline's copy of the
+//     source links in pipeline/test/sourceLinks.test.mjs, and
+//     targetMembershipIdentifiers in sdk/test/toolkit.test.mjs);
 //   - the active destination's limits.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -22,9 +25,6 @@ process.env.HOME = home;
 process.env.VIDEO_SERVICES_DATA_ROOT = otherDataRoot;
 const {
     readTokens,
-    formatStreamerTarget,
-    streamerSourceLinks,
-    targetMembershipIdentifiers,
     extractRecordingIdentifier,
     PROVIDER_UPLOAD_POLICIES,
     UPLOAD_PROVIDER_PLAN,
@@ -89,23 +89,6 @@ test("pin: readTokens field mapping (tsliveST, tt, ttu, tte, lastWriteMs)", asyn
     assert.deepEqual(await readTokens(), empty);
     await rm(file);
     assert.deepEqual(await readTokens(), empty);
-});
-
-test("pin: download-list line format and source links per site", () => {
-    const tslive = { provider: "tslive", id: "acct123", label: "synthetic_alias" };
-    const ladder = { provider: "ladder", id: "10000001", label: "10000001" };
-    const fmp4 = { provider: "fmp4", id: "20000002", label: "synthetic_room" };
-    assert.equal(formatStreamerTarget(tslive), "https://ts-live.example/acct123 synthetic_alias");
-    assert.equal(formatStreamerTarget(ladder), "https://ladder-live.example/10000001/");
-    assert.equal(formatStreamerTarget(fmp4), "https://fmp4-live.example/synthetic_room 20000002");
-    assert.deepEqual(streamerSourceLinks(tslive), {
-        streamerUrl: "https://ts-live.example/acct123", aliasUrl: "https://ts-live.example/synthetic_alias" });
-    assert.deepEqual(streamerSourceLinks({ ...tslive, label: "acct123" }), { streamerUrl: "https://ts-live.example/acct123", aliasUrl: null });
-    assert.deepEqual(streamerSourceLinks(ladder), { streamerUrl: "https://ladder-live.example/10000001/", aliasUrl: null });
-    assert.deepEqual(streamerSourceLinks(fmp4), {
-        streamerUrl: "https://fmp4-live.example/20000002", aliasUrl: "https://fmp4-live.example/synthetic_room" });
-    assert.deepEqual(targetMembershipIdentifiers(fmp4, [" old_room ", "synthetic_room", ""]),
-        ["20000002", "synthetic_room", "old_room"]);
 });
 
 test("pin: the recording identity is everything after the folder's date and time", () => {

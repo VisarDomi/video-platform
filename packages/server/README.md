@@ -18,7 +18,11 @@ recordings handed off through `.pending`, and non-download operational logic.
     without a revision, of another epoch (the server restarted) or too far behind gets
     `{ epoch, revision, videos }` instead. The iPhone local apps keep their list this way.
   - Edits and moves through the API refresh the index before answering.
-- Download list endpoints (`provider` is `tslive`, `ladder`, or `fmp4`):
+- Download list endpoints, one set per site in the sites file that has a catalog
+  (`provider` is the site ID: `tslive`, `ladder` or `fmp4` in production). The core serves
+  them (`src/api/providers/list-routes.ts`) and owns the list file; each site's plug-in
+  catalog (`private/plugins/<site>/src/catalog.ts`) parses and formats its lines with
+  the same parser the downloader records from, and knows the site:
   - `POST /api/{provider}/add` with `{ identifier }`
   - `POST /api/{provider}/remove` with `{ identifier }`
   - `GET /api/{provider}/list`

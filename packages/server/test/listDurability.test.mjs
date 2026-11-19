@@ -5,28 +5,28 @@ import path from "node:path";
 import test from "node:test";
 import express from "express";
 import { createListRoutes } from "../dist/api/providers/list-routes.js";
-import { mutateTextFile } from "../dist/core/durableFile.js";
-import { syncScTxtAliases } from "../dist/services/scAliasRefreshService.js";
 import { acquireLock } from "../dist/services/fileLock.js";
 
 async function listServer(t, filePath, resolveDelayMs) {
-    const adapter = {
-        name: "demo",
+    const site = {
+        id: "demo",
         filePath,
-        parseLine: (line) => {
-            const [id, label] = line.trim().split(/\s+/);
-            return id && !id.startsWith("#") ? { id, label: label ?? id } : null;
+        catalog: {
+            parseTargetLine: (line) => {
+                const [id, label] = line.trim().split(/\s+/);
+                return id && !id.startsWith("#") ? { id, label: label ?? id } : null;
+            },
+            // A provider lookup takes a while, as the real ones do over the network.
+            resolveIdentifier: async (input) => {
+                await new Promise((resolve) => setTimeout(resolve, resolveDelayMs(input)));
+                return { id: input, label: `${input}-label` };
+            },
+            formatTargetLine: (entry) => `${entry.id} ${entry.label}`,
         },
-        // A provider lookup takes a while, as the real ones do over the network.
-        resolveIdentifier: async (input) => {
-            await new Promise((resolve) => setTimeout(resolve, resolveDelayMs(input)));
-            return { id: input, label: `${input}-label` };
-        },
-        formatEntry: (entry) => `${entry.id} ${entry.label}`,
     };
     const app = express();
     app.use(express.json());
-    app.use(createListRoutes(adapter));
+    app.use(createListRoutes(site));
     const server = app.listen(0, "127.0.0.1");
     t.after(() => new Promise((resolve) => server.close(resolve)));
     await new Promise((resolve) => server.once("listening", resolve));
@@ -78,26 +78,7 @@ test("a list write replaces the file instead of rewriting it in place", async (t
     assert.equal(await readFile(filePath, "utf-8"), "\nfirst first-label\nsecond second-label\n");
 });
 
-test("the FMP4 alias refresh keeps entries added while usernames were being fetched", async (t) => {
-    const dir = await mkdtemp(path.join(tmpdir(), "fmp4-alias-"));
-    t.after(() => rm(dir, { recursive: true, force: true }));
-    const filePath = path.join(dir, "fmp4.txt");
-    await writeFile(filePath, "https://fmp4-live.example/oldname 111\n");
-
-    await syncScTxtAliases(filePath, async () => {
-        // The +/- routes add a room while the refresh waits on the network.
-        await mutateTextFile(filePath, (current) => ({
-            next: `${current}https://fmp4-live.example/newcomer 222\n`,
-            result: undefined,
-        }));
-        return new Map([["111", "renamed"]]);
-    });
-
-    assert.equal(
-        await readFile(filePath, "utf-8"),
-        "https://fmp4-live.example/renamed 111\nhttps://fmp4-live.example/newcomer 222\n",
-    );
-});
+// The FMP4 alias refresh test moved to private/test/aliasRefresh.test.mjs.
 
 test("a lock left without a holder by a power cut is taken over once stale", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "lock-"));

@@ -1,6 +1,7 @@
 import https from "node:https";
 import path from "node:path";
-import { extractRecordingIdentifier, streamerSourceLinks, type StreamProvider } from "shared";
+import { extractRecordingIdentifier } from "shared";
+import { streamerSourceLinks, type StreamProvider } from "./sourceLinks.js";
 import type { RecordingInput, RecordingProvenance } from "../domain/types.js";
 
 // Recording provenance is resolved by the SERVER's own per-provider capability

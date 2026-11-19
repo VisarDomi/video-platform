@@ -14,6 +14,10 @@ export interface Logger {
     info(message: string, meta?: Record<string, unknown>): void;
     warn(message: string, meta?: Record<string, unknown>): void;
     error(message: string, meta?: Record<string, unknown>): void;
+    // The same logger with another tag in place of the site's label ("[<tag>] ..."), for
+    // the few monitored lines whose prefix is not the label. Hosts provide it; a plug-in
+    // falls back to its own logger when it is missing (e.g. in a test).
+    tagged?(tag: string): Logger;
 }
 
 export interface Clock {
@@ -36,6 +40,9 @@ export interface PluginContext {
     paths: PluginPaths;
     log: Logger;
     clock: Clock;
+    // The core's alias registry, in hosts that keep one (the server). Catalogs that find
+    // targets by a former name read and extend it.
+    aliases?: AliasBook;
 }
 
 export interface SitePlugin {
@@ -79,17 +86,56 @@ export interface Target {
     label: string;
 }
 
+// How a list knows an entry: by its ID, or by its label while it has none.
+export function targetKey(target: Target): string {
+    return target.id || target.label;
+}
+
 // ---- Catalog: download lists and identity ---------------------------------------
 
 export interface AliasHistory {
     current: string;
+    // Former names, oldest first.
     history: string[];
 }
 
+// The core's alias registry: every name an ID has been seen under, kept durable by the
+// core (one file for the deployment). Catalogs that resolve former names use it.
+export interface AliasBook {
+    // The ID's current name, if known.
+    current(id: string): string | undefined;
+    // The ID a current or former name belongs to, if known.
+    idForName(name: string): string | undefined;
+    // Every known name of the ID, oldest first and the current one last.
+    names(id: string): string[] | undefined;
+    // Merges names just read from the site; true when anything changed. Durable when it
+    // resolves.
+    record(id: string, aliases: AliasHistory): Promise<boolean>;
+}
+
+// A periodic refresh of the listed targets' names. The core runs it (at start, then
+// every intervalMs), keeps the alias registry and rewrites the list atomically: every
+// line whose ID has a new current name is written again with formatTargetLine.
+export interface AliasRefresh {
+    intervalMs: number;
+    // true: the names go into the core's alias registry, history included, and the list
+    // takes each ID's current name from the registry. Otherwise the list takes the names
+    // this refresh returned, and nothing else is kept.
+    keepHistory?: boolean;
+    // The IDs to refresh, given the list's own (in list order, repeats kept). Default:
+    // the list's.
+    ids?(listed: string[]): Promise<string[]>;
+    // The names of the IDs the site could look up; IDs it could not are left out.
+    run(ids: string[]): Promise<Map<string, AliasHistory>>;
+}
+
 export interface Catalog {
-    // The one parser of a download-list line (comments and blanks return null). It may
-    // warn through ctx.log about a malformed line; it has no other side effects.
-    parseTargetLine(line: string): Target | null;
+    // The one parser of a download-list line, shared by every reader of the list
+    // (comments and blanks return null). A reader that logs list problems passes warn,
+    // which gets a note about a malformed or incomplete line; others parse silently.
+    // Pure otherwise.
+    parseTargetLine(line: string, warn?: (message: string) => void): Target | null;
+    // A new line for a target. The bytes are pinned: other programs read the lists.
     formatTargetLine(target: Target): string;
     // The comment a new, empty download list starts with.
     listHeader?: string;
@@ -101,24 +147,27 @@ export interface Catalog {
     // How an entry is named in those log lines. Default: "<label> (<id>)".
     describeTarget?(target: Target): string;
 
-    // The server side of the catalog. Optional until the server reads its lists through
-    // the catalog (it keeps its own parsers for now).
+    // The server side: the core serves /api/<site>/{list,add,remove,member,exists,resolve}
+    // from these, and owns the list file and its serialized, atomic rewrites.
 
-    // Resolves user input (an ID, a name, a page URL) through the site.
+    // Resolves user input (an ID, a name, a page URL) through the site to the target it
+    // names, or null.
     resolveIdentifier?(input: string): Promise<Target | null>;
-    // Runs before a target is added to the list (e.g. follow the account).
+    // Runs before a target is added to the list (e.g. follow the account). A throw
+    // leaves the list unchanged.
     beforeAdd?(target: Target): Promise<void>;
     // Whether the site itself has this name, listed or not; throws when it cannot say.
     exists?(identifier: string): Promise<boolean>;
-    // The listed ID a name belongs to, so names used before a rename still match.
-    resolveForRemove?(identifier: string): Promise<string> | string;
-    // Extra list rows for clients (e.g. historical aliases next to each ID).
-    enrichList?(targets: Target[]): string[];
-    sourceLinks?(target: Target): { channelUrl?: string; aliasUrl?: string };
-    refreshAliases?: {
-        intervalMs: number;
-        run(ids: string[]): Promise<Map<string, AliasHistory>>;
-    };
+    // The listed key (ID, or label for an entry without one) a name belongs to, so names
+    // used before a rename still match. `listed` is the list as it is now. Default: the
+    // name itself.
+    resolveForRemove?(identifier: string, listed: readonly Target[]): Promise<string> | string;
+    // The list as clients get it (e.g. IDs, labels and former names). Default: the labels.
+    enrichList?(listed: readonly Target[]): string[];
+    // The site's pages for a target: its channel and, when the label is a name of its
+    // own, the page under that name.
+    sourceLinks?(target: Target): { channelUrl: string; aliasUrl: string | null };
+    refreshAliases?: AliasRefresh;
 }
 
 // ---- Live capture -------------------------------------------------------------------

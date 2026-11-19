@@ -26,6 +26,8 @@ export class TargetManager {
     private readonly log: Logger;
     private debounceTimer: NodeJS.Timeout | null = null;
     private watcher: fs.FSWatcher | null = null;
+    // The catalog's notes about malformed or incomplete lines go to the site's log.
+    private readonly warn = (message: string) => this.log.warn(message);
 
     private constructor(options: TargetManagerOptions) {
         this.filePath = options.filePath;
@@ -73,7 +75,7 @@ export class TargetManager {
             for (const line of content.split("\n")) {
                 const trimmed = line.trim();
                 if (!trimmed || trimmed.startsWith("#")) continue;
-                const target = this.catalog.parseTargetLine(trimmed);
+                const target = this.catalog.parseTargetLine(trimmed, this.warn);
                 if (target) next.set(target.id || target.label, target);
             }
 
