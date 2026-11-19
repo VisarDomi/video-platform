@@ -6,7 +6,7 @@ import { nativeMediaRuns, parseNativeMediaPlaylist, renderNativeMediaRun, moveTo
     type NativeMediaSegment } from "shared";
 
 import { FILE_NAMES, HLS, MISC } from "../../core/constants.js";
-import { FINALIZATION_DB_PATH, getProviderPaths } from "../../core/config.js";
+import { FINALIZATION_DB_PATH, getAllProviders, getProviderPaths } from "../../core/config.js";
 import logger from "../../core/logger.js";
 import { FinalizationCheckpointStore, playlistFingerprint } from "./finalizationCheckpointStore.js";
 import { processFinalizedRecording } from "./finalizedRecordingProcessor.js";
@@ -22,7 +22,6 @@ const QUEUE_COOLDOWN_MS = 15_000;
 const QUEUE_WORKER_COUNT = os.availableParallelism();
 const DEEP_SCAN_CHECKPOINT_INTERVAL = 25;
 const MAX_CAPTURED_STDERR_BYTES = 16_384;
-const SUPPORTED_PROVIDERS = ["tslive", "ladder", "fmp4"];
 const IGNORED_NULL_MUXER_ERROR = "Application provided invalid, non monotonically increasing dts to muxer";
 // Revision 4: validation is non-destructive. Media damage never blocks
 // publication; it is reported as warnings on a "ready" report. "failed" is
@@ -718,8 +717,9 @@ async function isPendingCandidate(streamPath: string): Promise<boolean> {
 function pendingRoots(): string[] {
     // .pending is capture-only: edited recordings publish directly (their
     // kept segments were already validated at capture), so only the
-    // downloaded handoff roots flow through media validation.
-    return SUPPORTED_PROVIDERS.flatMap((provider) => {
+    // downloaded handoff roots flow through media validation. One per capture site in
+    // the sites file.
+    return getAllProviders().flatMap((provider) => {
         const paths = getProviderPaths(provider);
         return [pendingRoot(paths.downloaded)];
     });
@@ -841,8 +841,8 @@ export function startMediaIntegrityFinalizer(): void {
                 ? { warnings: warnings.map((warning) => ({ kind: warning.kind, message: warning.message, count: warning.names?.length ?? 0 })) }
                 : {}),
         };
-        // A few damaged segments are the stream's own (TsLive sends some in most
-        // recordings) and need nothing: an info line. Any other finding, or damage
+        // A few damaged segments are the stream's own (a production site sends some in
+        // most recordings) and need nothing: an info line. Any other finding, or damage
         // beyond MINOR_DAMAGE_FRACTION, is a warning.
         const damaged = warnings.find((warning) => warning.kind === "damaged-segments")?.names?.length ?? 0;
         const notable = warnings.some((warning) => warning.kind !== "decoder-boundary-split" && warning.kind !== "damaged-segments")

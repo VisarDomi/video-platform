@@ -5,6 +5,10 @@
 // - A `private/plugins/*/src` file imports only `sdk`, `node:*` built-ins, its own files
 //   (relative paths inside the plug-in) and the runtime dependencies its package.json
 //   declares.
+// - The server and the auth daemon reach other packages by name only (no path into a
+//   package's files or build output; the phone setup used to import auth's dist by path).
+//   Which site names their sources may still contain is checked with the private word
+//   list in private/test/coreSiteNames.test.mjs.
 //
 // The private plug-ins leave this repository later; their half of the check then has
 // nothing to scan.
@@ -100,6 +104,38 @@ test('no core package source imports a plug-in or anything under private/', () =
     assert.deepEqual(violations, []);
 });
 
+// Why a source file of a service that loads its sites from the registry (the server, the
+// auth daemon) may not import this specifier, or null: other packages are reached by
+// name (their package root), never by a path into their files or their build output.
+export function servicePackageViolation(file, specifier, packageRoot) {
+    if (isRelative(specifier)) {
+        return inside(packageRoot, path.resolve(path.dirname(file), specifier)) ? null : 'reaches into another package by path';
+    }
+    if (path.isAbsolute(specifier)) return 'imports an absolute path';
+    const name = packageName(specifier);
+    if (specifier !== name && /^(sdk|shared|auth|server|downloader|pipeline|descriptor|app)$/.test(name)) {
+        return `imports ${specifier}, a path inside another workspace package`;
+    }
+    return null;
+}
+
+test('the server and the auth daemon reach other packages only by name, never by path', () => {
+    const violations = [];
+    let scanned = 0;
+    for (const name of ['server', 'auth']) {
+        const packageRoot = path.join(ROOT, 'packages', name);
+        for (const file of sourceFiles(path.join(packageRoot, 'src'))) {
+            scanned++;
+            for (const specifier of importSpecifiers(readFileSync(file, 'utf8'))) {
+                const why = servicePackageViolation(file, specifier, packageRoot);
+                if (why) violations.push(`${path.relative(ROOT, file)}: ${why} (${specifier})`);
+            }
+        }
+    }
+    assert.ok(scanned > 40, `only ${scanned} server and auth source files found under ${ROOT}`);
+    assert.deepEqual(violations, []);
+});
+
 test('plug-in sources import only sdk, node: built-ins, their own files and declared dependencies', () => {
     const violations = [];
     for (const pluginRoot of subdirectories(path.join(ROOT, 'private', 'plugins'))) {
@@ -133,6 +169,15 @@ test('the checks catch what they forbid', () => {
     assert.match(coreViolation(core, '/repo/private/config/sites.json', root), /private/);
     assert.equal(coreViolation(core, 'sdk', root), null);
     assert.equal(coreViolation(core, '../common/logger.js', root), null);
+
+    const server = '/repo/packages/server';
+    const route = `${server}/src/api/providers/phone-session.routes.ts`;
+    assert.match(servicePackageViolation(route, '../../../../auth/dist/phoneBrowserSession.js', server), /another package by path/);
+    assert.match(servicePackageViolation(route, 'auth/dist/phoneBrowserSession.js', server), /inside another workspace package/);
+    assert.match(servicePackageViolation(route, 'shared/dist/siteHost.js', server), /inside another workspace package/);
+    assert.equal(servicePackageViolation(route, 'shared', server), null);
+    assert.equal(servicePackageViolation(route, 'express', server), null);
+    assert.equal(servicePackageViolation(route, '../../core/config.js', server), null);
 
     const plugin = '/repo/private/plugins/demo';
     const file = `${plugin}/src/client.ts`;

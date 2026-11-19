@@ -2,7 +2,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { FINALIZATION_DB_PATH, getProviderPaths } from "../core/config.js";
+import { closeSites, loadSiteRegistry } from "shared";
+import { FINALIZATION_DB_PATH, configureProviders, getAllProviders, getProviderPaths } from "../core/config.js";
+import logger from "../core/logger.js";
+import { captureSiteIds } from "../sites.js";
 import { FinalizationCheckpointStore } from "../services/hls/finalizationCheckpointStore.js";
 import { processFinalizedRecording } from "../services/hls/finalizedRecordingProcessor.js";
 import {
@@ -11,7 +14,6 @@ import {
     type ManagedRecordingRoot,
 } from "./finalizeLibraryTarget.js";
 
-const PROVIDERS = ["tslive", "ladder", "fmp4"] as const;
 const SCOPES = ["downloads", "edited"] as const;
 const CONTRACT_KEY = "historical-finalization-v1";
 
@@ -60,8 +62,10 @@ function parseArgs(argv: readonly string[]): Options {
             throw new Error(`Unknown argument: ${argument}`);
         }
     }
-    if (![...PROVIDERS, "all"].includes(options.provider as typeof PROVIDERS[number] | "all")) {
-        throw new Error("--provider must be tslive, ladder, fmp4, or all");
+    // The capture sites of the sites file.
+    const providers = getAllProviders();
+    if (![...providers, "all"].includes(options.provider)) {
+        throw new Error(`--provider must be ${providers.join(", ")}, or all`);
     }
     if (![...SCOPES, "all"].includes(options.scope as typeof SCOPES[number] | "all")) {
         throw new Error("--scope must be downloads, edited, or all");
@@ -73,7 +77,7 @@ function parseArgs(argv: readonly string[]): Options {
 }
 
 function managedRoots(): ManagedRecordingRoot[] {
-    return PROVIDERS.flatMap((provider) => {
+    return getAllProviders().flatMap((provider) => {
         const paths = getProviderPaths(provider);
         return [
             { provider, scope: "downloads", rootPath: paths.downloaded },
@@ -87,7 +91,7 @@ async function discoverTargets(options: Options): Promise<HistoricalFinalization
         return [await resolveManagedRecordingTarget(options.recording, managedRoots())];
     }
 
-    const providers = options.provider === "all" ? PROVIDERS : [options.provider];
+    const providers = options.provider === "all" ? getAllProviders() : [options.provider];
     const scopes = options.scope === "all" ? SCOPES : [options.scope];
     const targets: HistoricalFinalizationTarget[] = [];
     for (const provider of providers) {
@@ -110,7 +114,19 @@ async function discoverTargets(options: Options): Promise<HistoricalFinalization
     return targets.sort((left, right) => left.recordingPath.localeCompare(right.recordingPath));
 }
 
+// The recordings' sites: the capture sites of the sites file (loaded, then let go, so the
+// command can exit).
+async function configureCaptureSites(): Promise<void> {
+    const sites = await loadSiteRegistry({ logger });
+    try {
+        configureProviders(captureSiteIds(sites));
+    } finally {
+        await closeSites(sites);
+    }
+}
+
 async function main(): Promise<void> {
+    await configureCaptureSites();
     const options = parseArgs(process.argv.slice(2));
     const workerCount = os.availableParallelism();
     const discovered = await discoverTargets(options);

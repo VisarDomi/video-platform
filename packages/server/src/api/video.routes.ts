@@ -8,7 +8,7 @@ import * as moveService from "../services/video/move.service.js";
 import * as editService from "../services/video/edit.service.js";
 import * as playlistAuthority from "../services/hls/playlistAuthority.js";
 import * as utils from "../core/utils.js";
-import { getProviderPaths } from "../core/config.js";
+import { defaultProvider, getProviderPaths } from "../core/config.js";
 import logger from "../core/logger.js";
 import { DESTINATIONS, API } from "../core/constants.js";
 import * as types from "../core/types.js";
@@ -48,7 +48,7 @@ function sendJSON(req: Request, res: Response, json: Buffer, gzip?: Buffer): voi
 // the whole list (encoded once per revision, gzipped, 304 when unchanged), or with `after`
 // only the names after it.
 router.get("/videos", async (req, res) => {
-    const provider = (req.query.provider as string) || "tslive";
+    const provider = (req.query.provider as string) || defaultProvider();
     if (!knownProvider(provider)) return res.status(400).json({ error: `Unknown provider: ${provider}` });
     try {
         const index = libraryIndex(provider);
@@ -69,7 +69,7 @@ router.get("/videos", async (req, res) => {
 // nothing new it waits for the next change (long polling). A client without a revision, of
 // another epoch (the server restarted) or too far behind gets the whole list instead.
 router.get("/videos/changes", async (req, res) => {
-    const provider = (req.query.provider as string) || "tslive";
+    const provider = (req.query.provider as string) || defaultProvider();
     if (!knownProvider(provider)) return res.status(400).json({ error: `Unknown provider: ${provider}` });
     try {
         const since = req.query.since === undefined ? undefined : Number(req.query.since);
@@ -87,7 +87,7 @@ router.get("/videos/changes", async (req, res) => {
 
 router.post("/edit", async (req, res) => {
     const { filename, segments, provider }: { filename: string; segments: string[], provider?: string } = req.body;
-    const targetProvider = provider || "tslive";
+    const targetProvider = provider || defaultProvider();
 
     if (!filename || !segments || segments.length === 0) {
         logger.warn(`[api/edit] rejected: filename=${filename ?? "missing"} segments=${segments?.length ?? "missing"} provider=${targetProvider}`);
@@ -112,7 +112,7 @@ router.post("/edit", async (req, res) => {
 
 router.post("/videos/:filename/repair-playlist", async (req, res) => {
     const { filename } = req.params as { filename: string };
-    const provider = (req.query.provider as string) || "tslive";
+    const provider = (req.query.provider as string) || defaultProvider();
 
     try {
         const ref = await utils.resolveVideo(filename, provider);
@@ -129,7 +129,7 @@ router.post("/videos/:filename/repair-playlist", async (req, res) => {
 });
 
 router.post("/videos/repair-playlists", async (req, res) => {
-    const provider = (req.query.provider as string) || "tslive";
+    const provider = (req.query.provider as string) || defaultProvider();
     const scope = (req.query.scope as string) || "all";
 
     try {
@@ -162,7 +162,7 @@ router.post("/videos/repair-playlists", async (req, res) => {
 
 router.post("/videos/:filename/:destination", async (req, res) => {
     const { filename, destination } = req.params as { filename: string; destination: types.Destination };
-    const provider = (req.query.provider as string) || "tslive";
+    const provider = (req.query.provider as string) || defaultProvider();
 
     if (!filename || !(destination === DESTINATIONS.TRASH || destination === DESTINATIONS.ORIGINAL || destination === DESTINATIONS.EDITED)) {
         return res.status(400).send(API.MESSAGES.INVALID_REQUEST_DESTINATION);
