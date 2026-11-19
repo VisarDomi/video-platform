@@ -9,7 +9,7 @@
         "test:app:webkit": "node packages/app/test/providers.mjs",
         "build:frontend": "npm run build:app",
         "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
-        "build:auth": "npm run build:shared && npm run build -w auth",
+        "build:auth": "npm run build:shared && npm run build:plugins && npm run build -w auth",
         "build:downloader": "npm run build:shared && npm run build:plugins && npm run build -w downloader",
         "build:sdk": "npm run build -w sdk",
         "build:plugins": "npm run build -w private/plugins",

@@ -4,13 +4,16 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import express from "express";
-import { createPhoneSessionRoutes, phoneKey } from "../dist/api/providers/phone-session.routes.js";
+import { createPhoneSessionRoutes, phoneKey, phoneKeyPath } from "../dist/api/providers/phone-session.routes.js";
 
 const post=(url,headers)=>fetch(url,{method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({setup:true})});
 
+// The route is the site's; in production the TsLive site's (/api/tslive/phone-session).
+const site = { id: "tslive", label: "TsLive" };
+
 async function serve(t, dependencies) {
     const app = express();
-    app.use(createPhoneSessionRoutes(dependencies));
+    app.use(createPhoneSessionRoutes(site, dependencies));
     const server = app.listen(0, "127.0.0.1");
     t.after(() => new Promise(resolve => server.close(resolve)));
     await new Promise(resolve => server.once("listening", resolve));
@@ -32,7 +35,9 @@ test("the phone session needs the key, says whether the PC can log in, and runs 
     assert.deepEqual(await (await fetch(url, { headers })).json(), { available: true });
     const first = post(url, headers);
     await new Promise(resolve => setTimeout(resolve, 50));
-    assert.equal((await post(url, headers)).status, 409, "a second login waits for the first");
+    const second = await post(url, headers);
+    assert.equal(second.status, 409, "a second login waits for the first");
+    assert.deepEqual(await second.json(), { error: "A TsLive login is already running" });
     release();
     assert.deepEqual(await (await first).json(), { cookies });
     assert.equal(logins, 1);
@@ -41,11 +46,17 @@ test("the phone session needs the key, says whether the PC can log in, and runs 
 test("a PC without the login setup says so; a failed login reports why", async t => {
     const headers = { "X-Phone-Key": "key" };
     const off = await serve(t, { key: () => "key", available: () => false, login: async () => ({ cookies: [] }) });
-    assert.equal((await post(off, headers)).status, 503);
+    const unavailable = await post(off, headers);
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { error: "This PC is not set up to log in to TsLive" });
     const failing = await serve(t, { key: () => "key", available: () => true, login: async () => { throw new Error("Google asked again"); } });
     const response = await post(failing, headers);
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), { error: "Google asked again" });
+});
+
+test("the phone key and the handoff receipt are named after the site", () => {
+    assert.equal(path.basename(phoneKeyPath(site)), "tslive-phone-key");
 });
 
 test("the phone key is made once, private to the user", async t => {

@@ -1,30 +1,65 @@
 import * as timersPromises from "timers/promises";
 
+import type { AuthDecision, Logger, SiteAuth } from "sdk";
+import { CredentialStore, taggedLogger } from "shared";
 import logger from "../common/logger.js";
-import { Account, IAuthProvider, BrowserVerificationRequiredError, BrowserLoginNeedsAttentionError } from "../providers/interfaces.js";
+import { getConfig } from "../common/config.js";
 import { AuthContext } from "./authContext.js";
 import { loginQueue } from "../browser/loginQueue.js";
-import { parseJwtPayload } from "./authUtils.js";
+import type { Account } from "../accounts.js";
 
 const AUTH_LOGIN_RETRY_MS = 30_000;
 const SHORT_REFRESH_RETRY_MS = 1_000;
 // A refresh unanswered after this long gets a second, parallel request.
 const SHORT_REFRESH_HEDGE_MS = 1_000;
-// A stream-token request otherwise; TsLive's stream token lives 10 seconds.
+// A short-lived-token request otherwise (the token it renews may live only seconds).
 const SHORT_TOKEN_REQUEST_TIMEOUT_MS = 10_000;
 
+export interface AuthSite {
+    // The plug-in's label: names the site in log lines ("<label> requested ...").
+    label: string;
+    // The site's logger ("[<label>] ...").
+    log: Logger;
+    store: CredentialStore;
+}
+
+// Keeps one account signed in on one site: restores the saved session at start (or signs
+// in with the browser), renews the short-lived tokens and the session on the site's
+// cadence, saves every change to the credential store, and decides from the site's
+// classify() when to sign in again, when to wait out an outage and when to stop.
 export class AuthService {
     private readonly account: Account;
-    private readonly provider: IAuthProvider;
+    private readonly provider: SiteAuth;
     private readonly authContext: AuthContext;
+    private readonly label: string;
+    private readonly siteLog: Logger;
     private browserLoginBlocked = false;
+    // The failure that stopped automatic sign-ins; any later sign-in reports it again.
+    private blockedBy: unknown = null;
     private maintaining: Promise<void> | null = null;
     private forceSessionRefresh = false;
 
-    constructor(account: Account, provider: IAuthProvider) {
+    constructor(account: Account, provider: SiteAuth, site: Partial<AuthSite> = {}) {
         this.account = account;
         this.provider = provider;
-        this.authContext = new AuthContext(account.email, provider);
+        this.label = site.label ?? account.provider;
+        this.siteLog = site.log ?? taggedLogger(logger, this.label);
+        this.authContext = new AuthContext(account.email, provider, site.store ?? new CredentialStore(getConfig().sessionPath));
+    }
+
+    // The site's decision for a failure: sign in again ("reauthenticate", or "verification"
+    // when the site asked for its interactive check), stop ("needs-attention") or wait.
+    private decide(error: unknown): AuthDecision {
+        return this.provider.classify(error);
+    }
+
+    private reauthenticates(decision: AuthDecision): boolean {
+        return decision === "reauthenticate" || decision === "verification";
+    }
+
+    private sessionExpiresAt(): number | undefined {
+        const bag = this.authContext.getTokenBag();
+        return bag ? this.provider.describeTokens(bag).sessionExpiresAt : undefined;
     }
 
     public async initiateAuth() {
@@ -34,8 +69,8 @@ export class AuthService {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             // A freshly recovered access token is already usable. Validate it with the
             // stream-token endpoint before consuming its rotating refresh token again.
-            const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
-            let reuseSession = typeof expires === "number" && expires * 1000 > Date.now() + 60_000;
+            const expires = this.sessionExpiresAt();
+            let reuseSession = expires !== undefined && expires > Date.now() + 60_000;
             while (true) {
                 try {
                     if (reuseSession) {
@@ -47,10 +82,11 @@ export class AuthService {
                     return;
                 } catch (error) {
                     const errorMessage = (error as Error).message;
-                    if (error instanceof BrowserVerificationRequiredError || errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
+                    const decision = this.decide(error);
+                    if (this.reauthenticates(decision)) {
                         if (reuseSession) { reuseSession = false; continue; }
-                        logger.warn(error instanceof BrowserVerificationRequiredError
-                            ? `TsLive requested browser verification for ${this.account.email}; completing the normal browser login.`
+                        logger.warn(decision === "verification"
+                            ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                             : `Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
                         break;
                     } else {
@@ -68,7 +104,7 @@ export class AuthService {
                 logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
                 return;
             } catch (error) {
-                if (error instanceof BrowserLoginNeedsAttentionError) throw error;
+                if (this.decide(error) === "needs-attention") throw error;
                 const errorMessage = (error as Error).message;
                 logger.error(`Browser login failed for ${this.account.email}: ${errorMessage}. Retrying...`);
                 await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
@@ -82,7 +118,7 @@ export class AuthService {
     }
 
     private async performFreshLogin() {
-        if (this.browserLoginBlocked) throw new BrowserLoginNeedsAttentionError();
+        if (this.browserLoginBlocked) throw this.blockedBy;
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
@@ -94,9 +130,9 @@ export class AuthService {
     }
 
     private async ensureValidTokens(source: string) {
-        const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
-        const recoveredSession = !this.forceSessionRefresh && source === "session-maintain" && typeof expires === "number"
-            && expires * 1000 > Date.now() + this.provider.intervals.sessionRefresh + 60_000;
+        const expires = this.sessionExpiresAt();
+        const recoveredSession = !this.forceSessionRefresh && source === "session-maintain" && expires !== undefined
+            && expires > Date.now() + this.provider.intervals.sessionRefresh + 60_000;
         if (!recoveredSession) await this.refreshSession();
         await this.setTokenData();
         await this.authContext.saveTokenToFile();
@@ -105,19 +141,27 @@ export class AuthService {
         this.logTokenWrite(source);
     }
 
+    // The short-lived tokens just saved, as the site names them, and whether they outlive
+    // the next short refresh.
     private logTokenWrite(source: string): void {
-        const tte = this.authContext.getTokenBag()?.extras?.tte;
-        if (!tte) {
-            logger.warn(`[TsLive] Token write — source=${source} tte=none`);
+        const bag = this.authContext.getTokenBag();
+        const tokens = bag ? this.provider.describeTokens(bag) : { summary: "" };
+        if (!bag || tokens.shortExpiresAt === undefined) {
+            this.siteLog.warn(`Token write — source=${source} ${bag ? tokens.summary : this.noTokensSummary()}`);
             return;
         }
-        const ttl = parseInt(tte, 10) - Math.floor(Date.now() / 1000);
+        const ttl = Math.floor(tokens.shortExpiresAt / 1000) - Math.floor(Date.now() / 1000);
         const refreshCycleSec = this.provider.intervals.shortTokenRefresh / 1000;
         if (ttl < refreshCycleSec) {
-            logger.warn(`[TsLive] Token write — source=${source} tte=${tte} ttl=${ttl}s (below ${refreshCycleSec}s refresh cycle)`);
+            this.siteLog.warn(`Token write — source=${source} ${tokens.summary} ttl=${ttl}s (below ${refreshCycleSec}s refresh cycle)`);
         } else {
-            logger.debug(`[TsLive] Token write — source=${source} tte=${tte} ttl=${ttl}s`);
+            this.siteLog.debug(`Token write — source=${source} ${tokens.summary} ttl=${ttl}s`);
         }
+    }
+
+    // How the site names "no short-lived tokens" (a bag without any).
+    private noTokensSummary(): string {
+        return this.provider.describeTokens({ refreshToken: "", sessionToken: null, extras: {} }).summary;
     }
 
     private async refreshSession() {
@@ -186,19 +230,20 @@ export class AuthService {
                 await this.authContext.saveTokenToFile();
                 consecutiveOk++;
                 if (!wasHealthy) {
-                    logger.info(`[TsLive] Short-refresh recovered after ${consecutiveFail} failures — tte=${this.authContext.getTokenBag()?.extras?.tte}`);
+                    const bag = this.authContext.getTokenBag();
+                    this.siteLog.info(`Short-refresh recovered after ${consecutiveFail} failures — ${bag ? this.provider.describeTokens(bag).summary : this.noTokensSummary()}`);
                     wasHealthy = true;
                     consecutiveFail = 0;
                 }
                 await timersPromises.setTimeout(Math.max(0, this.provider.intervals.shortTokenRefresh - (Date.now() - startedAt)));
             } catch (error) {
                 consecutiveFail++;
-                if ((error instanceof BrowserVerificationRequiredError || /failed with status (401|403)\b/.test((error as Error).message)) && !this.browserLoginBlocked) {
+                if (this.reauthenticates(this.decide(error)) && !this.browserLoginBlocked) {
                     this.forceSessionRefresh = true;
                     await this.maintainSession();
                 }
                 if (wasHealthy) {
-                    logger.warn(`[TsLive] Short-refresh failed for ${this.account.email} after ${consecutiveOk} successes: ${(error as Error).message}`);
+                    this.siteLog.warn(`Short-refresh failed for ${this.account.email} after ${consecutiveOk} successes: ${(error as Error).message}`);
                     wasHealthy = false;
                     consecutiveOk = 0;
                 }
@@ -210,8 +255,8 @@ export class AuthService {
     private async manageTokenLifecycle() {
         while (true) {
             if (this.browserLoginBlocked) return;
-            const expires = parseJwtPayload(this.authContext.getSessionToken() ?? "")?.exp;
-            const delay = typeof expires === "number" ? Math.max(30_000, Math.min(this.provider.intervals.sessionRefresh, expires * 1000 - Date.now() - 300_000)) : this.provider.intervals.sessionRefresh;
+            const expires = this.sessionExpiresAt();
+            const delay = expires !== undefined ? Math.max(30_000, Math.min(this.provider.intervals.sessionRefresh, expires - Date.now() - 300_000)) : this.provider.intervals.sessionRefresh;
             await timersPromises.setTimeout(delay);
             await this.maintainSession();
         }
@@ -232,24 +277,23 @@ export class AuthService {
                 logger.debug(`Session successfully maintained for ${this.account.email}.`);
                 return;
             } catch (error) {
-                if (error instanceof BrowserLoginNeedsAttentionError) {
-                    this.browserLoginBlocked = true;
-                    logger.error(error.message);
+                const decision = this.decide(error);
+                if (decision === "needs-attention") {
+                    this.block(error);
                     return;
                 }
                 const errorMessage = (error as Error).message;
-                if (error instanceof BrowserVerificationRequiredError || errorMessage.includes("failed with status 401") || errorMessage.includes("failed with status 403")) {
-                    logger.warn(error instanceof BrowserVerificationRequiredError
-                        ? `TsLive requested browser verification for ${this.account.email}; completing the normal browser login.`
+                if (this.reauthenticates(decision)) {
+                    logger.warn(decision === "verification"
+                        ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                         : `Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
                     try {
                         await this.performFreshLogin();
                         logger.info(`Successfully re-authenticated via browser login for ${this.account.email}.`);
                         return;
                     } catch (loginError) {
-                        if (loginError instanceof BrowserLoginNeedsAttentionError) {
-                            this.browserLoginBlocked = true;
-                            logger.error(loginError.message);
+                        if (this.decide(loginError) === "needs-attention") {
+                            this.block(loginError);
                             return;
                         }
                         logger.error(`Browser login failed during maintenance. Retrying after delay.`, { error: (loginError as Error).message });
@@ -260,5 +304,12 @@ export class AuthService {
             }
             await timersPromises.setTimeout(AUTH_LOGIN_RETRY_MS);
         }
+    }
+
+    // A person has to act: automatic sign-ins stop until the daemon restarts.
+    private block(error: unknown): void {
+        this.browserLoginBlocked = true;
+        this.blockedBy = error;
+        logger.error((error as Error).message);
     }
 }

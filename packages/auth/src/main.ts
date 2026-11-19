@@ -1,36 +1,18 @@
 import "dotenv/config";
-import * as fs from "fs";
 
+import { CredentialStore, loadSiteRegistry, type HostedSite } from "shared";
 import { AuthService } from "./auth/authService.js";
-import { Account } from "./providers/interfaces.js";
-import { getProvider } from "./providers/registry.js";
+import { loadAccounts } from "./accounts.js";
 import logger from "./common/logger.js";
 import { getConfig } from "./common/config.js";
 
-interface Credentials {
-    accounts: (Omit<Account, "provider"> & { provider?: string })[];
-}
-
-function loadCredentials(): { accounts: Account[] } {
-    const { accountsPath } = getConfig();
-    const fileContent = fs.readFileSync(accountsPath, "utf-8");
-    const credentials: Credentials = JSON.parse(fileContent);
-
-    if (!credentials.accounts || !Array.isArray(credentials.accounts)) {
-        throw new Error(`${accountsPath} is missing the 'accounts' array.`);
-    }
-
-    const accounts: Account[] = credentials.accounts.map((a) => ({
-        email: a.email,
-        password: a.password,
-        provider: a.provider ?? "tslive",
-    }));
-
-    return { accounts };
-}
-
+// The auth daemon: keeps every configured account signed in on its site. The sites come
+// from the sites file (those whose plug-in has auth), the accounts and their passwords
+// from the accounts file; each account's session is saved to the core's credential
+// store, where the site's consumers (downloader, server) read it.
 async function main() {
-    const { accounts } = loadCredentials();
+    const sites = (await loadSiteRegistry({ logger })).filter((site) => site.instance.auth);
+    const accounts = loadAccounts(getConfig().accountsPath, sites[0]?.id);
 
     if (accounts.length === 0) {
         logger.warn(`No accounts found in ${getConfig().accountsPath}. Exiting.`);
@@ -38,10 +20,15 @@ async function main() {
     }
 
     logger.info(`Found ${accounts.length} account(s). Initializing auth services...`);
+    warnAboutUnrefreshedSessions(sites, accounts.map((account) => ({ site: account.provider, email: account.email })));
 
+    const store = new CredentialStore(getConfig().sessionPath);
     const authPromises = accounts.map(async (account) => {
-        const provider = getProvider(account.provider);
-        const authService = new AuthService(account, provider);
+        const site = sites.find((candidate) => candidate.id === account.provider);
+        if (!site) {
+            throw new Error(`Unknown auth provider: "${account.provider}". Available: ${sites.map((candidate) => candidate.id).join(", ")}`);
+        }
+        const authService = new AuthService(account, site.instance.auth!, { label: site.label, log: site.context.log, store });
         await authService.initiateAuth();
         authService.startBackgroundJobs();
         return authService;
@@ -55,4 +42,18 @@ async function main() {
     }
 }
 
-void main();
+// A site's consumers read the session of the account the sites file names; nothing would
+// renew it if no configured account is that one.
+function warnAboutUnrefreshedSessions(sites: HostedSite[], kept: { site: string; email: string }[]): void {
+    for (const site of sites) {
+        const account = site.entry.account;
+        if (account && !kept.some((entry) => entry.site === site.id && entry.email === account)) {
+            logger.warn(`Site ${site.id}: its consumers read the session of ${account}, which no configured account keeps signed in`);
+        }
+    }
+}
+
+void main().catch((error) => {
+    logger.error("The auth daemon could not start", { error });
+    process.exit(1);
+});

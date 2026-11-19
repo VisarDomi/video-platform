@@ -1,46 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TsLiveAuthProvider } from '../dist/providers/tslive/tsliveAuthProvider.js';
-import { requestQueue } from '../dist/auth/authQueue.js';
 import { AuthService } from '../dist/auth/authService.js';
-import { BrowserVerificationRequiredError, BrowserLoginNeedsAttentionError } from '../dist/providers/interfaces.js';
 
-const token = claims => `header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
-
-test('a retained browser session renews without replaying a direct API request or using a password',async()=>{
-    const original=requestQueue.add;
-    const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{tsliveBrowserState:'private-fixture-state'}};
-    let renewals=0;
-    const provider=new TsLiveAuthProvider(async owner=>{assert.equal(owner,bag);renewals++;return {newRefreshToken:'rotated',newSessionToken:'renewed',browserState:'updated-state'};});
-    try {
-        requestQueue.add=async()=>{throw new Error('Current browser state must use the ordinary website flow directly');};
-        assert.deepEqual(await provider.refreshSession(bag),{newRefreshToken:'rotated',newSessionToken:'renewed',browserState:'updated-state'});
-        assert.equal(renewals,1);
-    } finally {requestQueue.add=original;}
-});
-
-test('a blocked refresh page is an outage, while explicit invalid session codes permit recovery',async()=>{
-    const original=requestQueue.add, provider=new TsLiveAuthProvider();
-    const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{}};
-    try {
-        requestQueue.add=async()=>new Response('<html>upstream denied</html>',{status:403});
-        await assert.rejects(provider.refreshSession(bag),e=>!(e instanceof BrowserVerificationRequiredError)&&/unavailable/.test(e.message));
-        requestQueue.add=async()=>new Response(JSON.stringify({errorCode:'SESSION_NOT_FOUND'}),{status:401});
-        await assert.rejects(provider.refreshSession(bag),BrowserVerificationRequiredError);
-    } finally {requestQueue.add=original;}
-});
-
-test('server rejection forces one renewal even when the saved ST nominally has time left',async()=>{
-    let refreshes=0;
-    const provider={intervals:{shortTokenRefresh:5000,sessionRefresh:1800000},
-        refreshSession:async()=>{refreshes++;return {newSessionToken:token({exp:Math.floor(Date.now()/1000)+3600}),newRefreshToken:'new-refresh'};},
-        fetchShortTokens:async()=>({extras:{tt:'fresh',ttu:'fresh',tte:'9999999999'}})};
-    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:token({exp:Math.floor(Date.now()/1000)+3500}),extras:{}});
-    service.authContext.saveTokenToFile=async()=>{};service.forceSessionRefresh=true;
-    await service.maintainSession();
-    assert.equal(refreshes,1);assert.equal(service.forceSessionRefresh,false);
-});
+// The core's own refresh mechanics with fake sites. (The TsLive session's requests are tested
+// with the plug-in; the core with TsLive's decisions in private/test/authService.test.mjs.)
 
 test('late playback tokens from an old ST cannot overwrite a new session generation',async()=>{
     let resolve;
@@ -48,121 +11,10 @@ test('late playback tokens from an old ST cannot overwrite a new session generat
     const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'tslive'},provider);
     service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{tsliveBrowserState:'retained-state'}});
     const request=service.setTokenData();
-    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',browserState:'fresh-state'});
+    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',extras:{tsliveBrowserState:'fresh-state'}});
     resolve({extras:{tt:'stale-stream-token',ttu:'stale',tte:'9999999999'}});
     await request;
     assert.deepEqual(service.authContext.getTokenBag(),{refreshToken:'new-refresh',sessionToken:'new-access',extras:{tsliveBrowserState:'fresh-state'}});
-});
-
-test('only an explicit 424 challenge requests browser recovery', async () => {
-    const provider=new TsLiveAuthProvider(),original=requestQueue.add;
-    const bag={refreshToken:token({accountId:'pc-account',sessionId:'pc-session'}),sessionToken:'access',extras:{}};
-    try {
-        requestQueue.add=async()=>new Response(JSON.stringify({errorCode:'CHALLENGE_REQUIRED'}),{status:424});
-        await assert.rejects(provider.refreshSession(bag),BrowserVerificationRequiredError);
-        requestQueue.add=async()=>new Response(JSON.stringify({errorCode:'DEPENDENCY_UNAVAILABLE'}),{status:424});
-        await assert.rejects(provider.refreshSession(bag),e=>!(e instanceof BrowserVerificationRequiredError)&&/status 424/.test(e.message));
-        requestQueue.add=async()=>new Response('unavailable',{status:503});
-        await assert.rejects(provider.refreshSession(bag),e=>!(e instanceof BrowserVerificationRequiredError)&&/status 503/.test(e.message));
-    } finally {requestQueue.add=original;}
-});
-
-test('a maintenance challenge uses the existing browser recovery once', async () => {
-    let logins=0;
-    const provider={intervals:{shortTokenRefresh:5000,sessionRefresh:1800000},refreshSession:async()=>{throw new BrowserVerificationRequiredError();}};
-    const service=new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:token({exp:1}),extras:{}});
-    service.performFreshLogin=async()=>{logins++;};
-    await service.maintainSession();assert.equal(logins,1);
-});
-
-test('manual verification stops repeated password logins',async()=>{
-    let logins=0;
-    const provider={intervals:{shortTokenRefresh:5000,sessionRefresh:1800000},
-        refreshSession:async()=>{throw new BrowserVerificationRequiredError();},
-        login:async()=>{logins++;throw new BrowserLoginNeedsAttentionError();}};
-    const service=new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:token({exp:1}),extras:{}});
-    await service.maintainSession();await service.maintainSession();
-    assert.equal(logins,1);
-});
-
-test('a stream-token failure after fresh recovery does not rotate the fresh session again', async () => {
-    let refreshes=0,streams=0;
-    const provider={intervals:{shortTokenRefresh:5000,sessionRefresh:1800000},
-        refreshSession:async()=>{refreshes++;return {newSessionToken:token({exp:Math.floor(Date.now()/1000)+3600}),newRefreshToken:'new-refresh'};},
-        fetchShortTokens:async()=>{if(++streams===1)throw new Error('temporary stream network failure');return {extras:{tt:'t',ttu:'u',tte:'9999999999'}};}};
-    const service=new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:token({exp:1}),extras:{}});service.authContext.saveTokenToFile=async()=>{};
-    await assert.rejects(service.ensureValidTokens('session-maintain'),/temporary/);
-    await service.ensureValidTokens('session-maintain');assert.equal(refreshes,1);assert.equal(streams,2);
-});
-
-test('restart validates a fresh saved session without rotating its refresh token', async () => {
-    let refreshes = 0, shortTokens = 0;
-    const provider = {
-        intervals: {shortTokenRefresh:5000,sessionRefresh:1800000},
-        refreshSession: async () => { refreshes++; throw new Error('Unexpected rotation'); },
-        fetchShortTokens: async () => { shortTokens++; return {extras:{tt:'t',ttu:'u',tte:'9999999999'}}; },
-    };
-    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:token({exp:Math.floor(Date.now()/1000)+3600}),extras:{}});
-    service.authContext.loadTokenFromFile = async () => true;
-    service.authContext.saveTokenToFile = async () => {};
-    await service.initiateAuth();
-    assert.equal(refreshes,0);assert.equal(shortTokens,1);
-});
-
-test('a saved access token rejected by the server falls back to its own refresh token', async () => {
-    let refreshes = 0, shortTokens = 0;
-    const provider = {
-        intervals: {shortTokenRefresh:5000,sessionRefresh:1800000},
-        refreshSession: async () => { refreshes++; return {newSessionToken:'renewed-access',newRefreshToken:'renewed-refresh'}; },
-        fetchShortTokens: async () => { if (++shortTokens===1) throw new Error('Token data fetch failed with status 401'); return {extras:{tt:'t',ttu:'u',tte:'9999999999'}}; },
-    };
-    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:token({exp:Math.floor(Date.now()/1000)+3600}),extras:{}});
-    service.authContext.loadTokenFromFile = async () => true;service.authContext.saveTokenToFile = async () => {};
-    await service.initiateAuth();
-    assert.equal(refreshes,1);assert.equal(shortTokens,2);assert.equal(service.authContext.getRefreshToken(),'renewed-refresh');
-});
-
-test('refresh uses the PC token claims and receives replacement cookies', async () => {
-    const provider = new TsLiveAuthProvider();
-    const refreshToken = token({accountId:'pc-account', sessionId:'pc-session'});
-    const original = requestQueue.add;
-    requestQueue.add = async (url, request) => {
-        assert.equal(url, 'https://ts-live.example/api/session-service/public/v2/session/web/refresh');
-        assert.equal(request.method, 'POST');
-        assert.deepEqual(JSON.parse(request.body), {accountId:'pc-account', sessionId:'pc-session'});
-        assert.equal(new Headers(request.headers).get('cookie'), `TsLive-RT=${refreshToken}`);
-        const headers = new Headers();
-        headers.append('set-cookie', 'TsLive-ST=new-access; Path=/');
-        headers.append('set-cookie', 'TsLive-RT=new-refresh; Path=/');
-        return new Response(null, {status:200, headers});
-    };
-    try {
-        assert.deepEqual(await provider.refreshSession({refreshToken, sessionToken:'old-access', extras:{}}),
-            {newSessionToken:'new-access', newRefreshToken:'new-refresh'});
-        await assert.rejects(provider.refreshSession({refreshToken:token({sessionId:'missing-account'}),sessionToken:null,extras:{}}),
-            /missing accountId or sessionId/);
-    } finally { requestQueue.add = original; }
-});
-
-test('persist rotated refresh token before a failing stream-token request', async () => {
-    const writes = [];
-    const provider = {
-        refreshSession: async () => ({newSessionToken:'new-access', newRefreshToken:'new-refresh'}),
-        fetchShortTokens: async () => {
-            assert.deepEqual(writes, [{refreshToken:'new-refresh', sessionToken:'new-access', extras:{}}]);
-            throw new Error('stream token connection interrupted');
-        },
-    };
-    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'}, provider);
-    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{}});
-    service.authContext.saveTokenToFile = async () => writes.push(structuredClone(service.authContext.getTokenBag()));
-    await assert.rejects(service.ensureValidTokens('test'), /stream token connection interrupted/);
-    assert.equal(writes[0].refreshToken, 'new-refresh');
 });
 
 test('a stream-token refresh unanswered for a second is hedged by a parallel request', async () => {
@@ -188,4 +40,77 @@ test('a quick stream-token answer sends no second request', async () => {
     await service.setTokenData(true);
     await new Promise(resolve => setTimeout(resolve, 1200));
     assert.equal(calls, 1);
+});
+
+// ---- the site's decisions and token description (generic sites) ----
+
+class Rejected extends Error {}
+class Verify extends Error {}
+class Person extends Error {}
+const demo = (extra = {}) => ({
+    intervals: { shortTokenRefresh: 5000, sessionRefresh: 1800000 },
+    classify: error => error instanceof Person ? 'needs-attention' : error instanceof Verify ? 'verification'
+        : error instanceof Rejected ? 'reauthenticate' : 'outage',
+    describeTokens: bag => ({ ...(bag.extras.short ? { shortExpiresAt: Number(bag.extras.short) * 1000 } : {}),
+        summary: `short=${bag.extras.short || 'none'}` }),
+    ...extra,
+});
+function recorder() {
+    const lines = [];
+    const log = Object.fromEntries(['debug', 'verbose', 'info', 'warn', 'error'].map(level => [level, message => lines.push([level, message])]));
+    return { log, lines };
+}
+const account = { email: 'fixture@example.invalid', password: 'unused', provider: 'demo' };
+
+test("a verification request signs in again and names the site; a rejection says the token became invalid", async (t) => {
+    const { default: logger } = await import('../dist/common/logger.js');
+    const warnings = [];
+    t.mock.method(logger, 'warn', message => warnings.push(message));
+    for (const error of [new Verify('check'), new Rejected('Token data fetch failed with status 401')]) {
+        let logins = 0;
+        const service = new AuthService(account, demo({ refreshSession: async () => { throw error; } }), { label: 'Demo', log: recorder().log });
+        service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+        service.performFreshLogin = async () => { logins++; };
+        await service.maintainSession();
+        assert.equal(logins, 1);
+    }
+    assert.deepEqual(warnings, [
+        'Demo requested browser verification for fixture@example.invalid; completing the normal browser login.',
+        'Token became invalid during maintenance for fixture@example.invalid. Attempting fresh browser login.',
+    ]);
+});
+
+test("needs-attention stops automatic sign-ins, and a later sign-in reports the same failure", async (t) => {
+    const { default: logger } = await import('../dist/common/logger.js');
+    const errors = [];
+    t.mock.method(logger, 'error', message => errors.push(message));
+    const person = new Person('A person has to look at the sign-in.');
+    let logins = 0;
+    const service = new AuthService(account, demo({
+        refreshSession: async () => { throw new Rejected('Session refresh failed with status 403.'); },
+        login: async () => { logins++; throw person; },
+    }), { label: 'Demo', log: recorder().log });
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+    await service.maintainSession();
+    await service.maintainSession();
+    assert.equal(logins, 1);
+    assert.deepEqual(errors, ['A person has to look at the sign-in.']);
+    await assert.rejects(service.performFreshLogin(), error => error === person);
+});
+
+test("a token write names the short tokens as the site does and warns when they lapse before the next refresh", async () => {
+    const { log, lines } = recorder();
+    const service = new AuthService(account, demo(), { label: 'Demo', log });
+    const now = Math.floor(Date.now() / 1000);
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+    service.logTokenWrite('login');
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: { short: String(now + 2) } });
+    service.logTokenWrite('init');
+    service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: { short: String(now + 60) } });
+    service.logTokenWrite('resume');
+    assert.deepEqual(lines.map(([level, message]) => [level, message.replace(/ttl=\d+s/, 'ttl=Ns')]), [
+        ['warn', 'Token write — source=login short=none'],
+        ['warn', `Token write — source=init short=${now + 2} ttl=Ns (below 5s refresh cycle)`],
+        ['debug', `Token write — source=resume short=${now + 60} ttl=Ns`],
+    ]);
 });

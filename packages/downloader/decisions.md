@@ -390,10 +390,10 @@ unavailable without payment.
 
 ## No token cache: read from disk on every request
 
-The TsLive client reads tokens through its plug-in's `readTokens()`
-(`private/plugins/tslive/src/tokens.ts`, the same file and fields as
-`packages/shared`'s, which the server still uses), which reads the session file on
-every call. There is no watcher and no cache.
+The TsLive client reads tokens through its context's credentials (the core's
+credential store, `shared/src/credentialStore.ts`, mapped by the plug-in's
+`src/auth/tokens.ts`), which read the session file on every call. There is no
+watcher and no cache.
 
 **Why:** Stream tokens live 10 seconds and are refreshed every 5. Any cache age
 is subtracted from the time left for the request; a disk read is cheap next to

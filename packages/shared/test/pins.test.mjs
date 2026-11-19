@@ -1,7 +1,9 @@
 // Pinning tests for contracts other packages and production files depend on.
 // Change them only on purpose:
-//   - the TsLive token file: a different path or field name turns every TsLive
-//     playlist request into a 401 loop;
+//   - the session files of the core's credential store (session/<account>.json): a
+//     different path turns every TsLive playlist request into a 401 loop (the account
+//     is the sites file's; its name is pinned in private/test/sitesFile.test.mjs and the
+//     TsLive field mapping in private/test/pinsListsAndTokens.test.mjs);
 //   - the recording identity: it decides which streamer a folder belongs to (the
 //     list line formats and source links moved with the site catalogs: they are
 //     pinned in private/test/pinsListsAndTokens.test.mjs, the pipeline's copy of the
@@ -9,22 +11,21 @@
 //     targetMembershipIdentifiers in sdk/test/toolkit.test.mjs);
 //   - the active destination's limits.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { promises as fsPromises } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-// readTokens fixes its path from the home directory when it is imported, so
-// point HOME at a temporary directory first. The data-root variable is set to a
-// different directory to show the token path does not follow it.
+// The store takes its directory from the home directory, so point HOME at a
+// temporary directory first. The data-root variable is set to a different
+// directory to show the session path does not follow it.
 const home = await mkdtemp(path.join(os.tmpdir(), "pins-shared-home-"));
 const otherDataRoot = await mkdtemp(path.join(os.tmpdir(), "pins-shared-data-"));
 process.env.HOME = home;
 process.env.VIDEO_SERVICES_DATA_ROOT = otherDataRoot;
 const {
-    readTokens,
+    CredentialStore,
     extractRecordingIdentifier,
     PROVIDER_UPLOAD_POLICIES,
     UPLOAD_PROVIDER_PLAN,
@@ -35,60 +36,48 @@ test.after(async () => {
     await rm(otherDataRoot, { recursive: true, force: true });
 });
 
-// The session file name is the auth account's e-mail plus ".json". It is pinned
-// by hash so this public test does not repeat the address.
-const SESSION_FILE_NAME_SHA256 = "8c732ee6f643fe1b2ac1455bed6e833545595d6711265e9709417f99af594e0d";
+// The session file name is the account's e-mail plus ".json"; this one is synthetic.
+const ACCOUNT = "fixture@example.invalid";
 
-async function sessionFilePath(t) {
+async function sessionFilePath(t, store = new CredentialStore()) {
     const requested = [];
     const readFile = fsPromises.readFile;
     t.mock.method(fsPromises, "readFile", async (file, ...rest) => {
         requested.push(String(file));
         return await readFile.call(fsPromises, file, ...rest);
     });
-    await readTokens();
+    await store.read(ACCOUNT);
     t.mock.restoreAll();
-    assert.equal(requested.length, 1, "readTokens reads exactly one file");
+    assert.equal(requested.length, 1, "a read reads exactly one file");
     return requested[0];
 }
 
-test("pin: readTokens reads ~/.local/share/video-services/session/<account>.json, not the data root", async (t) => {
+// Moved from the readTokens pin (shared's reader went; the core's store is the one reader).
+test("pin: the credential store reads ~/.local/share/video-services/session/<account>.json, not the data root", async (t) => {
     const file = await sessionFilePath(t);
     assert.equal(path.dirname(file), path.join(home, ".local", "share", "video-services", "session"));
-    assert.equal(createHash("sha256").update(path.basename(file)).digest("hex"), SESSION_FILE_NAME_SHA256,
-        "the session file name changed; auth writes session/<e-mail>.json");
-    assert(!file.startsWith(otherDataRoot), "VIDEO_SERVICES_DATA_ROOT does not move the token file");
+    assert.equal(path.basename(file), `${ACCOUNT}.json`, "auth writes session/<e-mail>.json");
+    assert(!file.startsWith(otherDataRoot), "VIDEO_SERVICES_DATA_ROOT does not move the session file");
 });
 
-test("pin: readTokens field mapping (tsliveST, tt, ttu, tte, lastWriteMs)", async (t) => {
-    const file = await sessionFilePath(t);
+test("pin: the store reads what auth saves, with lastWriteMs, and nothing from a torn or missing file", async (t) => {
+    const store = new CredentialStore();
+    const file = await sessionFilePath(t, store);
     await mkdir(path.dirname(file), { recursive: true });
     const now = 1_800_000_000_123;
     t.mock.method(Date, "now", () => now);
-    const write = (session) => writeFile(file, JSON.stringify(session));
-    await write({
-        tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st", tt: "synthetic-tt", ttu: "synthetic-ttu",
-        tte: String(1_800_000_600), lastWriteMs: now - 4_000, browserState: "ignored",
-    });
-    assert.deepEqual(await readTokens(), {
-        st: "synthetic-st", tt: "synthetic-tt", ttu: "synthetic-ttu", tte: "1800000600",
-        readAtMs: now, ttlAtReadSec: 600, tokenAgeMs: 4_000,
-    });
-    const empty = { st: null, tt: null, ttu: null, tte: null, readAtMs: now, ttlAtReadSec: null, tokenAgeMs: null };
-    // Without the session token nothing is used, even the stream tokens.
-    await write({ tt: "synthetic-tt", ttu: "synthetic-ttu", tte: "1800000600" });
-    assert.deepEqual(await readTokens(), empty);
-    // Other spellings of the session token are not read.
-    await write({ st: "synthetic-st", "TsLive-ST": "synthetic-st", tt: "synthetic-tt" });
-    assert.deepEqual(await readTokens(), empty);
-    await write({ tsliveST: "synthetic-st" });
-    assert.deepEqual(await readTokens(), { ...empty, st: "synthetic-st" });
-    await write({ tsliveST: "synthetic-st", tte: "not-a-number" });
-    assert.deepEqual(await readTokens(), { ...empty, st: "synthetic-st", tte: "not-a-number" });
+    await store.write(ACCOUNT, { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st" });
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st", lastWriteMs: now });
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    assert.deepEqual(await readdir(path.dirname(file)), [path.basename(file)], "no temporary file is left");
+    assert.deepEqual(await store.read(ACCOUNT), {
+        record: { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st", lastWriteMs: now }, writtenAtMs: now, readAtMs: now });
+    const none = { record: null, writtenAtMs: null, readAtMs: now };
     await writeFile(file, "{ torn");
-    assert.deepEqual(await readTokens(), empty);
+    assert.deepEqual(await store.read(ACCOUNT), none);
     await rm(file);
-    assert.deepEqual(await readTokens(), empty);
+    assert.deepEqual(await store.read(ACCOUNT), none);
+    assert.deepEqual(await store.source(undefined).read(), none, "a site without an account has no credentials");
 });
 
 test("pin: the recording identity is everything after the folder's date and time", () => {

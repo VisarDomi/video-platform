@@ -14,10 +14,10 @@ export interface Logger {
     info(message: string, meta?: Record<string, unknown>): void;
     warn(message: string, meta?: Record<string, unknown>): void;
     error(message: string, meta?: Record<string, unknown>): void;
-    // The same logger with another tag in place of the site's label ("[<tag>] ..."), for
-    // the few monitored lines whose prefix is not the label. Hosts provide it; a plug-in
-    // falls back to its own logger when it is missing (e.g. in a test).
-    tagged?(tag: string): Logger;
+    // The same logger with another tag in place of the site's label ("[<tag>] ..."), or
+    // with none, for the monitored lines whose prefix is not the label. Hosts provide it;
+    // a plug-in falls back to its own logger when it is missing (e.g. in a test).
+    tagged?(tag?: string): Logger;
 }
 
 export interface Clock {
@@ -29,6 +29,10 @@ export interface PluginPaths {
     stateDir: string;
     // The site's download list (one target per line, in the catalog's format).
     downloadList: string;
+    // The site's browser profiles, one directory each (persistent sign-ins).
+    browserProfiles: string;
+    // Per-account sign-in coordination and diagnostics (leases, attention markers).
+    loginState: string;
 }
 
 export interface PluginContext {
@@ -43,6 +47,9 @@ export interface PluginContext {
     // The core's alias registry, in hosts that keep one (the server). Catalogs that find
     // targets by a former name read and extend it.
     aliases?: AliasBook;
+    // The site account's credentials as the auth daemon last saved them (the account the
+    // sites file names for the site), read from the core's credential store.
+    credentials: CredentialSource;
 }
 
 export interface SitePlugin {
@@ -215,20 +222,83 @@ export interface LiveCapture {
 
 // ---- Site accounts ------------------------------------------------------------------
 
-export type TokenBag = Record<string, unknown>;
+export interface SiteAccount {
+    email: string;
+    password: string;
+}
+
+// An account's session as the auth daemon holds it: the refresh token, the session
+// (access) token it yields, and the rest (short-lived tokens, the site's own state).
+export interface TokenBag {
+    refreshToken: string;
+    sessionToken: string | null;
+    extras: Record<string, string | null>;
+}
+
+export interface SessionRenewal {
+    newSessionToken: string;
+    newRefreshToken: string | null;
+    // Merged into the bag's extras.
+    extras?: Record<string, string>;
+}
+
+export interface ShortTokens {
+    extras: Record<string, string | null>;
+    // A session renewal that happened on the way.
+    session?: SessionRenewal;
+}
+
+// A session as its consumers read it from the core's credential store.
+export interface StoredCredentials {
+    // The record the site's auth serialized, as last saved; null when there is none (no
+    // file, unreadable or torn).
+    record: Record<string, unknown> | null;
+    // When the auth daemon saved it, if recorded.
+    writtenAtMs: number | null;
+    // When it was read.
+    readAtMs: number;
+}
+
+export interface CredentialSource {
+    // Reads the store on every call: the auth daemon replaces the record every few seconds.
+    read(): Promise<StoredCredentials>;
+}
+
+// What a failure means for the session (rule 5: a decision, not a matched message):
+// - outage: the site could not answer; keep the session and retry later;
+// - reauthenticate: the site rejected the credentials; sign in again;
+// - verification: the site asked for an interactive check that the normal sign-in
+//   completes; sign in again;
+// - needs-attention: a person has to act; automatic sign-ins stop.
+export type AuthDecision = "outage" | "reauthenticate" | "verification" | "needs-attention";
 
 export interface SiteAuth {
-    intervals: { refreshMs: number; shortTokenMs: number };
-    login(account: string): Promise<TokenBag>;
-    refreshSession(bag: TokenBag): Promise<TokenBag>;
-    fetchShortTokens(bag: TokenBag): Promise<TokenBag>;
-    // Typed decision instead of matching error messages.
-    classify(error: unknown): "outage" | "reauthenticate" | "needs-attention";
-    // Consumers never build site cookies or headers themselves.
-    headersFor(bag: TokenBag, kind: "api" | "stream"): Record<string, string>;
-    describeTokens(bag: TokenBag): { expiresAt?: number };
+    // How often the short-lived tokens and the session are renewed (ms). Pinned per site.
+    intervals: { shortTokenRefresh: number; sessionRefresh: number };
+    // The record the core's credential store keeps for a bag, and back. Its field names
+    // are a contract with every consumer of the site's credentials.
+    serializeTokens(bag: TokenBag): Record<string, unknown>;
+    deserializeTokens(record: Record<string, unknown>): TokenBag | null;
+    // A stored bag that has to sign in once more before use (e.g. an older format).
+    needsSessionMigration?(bag: TokenBag): boolean;
+    login(account: SiteAccount): Promise<TokenBag>;
+    refreshSession(bag: TokenBag): Promise<SessionRenewal>;
+    // timeoutMs bounds the request.
+    fetchShortTokens(bag: TokenBag, timeoutMs: number): Promise<ShortTokens>;
+    classify(error: unknown): AuthDecision;
+    // The request headers for the stored credentials; throws when they lack what the
+    // kind of request needs. Consumers never build site cookies or headers themselves.
+    headersFor(credentials: StoredCredentials, kind: "api" | "stream"): Record<string, string>;
+    describeTokens(bag: TokenBag): {
+        // When the session token expires (ms since the epoch); drives session renewal.
+        sessionExpiresAt?: number;
+        // When the short-lived tokens expire (ms since the epoch); absent when the bag has none.
+        shortExpiresAt?: number;
+        // How the short-lived tokens appear in log lines, e.g. "tte=1800000600".
+        summary: string;
+    };
     // A separate token family for a phone, provisioned once and then owned by the phone.
-    provisionDevice?(account: string, requestId: string): Promise<Record<string, unknown>>;
+    provisionDevice?(account: SiteAccount, requestId: string): Promise<{ cookies: unknown[] }>;
     acknowledgeDevice?(requestId: string): Promise<void>;
 }
 

@@ -195,11 +195,17 @@ test('the plug-in context names the site, its list and its own state directory',
     assert.equal(seen.length, 1);
     assert.equal(seen[0].siteId, 'live-c');
     assert.deepEqual(seen[0].config, { host: 'h' });
+    // Changed on purpose: two paths for sites with browser sign-ins were added (home-relative,
+    // named after the site); the two before are unchanged.
+    const home = path.join(os.homedir(), '.local');
     assert.deepEqual(seen[0].paths, {
         stateDir: path.join(sandbox, 'data', 'site-state', 'live-c'),
         downloadList: path.join(sandbox, 'data', 'download-lists', 'live-c.txt'),
+        browserProfiles: path.join(home, 'share', 'video-services', 'live-c-browser-profiles'),
+        loginState: path.join(home, 'state', 'video-services', 'live-c-login'),
     });
     assert.equal(typeof seen[0].store.write, 'function');
+    assert.equal(typeof seen[0].credentials.read, 'function');
     assert.equal(typeof seen[0].clock.now(), 'number');
 });
 
