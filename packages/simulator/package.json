@@ -12,7 +12,6 @@
         "build": "rm -rf dist && tsc",
         "test": "npm run build && node --test test/*.test.mjs"
     },
-    "license": "MIT",
     "devDependencies": {
         "@types/node": "^22.19.0",
         "typescript": "^5.4.5"
