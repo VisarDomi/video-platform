@@ -1,17 +1,19 @@
 // The dependency rule (CONTRACTS.md, rule 1): the core depends on the SDK, plug-ins depend
 // on the SDK, and nothing depends on a plug-in.
 //
-// - No `packages/*/src` file imports a `plugin-*` package or anything under `private/`.
-// - A `private/plugins/*/src` file imports only `sdk`, `node:*` built-ins, its own files
-//   (relative paths inside the plug-in) and the runtime dependencies its package.json
-//   declares.
+// - No `packages/*/src` file imports a `plugin-*` package, a public plug-in under
+//   `plugins/` or anything under `private/`.
+// - A plug-in source file (`plugins/*/src`, public, and `private/plugins/*/src`) imports
+//   only `sdk`, `node:*` built-ins, its own files (relative paths inside the plug-in) and
+//   the runtime dependencies its package.json declares (devDependencies, such as the
+//   simulator its tests use, do not count).
 // - The server and the auth daemon reach other packages by name only (no path into a
 //   package's files or build output; the phone setup used to import auth's dist by path).
 //   Which site names their sources may still contain is checked with the private word
 //   list in private/test/coreSiteNames.test.mjs.
 //
 // The private plug-ins leave this repository later; their half of the check then has
-// nothing to scan.
+// nothing to scan. The public ones stay, so at least those two are always scanned.
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -51,6 +53,9 @@ const inside = (directory, file) => {
 // Why a core source file may not import this specifier, or null.
 export function coreViolation(file, specifier, root = ROOT) {
     if (packageName(specifier).startsWith('plugin-')) return 'imports a plug-in package';
+    const publicPlugins = path.join(root, 'plugins');
+    if (isRelative(specifier) && inside(publicPlugins, path.resolve(path.dirname(file), specifier))) return 'imports a plug-in';
+    if (path.isAbsolute(specifier) && inside(publicPlugins, specifier)) return 'imports a plug-in';
     const privateRoot = path.join(root, 'private');
     if (isRelative(specifier) && inside(privateRoot, path.resolve(path.dirname(file), specifier))) return 'imports from private/';
     if (path.isAbsolute(specifier) && inside(privateRoot, specifier)) return 'imports from private/';
@@ -138,7 +143,10 @@ test('the server and the auth daemon reach other packages only by name, never by
 
 test('plug-in sources import only sdk, node: built-ins, their own files and declared dependencies', () => {
     const violations = [];
-    for (const pluginRoot of subdirectories(path.join(ROOT, 'private', 'plugins'))) {
+    const publicPlugins = subdirectories(path.join(ROOT, 'plugins'));
+    let publicScanned = 0;
+    for (const pluginRoot of [...publicPlugins, ...subdirectories(path.join(ROOT, 'private', 'plugins'))]) {
+        if (publicPlugins.includes(pluginRoot)) publicScanned += sourceFiles(path.join(pluginRoot, 'src')).length > 0 ? 1 : 0;
         const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
         const dependencies = Object.keys(manifest.dependencies ?? {});
         for (const file of sourceFiles(path.join(pluginRoot, 'src'))) {
@@ -148,6 +156,7 @@ test('plug-in sources import only sdk, node: built-ins, their own files and decl
             }
         }
     }
+    assert.ok(publicScanned >= 2, `only ${publicScanned} public plug-ins with sources found under ${path.join(ROOT, 'plugins')}`);
     assert.deepEqual(violations, []);
 });
 
@@ -167,6 +176,8 @@ test('the checks catch what they forbid', () => {
     assert.match(coreViolation(core, 'plugin-demo/dist/x.js', root), /plug-in/);
     assert.match(coreViolation(core, '../../../../private/plugins/demo/src/x.js', root), /private/);
     assert.match(coreViolation(core, '/repo/private/config/sites.json', root), /private/);
+    assert.match(coreViolation(core, '../../../../plugins/demo/src/x.js', root), /plug-in/);
+    assert.match(coreViolation(core, '/repo/plugins/demo/dist/index.js', root), /plug-in/);
     assert.equal(coreViolation(core, 'sdk', root), null);
     assert.equal(coreViolation(core, '../common/logger.js', root), null);
 
@@ -191,4 +202,12 @@ test('the checks catch what they forbid', () => {
     assert.match(pluginViolation(file, '../../other/src/x.js', plugin, []), /outside its plug-in/);
     assert.match(pluginViolation(file, '../../../../packages/downloader/src/x.js', plugin, []), /outside its plug-in/);
     assert.match(pluginViolation(file, '/repo/packages/shared/src/x.js', plugin, []), /absolute/);
+
+    const open = '/repo/plugins/demo';
+    const openFile = `${open}/src/provider.ts`;
+    assert.equal(pluginViolation(openFile, 'sdk', open, []), null);
+    assert.equal(pluginViolation(openFile, './edges.js', open, []), null);
+    assert.match(pluginViolation(openFile, 'simulator', open, []), /neither sdk/, 'a test-only dependency is not for sources');
+    assert.match(pluginViolation(openFile, '../../../private/plugins/demo/src/x.js', open, []), /outside its plug-in/);
+    assert.match(pluginViolation(openFile, '../../other/src/x.js', open, []), /outside its plug-in/);
 });

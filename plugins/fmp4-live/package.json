@@ -1,0 +1,19 @@
+{
+    "name": "plugin-fmp4-live",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "rm -rf dist && tsc",
+        "test": "npm run build && node --test test/*.test.mjs"
+    },
+    "dependencies": {
+        "sdk": "1.0.0"
+    },
+    "devDependencies": {
+        "simulator": "1.0.0",
+        "typescript": "^5.4.5"
+    }
+}
