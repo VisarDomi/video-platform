@@ -85,3 +85,92 @@ test('B1: the tolerance is half the EXTINF; a later date-time is new media', asy
     const later = await playlist.identifyNewSegments(window({ firstSequence: 206, firstK: 6, count: 3, skewMs: 20 }), (line) => `http://b/${line}`);
     assert.deepEqual(later.filter((segment) => !playlist.shouldSkipByTimeline(segment)).map(kOf), [8]);
 });
+
+// ---- B2: a new attempt that starts on another copy ----------------------------------
+
+const { StreamDownloader } = await import('../dist/services/download/streamDownloader.js');
+const { InitTracker } = await import('../dist/services/download/initTracker.js');
+const { AccessIncidentTracker } = await import('../dist/services/download/accessIncidentTracker.js');
+
+// Two copies of one stream, as StreamSession meets them: the first attempt records
+// k0..k5 from edge a (numbered 1000 + k) and stops when k6 fails there; the retry's
+// master names edge b, whose window lists k3..k8 (numbered bFirstSequence + k) and ends.
+async function retryOnAnotherCopy(t, { bFirstSequence, skewMs = 0 }) {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'edge-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'edge', streamerId: '1', recordingId: 'rec' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('edge', handle, async () => root);
+    const playlist = new PlaylistManager(disk, 'rec');
+    const initTracker = new InitTracker(disk);
+    const edgeOf = (url) => /\/edge\/(\w+)\//.exec(url)?.[1] ?? null;
+    const provider = {
+        providerName: 'edge-test',
+        playlistRetryMs: 100,
+        parseMasterPlaylist: async (master) => master.replace('master.m3u8', 'live.m3u8'),
+        recoverVariant: async () => null,
+        edgeOf,
+        validateSegment: async () => ({ valid: true }),
+        createDownloadSession: () => ({
+            fetchPlaylist: async (url) => edgeOf(url) === 'a'
+                ? window({ firstSequence: 1000, firstK: 0, count: 7 })
+                : window({ firstSequence: bFirstSequence + 3, firstK: 3, count: 6, skewMs, end: true }),
+            fetchSegment: async (url) => (edgeOf(url) === 'a' && kOf(url) === 6
+                ? { data: null, retryable: false, status: 503 }
+                : { data: Buffer.from(`k${kOf(url)} from ${edgeOf(url)}`) }),
+        }),
+    };
+    const attempt = (edge) => new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run(`https://cdn.test/edge/${edge}/stream/master.m3u8`, playlist, initTracker, disk);
+    const first = await attempt('a');
+    const second = await attempt('b');
+    const names = (await readFile(path.join(disk.dirPath, 'playlist.m3u8'), 'utf8')).split('\n').filter((line) => line && !line.startsWith('#'));
+    const saved = await Promise.all(names.map(async (name) => (await readFile(path.join(disk.dirPath, name), 'utf8')).replace(' from ', '@')));
+    return { exits: [first.exitReason, second.exitReason], saved, missed: playlist.missedSegmentCount };
+}
+
+const once = ['k0@a', 'k1@a', 'k2@a', 'k3@a', 'k4@a', 'k5@a', 'k6@b', 'k7@b', 'k8@b'];
+
+test('B2: a retry on a copy numbered lower saves only what is new', async (t) => {
+    const result = await retryOnAnotherCopy(t, { bFirstSequence: 200 });
+    assert.deepEqual(result.exits, ['segment-failed', 'remote-endlist']);
+    assert.deepEqual(result.saved, once);
+    assert.equal(result.missed, 0);
+});
+
+test('B2: a retry on a copy numbered higher saves only what is new and counts no gap', async (t) => {
+    const result = await retryOnAnotherCopy(t, { bFirstSequence: 5000 });
+    assert.deepEqual(result.saved, once);
+    assert.equal(result.missed, 0, 'another numbering is not a gap');
+});
+
+test('B2: a retry on a copy stamping later date-times is stitched too (with B1)', async (t) => {
+    assert.deepEqual((await retryOnAnotherCopy(t, { bFirstSequence: 200, skewMs: 20 })).saved, once);
+});
+
+test('a retry on the same copy dedups by sequence, as before', async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'edge-same-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'edge', streamerId: '1', recordingId: 'rec' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('edge', handle, async () => root);
+    const playlist = new PlaylistManager(disk, 'rec');
+    const initTracker = new InitTracker(disk);
+    let attempts = 0;
+    const provider = {
+        providerName: 'edge-test', playlistRetryMs: 100, recoverVariant: async () => null,
+        parseMasterPlaylist: async () => 'https://cdn.test/edge/a/stream/live.m3u8',
+        edgeOf: () => 'a',
+        validateSegment: async () => ({ valid: true }),
+        createDownloadSession: () => ({
+            fetchPlaylist: async () => (attempts === 1
+                ? window({ firstSequence: 1000, firstK: 0, count: 7 })
+                : window({ firstSequence: 1003, firstK: 3, count: 6, end: true })),
+            fetchSegment: async (url) => (attempts === 1 && kOf(url) === 6 ? { data: null, retryable: false, status: 503 } : { data: Buffer.from(`k${kOf(url)}`) }),
+        }),
+    };
+    const attempt = () => { attempts++; return new StreamDownloader(handle, provider, new AccessIncidentTracker()).run('https://cdn.test/edge/a/stream/master.m3u8', playlist, initTracker, disk); };
+    await attempt();
+    await attempt();
+    const names = (await readFile(path.join(disk.dirPath, 'playlist.m3u8'), 'utf8')).split('\n').filter((line) => line && !line.startsWith('#'));
+    assert.deepEqual(names.map((name) => Number(name.split('_').at(-1).split('.')[0])), [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008]);
+    assert.equal(playlist.missedSegmentCount, 0);
+});
