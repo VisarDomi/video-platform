@@ -1,6 +1,6 @@
 {
     "name": "demo",
-    "description": "Three live sites with tennis channels going on and off air, and a fault every few minutes. Faults are session-scoped, so every session repeats them.",
+    "description": "Three live sites with tennis channels going on and off air, and a fault every few minutes (session-scoped, so every session repeats them); a file host serving prepared matches; two upload destinations with processing, removals, notices, cache windows, quotas and forced logouts.",
     "seed": "demo-1",
     "epoch": null,
     "segmentRetentionS": 120,
@@ -61,6 +61,50 @@
                 { "id": "502", "name": "hard-court-two", "schedule": { "always": true } }
             ],
             "faults": [{ "type": "obfuscationKey", "at": "1h", "keyId": "k2" }]
+        },
+        "file-host": {
+            "albums": [{ "id": "day-one", "title": "Day one, full matches" }],
+            "files": [
+                { "id": "m1a7Qx", "name": "First round, court one.mp4", "album": "day-one" },
+                { "id": "m2b8Ry", "name": "First round, court two.mp4", "album": "day-one", "at": "5m" },
+                { "id": "m3c9Sz", "name": "Practice session.mp4" }
+            ],
+            "signatureTtlS": 120,
+            "redirectHops": 1,
+            "faults": [
+                { "type": "transferStall", "at": "10m", "until": "12m", "mode": "stall", "afterBytes": 1048576, "stallS": 90 },
+                { "type": "transferStall", "at": "20m", "until": "21m", "mode": "cut", "afterBytes": 4194304, "file": "m1a7Qx" },
+                { "type": "etagChange", "at": "40m", "file": "m3c9Sz" }
+            ]
+        },
+        "form-host": {
+            "accounts": [{ "username": "demo", "password": "demo-password", "displayName": "Demo" }],
+            "processingS": 180,
+            "processingRules": [{ "titleMatches": "\\bfail\\b", "outcome": "failed", "recoverAfterS": 600 }],
+            "removals": [{ "shorterThanS": 120, "afterS": 1800, "reason": "too short" }],
+            "bannedWords": [{ "word": "Brandname", "action": "refuse" }, { "word": "Sponsor", "action": "replace-notice", "replacement": "partner" }],
+            "visibilityRules": [{ "word": "walkover", "reason": "incomplete match" }],
+            "faults": [
+                { "type": "cacheWindow", "at": "20m", "until": "22m", "path": "/upload-video/" },
+                { "type": "chunkFault", "at": "30m", "until": "35m", "mode": "drop", "ratio": 0.2 },
+                { "type": "listStatus", "at": "45m", "until": "45m10s", "status": 404 },
+                { "type": "logout", "at": "1h" }
+            ]
+        },
+        "api-host": {
+            "accounts": [{ "username": "demo", "password": "demo-password" }],
+            "rotateRefreshTokens": true,
+            "accessTokenTtlS": 900,
+            "processingS": 120,
+            "minDurationS": 60,
+            "bannedWords": [{ "word": "Brandname" }],
+            "removals": [{ "titleMatches": "\\breject me\\b", "afterS": 600, "kind": "rejected", "reason": "rights holder" }],
+            "quota": { "dailyUnits": 10000 },
+            "faults": [
+                { "type": "uploadFault", "at": "15m", "until": "16m", "mode": "drop", "ratio": 0.3 },
+                { "type": "apiStatus", "at": "25m", "until": "25m30s", "status": 503, "api": "videos" },
+                { "type": "revokeTokens", "at": "2h" }
+            ]
         }
     }
 }

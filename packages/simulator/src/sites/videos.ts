@@ -6,7 +6,7 @@
 // Only facts are stored (who uploaded what, when, with which metadata); every
 // later state is computed from them at the instant asked about, so a clock
 // jump or a restart never leaves a video "stuck" in a stale state.
-import { closeSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { fsyncDir, writeFileDurable } from "../fsutil.js";
@@ -174,14 +174,21 @@ export class MediaStore {
         return file;
     }
 
-    /** Appends to a file and fsyncs it; returns the new size. */
+    /**
+     * Writes `data` at offset `size` (the bytes acknowledged so far) and fsyncs;
+     * returns the new size. Bytes past `size` (written before a crash, never
+     * acknowledged) are cut off first, so the file always equals the
+     * acknowledged prefix plus this piece.
+     */
     append(rel: string, data: Uint8Array, size: number): number {
         const file = this.path(rel);
         mkdirSync(join(file, ".."), { recursive: true });
         const created = !existsSync(file);
-        const fd = openSync(file, "a");
+        const fd = openSync(file, created ? "w" : "r+");
         try {
-            writeSync(fd, data);
+            ftruncateSync(fd, size);
+            let written = 0;
+            while (written < data.length) written += writeSync(fd, data, written, data.length - written, size + written);
             fsyncSync(fd);
         } finally {
             closeSync(fd);

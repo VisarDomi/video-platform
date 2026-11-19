@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -254,6 +254,10 @@ test('tokens, quota use and a half-done upload survive a restart', async (t) => 
     const url = created.headers.get('location');
     await putRange(url, tokens.access_token, bytes, 0, CHUNK - 1, bytes.length);
     await first.close();
+    // A power cut after bytes reached the disk but before the offset was
+    // recorded leaves unacknowledged bytes behind; they must not survive.
+    const part = path.join(stateDir, 'blobs', 'api-host', 'sessions', `${new URL(url).pathname.split('/').pop()}.part`);
+    appendFileSync(part, Buffer.alloc(1000, 0xee));
 
     const second = await start(t, { quota: { dailyUnits: 1000 } }, { stateDir, clock });
     const resumeUrl = url.replace(first.base, second.base);
