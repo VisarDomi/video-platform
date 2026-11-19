@@ -268,3 +268,28 @@ test('a poll that throws is logged and the next poll still runs', async (t) => {
     await until(() => sleeps.length === 2);
     assert.deepEqual(errors, [['Poll error', { error: 'site exploded' }], ['Poll error', { error: 'site exploded' }]]);
 });
+
+test("a site never replaces another site's capture that has the same target ID", async () => {
+    // One capture of "123", by site-p; site-q lists "123" too and sees it live under its own identity.
+    const sessions = new Map([['123', { site: 'site-p', recordingId: 'p1', hasMedia: true }]]);
+    const finalized = [];
+    const manager = {
+        size: 1,
+        getRecordingId: (id, provider) => {
+            const session = sessions.get(id);
+            return session && (provider === undefined || session.site === provider) ? session.recordingId : null;
+        },
+        hasStreamer: (id) => sessions.has(id),
+        has: () => false,
+        activeSessions: (provider) => [...sessions].filter(([, s]) => s.site === provider).map(([streamerId, s]) => ({ streamerId, hasMedia: s.hasMedia })),
+        getActiveSegmentPaths: () => new Set(),
+        async finalizeStreamer(id, reason) { finalized.push([id, reason]); sessions.delete(id); return true; },
+        add() { return null; },
+    };
+    const state = { now: 0, live: { 123: 'q1' } };
+    const loop = new DiscoveryLoop({ id: 'site-q', label: 'Q', log: silentLog }, fakeSite('site-q', state),
+        { getTargets: () => [{ id: '123', label: 'q-123' }], hasTarget: () => true }, manager);
+    await loop.poll();
+    assert.deepEqual(finalized, []);
+    assert.equal(sessions.get('123').recordingId, 'p1');
+});

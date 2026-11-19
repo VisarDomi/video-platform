@@ -171,9 +171,13 @@ export class DownloadsManager {
         return false;
     }
 
-    public getRecordingId(streamerId: string): string | null {
-        for (const download of this.downloads.values()) {
-            if (download.streamerId === streamerId) return download.recordingId;
+    // The recording identity of a streamer's download. With a provider, only that
+    // provider's download counts: streamer IDs are unique within a site, not across sites.
+    public getRecordingId(streamerId: string, provider?: string): string | null {
+        for (const [masterPlaylistUrl, download] of this.downloads) {
+            if (download.streamerId !== streamerId) continue;
+            if (provider !== undefined && this.activeDownloaders.get(masterPlaylistUrl)?.provider !== provider) continue;
+            return download.recordingId;
         }
         return null;
     }
