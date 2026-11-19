@@ -85,11 +85,12 @@ export interface FileHostSpec {
 // ---- form-host ----
 
 export type FormHostFault =
-    | { type: "logout"; at: number; account?: string }
+    | { type: "logout"; at: number; account?: string; revokeRemember: boolean }
     | Window & { type: "cacheWindow"; path: string }
     | RatioWindow & { type: "pageStatus"; status: number | "reset"; path?: string }
     | RatioWindow & { type: "chunkFault"; mode: "drop" | "stall" | "login-redirect" | "non-json" | "status"; status?: number; stallS?: number; index?: number }
-    | RatioWindow & { type: "listStatus"; status: number };
+    | RatioWindow & { type: "listStatus"; status: number }
+    | RatioWindow & { type: "tierStatus"; height: number; status: number | "reset" };
 
 export interface FormHostSpec {
     accounts: Array<{ username: string; password: string; displayName?: string }>;
@@ -113,6 +114,8 @@ export interface FormHostSpec {
     removalLagS?: number;
     /** Real-time delay of the final (media-free) assembly request. */
     assemblyDelayMs?: number;
+    /** What a signed-out client gets at the upload page. */
+    signedOutUpload?: "redirect-login" | "redirect-home" | "login-form";
     faults: FormHostFault[];
 }
 
@@ -182,7 +185,7 @@ const fileHostFaults: Record<string, Fields> = {
 };
 
 const formHostFaults: Record<string, Fields> = {
-    logout: { at: req(seconds), account: opt(str()) },
+    logout: { at: req(seconds), account: opt(str()), revokeRemember: opt(bool, true) },
     cacheWindow: { ...window, path: opt(str(/^\//, "a path starting with /"), "/") },
     pageStatus: { ...window, ...ratio, status: req(withReset), path: opt(str(/^\//, "a path starting with /")) },
     chunkFault: {
@@ -190,6 +193,7 @@ const formHostFaults: Record<string, Fields> = {
         status: opt(pageStatus), stallS: opt(num(0.001, 3600)), index: opt(num(0, 1e6, true)),
     },
     listStatus: { ...window, ...ratio, status: req(pageStatus) },
+    tierStatus: { ...window, ...ratio, height: req(oneOf(1080, 720, 480, 360)), status: req(withReset) },
 };
 
 const apiHostFaults: Record<string, Fields> = {
@@ -226,6 +230,7 @@ const formHost = object({
     listTotalsLagS: opt(num(0, 86400)),
     removalLagS: opt(num(0, 86400)),
     assemblyDelayMs: opt(num(0, 600000, true)),
+    signedOutUpload: opt(oneOf("redirect-login", "redirect-home", "login-form")),
     faults: opt(list(tagged(formHostFaults, Object.keys(formHostFaults), "form-host fault")), []),
 });
 
