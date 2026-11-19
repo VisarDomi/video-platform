@@ -44,6 +44,24 @@ export function controlRouter(sim: Simulation, hooks: ControlHooks): Router {
         sim.clock.setMode(body.mode);
     }));
 
+    // Site actions, e.g. remove a destination's video now or sign every session out.
+    r.post("/sites/:site/:action", async ctx => {
+        const module = sim.sites.get(ctx.params.site as never);
+        if (!module?.action) return json(404, { error: "no such site action" }, { kind: "control" });
+        let body: Record<string, unknown> = {};
+        const raw = (await ctx.body()).toString();
+        if (raw.trim()) {
+            try { body = JSON.parse(raw); } catch { return json(400, { error: "invalid JSON body" }, { kind: "control" }); }
+        }
+        try {
+            const result = await module.action(ctx.params.action, body, sim.clock.now());
+            return json(200, result ?? { ok: true }, { kind: "control" });
+        } catch (error) {
+            if (error instanceof RangeError) return json(400, { error: error.message }, { kind: "control" });
+            throw error;
+        }
+    });
+
     async function clockChange(_ctx: RequestContext, change: () => Promise<void>): Promise<Reply> {
         try {
             await change();
@@ -69,7 +87,7 @@ export function describe(sim: Simulation, hooks: ControlHooks, now: number) {
                 const session = model.sessionAt(now);
                 return {
                     id: model.spec.id, name: model.nameAt(now), source: model.source, online: session !== null,
-                    session: session ? { key: session.key, index: session.index, startMs: session.startMs, endMs: session.endMs, recordingId: module?.recordingId(model, session) ?? session.key } : null,
+                    session: session ? { key: session.key, index: session.index, startMs: session.startMs, endMs: session.endMs, recordingId: module?.recordingId?.(model, session) ?? session.key } : null,
                     edges: model.edges.map(edge => {
                         const w = session ? model.window(session, edge, now) : null;
                         return { id: edge.id, lagMs: edge.lagMs, pdtSkewMs: edge.pdtSkewMs, mediaSequence: w?.mediaSequence ?? null, segments: w?.entries.length ?? 0 };
@@ -78,6 +96,11 @@ export function describe(sim: Simulation, hooks: ControlHooks, now: number) {
                 };
             }),
         };
+    }
+    for (const [id, module] of sim.sites) {
+        if (sites[id] !== undefined || !module.describe) continue;
+        const described = module.describe(now);
+        if (described) sites[id] = { url: hooks.urls()[id] ?? null, ...described };
     }
     return {
         scenario: { name: engine.scenario.name, seed: engine.seed, hash: engine.scenarioHash, epochMs: engine.epochMs, epoch: new Date(engine.epochMs).toISOString() },

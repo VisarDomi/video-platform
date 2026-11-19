@@ -80,6 +80,13 @@ export interface ResponseRecord {
     ended?: boolean;
     stale?: boolean;
     reason?: string;
+    /** Streamed bodies: the announced length (`bytes` is what was sent). */
+    planned?: number;
+    /** Byte range served (file downloads), "first-last". */
+    range?: string;
+    /** File host: the file id; destinations: the video id. */
+    file?: string;
+    video?: string;
 }
 
 export interface EventRecord {

@@ -6,8 +6,17 @@
 // when a fault says "scope": "session"). A time may also be written as a
 // string such as "90s", "15m", "1h30m".
 
+import { bool, isObject, list, num, object, oneOf, opt, req, seconds, str, tagged, type Check, type Fields } from "./check.js";
+import { hostSpecChecks, validateHosts, type ApiHostSpec, type FileHostSpec, type FormHostSpec } from "./hosts.js";
+export { parseSeconds } from "./check.js";
+
+/** The live sites (channels served by the live engine). */
 export const SITE_IDS = ["ts-live", "ladder-live", "fmp4-live"] as const;
 export type SiteId = typeof SITE_IDS[number];
+/** The file host and the two upload destinations (their own state, no channels). */
+export const HOST_IDS = ["file-host", "form-host", "api-host"] as const;
+export type HostId = typeof HOST_IDS[number];
+export type AnySiteId = SiteId | HostId;
 
 export type Schedule =
     | { always: true }
@@ -96,96 +105,17 @@ export interface Scenario {
     /** Epoch milliseconds, or null for "when loaded". */
     epoch: number | null;
     segmentRetentionS: number;
-    sites: Partial<Record<SiteId, SiteSpec>>;
+    sites: Partial<Record<SiteId, SiteSpec>> & {
+        "file-host"?: FileHostSpec;
+        "form-host"?: FormHostSpec;
+        "api-host"?: ApiHostSpec;
+    };
 }
 
 export class ScenarioError extends Error {
     constructor(readonly problems: string[]) {
         super(`invalid scenario:\n  ${problems.join("\n  ")}`);
     }
-}
-
-// ---- a small strict validator ----
-
-type Check<T> = (value: unknown, path: string, problems: string[]) => T | undefined;
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
-function str(pattern?: RegExp, what = "a string"): Check<string> {
-    return (v, path, problems) => {
-        if (typeof v !== "string" || v.length === 0) { problems.push(`${path}: expected ${what}`); return undefined; }
-        if (pattern && !pattern.test(v)) { problems.push(`${path}: "${v}" is not ${what}`); return undefined; }
-        return v;
-    };
-}
-
-function num(min: number, max = Infinity, integer = false): Check<number> {
-    return (v, path, problems) => {
-        if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) {
-            problems.push(`${path}: expected ${integer ? "an integer" : "a number"} in [${min}, ${max}]`);
-            return undefined;
-        }
-        return v;
-    };
-}
-
-const bool: Check<boolean> = (v, path, problems) => {
-    if (typeof v !== "boolean") { problems.push(`${path}: expected true or false`); return undefined; }
-    return v;
-};
-
-function oneOf<T extends string | number>(...values: T[]): Check<T> {
-    return (v, path, problems) => {
-        if (!values.includes(v as T)) { problems.push(`${path}: expected one of ${values.map(x => JSON.stringify(x)).join(", ")}`); return undefined; }
-        return v as T;
-    };
-}
-
-export function parseSeconds(v: unknown): number | undefined {
-    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
-    if (typeof v !== "string") return undefined;
-    const m = /^\s*(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m)?\s*(?:(\d+(?:\.\d+)?)s)?\s*$/.exec(v);
-    if (!m || (!m[1] && !m[2] && !m[3])) return undefined;
-    return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
-}
-
-const seconds: Check<number> = (v, path, problems) => {
-    const s = parseSeconds(v);
-    if (s === undefined) problems.push(`${path}: expected seconds (a number, or a string like "90s", "15m", "1h30m")`);
-    return s;
-};
-
-function list<T>(item: Check<T>): Check<T[]> {
-    return (v, path, problems) => {
-        if (!Array.isArray(v)) { problems.push(`${path}: expected an array`); return undefined; }
-        const out: T[] = [];
-        v.forEach((x, i) => { const r = item(x, `${path}[${i}]`, problems); if (r !== undefined) out.push(r); });
-        return out;
-    };
-}
-
-type Fields = Record<string, { check: Check<any>; optional?: boolean; default?: unknown }>;
-const req = (check: Check<any>) => ({ check });
-const opt = (check: Check<any>, def?: unknown) => ({ check, optional: true, default: def });
-
-function object(fields: Fields): Check<Record<string, any>> {
-    return (v, path, problems) => {
-        if (!isObject(v)) { problems.push(`${path}: expected an object`); return undefined; }
-        const out: Record<string, any> = {};
-        for (const key of Object.keys(v)) {
-            if (!(key in fields)) problems.push(`${path}: unknown key "${key}"`);
-        }
-        for (const [key, spec] of Object.entries(fields)) {
-            if (v[key] === undefined) {
-                if (!spec.optional) problems.push(`${path}: missing "${key}"`);
-                else if (spec.default !== undefined) out[key] = spec.default;
-                continue;
-            }
-            const r = spec.check(v[key], `${path}.${key}`, problems);
-            if (r !== undefined) out[key] = r;
-        }
-        return out;
-    };
 }
 
 const statusCode = oneOf(401, 403, 404, 410, 429, 500, 502, 503, 504);
@@ -223,20 +153,6 @@ const siteFaultsBySite: Record<SiteId, string[]> = {
     "ladder-live": ["apiStatus"],
     "fmp4-live": ["apiStatus", "obfuscationKey"],
 };
-
-function tagged(shapes: Record<string, Fields>, allowed: string[], what: string): Check<any> {
-    return (v, path, problems) => {
-        if (!isObject(v) || typeof v.type !== "string") { problems.push(`${path}: expected a ${what} with a "type"`); return undefined; }
-        if (!allowed.includes(v.type)) {
-            problems.push(`${path}: ${what} type "${v.type}" is not one of ${allowed.join(", ")}`);
-            return undefined;
-        }
-        const { type, ...rest } = v;
-        const out = object(shapes[type])(rest, path, problems);
-        if (out && "until" in out && "at" in out && out.until <= out.at) problems.push(`${path}: "until" must be after "at"`);
-        return out ? { type, ...out } : undefined;
-    };
-}
 
 const schedule: Check<Schedule> = (v, path, problems) => {
     if (!isObject(v)) { problems.push(`${path}: expected a schedule object`); return undefined; }
@@ -333,7 +249,10 @@ const scenarioCheck = object({
         return ms;
     }, null),
     segmentRetentionS: opt(num(1, 86400), 120),
-    sites: req(object(Object.fromEntries(SITE_IDS.map(s => [s, opt(siteSpec(s))])))),
+    sites: req(object({
+        ...Object.fromEntries(SITE_IDS.map(s => [s, opt(siteSpec(s))])),
+        ...Object.fromEntries(HOST_IDS.map(s => [s, opt(hostSpecChecks[s])])),
+    })),
 });
 
 export function validateScenario(input: unknown): Scenario {
@@ -369,6 +288,7 @@ export function validateScenario(input: unknown): Scenario {
                 if (accounts.size !== (spec.accounts ?? []).length) problems.push(`scenario.sites.ts-live.accounts: duplicate username`);
             }
         }
+        validateHosts(out, problems);
         if (Object.keys(out.sites).length === 0) problems.push("scenario.sites: no site configured");
     }
     if (problems.length > 0 || !out) throw new ScenarioError(problems);
