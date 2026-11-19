@@ -80,3 +80,30 @@ test('a failed save does not prevent a later token from being saved', async t =>
     assert.equal(errors.length, 1);
     assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).refreshToken, 'rotated-token');
 });
+
+test('loading a session: a missing file is no session, a torn or unreadable one is reported', async t => {
+    const { file, errors } = await fixture(t);
+    // The site's auth reads its own fields (as TsLive's does: data.tsliveRT).
+    const reader = { deserializeTokens: data => data.tsliveRT ? bag(data.tsliveRT) : null };
+    const context = new AuthContext('fixture@example.invalid', reader);
+    assert.equal(await context.loadTokenFromFile(), false);
+    assert.equal(errors.length, 0, 'a missing file is not an error');
+
+    await fs.writeFile(file, JSON.stringify({ tsliveRT: 'saved' }));
+    assert.equal(await context.loadTokenFromFile(), true);
+    assert.equal(context.getRefreshToken(), 'saved');
+
+    for (const content of ['{ torn', 'null']) {
+        errors.length = 0;
+        await fs.writeFile(file, content);
+        assert.equal(await new AuthContext('fixture@example.invalid', reader).loadTokenFromFile(), false, content);
+        assert.equal(errors.length, 1, content);
+        assert.equal(errors[0][0], `Failed to read session file for fixture@example.invalid at ${file}`);
+    }
+
+    // A record without the site's fields is no session, silently.
+    errors.length = 0;
+    await fs.writeFile(file, '{}');
+    assert.equal(await new AuthContext('fixture@example.invalid', reader).loadTokenFromFile(), false);
+    assert.equal(errors.length, 0);
+});

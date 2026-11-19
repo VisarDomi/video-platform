@@ -61,8 +61,10 @@ export class AliasRegistry implements AliasBook {
         return this.getReverse()[name];
     }
 
+    // One lookup, not a copy of the registry: a list request asks once per listed target.
     names(id: string): string[] | undefined {
-        return this.getAllWithHistory()[id];
+        const entry = this.state.get(id);
+        return entry ? [...entry.history, entry.current] : undefined;
     }
 
     record(id: string, aliases: AliasSnapshot): Promise<boolean> {

@@ -92,3 +92,22 @@ test("a site may name the account its consumers read; a site with auth must", as
     await assert.rejects(loadSites([{ id: "a", plugin: "demo" }], { importPlugin, context }), /needs an "account"/);
     assert.equal((await loadSites([{ id: "a", plugin: "demo", account: "x" }], { importPlugin, context })).length, 1);
 });
+
+test("a failed load closes the instances it already created, so the process can exit", async () => {
+    const closed = [];
+    const good = { id: "demo", label: "Demo", sdkVersion: SDK_VERSION, create: (context) => ({ close: () => { closed.push(context.siteId); } }) };
+    const withAuth = { ...good, create: (context) => ({ auth: {}, close: () => { closed.push(context.siteId); } }) };
+    const modules = { good: { plugin: good }, auth: { plugin: withAuth }, none: {} };
+    const importPlugin = async (name) => modules[name];
+    const context = (entry) => ({ siteId: entry.id });
+
+    await assert.rejects(loadSites([{ id: "a", plugin: "good" }, { id: "b", plugin: "good" }, { id: "c", plugin: "none" }],
+        { importPlugin, context }), /does not export a plug-in/);
+    assert.deepEqual(closed, ["a", "b"]);
+
+    closed.length = 0;
+    // The instance that failed the account check is closed too.
+    await assert.rejects(loadSites([{ id: "a", plugin: "good" }, { id: "t", plugin: "auth" }], { importPlugin, context }),
+        /needs an "account"/);
+    assert.deepEqual(closed.sort(), ["a", "t"]);
+});

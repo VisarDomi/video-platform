@@ -72,21 +72,30 @@ export async function readSitesFile(filePath: string): Promise<SiteEntry[]> {
 
 export async function loadSites(entries: SiteEntry[], options: LoadOptions): Promise<LoadedSite[]> {
     const importPlugin = options.importPlugin ?? ((specifier: string) => import(specifier));
+    const created: SiteInstance[] = [];
     const loaded: LoadedSite[] = [];
-    for (const entry of entries) {
-        if (entry.enabled === false) continue;
-        const module = await importPlugin(entry.plugin) as { default?: unknown; plugin?: unknown };
-        const plugin = (module.plugin ?? module.default) as SitePlugin | undefined;
-        if (!plugin || typeof plugin.create !== "function") {
-            throw new Error(`Site ${entry.id}: ${entry.plugin} does not export a plug-in`);
+    try {
+        for (const entry of entries) {
+            if (entry.enabled === false) continue;
+            const module = await importPlugin(entry.plugin) as { default?: unknown; plugin?: unknown };
+            const plugin = (module.plugin ?? module.default) as SitePlugin | undefined;
+            if (!plugin || typeof plugin.create !== "function") {
+                throw new Error(`Site ${entry.id}: ${entry.plugin} does not export a plug-in`);
+            }
+            if (plugin.sdkVersion !== SDK_VERSION) {
+                throw new Error(`Site ${entry.id}: ${entry.plugin} targets SDK ${plugin.sdkVersion}, this core runs SDK ${SDK_VERSION}`);
+            }
+            const instance = await plugin.create(options.context(entry, plugin));
+            created.push(instance);
+            // Consumers read the site's credentials through the account the file names.
+            if (instance.auth && !entry.account) throw new Error(`Site ${entry.id}: a site with auth needs an "account" in the sites file`);
+            loaded.push({ id: entry.id, plugin, entry, instance });
         }
-        if (plugin.sdkVersion !== SDK_VERSION) {
-            throw new Error(`Site ${entry.id}: ${entry.plugin} targets SDK ${plugin.sdkVersion}, this core runs SDK ${SDK_VERSION}`);
-        }
-        const instance = await plugin.create(options.context(entry, plugin));
-        // Consumers read the site's credentials through the account the file names.
-        if (instance.auth && !entry.account) throw new Error(`Site ${entry.id}: a site with auth needs an "account" in the sites file`);
-        loaded.push({ id: entry.id, plugin, entry, instance });
+    } catch (error) {
+        // Nothing gets the instances made so far: stop what they hold (timers, sockets), so
+        // the failed process can exit instead of hanging.
+        await Promise.allSettled(created.map(async (instance) => { await instance.close?.(); }));
+        throw error;
     }
     return loaded;
 }
