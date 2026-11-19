@@ -45,6 +45,10 @@ export class DownloadHandle {
 
 export class DownloadsManager {
     private downloads: Map<string, Download> = new Map();
+    // The site of each download, by master playlist URL. Streamer IDs are unique within
+    // a site, not across sites, so every lookup by streamer takes the site. Kept apart
+    // from the downloads: live-status.json shows them as they are.
+    private downloadSites: Map<string, string> = new Map();
     private activeDownloaders: Map<string, ActiveDownloader> = new Map();
     private shuttingDown = false;
     private readonly statusFilePath: string;
@@ -61,7 +65,7 @@ export class DownloadsManager {
         return instance;
     }
 
-    public add(masterPlaylistUrl: string, initialData: Omit<Download, "liveUrl" | "segmentsDirPath">): DownloadHandle | null {
+    public add(masterPlaylistUrl: string, initialData: Omit<Download, "liveUrl" | "segmentsDirPath">, provider: string): DownloadHandle | null {
         // Discovery keeps polling during shutdown; a session started then would
         // resume a folder the stopping session just left, and be cut off mid-write.
         if (this.shuttingDown) return null;
@@ -77,6 +81,7 @@ export class DownloadsManager {
         };
 
         this.downloads.set(masterPlaylistUrl, newDownload);
+        this.downloadSites.set(masterPlaylistUrl, provider);
         this._requestStatusFileUpdate();
         return new DownloadHandle(masterPlaylistUrl, this);
     }
@@ -119,8 +124,9 @@ export class DownloadsManager {
     }
 
     // The reason appears in the session's "recording ended" line.
-    public async finalizeStreamer(streamerId: string, reason: string): Promise<boolean> {
-        const active = [...this.activeDownloaders.values()].find((download) => download.streamerId === streamerId);
+    public async finalizeStreamer(streamerId: string, reason: string, provider: string): Promise<boolean> {
+        const active = [...this.activeDownloaders.values()]
+            .find((download) => download.streamerId === streamerId && download.provider === provider);
         if (!active) return false;
         active.finalize(reason);
         await active.completion;
@@ -132,6 +138,7 @@ export class DownloadsManager {
         if (existing) {
             logger.debug(`[StreamDownloader] DM-REMOVE streamer=${existing.streamerId} dir=${existing.segmentsDirPath ? existing.segmentsDirPath.split("/").pop() : "none"}`);
         }
+        this.downloadSites.delete(masterPlaylistUrl);
         if (this.downloads.delete(masterPlaylistUrl)) {
             this._requestStatusFileUpdate();
         }
@@ -162,24 +169,19 @@ export class DownloadsManager {
     public has(masterPlaylistUrl: string): boolean {
         return this.downloads.has(masterPlaylistUrl);
     }
-    public hasStreamer(streamerId: string): boolean {
-        for (const download of this.downloads.values()) {
-            if (download.streamerId === streamerId) {
-                return true;
-            }
-        }
-        return false;
+    public hasStreamer(streamerId: string, provider: string): boolean {
+        return this.streamerDownload(streamerId, provider) !== undefined;
     }
 
-    // The recording identity of a streamer's download. With a provider, only that
-    // provider's download counts: streamer IDs are unique within a site, not across sites.
-    public getRecordingId(streamerId: string, provider?: string): string | null {
+    public getRecordingId(streamerId: string, provider: string): string | null {
+        return this.streamerDownload(streamerId, provider)?.recordingId ?? null;
+    }
+
+    private streamerDownload(streamerId: string, provider: string): Download | undefined {
         for (const [masterPlaylistUrl, download] of this.downloads) {
-            if (download.streamerId !== streamerId) continue;
-            if (provider !== undefined && this.activeDownloaders.get(masterPlaylistUrl)?.provider !== provider) continue;
-            return download.recordingId;
+            if (download.streamerId === streamerId && this.downloadSites.get(masterPlaylistUrl) === provider) return download;
         }
-        return null;
+        return undefined;
     }
 
     public get size(): number {
@@ -221,6 +223,7 @@ export class DownloadsManager {
             this._updateFileDebounceTimer = null;
         }
         this.downloads.clear();
+        this.downloadSites.clear();
         await this._updateStatusFile();
     }
 }

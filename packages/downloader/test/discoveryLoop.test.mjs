@@ -16,29 +16,37 @@ test.after(() => rm(sandbox, { recursive: true, force: true }));
 const { DiscoveryLoop } = await import('../dist/services/common/discoveryLoop.js');
 const { formatSegmentName } = await import('../dist/services/download/segmentIdentity.js');
 
-const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
+const silentLog = { debug() {}, verbose() {}, info() {}, warn() {}, error() {} };
 
-// A running capture per streamer, as the downloads manager reports it. A start is
-// recorded, not run.
-function fakeManager() {
-    const sessions = new Map();
+// The running captures, by site and streamer, as the downloads manager reports them.
+// A start is recorded, not run. `sessions` holds the captures of `site` (one site per
+// test unless a test adds others under "<site>:<id>" in `all`).
+function fakeManager(site) {
+    const all = new Map();
+    const sessions = {
+        set: (id, session) => all.set(`${site}:${id}`, session),
+        get: (id) => all.get(`${site}:${id}`),
+        has: (id) => all.has(`${site}:${id}`),
+    };
     const finalized = [];
     const starts = [];
+    const urls = new Set();
     return {
-        sessions, finalized, starts,
-        get size() { return sessions.size; },
-        getRecordingId: (id) => sessions.get(id)?.recordingId ?? null,
-        hasStreamer: (id) => sessions.has(id),
-        has: () => false,
-        activeSessions: () => [...sessions].map(([streamerId, session]) => ({ streamerId, hasMedia: session.hasMedia })),
+        all, sessions, finalized, starts, urls,
+        get size() { return all.size; },
+        getRecordingId: (id, provider) => all.get(`${provider}:${id}`)?.recordingId ?? null,
+        hasStreamer: (id, provider) => all.has(`${provider}:${id}`),
+        has: (url) => urls.has(url),
+        activeSessions: (provider) => [...all].filter(([key]) => key.startsWith(`${provider}:`))
+            .map(([key, session]) => ({ streamerId: key.slice(provider.length + 1), hasMedia: session.hasMedia })),
         getActiveSegmentPaths: () => new Set(),
-        async finalizeStreamer(id, reason) {
-            if (!sessions.has(id)) return false;
-            finalized.push([id, reason]);
-            sessions.delete(id);
+        async finalizeStreamer(id, reason, provider) {
+            if (!all.has(`${provider}:${id}`)) return false;
+            finalized.push([id, reason, provider]);
+            all.delete(`${provider}:${id}`);
             return true;
         },
-        add(url, data) { starts.push({ url, ...data }); return null; },
+        add(url, data, provider) { starts.push({ url, ...data, provider }); return null; },
     };
 }
 
@@ -73,7 +81,7 @@ function fakeSite(siteId, state, overrides = {}) {
 
 function fixture(siteId, { targets = [{ id: 'a1', label: 'alpha' }], state = { now: 0 }, capture = {} } = {}) {
     const listed = [...targets];
-    const manager = fakeManager();
+    const manager = fakeManager(siteId);
     const site = fakeSite(siteId, state, capture);
     const loop = new DiscoveryLoop({ id: siteId, label: siteId.toUpperCase(), log: silentLog }, site, {
         getTargets: () => [...listed],
@@ -103,7 +111,7 @@ test('a terminal target ends its session only after 60 s over two observations',
     assert.deepEqual(f.manager.finalized, []);
     f.state.now = 1_000 + 60_000;
     await f.loop.poll();
-    assert.deepEqual(f.manager.finalized, [['a1', 'offline for 60s without any media']]);
+    assert.deepEqual(f.manager.finalized, [['a1', 'offline for 60s without any media', 'site-b']]);
 });
 
 test('a terminal target hands its recording to the server only after 60 s', async () => {
@@ -126,13 +134,21 @@ test('a terminal target hands its recording to the server only after 60 s', asyn
     assert.deepEqual(await readdir(path.join(downloaded, '.pending')), [name]);
 });
 
-test('a new recording identity replaces the running session, also one without a folder', async () => {
-    const f = fixture('site-d', { state: { now: 0, live: { a1: 'r2' } } });
+test('a site that opts in has a new recording identity replace the running session, also one without a folder', async () => {
+    const f = fixture('site-d', { state: { now: 0, live: { a1: 'r2' } }, capture: { replaceSessionOnNewRecording: true } });
     f.manager.sessions.set('a1', { recordingId: 'r1', hasMedia: false });
     await f.loop.poll();
-    assert.deepEqual(f.manager.finalized, [['a1', 'a new stream replaced it']]);
+    assert.deepEqual(f.manager.finalized, [['a1', 'a new stream replaced it', 'site-d']]);
     assert.deepEqual(f.manager.starts.map(({ streamerId, alias, recordingId }) => ({ streamerId, alias, recordingId })),
         [{ streamerId: 'a1', alias: 'alpha', recordingId: 'r2' }]);
+});
+
+test('a site that does not opt in keeps the running session and starts no other', async () => {
+    const f = fixture('site-d2', { state: { now: 0, live: { a1: 'r2' } } });
+    f.manager.sessions.set('a1', { recordingId: 'r1', hasMedia: false });
+    await f.loop.poll();
+    assert.deepEqual(f.manager.finalized, []);
+    assert.deepEqual(f.manager.starts, []);
 });
 
 test('the same recording identity keeps the running session', async () => {
@@ -150,7 +166,7 @@ test('a target removed from the list ends its session, even while the lookup fai
     assert.deepEqual(f.manager.finalized, []);
     f.listed.length = 0;
     await f.loop.poll();
-    assert.deepEqual(f.manager.finalized, [['a1', 'removed from the download list']]);
+    assert.deepEqual(f.manager.finalized, [['a1', 'removed from the download list', 'site-f']]);
 });
 
 test('a target removed while the lookup is in flight does not start', async () => {
@@ -258,38 +274,90 @@ test('the cadence runs from the end of a poll, or from its start when the site a
     assert.deepEqual(sleeps, [29_600, 29_600]);
 });
 
-test('a poll that throws is logged and the next poll still runs', async (t) => {
+test('a poll that throws is logged in the site\'s words and the next poll still runs', async (t) => {
     const sleeps = recordSleeps(t);
     const errors = [];
-    const f = fixture('site-o', { capture: { async lookup() { throw new Error('site exploded'); } } });
+    let calls = 0;
+    const f = fixture('site-o', { capture: { async lookup() { throw ++calls === 1 ? new Error('site exploded') : 'not an error'; } } });
     f.loop.site.log = { ...silentLog, error: (...args) => errors.push(args) };
     f.loop.activeReconciler.recoverLocalState = async () => {};
     void f.loop.start();
     await until(() => sleeps.length === 2);
-    assert.deepEqual(errors, [['Poll error', { error: 'site exploded' }], ['Poll error', { error: 'site exploded' }]]);
+    assert.deepEqual(errors, [['Poll error', { error: 'site exploded' }], ['Poll error', { error: undefined }]]);
+
+    sleeps.length = 0;
+    const own = fixture('site-o2', { capture: { pollErrorMessage: 'Error processing the channel list', async lookup() { throw new Error('x'); } } });
+    own.loop.site.log = { ...silentLog, error: (...args) => errors.push(args) };
+    own.loop.activeReconciler.recoverLocalState = async () => {};
+    void own.loop.start();
+    await until(() => sleeps.length === 2);
+    assert.deepEqual(errors.slice(2), [['Error processing the channel list', { error: 'x' }], ['Error processing the channel list', { error: 'x' }]]);
 });
 
-test("a site never replaces another site's capture that has the same target ID", async () => {
-    // One capture of "123", by site-p; site-q lists "123" too and sees it live under its own identity.
-    const sessions = new Map([['123', { site: 'site-p', recordingId: 'p1', hasMedia: true }]]);
-    const finalized = [];
-    const manager = {
-        size: 1,
-        getRecordingId: (id, provider) => {
-            const session = sessions.get(id);
-            return session && (provider === undefined || session.site === provider) ? session.recordingId : null;
-        },
-        hasStreamer: (id) => sessions.has(id),
-        has: () => false,
-        activeSessions: (provider) => [...sessions].filter(([, s]) => s.site === provider).map(([streamerId, s]) => ({ streamerId, hasMedia: s.hasMedia })),
-        getActiveSegmentPaths: () => new Set(),
-        async finalizeStreamer(id, reason) { finalized.push([id, reason]); sessions.delete(id); return true; },
-        add() { return null; },
-    };
+test('the same numeric ID live on two sites: each site starts, keeps and ends only its own capture', async () => {
+    const manager = fakeManager('site-p');
     const state = { now: 0, live: { 123: 'q1' } };
-    const loop = new DiscoveryLoop({ id: 'site-q', label: 'Q', log: silentLog }, fakeSite('site-q', state),
-        { getTargets: () => [{ id: '123', label: 'q-123' }], hasTarget: () => true }, manager);
+    const listed = [{ id: '123', label: 'q-123' }];
+    const loop = new DiscoveryLoop({ id: 'site-q', label: 'Q', log: silentLog },
+        fakeSite('site-q', state, { replaceSessionOnNewRecording: true }),
+        { getTargets: () => [...listed], hasTarget: (id) => listed.some((t) => t.id === id) }, manager);
+    // site-p captures its own "123" with another identity.
+    manager.all.set('site-p:123', { recordingId: 'p1', hasMedia: true });
+
     await loop.poll();
-    assert.deepEqual(finalized, []);
-    assert.equal(sessions.get('123').recordingId, 'p1');
+    assert.deepEqual(manager.finalized, [], "site-q does not replace site-p's capture");
+    assert.deepEqual(manager.starts.map(({ streamerId, provider, recordingId }) => ({ streamerId, provider, recordingId })),
+        [{ streamerId: '123', provider: 'site-q', recordingId: 'q1' }], 'site-q starts its own capture');
+
+    manager.all.set('site-q:123', { recordingId: 'q1', hasMedia: true });
+    listed.length = 0;
+    state.now = 120_000;
+    await loop.poll();
+    assert.deepEqual(manager.finalized, [['123', 'removed from the download list', 'site-q']]);
+    assert.ok(manager.all.has('site-p:123'), "site-p's capture runs on");
+});
+
+test('captures start in the order the site gives', async () => {
+    const f = fixture('site-r', {
+        targets: [{ id: 'a1', label: 'alpha' }, { id: 'b2', label: 'beta' }, { id: 'c3', label: 'gamma' }],
+        state: { now: 0, live: { a1: 'r1', b2: 'r2', c3: 'r3' } },
+    });
+    const lookup = f.site.lookup;
+    f.site.lookup = async function (...args) {
+        return { ...await lookup.apply(this, args), startOrder: ['c3', 'x9', 'a1', 'b2'] };
+    };
+    await f.loop.poll();
+    assert.deepEqual(f.manager.starts.map(({ streamerId }) => streamerId), ['c3', 'a1', 'b2']);
+});
+
+test('a live target without an identity is neither live nor terminal, and may still start through resolveMaster', async () => {
+    const resolved = [];
+    const f = fixture('site-s', {
+        targets: [{ id: 'a1', label: 'alpha' }, { id: 'b2', label: 'beta' }],
+        state: { now: 0 },
+        capture: {
+            async lookup(targets) {
+                return { observedAt: 0, live: new Map(), terminalTargetIds: new Set(), unidentifiedTargetIds: new Set(targets.map((t) => t.id)) };
+            },
+            async resolveMaster(live) {
+                resolved.push({ ...live });
+                return live.targetId === 'a1' ? { ...live, recordingId: 'read-again', masterPlaylistUrl: 'https://cdn.example.test/a1.m3u8' } : null;
+            },
+        },
+    });
+    f.manager.sessions.set('b2', { recordingId: 'r', hasMedia: false });
+    await f.loop.poll();
+    assert.deepEqual(resolved, [{ targetId: 'a1', alias: 'alpha', recordingId: '', masterPlaylistUrl: '' }], 'b2 has a capture already');
+    assert.deepEqual(f.manager.starts.map(({ streamerId, recordingId }) => ({ streamerId, recordingId })), [{ streamerId: 'a1', recordingId: 'read-again' }]);
+    assert.deepEqual(f.manager.finalized, []);
+});
+
+test('a resolved playlist already being captured does not start twice', async () => {
+    const f = fixture('site-t', {
+        state: { now: 0, live: { a1: 'r1' } },
+        capture: { async resolveMaster(live) { return { ...live, masterPlaylistUrl: 'https://cdn.example.test/shared.m3u8' }; } },
+    });
+    f.manager.urls.add('https://cdn.example.test/shared.m3u8');
+    await f.loop.poll();
+    assert.deepEqual(f.manager.starts, []);
 });

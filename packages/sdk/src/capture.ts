@@ -106,4 +106,11 @@ export interface ProviderSnapshot {
     observedAt: number;
     live: Map<string, ProviderLiveStream>;
     terminalTargetIds: Set<string>;
+    // Listed targets the site reports live but whose recording identity it could not read
+    // yet. The disk reconcile counts them neither live nor terminal; the core still offers
+    // them to resolveMaster, which may read the identity in time to start.
+    unidentifiedTargetIds?: Set<string>;
+    // The order in which the core considers targets for a start in this poll (the site's
+    // own listing order). Default: the download list's order.
+    startOrder?: string[];
 }

@@ -8,11 +8,11 @@ segments). The core owns the discovery loop, the session rules, durability and h
 ## Sites file
 
 The sites to capture come from the sites file: `$VIDEO_SITES_FILE`, else
-`<services data root>/sites.json` (`{"sites": [{"id", "plugin", "label"}]}`, see
+`<services data root>/sites.json` (`{"sites": [{"id", "plugin"}]}`, see
 `packages/sdk/src/registry.ts`). A missing or invalid file, or one without a capture site,
 stops the service at startup. The site ID names the download list and the recording
-folders; the label is the log prefix (`[<label>] ...`). Each plug-in gets its own state
-directory, `<services data root>/site-state/<id>/`.
+folders; the plug-in's label is the log prefix (`[<label>] ...`). Each plug-in gets its own
+state directory, `<services data root>/site-state/<id>/`.
 
 ## Target files
 

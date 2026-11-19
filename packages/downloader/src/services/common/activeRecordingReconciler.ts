@@ -148,7 +148,7 @@ export class ActiveRecordingReconciler {
         for (const { streamerId } of this.downloadsManager.activeSessions(this.providerName)) {
             if (listed.has(streamerId)) continue;
             logger.info(`[${this.providerName}] Ending the session of ${streamerId}: removed from the download list`);
-            await this.downloadsManager.finalizeStreamer(streamerId, "removed from the download list");
+            await this.downloadsManager.finalizeStreamer(streamerId, "removed from the download list", this.providerName);
             this.sessionConfirmations.delete(streamerId);
         }
     }
@@ -201,7 +201,7 @@ export class ActiveRecordingReconciler {
             const current = targetId ? snapshot.live.get(targetId) : undefined;
             if (targetId && current?.recordingId === recording.recordingId) {
                 this.confirmations.delete(recording.path);
-                if (!this.downloadsManager.hasStreamer(targetId)) resumePaths.set(targetId, recording.path);
+                if (!this.downloadsManager.hasStreamer(targetId, this.providerName)) resumePaths.set(targetId, recording.path);
                 continue;
             }
 
@@ -255,7 +255,7 @@ export class ActiveRecordingReconciler {
             this.sessionConfirmations.set(streamerId, confirmation);
             if (confirmation.observationCount >= 2 && snapshot.observedAt - confirmation.firstObservedAt >= TERMINAL_CONFIRMATION_MS) {
                 logger.info(`[${this.providerName}] Ending the session of ${streamerId}: offline for 60s without any media`);
-                await this.downloadsManager.finalizeStreamer(streamerId, "offline for 60s without any media");
+                await this.downloadsManager.finalizeStreamer(streamerId, "offline for 60s without any media", this.providerName);
                 this.sessionConfirmations.delete(streamerId);
             }
         }
@@ -264,7 +264,7 @@ export class ActiveRecordingReconciler {
     private async finalize(targetId: string | null, recordingPath: string, reason: string): Promise<void> {
         // A running session logs the end itself, with its segment count.
         const finalizedActiveSession = targetId
-            ? await this.downloadsManager.finalizeStreamer(targetId, reason)
+            ? await this.downloadsManager.finalizeStreamer(targetId, reason, this.providerName)
             : false;
         if (!finalizedActiveSession) {
             logger.info(`[${this.providerName}] Finalizing ${path.basename(recordingPath)}: ${reason}`);
