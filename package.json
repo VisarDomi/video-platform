@@ -60,6 +60,7 @@
         "packages/server",
         "packages/app",
         "packages/live-extensions",
+        "packages/simulator",
         "private/plugins/tslive",
         "private/plugins/ladder",
         "private/plugins/fmp4"
