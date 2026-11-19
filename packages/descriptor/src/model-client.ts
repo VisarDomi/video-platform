@@ -47,9 +47,26 @@ export function postJson(url: URL, body: unknown): Promise<{ status: number; bod
     });
 }
 
+// The JSON the model must answer with, bounded by the content profile.
+export function descriptionResponseFormat() {
+    const bounds = descriptorConfig.output;
+    return {
+        type: "json_object",
+        schema: {
+            type: "object",
+            additionalProperties: false,
+            required: ["title", "description"],
+            properties: {
+                title: { type: "string", minLength: bounds.titleMinLength, maxLength: bounds.titleMaxLength },
+                description: { type: "string", minLength: bounds.descriptionMinLength, maxLength: bounds.descriptionMaxLength },
+            },
+        },
+    };
+}
+
 export async function requestDescription(videoUrl: string, fps: number, prompt: string) {
     const response = await postJson(new URL("/v1/chat/completions", descriptorConfig.modelUrl), {
-        model: "gemma-4-E4B-it-Q8_0",
+        model: descriptorConfig.requestModel,
         messages: [{
             role: "user",
             content: [
@@ -61,18 +78,7 @@ export async function requestDescription(videoUrl: string, fps: number, prompt: 
         max_tokens: 512,
         reasoning_effort: "none",
         chat_template_kwargs: { enable_thinking: false },
-        response_format: {
-            type: "json_object",
-            schema: {
-                type: "object",
-                additionalProperties: false,
-                required: ["title", "description"],
-                properties: {
-                    title: { type: "string", minLength: 5, maxLength: 100 },
-                    description: { type: "string", minLength: 20, maxLength: 750 },
-                },
-            },
-        },
+        response_format: descriptionResponseFormat(),
     });
 
     if (response.status < 200 || response.status >= 300) {

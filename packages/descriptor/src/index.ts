@@ -3,3 +3,5 @@ export { rewriteAvoidingPhrases, rewritePrompt } from "./rewrite.js";
 export type { ArtifactDescriptionEvidence, DescribeArtifactOptions, DescriptionRotation } from "./describe.js";
 export { chooseVideoFps, probeDuration } from "./media.js";
 export { LlamaServer } from "./llama-server.js";
+export { configureDescriptor, descriptorConfig } from "./config.js";
+export type { DescriptorProfileSettings } from "./config.js";

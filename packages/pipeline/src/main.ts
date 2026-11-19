@@ -30,6 +30,7 @@ import { videohostUploadsReport } from "./commands/videohostUploadsReport.js";
 import { videohostTiersReport } from "./commands/videohostTiersReport.js";
 import { retryRecording } from "./commands/retryRecording.js";
 import { maintainVideoHostSession } from "./commands/maintainVideoHostSession.js";
+import { contentProfile, initContentProfile } from "./contentProfile.js";
 
 function usage(): never {
     throw new Error([
@@ -86,6 +87,11 @@ async function main(): Promise<void> {
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
         "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-session-keepalive", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+    // The deployment's content profile (named by its sites file) drives descriptions and
+    // upload metadata. The worker and the stage commands stop here, before touching
+    // anything, without it; session upkeep and reports run either way.
+    if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one",
+        "metadata-check", "retry"].includes(command ?? "")) contentProfile();
     if (command === "vhost-session-keepalive") {
         requireApply(process.argv.slice(3));
         console.log(JSON.stringify(await maintainVideoHostSession(pipelineConfig, undefined, undefined,
