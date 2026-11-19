@@ -278,27 +278,33 @@ test("pin: local media names for fMP4 fragments end in .ts; the first map become
     ].join("\n"));
 });
 
+// Edge naming moved from an inline URL regex in the generic loop to the site's
+// edgeOf hook (copy failover is core, naming copies is the site's). The expected
+// values are unchanged: FMP4 names b-hls-NN edges, TsLive and LADDER name none.
+const fmp4 = new ScClient();
+const scHooks = { edgeOf: (url) => fmp4.edgeOf(url), variantKey: (url) => fmp4.variantKey(url) };
+
 test("pin: edge naming: b-hls-NN for FMP4 URLs, none for TsLive and LADDER URLs", () => {
-    const edgeOf = (url) => {
+    const edgeOf = (provider, url) => {
         const manager = new PlaylistManager({}, "synthetic");
-        manager.setEdge(url);
+        manager.setEdge(provider.edgeOf?.(url) ?? null);
         return manager.timeline.edge;
     };
-    assert.equal(edgeOf(FMP4_LIVE), "b-hls-08");
-    assert.equal(edgeOf("https://cdn.fmp4-live.example/b-hls-123/9001/9001.m3u8"), "b-hls-123");
-    assert.equal(edgeOf(TSLIVE_LIVE), null);
-    assert.equal(edgeOf(LADDER_LIVE), null);
-    assert.equal(edgeOf("https://example.test/b-hls-08.m3u8"), null, "only a whole path segment counts");
+    assert.equal(edgeOf(scHooks, FMP4_LIVE), "b-hls-08");
+    assert.equal(edgeOf(scHooks, "https://cdn.fmp4-live.example/b-hls-123/9001/9001.m3u8"), "b-hls-123");
+    assert.equal(edgeOf({}, TSLIVE_LIVE), null);
+    assert.equal(edgeOf({}, LADDER_LIVE), null);
+    assert.equal(edgeOf(scHooks, "https://example.test/b-hls-08.m3u8"), null, "only a whole path segment counts");
     // A later URL without an edge keeps the earlier one.
     const manager = new PlaylistManager({}, "synthetic");
-    manager.setEdge(FMP4_LIVE);
-    manager.setEdge(TSLIVE_LIVE);
+    manager.setEdge(fmp4.edgeOf(FMP4_LIVE));
+    manager.setEdge(fmp4.edgeOf(TSLIVE_LIVE));
     assert.equal(manager.timeline.edge, "b-hls-08");
 });
 
 test("pin: the generic loop switches edges (PDT dedup) only for b-hls-NN recovery URLs", async (t) => {
     recordSleeps(t, "resolve");
-    const run = async (initialUrl, recoveredUrl) => {
+    const run = async (initialUrl, recoveredUrl, hooks = {}) => {
         const switches = [];
         const playlist = new PlaylistManager({}, "synthetic");
         playlist.onEdgeSwitch = (oldEdge, newEdge) => switches.push([oldEdge, newEdge]);
@@ -315,6 +321,7 @@ test("pin: the generic loop switches edges (PDT dedup) only for b-hls-NN recover
             parseMasterPlaylist: async () => initialUrl,
             createDownloadSession: () => session,
             recoverVariant: async () => recoveredUrl,
+            ...hooks,
         };
         const handle = captureHandle();
         await new StreamDownloader(handle, provider, new AccessIncidentTracker())
@@ -322,9 +329,9 @@ test("pin: the generic loop switches edges (PDT dedup) only for b-hls-NN recover
         return { switches, edge: playlist.timeline.edge, liveUrl: handle.state.liveUrl };
     };
     const otherEdge = FMP4_LIVE.replace("b-hls-08", "b-hls-11");
-    assert.deepEqual(await run(FMP4_LIVE, otherEdge), { switches: [["b-hls-08", "b-hls-11"]], edge: "b-hls-11", liveUrl: otherEdge });
+    assert.deepEqual(await run(FMP4_LIVE, otherEdge, scHooks), { switches: [["b-hls-08", "b-hls-11"]], edge: "b-hls-11", liveUrl: otherEdge });
     const sameEdge = FMP4_LIVE.replace("9001_720p", "9001_480p");
-    assert.deepEqual(await run(FMP4_LIVE, sameEdge), { switches: [], edge: "b-hls-08", liveUrl: sameEdge });
+    assert.deepEqual(await run(FMP4_LIVE, sameEdge, scHooks), { switches: [], edge: "b-hls-08", liveUrl: sameEdge });
     const tsliveOther = TSLIVE_LIVE.replace("high", "low");
     assert.deepEqual(await run(TSLIVE_LIVE, tsliveOther), { switches: [], edge: null, liveUrl: tsliveOther });
     const ladderOther = LADDER_LIVE.replace("synthetic", "other");
@@ -333,7 +340,8 @@ test("pin: the generic loop switches edges (PDT dedup) only for b-hls-NN recover
 
 test("pin: the quality check's 'no change' ignores the query and the cdnhost TLD only", async () => {
     const check = async (current, better) => {
-        const provider = { providerName: "fmp4", parseMasterPlaylist: async () => better };
+        const hooks = current.includes("cdnhost") || current.includes("othercdn") ? scHooks : {};
+        const provider = { providerName: "fmp4", parseMasterPlaylist: async () => better, ...hooks };
         return await new StreamDownloader(captureHandle(), provider, new AccessIncidentTracker())
             .checkForQualityUpgrade("synthetic_alias", "https://master.example.test/master.m3u8", current);
     };

@@ -1,76 +1,12 @@
-import type { SegmentDimensions } from "../download/segmentDimensions.js";
-
-export interface SegmentValidationResult {
-    valid: boolean;
-    duration?: number;
-    // null means an attempted TS dimension probe failed; undefined means the
-    // provider uses other boundary metadata (FMP4 init maps).
-    dimensions?: SegmentDimensions | null;
-}
-
-export interface SegmentFetchResult {
-    data: Buffer | null;
-    retryable?: boolean;
-    status?: number;
-    error?: string;
-    // What the session repaired in the received bytes, for the log.
-    repair?: string;
-}
-
-export interface PlaylistFetchFailure {
-    kind: "http" | "network" | "decrypt";
-    status?: number;
-    error?: string;
-}
-
-export interface StreamVariantDescription {
-    name: string;
-    resolution: string;
-    bandwidth: number;
-    isMasterBest: boolean;
-}
-
-export interface AccessFailureContext {
-    stage: "playlist" | "segment";
-    streamerId: string;
-    alias: string;
-    recordingId: string;
-    masterUrl: string;
-    liveUrl: string;
-    failure: PlaylistFetchFailure;
-}
-
-export interface IDownloadSession {
-    // An aborted request returns null and records no failure.
-    fetchPlaylist(url: string, signal?: AbortSignal): Promise<string | null>;
-    fetchSegment(url: string, signal?: AbortSignal): Promise<SegmentFetchResult>;
-    getLastPlaylistFailure?(): PlaylistFetchFailure | null;
-}
-
-export interface IStreamProvider {
-    readonly providerName: string;
-    // False keeps the selected live URL for the recording, including retries.
-    readonly refreshMasterDuringDownload?: boolean;
-    // Wait before polling again after the live playlist could not be fetched
-    // (default EDGE_RECOVERY_SLEEP_MS). It must stay well inside the live window.
-    readonly playlistRetryMs?: number;
-    parseMasterPlaylist(masterUrl: string): Promise<string | null>;
-    validateSegment(filePath: string): Promise<SegmentValidationResult>;
-    createDownloadSession(): IDownloadSession;
-
-    recoverVariant(masterPlaylistUrl: string): Promise<string | null>;
-
-    shouldRetry(context: DownloadExitContext): Promise<string | null>;
-
-    describeVariant?(url: string): StreamVariantDescription | null;
-    diagnoseAccessFailure?(context: AccessFailureContext): Promise<Record<string, unknown>>;
-}
-
-export interface DownloadExitContext {
-    streamerId: string;
-    recordingId: string;
-    lookupAlias?: string;
-    exitReason: "aborted" | "remote-endlist" | "playlist-not-found" | "segment-failed" | "stale-timeout" | "fetch-failed";
-    lastMasterUrl: string;
-    lastLiveUrl: string | null;
-}
+// The capture contract lives in the plug-in SDK; the downloader's core and its site
+// implementations share these shapes.
+export type {
+    SegmentValidationResult,
+    SegmentFetchResult,
+    PlaylistFetchFailure,
+    StreamVariantDescription,
+    AccessFailureContext,
+    IDownloadSession,
+    IStreamProvider,
+    DownloadExitContext,
+} from "sdk";
