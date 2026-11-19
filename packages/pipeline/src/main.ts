@@ -1,4 +1,4 @@
-import { journalPriority } from "shared";
+import { journalPriority, sitesFilePath } from "shared";
 import { markStopping } from "./shutdown.js";
 import { pipelineConfig, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
@@ -24,13 +24,10 @@ import { parseRemuxOneArguments } from "./commands/remuxOneArguments.js";
 import { selectComparisonFile, writeComparisonReport } from "./commands/comparisonTrial.js";
 import { assertUploadProvider } from "./config/uploadProviders.js";
 import { checkRejectedPhrases } from "./metadata/rejectedPhraseCheck.js";
-import { connectVideoHostPhone } from "./commands/connectVideoHostPhone.js";
-import { videohostSessionReport } from "./commands/videohostSessionReport.js";
-import { videohostUploadsReport } from "./commands/videohostUploadsReport.js";
-import { videohostTiersReport } from "./commands/videohostTiersReport.js";
 import { retryRecording } from "./commands/retryRecording.js";
-import { maintainVideoHostSession } from "./commands/maintainVideoHostSession.js";
 import { contentProfile, initContentProfile } from "./contentProfile.js";
+import { readFile } from "node:fs/promises";
+import { parseDestinations } from "sdk";
 
 function usage(): never {
     throw new Error([
@@ -45,8 +42,7 @@ function usage(): never {
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
         "  upload-provider [--provider videohost --apply]",
         "  metadata-check [--provider videohost]",
-        "  vhost-connect-iphone --apply [--allow-password-login] | vhost-session-report | vhost-uploads [--limit N] | vhost-tiers [--record FILE]",
-        "  vhost-session-keepalive --apply [--sync-phone] (authentication only; no upload work)",
+        "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
         "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
@@ -80,43 +76,37 @@ function campaignProvider(value: string | null): CampaignProviderFilter {
     throw new Error("Campaign provider must be all, tslive, ladder, or fmp4");
 }
 
+// The CLI commands a destination adds: its sites-file entry names a package whose
+// `commands` maps command names to handlers.
+async function destinationCommand(command: string): Promise<((args: readonly string[]) => Promise<void>) | null> {
+    if (!command) return null;
+    for (const entry of parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath())) {
+        if (!entry.commands) continue;
+        const module = await import(entry.commands) as { commands?: Record<string, (args: readonly string[]) => Promise<void>> };
+        const run = module.commands?.[command];
+        if (run) return run;
+    }
+    return null;
+}
+
 async function main(): Promise<void> {
     const command = process.argv[2];
     if (!["status", "discover-plan", "discover", "remux-one", "describe-one", "process-one", "provenance-refresh",
         "provenance-review", "provenance-set", "review", "retry", "upload-plan", "upload-one",
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
-        "upload-provider", "metadata-check", "vhost-connect-iphone", "vhost-session-report", "vhost-session-keepalive", "vhost-uploads", "vhost-tiers"].includes(command ?? "")) usage();
+        "upload-provider", "metadata-check"].includes(command ?? "")) {
+        // Not a core command: a destination's own (named by its sites-file entry), or none.
+        const run = await destinationCommand(command ?? "");
+        if (!run) usage();
+        await run(process.argv.slice(3));
+        return;
+    }
     // The deployment's content profile (named by its sites file) drives descriptions and
     // upload metadata. The worker and the stage commands stop here, before touching
     // anything, without it; session upkeep and reports run either way.
     if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one",
         "metadata-check", "retry"].includes(command ?? "")) contentProfile();
-    if (command === "vhost-session-keepalive") {
-        requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await maintainVideoHostSession(pipelineConfig, undefined, undefined,
-            { syncPhone: process.argv.slice(3).includes("--sync-phone") })));
-        return;
-    }
-    if (command === "vhost-tiers") {
-        console.log(JSON.stringify(await videohostTiersReport(pipelineConfig, option(process.argv.slice(3), "--record")), null, 2));
-        return;
-    }
-    if (command === "vhost-uploads") {
-        const limit = Number(option(process.argv.slice(3), "--limit") ?? 25);
-        console.log(JSON.stringify(await videohostUploadsReport(pipelineConfig, Number.isSafeInteger(limit) && limit > 0 ? limit : 25), null, 2));
-        return;
-    }
-    if (command === "vhost-connect-iphone") {
-        requireApply(process.argv.slice(3));
-        console.log(JSON.stringify(await connectVideoHostPhone(pipelineConfig, undefined,
-            { allowPasswordLogin: process.argv.slice(3).includes("--allow-password-login") }), null, 2));
-        return;
-    }
-    if (command === "vhost-session-report") {
-        console.log(JSON.stringify(await videohostSessionReport(pipelineConfig), null, 2));
-        return;
-    }
     if (command === "campaign-prepare") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);

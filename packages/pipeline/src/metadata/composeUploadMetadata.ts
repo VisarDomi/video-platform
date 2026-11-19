@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ContentProfile, RecordingFacts } from "sdk";
+import { titleCarriesIdentity, type ContentProfile, type RecordingFacts } from "sdk";
 import { contentProfile } from "../contentProfile.js";
 import type {
     DescriptionRecord,
@@ -20,7 +20,7 @@ export function productionUploadIdentity(recording: Recording, part: ProductionA
 }
 
 export function hasDiagnosticUploadIdentity(title: string, identity: string): boolean {
-    return title.trimEnd().endsWith(`[${identity}]`);
+    return titleCarriesIdentity(title, identity);
 }
 
 // The public title suffix: "[<recording folder>]", or "[<recording folder> | part N]"

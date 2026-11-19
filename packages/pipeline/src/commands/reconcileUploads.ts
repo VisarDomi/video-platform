@@ -2,12 +2,11 @@ import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase, UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
-import type { ChromiumVideoHostUploader } from "../upload/chromiumVideoHostUploader.js";
 import { createProviderUploader } from "../upload/providerFactory.js";
 import { writeComparisonReport } from "./comparisonTrial.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
-import { swappedWords, type StoredVideoHostMetadata } from "../upload/videohostMetadata.js";
+import { swappedWords, type Destination, type DestinationSession, type UploadLookup, type UploadProbe } from "sdk";
 
 
 async function retrySourceUnchanged(database: PipelineDatabase, id: string): Promise<boolean> {
@@ -24,10 +23,28 @@ async function retrySourceUnchanged(database: PipelineDatabase, id: string): Pro
     return true;
 }
 
+// A destination's page-level session, as tests hand one in: the uploader's own methods
+// on one signed-in page. Production passes none and uses the destination's sessions.
+export interface PageLevelBrowser {
+    withAuthenticatedPage<T>(action: (page: any) => Promise<T>): Promise<T>;
+    probeUploadStatus(page: any, remoteId: string): Promise<UploadProbe>;
+    lookupUpload?(page: any, identity: string, exactRemoteId?: string): Promise<UploadLookup>;
+}
+
+type ReconcileSession = Pick<DestinationSession, "probe"> & Partial<Pick<DestinationSession, "lookup">>;
+
+function pageLevelSessions(browser: PageLevelBrowser): { withSession<T>(action: (session: ReconcileSession) => Promise<T>): Promise<T> } {
+    return {
+        withSession: (action) => browser.withAuthenticatedPage((page) => action({
+            probe: (remoteId) => browser.probeUploadStatus(page, remoteId),
+            ...(browser.lookupUpload ? { lookup: (identity: string, exactRemoteId?: string) => browser.lookupUpload!(page, identity, exactRemoteId) } : {}),
+        })),
+    };
+}
+
 export async function reconcileDueUploads(config: PipelineConfig, now = new Date(),
-    browserOverride?: Pick<ChromiumVideoHostUploader, "withAuthenticatedPage" | "probeUploadStatus">
-        & Partial<Pick<ChromiumVideoHostUploader, "lookupUpload">>,
-    providerFactory = createProviderUploader,
+    browserOverride?: PageLevelBrowser,
+    providerFactory: (config: PipelineConfig, provider: never) => Promise<Pick<Destination, "withSession">> = createProviderUploader,
 ): Promise<unknown> {
     if (!config.networkUploadsEnabled) {
         throw new Error("Network reconciliation is disabled; explicit VIDEO_PIPELINE_NETWORK_UPLOADS=1 opt-in is required");
@@ -52,12 +69,13 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         for (const provider of new Set(due.map(confirmation => confirmation.uploadProvider))) {
         const providerDue = due.filter(confirmation => confirmation.uploadProvider === provider);
         try {
-        const browser: NonNullable<typeof browserOverride> = browserOverride ?? await providerFactory(config, provider);
-        await browser.withAuthenticatedPage(async (page) => {
+        const destination: { withSession<T>(action: (session: ReconcileSession) => Promise<T>): Promise<T> } = browserOverride
+            ? pageLevelSessions(browserOverride) : await providerFactory(config, provider as never);
+        await destination.withSession(async (session) => {
             for (const confirmation of providerDue) {
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
-                let probe = remoteId ? await browser.probeUploadStatus(page, remoteId) : null;
+                let probe = remoteId ? await session.probe(remoteId) : null;
                 const removed = async (id: string, reason: string | undefined) => {
                     if(database.acceptedUpload(confirmation.attemptId)) {
                         const accepted=database.acceptedUpload(confirmation.attemptId)!;
@@ -91,8 +109,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     const metadata = database.getUploadMetadata(confirmation.recordingId);
                     const identity = recording && metadata ? uploadLookupIdentity(recording,
                         database.getArtifactPart(recording.id) ?? "full", metadata.title) : null;
-                    if (identity && browser.lookupUpload) {
-                        const lookup = await browser.lookupUpload(page, identity);
+                    if (identity && session.lookup) {
+                        const lookup = await session.lookup(identity);
                         if (lookup.kind === "found") {
                             remoteId = lookup.remoteId;
                             database.attachUncertainRemote(confirmation.attemptId, remoteId);
@@ -117,16 +135,16 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     });
                     continue;
                 }
-                probe ??= await browser.probeUploadStatus(page, remoteId);
+                probe ??= await session.probe(remoteId);
                 if (probe.outcome === "missing") {
                     await removed(remoteId, probe.reason);
                     continue;
                 }
-                const { stored, ...probeEvidence } = probe as typeof probe & { stored?: StoredVideoHostMetadata | null };
+                const { stored, ...probeEvidence } = probe;
                 database.recordUploadEvidence(confirmation.attemptId, { stage: "playback_verification", remoteId, ...probeEvidence }, now);
                 const sent = stored ? database.getUploadMetadata(confirmation.recordingId) : null;
                 if (stored && sent) {
-                    // VideoHost silently swaps filtered words: learn them so new
+                    // A destination may silently swap filtered words: learn them so new
                     // descriptions avoid them (the prompt appends every learned phrase).
                     const learned = [...new Set([...swappedWords(sent.title, stored.title), ...swappedWords(sent.description, stored.description)])];
                     if (learned.length) {

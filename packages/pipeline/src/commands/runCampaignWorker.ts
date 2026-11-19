@@ -8,7 +8,8 @@ import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 import { reconcileDueUploads } from "./reconcileUploads.js";
 import { campaignStep } from "./campaign.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
-import { checkVideoHostSession } from "../upload/videohostKeepalive.js";
+import type { DestinationSessionCheck } from "sdk";
+import { createProviderUploader } from "../upload/providerFactory.js";
 import { SESSION_LOST_ADVICE } from "../upload/providerWarnings.js";
 import { notifyDesktop, stepNotification } from "../notify.js";
 import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecoveryState.js";
@@ -23,7 +24,9 @@ const SESSION_KEEPALIVE_MILLISECONDS = 10 * 60_000;
 // session pauses the campaign with its reason instead of logging in again,
 // which would log the phone out.
 export async function keepVideoHostSessionAlive(config: PipelineConfig, now = new Date(),
-    check = checkVideoHostSession): Promise<void> {
+    // The destination's own light session check, on the shared session file.
+    check: (sessionFilePath: string) => Promise<DestinationSessionCheck>
+        = async () => await (await createProviderUploader(config)).session.check()): Promise<void> {
     if (!config.networkUploadsEnabled || !config.videohostSessionPath) return;
     if (await recoveryInProgress(config.databasePath)) return;
     const database = new PipelineDatabase(config.databasePath);

@@ -1,3 +1,5 @@
+import { SDK_VERSION } from "./plugin.js";
+
 // ---- Destination ----------------------------------------------------------------------
 //
 // Where finished recordings are uploaded. Designed from the core's call sites (upload,
@@ -75,14 +77,101 @@ export interface DestinationSession {
     probe(remoteId: string): Promise<UploadProbe>;
 }
 
-// A site's destination capability (a sites-file entry whose plug-in uploads).
+// The state of the destination's stored login, from one light request. A network or
+// cache problem throws instead (inconclusive): it never counts as logged out.
+export interface DestinationSessionCheck {
+    readonly loggedIn: boolean;
+    // Names the login in logs and reports without revealing it.
+    readonly fingerprint: string | null;
+    readonly passwordLoginAt: string | null;
+    readonly note: string;
+}
+
 export interface Destination {
     // When the remote copy comes into existence: a failure before this point published
     // nothing (a plain failure); after it, the attempt is confirmed before any retry.
     readonly creationBoundary: "metadata_submit" | "transfer_start";
     upload(request: UploadRequest): Promise<UploadOutcome>;
+    // The upload carrying this identity, if the destination has one (ambiguous throws).
+    findUploadedCopy(identity: string): Promise<{ kind: "found"; remoteId: string; remoteUrl: string } | { kind: "not_found" }>;
     // Runs action in one signed-in session; it never signs in with a password.
     withSession<T>(action: (session: DestinationSession) => Promise<T>): Promise<T>;
+    readonly session: {
+        check(): Promise<DestinationSessionCheck>;
+        // What a session-lost message tells the owner to run. The campaign's attention
+        // text carries it, and resuming after a recovery recognises the text by it.
+        readonly lostAdvice: string;
+    };
+}
+
+// What the host gives a destination it creates. The host owns the browser profile (it
+// refuses everyday and shared profiles) and the shared session file; the plug-in only
+// uses them.
+export interface DestinationHost {
+    readonly browser: { readonly executablePath: string; readonly profilePath: string; readonly headless?: boolean };
+    readonly sessionFilePath?: string;
+    readonly credentials: { readonly email: string; readonly password: string };
+    // Aborted when the host service stops.
+    readonly stopSignal: AbortSignal;
+}
+
+export interface DestinationPlugin {
+    id: string;
+    sdkVersion: typeof SDK_VERSION;
+    createDestination(host: DestinationHost): Destination;
+}
+
+// The destinations a deployment uploads to, from its sites file. They are read only by
+// the pipeline, so a destination never becomes a capture site:
+//
+//   { "destinations": [ { "id": "form-host", "plugin": "plugin-form-host",
+//                         "commands": "ops-form-host" } ], "sites": [ ... ] }
+//
+// "commands" optionally names a package of extra pipeline CLI commands for it.
+export interface DestinationEntry {
+    id: string;
+    plugin: string;
+    commands?: string;
+}
+
+const DESTINATION_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export function parseDestinations(text: string, source = "sites file"): DestinationEntry[] {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch (error: any) {
+        throw new Error(`${source}: invalid JSON (${error.message})`);
+    }
+    const list = (parsed as { destinations?: unknown } | null)?.destinations;
+    if (list === undefined) return [];
+    if (!Array.isArray(list)) throw new Error(`${source}: destinations must be a list`);
+    const seen = new Set<string>();
+    return list.map((raw, index) => {
+        const entry = raw as DestinationEntry;
+        const where = `${source}: destinations[${index}]`;
+        if (typeof entry?.id !== "string" || !DESTINATION_ID.test(entry.id)) throw new Error(`${where}: invalid id ${JSON.stringify(entry?.id)}`);
+        if (seen.has(entry.id)) throw new Error(`${where}: duplicate id ${entry.id}`);
+        seen.add(entry.id);
+        if (typeof entry.plugin !== "string" || !entry.plugin) throw new Error(`${where}: plugin is required`);
+        if (entry.commands !== undefined && (typeof entry.commands !== "string" || !entry.commands)) throw new Error(`${where}: commands must be a package name`);
+        return { id: entry.id, plugin: entry.plugin, ...(entry.commands ? { commands: entry.commands } : {}) };
+    });
+}
+
+export async function loadDestinationPlugin(
+    entry: DestinationEntry,
+    importPlugin: (specifier: string) => Promise<unknown> = (specifier) => import(specifier),
+): Promise<DestinationPlugin> {
+    const module = await importPlugin(entry.plugin) as { default?: unknown; destination?: unknown };
+    const plugin = (module.destination ?? module.default) as DestinationPlugin | undefined;
+    if (!plugin || typeof plugin.createDestination !== "function") {
+        throw new Error(`Destination ${entry.id}: ${entry.plugin} does not export a destination plug-in`);
+    }
+    if (plugin.sdkVersion !== SDK_VERSION) {
+        throw new Error(`Destination ${entry.id}: ${entry.plugin} targets SDK ${plugin.sdkVersion}, this core runs SDK ${SDK_VERSION}`);
+    }
+    return plugin;
 }
 
 // ---- Errors the core distinguishes ----------------------------------------------------
@@ -136,4 +225,20 @@ export class UploadTransportError extends Error {
         super(message, options);
         this.name = "UploadTransportError";
     }
+}
+
+// Session recovery could not run now (another recovery holds the lock, the phone is
+// unreachable); it is retried later, never escalated to a password login.
+export class RecoveryDeferredError extends Error {}
+
+// ---- Rules shared by the core and destinations ----------------------------------------
+
+// The core reserves an upload's size plus this much for request overhead before any byte
+// leaves; a destination must never send more than size + this for one upload.
+export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
+
+// Whether a title carries an upload identity: it ends with "[<identity>]". This is how an
+// existing upload is recognised on the destination (the duplicate guard).
+export function titleCarriesIdentity(title: string, identity: string): boolean {
+    return title.trimEnd().endsWith(`[${identity}]`);
 }

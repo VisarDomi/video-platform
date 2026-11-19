@@ -3,7 +3,9 @@
         "target": "ESNext",
         "module": "ESNext",
         "moduleResolution": "node",
-        "lib": ["ESNext"],
+        "lib": [
+            "ESNext"
+        ],
         "outDir": "./dist",
         "strict": true,
         "sourceMap": true,
@@ -13,8 +15,13 @@
         "isolatedModules": true,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
-        "noFallthroughCasesInSwitch": true
+        "noFallthroughCasesInSwitch": true,
+        "declaration": true
     },
-    "include": ["src"],
-    "exclude": ["node_modules"]
+    "include": [
+        "src"
+    ],
+    "exclude": [
+        "node_modules"
+    ]
 }

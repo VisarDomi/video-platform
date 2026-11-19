@@ -20,7 +20,7 @@
         "build:server": "npm run build:shared && npm run build:plugins && npm run build -w server && npm run build:app",
         "build:descriptor": "npm run build:shared && npm run build:profiles && npm run build -w descriptor",
         "build:live-extensions": "npm run build -w live-extensions",
-        "build:pipeline": "npm run build:shared && npm run build:profiles && npm run build -w pipeline",
+        "build:pipeline": "npm run build:shared && npm run build:profiles && npm run build -w plugin-videohost && npm run build -w pipeline && npm run build -w ops-videohost",
         "start": "npm run start:auth && npm run start:downloader && npm run start:server",
         "start:auth": "npm run build:auth && systemctl --user start video-auth.service",
         "start:downloader": "npm run build:downloader && systemctl --user start video-downloader.service",
@@ -71,6 +71,8 @@
         "private/plugins/tslive",
         "private/plugins/ladder",
         "private/plugins/fmp4",
+        "private/plugins/videohost",
+        "private/ops/videohost",
         "private/profiles/original"
     ]
 }
