@@ -208,6 +208,27 @@ downloads root and runs `systemctl --user stop video-downloader` when less than
 **Why:** A full disk corrupts in-progress recordings. The check lives in the
 server so changing it never restarts the downloader.
 
+## The sites registry: one parser per list
+
+The server loads every site in the sites file (`src/sites.ts`, shared plumbing in
+`packages/shared/src/siteHost.ts`; a missing or invalid file stops it at startup) and
+serves `/api/<site>/{list,add,remove,member,exists,resolve}` for each site with a
+catalog. The core owns the list file, its serialized atomic rewrites, the alias
+registry and the hourly refresh; the plug-in's catalog parses and formats the lines and
+knows the site (name resolution, follow before add, existence, former names, source
+links, the names to refresh). Site code lives in the plug-ins only.
+
+The server reads each list with the plug-in's `parseTargetLine`, the downloader's
+parser, so the routes see exactly the targets that are recorded. Until 2026-11-19 the
+server had parsers of its own that disagreed: they skipped lines the downloader
+recorded (bare LADDER IDs, `http://` or query-string LADDER URLs, TsLive tab separators, FMP4
+bare usernames, subdomains and non-numeric room IDs), so `remove` could not take them
+off the list, and accepted some it never recorded. The server parses silently; the
+downloader logs malformed lines. An entry without an ID (an FMP4 username not yet
+resolved) is known by its label, as the downloader keys it: `remove` and `member`
+match it by that label. New lines are written by `formatTargetLine`, byte-identical to
+before (pinned in `private/test/pinsListsAndTokens.test.mjs`).
+
 ## FMP4 room IDs resolved at write time
 
 Adding an FMP4 streamer resolves the username once (`resolveScUsername`) and
@@ -222,10 +243,12 @@ every cycle.
 
 ## AliasRegistry is server-only
 
-AliasRegistry lives in the server. Only the server reads and writes
-`aliases.json`; the downloader takes folder names from `tslive.txt`, which the
-server's alias refresh keeps in sync. `GET /api/tslive/list` returns each listed
-streamer's ID with its current and historical aliases.
+AliasRegistry lives in the server core. Only the server reads and writes
+`aliases.json`; catalogs see it as `ctx.aliases` (the SDK's `AliasBook`). The
+downloader takes folder names from `tslive.txt`, which the server's alias refresh keeps
+in sync. `GET /api/tslive/list` returns each listed streamer's ID with its current and
+historical aliases (the TsLive catalog's `enrichList`). The file is not namespaced by
+site (its format is pinned); only TsLive keeps history in it today.
 
 `aliases.json` writes take a directory lock (`aliases.json.lock`,
 `services/fileLock.ts`): `mkdir` is atomic, and `holder.json` inside records
@@ -237,14 +260,23 @@ between `mkdir` and the holder write, and it is stale too, so it cannot block
 every later write. `aliases.json` is replaced through `core/durableFile.ts`
 (temporary file, fsync, rename, directory fsync).
 
-## Alias refresh: hourly batch + tslive.txt sync
+## Alias refresh: hourly batch + list sync
 
-Every hour (and at startup) the server collects the followed account IDs
-(`size=5000`) plus every account in `tslive.txt`, fetches their profiles from the
-TsLive batch profile API in sequential chunks of 500 (the API's per-request
-maximum), persists the aliases to `aliases.json`, then rewrites stale aliases in
-`tslive.txt`. The downloader's target manager picks up the change through its
-directory watch.
+`services/aliasRefreshService.ts` runs each catalog's `refreshAliases` at start and
+then at its interval (hourly for TsLive and FMP4), and rewrites the list with
+`renameListedTargets` (`services/listRenames.ts`): a line whose ID has a new current
+name is written again by `formatTargetLine`, every other line keeps its bytes.
+
+- TsLive (`keepHistory`): the followed account IDs (`size=5000`) plus every account in
+  `tslive.txt`, their profiles from the batch profile API in sequential chunks of 500
+  (the API's per-request maximum), persisted to `aliases.json`; `tslive.txt` then takes
+  each ID's current alias from the registry. Logged by `[AliasRegistry]`
+  (`tslive.txt sync: <id> <old> -> <new>`, `Periodic refresh failed: ...`) and
+  `[AliasRefresh] Batch fetch failed for chunk <n>`.
+- FMP4: every listed room ID, 100 per request; `fmp4.txt` takes the usernames this refresh
+  returned. Logged as `[FMP4 Alias Refresh] ...`.
+
+The downloader's target manager picks up the change through its directory watch.
 
 ## Download lists are replaced atomically, one change at a time
 

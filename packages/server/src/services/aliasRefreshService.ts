@@ -1,95 +1,98 @@
 import { promises as fs } from "fs";
-import { readTokens } from "shared";
+import * as path from "path";
+import type { AliasRefresh, Catalog, Logger } from "sdk";
 import { AliasRegistry } from "./aliasRegistry.js";
-import type { AliasFetcher } from "./aliasRegistry.js";
-import { ALIASES_PATH, TSLIVE_FILE_PATH } from "../core/config.js";
-import logger from "../core/logger.js";
-import { extractAliasSnapshot } from "./tslive/profileAliases.js";
-import { fetchFollowingAccountIds } from "./tslive/apiClient.js";
+import { ALIASES_PATH } from "../core/config.js";
+import { mutateTextFile } from "../core/durableFile.js";
+import { renameListedTargets } from "./listRenames.js";
 
-const ALIAS_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
-const BATCH_CHUNK_SIZE = 500;
-
-const API_BASE = "https://ts-live.example";
-
-async function getApiHeaders(): Promise<Record<string, string> | null> {
-    const tokens = await readTokens();
-    if (!tokens?.st) return null;
-    return {
-        cookie: `TsLive-ST=${tokens.st}`,
-        Accept: "application/json",
-    };
-}
-
-export function parseTsLiveTargetIds(content: string): string[] {
-    const ids = new Set<string>();
-    for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith("https://ts-live.example/")) continue;
-        const rest = trimmed.slice("https://ts-live.example/".length);
-        const spaceIdx = rest.indexOf(" ");
-        const accountId = (spaceIdx === -1 ? rest : rest.slice(0, spaceIdx)).trim();
-        if (accountId) ids.add(accountId);
-    }
-    return [...ids];
-}
-
-export function combineAliasRefreshIds(followingIds: string[], targetIds: string[]): string[] {
-    return [...new Set([...followingIds, ...targetIds])];
-}
-
-async function getAllAliasRefreshIds(): Promise<string[]> {
-    const [followingIds, targetContent] = await Promise.all([
-        fetchFollowingAccountIds().then(ids => ids ?? []),
-        fs.readFile(TSLIVE_FILE_PATH, "utf-8").catch(() => ""),
-    ]);
-    const targetIds = parseTsLiveTargetIds(targetContent);
-    return combineAliasRefreshIds(followingIds, targetIds);
-}
-
-const fetcher: AliasFetcher = async (ids: string[]) => {
-    const headers = await getApiHeaders();
-    if (!headers) return {};
-
-    const result: Awaited<ReturnType<AliasFetcher>> = {};
-
-    for (let i = 0; i < ids.length; i += BATCH_CHUNK_SIZE) {
-        const chunk = ids.slice(i, i + BATCH_CHUNK_SIZE);
-        try {
-            const response = await fetch(
-                `${API_BASE}/proxycador/api/public/v1/profiles/v2/batch?basicProfile=true&liveStats=false&followStats=false`,
-                {
-                    method: "POST",
-                    headers: { ...headers, "Content-Type": "application/json" },
-                    body: JSON.stringify(chunk),
-                },
-            );
-            if (!response.ok) continue;
-            const batch: any = await response.json();
-            for (const id of chunk) {
-                const aliases = extractAliasSnapshot(batch[id]?.basicProfile);
-                if (aliases) result[id] = aliases;
-            }
-        } catch (error: any) {
-            logger.error(`[AliasRefresh] Batch fetch failed for chunk ${i}`, { error: error.message });
-        }
-    }
-
-    return result;
-};
-
+// The deployment's alias registry (aliases.json). Catalogs read it through their context;
+// the refresh below keeps it current.
 export const registry = new AliasRegistry(ALIASES_PATH);
 
-export function startAliasRefresh(): void {
+export interface AliasRefreshSite {
+    id: string;
+    label: string;
+    log: Logger;
+    listPath: string;
+    catalog: Catalog;
+}
+
+type RefreshingSite = AliasRefreshSite & { catalog: Catalog & { refreshAliases: AliasRefresh } };
+
+// The IDs of the list's targets, in list order (repeats kept).
+function listedIds(catalog: Catalog, content: string): string[] {
+    const ids: string[] = [];
+    for (const line of content.split("\n")) {
+        const id = catalog.parseTargetLine(line)?.id;
+        if (id) ids.push(id);
+    }
+    return ids;
+}
+
+async function refreshIds(site: RefreshingSite, listed: string[]): Promise<string[]> {
+    const { refreshAliases } = site.catalog;
+    return refreshAliases.ids ? refreshAliases.ids(listed) : listed;
+}
+
+// A site that keeps no history: its list takes the names one refresh returns. Applied to
+// the list's current content, so entries added or removed while the names were being
+// fetched are kept as they are.
+export async function refreshListNames(site: RefreshingSite, log: Logger = site.log): Promise<void> {
+    let content: string;
+    try {
+        content = await fs.readFile(site.listPath, "utf-8");
+    } catch {
+        return;
+    }
+    const listed = listedIds(site.catalog, content);
+    if (listed.length === 0) return;
+
+    const names = await site.catalog.refreshAliases.run(await refreshIds(site, listed));
+    if (names.size === 0) return;
+
+    // The fetch can take seconds; the +/- routes may have changed the list meanwhile.
+    const fileName = path.basename(site.listPath);
+    await mutateTextFile(site.listPath, (current) => ({
+        next: current === null ? null : renameListedTargets(current, site.catalog, (id) => names.get(id)?.current,
+            (target, name) => log.info(`${fileName} sync: ${target.id} ${target.label} -> ${name}`)),
+        result: undefined,
+    }));
+}
+
+// Starts each site's alias refresh: once now, then at the site's interval. Sites that
+// keep history refresh the registry (loaded first) and take their names from it; the
+// others refresh their list alone, logging as "[<label> Alias Refresh]".
+export function startAliasRefresh(sites: readonly AliasRefreshSite[]): void {
+    const refreshing = sites.filter((site): site is RefreshingSite => site.catalog.refreshAliases !== undefined);
+
     const boot = async () => {
         await registry.load();
-        registry.startPeriodicRefresh(
-            ALIAS_REFRESH_INTERVAL_MS,
-            getAllAliasRefreshIds,
-            fetcher,
-            TSLIVE_FILE_PATH,
-        );
+        for (const site of refreshing.filter((site) => site.catalog.refreshAliases.keepHistory)) {
+            const { refreshAliases } = site.catalog;
+            registry.startPeriodicRefresh(
+                refreshAliases.intervalMs,
+                async () => refreshIds(site, listedIds(site.catalog, await fs.readFile(site.listPath, "utf-8").catch(() => ""))),
+                (ids) => refreshAliases.run(ids),
+                { path: site.listPath, catalog: site.catalog },
+            );
+        }
     };
-
     void boot();
+
+    for (const site of refreshing.filter((site) => !site.catalog.refreshAliases.keepHistory)) {
+        const log = site.log.tagged?.(`${site.label} Alias Refresh`) ?? site.log;
+        const run = async () => {
+            try {
+                await refreshListNames(site, log);
+            } catch (error: any) {
+                log.error("Periodic refresh failed", { error: error.message });
+            }
+        };
+
+        void run();
+        setInterval(() => {
+            void run();
+        }, site.catalog.refreshAliases.intervalMs);
+    }
 }

@@ -28,18 +28,9 @@ export {
     assessRecording,
     planRecordingsForUpload,
 } from "./uploadPlanner.js";
-export {
-    extractRecordingIdentifier,
-    formatStreamerTarget,
-    parseStreamerTargetLine,
-    streamerSourceLinks,
-    targetMembershipIdentifiers,
-} from "./streamerTarget.js";
-export type {
-    StreamProvider,
-    StreamerSourceLinks,
-    StreamerTarget,
-} from "./streamerTarget.js";
+export { extractRecordingIdentifier } from "./streamerTarget.js";
+export { closeSites, loadSiteRegistry, siteContext, sitesFilePath, taggedLogger } from "./siteHost.js";
+export type { HostedSite, ServiceLogger, SiteHost } from "./siteHost.js";
 export type {
     FinalUploadArtifact,
     RecordingUploadPlan,

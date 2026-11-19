@@ -1,12 +1,12 @@
 import { promises as fs } from "fs";
 import * as path from "path";
+import type { AliasBook, Catalog } from "sdk";
 import { createLogger } from "shared";
 import { acquireLock } from "./fileLock.js";
 import { mutateTextFile, writeFileAtomic } from "../core/durableFile.js";
+import { renameListedTargets } from "./listRenames.js";
 
 const logger = createLogger("AliasRegistry");
-
-const TSLIVE_URL_PREFIX = "https://ts-live.example/";
 
 interface AliasEntry {
     current: string;
@@ -19,9 +19,19 @@ export interface AliasSnapshot {
     history: string[];
 }
 
-export type AliasFetcher = (streamerIds: string[]) => Promise<Record<string, AliasSnapshot>>;
+export type AliasFetcher = (streamerIds: string[]) =>
+    Promise<Record<string, AliasSnapshot> | Map<string, AliasSnapshot>>;
 
-export class AliasRegistry {
+// A download list whose lines take their names from the registry.
+export interface AliasedList {
+    path: string;
+    catalog: Pick<Catalog, "parseTargetLine" | "formatTargetLine">;
+}
+
+// Every name an ID has been seen under (aliases.json: ID -> names, oldest first, current
+// last). One registry serves the deployment; its file is replaced atomically under a
+// lock, and the lists that follow it are rewritten through mutateTextFile.
+export class AliasRegistry implements AliasBook {
     private readonly filePath: string;
     private readonly lockPath: string;
     private state: Map<string, AliasEntry> = new Map();
@@ -39,6 +49,24 @@ export class AliasRegistry {
 
     resolve(streamerId: string): string | undefined {
         return this.state.get(streamerId)?.current;
+    }
+
+    // ---- AliasBook: what catalogs see ----
+
+    current(id: string): string | undefined {
+        return this.resolve(id);
+    }
+
+    idForName(name: string): string | undefined {
+        return this.getReverse()[name];
+    }
+
+    names(id: string): string[] | undefined {
+        return this.getAllWithHistory()[id];
+    }
+
+    record(id: string, aliases: AliasSnapshot): Promise<boolean> {
+        return this.mergeAliasSnapshot(id, aliases);
     }
 
     resolveAll(): Record<string, string> {
@@ -72,15 +100,16 @@ export class AliasRegistry {
         if (streamerIds.length === 0) return;
 
         const aliasMap = await fetcher(streamerIds);
+        const entries = aliasMap instanceof Map ? [...aliasMap] : Object.entries(aliasMap);
         let updated = 0;
 
-        for (const [streamerId, aliases] of Object.entries(aliasMap)) {
+        for (const [streamerId, aliases] of entries) {
             const changed = this.recordAliases(streamerId, aliases);
             if (changed) updated++;
         }
 
         await this.persistToDisk();
-        logger.debug(`Refresh complete: ${Object.keys(aliasMap).length}/${streamerIds.length} resolved, ${updated} updated`);
+        logger.debug(`Refresh complete: ${entries.length}/${streamerIds.length} resolved, ${updated} updated`);
     }
 
     async mergeAliasSnapshot(streamerId: string, aliases: AliasSnapshot): Promise<boolean> {
@@ -93,14 +122,14 @@ export class AliasRegistry {
         intervalMs: number,
         getStreamerIds: () => Promise<string[]>,
         fetcher: AliasFetcher,
-        tsliveTxtPath?: string,
+        list?: AliasedList,
     ): () => void {
         const performRefresh = async () => {
             try {
                 const ids = await getStreamerIds();
                 await this.refresh(fetcher, ids);
-                if (tsliveTxtPath) {
-                    await this.syncTsLiveTxt(tsliveTxtPath);
+                if (list) {
+                    await this.syncList(list);
                 }
             } catch (err: any) {
                 logger.error(`Periodic refresh failed: ${err.message}`);
@@ -112,38 +141,18 @@ export class AliasRegistry {
         return () => clearInterval(timer);
     }
 
-    async syncTsLiveTxt(filePath: string): Promise<void> {
-        // Same serialized, atomic replacement as the +/- routes, which write this file too.
-        await mutateTextFile(filePath, (content) => {
+    // Gives every listed ID its current name. Same serialized, atomic replacement as the
+    // +/- routes, which write the list too.
+    async syncList(list: AliasedList): Promise<void> {
+        const fileName = path.basename(list.path);
+        await mutateTextFile(list.path, (content) => {
             if (content === null) return { next: null, result: undefined };
-            return { next: this.renameTsLiveLines(content), result: undefined };
+            return {
+                next: renameListedTargets(content, list.catalog, (id) => this.resolve(id),
+                    (target, current) => logger.info(`${fileName} sync: ${target.id} ${target.label} -> ${current}`)),
+                result: undefined,
+            };
         });
-    }
-
-    private renameTsLiveLines(content: string): string | null {
-        const lines = content.split("\n");
-        let changed = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const trimmed = lines[i].trim();
-            if (!trimmed || trimmed.startsWith("#") || !trimmed.startsWith(TSLIVE_URL_PREFIX)) continue;
-
-            const rest = trimmed.slice(TSLIVE_URL_PREFIX.length);
-            const spaceIdx = rest.indexOf(" ");
-            if (spaceIdx === -1) continue;
-
-            const accountId = rest.slice(0, spaceIdx);
-            const oldAlias = rest.slice(spaceIdx + 1);
-            const currentAlias = this.resolve(accountId);
-
-            if (currentAlias && currentAlias !== oldAlias) {
-                lines[i] = `${TSLIVE_URL_PREFIX}${accountId} ${currentAlias}`;
-                logger.info(`tslive.txt sync: ${accountId} ${oldAlias} -> ${currentAlias}`);
-                changed = true;
-            }
-        }
-
-        return changed ? lines.join("\n") : null;
     }
 
     private recordAliases(streamerId: string, aliases: AliasSnapshot): boolean {
