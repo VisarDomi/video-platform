@@ -1,5 +1,6 @@
 import type { IStreamProvider, ProviderLiveStream, ProviderSnapshot } from "./capture.js";
 import type { PluginStore } from "./store.js";
+import type { Destination } from "./destination.js";
 
 // A plug-in is one kind of site. The core loads the plug-ins named in the sites file,
 // creates one instance per configured site, and iterates them; it never switches on a
@@ -327,87 +328,4 @@ export interface ExtensionSpec {
     runAt: "document_start" | "document_end" | "document_idle";
     // Path of the content-script module that classifies pages (identify()).
     entry: string;
-}
-
-// ---- Destination ----------------------------------------------------------------------
-
-export interface DestinationLimits {
-    minDurationS: number;
-    maxDurationS?: number;
-    maxBytes: number;
-    titleMax: number;
-    descriptionMax: number;
-    tagsMax: number;
-    visibility: string;
-}
-
-export type SessionCheck =
-    | { kind: "signed_in"; fingerprint: string }
-    | { kind: "signed_out"; evidence: string }
-    | Inconclusive;
-
-export interface ByteMeter {
-    // Resolves once the claim is durably recorded; bytes may leave only after that.
-    claim(bytes: number): Promise<void>;
-    // Bytes the destination acknowledged, for progress only.
-    acknowledged(bytes: number): void;
-}
-
-export interface UploadMetadata {
-    title: string;
-    description: string;
-    tags: string[];
-    category?: string;
-    visibility: string;
-}
-
-export interface UploadJob {
-    attemptId: string;
-    filePath: string;
-    sizeBytes: number;
-    durationS: number;
-    // The identity the destination will be searched by (the title's bracket stamp).
-    identity: string;
-    metadata: UploadMetadata;
-}
-
-export type UploadOutcome =
-    | { kind: "submitted"; remoteId?: string; url?: string }
-    | { kind: "rejected"; phrases: string[] }
-    | { kind: "failed"; beforeCreation: boolean; reason: string };
-
-export type LookupResult =
-    | { kind: "found"; remoteId: string; url?: string; processing: boolean; failed: boolean }
-    | { kind: "absent"; completeness: string }
-    | { kind: "ambiguous" }
-    | Inconclusive;
-
-export type ProbeResult =
-    | { kind: "online"; tier: string; url: string }
-    | { kind: "processing" }
-    | { kind: "not_ready"; reason: string; retrySoon: boolean }
-    | { kind: "failed_processing" }
-    | Absent
-    | Inconclusive;
-
-export interface Destination {
-    limits(): DestinationLimits;
-    // When the remote copy comes into existence: failures before this point are plain
-    // failures; after it, the core waits for verification before retrying.
-    creationBoundary: "metadata_submit" | "transfer_start" | "api_create";
-    remoteIdPattern: RegExp;
-    requiresBrowser?: boolean;
-    session: {
-        cadenceMs: number;
-        check(): Promise<SessionCheck>;
-        maintain(): Promise<void>;
-        recover(options: { allowPasswordLogin: boolean }): Promise<"recovered" | "deferred" | "failed">;
-    };
-    upload(job: UploadJob, meter: ByteMeter): Promise<UploadOutcome>;
-    lookup(identity: string, exactId?: string): Promise<LookupResult>;
-    probe(remoteId: string): Promise<ProbeResult>;
-    // The core never builds destination URLs itself.
-    canonicalUrl(remoteId: string): string;
-    parseNotices?(text: string): { rejectedPhrases: string[]; visibility?: string };
-    retirementUrlPatterns: string[];
 }

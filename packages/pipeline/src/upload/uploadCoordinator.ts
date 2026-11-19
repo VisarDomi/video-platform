@@ -1,19 +1,10 @@
 import { UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { UploadOutcome, UploadRequest, ProviderUploader } from "./providerUploader.js";
-import { MetadataRejectedError, TransferAbortedBeforeSubmissionError } from "./providerWarnings.js";
+import { MetadataRejectedError, TransferAbortedBeforeSubmissionError, UploadTransportError } from "sdk";
 
-export class UploadTransportError extends Error {
-    constructor(
-        message: string,
-        readonly transmittedBytes: number,
-        readonly acceptanceUnknown: boolean,
-        options?: ErrorOptions,
-    ) {
-        super(message, options);
-        this.name = "UploadTransportError";
-    }
-}
+export { UploadTransportError };
+
 
 export class UploadByteMeter {
     private countedBytes = 0;
