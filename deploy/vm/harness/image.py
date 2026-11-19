@@ -238,15 +238,22 @@ def kernel_append(cmdline: str) -> str:
 
 def prepare(packages: list[str], *, disk_size: str = "10G", force: bool = False,
             cpus: int = 2, memory_mb: int = 2048) -> Path:
-    packages = sorted(set(BASE_PACKAGES) | set(packages))
+    """Make sure a provisioned disk with at least `packages` exists.
+
+    Packages only accumulate: preparing for one workload never removes what
+    another workload needed."""
     base = ensure_base_image()
     ensure_ssh_keys()
-    want = wanted_stamp(packages, disk_size)
-    have = provisioned_stamp()
+    have = provisioned_stamp() or {}
     complete = all((PROVISIONED / n).exists() for n in ("disk.qcow2", "vmlinuz", "initrd.img"))
-    if not force and have and complete and {k: have.get(k) for k in want} == want:
+    same = {k: v for k, v in wanted_stamp([], disk_size).items() if k != "packages"}
+    matches = complete and all(have.get(k) == v for k, v in same.items())
+    if not force and matches and set(packages) <= set(have.get("packages", [])):
         log(f"provisioned disk is up to date ({provisioned_disk()})")
         return provisioned_disk()
+    keep = have.get("packages", []) if matches else []
+    packages = sorted(set(BASE_PACKAGES) | set(packages) | set(keep))
+    want = wanted_stamp(packages, disk_size)
 
     tmp = PROVISIONED.with_name("provisioned.tmp")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -262,8 +269,7 @@ def prepare(packages: list[str], *, disk_size: str = "10G", force: bool = False,
     vm = VM(disk, tmp, "provision", cpus=cpus, memory_mb=memory_mb, seed_iso=seed)
     t0 = time.monotonic()
     try:
-        vm.start()
-        vm.wait_ssh(timeout=900)
+        vm.boot(timeout=900)
         r = vm.ssh("cloud-init status --wait --long", timeout=1800, check=False)
         status = r.stdout.decode(errors="replace")
         if r.returncode not in (0, 2) or "status: done" not in status:

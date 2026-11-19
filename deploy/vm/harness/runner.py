@@ -113,9 +113,8 @@ def guest_facts(vm: VM) -> dict:
 def boot(run_dir: Path, disk: Path, index: int, opts: dict) -> tuple[VM, float]:
     vm = VM(disk, run_dir / "boots", f"boot-{index:03d}", cpus=opts["cpus"],
             memory_mb=opts["memory_mb"], cache=opts["cache"], direct=direct_boot())
-    vm.start()
     try:
-        return vm, vm.wait_ssh(timeout=opts["boot_timeout_s"])
+        return vm, vm.boot(timeout=opts["boot_timeout_s"])
     except BaseException:
         vm.kill_quietly()
         raise
@@ -180,6 +179,7 @@ def run(wl: Workload, *, cycles: int, seed: int, min_ms: int, max_ms: int,
 
     old_handler = signal.signal(signal.SIGTERM, _on_sigterm)
     vm = None
+    aborted = None
     try:
         vm, boot_s = boot(run_dir, disk, 0, opts)
         log(f"boot 0 up in {boot_s:.1f}s; installing workload {wl.name}")
@@ -231,13 +231,21 @@ def run(wl: Workload, *, cycles: int, seed: int, min_ms: int, max_ms: int,
                 + ("" if verdict == "pass" else f"\n    {json.dumps(evidence)[:400]}"))
         vm.poweroff()
     except _Terminate:
+        aborted = "terminated"
         log("terminated; cutting the guest and keeping partial results")
+    except (HarnessError, subprocess.TimeoutExpired) as e:
+        # A boot that never comes up, a guest command that hangs: the run stops,
+        # but the cycles already done are still results.
+        aborted = str(e).splitlines()[0][:300]
+        log(f"run aborted: {e}")
     finally:
         signal.signal(signal.SIGTERM, old_handler)
         if vm is not None:
             vm.kill_quietly()
 
     summary = summarize(read_jsonl(results), meta)
+    if aborted:
+        summary["aborted"] = aborted
     write_json_atomic(run_dir / "summary.json", summary)
     if not keep_disk:
         disk.unlink(missing_ok=True)

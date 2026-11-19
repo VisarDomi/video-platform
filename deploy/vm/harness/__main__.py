@@ -18,7 +18,7 @@ sys.dont_write_bytecode = True
 import image  # noqa: E402
 import runner  # noqa: E402
 import workload  # noqa: E402
-from common import CACHE, RUNS, HarnessError, kvm_problem, log, read_jsonl  # noqa: E402
+from common import RUNS, HarnessError, kvm_problem, log, read_jsonl  # noqa: E402
 from vm import CACHE_MODES  # noqa: E402
 
 
@@ -69,7 +69,7 @@ def cmd_smoke(args) -> int:
         print(f"SKIP: {problem}")
         return 0
     wl = workload.load("journal-careful")
-    image.prepare(sorted(wl.packages))
+    image.prepare(wl.packages)  # a no-op when already provisioned
     RUNS.mkdir(parents=True, exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="smoke-", dir=RUNS))
     summary = runner.run(wl, cycles=1, seed=args.seed, min_ms=1500, max_ms=2500, out=out)
