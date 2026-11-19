@@ -17,6 +17,13 @@ export interface Reply {
     log?: Partial<ResponseRecord>;
     /** Hash the body into the response record (segments). */
     hashBody?: boolean;
+    /**
+     * A streamed body instead of `body` (large files, throttled or stalled
+     * transfers). `length` is announced as content-length; `write` resolves
+     * with the bytes it actually sent. The response record is written once it
+     * finishes, with `bytes` = what was sent.
+     */
+    stream?: { length: number; write(res: ServerResponse, req: IncomingMessage): Promise<number> };
 }
 
 export interface RequestContext {
@@ -29,11 +36,25 @@ export interface RequestContext {
     json<T = unknown>(): Promise<T>;
     /** Form fields from a urlencoded body, or a JSON object body. */
     fields(): Promise<Record<string, string>>;
+    /** Every form field, repeated ones included (urlencoded or multipart). */
+    form(): Promise<URLSearchParams>;
+    /** A multipart/form-data body: text fields and files. */
+    multipart(): Promise<Multipart>;
+}
+
+export interface Multipart {
+    fields: URLSearchParams;
+    files: Map<string, { filename: string; type: string; data: Buffer }>;
 }
 
 export type Handler = (ctx: RequestContext) => Promise<Reply> | Reply;
 
-interface Route { method: string; pattern: RegExp; keys: string[]; handler: Handler }
+export interface RouteOptions {
+    /** Largest request body accepted (default 1 MiB); larger ones get 413. */
+    maxBodyBytes?: number;
+}
+
+interface Route { method: string; pattern: RegExp; keys: string[]; handler: Handler; options: RouteOptions }
 
 export class HttpError extends Error {
     constructor(readonly status: number, message: string) { super(message); }
@@ -42,20 +63,23 @@ export class HttpError extends Error {
 export class Router {
     private readonly routes: Route[] = [];
 
-    on(method: string, path: string, handler: Handler): this {
+    on(method: string, path: string, handler: Handler, options: RouteOptions = {}): this {
         const keys: string[] = [];
         const source = path.split("/").map(part => {
             if (part.startsWith(":")) { keys.push(part.slice(1)); return "([^/]+)"; }
             return part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         }).join("/");
-        this.routes.push({ method, pattern: new RegExp(`^${source}$`), keys, handler });
+        this.routes.push({ method, pattern: new RegExp(`^${source}$`), keys, handler, options });
         return this;
     }
 
     get(path: string, handler: Handler): this { return this.on("GET", path, handler); }
-    post(path: string, handler: Handler): this { return this.on("POST", path, handler); }
+    post(path: string, handler: Handler, options?: RouteOptions): this { return this.on("POST", path, handler, options); }
+    put(path: string, handler: Handler, options?: RouteOptions): this { return this.on("PUT", path, handler, options); }
+    patch(path: string, handler: Handler): this { return this.on("PATCH", path, handler); }
+    delete(path: string, handler: Handler): this { return this.on("DELETE", path, handler); }
 
-    match(method: string, path: string): { handler: Handler; params: Record<string, string> } | "method" | null {
+    match(method: string, path: string): { handler: Handler; params: Record<string, string>; options: RouteOptions } | "method" | null {
         let methodMismatch = false;
         for (const route of this.routes) {
             const m = route.pattern.exec(path);
@@ -63,7 +87,7 @@ export class Router {
             if (route.method !== method && !(route.method === "GET" && method === "HEAD")) { methodMismatch = true; continue; }
             const params: Record<string, string> = {};
             route.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
-            return { handler: route.handler, params };
+            return { handler: route.handler, params, options: route.options };
         }
         return methodMismatch ? "method" : null;
     }
@@ -100,14 +124,47 @@ export const playlist = (body: string, extra: Partial<Reply> = {}): Reply =>
 
 const MAX_BODY = 1024 * 1024;
 
-function makeContext(req: IncomingMessage, url: URL, params: Record<string, string>, now: number): RequestContext {
+/** Parses a multipart/form-data body (RFC 7578): text fields and files. */
+export function parseMultipart(body: Buffer, contentType: string): Multipart {
+    const m = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
+    if (!m) throw new HttpError(400, "multipart body without a boundary");
+    const delimiter = Buffer.from(`--${m[1] ?? m[2]}`);
+    const out: Multipart = { fields: new URLSearchParams(), files: new Map() };
+    let pos = body.indexOf(delimiter);
+    if (pos < 0) throw new HttpError(400, "malformed multipart body");
+    for (;;) {
+        pos += delimiter.length;
+        if (body.subarray(pos, pos + 2).toString() === "--") break;
+        pos += 2; // CRLF after the delimiter
+        const headerEnd = body.indexOf("\r\n\r\n", pos);
+        if (headerEnd < 0) throw new HttpError(400, "malformed multipart part");
+        const headers = body.subarray(pos, headerEnd).toString("utf8");
+        const next = body.indexOf(Buffer.concat([Buffer.from("\r\n"), delimiter]), headerEnd + 4);
+        if (next < 0) throw new HttpError(400, "unterminated multipart body");
+        const data = body.subarray(headerEnd + 4, next);
+        const disposition = /content-disposition:([^\r\n]*)/i.exec(headers)?.[1] ?? "";
+        const name = /\bname="([^"]*)"/i.exec(disposition)?.[1];
+        const filename = /\bfilename="([^"]*)"/i.exec(disposition)?.[1];
+        if (name !== undefined) {
+            if (filename !== undefined) {
+                out.files.set(name, { filename, type: /content-type:\s*([^\r\n]*)/i.exec(headers)?.[1]?.trim() ?? "application/octet-stream", data: Buffer.from(data) });
+            } else {
+                out.fields.append(name, data.toString("utf8"));
+            }
+        }
+        pos = next + 2;
+    }
+    return out;
+}
+
+function makeContext(req: IncomingMessage, url: URL, params: Record<string, string>, now: number, maxBody = MAX_BODY): RequestContext {
     let cached: Promise<Buffer> | null = null;
     const body = () => cached ??= new Promise<Buffer>((resolve, reject) => {
         const chunks: Buffer[] = [];
         let size = 0;
         req.on("data", (c: Buffer) => {
             size += c.length;
-            if (size > MAX_BODY) { reject(new HttpError(413, "body too large")); req.destroy(); return; }
+            if (size > maxBody) { reject(new HttpError(413, "body too large")); req.destroy(); return; }
             chunks.push(c);
         });
         req.on("end", () => resolve(Buffer.concat(chunks)));
@@ -131,6 +188,16 @@ function makeContext(req: IncomingMessage, url: URL, params: Record<string, stri
                 return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, String(x)]));
             }
             return Object.fromEntries(new URLSearchParams(raw));
+        },
+        async form() {
+            const type = req.headers["content-type"] ?? "";
+            if (type.includes("multipart/form-data")) return (await ctx.multipart()).fields;
+            return new URLSearchParams((await body()).toString());
+        },
+        async multipart() {
+            const type = req.headers["content-type"] ?? "";
+            if (!type.includes("multipart/form-data")) throw new HttpError(400, "expected multipart/form-data");
+            return parseMultipart(await body(), type);
         },
     };
     return ctx;
@@ -156,7 +223,7 @@ export function createSiteServer(options: ServerOptions): http.Server {
             const found = options.router.match(method, url.pathname);
             if (found === null) reply = json(404, { error: "not found" }, { kind: "unknown" });
             else if (found === "method") reply = json(405, { error: "method not allowed" }, { kind: "unknown" });
-            else reply = await found.handler(makeContext(req, url, found.params, now));
+            else reply = await found.handler(makeContext(req, url, found.params, now, found.options.maxBodyBytes));
         } catch (error) {
             reply = error instanceof HttpError
                 ? json(error.status, { error: error.message }, { kind: "error" })
@@ -170,15 +237,26 @@ export function createSiteServer(options: ServerOptions): http.Server {
             ...(reply.hashBody && reply.status !== "reset" ? { sha256: sha256(body) } : {}),
             ...(reply.log ?? {}),
         };
-        options.truth.append(record);
         if (reply.status === "reset") {
+            options.truth.append(record);
             req.socket.destroy();
             return;
         }
         res.statusCode = reply.status;
         for (const [k, v] of Object.entries(reply.headers ?? {})) res.setHeader(k, v);
-        res.setHeader("content-length", body.length);
-        res.setHeader("cache-control", "no-cache");
+        if (!res.hasHeader("cache-control")) res.setHeader("cache-control", "no-cache");
+        if (reply.stream && method !== "HEAD") {
+            res.setHeader("content-length", reply.stream.length);
+            let sent = 0;
+            try {
+                sent = await reply.stream.write(res, req);
+            } finally {
+                options.truth.append({ ...record, bytes: sent, planned: reply.stream.length } as ResponseRecord);
+            }
+            return;
+        }
+        options.truth.append(record);
+        res.setHeader("content-length", reply.stream ? reply.stream.length : body.length);
         res.end(method === "HEAD" ? undefined : body);
     };
     const server = options.tls

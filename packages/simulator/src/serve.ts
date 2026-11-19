@@ -13,15 +13,16 @@ import { writeJsonDurable } from "./fsutil.js";
 import { close, createSiteServer, listen } from "./http/server.js";
 import { MediaLibrary } from "./media/library.js";
 import { hashHex } from "./rng.js";
-import { validateScenario, type Scenario, type SiteId } from "./scenario/schema.js";
+import { validateScenario, type AnySiteId, type Scenario } from "./scenario/schema.js";
 import { Simulation } from "./sim.js";
 import { createSites } from "./sites/index.js";
 import { MemoryTruth, TeeTruth, TruthLog, type TruthSink } from "./truth/log.js";
 
-export type PortName = SiteId | "control";
+export type PortName = AnySiteId | "control" | "file-host-cdn";
 
 export const DEFAULT_PORTS: Record<PortName, number> = {
     control: 18080, "ts-live": 18081, "ladder-live": 18082, "fmp4-live": 18083,
+    "file-host": 18084, "form-host": 18085, "api-host": 18086, "file-host-cdn": 18087,
 };
 
 export interface StartOptions {
@@ -89,6 +90,9 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
     const truth: TruthSink = sinks.length === 1 ? sinks[0] : new TeeTruth(sinks);
 
     const sim = new Simulation({ library, clock, truth, stateDir, autoPublish: options.autoPublish, hashBudget: options.hashBudget });
+    // A different scenario file starts over: the sites' documents and uploads
+    // from the earlier run go too (the truth log keeps growing).
+    if (stateFile && existsSync(stateFile) && !persisted) sim.store.clear();
     const scheme = options.tls ? "https" : "http";
     for (const site of createSites(sim, scheme)) sim.addSite(site);
     if (persisted) sim.load(validateScenario(persisted.scenario), { epochMs: persisted.epochMs, reason: "start" });
@@ -107,10 +111,13 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
     const urlHost = host.includes(":") ? `[${host}]` : host;
     try {
         for (const [site, module] of sim.sites) {
-            const server = createSiteServer({ site, router: module.router, truth, now: () => sim.clock.now(), tls: options.tls });
-            servers.push(server);
-            const port = await listen(server, options.ports?.[site] ?? 0, host);
-            urls[site] = `${scheme}://${urlHost}:${port}`;
+            for (const { name, router } of [{ name: site as string, router: module.router }, ...(module.extraServers ?? [])]) {
+                const server = createSiteServer({ site, router, truth, now: () => sim.clock.now(), tls: options.tls });
+                servers.push(server);
+                const port = await listen(server, options.ports?.[name as PortName] ?? 0, host);
+                urls[name as PortName] = `${scheme}://${urlHost}:${port}`;
+                sim.urls[name] = urls[name as PortName];
+            }
         }
         const control = createSiteServer({
             site: "control", truth, now: () => sim.clock.now(), tls: options.tls,
@@ -118,8 +125,10 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
         });
         servers.push(control);
         urls.control = `${scheme}://${urlHost}:${await listen(control, options.ports?.control ?? 0, host)}`;
+        sim.urls.control = urls.control;
     } catch (error) {
         await Promise.all(servers.map(s => close(s)));
+        await closeSites(sim);
         sim.close();
         throw error;
     }
@@ -128,10 +137,15 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
         sim, urls, memory, truthFile,
         async close() {
             await Promise.all(servers.map(s => close(s)));
+            await closeSites(sim);
             persist();
             sim.close();
         },
     };
+}
+
+async function closeSites(sim: Simulation): Promise<void> {
+    for (const module of sim.sites.values()) await module.close?.();
 }
 
 function parsePorts(value: string | undefined): Partial<Record<PortName, number>> {
