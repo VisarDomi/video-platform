@@ -23,8 +23,12 @@ export class SimClock implements Clock {
         options: { mode?: ClockMode; at?: number } = {},
         private readonly realNow: () => number = Date.now,
     ) {
-        if (options.at !== undefined) this.offsetMs = options.at - this.realNow();
-        if (options.mode === "manual") this.frozenAt = this.now();
+        // Read real time once: two reads can straddle a millisecond tick, and a
+        // manual clock "at T" would then stand at T+1 (everything a test or a
+        // checker asks about T would be off by that millisecond).
+        const real = this.realNow();
+        if (options.at !== undefined) this.offsetMs = options.at - real;
+        if (options.mode === "manual") this.frozenAt = options.at ?? real;
     }
 
     now(): number {

@@ -20,6 +20,21 @@ function engineFor(channel, { site = 'ts-live', seed = 'seed-1', clockAt = EPOCH
 
 const at = s => EPOCH + s * 1000;
 
+test('a manual clock stands exactly where it was set, however real time moves while it is built', () => {
+    // A real clock that ticks a millisecond on every read: the worst case of
+    // two reads straddling a tick, which a loaded machine hits now and then.
+    let real = EPOCH + 123_456;
+    const ticking = () => real++;
+    assert.equal(new SimClock({ mode: 'manual', at: EPOCH }, ticking).now(), EPOCH);
+    assert.equal(new SimClock({ mode: 'manual', at: EPOCH }, ticking).now(), EPOCH, 'every time');
+    const frozenNow = new SimClock({ mode: 'manual' }, ticking);
+    assert.equal(frozenNow.now(), frozenNow.now(), 'manual without "at" freezes one instant');
+    const live = new SimClock({ at: EPOCH }, ticking);
+    assert.ok(Math.abs(live.now() - EPOCH) <= 2, 'real mode starts at "at" and runs on');
+    const restored = SimClock.restore(new SimClock({ mode: 'manual', at: EPOCH + 5 }, ticking).snapshot(), ticking);
+    assert.equal(restored.now(), EPOCH + 5);
+});
+
 test('the live window slides with the clock', () => {
     const { model, clock } = engineFor({ startPosition: 0, edges: [{ id: 'a', firstSequence: 100 }] });
     const edge = model.edge('a');
