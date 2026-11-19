@@ -10,7 +10,10 @@
         "build:frontend": "npm run build:app",
         "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
         "build:auth": "npm run build:shared && npm run build -w auth",
-        "build:downloader": "npm run build:shared && npm run build -w downloader",
+        "build:downloader": "npm run build:shared && npm run build:sdk && npm run build:plugins && npm run build -w downloader",
+        "build:sdk": "npm run build -w sdk",
+        "build:plugins": "npm run build -w private/plugins",
+        "test:sites": "node --test private/test/*.test.mjs private/plugins/*/test/*.test.mjs",
         "build:server": "npm run build:shared && npm run build -w server && npm run build:app",
         "build:descriptor": "npm run build:shared && npm run build -w descriptor",
         "build:live-extensions": "npm run build -w live-extensions",
@@ -56,6 +59,9 @@
         "packages/downloader",
         "packages/server",
         "packages/app",
-        "packages/live-extensions"
+        "packages/live-extensions",
+        "private/plugins/tslive",
+        "private/plugins/ladder",
+        "private/plugins/fmp4"
     ]
 }

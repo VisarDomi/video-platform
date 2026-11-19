@@ -22,8 +22,8 @@ import {
 // baseline. A window entirely below the baseline is either (a) a stale CDN
 // copy or lagging edge of the SAME numbering, whose newest entry lags by at
 // most about one window plus a few segments of cache age, or (b) a NEW
-// numbering (FMP4 edges number independently, TsLive restarts at 0, LADDER went
-// 1112 -> 1), which lands far below. One window plus 10 segments (10-20 s of
+// numbering (copies on different CDN edges number independently, a restarted
+// stream may count from 0 again or jump, e.g. 1112 -> 1), which lands far below. One window plus 10 segments (10-20 s of
 // cache age at 1-2 s segments) covers (a); anything further below is (b) and
 // is accepted as new media. A restart that lands within the margin is still
 // deduplicated against the old numbering (bounded by the margin).

@@ -9,7 +9,7 @@ import { PlaylistManager } from '../dist/services/download/playlistManager.js';
 import { DiskSession } from '../dist/services/download/diskSession.js';
 import { InitTracker } from '../dist/services/download/initTracker.js';
 import { AccessIncidentTracker } from '../dist/services/download/accessIncidentTracker.js';
-import { ApiClient } from '../dist/services/tslive/api/apiClient.js';
+import { validateTsSegment } from './helpers/tsValidator.mjs';
 import logger from '../dist/common/logger.js';
 
 async function fixture(t, provider) {
@@ -24,7 +24,7 @@ async function fixture(t, provider) {
         playlistRetryMs: 100,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         recoverVariant: async () => null,
-        validateSegment: file => ApiClient.prototype.validateSegment.call({}, file),
+        validateSegment: validateTsSegment,
         ...provider,
     }, incidents);
     return { manager, downloader, handle, incidents, run: () => downloader.run('https://example.test/master.m3u8', manager, new InitTracker(disk), disk) };
@@ -91,19 +91,6 @@ test('a slow master check does not hold up playlist polling', { timeout: 20000 }
     assert.equal(result.exitReason, 'remote-endlist');
     assert.equal(masterChecks, 1);
     assert.equal(f.manager.missedSegmentCount, 0);
-});
-
-test('an aborted playlist request records no failure', async (t) => {
-    const { ScClient } = await import('../dist/services/fmp4/api/scClient.js');
-    t.mock.method(globalThis, 'fetch', (url, init) => new Promise((resolve, reject) => {
-        init.signal.addEventListener('abort', () => reject(init.signal.reason));
-    }));
-    const session = new ScClient().createDownloadSession();
-    const controller = new AbortController();
-    const pending = session.fetchPlaylist('https://example.test/live.m3u8', controller.signal);
-    controller.abort();
-    assert.equal(await pending, null);
-    assert.equal(session.getLastPlaylistFailure(), null);
 });
 
 test('slow access diagnostics do not hold capture behind a moving live window', { timeout: 15000 }, async t => {

@@ -6,8 +6,6 @@ import test from "node:test";
 import { DiskSession } from "../dist/services/download/diskSession.js";
 import { PlaylistManager } from "../dist/services/download/playlistManager.js";
 import { InitTracker } from "../dist/services/download/initTracker.js";
-import { ApiClient } from "../dist/services/tslive/api/apiClient.js";
-import { LadderClient } from "../dist/services/ladder/api/ladderClient.js";
 import { fixturePart } from "../../pipeline/test/helpers/mediaFixture.mjs";
 
 const dims = (width, height, sampleAspectRatio = "1:1") => ({ width, height, sampleAspectRatio });
@@ -93,22 +91,4 @@ test("FMP4 init-map quality changes still retain fragments and publish one map b
     assert.match(await readFile(path.join(root, "playlist.m3u8"), "utf8"),
         /#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_1.mp4"\n#EXTINF/);
     assert.match(await readFile(path.join(root, "playlist.m3u8"), "utf8"), /#EXT-X-MAP:URI="init.mp4"/);
-});
-
-test("real new-segment probes keep every LADDER and TsLive resolution", async (t) => {
-    const { root } = await setup(t);
-    // These methods need no account/session state; avoid starting LADDER's timer.
-    for (const size of ["360x640", "640x360", "720x1280", "1280x720", "1920x1080"]) {
-        const part = await fixturePart(root, size, { size, frames: 2 });
-        const ladder = await LadderClient.prototype.validateSegment.call({}, part.input);
-        const tslive = await ApiClient.prototype.validateSegment.call({}, part.input);
-        const [width, height] = size.split("x").map(Number);
-        assert.deepEqual(ladder, { valid: true, dimensions: dims(width, height) });
-        assert.equal(tslive.valid, true);
-        if (tslive.valid) assert.deepEqual(tslive.dimensions, ladder.dimensions);
-    }
-    const unknown = path.join(root, "unknown.ts");
-    await writeFile(unknown, "not media");
-    assert.deepEqual(await LadderClient.prototype.validateSegment.call({}, unknown), { valid: true, dimensions: null });
-    assert.deepEqual(await ApiClient.prototype.validateSegment.call({}, unknown), { valid: true, dimensions: null });
 });

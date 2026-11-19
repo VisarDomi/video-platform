@@ -1,9 +1,6 @@
 
-export const TSLIVE_POLL_MS = 1_000;
-export const FMP4_POLL_MS = 5_000;
-export const FMP4_IDENTITY_REFRESH_MS = 60_000;
-export const LADDER_POLL_MS = 30_000;
-export const LADDER_DISCOVERY_RETRY_MS = 1_000;
+// The capture loop's timings. Each site's discovery cadence and its own request timings
+// belong to its plug-in (LiveCapture.pollIntervalMs).
 
 export const STALE_STREAM_TIMEOUT_MS = 60_000;
 export const QUALITY_CHECK_INTERVAL_MS = 10_000;
@@ -23,15 +20,8 @@ export { CDN_FETCH_TIMEOUT_MS } from "sdk";
 
 export const ZERO_SEGMENT_COOLDOWN_MS = 20_000;
 
-
-
 export const AUTH_LOGIN_RETRY_MS = 30_000;
 export const AUTH_API_RATE_LIMIT_MS = 1_000;
 
 export const FILE_WATCHER_DEBOUNCE_MS = 500;
 export const STATUS_FILE_DEBOUNCE_MS = 200;
-
-export const LADDER_SESSION_CLEANUP_INTERVAL_MS = 30_000;
-export const LADDER_SESSION_STALE_MS = 60_000;
-export const LADDER_WS_HANDSHAKE_TIMEOUT_MS = 15_000;
-export const LADDER_WS_HEARTBEAT_INTERVAL_MS = 30_000;
