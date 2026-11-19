@@ -1,0 +1,66 @@
+{
+    "name": "demo",
+    "description": "Three live sites with tennis channels going on and off air, and a fault every few minutes. Faults are session-scoped, so every session repeats them.",
+    "seed": "demo-1",
+    "epoch": null,
+    "segmentRetentionS": 120,
+    "sites": {
+        "ts-live": {
+            "accounts": [{ "username": "demo", "password": "demo", "accountId": "acct-demo" }],
+            "streamTokenTtlS": 10,
+            "channels": [
+                {
+                    "id": "acct-centre", "name": "centre-court",
+                    "schedule": { "cycle": { "periodS": 3600, "onlineS": 2700 } },
+                    "faults": [
+                        { "type": "playlistStatus", "scope": "session", "at": "5m", "until": "5m20s", "status": 503 },
+                        { "type": "restart", "scope": "session", "at": "12m", "value": 0 },
+                        { "type": "damage", "scope": "session", "at": "20m", "until": "20m10s", "kind": "single-frame", "every": 3 },
+                        { "type": "codecChange", "scope": "session", "at": "30m", "until": "31m" }
+                    ]
+                },
+                {
+                    "id": "acct-court-two", "name": "court-two",
+                    "schedule": { "cycle": { "periodS": 1800, "onlineS": 1200, "offsetS": 300 } },
+                    "renames": [{ "at": "2h", "name": "court-two-evening" }],
+                    "faults": [{ "type": "skip", "scope": "session", "at": "8m", "count": 4 }]
+                }
+            ],
+            "faults": [{ "type": "tokenRevoke", "at": "40m" }]
+        },
+        "ladder-live": {
+            "pageSize": 50,
+            "channels": [
+                {
+                    "id": "1001", "name": "clay-court-one",
+                    "schedule": { "cycle": { "periodS": 2400, "onlineS": 1800 } },
+                    "faults": [
+                        { "type": "restart", "scope": "session", "at": "10m", "value": 1 },
+                        { "type": "paid", "scope": "session", "at": "25m", "until": "26m" }
+                    ]
+                },
+                { "id": "1002", "name": "clay-court-two", "schedule": { "always": true } }
+            ]
+        },
+        "fmp4-live": {
+            "edges": ["a", "b", "c"],
+            "obfuscation": { "keys": { "k1": "demo-key-one", "k2": "demo-key-two" }, "keyId": "k1" },
+            "channels": [
+                {
+                    "id": "501", "name": "hard-court-one", "obfuscated": true,
+                    "schedule": { "cycle": { "periodS": 3000, "onlineS": 2400 } },
+                    "renames": [{ "at": "90m", "name": "hard-court-main" }],
+                    "faults": [
+                        { "type": "edgeOutage", "scope": "session", "edge": "b", "at": "4m", "until": "6m", "status": 403 },
+                        { "type": "edgeOutage", "scope": "session", "edge": "a", "at": "15m", "until": "15m30s", "status": 404 },
+                        { "type": "damage", "scope": "session", "at": "9m", "until": "9m30s", "kind": "zero-size-sample", "every": 2 },
+                        { "type": "showState", "scope": "session", "at": "18m", "until": "18m45s", "state": "group" },
+                        { "type": "segmentStatus", "scope": "session", "at": "22m", "until": "24m", "status": 429, "ratio": 0.3 }
+                    ]
+                },
+                { "id": "502", "name": "hard-court-two", "schedule": { "always": true } }
+            ],
+            "faults": [{ "type": "obfuscationKey", "at": "1h", "keyId": "k2" }]
+        }
+    }
+}
