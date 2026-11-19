@@ -446,28 +446,8 @@ export function requiresFfprobeFallback(
     return duration === null || (source === "stream-duration" && needsFfprobeFallback);
 }
 
-export async function writeFileAtomic(filePath: string, content: string): Promise<void> {
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    let handle;
-    try {
-        handle = await fs.open(tmpPath, "wx");
-        await handle.writeFile(content, MISC.ENCODING_UTF8);
-        await handle.sync();
-        await handle.close();
-        handle = null;
-        await fs.rename(tmpPath, filePath);
-        const directoryHandle = await fs.open(path.dirname(filePath), "r");
-        try {
-            await directoryHandle.sync();
-        } finally {
-            await directoryHandle.close();
-        }
-    } catch (error) {
-        if (handle) await handle.close().catch(() => {});
-        await fs.unlink(tmpPath).catch(() => {});
-        throw error;
-    }
-}
+export { writeFileAtomic } from "../../core/durableFile.js";
+import { writeFileAtomic } from "../../core/durableFile.js";
 
 export async function annotateCompoundSequenceRestarts(videoPath: string): Promise<CompoundSequenceRestarts> {
     const playlistPath = path.join(videoPath, FILE_NAMES.HLS_PLAYLIST);

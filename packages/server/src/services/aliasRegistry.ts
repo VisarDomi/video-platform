@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import { createLogger } from "shared";
 import { acquireLock } from "./fileLock.js";
+import { mutateTextFile, writeFileAtomic } from "../core/durableFile.js";
 
 const logger = createLogger("AliasRegistry");
 
@@ -112,13 +113,14 @@ export class AliasRegistry {
     }
 
     async syncTsLiveTxt(filePath: string): Promise<void> {
-        let content: string;
-        try {
-            content = await fs.readFile(filePath, "utf-8");
-        } catch {
-            return;
-        }
+        // Same serialized, atomic replacement as the +/- routes, which write this file too.
+        await mutateTextFile(filePath, (content) => {
+            if (content === null) return { next: null, result: undefined };
+            return { next: this.renameTsLiveLines(content), result: undefined };
+        });
+    }
 
+    private renameTsLiveLines(content: string): string | null {
         const lines = content.split("\n");
         let changed = false;
 
@@ -141,9 +143,7 @@ export class AliasRegistry {
             }
         }
 
-        if (changed) {
-            await fs.writeFile(filePath, lines.join("\n"), "utf-8");
-        }
+        return changed ? lines.join("\n") : null;
     }
 
     private recordAliases(streamerId: string, aliases: AliasSnapshot): boolean {
@@ -200,11 +200,8 @@ export class AliasRegistry {
                 data[id] = [...entry.history, entry.current];
             }
 
-            const tmpPath = this.filePath + ".tmp";
-            const dir = path.dirname(this.filePath);
-            await fs.mkdir(dir, { recursive: true });
-            await fs.writeFile(tmpPath, JSON.stringify(data, null, 2));
-            await fs.rename(tmpPath, this.filePath);
+            await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+            await writeFileAtomic(this.filePath, JSON.stringify(data, null, 2));
         } finally {
             await release();
         }

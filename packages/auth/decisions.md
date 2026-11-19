@@ -24,7 +24,9 @@ The tokens are written to
 
 A session refresh consumes the previous refresh token, so its replacement is
 saved before the stream tokens are requested; a stream-token failure or an
-interruption cannot lose it (`test/session-refresh.test.mjs`).
+interruption cannot lose it (`test/session-refresh.test.mjs`). "Saved" means
+durable: the temporary file is fsynced before the rename and the directory after
+it, so a power cut right after a rotation cannot leave only the consumed token.
 
 The session and stream refresh loops share a per-account save queue. Each
 atomic write and rename finishes before the next save starts, so concurrent

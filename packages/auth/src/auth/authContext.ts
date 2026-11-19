@@ -87,14 +87,29 @@ export class AuthContext {
             if (this.tokenBag) {
                 const serialized = this.provider.serializeTokens(this.tokenBag);
                 serialized.lastWriteMs = Date.now();
+                // A rotated refresh token invalidates the previous one, so the new one must
+                // be on disk (file and rename both flushed) before the save counts as done:
+                // otherwise a power cut right after rotation leaves only a dead token.
                 const tmpPath = filePath + '.tmp';
                 await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2), {mode: 0o600});
+                await syncPath(tmpPath);
                 await fsPromises.rename(tmpPath, filePath);
+                await syncPath(path.dirname(filePath));
                 logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
             logger.error(`Failed to save session file for ${this.email} at ${filePath}`, { error });
             throw error;
         }
+    }
+}
+
+// fsync a file or directory through a read-only descriptor (Linux flushes either way).
+async function syncPath(target: string): Promise<void> {
+    const handle = await fsPromises.open(target, 'r');
+    try {
+        await handle.sync();
+    } finally {
+        await handle.close();
     }
 }
