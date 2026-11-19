@@ -18,6 +18,7 @@ export class TargetManager {
     private readonly parseIdentifier: (line: string) => string | null;
     private readonly defaultComment: string;
     private debounceTimer: NodeJS.Timeout | null = null;
+    private watcher: fs.FSWatcher | null = null;
 
     private constructor(options: TargetManagerOptions) {
         this.targetsFilePath = options.filePath;
@@ -92,16 +93,24 @@ export class TargetManager {
         }
     }
 
+    public close(): void {
+        this.watcher?.close();
+        if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    }
+
     private watchFile(): void {
-        fs.watch(this.targetsFilePath, (eventType) => {
-            if (eventType === "change") {
-                if (this.debounceTimer) clearTimeout(this.debounceTimer);
-                this.debounceTimer = setTimeout(() => {
-                    logger.debug(`[${this.label}] ${path.basename(this.targetsFilePath)} changed. Reloading targets...`);
-                    this.loadTargets();
-                    this.debounceTimer = null;
-                }, FILE_WATCHER_DEBOUNCE_MS);
-            }
+        // Watch the directory, not the file: the server replaces the list atomically
+        // (write a temporary file, rename it over the list), which would orphan a
+        // watcher on the old file and stop every later reload.
+        const name = path.basename(this.targetsFilePath);
+        this.watcher = fs.watch(path.dirname(this.targetsFilePath), (_eventType, filename) => {
+            if (filename !== null && filename.toString() !== name) return;
+            if (this.debounceTimer) clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => {
+                logger.debug(`[${this.label}] ${name} changed. Reloading targets...`);
+                this.loadTargets();
+                this.debounceTimer = null;
+            }, FILE_WATCHER_DEBOUNCE_MS);
         });
     }
 }

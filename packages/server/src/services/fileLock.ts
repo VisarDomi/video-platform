@@ -39,30 +39,14 @@ export async function acquireLock({
         } catch (err: any) {
             if (err.code !== "EEXIST") throw err;
 
-            try {
-                const raw = await fs.readFile(holderPath, "utf-8");
-                const holder: LockHolder = JSON.parse(raw);
-
-                let isStale = Date.now() - holder.timestamp > staleMs;
-
-                if (!isStale) {
-                    try {
-                        process.kill(holder.pid, 0);
-                    } catch {
-                        isStale = true;
-                    }
-                }
-
-                if (isStale) {
-                    try {
-                        await fs.unlink(holderPath);
-                    } catch {}
-                    try {
-                        await fs.rmdir(lockPath);
-                    } catch {}
-                    continue;
-                }
-            } catch {
+            if (await isStaleLock(lockPath, holderPath, staleMs)) {
+                try {
+                    await fs.unlink(holderPath);
+                } catch {}
+                try {
+                    await fs.rmdir(lockPath);
+                } catch {}
+                continue;
             }
 
             if (Date.now() >= deadline) {
@@ -71,5 +55,34 @@ export async function acquireLock({
 
             await new Promise((r) => setTimeout(r, retryMs));
         }
+    }
+}
+
+// A lock is stale when its holder is gone or too old. A power cut between creating the
+// lock directory and writing the holder leaves no readable holder at all; that lock is
+// stale once the directory itself is older than staleMs (a live holder writes within
+// milliseconds), so it cannot block every later writer forever.
+async function isStaleLock(lockPath: string, holderPath: string, staleMs: number): Promise<boolean> {
+    let holder: LockHolder | null = null;
+    try {
+        const parsed = JSON.parse(await fs.readFile(holderPath, "utf-8"));
+        if (Number.isFinite(parsed?.timestamp) && Number.isInteger(parsed?.pid)) holder = parsed;
+    } catch {}
+
+    if (!holder) {
+        try {
+            const { mtimeMs } = await fs.stat(lockPath);
+            return Date.now() - mtimeMs > staleMs;
+        } catch {
+            return false;
+        }
+    }
+
+    if (Date.now() - holder.timestamp > staleMs) return true;
+    try {
+        process.kill(holder.pid, 0);
+        return false;
+    } catch {
+        return true;
     }
 }

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { promises as fs } from "fs";
 import logger from "../../core/logger.js";
 import { cleanListContent } from "../../core/content-processor.js";
+import { mutateTextFile } from "../../core/durableFile.js";
 
 interface ParsedEntry {
     id: string;
@@ -56,27 +57,30 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
             }
             if (adapter.beforeAdd) await adapter.beforeAdd(resolved);
 
-            let content = "";
-            try { content = await fs.readFile(adapter.filePath, "utf-8"); } catch {}
-
-            const lines = content.split("\n");
-            const existingIndex = lines.findIndex((line) => adapter.parseLine(line)?.id === resolved.id);
-
-            if (existingIndex !== -1) {
-                const existing = adapter.parseLine(lines[existingIndex]);
-                if (existing?.label === resolved.label) {
-                    logger.debug(`${adapter.name} skip: ${resolved.id} ${resolved.label} (already exists)`);
-                    return res.json({ success: true });
+            // The read, the decision and the write happen as one serialized step, and the
+            // write replaces the file atomically: a power cut or a concurrent add cannot
+            // truncate the list or drop an entry (a dropped line ends that live capture).
+            type AddOutcome = { kind: "skip" } | { kind: "update"; previous?: string } | { kind: "add" };
+            const outcome = await mutateTextFile<AddOutcome>(adapter.filePath, (current) => {
+                const content = current ?? "";
+                const lines = content.split("\n");
+                const existingIndex = lines.findIndex((line) => adapter.parseLine(line)?.id === resolved.id);
+                if (existingIndex !== -1) {
+                    const existing = adapter.parseLine(lines[existingIndex]);
+                    if (existing?.label === resolved.label) return { next: null, result: { kind: "skip" as const } };
+                    lines[existingIndex] = adapter.formatEntry(resolved);
+                    return { next: cleanListContent(lines.join("\n")), result: { kind: "update" as const, previous: existing?.label } };
                 }
-                lines[existingIndex] = adapter.formatEntry(resolved);
-                await fs.writeFile(adapter.filePath, cleanListContent(lines.join("\n")), "utf-8");
-                logger.info(`${adapter.name} update: ${existing?.label} -> ${resolved.label} (id=${resolved.id})`);
-                return res.json({ success: true });
-            }
+                return { next: cleanListContent(content + "\n" + adapter.formatEntry(resolved)), result: { kind: "add" as const } };
+            });
 
-            const newContent = cleanListContent(content + "\n" + adapter.formatEntry(resolved));
-            await fs.writeFile(adapter.filePath, newContent, "utf-8");
-            logger.info(`${adapter.name} add: ${resolved.id} ${resolved.label}`);
+            if (outcome.kind === "skip") {
+                logger.debug(`${adapter.name} skip: ${resolved.id} ${resolved.label} (already exists)`);
+            } else if (outcome.kind === "update") {
+                logger.info(`${adapter.name} update: ${outcome.previous} -> ${resolved.label} (id=${resolved.id})`);
+            } else {
+                logger.info(`${adapter.name} add: ${resolved.id} ${resolved.label}`);
+            }
             res.json({ success: true });
         } catch (error) {
             logger.error(`Error adding to ${adapter.name}`, { error });
@@ -136,14 +140,16 @@ export function createListRoutes(adapter: ListProviderAdapter): Router {
             const resolvedId = adapter.resolveForRemove
                 ? await adapter.resolveForRemove(identifier)
                 : identifier;
-            const content = await fs.readFile(adapter.filePath, "utf-8");
-            const lines = content
-                .split("\n")
-                .filter((line) => {
-                    const parsed = adapter.parseLine(line);
-                    return parsed ? parsed.id !== resolvedId : true;
-                });
-            await fs.writeFile(adapter.filePath, cleanListContent(lines.join("\n")), "utf-8");
+            await mutateTextFile(adapter.filePath, (current) => {
+                if (current === null) throw new Error(`${adapter.filePath} does not exist`);
+                const lines = current
+                    .split("\n")
+                    .filter((line) => {
+                        const parsed = adapter.parseLine(line);
+                        return parsed ? parsed.id !== resolvedId : true;
+                    });
+                return { next: cleanListContent(lines.join("\n")), result: undefined };
+            });
             logger.info(`${adapter.name} remove: ${identifier}${resolvedId !== identifier ? ` (id: ${resolvedId})` : ""}`);
             res.json({ success: true });
         } catch (error) {

@@ -230,8 +230,12 @@ streamer's ID with its current and historical aliases.
 `aliases.json` writes take a directory lock (`aliases.json.lock`,
 `services/fileLock.ts`): `mkdir` is atomic, and `holder.json` inside records
 the holder's PID and timestamp. A holder older than 30 seconds or whose PID is
-not alive (`kill(pid, 0)`) is stale and removed at once; an unreadable holder
-(mid-creation) is retried every 50 ms, up to 5 seconds.
+not alive (`kill(pid, 0)`) is stale and removed at once. An unreadable or
+missing holder is a lock mid-creation, retried every 50 ms up to 5 seconds,
+until the lock directory itself is older than 30 seconds: then it is a power cut
+between `mkdir` and the holder write, and it is stale too, so it cannot block
+every later write. `aliases.json` is replaced through `core/durableFile.ts`
+(temporary file, fsync, rename, directory fsync).
 
 ## Alias refresh: hourly batch + tslive.txt sync
 
@@ -241,6 +245,19 @@ TsLive batch profile API in sequential chunks of 500 (the API's per-request
 maximum), persists the aliases to `aliases.json`, then rewrites stale aliases in
 `tslive.txt`. The downloader's target manager picks up the change through its
 directory watch.
+
+## Download lists are replaced atomically, one change at a time
+
+The +/- routes, the TsLive alias sync and the FMP4 alias sync all change a list
+through `mutateTextFile` (`core/durableFile.ts`). The read, the decision and the
+write are one step serialized per file inside the server, and the write replaces
+the file: temporary file, fsync, rename, directory fsync. Why: a list torn by a
+power cut, or an entry dropped by two concurrent changes, ends that streamer's
+live capture, since the downloader finalizes sessions missing from the list. The
+FMP4 alias sync fetches usernames before taking that step and applies them to the
+list as it is then, so an add or remove made during the fetch survives. The
+downloader's target managers watch the list's directory, not the file, because
+an atomic replacement orphans a watcher on the old file.
 
 ## Notes
 
