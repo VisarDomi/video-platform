@@ -32,7 +32,6 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
             throw new Error("The shared agent profile and everyday Chromium profiles are reserved; use the pipeline-owned browser directory");
         }
     }
-    const credentials = readProviderCredentials(config.credentialsFilePath, provider);
     await mkdir(profilePath, { recursive: true, mode: 0o700 });
     await chmod(profilePath, 0o700);
     const entry = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath()).find((destination) => destination.id === provider);
@@ -41,7 +40,7 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
     return plugin.createDestination({
         browser: { executablePath: config.chromiumExecutablePath, profilePath },
         ...(config.videohostSessionPath ? { sessionFilePath: config.videohostSessionPath } : {}),
-        credentials,
+        credentials: () => readProviderCredentials(config.credentialsFilePath, provider),
         stopSignal: shutdownSignal,
     });
 }

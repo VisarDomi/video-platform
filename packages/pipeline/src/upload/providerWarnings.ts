@@ -10,7 +10,7 @@ export function rejectedPhrases(text: string): string[] {
 }
 
 // The campaign's session-lost attention text ends with this; resuming after a recovery
-// recognises the text by it. The destination says the same in its own messages (a pin
+// recognises the text by it. The destination says the same in its own messages (a test
 // keeps the two identical until the generic session engine owns the text).
 export const SESSION_LOST_ADVICE = "run `npm run vhost:connect-iphone` to restore the shared session";
 

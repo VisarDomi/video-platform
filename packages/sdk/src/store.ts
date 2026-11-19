@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -68,7 +69,7 @@ export class FilePluginStore implements PluginStore {
 }
 
 export async function writeFileDurably(filePath: string, content: string | Uint8Array, mode = 0o600): Promise<void> {
-    const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
     let handle: fs.FileHandle | undefined;
     try {
         handle = await fs.open(temporary, "wx", mode);

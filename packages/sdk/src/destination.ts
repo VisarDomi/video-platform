@@ -110,7 +110,9 @@ export interface Destination {
 export interface DestinationHost {
     readonly browser: { readonly executablePath: string; readonly profilePath: string; readonly headless?: boolean };
     readonly sessionFilePath?: string;
-    readonly credentials: { readonly email: string; readonly password: string };
+    // Read only when a password login actually happens (never for uploads, lookups or
+    // session checks on the shared login), so those keep working without the file.
+    readonly credentials: () => { readonly email: string; readonly password: string };
     // Aborted when the host service stops.
     readonly stopSignal: AbortSignal;
 }

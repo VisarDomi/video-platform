@@ -83,8 +83,8 @@ async function destinationCommand(command: string): Promise<((args: readonly str
     for (const entry of parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath())) {
         if (!entry.commands) continue;
         const module = await import(entry.commands) as { commands?: Record<string, (args: readonly string[]) => Promise<void>> };
-        const run = module.commands?.[command];
-        if (run) return run;
+        // Own names only: "toString" or "constructor" is no command.
+        if (module.commands && Object.hasOwn(module.commands, command)) return module.commands[command];
     }
     return null;
 }
@@ -98,7 +98,10 @@ async function main(): Promise<void> {
         "upload-provider", "metadata-check"].includes(command ?? "")) {
         // Not a core command: a destination's own (named by its sites-file entry), or none.
         const run = await destinationCommand(command ?? "");
-        if (!run) usage();
+        if (!run) {
+            console.error(`No destination in ${sitesFilePath()} provides the command ${JSON.stringify(command ?? "")}`);
+            usage();
+        }
         await run(process.argv.slice(3));
         return;
     }
@@ -106,7 +109,7 @@ async function main(): Promise<void> {
     // upload metadata. The worker and the stage commands stop here, before touching
     // anything, without it; session upkeep and reports run either way.
     if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one",
-        "metadata-check", "retry"].includes(command ?? "")) contentProfile();
+        "metadata-check", "retry", "upload-one"].includes(command ?? "")) contentProfile();
     if (command === "campaign-prepare") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);
