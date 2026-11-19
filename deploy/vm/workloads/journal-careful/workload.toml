@@ -1,0 +1,7 @@
+name = "journal-careful"
+description = "Append checksummed records and replace a state file, careful variant"
+include = ["../shared/journal.py"]
+packages = ["python3"]
+setup = "python3 journal.py setup"
+run = "exec python3 journal.py run --mode careful"
+check = "python3 journal.py check"

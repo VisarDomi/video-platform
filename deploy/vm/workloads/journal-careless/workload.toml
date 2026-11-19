@@ -1,0 +1,7 @@
+name = "journal-careless"
+description = "Append checksummed records and replace a state file, careless variant"
+include = ["../shared/journal.py"]
+packages = ["python3"]
+setup = "python3 journal.py setup"
+run = "exec python3 journal.py run --mode careless"
+check = "python3 journal.py check"
