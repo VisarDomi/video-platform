@@ -4,14 +4,16 @@ import { SDK_VERSION, type PluginContext, type SiteInstance, type SitePlugin } f
 // The sites file names every site a deployment runs, the plug-in package that
 // implements it, and that plug-in's own configuration:
 //
-//   { "sites": [ { "id": "live-a", "plugin": "plugin-ts-live", "config": { ... } } ] }
+//   { "sites": [ { "id": "live-a", "plugin": "plugin-ts-live", "label": "Live A", "config": { ... } } ] }
 //
 // Site IDs are data: they name download lists, recording folders and API routes, so a
-// production deployment keeps the IDs its folders and ledger already use.
+// production deployment keeps the IDs its folders and ledger already use. The label is
+// the site's display name and log prefix ("[Live A] ..."); it defaults to the ID.
 
 export interface SiteEntry {
     id: string;
     plugin: string;
+    label?: string;
     enabled?: boolean;
     config?: Record<string, unknown>;
 }
@@ -49,11 +51,18 @@ export function parseSitesFile(text: string, source = "sites file"): SiteEntry[]
         if (seen.has(entry.id)) throw new Error(`${where}: duplicate id ${entry.id}`);
         seen.add(entry.id);
         if (typeof entry.plugin !== "string" || !entry.plugin) throw new Error(`${where}: plugin is required`);
+        if (entry.label !== undefined && (typeof entry.label !== "string" || !entry.label.trim())) throw new Error(`${where}: label must be a non-empty string`);
         if (entry.enabled !== undefined && typeof entry.enabled !== "boolean") throw new Error(`${where}: enabled must be a boolean`);
         if (entry.config !== undefined && (typeof entry.config !== "object" || entry.config === null || Array.isArray(entry.config))) {
             throw new Error(`${where}: config must be an object`);
         }
-        return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled ?? true, config: entry.config ?? {} };
+        return {
+            id: entry.id,
+            plugin: entry.plugin,
+            ...(entry.label === undefined ? {} : { label: entry.label }),
+            enabled: entry.enabled ?? true,
+            config: entry.config ?? {},
+        };
     });
 }
 

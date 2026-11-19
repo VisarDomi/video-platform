@@ -1,19 +1,14 @@
-import { formatTimestampForPath } from "../../common/pathTimestamp.js";
+import { normalizeRecordingId } from "sdk";
+
+// The stored form of recording identities is shared with the site plug-ins.
+export { normalizeRecordingId };
 
 const SAFE_RECORDING_ID = /^[A-Za-z0-9._-]+$/;
-const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
 export interface CompoundSegmentIdentity {
     localNumber: number;
     recordingId: string;
     providerSequence: number;
-}
-
-export function normalizeRecordingId(recordingId: string): string {
-    if (UTC_TIMESTAMP.test(recordingId)) {
-        return formatTimestampForPath(new Date(recordingId), true);
-    }
-    return recordingId;
 }
 
 function filenameRecordingId(recordingId: string): string {
