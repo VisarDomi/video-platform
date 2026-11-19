@@ -212,8 +212,10 @@ rules, identity refresh, and master URL derivation (`capture.resolveMaster`, cal
 just before a capture starts). One generic `DiscoveryLoop` per site owns the rest:
 reading the list (`TargetManager`), ending removed targets' sessions, reconciling
 with the folders on disk, the 60 s terminal rule, cooldowns, the "a new recording
-identity replaces the running session" rule (TsLive's before the move; every site's
-now), and starting sessions. Once the loop has a candidate (`streamerId`, `alias`,
+identity replaces the running session" rule (a site opts in with
+`replaceSessionOnNewRecording`; only TsLive does), and starting sessions. Every
+lookup of a running capture is by site and streamer ID: LADDER and FMP4 IDs are both
+numeric and may collide. Once the loop has a candidate (`streamerId`, `alias`,
 `recordingId`, `masterPlaylistUrl`, optional resume folder), `startStreamSession`
 owns the common lifecycle: add to `DownloadsManager`, create `StreamSession`,
 register abort/finalize/completion, and update zero-segment cooldown state.

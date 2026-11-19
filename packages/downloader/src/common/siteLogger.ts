@@ -6,10 +6,10 @@ import logger from "./logger.js";
 // The core logger is looked up on every call, so a test can observe it.
 export function siteLogger(label: string): Logger {
     const prefix = `[${label}] `;
-    const line = (level: "debug" | "info" | "warn" | "error") =>
+    const line = (level: "debug" | "verbose" | "info" | "warn" | "error") =>
         (message: string, meta?: Record<string, unknown>) => {
             if (meta === undefined) logger[level](prefix + message);
             else logger[level](prefix + message, meta);
         };
-    return { debug: line("debug"), info: line("info"), warn: line("warn"), error: line("error") };
+    return { debug: line("debug"), verbose: line("verbose"), info: line("info"), warn: line("warn"), error: line("error") };
 }

@@ -6,7 +6,7 @@ import { FILE_WATCHER_DEBOUNCE_MS } from "../../common/timing.js";
 export interface TargetManagerOptions {
     filePath: string;
     // The site's own list format.
-    catalog: Pick<Catalog, "parseTargetLine" | "listHeader" | "listChangesBy">;
+    catalog: Pick<Catalog, "parseTargetLine" | "listHeader" | "listChangesBy" | "describeTarget">;
     // The site's logger ("[<label>] ...").
     log: Logger;
 }
@@ -14,7 +14,9 @@ export interface TargetManagerOptions {
 // A site's download list: one target per line in the site's format, read through its
 // catalog and reloaded whenever the file changes. An entry the site has not resolved to
 // an ID yet is kept under its label; it counts as listed but is never looked up. A
-// repeated ID keeps its first position and takes the last line's label.
+// repeated ID keeps its first position and takes the last line's label. A missing list
+// is created with the catalog's header and not read: the targets stay as they were (none
+// at startup), and the next change of the file loads it.
 export class TargetManager {
     private targets = new Map<string, Target>();
     private loaded = false;
@@ -62,6 +64,7 @@ export class TargetManager {
         if (!fs.existsSync(this.filePath)) {
             this.log.warn(`${this.fileName} not found at ${this.filePath}. Creating empty file.`);
             fs.writeFileSync(this.filePath, `${this.catalog.listHeader ?? "# One target per line"}\n`);
+            return;
         }
 
         try {
@@ -91,7 +94,7 @@ export class TargetManager {
     }
 
     private changes(previous: Map<string, Target>, next: Map<string, Target>): { added: string[]; removed: string[] } {
-        const describe = (target: Target) => target.label === target.id ? target.id : `${target.label} (${target.id})`;
+        const describe = (target: Target) => this.catalog.describeTarget?.(target) ?? `${target.label} (${target.id})`;
         if (this.catalog.listChangesBy === "entry") {
             const before = new Set([...previous.values()].map(describe));
             const after = new Set([...next.values()].map(describe));

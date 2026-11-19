@@ -30,9 +30,12 @@ export interface TargetSource {
 // - A failed lookup (null) changes nothing: no capture ends because the site was down.
 // - A recording ends on "offline" only after two observations at least 60 s apart
 //   without media progress (ActiveRecordingReconciler).
-// - A new recording identity for a target replaces its running session, also one that
-//   has no folder on disk yet.
+// - With replaceSessionOnNewRecording, a new recording identity for a target replaces
+//   its running session, also one that has no folder on disk yet.
 // - A target whose capture ended with no media waits out a cooldown before it restarts.
+//
+// Every lookup of a running capture is by site and target ID: two sites may list the same
+// ID.
 export class DiscoveryLoop {
     private readonly cooldown: RetryCooldown;
     private activeReconciler: ActiveRecordingReconciler;
@@ -65,7 +68,7 @@ export class DiscoveryLoop {
             try {
                 await this.poll();
             } catch (error: any) {
-                this.site.log.error("Poll error", { error: error?.message ?? String(error) });
+                this.site.log.error(this.capture.pollErrorMessage ?? "Poll error", { error: error?.message });
             }
             const interval = this.capture.pollIntervalMs;
             await timersPromises.setTimeout(this.capture.pollFromStart
@@ -75,6 +78,7 @@ export class DiscoveryLoop {
     }
 
     public async poll(): Promise<void> {
+        const siteId = this.site.id;
         const targets = this.targets.getTargets();
         const targetIds = new Set(targets.map((target) => target.id));
         // List removals apply even when the remote lookup is unavailable.
@@ -85,7 +89,7 @@ export class DiscoveryLoop {
         this.previousTargetIds = targetIds;
 
         const snapshot = await this.capture.lookup(targets, {
-            recordingId: (targetId) => this.downloadsManager.getRecordingId(targetId, this.site.id),
+            recordingId: (targetId) => this.downloadsManager.getRecordingId(targetId, siteId),
         });
 
         const currentTotal = this.downloadsManager.size;
@@ -102,32 +106,36 @@ export class DiscoveryLoop {
             this.lastLookupSummary = lookupSummary;
         }
 
-        for (const target of targets) {
-            const targetId = target.id;
+        const listed = new Map(targets.map((target) => [target.id, target]));
+        for (const targetId of snapshot.startOrder ?? targets.map((target) => target.id)) {
+            const target = listed.get(targetId);
+            if (!target) continue;
             // The list may have changed while the lookup was in flight.
             if (!this.targets.hasTarget(targetId)) continue;
-            const stream = snapshot.live.get(targetId);
-            if (!stream) {
+            const live = snapshot.live.get(targetId);
+            const unidentified = !live && snapshot.unidentifiedTargetIds?.has(targetId) === true;
+            if (!live && !unidentified) {
                 this.logDecision(target, "not live/public");
                 continue;
             }
-            if (!stream.recordingId) {
+            if (live && !live.recordingId) {
                 this.logDecision(target, "live stream has no recording identity; refusing unsafe capture");
                 continue;
             }
 
-            // Only this site's capture of the target: another site may list the same ID.
-            const activeRecordingId = this.downloadsManager.getRecordingId(targetId, this.site.id);
-            if (activeRecordingId && activeRecordingId !== stream.recordingId) {
-                // Empty/missing folders are invisible to disk reconciliation.
-                await this.downloadsManager.finalizeStreamer(targetId, "a new stream replaced it");
-                this.cooldown.clear(targetId);
+            if (live && this.capture.replaceSessionOnNewRecording) {
+                const activeRecordingId = this.downloadsManager.getRecordingId(targetId, siteId);
+                if (activeRecordingId && activeRecordingId !== live.recordingId) {
+                    // Empty/missing folders are invisible to disk reconciliation.
+                    await this.downloadsManager.finalizeStreamer(targetId, "a new stream replaced it", siteId);
+                    this.cooldown.clear(targetId);
+                }
             }
-            if (this.downloadsManager.hasStreamer(targetId)) {
+            if (this.downloadsManager.hasStreamer(targetId, siteId)) {
                 this.logDecision(target, "already downloading this streamer");
                 continue;
             }
-            if (stream.masterPlaylistUrl && this.downloadsManager.has(stream.masterPlaylistUrl)) {
+            if (live?.masterPlaylistUrl && this.downloadsManager.has(live.masterPlaylistUrl)) {
                 this.logDecision(target, "already downloading this playlistUrl");
                 continue;
             }
@@ -140,8 +148,13 @@ export class DiscoveryLoop {
                 this.site.log.debug(`${target.label} (${targetId}): live again after cooldown`);
             }
 
-            const start = this.capture.resolveMaster ? await this.capture.resolveMaster(stream) : stream;
+            const stream = live ?? { targetId, alias: target.label, recordingId: "", masterPlaylistUrl: "" };
+            const start = this.capture.resolveMaster ? await this.capture.resolveMaster(stream) : live;
             if (!start) continue;
+            if (start !== live && this.downloadsManager.has(start.masterPlaylistUrl)) {
+                this.logDecision(target, "already downloading this playlistUrl");
+                continue;
+            }
 
             this.site.log.debug(`Discovered new stream from ${start.alias}.`);
             this.logDecision(target, "live stream found by lookup; starting");

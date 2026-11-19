@@ -23,7 +23,7 @@ export function startStreamSession(
         streamerId: candidate.streamerId,
         alias: candidate.alias,
         recordingId: candidate.recordingId,
-    });
+    }, provider.providerName);
 
     if (!handle) {
         return false;

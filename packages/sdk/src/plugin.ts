@@ -9,6 +9,8 @@ export const SDK_VERSION = 1;
 
 export interface Logger {
     debug(message: string, meta?: Record<string, unknown>): void;
+    // Detail between info and debug.
+    verbose(message: string, meta?: Record<string, unknown>): void;
     info(message: string, meta?: Record<string, unknown>): void;
     warn(message: string, meta?: Record<string, unknown>): void;
     error(message: string, meta?: Record<string, unknown>): void;
@@ -39,6 +41,9 @@ export interface PluginContext {
 export interface SitePlugin {
     // The plug-in type, e.g. "ts-live".
     id: string;
+    // The site's display name and the prefix of its log lines ("[Live A] ..."). It lives in
+    // the plug-in, not in the sites file, so a deployment cannot change a monitored prefix.
+    label: string;
     sdkVersion: typeof SDK_VERSION;
     create(context: PluginContext): SiteInstance | Promise<SiteInstance>;
 }
@@ -50,6 +55,9 @@ export interface SiteInstance {
     fileHost?: FileHost;
     extension?: ExtensionSpec;
     destination?: Destination;
+    // Called once by the host after it has read the site's download list, before the first
+    // poll: slow or logged start-up work (e.g. loading key files) goes here, not in create.
+    init?(): Promise<void> | void;
     // Stops timers and watchers the instance started.
     close?(): Promise<void> | void;
 }
@@ -90,6 +98,8 @@ export interface Catalog {
     // nothing. "entry": the whole entry counts, so a new label logs as one removed and
     // one added entry.
     listChangesBy?: "id" | "entry";
+    // How an entry is named in those log lines. Default: "<label> (<id>)".
+    describeTarget?(target: Target): string;
 
     // The server side of the catalog. Optional until the server reads its lists through
     // the catalog (it keeps its own parsers for now).
@@ -125,6 +135,13 @@ export interface LiveCapture {
     // pollFromStart is set (a slow lookup then keeps the cadence).
     pollIntervalMs: number;
     pollFromStart?: boolean;
+    // The message the core logs (with {error}) when a poll throws. Default: "Poll error".
+    pollErrorMessage?: string;
+    // A live target whose running capture has another recording identity than the
+    // lookup reports gets that capture ended ("a new stream replaced it") and a new one
+    // started, also when the old one has no folder on disk yet. Off: a target with a
+    // running capture is skipped; its folder is still judged by the disk reconcile.
+    replaceSessionOnNewRecording?: boolean;
     // Who is live among the listed targets. null = the site could not answer (or there
     // was nothing to ask); it is never taken as "all offline", so no live capture ends on
     // a lookup failure. The core reconciles the snapshot with the recordings on disk.
@@ -133,7 +150,10 @@ export interface LiveCapture {
     // playlist (e.g. a per-stream handshake). Returns the stream to capture, with its
     // masterPlaylistUrl and possibly a fresher name or recording identity read in the
     // same request, or null when it cannot start now (the plug-in logs why). Without it,
-    // the snapshot's stream starts as it is.
+    // the snapshot's stream starts as it is. The core calls it only within the poll whose
+    // lookup reported the stream, right after that lookup, so per-poll state the lookup
+    // kept is still current. A target in the snapshot's unidentifiedTargetIds comes with
+    // an empty recordingId; the returned stream must carry one.
     resolveMaster?(live: ProviderLiveStream): Promise<ProviderLiveStream | null>;
     // The listed target a recording folder belongs to, from the alias in its name
     // (labels may be stale names). Default: the target whose label is the alias.
