@@ -1,12 +1,12 @@
 import path from "node:path";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { access, mkdir, readFile } from "node:fs/promises";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { inspectFinalizedRecording } from "../discovery/inspectRecording.js";
 import { readRecordingFinalization } from "../discovery/recordingFinalization.js";
 import type { RecordingInput } from "../domain/types.js";
+import { writeFileDurably } from "sdk";
 
 export async function selectComparisonFile(config: PipelineConfig, filePath: string): Promise<unknown> {
     await syncComparisonSelection(config, filePath);
@@ -120,9 +120,7 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
             "The adjacent JSON report records source fingerprints, artifact SHA-256, policy decisions, and remote IDs.", ""].join("\n");
         for (const [name, content] of [["comparison.json", JSON.stringify(report, null, 2) + "\n"], ["comparison.md", markdown]]) {
             const target = path.join(config.stagingRoot, name);
-            const temporary = `${target}.${randomUUID()}.tmp`;
-            await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
-            await rename(temporary, target);
+            await writeFileDurably(target, content, 0o600);
         }
         return report;
     } finally { database.close(); }

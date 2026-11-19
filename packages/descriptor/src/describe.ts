@@ -5,6 +5,7 @@ import { descriptorConfig } from "./config.js";
 import { LlamaServer } from "./llama-server.js";
 import { chooseVideoFps, makeUprightCopy, probeDuration, stageMedia } from "./media.js";
 import { requestDescription, type DescriptionResult } from "./model-client.js";
+import { writeFileDurably } from "sdk";
 
 export interface ArtifactDescriptionEvidence {
     readonly inputPath: string;
@@ -143,9 +144,9 @@ export async function describeArtifact(
             modelResponse: result.raw,
             generatedAt: now().toISOString(),
         };
-        const temporaryPath = `${evidencePath}.${randomUUID()}.tmp`;
-        await fs.writeFile(temporaryPath, `${JSON.stringify(evidence, null, 2)}\n`);
-        await fs.rename(temporaryPath, evidencePath);
+        // Durable before it counts: a power cut leaves no evidence or the whole of it, never
+        // a torn cache entry that would stop the next describe of this artifact.
+        await writeFileDurably(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 0o644);
         return publicEvidence(evidence, evidencePath);
     } finally {
         await staged?.remove();
