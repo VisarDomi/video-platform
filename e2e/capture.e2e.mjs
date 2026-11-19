@@ -114,8 +114,17 @@ function guardIsolation() {
     return seen;
 }
 
+// Production's own downloader rewrites its live-status.json whenever its recordings
+// change, so the file's mtime proves nothing. Instead: the run's status file must be
+// written inside the run directory, and production's must never name a test channel.
 const statusFile = path.join(realHome, '.local', 'share', 'video-services', 'live-status.json');
-const productionMtime = () => (existsSync(statusFile) ? statSync(statusFile).mtimeMs : null);
+const runStatusFile = () => path.join(dirs.home, '.local', 'share', 'video-services', 'live-status.json');
+function isolationHeld() {
+    const names = CHANNELS.flatMap((c) => [c.name, ...(c.renames ?? []).map((r) => r.name)]);
+    const production = existsSync(statusFile) ? readFileSync(statusFile, 'utf8') : '';
+    const leaked = names.filter((name) => production.includes(`"${name}"`));
+    return { held: leaked.length === 0 && existsSync(runStatusFile()), leaked, runStatusWritten: existsSync(runStatusFile()) };
+}
 
 // ---- media and scenario --------------------------------------------------------------
 
@@ -203,7 +212,6 @@ async function run() {
     const seen = guardIsolation();
     say(`run directory ${runDir}`);
     say(`downloader paths: ${JSON.stringify(seen)}`);
-    const mtimeBefore = productionMtime();
 
     const cache = await prepareMedia();
     say('media prepared');
@@ -261,8 +269,8 @@ async function run() {
     await sim.close();
     sim = null;
 
-    const mtimeAfter = productionMtime();
-    return { epoch, cache, stop, logFile, productionUntouched: mtimeBefore === mtimeAfter };
+    const isolation = isolationHeld();
+    return { epoch, cache, stop, logFile, isolation };
 }
 
 // ---- judging -------------------------------------------------------------------------
@@ -311,7 +319,7 @@ function logFacts(lines) {
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
-function judge({ cache, stop, logFile, productionUntouched }) {
+function judge({ cache, stop, logFile, isolation }) {
     const truth = TruthIndex.fromFile(dirs.sim);
     const media = MediaLibrary.load(cache);
     const facts = logFacts(logLines);
@@ -325,7 +333,9 @@ function judge({ cache, stop, logFile, productionUntouched }) {
 
     expect(stop.code === 0, 'downloader', `exit code ${stop.code} (signal ${stop.signal}) after SIGTERM`);
     expect(logLines.some((line) => line.includes('Graceful shutdown complete.')), 'downloader', 'no "Graceful shutdown complete." line');
-    expect(productionUntouched, 'isolation', 'the production live-status.json changed during the run');
+    expect(isolation.held, 'isolation', isolation.runStatusWritten
+        ? `the production live-status.json names test channel(s): ${isolation.leaked.join(', ')}`
+        : 'the run wrote no live-status.json in its own home (redirect not proven)');
     expect(facts.errors.length === 0, 'downloader', `${facts.errors.length} error line(s): ${facts.errors.slice(0, 3).join(' | ')}`);
     expect(facts.undecodable === 0, 'fmp4-live', 'a playlist could not be decoded (key rotation)');
 
