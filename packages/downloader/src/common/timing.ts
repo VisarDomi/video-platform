@@ -18,7 +18,8 @@ export const SESSION_RETRY_SLEEP_MS = 5_000;
 export const SEGMENT_RETRY_SLEEP_MS = 1_000;
 export const RATE_LIMIT_RETRY_MS = 2_000;
 
-export const CDN_FETCH_TIMEOUT_MS = 30_000;
+// A request's own timeout, shared with the site plug-ins.
+export { CDN_FETCH_TIMEOUT_MS } from "sdk";
 
 export const ZERO_SEGMENT_COOLDOWN_MS = 20_000;
 

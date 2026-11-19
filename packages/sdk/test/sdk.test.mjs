@@ -44,6 +44,10 @@ test("the sites file is validated", () => {
     assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p"},{"id":"a","plugin":"q"}]}'), /duplicate id/);
     assert.throws(() => parseSitesFile('{"sites":[{"id":"a"}]}'), /plugin is required/);
     assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p","config":[]}]}'), /config must be an object/);
+    assert.deepEqual(parseSitesFile('{"sites":[{"id":"a","plugin":"p","label":"Site A"}]}'),
+        [{ id: "a", plugin: "p", label: "Site A", enabled: true, config: {} }]);
+    assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p","label":" "}]}'), /label must be/);
+    assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p","label":1}]}'), /label must be/);
 });
 
 test("a missing sites file is an error, never an empty deployment", async (t) => {

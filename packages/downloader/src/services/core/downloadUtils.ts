@@ -4,22 +4,8 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { formatTimestampForPath } from "../../common/pathTimestamp.js";
 
-export function resolveSegmentUrl(baseUrl: string, segmentLine: string): string {
-    try {
-        return new URL(segmentLine, baseUrl).href;
-    } catch {
-        return segmentLine;
-    }
-}
-
-// AbortSignal.any exists at runtime (Node 20.3+); the pinned @types/node predates it.
-const AnyAbortSignal = AbortSignal as typeof AbortSignal & { any(signals: AbortSignal[]): AbortSignal };
-
-// A request's own timeout, plus the caller's signal when it has one.
-export function requestSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
-    const timeout = AbortSignal.timeout(timeoutMs);
-    return signal ? AnyAbortSignal.any([signal, timeout]) : timeout;
-}
+// URL resolution and request signals are shared with the site plug-ins.
+export { requestSignal, resolveSegmentUrl } from "sdk";
 
 export function formatDownloadDirName(alias: string, date: Date): string {
     return `${formatTimestampForPath(date)} ${alias}`;

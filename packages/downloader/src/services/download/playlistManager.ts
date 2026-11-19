@@ -5,7 +5,7 @@ import { FileSystemManager } from "../../common/fileSystemManager.js";
 import logger from "../../common/logger.js";
 import { DiskSession } from "./diskSession.js";
 import { describeDropped, lacksMedia, recoverPlaylistTail } from "./playlistTail.js";
-import type { SegmentDimensions } from "./segmentDimensions.js";
+import type { SegmentDimensions } from "sdk";
 import type { SegmentValidationResult } from "../core/interfaces.js";
 import {
     type CompoundSegmentIdentity,

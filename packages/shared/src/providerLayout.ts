@@ -29,8 +29,8 @@ export function providerFolders(provider: string): Readonly<Record<VideoFolderKi
 export const servicesDataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
     ?? path.join(os.homedir(), ".local", "share", "video-services");
 
-// Each provider's download list (the streamers to record): the server edits it, the downloader
-// watches it. `<data root>/download-lists/<provider>.txt`.
-export function downloadListPath(provider: "tslive" | "ladder" | "fmp4"): string {
+// Each site's download list (the streamers to record): the server edits it, the downloader
+// watches it. `<data root>/download-lists/<site ID>.txt`.
+export function downloadListPath(provider: string): string {
     return path.join(servicesDataRoot, "download-lists", `${provider}.txt`);
 }

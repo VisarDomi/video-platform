@@ -62,6 +62,10 @@ export interface Absent { kind: "absent"; evidence?: string }
 // negative; the core retries later.
 export interface Inconclusive { kind: "inconclusive"; reason: string }
 
+// One download-list entry. `id` is the site's stable identity (it keys sessions and
+// lookups); `label` is the human name, also the alias that names recording folders.
+// A site may keep an entry it has not resolved to an ID yet: its `id` is "" and it is
+// never looked up, but it still counts as listed.
 export interface Target {
     id: string;
     label: string;
@@ -75,11 +79,23 @@ export interface AliasHistory {
 }
 
 export interface Catalog {
-    // The one parser of a download-list line (comments and blanks return null).
+    // The one parser of a download-list line (comments and blanks return null). It may
+    // warn through ctx.log about a malformed line; it has no other side effects.
     parseTargetLine(line: string): Target | null;
     formatTargetLine(target: Target): string;
+    // The comment a new, empty download list starts with.
+    listHeader?: string;
+    // How a reload of the list is reported in the log. "id" (the default): an entry is
+    // added or removed when its ID appears or disappears, so a new label alone logs
+    // nothing. "entry": the whole entry counts, so a new label logs as one removed and
+    // one added entry.
+    listChangesBy?: "id" | "entry";
+
+    // The server side of the catalog. Optional until the server reads its lists through
+    // the catalog (it keeps its own parsers for now).
+
     // Resolves user input (an ID, a name, a page URL) through the site.
-    resolveIdentifier(input: string): Promise<Target | null>;
+    resolveIdentifier?(input: string): Promise<Target | null>;
     // Runs before a target is added to the list (e.g. follow the account).
     beforeAdd?(target: Target): Promise<void>;
     // Whether the site itself has this name, listed or not; throws when it cannot say.
@@ -88,7 +104,7 @@ export interface Catalog {
     resolveForRemove?(identifier: string): Promise<string> | string;
     // Extra list rows for clients (e.g. historical aliases next to each ID).
     enrichList?(targets: Target[]): string[];
-    sourceLinks(target: Target): { channelUrl?: string; aliasUrl?: string };
+    sourceLinks?(target: Target): { channelUrl?: string; aliasUrl?: string };
     refreshAliases?: {
         intervalMs: number;
         run(ids: string[]): Promise<Map<string, AliasHistory>>;
@@ -97,18 +113,33 @@ export interface Catalog {
 
 // ---- Live capture -------------------------------------------------------------------
 
+// What the core knows about the captures it is running, for a lookup that needs it.
+export interface RunningCaptures {
+    // The recording identity of the capture running for a target, or null.
+    recordingId(targetId: string): string | null;
+}
+
 export interface LiveCapture {
-    // How often the core asks the site who is live.
+    // How long the core waits between two lookups: from the end of one poll to the start
+    // of the next, or from the start of one poll to the start of the next when
+    // pollFromStart is set (a slow lookup then keeps the cadence).
     pollIntervalMs: number;
-    // Who is live among the listed targets. null = the site could not answer; it is never
-    // taken as "all offline", so no live capture ends on a lookup failure.
-    lookup(targets: Target[]): Promise<ProviderSnapshot | null>;
-    // Resolves the master playlist of a live stream when the lookup cannot (e.g. a
-    // per-stream handshake). Defaults to the snapshot's masterPlaylistUrl.
-    resolveMaster?(live: ProviderLiveStream): Promise<string | null>;
-    // Maps a recording folder's alias back to a target ID (labels may be stale names).
-    targetIdForFolderAlias(alias: string): string | null;
-    // The protocol side: playlists, segments, variants, copy failover.
+    pollFromStart?: boolean;
+    // Who is live among the listed targets. null = the site could not answer (or there
+    // was nothing to ask); it is never taken as "all offline", so no live capture ends on
+    // a lookup failure. The core reconciles the snapshot with the recordings on disk.
+    lookup(targets: Target[], running: RunningCaptures): Promise<ProviderSnapshot | null>;
+    // Called just before a capture starts, when the lookup could not give the master
+    // playlist (e.g. a per-stream handshake). Returns the stream to capture, with its
+    // masterPlaylistUrl and possibly a fresher name or recording identity read in the
+    // same request, or null when it cannot start now (the plug-in logs why). Without it,
+    // the snapshot's stream starts as it is.
+    resolveMaster?(live: ProviderLiveStream): Promise<ProviderLiveStream | null>;
+    // The listed target a recording folder belongs to, from the alias in its name
+    // (labels may be stale names). Default: the target whose label is the alias.
+    targetIdForFolderAlias?(alias: string, targets: readonly Target[]): string | null;
+    // The protocol side: playlists, segments, variants, copy failover. Its providerName
+    // must be the site ID (it names the recording folders).
     provider: IStreamProvider;
     mediaFormat: "ts" | "fmp4";
 }
