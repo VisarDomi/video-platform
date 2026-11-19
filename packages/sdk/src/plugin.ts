@@ -1,6 +1,5 @@
 import type { IStreamProvider, ProviderLiveStream, ProviderSnapshot } from "./capture.js";
 import type { PluginStore } from "./store.js";
-import type { Destination } from "./destination.js";
 
 // A plug-in is one kind of site. The core loads the plug-ins named in the sites file,
 // creates one instance per configured site, and iterates them; it never switches on a
@@ -74,7 +73,6 @@ export interface SiteInstance {
     auth?: SiteAuth;
     fileHost?: FileHost;
     extension?: ExtensionSpec;
-    destination?: Destination;
     // Called once by the host after it has read the site's download list, before the first
     // poll: slow or logged start-up work (e.g. loading key files) goes here, not in create.
     init?(): Promise<void> | void;

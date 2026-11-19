@@ -6,6 +6,9 @@ export type { UploadOutcome, UploadReceipt, UploadRequest } from "sdk";
 
 export interface ProviderUploader {
     readonly provider?: ActiveUploadProvider;
+    // When the remote copy comes into existence (a Destination's creationBoundary);
+    // "metadata_submit" when not given.
+    readonly creationBoundary?: "metadata_submit" | "transfer_start";
     upload(request: UploadRequest): Promise<UploadOutcome>;
 }
 

@@ -1,5 +1,5 @@
 export const DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES = 700_000_000_000;
-export const REQUEST_OVERHEAD_RESERVATION_BYTES = 16 * 1024 * 1024;
+export { REQUEST_OVERHEAD_RESERVATION_BYTES } from "sdk";
 
 function localCalendar(date: Date, timeZone: string): { month: string; day: number } {
     const parts = new Intl.DateTimeFormat("en-CA", {

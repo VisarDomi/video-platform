@@ -3,9 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import type { PipelineConfig } from "../config.js";
 import { readProviderCredentials, assertUploadProvider, type ActiveUploadProvider } from "../config/uploadProviders.js";
-import { ChromiumVideoHostUploader } from "./chromiumVideoHostUploader.js";
+import { loadDestinationPlugin, parseDestinations, type Destination } from "sdk";
+import { sitesFilePath } from "shared";
+import { readFile } from "node:fs/promises";
+import { shutdownSignal } from "../shutdown.js";
 
-export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider = "videohost") {
+// The destination the sites file names for this provider ID, created on the
+// pipeline-owned browser profile (everyday and shared profiles are refused here, before
+// the plug-in sees a path) with the provider's credentials.
+export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider = "videohost"): Promise<Destination> {
     assertUploadProvider(provider);
     const profilePath = path.resolve(config.videohostBrowserProfilePath ?? config.browserProfilePath);
     let ancestor = profilePath;
@@ -29,10 +35,15 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
     const credentials = readProviderCredentials(config.credentialsFilePath, provider);
     await mkdir(profilePath, { recursive: true, mode: 0o700 });
     await chmod(profilePath, 0o700);
-    return new ChromiumVideoHostUploader({
-        executablePath: config.chromiumExecutablePath,
-        profilePath,
-        sessionFilePath: config.videohostSessionPath,
-        ...credentials,
+    const entry = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath()).find((destination) => destination.id === provider);
+    if (!entry) throw new Error(`The sites file names no destination "${provider}"`);
+    const plugin = await loadDestinationPlugin(entry);
+    return plugin.createDestination({
+        browser: { executablePath: config.chromiumExecutablePath, profilePath },
+        ...(config.videohostSessionPath ? { sessionFilePath: config.videohostSessionPath } : {}),
+        credentials,
+        stopSignal: shutdownSignal,
     });
 }
+
+export type { Destination };

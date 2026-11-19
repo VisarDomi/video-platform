@@ -82,8 +82,9 @@ export class UploadCoordinator {
             }
             const transportError = error instanceof UploadTransportError ? error : null;
             const progress = this.database.getUploadProgress(attemptId);
-            if (provider === "videohost" && progress.phase !== "metadata_submitting") {
-                // VideoHost creates the video only when its metadata form is
+            if ((this.uploader.creationBoundary ?? "metadata_submit") === "metadata_submit"
+                && progress.phase !== "metadata_submitting") {
+                // The destination creates the video only when its metadata form is
                 // submitted, and that phase is recorded just before the click.
                 // Failing earlier published nothing: no weekly uncertainty.
                 this.database.finishUploadAttempt(attemptId, {

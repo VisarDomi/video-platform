@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 let stopping = false;
 const stopController = new AbortController();
-export const shutdownSignal = stopController.signal;
+export const shutdownSignal: AbortSignal = stopController.signal;
 
 // Called by the service's SIGTERM/SIGINT handler.
 export function markStopping(): void {

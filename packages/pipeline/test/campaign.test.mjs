@@ -13,7 +13,7 @@ import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
-import { ChromiumVideoHostUploader } from "../dist/upload/chromiumVideoHostUploader.js";
+import { ChromiumVideoHostUploader } from "../../../private/plugins/videohost/dist/chromiumVideoHostUploader.js";
 import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
 import { campaignStatus, configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 

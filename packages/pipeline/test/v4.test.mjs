@@ -7,7 +7,7 @@ import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
 import { productionOutputDimensions } from "../dist/stages/resolutionPolicy.js";
-import { parsePlaybackRenditions, hasFullHdPlayback } from "../dist/upload/playbackQuality.js";
+import { parsePlaybackRenditions, hasFullHdPlayback } from "../../../private/plugins/videohost/dist/playbackQuality.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { CURRENT_PRODUCTION_VERSION } from "../dist/domain/productionVersion.js";
 

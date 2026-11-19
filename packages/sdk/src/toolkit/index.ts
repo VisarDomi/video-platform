@@ -23,3 +23,4 @@ export { probeSegmentDimensions } from "./segmentDimensions.js";
 export { dropZeroSizeSamples, inspectFragment } from "./fmp4Fragment.js";
 export type { FragmentInspection, FragmentRepair } from "./fmp4Fragment.js";
 export { targetMembershipIdentifiers } from "./targets.js";
+export * from "./textChanges.js";

@@ -10,7 +10,7 @@ export interface RecoveryState {
     status?: string;
     lastError?: string;
 }
-export class RecoveryDeferredError extends Error {}
+export { RecoveryDeferredError } from "sdk";
 export const recoveryLockPath = (databasePath: string) => path.join(path.dirname(databasePath), 'videohost-recovery.lock');
 export const recoveryStatePath = (databasePath: string) => path.join(path.dirname(databasePath), 'videohost-recovery.json');
 export async function recoveryInProgress(databasePath: string): Promise<boolean> {

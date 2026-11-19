@@ -23,7 +23,7 @@ import {
     productionUploadIdentity,
     uploadLookupIdentity,
 } from "../dist/metadata/composeUploadMetadata.js";
-import { ChromiumVideoHostUploader } from "../dist/upload/chromiumVideoHostUploader.js";
+import { ChromiumVideoHostUploader } from "../../../private/plugins/videohost/dist/chromiumVideoHostUploader.js";
 
 test("pin: production geometry for the sizes not pinned in v4.test.mjs", () => {
     const size = (width, height, sampleAspectRatio) => productionOutputDimensions({ width, height, sampleAspectRatio });
