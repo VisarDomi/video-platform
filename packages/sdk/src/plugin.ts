@@ -43,6 +43,11 @@ export interface PluginContext {
     store: PluginStore;
     paths: PluginPaths;
     log: Logger;
+    // The logger of the account sign-in code (SiteAuth's login and device provisioning):
+    // the auth service's own lines, with no site label, in whichever process signs in.
+    // Hosts that sign in on behalf of the auth service (the server's device sign-in)
+    // provide it; otherwise it is the host's own logger, log.tagged().
+    authLog?: Logger;
     clock: Clock;
     // The core's alias registry, in hosts that keep one (the server). Catalogs that find
     // targets by a former name read and extend it.

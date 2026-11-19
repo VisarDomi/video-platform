@@ -1,6 +1,6 @@
 import "dotenv/config";
 
-import { CredentialStore, loadSiteRegistry, type HostedSite } from "shared";
+import { closeSites, CredentialStore, loadSiteRegistry, type HostedSite } from "shared";
 import { AuthService } from "./auth/authService.js";
 import { loadAccounts } from "./accounts.js";
 import logger from "./common/logger.js";
@@ -11,11 +11,14 @@ import { getConfig } from "./common/config.js";
 // from the accounts file; each account's session is saved to the core's credential
 // store, where the site's consumers (downloader, server) read it.
 async function main() {
-    const sites = (await loadSiteRegistry({ logger })).filter((site) => site.instance.auth);
+    const loaded = await loadSiteRegistry({ logger });
+    const sites = loaded.filter((site) => site.instance.auth);
     const accounts = loadAccounts(getConfig().accountsPath, sites[0]?.id);
 
     if (accounts.length === 0) {
         logger.warn(`No accounts found in ${getConfig().accountsPath}. Exiting.`);
+        // Nothing to keep signed in: stop what the plug-ins hold, so the process does exit.
+        await closeSites(loaded);
         return;
     }
 

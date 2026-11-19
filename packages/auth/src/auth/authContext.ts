@@ -53,8 +53,10 @@ export class AuthContext {
 
     public async loadTokenFromFile(): Promise<boolean> {
         try {
+            // A missing file is no session; any file the site's auth cannot read (torn, or
+            // not a record) is reported.
             const record = await this.store.load(this.email);
-            const bag = record ? this.provider.deserializeTokens(record) : null;
+            const bag = record === undefined ? null : this.provider.deserializeTokens(record as Record<string, unknown>);
 
             if (bag) {
                 this.tokenBag = bag;

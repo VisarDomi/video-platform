@@ -35,6 +35,11 @@ async function refreshIds(site: RefreshingSite, listed: string[]): Promise<strin
     return refreshAliases.ids ? refreshAliases.ids(listed) : listed;
 }
 
+// The IDs a refresh of the registry asks the site for, given the list's content.
+export function aliasRefreshIds(site: RefreshingSite, content: string): Promise<string[]> {
+    return refreshIds(site, listedIds(site.catalog, content));
+}
+
 // A site that keeps no history: its list takes the names one refresh returns. Applied to
 // the list's current content, so entries added or removed while the names were being
 // fetched are kept as they are.
@@ -72,7 +77,7 @@ export function startAliasRefresh(sites: readonly AliasRefreshSite[]): void {
             const { refreshAliases } = site.catalog;
             registry.startPeriodicRefresh(
                 refreshAliases.intervalMs,
-                async () => refreshIds(site, listedIds(site.catalog, await fs.readFile(site.listPath, "utf-8").catch(() => ""))),
+                async () => aliasRefreshIds(site, await fs.readFile(site.listPath, "utf-8").catch(() => "")),
                 (ids) => refreshAliases.run(ids),
                 { path: site.listPath, catalog: site.catalog },
             );

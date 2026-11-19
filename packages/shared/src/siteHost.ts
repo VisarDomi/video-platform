@@ -48,6 +48,8 @@ export function taggedLogger(base: ServiceLogger, tag?: string): Logger {
 export interface SiteHost {
     // The service's logger; a site logs through it as "[<plug-in label>] ...".
     logger: ServiceLogger;
+    // The auth service's logger, for a host that signs in on its behalf (PluginContext.authLog).
+    authLogger?: ServiceLogger;
     // The service's alias registry, if it keeps one.
     aliases?: AliasBook;
     // Where the sites' credentials are read from; default: the services' session folder.
@@ -73,6 +75,7 @@ export function siteContext(entry: SiteEntry, plugin: SitePlugin, host: SiteHost
             loginState: path.join(servicesStateHome(), `${entry.id}-login`),
         },
         log: taggedLogger(host.logger, plugin.label),
+        ...(host.authLogger ? { authLog: taggedLogger(host.authLogger) } : {}),
         clock: { now: () => Date.now() },
         ...(host.aliases ? { aliases: host.aliases } : {}),
         credentials: (host.credentials ?? new CredentialStore()).source(entry.account),

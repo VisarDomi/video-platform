@@ -51,13 +51,14 @@ export class CredentialStore {
         return { record: stored, writtenAtMs: (stored.lastWriteMs ?? null) as number | null, readAtMs };
     }
 
-    // For the auth daemon at start: the record, null when there is no file; any other
-    // failure (unreadable, torn) throws for the caller to report.
-    public async load(account: string): Promise<Record<string, unknown> | null> {
+    // For the auth daemon at start: the file's JSON as it is (whatever value it holds),
+    // undefined when there is no file; any other failure (unreadable, torn) throws for the
+    // caller to report.
+    public async load(account: string): Promise<unknown> {
         try {
             return JSON.parse(await fs.readFile(this.path(account), "utf-8"));
         } catch (error: any) {
-            if (error?.code === "ENOENT") return null;
+            if (error?.code === "ENOENT") return undefined;
             throw error;
         }
     }
