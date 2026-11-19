@@ -149,6 +149,27 @@ class JournalWorkloadTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, ev)
         self.assertEqual(ev["journal_bad_lines"], 0)
 
+    def test_inline_state_writer_passes(self):
+        env = dict(self.env, HARNESS_CYCLE="2", HARNESS_SEED="44")
+        p = subprocess.Popen([sys.executable, JOURNAL, "run", "--mode", "careful",
+                              "--state-writer", "inline", "--state-bytes", "4096"], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            out, _ = p.communicate(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, _ = p.communicate()
+        acks2 = b"\n".join(ln for ln in out.split(b"\n")[:-1] if len(ln.split()) == 3) + b"\n"
+        self.assertGreater(acks2.count(b"\n"), 5)
+        r = subprocess.run([sys.executable, JOURNAL, "check"], env=env, input=acks2,
+                           capture_output=True)
+        ev = json.loads(r.stdout.decode().strip().splitlines()[-1])
+        self.assertEqual(r.returncode, 0, ev)
+        self.assertEqual(ev["state"], "ok")
+        state = json.loads((self.data / "state.json").read_text())["state"]
+        self.assertGreater(state["version"], 5)
+        self.assertEqual(state["cycle"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
