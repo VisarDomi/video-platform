@@ -11,7 +11,8 @@
         "test:filehost-album": "node test/filehost-album.mjs"
     },
     "dependencies": {
-        "app": "0.0.1"
+        "app": "0.0.1",
+        "sdk": "1.0.0"
     },
     "devDependencies": {
         "typescript": "^5.9.3"
