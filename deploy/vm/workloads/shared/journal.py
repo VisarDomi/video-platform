@@ -187,6 +187,18 @@ def cmd_setup(args) -> int:
     return 0
 
 
+def replace_state(careful: bool, cycle: int, rng: random.Random, version: int,
+                  seq: int, journal_bytes: int, args) -> None:
+    pad = base64.b64encode(rng.randbytes(args.state_bytes * 3 // 4)).decode()
+    data = state_bytes({"cycle": cycle, "seq": seq, "journal_bytes": journal_bytes,
+                        "version": version, "pad": pad})
+    # THE DIFFERENCE, part 2: never let a reader see a half-written state file.
+    if careful:
+        replace_state_careful(data)
+    else:
+        replace_state_careless(data)
+
+
 def state_writer(careful: bool, cycle: int, seed: int, args, progress: list) -> None:
     """Replace the state file over and over, concurrently with the journal writer,
     the way a service's components share one filesystem."""
@@ -195,15 +207,7 @@ def state_writer(careful: bool, cycle: int, seed: int, args, progress: list) -> 
     try:
         while True:
             version += 1
-            seq, journal_bytes = progress[0]
-            pad = base64.b64encode(rng.randbytes(args.state_bytes * 3 // 4)).decode()
-            data = state_bytes({"cycle": cycle, "seq": seq, "journal_bytes": journal_bytes,
-                                "version": version, "pad": pad})
-            # THE DIFFERENCE, part 2: never let a reader see a half-written state file.
-            if careful:
-                replace_state_careful(data)
-            else:
-                replace_state_careless(data)
+            replace_state(careful, cycle, rng, version, *progress[0], args)
             progress[1] = version
             if args.state_interval_ms:
                 time.sleep(args.state_interval_ms / 1000)
@@ -228,8 +232,12 @@ def cmd_run(args) -> int:
     seq = 0
     journal_bytes = os.fstat(jfd).st_size
     progress = [(0, journal_bytes), 0]  # (last acknowledged seq, bytes), state version
-    threading.Thread(target=state_writer, args=(careful, cycle, seed, args, progress),
-                     daemon=True).start()
+    inline = args.state_writer == "inline"
+    if inline:
+        state_rng = random.Random(seed ^ 0x5EED)
+    else:
+        threading.Thread(target=state_writer, args=(careful, cycle, seed, args, progress),
+                         daemon=True).start()
     last_report = time.monotonic()
     while True:
         seq += 1
@@ -248,6 +256,9 @@ def cmd_run(args) -> int:
             write_all(ack_fd, ack)
             os.fsync(jfd)
         progress[0] = (seq, journal_bytes)
+        if inline:  # experiment: replace the state between records, single-threaded
+            replace_state(careful, cycle, state_rng, progress[1] + 1, seq, journal_bytes, args)
+            progress[1] += 1
 
         if time.monotonic() - last_report >= 1:
             print(f"seq {seq}, journal {journal_bytes} bytes, state version {progress[1]}",
@@ -331,7 +342,10 @@ def main() -> int:
     p.add_argument("--record-max", type=int, default=16384, help="largest record payload, bytes")
     p.add_argument("--state-bytes", type=int, default=262144, help="state file padding, bytes")
     p.add_argument("--state-interval-ms", type=float, default=0,
-                   help="pause between state replacements")
+                   help="pause between state replacements (thread writer only)")
+    p.add_argument("--state-writer", choices=("thread", "inline"), default="thread",
+                   help="replace the state from its own thread (default) or from the "
+                        "journal loop after each record (an experiment)")
     p.set_defaults(func=cmd_run)
     p = sub.add_parser("check")
     p.set_defaults(func=cmd_check)
