@@ -29,6 +29,11 @@ export class Publisher {
         this.through = engine.now() - engine.scenario.segmentRetentionS * 1000;
     }
 
+    /** Logs session records again at the next tick (a new log file). */
+    forgetSessions(): void {
+        this.seenSessions.clear();
+    }
+
     start(intervalMs = 250): void {
         this.stop();
         this.timer = setInterval(() => this.tick(), intervalMs);

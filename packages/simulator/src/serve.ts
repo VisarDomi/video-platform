@@ -13,10 +13,10 @@ import { writeJsonDurable } from "./fsutil.js";
 import { close, createSiteServer, listen } from "./http/server.js";
 import { MediaLibrary } from "./media/library.js";
 import { hashHex } from "./rng.js";
-import { validateScenario, type AnySiteId, type Scenario } from "./scenario/schema.js";
+import { parseSeconds, validateScenario, type AnySiteId, type Scenario } from "./scenario/schema.js";
 import { Simulation } from "./sim.js";
 import { createSites } from "./sites/index.js";
-import { MemoryTruth, TeeTruth, TruthLog, type TruthSink } from "./truth/log.js";
+import { MemoryTruth, TeeTruth, TruthLog, type RotationOptions, type TruthSink } from "./truth/log.js";
 
 export type PortName = AnySiteId | "control" | "file-host-cdn";
 
@@ -34,6 +34,8 @@ export interface StartOptions {
     truthFile?: string | null;
     /** Also keep the log in memory (tests). */
     memoryTruth?: boolean;
+    /** Rotate the log file by size or (simulated) age. */
+    truthRotation?: RotationOptions;
     host?: string;
     /** 0 = any free port. Missing entries use 0. */
     ports?: Partial<Record<PortName, number>>;
@@ -85,7 +87,7 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
     const truthFile = options.truthFile !== undefined ? options.truthFile : stateDir ? join(stateDir, "truth.jsonl") : null;
     const memory = options.memoryTruth ? new MemoryTruth() : null;
     const sinks: TruthSink[] = [];
-    if (truthFile) sinks.push(new TruthLog(truthFile));
+    if (truthFile) sinks.push(new TruthLog(truthFile, 1000, options.truthRotation));
     if (memory) sinks.push(memory);
     const truth: TruthSink = sinks.length === 1 ? sinks[0] : new TeeTruth(sinks);
 
@@ -158,6 +160,25 @@ function parsePorts(value: string | undefined): Partial<Record<PortName, number>
     return ports;
 }
 
+/** "500000", "64K", "100M", "2G" -> bytes. */
+export function parseSize(value: string): number {
+    const m = /^(\d+(?:\.\d+)?)\s*([KMG]?)i?B?$/i.exec(value.trim());
+    if (!m) throw new Error(`expected a size like 100M, got "${value}"`);
+    return Math.floor(Number(m[1]) * 1024 ** "_KMG".indexOf(m[2].toUpperCase() || "_"));
+}
+
+function rotationFromFlags(flags: Map<string, string>): RotationOptions | undefined {
+    const maxBytes = flags.get("truth-max-bytes"), maxAge = flags.get("truth-max-age"), keep = flags.get("truth-keep");
+    if (!maxBytes && !maxAge) return undefined;
+    const ageS = maxAge === undefined ? undefined : parseSeconds(/^\d+(\.\d+)?$/.test(maxAge) ? Number(maxAge) : maxAge);
+    if (maxAge !== undefined && ageS === undefined) throw new Error(`--truth-max-age: expected seconds or "1h30m", got "${maxAge}"`);
+    return {
+        ...(maxBytes ? { maxBytes: parseSize(maxBytes) } : {}),
+        ...(ageS !== undefined ? { maxAgeMs: ageS * 1000 } : {}),
+        ...(keep ? { keep: Number(keep) } : {}),
+    };
+}
+
 export async function serveFromCli(flags: Map<string, string>): Promise<void> {
     const scenario = flags.get("scenario");
     const media = flags.get("media");
@@ -173,6 +194,7 @@ export async function serveFromCli(flags: Map<string, string>): Promise<void> {
         ports: parsePorts(flags.get("ports")),
         tls: cert && key ? { cert, key } : undefined,
         clockMode: clockMode as "real" | "manual" | undefined,
+        truthRotation: rotationFromFlags(flags),
     });
     process.stdout.write(JSON.stringify({ event: "listening", ...running.urls, truthFile: running.truthFile, scenario: running.sim.engine.scenario.name }) + "\n");
     let stopping = false;
