@@ -7,7 +7,7 @@ import type { SiteAccount, SiteAuth } from "sdk";
 import { authAccountsPath } from "shared";
 import { SHARED_STATE_PATH } from "../../core/config.js";
 
-// A live app's shortcut to a login (for TsLive: apps/ios VideoApp/TsLivePCLogin.swift): the PC
+// A live app's shortcut to a login (the iOS live app's PC login): the PC
 // signs in with a separate browser profile (the site's auth.provisionDevice) and hands the
 // phone that new session, so every device holds its own refresh token; the PC's own session
 // is never shared. Served as /api/<site>/phone-session for every site whose auth provisions

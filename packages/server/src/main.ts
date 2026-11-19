@@ -5,13 +5,13 @@ import fs from "fs";
 import https from "https";
 import * as os from "os";
 import logger from "./core/logger.js";
-import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
+import { PORT, FRONTEND_DIST_PATH, configureProviders } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { createListRoutes } from "./api/providers/list-routes.js";
 import { createPhoneSessionRoutes, phoneSessionDependencies } from "./api/providers/phone-session.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
-import { loadServerSites } from "./sites.js";
+import { captureSiteIds, loadServerSites } from "./sites.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
 import { startLibraryIndexes } from "./services/video/library-index.js";
@@ -47,6 +47,9 @@ async function startServer() {
 
   // Every site in the sites file; a missing or invalid file stops the server here.
   const sites = await loadServerSites();
+  // The recordings served (/api/videos, /hls, finalization, the disk check): every
+  // capture site's; a request without a provider means the first.
+  configureProviders(captureSiteIds(sites));
   const listSites = sites.flatMap((site) => site.instance.catalog
     ? [{ id: site.id, label: site.label, log: site.context.log, listPath: site.context.paths.downloadList, catalog: site.instance.catalog }]
     : []);

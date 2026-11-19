@@ -67,8 +67,8 @@ export function siteContext(entry: SiteEntry, plugin: SitePlugin, host: SiteHost
         paths: {
             stateDir,
             downloadList: downloadListPath(entry.id),
-            // Home-relative like the session files, named after the site (pinned for TsLive:
-            // tslive-browser-profiles, tslive-login).
+            // Home-relative like the session files, named after the site (pinned: existing
+            // profiles and login state live at these names).
             browserProfiles: path.join(servicesHome(), `${entry.id}-browser-profiles`),
             loginState: path.join(servicesStateHome(), `${entry.id}-login`),
         },

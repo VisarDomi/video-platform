@@ -1,3 +1,4 @@
+import type { LoadedSite } from "sdk";
 import { loadSiteRegistry, sitesFilePath, type HostedSite } from "shared";
 import logger from "./core/logger.js";
 import { registry } from "./services/aliasRefreshService.js";
@@ -10,4 +11,10 @@ export async function loadServerSites(
     importPlugin?: (specifier: string) => Promise<unknown>,
 ): Promise<HostedSite[]> {
     return loadSiteRegistry({ logger, aliases: registry }, filePath, importPlugin);
+}
+
+// The sites whose recordings the server serves (folders <downloads root>/<site>/): the
+// capture sites, in the sites file's order.
+export function captureSiteIds(sites: readonly LoadedSite[]): string[] {
+    return sites.filter((site) => site.instance.capture).map((site) => site.id);
 }

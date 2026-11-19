@@ -213,7 +213,7 @@ function serializePlaylist(parsed: ParsedPlaylist, targetDuration: number): stri
     return normalizeHeaderOrder(output).join(MISC.NEW_LINE) + MISC.NEW_LINE;
 }
 
-// Provider numbering restarts (FMP4 edges, TsLive, LADDER) are genuine new media and
+// Provider numbering restarts (a switch of CDN edge, a site restarting its count) are genuine new media and
 // are always KEPT. This only makes sure each restart point carries an
 // #EXT-X-DISCONTINUITY, so durations and decoding are not computed across it,
 // and reports where they are. No entry is removed, reordered, or reformatted.
@@ -653,8 +653,8 @@ export async function repairPlaylistDurations(
         writeSkippedReason,
     };
 
-    // Correcting a few durations by fractions of a second is routine for TsLive
-    // recordings; only probe problems are worth a warning.
+    // Correcting a few durations by fractions of a second is routine for some live
+    // sites' recordings; only probe problems are worth a warning.
     logger.debug("[PlaylistAuthority] playlist-media-timeline-repair", summary);
     if (failedProbeCount > 0 || missingSegmentCount > 0) {
         logger.warn("[PlaylistAuthority] playlist-media-timeline-repair had probe issues", {

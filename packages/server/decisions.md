@@ -157,7 +157,7 @@ Visible recordings are (re)finalized in place by the bounded command:
 
 ```bash
 npm run finalize-library -w server                    # dry run: counts only
-npm run finalize-library -w server -- --apply [--provider tslive|ladder|fmp4|all] [--scope downloads|edited|all] [--limit N]
+npm run finalize-library -w server -- --apply [--provider <capture site>|all] [--scope downloads|edited|all] [--limit N]
 npm run finalize-library -w server -- --recording "/exact/managed/folder" --apply
 ```
 
@@ -196,7 +196,7 @@ Provider storage paths come from `providerFolders()` in `packages/shared`
 config creates no provider storage directories (`test/configPaths.test.mjs`);
 it creates only the frontend build directory, the download-lists directory, and
 the shared state directory when missing. At startup the finalizer creates the
-three `downloaded/.pending` roots it watches. Every other destination is
+`downloaded/.pending` root of every capture site it watches. Every other destination is
 created by the write that needs it.
 
 ## Disk space monitor stops the downloader at 50 GiB
@@ -228,6 +228,15 @@ downloader logs malformed lines. An entry without an ID (an FMP4 username not ye
 resolved) is known by its label, as the downloader keys it: `remove` and `member`
 match it by that label. New lines are written by `formatTargetLine`, byte-identical to
 before (pinned in `private/test/pinsListsAndTokens.test.mjs`).
+
+## Providers are the sites file's capture sites
+
+The recordings the server serves (`/api/videos`, `/hls`, edits, moves, the library
+index, the finalizer's `.pending` roots, `finalize-library`) are those of the sites
+file's capture sites, in its order (`configureProviders` at startup; `finalize-library`
+loads the sites file itself). A request without a provider means the first one (`tslive`
+in production, the old fixed default), and the disk check measures its folder. A
+disabled site's recordings are not served.
 
 ## FMP4 room IDs resolved at write time
 

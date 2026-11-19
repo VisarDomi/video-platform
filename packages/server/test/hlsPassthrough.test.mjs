@@ -4,7 +4,10 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import {getProviderPaths} from '../dist/core/config.js';
+import {configureProviders,getProviderPaths} from '../dist/core/config.js';
+
+// The server serves the capture sites the sites file names; here, one called fmp4.
+configureProviders(['fmp4']);
 import hls from '../dist/api/hls.routes.js';
 
 test('shared HLS responses preserve stored playlist and fragment bytes',async t=>{

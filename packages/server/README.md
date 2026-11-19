@@ -5,7 +5,8 @@ recordings handed off through `.pending`, and non-download operational logic.
 
 ## API details
 
-- Recordings (`provider` is `tslive`, `ladder`, or `fmp4`), served from the library index
+- Recordings (`provider` is a capture site of the sites file, `tslive`, `ladder` or `fmp4` in
+  production; without one, the first capture site, `tslive`), served from the library index
   (`src/services/video/library-index.ts`: in memory and in
   `~/.local/share/video-services/list-index/<provider>.json`, following the folders through
   inotify and a 30 s stat rescan; playlists are read only when their stat changes):

@@ -2,13 +2,14 @@ import * as fs from "fs/promises";
 import * as timersPromises from "timers/promises";
 import { exec } from "child_process";
 import logger from "../core/logger.js";
-import { getProviderPaths } from "../core/config.js";
+import { defaultProvider, getProviderPaths } from "../core/config.js";
 
 const DISK_CHECK_INTERVAL_MS = 60_000;
 const DISK_LIMIT_BYTES = 50 * 1024 * 1024 * 1024;
 
 export function startDiskSpaceMonitor(): void {
-    const storagePath = getProviderPaths("tslive").downloaded;
+    // The downloads disk, measured at the first capture site's folder (as it always was).
+    const storagePath = getProviderPaths(defaultProvider()).downloaded;
 
     const run = async () => {
         logger.debug("[System] DiskSpaceMonitor started.");
