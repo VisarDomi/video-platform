@@ -85,7 +85,7 @@ export class DiscoveryLoop {
         this.previousTargetIds = targetIds;
 
         const snapshot = await this.capture.lookup(targets, {
-            recordingId: (targetId) => this.downloadsManager.getRecordingId(targetId),
+            recordingId: (targetId) => this.downloadsManager.getRecordingId(targetId, this.site.id),
         });
 
         const currentTotal = this.downloadsManager.size;
@@ -116,7 +116,8 @@ export class DiscoveryLoop {
                 continue;
             }
 
-            const activeRecordingId = this.downloadsManager.getRecordingId(targetId);
+            // Only this site's capture of the target: another site may list the same ID.
+            const activeRecordingId = this.downloadsManager.getRecordingId(targetId, this.site.id);
             if (activeRecordingId && activeRecordingId !== stream.recordingId) {
                 // Empty/missing folders are invisible to disk reconciliation.
                 await this.downloadsManager.finalizeStreamer(targetId, "a new stream replaced it");
