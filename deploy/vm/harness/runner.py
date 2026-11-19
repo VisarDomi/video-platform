@@ -111,6 +111,10 @@ def guest_facts(vm: VM) -> dict:
 
 
 def boot(run_dir: Path, disk: Path, index: int, opts: dict) -> tuple[VM, float]:
+    # The run's disk is an overlay on the provisioned disk; if `prepare` replaced
+    # that disk mid-run, booting would silently read a different backing file.
+    if (provisioned_stamp() or {}).get("provisioned_at") != opts["provisioned_at"]:
+        raise HarnessError("the provisioned disk changed during this run (prepare ran again)")
     vm = VM(disk, run_dir / "boots", f"boot-{index:03d}", cpus=opts["cpus"],
             memory_mb=opts["memory_mb"], cache=opts["cache"], direct=direct_boot())
     try:
@@ -162,7 +166,8 @@ def run(wl: Workload, *, cycles: int, seed: int, min_ms: int, max_ms: int,
     qemu_img_create(disk, provisioned_disk())
 
     plan = schedule(seed, cycles, min_ms, max_ms)
-    opts = {"cpus": cpus, "memory_mb": memory_mb, "cache": cache, "boot_timeout_s": boot_timeout_s}
+    opts = {"cpus": cpus, "memory_mb": memory_mb, "cache": cache, "boot_timeout_s": boot_timeout_s,
+            "provisioned_at": stamp.get("provisioned_at")}
     qemu_version = subprocess.run(["qemu-system-x86_64", "--version"], capture_output=True,
                                   text=True).stdout.splitlines()[0]
     meta = {

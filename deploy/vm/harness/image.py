@@ -22,8 +22,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from common import (BASE_IMAGE, GUEST_HOSTNAME, GUEST_USER, IMAGES, PROVISIONED, SSH_DIR,
-                    HarnessError, fsync_dir, log, require_tool, write_atomic,
+from common import (BASE_IMAGE, GUEST_HOSTNAME, GUEST_USER, HOST_KEY_ALIAS, IMAGES, PROVISIONED,
+                    SSH_DIR, HarnessError, fsync_dir, log, require_tool, write_atomic,
                     write_json_atomic)
 from vm import VM, DirectBoot, find_uefi_firmware
 
@@ -120,7 +120,6 @@ def ensure_ssh_keys() -> None:
             p.unlink(missing_ok=True)
         subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment,
                         "-f", str(key)], check=True)
-    from common import HOST_KEY_ALIAS
     host_pub = (SSH_DIR / "guest_host_ed25519.pub").read_text().split()
     write_atomic(SSH_DIR / "known_hosts", f"{HOST_KEY_ALIAS} {host_pub[0]} {host_pub[1]}\n".encode())
 
@@ -226,6 +225,10 @@ def wanted_stamp(packages: list[str], disk_size: str) -> dict:
         "packages": packages,
         "disk_size": disk_size,
         "provision_script_sha256": hashlib.sha256(PROVISION_SCRIPT.encode()).hexdigest(),
+        # The disk trusts these keys; new keys need a new disk.
+        "keys_sha256": hashlib.sha256(b"".join(
+            (SSH_DIR / n).read_bytes() for n in ("id_ed25519.pub", "guest_host_ed25519.pub")
+        )).hexdigest(),
     }
 
 
