@@ -33,6 +33,22 @@ class ScheduleTest(unittest.TestCase):
             self.assertTrue(100 <= step["delay_ms"] <= 300)
 
 
+class SmokeSkipTest(unittest.TestCase):
+    def test_smoke_skips_cleanly_without_kvm(self):
+        import contextlib
+        import importlib.util
+        import io
+        spec = importlib.util.spec_from_file_location("harness_cli", VM_DIR / "harness" / "__main__.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        cli.kvm_problem = lambda: "/dev/kvm does not exist"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main(["smoke"])
+        self.assertEqual(code, 0)
+        self.assertIn("SKIP", out.getvalue())
+
+
 class WorkloadSpecTest(unittest.TestCase):
     def test_reference_workloads_load(self):
         names = {wl.name for wl in workload.all_workloads()}

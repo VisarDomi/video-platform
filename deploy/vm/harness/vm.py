@@ -16,6 +16,7 @@ import io
 import json
 import os
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -196,7 +197,7 @@ class VM:
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.port = free_port()
         cmd = self.command()
-        if os.environ.get("VM_HARNESS_IONICE", "1") == "1" and _which("ionice"):
+        if os.environ.get("VM_HARNESS_IONICE", "1") == "1" and shutil.which("ionice"):
             # Lowest best-effort I/O priority: the host's own services win.
             cmd = ["ionice", "-c", "2", "-n", "7"] + cmd
         stderr = open(self.workdir / f"{self.label}.qemu.log", "wb")
@@ -244,6 +245,20 @@ class VM:
 
     # -- SSH -----------------------------------------------------------------
 
+    def boot(self, timeout: float = 180.0) -> float:
+        """start() + wait_ssh(), retrying if another process took the SSH port
+        between choosing it and QEMU binding it."""
+        for attempt in range(3):
+            self.start()
+            try:
+                return self.wait_ssh(timeout)
+            except HarnessError:
+                log_text = (self.workdir / f"{self.label}.qemu.log").read_text(errors="replace")
+                self.kill_quietly()
+                if "host forwarding" not in log_text or attempt == 2:
+                    raise
+        raise AssertionError("unreachable")
+
     def wait_ssh(self, timeout: float = 180.0) -> float:
         """Block until the guest answers on SSH. Returns seconds since start()."""
         deadline = time.monotonic() + timeout
@@ -277,7 +292,7 @@ class VM:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
             for name, path in sorted(files.items()):
-                tar.add(str(path), arcname=name, recursive=True)
+                tar.add(str(path), arcname=name, recursive=True, filter=_skip_junk)
         q = shlex.quote(dest)
         self.ssh(f"sudo rm -rf {q} && sudo mkdir -p {q} && sudo tar -C {q} -xf - "
                  f"--no-same-owner && sudo chown -R root:root {q}",
@@ -295,6 +310,6 @@ class VM:
         return [ln for ln in complete.decode(errors="replace").split("\n") if ln]
 
 
-def _which(name: str) -> bool:
-    from shutil import which
-    return which(name) is not None
+def _skip_junk(info: tarfile.TarInfo):
+    base = os.path.basename(info.name)
+    return None if base == "__pycache__" or base.startswith(".") else info
