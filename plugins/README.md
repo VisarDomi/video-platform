@@ -146,3 +146,22 @@ start instead of capturing wrongly.
   they exercise exactly what the core loads, and move the clock to reach faults.
 - `npm run e2e:capture` runs the real downloader against both sites and judges every
   recording folder with the simulator's checker (`packages/simulator/README.md`).
+
+## Content profiles
+
+A content profile decides what a deployment's metadata says about its recordings. It is a
+package too, named by the sites file's top-level `"contentProfile"` key, and it exports
+`profile` (a `ContentProfilePlugin` from `sdk`):
+
+- `descriptor`: the base prompt file, the model and projector files (under
+  `<data root>/models`), the model name sent with each request, and the bounds of the
+  model's JSON output. The prompt's exact bytes are its version, which keys every cached
+  description, so a profile's prompt changes only together with a plan for the old ones.
+- `descriptionFooter(facts)`: the lines under the descriptor's text (for example where and
+  when the recording was made). `facts.sourceUrl` is null while a recording's provenance is
+  unresolved.
+- `tags(facts)`: every upload's tags; the descriptor's own tags are never used.
+
+The core keeps the rest: the `[<recording folder>]` stamp at the end of every title (the
+duplicate guard), shortening to the destination's limits, and learned phrases, which it
+stores per destination and adds to the prompt.

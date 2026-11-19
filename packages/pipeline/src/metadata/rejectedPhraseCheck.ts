@@ -4,6 +4,7 @@ import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { containedPhrases } from "../upload/providerWarnings.js";
 import { composeUploadMetadata } from "./composeUploadMetadata.js";
+import { contentProfile } from "../contentProfile.js";
 
 export type RejectedPhraseVerdict =
     | { kind: "clean" }
@@ -52,7 +53,9 @@ async function rewriteText(database: PipelineDatabase, recordingId: string, rewr
     const phrases = database.listRejectedPhrases();
     const text = await rewrite({ title: output.title, description: output.description }, phrases);
     if (containedPhrases([text.title, text.description], phrases).length) return false;
-    if (text.title.length < 5 || text.title.length > 100 || text.description.length < 20 || text.description.length > 750) return false;
+    const bounds = contentProfile().descriptor.output;
+    if (text.title.length < bounds.titleMinLength || text.title.length > bounds.titleMaxLength
+        || text.description.length < bounds.descriptionMinLength || text.description.length > bounds.descriptionMaxLength) return false;
     const promptVersion = await descriptionPromptVersion(phrases);
     const updated = { ...description, promptVersion, output: { ...output, ...text } };
     const metadata = composeUploadMetadata(recording, updated, provenance, database.getArtifactPart(recordingId) ?? "full",

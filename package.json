@@ -18,9 +18,9 @@
         "test:sim-plugins": "node --test plugins/*/test/*.test.mjs",
         "e2e:capture": "node e2e/capture.e2e.mjs",
         "build:server": "npm run build:shared && npm run build:plugins && npm run build -w server && npm run build:app",
-        "build:descriptor": "npm run build:shared && npm run build -w descriptor",
+        "build:descriptor": "npm run build:shared && npm run build:profiles && npm run build -w descriptor",
         "build:live-extensions": "npm run build -w live-extensions",
-        "build:pipeline": "npm run build:shared && npm run build -w pipeline",
+        "build:pipeline": "npm run build:shared && npm run build:profiles && npm run build -w pipeline",
         "start": "npm run start:auth && npm run start:downloader && npm run start:server",
         "start:auth": "npm run build:auth && systemctl --user start video-auth.service",
         "start:downloader": "npm run build:downloader && systemctl --user start video-downloader.service",
@@ -51,7 +51,9 @@
         "vhost:connect-iphone": "npm run vhost:connect-iphone -w pipeline",
         "vhost:session-report": "npm run vhost:session-report -w pipeline",
         "vhost:uploads": "npm run vhost:uploads -w pipeline",
-        "vhost:tiers": "npm run vhost:tiers -w pipeline"
+        "vhost:tiers": "npm run vhost:tiers -w pipeline",
+        "build:profiles": "npm run build:sdk && npm run build -w private/profiles",
+        "test:profiles": "node --test private/profiles/*/test/*.test.mjs"
     },
     "workspaces": [
         "packages/shared",
@@ -68,6 +70,7 @@
         "plugins/fmp4-live",
         "private/plugins/tslive",
         "private/plugins/ladder",
-        "private/plugins/fmp4"
+        "private/plugins/fmp4",
+        "private/profiles/original"
     ]
 }

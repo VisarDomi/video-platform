@@ -1,6 +1,6 @@
 import { descriptorConfig } from "./config.js";
 import { LlamaServer } from "./llama-server.js";
-import { postJson } from "./model-client.js";
+import { descriptionResponseFormat, postJson } from "./model-client.js";
 
 export interface DescriptionText {
     readonly title: string;
@@ -27,24 +27,13 @@ export async function rewriteAvoidingPhrases(
     try {
         if (manageServer) await server.start();
         const request = () => postJson(new URL("/v1/chat/completions", descriptorConfig.modelUrl), {
-            model: "gemma-4-E4B-it-OBLITERATED-Q8_0",
+            model: descriptorConfig.requestModel,
             messages: [{ role: "user", content: [{ type: "text", text: rewritePrompt(text, phrases) }] }],
             temperature: 0.2,
             max_tokens: 512,
             reasoning_effort: "none",
             chat_template_kwargs: { enable_thinking: false },
-            response_format: {
-                type: "json_object",
-                schema: {
-                    type: "object",
-                    additionalProperties: false,
-                    required: ["title", "description"],
-                    properties: {
-                        title: { type: "string", minLength: 5, maxLength: 100 },
-                        description: { type: "string", minLength: 20, maxLength: 750 },
-                    },
-                },
-            },
+            response_format: descriptionResponseFormat(),
         });
         const response = await (manageServer ? server.requestWithRecovery(request) : request());
         if (response.status < 200 || response.status >= 300) {

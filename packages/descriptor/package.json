@@ -14,7 +14,7 @@
     },
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "test": "npm run build && node --test test/*.test.mjs",
+        "test": "npm run build && node --import ./test/support/originalProfile.mjs --test test/*.test.mjs",
         "describe-one": "npm run build && node dist/describe-one.js",
         "describe-one:bounded": "npm run build && node scripts/run-bounded-describe-one.mjs",
         "runtime:install": "node scripts/install-runtime.mjs",
@@ -24,5 +24,8 @@
     "devDependencies": {
         "@types/node": "20.8.10",
         "typescript": "5.2.2"
+    },
+    "dependencies": {
+        "sdk": "1.0.0"
     }
 }

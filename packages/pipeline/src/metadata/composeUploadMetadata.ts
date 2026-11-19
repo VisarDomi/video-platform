@@ -1,4 +1,6 @@
 import path from "node:path";
+import type { ContentProfile, RecordingFacts } from "sdk";
+import { contentProfile } from "../contentProfile.js";
 import type {
     DescriptionRecord,
     ProductionArtifactPart,
@@ -71,6 +73,7 @@ export function composeUploadMetadata(
     provenance: RecordingProvenance,
     part: ProductionArtifactPart = "full",
     options: { diagnosticTitle?: boolean } = {},
+    profile: ContentProfile = contentProfile(),
 ): Omit<UploadMetadataRecord, "recordingId" | "createdAt"> {
     if (!allowsUpload(provenance)) {
         throw new Error("Cannot compose upload metadata with unresolved provenance");
@@ -86,17 +89,19 @@ export function composeUploadMetadata(
     if (titleRoom < 1) throw new Error("Recording identity leaves no room for a title");
     const title = `${shorten(output.title, titleRoom)}${folderSuffix}`;
 
-    const suffix = [
-        `Recorded: ${recordingTime(recording.sourcePath)}`,
-        `Source: ${allowsPlaceholder(provenance) ? "TODO LATER" : provenance.streamerUrl}`,
-        ...(provenance.aliasUrl ? [`Alias: ${provenance.aliasUrl}`] : []),
-    ].join("\n");
+    const facts: RecordingFacts = {
+        siteId: recording.provider,
+        folderName: path.basename(recording.sourcePath),
+        recordedAt: recordingTime(recording.sourcePath),
+        // allowsUpload() holds: without a placeholder, the provenance has its URL.
+        sourceUrl: allowsPlaceholder(provenance) ? null : `${provenance.streamerUrl}`,
+        aliasUrl: provenance.aliasUrl || null,
+    };
+    const suffix = profile.descriptionFooter(facts);
     const descriptionRoom = DESCRIPTION_LIMIT - suffix.length - 2;
     if (descriptionRoom < 20) throw new Error("Streamer provenance leaves no room for a description");
     const composedDescription = `${shorten(output.description, descriptionRoom)}\n\n${suffix}`;
 
-    // Descriptor tags are intentionally ignored. The only tags uploaded are
-    // the fixed provider tag and "live": ladder -> ladder + live, fmp4 -> fmp4live + live.
-    const providerTag = recording.provider === "fmp4" ? "fmp4live" : recording.provider;
-    return { title, description: composedDescription, tags: [providerTag, "live"] };
+    // Descriptor tags are intentionally ignored: the profile decides every upload's tags.
+    return { title, description: composedDescription, tags: profile.tags(facts) };
 }
