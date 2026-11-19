@@ -1,0 +1,21 @@
+// Library entry point: everything a test harness, checker or plug-in needs.
+export { SimClock, type Clock, type ClockMode, type ClockSnapshot } from "./clock.js";
+export { prepAll, prepSource, listInputs, sourceIdFor, ladderHeights, type PrepOptions } from "./media/prep.js";
+export { MediaLibrary, type DamageKind as ServedDamageKind, type SegmentRequest } from "./media/library.js";
+export type { SourceManifest, RenditionManifest, SegmentEntry, DamageEntry } from "./media/manifest.js";
+export { readBoxes, trackInfo, shiftFragment, insertZeroSizeSample, countZeroSizeSamples } from "./media/fmp4.js";
+export { shiftTimestamps, truncateToFirstFrame, firstVideoPts } from "./media/ts.js";
+export { validateScenario, parseSeconds, ScenarioError, SITE_IDS } from "./scenario/schema.js";
+export type { Scenario, SiteId, SiteSpec, ChannelSpec, ChannelFault, SiteFault, Schedule, EdgeSpec, Account } from "./scenario/schema.js";
+export { LiveEngine, siteDefaults } from "./engine/engine.js";
+export { ChannelModel, type Session, type Edge, type PlaylistWindow, type WindowEntry } from "./engine/channel.js";
+export { Publisher } from "./engine/publisher.js";
+export { Simulation, StateStore, type SiteModule } from "./sim.js";
+export { startSimulator, DEFAULT_PORTS, type StartOptions, type RunningSimulator, type PortName } from "./serve.js";
+export { TruthLog, MemoryTruth, TeeTruth, type TruthRecord, type TruthSink, type PublishRecord, type ResponseRecord, type SessionRecord, type ScenarioRecord, type EventRecord } from "./truth/log.js";
+export { TruthIndex, parseTruth, readTruthFile, type Availability, type Interval, type SegmentFilter, type ResponseFilter } from "./truth/query.js";
+export { encodeUri, decodeUri, decodePlaylist, keyIdOf, KEY_TAG, URI_TAG, PLACEHOLDER, type DecodeResult } from "./sites/obfuscation.js";
+export { peekClaims } from "./sites/tokens.js";
+export { streamIdOf } from "./sites/ts-live.js";
+export { modeOf, qualityOf, tierOfMode } from "./sites/ladder-live.js";
+export { streamNameOf } from "./sites/fmp4-live.js";
