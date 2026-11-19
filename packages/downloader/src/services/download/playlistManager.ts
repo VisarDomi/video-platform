@@ -37,6 +37,11 @@ export const SEQUENCE_GAP_LATE_POLL_SECONDS = 3;
 // difference is clock skew between edges, never overlap, and must not swallow
 // new media.
 export const EDGE_DEDUP_MAX_OVERLAP_MS = 60_000;
+// Copies stamp date-times with their own clocks: the segment last saved from one
+// edge may be re-listed by another a few ms LATER. Consecutive real segments are a
+// full EXTINF apart, so one within this fraction of its EXTINF after the last saved
+// date-time is that same segment again.
+export const EDGE_DEDUP_TOLERANCE_EXTINF_FRACTION = 0.5;
 
 export type SegmentInspector = (filePath: string) => Promise<SegmentValidationResult>;
 
@@ -126,6 +131,12 @@ export class PlaylistManager {
         const gapMs = segDate - lastDate;
         if (gapMs <= 0 && -gapMs <= EDGE_DEDUP_MAX_OVERLAP_MS) {
             logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
+            return true;
+        }
+        const extinfS = Number.parseFloat(segment.metadata.find((line) => line.startsWith("#EXTINF:"))?.slice("#EXTINF:".length) ?? "");
+        const toleranceMs = Number.isFinite(extinfS) && extinfS > 0 ? extinfS * 1000 * EDGE_DEDUP_TOLERANCE_EXTINF_FRACTION : 0;
+        if (gapMs > 0 && gapMs <= toleranceMs) {
+            logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} is ${gapMs}ms after lastPDT=${this.lastDownloadedPDT}, within half its EXTINF (${toleranceMs}ms): the same segment from another copy`);
             return true;
         }
         if (gapMs <= 0) {
