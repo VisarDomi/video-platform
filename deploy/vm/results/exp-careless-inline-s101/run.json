@@ -1,0 +1,179 @@
+{
+  "base_image": "debian-13-genericcloud-amd64-20261116-2664.qcow2",
+  "cache": "writeback",
+  "cpus": 2,
+  "cycles": 30,
+  "guest": {
+    "kernel": "6.12.117+deb13-cloud-amd64",
+    "root_mount": "ext4 rw,relatime,discard,errors=remount-ro",
+    "vm.dirty_background_bytes": "0",
+    "vm.dirty_background_ratio": "10",
+    "vm.dirty_bytes": "0",
+    "vm.dirty_expire_centisecs": "3000",
+    "vm.dirty_ratio": "20",
+    "vm.dirty_writeback_centisecs": "500",
+    "write_cache": "write back"
+  },
+  "guest_os": "Debian GNU/Linux 13 (trixie)",
+  "max_ms": 5000,
+  "memory_mb": 2048,
+  "min_ms": 500,
+  "qemu": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "run": "20261119-135607-journal-careless-inline-s101",
+  "schedule": [
+    {
+      "cycle": 1,
+      "cycle_seed": 1865206422,
+      "delay_ms": 3783
+    },
+    {
+      "cycle": 2,
+      "cycle_seed": 305920806,
+      "delay_ms": 2033
+    },
+    {
+      "cycle": 3,
+      "cycle_seed": 4195154080,
+      "delay_ms": 2799
+    },
+    {
+      "cycle": 4,
+      "cycle_seed": 2810904376,
+      "delay_ms": 3871
+    },
+    {
+      "cycle": 5,
+      "cycle_seed": 65559242,
+      "delay_ms": 983
+    },
+    {
+      "cycle": 6,
+      "cycle_seed": 2146089430,
+      "delay_ms": 2100
+    },
+    {
+      "cycle": 7,
+      "cycle_seed": 3532028683,
+      "delay_ms": 2086
+    },
+    {
+      "cycle": 8,
+      "cycle_seed": 2963284148,
+      "delay_ms": 3961
+    },
+    {
+      "cycle": 9,
+      "cycle_seed": 3977582935,
+      "delay_ms": 3516
+    },
+    {
+      "cycle": 10,
+      "cycle_seed": 1182107415,
+      "delay_ms": 4895
+    },
+    {
+      "cycle": 11,
+      "cycle_seed": 3145553078,
+      "delay_ms": 4510
+    },
+    {
+      "cycle": 12,
+      "cycle_seed": 3153423560,
+      "delay_ms": 4442
+    },
+    {
+      "cycle": 13,
+      "cycle_seed": 3083752622,
+      "delay_ms": 4497
+    },
+    {
+      "cycle": 14,
+      "cycle_seed": 3568084059,
+      "delay_ms": 2543
+    },
+    {
+      "cycle": 15,
+      "cycle_seed": 2513480202,
+      "delay_ms": 4139
+    },
+    {
+      "cycle": 16,
+      "cycle_seed": 2940081836,
+      "delay_ms": 2772
+    },
+    {
+      "cycle": 17,
+      "cycle_seed": 437837070,
+      "delay_ms": 4236
+    },
+    {
+      "cycle": 18,
+      "cycle_seed": 1145517710,
+      "delay_ms": 1298
+    },
+    {
+      "cycle": 19,
+      "cycle_seed": 439581243,
+      "delay_ms": 1371
+    },
+    {
+      "cycle": 20,
+      "cycle_seed": 4024916500,
+      "delay_ms": 1287
+    },
+    {
+      "cycle": 21,
+      "cycle_seed": 3376440404,
+      "delay_ms": 1563
+    },
+    {
+      "cycle": 22,
+      "cycle_seed": 597464082,
+      "delay_ms": 4506
+    },
+    {
+      "cycle": 23,
+      "cycle_seed": 2968733863,
+      "delay_ms": 3494
+    },
+    {
+      "cycle": 24,
+      "cycle_seed": 2679079166,
+      "delay_ms": 4443
+    },
+    {
+      "cycle": 25,
+      "cycle_seed": 1487290884,
+      "delay_ms": 3858
+    },
+    {
+      "cycle": 26,
+      "cycle_seed": 980150246,
+      "delay_ms": 2324
+    },
+    {
+      "cycle": 27,
+      "cycle_seed": 2261791135,
+      "delay_ms": 3360
+    },
+    {
+      "cycle": 28,
+      "cycle_seed": 1552854547,
+      "delay_ms": 815
+    },
+    {
+      "cycle": 29,
+      "cycle_seed": 2316040282,
+      "delay_ms": 2825
+    },
+    {
+      "cycle": 30,
+      "cycle_seed": 3244734879,
+      "delay_ms": 2565
+    }
+  ],
+  "seed": 101,
+  "started_at": "2026-11-19T13:56:07+0100",
+  "workload": "journal-careless-inline",
+  "workload_description": "Experiment: careless, state replaced from the journal loop (no second thread)"
+}
