@@ -9,13 +9,22 @@
 `<data root>/download-lists/<provider>.txt`. The server, downloader, and pipeline
 take their provider folders and download-list paths from it.
 
-## Tokens: diagnostic fields for 401 debugging
+## Credentials: one store, read on every use
 
-`readTokens()` reads the TsLive session file on every call and returns, besides the
-tokens, `readAtMs` (when it was read), `ttlAtReadSec` (seconds until `tte` expiry at
-read time), and `tokenAgeMs` (milliseconds since the auth service wrote the file,
-from its `lastWriteMs`). The downloader logs them with a playlist 401 to diagnose
-token timing.
+`CredentialStore` (`credentialStore.ts`) is the one reader and writer of the session
+files, `~/.local/share/video-services/session/<account>.json` (home-relative, whatever
+`VIDEO_SERVICES_DATA_ROOT` says). The auth daemon writes the record its site's auth
+serializes plus `lastWriteMs`, durably (temporary file, fsync, rename, directory
+fsync), one save at a time per account. A site's consumers read it through
+`ctx.credentials` (the account the sites file names) on every use, with `readAtMs` and
+`writtenAtMs`; the TsLive plug-in turns them into the 401 diagnostics (`ttlAtReadSec`,
+`tokenAgeMs`).
+
+## The sites registry
+
+`siteHost.ts` is what every service shares to run the sites of a deployment: the sites
+file path, each site's context (logger with its label, store, paths, credentials, alias
+registry) and the loading of the plug-ins.
 
 ## Logging: journald priorities, one line per event, collapsed repeats
 

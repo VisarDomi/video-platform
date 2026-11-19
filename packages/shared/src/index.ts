@@ -4,8 +4,7 @@ export { fixTargetDuration, selectLongestMediaDuration } from "./hlsUtils.js";
 export { parseNativeMediaPlaylist, nativeMediaBoundary, nativeMediaRuns, renderNativeMediaRun,
     safeNativeMediaName } from "./nativeMedia.js";
 export type { NativeMediaSegment, NativeMediaPlaylist } from "./nativeMedia.js";
-export { readTokens } from "./tokenManager.js";
-export type { Tokens } from "./tokenManager.js";
+export { authAccountsPath, CredentialStore, servicesHome, servicesStateHome } from "./credentialStore.js";
 
 export { createLogger, journalPriority } from "./logger.js";
 export { moveToDesktopTrash } from "./desktopTrash.js";

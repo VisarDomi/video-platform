@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
+import { authAccountsPath, servicesHome } from "shared";
 
 export interface IConfig {
     sharedStatePath: string;
@@ -10,14 +10,15 @@ export interface IConfig {
     accountsPath: string;
 }
 
-const sharedStatePath = path.join(os.homedir(), ".local", "share", "video-services");
+// The session files are the core credential store's (session/<account>.json under the
+// services' home-relative folder).
+const sharedStatePath = servicesHome();
 const sessionPath = path.join(sharedStatePath, "session");
 
 const defaultConfig: IConfig = {
     sharedStatePath,
     sessionPath,
-    accountsPath: process.env.VIDEO_AUTH_ACCOUNTS_FILE
-        ?? path.join(os.homedir(), ".config", "video-services", "auth-accounts.json"),
+    accountsPath: authAccountsPath(),
 };
 
 function ensurePathsExist(config: IConfig) {

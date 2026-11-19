@@ -1,8 +1,22 @@
 # Auth Decisions
 
+## A core daemon, sites as plug-ins
+
+The daemon (`src/main.ts`) loads the sites file and keeps every account of the
+accounts file signed in on its site (`provider` in the accounts file, default: the
+first site with auth). The site's plug-in implements the SDK's `SiteAuth`: sign-in,
+renewals, the record the session is stored as, `classify(error)` and
+`describeTokens(bag)`. The core (`AuthService`, `AuthContext`) owns the cadences'
+loops, the hedging, the save queue and every re-login decision, taken from
+`classify()`: `reauthenticate` and `verification` sign in again (a verification
+request names the site in its warning), `needs-attention` stops automatic sign-ins,
+anything else is an outage that keeps the session and retries. TsLive's code is in
+`private/plugins/tslive/src/auth/` (its browser owner, Google sign-in and the phone's
+token family).
+
 ## TsLive token lifetimes and refresh cadence
 
-`src/providers/tslive/constants.ts` holds the external lifetimes:
+`private/plugins/tslive/src/auth/constants.ts` holds the external lifetimes:
 `TSLIVE_SESSION_TOKEN_TTL_S = 3600` (access token, `TsLive-ST`) and
 `TSLIVE_STREAM_TOKEN_TTL_S = 10` (stream tokens `tt`/`ttu`/`tte`). Each refresh
 cadence is half its TTL: stream tokens every 5 seconds, the session every 30
@@ -17,8 +31,10 @@ not go through the auth request queue, which runs one request at a time. A sessi
 a browser login.
 
 The tokens are written to
-`~/.local/share/video-services/session/<account email>.json`, which `readTokens()` in
-`packages/shared` reads on every call.
+`~/.local/share/video-services/session/<account email>.json` through the core's
+`CredentialStore` (`packages/shared`), which the site's consumers read on every call
+for the account the sites file names (TsLive's capture and catalog through
+`ctx.credentials`, with headers from `auth.headersFor`).
 
 ## Persist a rotated refresh token before anything else
 

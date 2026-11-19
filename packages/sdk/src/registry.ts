@@ -13,6 +13,9 @@ export interface SiteEntry {
     id: string;
     plugin: string;
     enabled?: boolean;
+    // The account whose credentials the site's consumers use (its session file in the
+    // core's credential store). Required for a site with auth.
+    account?: string;
     config?: Record<string, unknown>;
 }
 
@@ -53,7 +56,11 @@ export function parseSitesFile(text: string, source = "sites file"): SiteEntry[]
         if (entry.config !== undefined && (typeof entry.config !== "object" || entry.config === null || Array.isArray(entry.config))) {
             throw new Error(`${where}: config must be an object`);
         }
-        return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled ?? true, config: entry.config ?? {} };
+        if (entry.account !== undefined && (typeof entry.account !== "string" || !entry.account || entry.account.includes("/"))) {
+            throw new Error(`${where}: account must be a non-empty name without "/"`);
+        }
+        return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled ?? true,
+            ...(entry.account !== undefined ? { account: entry.account } : {}), config: entry.config ?? {} };
     });
 }
 
@@ -77,6 +84,8 @@ export async function loadSites(entries: SiteEntry[], options: LoadOptions): Pro
             throw new Error(`Site ${entry.id}: ${entry.plugin} targets SDK ${plugin.sdkVersion}, this core runs SDK ${SDK_VERSION}`);
         }
         const instance = await plugin.create(options.context(entry, plugin));
+        // Consumers read the site's credentials through the account the file names.
+        if (instance.auth && !entry.account) throw new Error(`Site ${entry.id}: a site with auth needs an "account" in the sites file`);
         loaded.push({ id: entry.id, plugin, entry, instance });
     }
     return loaded;

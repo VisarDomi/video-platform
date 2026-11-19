@@ -1,19 +1,23 @@
-import * as fsPromises from "fs/promises";
 import * as path from "path";
 
+import type { SessionRenewal, ShortTokens, SiteAuth, TokenBag } from "sdk";
+import { CredentialStore } from "shared";
 import logger from "../common/logger.js";
-import * as config from "../common/config.js";
-import { IAuthProvider, TokenBag, RefreshResult, ShortTokenResult } from "../providers/interfaces.js";
+import { getConfig } from "../common/config.js";
 
+// One account's session in memory, and its saves to the core's credential store
+// (session/<email>.json, read by every consumer of the site's credentials).
 export class AuthContext {
     private readonly email: string;
-    private readonly provider: IAuthProvider;
+    private readonly provider: SiteAuth;
+    private readonly store: CredentialStore;
     private tokenBag: TokenBag | null = null;
     private tokenSave: Promise<void> = Promise.resolve();
 
-    constructor(email: string, provider: IAuthProvider) {
+    constructor(email: string, provider: SiteAuth, store: CredentialStore = new CredentialStore(getConfig().sessionPath)) {
         this.email = email;
         this.provider = provider;
+        this.store = store;
     }
 
     public getRefreshToken(): string | null {
@@ -28,19 +32,17 @@ export class AuthContext {
         return this.tokenBag;
     }
 
-    public updateFromRefresh(result: RefreshResult): boolean {
+    public updateFromRefresh(result: SessionRenewal): boolean {
         if (!this.tokenBag) return false;
         // A request using the previous ST must not attach its late stream tokens
         // to this generation. AuthService checks this immutable owner identity.
         this.tokenBag = { ...this.tokenBag, sessionToken: result.newSessionToken,
             refreshToken: result.newRefreshToken ?? this.tokenBag.refreshToken,
-            extras: { ...this.tokenBag.extras,
-                ...(result.browserState ? {tsliveBrowserState: result.browserState} : {}),
-                ...(result.browserProfile ? {tsliveBrowserProfile: result.browserProfile} : {}) } };
+            extras: { ...this.tokenBag.extras, ...result.extras } };
         return !!result.newRefreshToken;
     }
 
-    public updateFromTokenData(result: ShortTokenResult): void {
+    public updateFromTokenData(result: ShortTokens): void {
         if (!this.tokenBag) return;
         this.tokenBag.extras = { ...this.tokenBag.extras, ...result.extras };
     }
@@ -49,26 +51,17 @@ export class AuthContext {
         this.tokenBag = bag;
     }
 
-    private getSessionFilePath(): string {
-        const sessionFilename = `${this.email}.json`;
-        return path.resolve(config.getConfig().sessionPath, sessionFilename);
-    }
-
     public async loadTokenFromFile(): Promise<boolean> {
-        const filePath = this.getSessionFilePath();
         try {
-            const data = await fsPromises.readFile(filePath, "utf-8");
-            const parsed = JSON.parse(data);
-            const bag = this.provider.deserializeTokens(parsed);
+            const record = await this.store.load(this.email);
+            const bag = record ? this.provider.deserializeTokens(record) : null;
 
             if (bag) {
                 this.tokenBag = bag;
                 return true;
             }
         } catch (error: any) {
-            if (error.code !== "ENOENT") {
-                logger.error(`Failed to read session file for ${this.email} at ${filePath}`, { error });
-            }
+            logger.error(`Failed to read session file for ${this.email} at ${this.store.path(this.email)}`, { error });
         }
         return false;
     }
@@ -82,34 +75,17 @@ export class AuthContext {
     }
 
     private async persistTokenToFile(): Promise<void> {
-        const filePath = this.getSessionFilePath();
+        const filePath = this.store.path(this.email);
         try {
             if (this.tokenBag) {
-                const serialized = this.provider.serializeTokens(this.tokenBag);
-                serialized.lastWriteMs = Date.now();
-                // A rotated refresh token invalidates the previous one, so the new one must
-                // be on disk (file and rename both flushed) before the save counts as done:
-                // otherwise a power cut right after rotation leaves only a dead token.
-                const tmpPath = filePath + '.tmp';
-                await fsPromises.writeFile(tmpPath, JSON.stringify(serialized, null, 2), {mode: 0o600});
-                await syncPath(tmpPath);
-                await fsPromises.rename(tmpPath, filePath);
-                await syncPath(path.dirname(filePath));
+                // The bag as it is when this save runs (a later rotation is saved by a later
+                // save), durable when it resolves: the store flushes the file and the rename.
+                await this.store.write(this.email, this.provider.serializeTokens(this.tokenBag));
                 logger.verbose(`Session tokens for ${this.email} saved to ${path.basename(filePath)}`);
             }
         } catch (error) {
             logger.error(`Failed to save session file for ${this.email} at ${filePath}`, { error });
             throw error;
         }
-    }
-}
-
-// fsync a file or directory through a read-only descriptor (Linux flushes either way).
-async function syncPath(target: string): Promise<void> {
-    const handle = await fsPromises.open(target, 'r');
-    try {
-        await handle.sync();
-    } finally {
-        await handle.close();
     }
 }

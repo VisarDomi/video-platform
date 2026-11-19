@@ -9,7 +9,7 @@ import { PORT, FRONTEND_DIST_PATH } from "./core/config.js";
 import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { createListRoutes } from "./api/providers/list-routes.js";
-import { createPhoneSessionRoutes } from "./api/providers/phone-session.routes.js";
+import { createPhoneSessionRoutes, phoneSessionDependencies } from "./api/providers/phone-session.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { loadServerSites } from "./sites.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
@@ -60,7 +60,16 @@ async function startServer() {
   for (const site of listSites) {
     app.use("/", createListRoutes({ id: site.id, filePath: site.listPath, catalog: site.catalog }));
   }
-  app.use("/", createPhoneSessionRoutes());
+  // /api/<site>/phone-session for every site whose auth provisions a phone's own sessions.
+  const authSites = sites.filter((site) => site.instance.auth);
+  for (const site of authSites) {
+    const { auth } = site.instance;
+    if (!auth?.provisionDevice) continue;
+    const provisionDevice = auth.provisionDevice.bind(auth);
+    const acknowledgeDevice = auth.acknowledgeDevice?.bind(auth);
+    app.use("/", createPhoneSessionRoutes(site,
+      phoneSessionDependencies(site, { provisionDevice, acknowledgeDevice }, authSites[0].id)));
+  }
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);
 

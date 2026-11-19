@@ -80,3 +80,15 @@ test("plug-ins load per site, skip disabled sites and check the SDK version", as
     await assert.rejects(loadSites([{ id: "x", plugin: "old" }], { importPlugin, context }), /targets SDK 0/);
     await assert.rejects(loadSites([{ id: "y", plugin: "none" }], { importPlugin, context }), /does not export a plug-in/);
 });
+
+test("a site may name the account its consumers read; a site with auth must", async () => {
+    assert.deepEqual(parseSitesFile('{"sites":[{"id":"a","plugin":"p","account":"someone@example.invalid"}]}'),
+        [{ id: "a", plugin: "p", enabled: true, account: "someone@example.invalid", config: {} }]);
+    assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p","account":""}]}'), /account must be/);
+    assert.throws(() => parseSitesFile('{"sites":[{"id":"a","plugin":"p","account":"../escape"}]}'), /account must be/);
+    const plugin = { id: "demo", label: "Demo", sdkVersion: SDK_VERSION, create: () => ({ auth: {} }) };
+    const importPlugin = async () => ({ plugin });
+    const context = (entry) => ({ siteId: entry.id });
+    await assert.rejects(loadSites([{ id: "a", plugin: "demo" }], { importPlugin, context }), /needs an "account"/);
+    assert.equal((await loadSites([{ id: "a", plugin: "demo", account: "x" }], { importPlugin, context })).length, 1);
+});

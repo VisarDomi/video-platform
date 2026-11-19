@@ -11,6 +11,7 @@ import {
     type SitePlugin,
 } from "sdk";
 import { downloadListPath, servicesDataRoot } from "./providerLayout.js";
+import { CredentialStore, servicesHome, servicesStateHome } from "./credentialStore.js";
 
 // The plumbing every service shares to run the sites of a deployment: the sites file,
 // each site's context (logger, store, paths) and the loading of their plug-ins.
@@ -28,8 +29,8 @@ export type ServiceLogger = Record<Level, (message: string, ...meta: any[]) => u
 // A logger whose lines are "[<tag>] <message>" on the service's logger. Monitoring reads
 // these lines, so the tags and the messages are part of the contract. The service logger
 // is looked up on every call, so a test can observe it.
-export function taggedLogger(base: ServiceLogger, tag: string): Logger {
-    const prefix = `[${tag}] `;
+export function taggedLogger(base: ServiceLogger, tag?: string): Logger {
+    const prefix = tag === undefined ? "" : `[${tag}] `;
     const line = (level: Level) => (message: string, meta?: Record<string, unknown>) => {
         if (meta === undefined) base[level](prefix + message);
         else base[level](prefix + message, meta);
@@ -40,7 +41,7 @@ export function taggedLogger(base: ServiceLogger, tag: string): Logger {
         info: line("info"),
         warn: line("warn"),
         error: line("error"),
-        tagged: (other: string) => taggedLogger(base, other),
+        tagged: (other?: string) => taggedLogger(base, other),
     };
 }
 
@@ -49,6 +50,8 @@ export interface SiteHost {
     logger: ServiceLogger;
     // The service's alias registry, if it keeps one.
     aliases?: AliasBook;
+    // Where the sites' credentials are read from; default: the services' session folder.
+    credentials?: CredentialStore;
 }
 
 export function siteContext(entry: SiteEntry, plugin: SitePlugin, host: SiteHost): PluginContext {
@@ -61,10 +64,18 @@ export function siteContext(entry: SiteEntry, plugin: SitePlugin, host: SiteHost
         siteId: entry.id,
         config: entry.config ?? {},
         store: new FilePluginStore(stateDir),
-        paths: { stateDir, downloadList: downloadListPath(entry.id) },
+        paths: {
+            stateDir,
+            downloadList: downloadListPath(entry.id),
+            // Home-relative like the session files, named after the site (pinned for TsLive:
+            // tslive-browser-profiles, tslive-login).
+            browserProfiles: path.join(servicesHome(), `${entry.id}-browser-profiles`),
+            loginState: path.join(servicesStateHome(), `${entry.id}-login`),
+        },
         log: taggedLogger(host.logger, plugin.label),
         clock: { now: () => Date.now() },
         ...(host.aliases ? { aliases: host.aliases } : {}),
+        credentials: (host.credentials ?? new CredentialStore()).source(entry.account),
     };
 }
 

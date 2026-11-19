@@ -27,7 +27,7 @@ Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:
 - [issues.md](./issues.md): open issues (HTTP caching).
 - [apps/ios/README.md](./apps/ios/README.md): the six iPhone apps: behaviour, rules, build, deploy, tests, frame reports, renewal. (`apps/tslive` holds only the TsLive unblock script it describes.)
 - [packages/app/README.md](./packages/app/README.md), [decisions.md](./packages/app/decisions.md): the website (lists, viewer, edits) and its WebKit tests.
-- [packages/auth/decisions.md](./packages/auth/decisions.md), [SESSION-RECOVERY.md](./packages/auth/SESSION-RECOVERY.md): the PC's TsLive session and how to recover it.
+- [packages/auth/decisions.md](./packages/auth/decisions.md), [SESSION-RECOVERY.md](./private/plugins/tslive/SESSION-RECOVERY.md): the PC's TsLive session and how to recover it.
 - [packages/descriptor/setup.md](./packages/descriptor/setup.md), [MODEL.md](./packages/descriptor/MODEL.md): the local description model, its runtime and the measurements behind its settings.
 - [packages/downloader/README.md](./packages/downloader/README.md), [decisions.md](./packages/downloader/decisions.md): stream capture.
 - [packages/live-extensions/README.md](./packages/live-extensions/README.md): LADDER/FMP4 controls and the FileHost-to-PC Safari extension hosted by TsLive.

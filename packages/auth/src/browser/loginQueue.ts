@@ -1,9 +1,11 @@
+import type { SiteAuth, TokenBag } from "sdk";
 import logger from "../common/logger.js";
-import { Account, IAuthProvider, TokenBag } from "../providers/interfaces.js";
+import type { Account } from "../accounts.js";
 
+// Browser sign-ins run one at a time across the daemon's accounts.
 interface QueuedLogin {
     account: Account;
-    provider: IAuthProvider;
+    provider: SiteAuth;
     resolve: (value: TokenBag) => void;
     reject: (reason?: any) => void;
 }
@@ -12,7 +14,7 @@ class LoginQueue {
     private queue: QueuedLogin[] = [];
     private isProcessing = false;
 
-    public add(account: Account, provider: IAuthProvider): Promise<TokenBag> {
+    public add(account: Account, provider: SiteAuth): Promise<TokenBag> {
         return new Promise<TokenBag>((resolve, reject) => {
             this.queue.push({ account, provider, resolve, reject });
             logger.info(`Browser login for ${account.email} added to the queue. Queue size: ${this.queue.length}`);
