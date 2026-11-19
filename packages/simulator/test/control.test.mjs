@@ -115,16 +115,23 @@ test('the CLI serves a scenario file and stops cleanly', async (t) => {
     assert.match(err, /--scenario/);
 });
 
-test('the shipped demo scenario is valid and serves all three sites', async (t) => {
+test('the shipped demo scenario is valid and serves every site', async (t) => {
     const { validateScenario } = await import('../dist/scenario/schema.js');
     const demo = validateScenario(JSON.parse(readFileSync(new URL('../scenarios/demo.json', import.meta.url), 'utf8')));
-    assert.deepEqual(Object.keys(demo.sites).sort(), ['fmp4-live', 'ladder-live', 'ts-live']);
+    assert.deepEqual(Object.keys(demo.sites).sort(), ['api-host', 'file-host', 'fmp4-live', 'form-host', 'ladder-live', 'ts-live']);
     const media = await sharedLibrary();
     const sim = await startSimulator({ scenario: demo, media: media.library, clockMode: 'manual', autoPublish: false });
     t.after(() => sim.close());
     const state = await (await fetch(sim.urls.control + '/state')).json();
     assert.equal(state.sites['ladder-live'].channels.find(c => c.id === '1002').online, true);
     assert.equal((await fetch(sim.urls['fmp4-live'] + '/api/channels/status?ids=502')).status, 200);
+    assert.deepEqual(state.sites['file-host'].files.map(f => f.up), [true, false, true], 'the second file appears at 5 minutes');
+    assert.equal(state.sites['file-host'].cdn, sim.urls['file-host-cdn']);
+    assert.deepEqual(state.sites['form-host'].videos, []);
+    assert.equal(state.sites['api-host'].quota.dailyUnits, 10000);
+    assert.equal((await fetch(sim.urls['file-host'] + '/a/day-one')).status, 200);
+    assert.match(await (await fetch(sim.urls['form-host'] + '/login/')).text(), /name="pass"/);
+    assert.equal((await fetch(sim.urls['api-host'] + '/v1/me')).status, 401);
 });
 
 test('TLS: the sites serve HTTPS from a given certificate', async (t) => {
