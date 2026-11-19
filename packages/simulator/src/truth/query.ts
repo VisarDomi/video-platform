@@ -1,7 +1,8 @@
 // Reading the ground-truth log back: which segments were available on which
 // edge, and when. This is what a checker compares a client's recording with.
-import { readFileSync } from "node:fs";
-import type { PublishRecord, ResponseRecord, ScenarioRecord, SessionRecord, TruthRecord } from "./log.js";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { truthFiles, type PublishRecord, type ResponseRecord, type ScenarioRecord, type SessionRecord, type TruthRecord } from "./log.js";
 
 export function parseTruth(text: string): { records: TruthRecord[]; skipped: number } {
     const records: TruthRecord[] = [];
@@ -13,9 +14,21 @@ export function parseTruth(text: string): { records: TruthRecord[]; skipped: num
     return { records, skipped };
 }
 
-/** Reads a log file. A torn final line (a power cut mid-write) is skipped. */
+/** Reads one log file. A torn final line (a power cut mid-write) is skipped. */
 export function readTruthFile(file: string): TruthRecord[] {
     return parseTruth(readFileSync(file, "utf8")).records;
+}
+
+/**
+ * Reads a whole log: its rotated files in order, then the current file.
+ * `path` is the current file (e.g. state/truth.jsonl) or the directory
+ * holding truth.jsonl.
+ */
+export function readTruthSet(path: string): TruthRecord[] {
+    const file = existsSync(path) && statSync(path).isDirectory() ? join(path, "truth.jsonl") : path;
+    const files = truthFiles(file);
+    if (files.length === 0) throw new Error(`no ground-truth log at ${file}`);
+    return files.flatMap(f => readTruthFile(f));
 }
 
 export interface Interval { from: number; until: number }
@@ -33,7 +46,10 @@ export interface Availability {
     durationS: number;
     damage: string | null;
     sha256: string | null;
+    bytes: number | null;
     srcSha256: string;
+    srcIndex: number;
+    loop: number;
     /** When playlists on this edge listed it (stale caches aside). */
     listed: Interval;
     /** When a request for it would have succeeded, faults aside. */
@@ -73,17 +89,29 @@ export class TruthIndex {
     constructor(records: TruthRecord[]) {
         // A scenario record starts a period (in file order): what came before
         // stops being served at its time, and what follows belongs to it.
+        // "continue" records (repeated at the top of a rotated-in file) do not.
+        const startsPeriod = (r: TruthRecord) => r.type === "scenario" && r.reason !== "continue";
         const periodEnds: number[] = new Array(records.length).fill(Infinity);
         let nextStart = Infinity;
         for (let i = records.length - 1; i >= 0; i--) {
             periodEnds[i] = nextStart;
-            if (records[i].type === "scenario") nextStart = records[i].t;
+            if (startsPeriod(records[i])) nextStart = records[i].t;
         }
         let start = -Infinity;
         const seen = new Set<string>();
+        const seenSessions = new Set<string>();
         records.forEach((r, i) => {
-            if (r.type === "scenario") { this.scenarios.push(r); start = r.t; return; }
-            if (r.type === "session") { this.sessionRecords.push(r); return; }
+            if (r.type === "scenario") {
+                if (startsPeriod(r)) { this.scenarios.push(r); start = r.t; }
+                else if (this.scenarios.length === 0) this.scenarios.push(r); // the head of the log was pruned
+                return;
+            }
+            if (r.type === "session") {
+                // Rotation logs live sessions again in the new file.
+                const key = `${r.site}/${r.channel}/${r.session}`;
+                if (!seenSessions.has(key)) { seenSessions.add(key); this.sessionRecords.push(r); }
+                return;
+            }
             if (r.type === "response") { this.responseRecords.push(r); return; }
             if (r.type !== "publish") return;
             const p = r as PublishRecord;
@@ -94,7 +122,8 @@ export class TruthIndex {
             const listedUntil = p.listedUntil ?? Infinity;
             this.segments.push({
                 site: p.site, channel: p.channel, session: p.session, edge: p.edge, tier: p.tier, rendition: p.rendition,
-                k: p.k, seq: p.seq, pdt: p.pdt, durationS: p.durationS, damage: p.damage, sha256: p.sha256, srcSha256: p.srcSha256,
+                k: p.k, seq: p.seq, pdt: p.pdt, durationS: p.durationS, damage: p.damage, sha256: p.sha256, bytes: p.bytes,
+                srcSha256: p.srcSha256, srcIndex: p.srcIndex, loop: p.loop,
                 listed: { from: Math.max(p.publishedAt, start), until: Math.min(listedUntil, end) },
                 fetchable: { from: Math.max(p.publishedAt, start), until: Math.min(p.fetchableUntil, end) },
             });
@@ -104,8 +133,9 @@ export class TruthIndex {
             || a.edge.localeCompare(b.edge) || a.tier.localeCompare(b.tier) || a.k - b.k);
     }
 
-    static fromFile(file: string): TruthIndex {
-        return new TruthIndex(readTruthFile(file));
+    /** The whole log at `path` (rotated files included); see readTruthSet. */
+    static fromFile(path: string): TruthIndex {
+        return new TruthIndex(readTruthSet(path));
     }
 
     sessions(filter: { site?: string; channel?: string } = {}): SessionRecord[] {

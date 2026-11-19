@@ -84,3 +84,59 @@ test('records before a scenario switch stop at the switch', async (t) => {
     assert.ok(old.every(s => s.listed.until <= EPOCH + 30_000));
     assert.ok(truth.available({ site: 'ladder-live', session: sessions[1].session }).length > 0);
 });
+
+test('the log rotates by size and by time; the index reads the rotated set as one log', async (t) => {
+    const { truthFiles } = await import('../dist/truth/log.js');
+    const { readFileSync, statSync } = await import('node:fs');
+    const media = await sharedLibrary();
+    const scenario = { name: 'rotate', seed: 'rotate', epoch: EPOCH, sites: { 'fmp4-live': { channels: [
+        { id: '9', name: 'rot', startPosition: 0, schedule: { sessions: [{ start: 0, end: 40 }, { start: 50 }] }, edges: [{ id: 'a' }, { id: 'b', lagMs: 300 }] },
+    ] } } };
+    const dir = tempDir(t);
+    const file = path.join(dir, 'truth.jsonl');
+    const clock = new SimClock({ mode: 'manual', at: EPOCH + 5_000 });
+    const sim = await startSimulator({ scenario, media: media.library, clock, autoPublish: false, memoryTruth: true, truthFile: file, truthRotation: { maxBytes: 16_000 } });
+    t.after(() => sim.close());
+    for (let s = 6; s <= 80; s++) clock.set(EPOCH + s * 1000);
+    sim.sim.truth.flush();
+    const files = truthFiles(file);
+    assert.ok(files.length >= 4, `rotated into ${files.length} files`);
+    assert.equal(files.at(-1), file);
+    for (const f of files.slice(0, -1)) assert.ok(statSync(f).size <= 16_000, 'each file stays under the limit');
+    for (const f of files.slice(1)) {
+        const first = JSON.parse(readFileSync(f, 'utf8').split('\n')[0]);
+        assert.equal(first.type, 'scenario');
+        assert.equal(first.reason, 'continue', 'a rotated-in file starts with the scenario in force');
+    }
+    const fromFiles = TruthIndex.fromFile(dir);
+    const fromMemory = new TruthIndex(sim.memory.records);
+    const filter = { site: 'fmp4-live', channel: '9' };
+    assert.deepEqual(fromFiles.available(filter), fromMemory.available(filter));
+    assert.deepEqual(fromFiles.sessions(filter).map(s => s.session), fromMemory.sessions(filter).map(s => s.session));
+    assert.equal(fromFiles.sessions(filter).length, 2, 'sessions logged again after a rotation are read once');
+    assert.equal(fromFiles.scenarios.length, 1, 'continuation records start no new period');
+    assert.deepEqual(fromFiles.listedAt({ ...filter, edge: 'a', tier: 'fmp4' }, EPOCH + 30_000).map(s => s.seq),
+        fromMemory.listedAt({ ...filter, edge: 'a', tier: 'fmp4' }, EPOCH + 30_000).map(s => s.seq));
+});
+
+test('time-based rotation, and a pruned set still reads on its own', async (t) => {
+    const { truthFiles } = await import('../dist/truth/log.js');
+    const media = await sharedLibrary();
+    const scenario = { name: 'rotate-time', seed: 'rotate-time', epoch: EPOCH, sites: { 'ladder-live': { channels: [{ id: '4', name: 'c', schedule: { always: true } }] } } };
+    const dir = tempDir(t);
+    const file = path.join(dir, 'truth.jsonl');
+    const clock = new SimClock({ mode: 'manual', at: EPOCH + 5_000 });
+    const sim = await startSimulator({ scenario, media: media.library, clock, autoPublish: false, truthFile: file, truthRotation: { maxAgeMs: 10_000, keep: 2 } });
+    t.after(() => sim.close());
+    for (let s = 6; s <= 45; s++) clock.set(EPOCH + s * 1000);
+    sim.sim.truth.flush();
+    const files = truthFiles(file);
+    assert.equal(files.length, 3, 'two rotated files kept, plus the current one');
+    assert.match(path.basename(files[0]), /^truth\.\d{6}\.jsonl$/);
+    const truth = TruthIndex.fromFile(file);
+    assert.equal(truth.scenarios[0].reason, 'continue', 'the head was pruned: the continuation names the scenario');
+    assert.equal(truth.sessions({ site: 'ladder-live' }).length, 1, 'the live session was logged again in a kept file');
+    assert.ok(truth.listedAt({ site: 'ladder-live', channel: '4' }, EPOCH + 44_000).length > 0, 'the current window is in the kept files');
+    const { parseSize } = await import('../dist/serve.js');
+    assert.deepEqual(['500', '64K', '100M', '2G', '1.5KiB'].map(parseSize), [500, 65536, 104857600, 2147483648, 1536]);
+});

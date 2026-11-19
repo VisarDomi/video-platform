@@ -108,6 +108,16 @@ export class Simulation {
         // A new scenario's publisher starts from what is still fetchable; the
         // scenario record in between tells readers where one period ends.
         this.unsubscribe = this.clock.onMove(() => this.publisher?.tick());
+        // A rotated-in log file starts with the scenario in force and, at the
+        // next tick, the sessions still live, so it reads on its own.
+        this.truth.onRotate?.(() => {
+            if (!this.engine) return;
+            this.truth.append({
+                type: "scenario", t: this.clock.now(), name: this.engine.scenario.name, seed: this.engine.seed,
+                hash: this.engine.scenarioHash, epochMs: this.engine.epochMs, reason: "continue",
+            });
+            this.publisher?.forgetSessions();
+        });
     }
 
     addSite(site: SiteModule): void {
