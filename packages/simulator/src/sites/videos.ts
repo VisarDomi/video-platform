@@ -42,6 +42,8 @@ export interface StoredVideo {
     media: { file: string; bytes: number; sha256: string; facts: MediaFacts | null; at: number } | null;
     /** api-host: the client's reference (idempotency). */
     clientRef?: string | null;
+    /** Processing fails for this reason whatever the rules say (e.g. a duration limit). */
+    failureReason?: string | null;
     /** Removed through the control API or deleted by the client. */
     removedAt?: number | null;
     removedBy?: "client" | "control" | null;
@@ -80,9 +82,9 @@ export function timeline(video: StoredVideo, spec: TimelineSpec): Timeline {
     const rule = spec.processingRules.find(r => selects(r, video));
     const facts = video.media?.facts ?? null;
     const processedAt = video.media ? video.media.at + (rule?.processingS ?? spec.processingS) * 1000 : null;
-    // Media nobody can decode always fails.
-    const outcome = facts === null ? "failed" : rule?.outcome ?? "ready";
-    const recoversAt = outcome === "failed" && facts !== null && rule?.recoverAfterS !== undefined && processedAt !== null
+    // Media nobody can decode, or that breaks a limit, always fails.
+    const outcome = facts === null || video.failureReason ? "failed" : rule?.outcome ?? "ready";
+    const recoversAt = outcome === "failed" && facts !== null && !video.failureReason && rule?.recoverAfterS !== undefined && processedAt !== null
         ? processedAt + rule.recoverAfterS * 1000 : null;
     let removedAt: number | null = video.removedAt ?? null;
     let removalKind: Timeline["removalKind"] = removedAt !== null ? "removed" : null;

@@ -147,8 +147,8 @@ export interface ApiHostSpec {
     faults: ApiHostFault[];
 }
 
-export type QuotaOperation = "token" | "list" | "get" | "insert" | "update" | "delete" | "upload";
-export const DEFAULT_QUOTA_COSTS: Record<QuotaOperation, number> = { token: 0, list: 1, get: 1, insert: 100, update: 50, delete: 50, upload: 0 };
+export type QuotaOperation = "token" | "limits" | "list" | "get" | "insert" | "update" | "delete" | "upload";
+export const DEFAULT_QUOTA_COSTS: Record<QuotaOperation, number> = { token: 0, limits: 0, list: 1, get: 1, insert: 100, update: 50, delete: 50, upload: 0 };
 
 // ---- checks ----
 
