@@ -200,7 +200,15 @@ export class StreamDownloader {
         });
 
         let session = this.provider.createDownloadSession();
+        // A new attempt of the same recording may start on another copy (the retry's
+        // master names the healthiest edge). Copies number independently, so what it
+        // re-lists is recognised by date-time, as after a failover within an attempt.
+        const previousEdge = playlistManager.timeline.edge;
         playlistManager.setEdge(edge);
+        if (edge && previousEdge && edge !== previousEdge) {
+            playlistManager.onEdgeSwitch(previousEdge, edge);
+            logger.debug(`[StreamDownloader] ${alias} EDGE-SWITCH ${previousEdge} → ${edge} (new attempt)`);
+        }
 
         return await this.downloadLoop(alias, masterUrl, liveUrl, session, playlistManager, initTracker, disk);
     }
