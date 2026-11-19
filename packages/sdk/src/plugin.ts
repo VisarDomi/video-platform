@@ -72,7 +72,6 @@ export interface SiteInstance {
     capture?: LiveCapture;
     auth?: SiteAuth;
     fileHost?: FileHost;
-    extension?: ExtensionSpec;
     // Called once by the host after it has read the site's download list, before the first
     // poll: slow or logged start-up work (e.g. loading key files) goes here, not in create.
     init?(): Promise<void> | void;
@@ -319,11 +318,30 @@ export interface FileHost {
 
 // ---- Browser extension build inputs -------------------------------------------------
 
+// A Safari web extension a site plug-in contributes, declared in the plug-in package's
+// `extension.json` (read at build time by live-extensions, so it needs no plug-in build).
+// The core builds the rest: the bar, the background page that talks to the PC, the manifest.
 export interface ExtensionSpec {
-    kind: "download-list" | "send-to-pc" | "login-handoff";
+    // A download-list bar: the open channel's +/- for the PC's download list of this site.
+    kind: "download-list";
+    // The build folder, and the name the iPhone app's extension entry uses, e.g. "x-live".
+    key: string;
+    // The extension's display name.
     name: string;
+    // The site's public name, as the description says it.
+    siteName: string;
+    version?: string;
     matches: string[];
-    runAt: "document_start" | "document_end" | "document_idle";
-    // Path of the content-script module that classifies pages (identify()).
+    runAt: "document_start" | "document_end";
+    // The content-script module, relative to the plug-in package. It exports `adapter` (a
+    // DownloadListAdapter) and, with runAt document_start, `onDocumentStart()`, which runs
+    // before the page has a body; the bar mounts once it has one.
     entry: string;
+}
+
+// How the bar reads the current page.
+export interface DownloadListAdapter {
+    // The channel identifier shown on the current page, or null when the current route is
+    // not a channel page (the bar hides).
+    identify(): string | null;
 }

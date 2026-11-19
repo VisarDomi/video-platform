@@ -9,6 +9,14 @@ described in `packages/app/README.md`), inside a shadow root so the site's style
 button's stay apart. TsLive's own +/- is in the app's native viewer
 (`apps/ios/VideoApp/ViewerOverlay.swift`).
 
+**Where the sites come in.** The LADDER live and FMP4 live bars are built from their site plug-ins:
+each declares its extension in `extension.json` (key, name, matches, `runAt`, and its page
+code, which exports the `adapter` that reads the streamer from the URL and, for LADDER, the
+`onDocumentStart()` login click). `scripts/build.mjs` builds one bar per enabled site of the
+sites file (`$VIDEO_SITES_FILE`, else `<data root>/sites.json`) whose plug-in has one; this
+package keeps only the bar, the background page and the manifest. FileHost to PC still keeps
+its sources here.
+
 The existing list server is `SERVER` in `src/core/config.ts`
 (`https://192.168.1.197:9999`); FileHost uses `FILEHOST_SERVER` on port `9998`.
 

@@ -1,12 +1,10 @@
 import buttonsCss from "app/src/player/buttons.css";
 import { DownloadListButton, type Membership } from "app/src/player/DownloadListButton";
 import type { ListReply, ListRequest } from "./messages";
+import type { DownloadListAdapter } from "sdk";
 
-export interface DownloadListAdapter {
-    // The streamer identifier shown on the current page, or null when the
-    // current route is not a streamer page (the bar hides).
-    identify(): string | null;
-}
+// How the bar reads the page: the site plug-in's adapter (sdk).
+export type { DownloadListAdapter } from "sdk";
 
 // One shared implementation for every provider: a fixed top bar with the viewer's +/- button
 // (packages/app) for the server's download list. A shadow root keeps the viewer's button styles
