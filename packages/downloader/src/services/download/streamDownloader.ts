@@ -5,6 +5,7 @@ import logger from "../../common/logger.js";
 import { DownloadHandle } from "../state/downloadsManager.js";
 import { FileSystemManager } from "../../common/fileSystemManager.js";
 import type { PlaylistManager, SegmentInfo } from "./playlistManager.js";
+import { extinfSeconds } from "./playlistManager.js";
 import { InitWriteError, type InitTracker } from "./initTracker.js";
 import type { DiskSession } from "./diskSession.js";
 import { IDownloadSession, IStreamProvider, PlaylistFetchFailure, SegmentFetchResult, SegmentValidationResult } from "../core/interfaces.js";
@@ -550,7 +551,7 @@ export class StreamDownloader {
                         if (fetchResult.repair) {
                             logger.info(`[StreamDownloader] ${alias} repaired segment ${segment.localName}: ${fetchResult.repair}`);
                         }
-                        playlistManager.recordDownloadedPDT(segment.programDateTime);
+                        playlistManager.recordDownloadedPDT(segment.programDateTime, extinfSeconds(segment.metadata));
                         if (health === 'stale') {
                             health = 'ok';
                             const staleSec = ((Date.now() - lastDownload) / 1000).toFixed(0);
