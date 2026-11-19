@@ -634,3 +634,32 @@ generate a few seconds of test pattern with ffmpeg (never real footage) and use
 the manual clock; servers bind to `127.0.0.1` on ephemeral ports. The checker's
 tests record a channel the way the capture client does (playlist polling,
 compound file names, an edge switch) and then damage the folder.
+
+## End-to-end: the real downloader against the simulator
+
+`npm run e2e:capture` (root; `e2e/capture.e2e.mjs`, about 100 s) records two simulated
+sites with the real downloader core and the public plug-ins in `plugins/`
+(`plugins/README.md`), then judges every recording folder with the checker:
+
+1. Tiny generated media (a test pattern, ffmpeg under `nice`), prepared per run.
+2. The simulator in process, real clock, ephemeral ports on `127.0.0.1`, with eight
+   channels on ladder-live and fmp4-live: a healthy channel per site (one renamed,
+   obfuscated playlists with a key rotation), a playlist outage shorter and one longer
+   than the live window, a provider skip with a numbering restart and a stream end, an
+   edge outage that needs failover, fragments failing on one edge (a session retry on
+   another), and a damaged-segment window with a stream end.
+3. A sites file and download lists in a temporary run directory, and
+   `packages/downloader/dist/main.js` as a child whose every path (`HOME`, data root,
+   downloads root, sites file; the downloader's own path resolution is asked first)
+   points inside it. The production `live-status.json` is checked untouched.
+4. SIGTERM after 90 s, then per channel: the checker's counts against the downloader's
+   own log lines. Zero client misses on healthy channels, site skips equal to the
+   "provider skipped them" lines, client misses equal to the `SEQUENCE-GAP` warnings,
+   no duplicate across either failover, every byte as served except the declared
+   zero-size-sample repairs (checked to be exactly the SDK's repair), the ended streams
+   finalized for the right reason, the rename logged and kept.
+
+The report (`report.md`, `report.json`), the downloader log and the checker output per
+channel stay in `/tmp/capture-e2e-*`; `E2E_KEEP=1` keeps media and recordings too. Exit
+status 0 = every assertion holds, 1 = a failure (listed), 2 = the run could not start.
+Build first: `npm run build:downloader && npm run build -w simulator && npm run build:sim-plugins`.
