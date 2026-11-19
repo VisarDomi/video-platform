@@ -38,10 +38,17 @@ export const SEQUENCE_GAP_LATE_POLL_SECONDS = 3;
 // new media.
 export const EDGE_DEDUP_MAX_OVERLAP_MS = 60_000;
 // Copies stamp date-times with their own clocks: the segment last saved from one
-// edge may be re-listed by another a few ms LATER. Consecutive real segments are a
-// full EXTINF apart, so one within this fraction of its EXTINF after the last saved
-// date-time is that same segment again.
+// edge may be re-listed by another a few ms LATER. The next real segment starts one
+// full EXTINF of the LAST SAVED segment later, so one within this fraction of the
+// shorter of the two EXTINFs after the last saved date-time is that same segment
+// again. (The shorter one: after a short segment, the next real one is close.)
 export const EDGE_DEDUP_TOLERANCE_EXTINF_FRACTION = 0.5;
+
+// The EXTINF duration in seconds from a segment's metadata lines, or null.
+export function extinfSeconds(metadata: readonly string[]): number | null {
+    const value = Number.parseFloat(metadata.find((line) => line.startsWith("#EXTINF:"))?.slice("#EXTINF:".length) ?? "");
+    return Number.isFinite(value) && value > 0 ? value : null;
+}
 
 export type SegmentInspector = (filePath: string) => Promise<SegmentValidationResult>;
 
@@ -96,6 +103,7 @@ export class PlaylistManager {
         lastProgramDateTime: null,
     };
     private lastDownloadedPDT: string | null = null;
+    private lastDownloadedExtinfS: number | null = null;
     private _edgeSwitchActive = false;
     private lastPollAt: number | null = null;
     private _missedSegmentCount = 0;
@@ -133,10 +141,10 @@ export class PlaylistManager {
             logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} ≤ lastPDT=${this.lastDownloadedPDT}`);
             return true;
         }
-        const extinfS = Number.parseFloat(segment.metadata.find((line) => line.startsWith("#EXTINF:"))?.slice("#EXTINF:".length) ?? "");
-        const toleranceMs = Number.isFinite(extinfS) && extinfS > 0 ? extinfS * 1000 * EDGE_DEDUP_TOLERANCE_EXTINF_FRACTION : 0;
+        const durations = [extinfSeconds(segment.metadata), this.lastDownloadedExtinfS].filter((d): d is number => d !== null);
+        const toleranceMs = durations.length > 0 ? Math.min(...durations) * 1000 * EDGE_DEDUP_TOLERANCE_EXTINF_FRACTION : 0;
         if (gapMs > 0 && gapMs <= toleranceMs) {
-            logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} is ${gapMs}ms after lastPDT=${this.lastDownloadedPDT}, within half its EXTINF (${toleranceMs}ms): the same segment from another copy`);
+            logger.debug(`[PlaylistManager] EDGE-DEDUP skip segment=${segment.localName} pdt=${segment.programDateTime} is ${gapMs}ms after lastPDT=${this.lastDownloadedPDT}, within half the shorter EXTINF (${toleranceMs}ms): the same segment from another copy`);
             return true;
         }
         if (gapMs <= 0) {
@@ -148,9 +156,11 @@ export class PlaylistManager {
         return false;
     }
 
-    public recordDownloadedPDT(pdt: string | undefined): void {
+    // Called for each saved segment; extinfS is its EXTINF duration when known.
+    public recordDownloadedPDT(pdt: string | undefined, extinfS: number | null = null): void {
         if (pdt) {
             this.lastDownloadedPDT = pdt;
+            this.lastDownloadedExtinfS = extinfS;
         }
     }
 

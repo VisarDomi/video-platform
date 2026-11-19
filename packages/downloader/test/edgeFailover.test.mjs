@@ -174,3 +174,32 @@ test('a retry on the same copy dedups by sequence, as before', async (t) => {
     assert.deepEqual(names.map((name) => Number(name.split('_').at(-1).split('.')[0])), [1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008]);
     assert.equal(playlist.missedSegmentCount, 0);
 });
+
+// The next real segment starts one EXTINF of the last SAVED segment later. After a
+// short segment (a cut at a restart or discontinuity), that is closer than half the
+// next segment's EXTINF: the tolerance uses the shorter one, so the next segment is
+// never mistaken for a re-listing and dropped.
+test('B1: after a short saved segment, the next segment from another copy is new media', async (t) => {
+    const { playlist } = await manager(t);
+    playlist.setEdge('a');
+    const seg = (k, startMs, extinf) => ['#EXTM3U', '#EXT-X-TARGETDURATION:2', `#EXT-X-MEDIA-SEQUENCE:${1000 + k}`,
+        `#EXT-X-PROGRAM-DATE-TIME:${new Date(T0 + startMs).toISOString()}`, `#EXTINF:${extinf},`, `k${k}.ts`].join('\n') + '\n';
+    const first = await playlist.identifyNewSegments(seg(0, 0, '0.500'), (line) => `http://a/${line}`);
+    assert.deepEqual(first.map(kOf), [0]);
+    playlist.recordDownloadedPDT(first[0].programDateTime, playlistModule.extinfSeconds(first[0].metadata));
+    playlist.setEdge('b');
+    playlist.onEdgeSwitch('a', 'b');
+    // k1 starts 500 ms after k0 (k0 lasted 0.5 s) and lasts 2 s; b stamps 20 ms late.
+    const listed = await playlist.identifyNewSegments(seg(1, 520, '2.000'), (line) => `http://b/${line}`);
+    assert.deepEqual(listed.filter((segment) => !playlist.shouldSkipByTimeline(segment)).map(kOf), [1],
+        'k1 is 520 ms after a 0.5 s segment: more than half the shorter EXTINF (250 ms), so it is new');
+    // The same short segment re-listed 20 ms late is still recognised.
+    const again = await manager(t);
+    again.playlist.setEdge('a');
+    const k0 = await again.playlist.identifyNewSegments(seg(0, 0, '0.500'), (line) => `http://a/${line}`);
+    again.playlist.recordDownloadedPDT(k0[0].programDateTime, playlistModule.extinfSeconds(k0[0].metadata));
+    again.playlist.setEdge('b');
+    again.playlist.onEdgeSwitch('a', 'b');
+    const reListed = await again.playlist.identifyNewSegments(seg(0, 20, '0.500'), (line) => `http://b/${line}`);
+    assert.deepEqual(reListed.filter((segment) => !again.playlist.shouldSkipByTimeline(segment)).map(kOf), []);
+});
