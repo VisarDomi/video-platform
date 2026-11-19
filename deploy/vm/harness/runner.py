@@ -247,7 +247,7 @@ def run(wl: Workload, *, cycles: int, seed: int, min_ms: int, max_ms: int,
     if aborted:
         summary["aborted"] = aborted
     write_json_atomic(run_dir / "summary.json", summary)
-    if not keep_disk:
+    if not keep_disk and not aborted:  # an aborted run's disk is worth a look
         disk.unlink(missing_ok=True)
     return summary
 

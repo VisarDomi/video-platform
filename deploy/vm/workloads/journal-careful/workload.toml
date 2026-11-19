@@ -1,5 +1,8 @@
+# Appends checksummed records to a journal and acknowledges each one only after
+# fsync; a second thread replaces a state file atomically (temp file, fsync,
+# rename, fsync of the directory). Expected to pass every cycle.
 name = "journal-careful"
-description = "Append checksummed records and replace a state file, careful variant"
+description = "fsync before acknowledging; atomic state replacement"
 include = ["../shared/journal.py"]
 packages = ["python3"]
 setup = "python3 journal.py setup"
