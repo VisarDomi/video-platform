@@ -1,38 +1,12 @@
+// The errors the core distinguishes are the SDK's, shared with destination plug-ins.
+export { MetadataRejectedError, ProviderSessionLostError, TransferAbortedBeforeSubmissionError } from "sdk";
+
 // A provider refusing words in the submitted metadata ("Sorry, 'X' is not
 // allowed here.") is a hard form rejection: the video is not created. It is
 // unrelated to the visibility label a published video can carry.
 export function rejectedPhrases(text: string): string[] {
     return [...new Set([...text.matchAll(/Sorry, '([^'\n]+)' is not allowed here/g)]
         .map((match) => match[1].trim().toLowerCase()).filter(Boolean))];
-}
-
-// The provider refused words in submitted metadata. The form was not accepted,
-// so no remote video exists; the phrases are learned for the next description.
-export class MetadataRejectedError extends Error {
-    constructor(readonly phrases: readonly string[]) {
-        super(`Provider rejected metadata phrase(s): ${phrases.map((phrase) => `'${phrase}'`).join(", ")}`);
-        this.name = "MetadataRejectedError";
-    }
-}
-
-// The file transfer stopped before the provider offered its metadata form.
-// On a two-step provider (VideoHost) the video only exists after that form is
-// submitted, so nothing was published; the next attempt still looks up first.
-export class TransferAbortedBeforeSubmissionError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "TransferAbortedBeforeSubmissionError";
-    }
-}
-
-// The provider account's single login moved to another device (or ended).
-// Raised before any metadata submission, so it is a plain failure; the
-// campaign pauses until `npm run vhost:connect-iphone` restores the shared session.
-export class ProviderSessionLostError extends TransferAbortedBeforeSubmissionError {
-    constructor(message: string) {
-        super(message);
-        this.name = "ProviderSessionLostError";
-    }
 }
 
 export const SESSION_LOST_ADVICE = "run `npm run vhost:connect-iphone` to restore the shared session";

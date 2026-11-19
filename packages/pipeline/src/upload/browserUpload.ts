@@ -1,3 +1,5 @@
+export { HumanActionRequiredError } from "sdk";
+
 export interface ChromiumUploaderConfig {
     readonly executablePath: string;
     readonly profilePath: string;
@@ -7,11 +9,3 @@ export interface ChromiumUploaderConfig {
     // Shared-session file (see videohostSession.ts).
     readonly sessionFilePath?: string;
 }
-
-export class HumanActionRequiredError extends Error {
-    constructor(readonly action: "captcha" | "session_login" | "daily_limit", message: string) {
-        super(message);
-        this.name = "HumanActionRequiredError";
-    }
-}
-
