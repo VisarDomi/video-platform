@@ -1,4 +1,12 @@
-import { SHARED_UPLOAD_POLICY, type SharedUploadPolicy } from "./uploadPolicy.js";
+// The limits one destination sets on an upload (its plug-in's policy), as the planner
+// applies them; the destination's ID names it in the notifications.
+export interface UploadLimits {
+    readonly destination: string;
+    // Shorter recordings wait to be joined with compatible footage (null: no minimum).
+    readonly minimumDurationSeconds: number | null;
+    readonly maximumDurationSeconds: number | null;
+    readonly maximumFileBytes: number;
+}
 
 export interface UploadCandidate {
     readonly id: string;
@@ -46,7 +54,7 @@ function invalidPositiveNumber(value: number): boolean {
 
 export function assessRecording(
     candidate: UploadCandidate,
-    policy: SharedUploadPolicy = SHARED_UPLOAD_POLICY,
+    policy: UploadLimits,
 ): UploadAssessment<UploadCandidate> {
     if (invalidPositiveNumber(candidate.durationSeconds)) {
         return {
@@ -71,7 +79,7 @@ export function assessRecording(
                 candidateId: candidate.id,
                 severity: "warning",
                 code: "too_short",
-                message: `Skipped ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s is below the ${policy.providers.join("/")} ${policy.minimumDurationSeconds}s minimum.`,
+                message: `Skipped ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s is below the ${policy.destination} ${policy.minimumDurationSeconds}s minimum.`,
                 requiresManualAction: true,
             },
         };
@@ -85,7 +93,7 @@ export function assessRecording(
                 candidateId: candidate.id,
                 severity: "warning",
                 code: "too_long",
-                message: `Blocked ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s exceeds the ${policy.providers.join("/")} ${policy.maximumDurationSeconds}s maximum.`,
+                message: `Blocked ${candidate.path}: ${candidate.durationSeconds.toFixed(3)}s exceeds the ${policy.destination} ${policy.maximumDurationSeconds}s maximum.`,
                 requiresManualAction: true,
             },
         };
@@ -95,7 +103,7 @@ export function assessRecording(
 
 export function planRecordingsForUpload(
     candidates: readonly UploadCandidate[],
-    policy: SharedUploadPolicy = SHARED_UPLOAD_POLICY,
+    policy: UploadLimits,
 ): RecordingUploadPlan {
     const assessments = candidates.map((candidate) => assessRecording(candidate, policy));
     return {
@@ -110,7 +118,7 @@ export function planRecordingsForUpload(
 
 export function assessFinalArtifact(
     artifact: FinalUploadArtifact,
-    policy: SharedUploadPolicy = SHARED_UPLOAD_POLICY,
+    policy: UploadLimits,
 ): UploadAssessment<FinalUploadArtifact> {
     const recordingAssessment = assessRecording(artifact, policy);
     if (recordingAssessment.disposition !== "ready_for_description") {
@@ -144,7 +152,7 @@ export function assessFinalArtifact(
                 candidateId: artifact.id,
                 severity: "warning",
                 code: "too_large",
-                message: `Blocked ${artifact.path}: ${artifact.sizeBytes} bytes exceeds the ${policy.providers.join("/")} ${policy.maximumFileBytes}-byte maximum.`,
+                message: `Blocked ${artifact.path}: ${artifact.sizeBytes} bytes exceeds the ${policy.destination} ${policy.maximumFileBytes}-byte maximum.`,
                 requiresManualAction: true,
             },
         };

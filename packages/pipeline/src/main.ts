@@ -40,10 +40,10 @@ function usage(): never {
         "  provenance-set ID --streamer-id ID --alias NAME --streamer-url URL [--alias-url URL]",
         "  review | retry ID | upload-plan",
         "  upload-one --recording ID --apply | reconcile-uploads --apply",
-        "  upload-provider [--provider videohost --apply]",
-        "  metadata-check [--provider videohost]",
+        "  upload-provider [--provider DESTINATION --apply]",
+        "  metadata-check [--provider DESTINATION]",
         "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
-        "  campaign-configure --provider all|tslive|ladder|fmp4 [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
+        "  campaign-configure --provider all|SITE [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
         "  campaign-worker (reserved for the future managed service)",
@@ -411,7 +411,7 @@ async function main(): Promise<void> {
             mode: "dry-run",
             networkRequests: 0,
             quotaMutations: 0,
-            items: createDryRunUploadPlan(
+            items: await createDryRunUploadPlan(
                 database,
                 new Date(),
                 pipelineConfig.uploadTimeZone,

@@ -1,14 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { loadDestinationPlugin, parseDestinations, type Destination } from "sdk";
-import { PROVIDER_UPLOAD_POLICIES, journalPriority, policyForUploadProvider, sitesFilePath, type SharedUploadPolicy } from "shared";
+import { journalPriority, sitesFilePath, type UploadLimits } from "shared";
 
 // What the core needs to know about a destination before it opens a session: its upload
 // limits and visibility, and when its remote copy comes into existence. They come from the
-// destination's plug-in (named by the sites file); VideoHost's limits are the core's pinned
-// table in shared, which wins for it.
+// destination's plug-in, named by the sites file.
 export interface DestinationFacts {
     readonly creationBoundary: Destination["creationBoundary"];
-    readonly policy: SharedUploadPolicy;
+    readonly policy: UploadLimits;
     readonly uploadVisibility: "public" | "private";
 }
 
@@ -36,15 +35,11 @@ export async function destinationFacts(provider: string): Promise<DestinationFac
     if (plugin.creationBoundary !== "metadata_submit" && plugin.creationBoundary !== "transfer_start") {
         throw new Error(`Destination ${provider}: ${entry.plugin} declares no creation boundary (a build older than this pipeline?)`);
     }
-    if (Object.hasOwn(PROVIDER_UPLOAD_POLICIES, provider)) {
-        const pinned = PROVIDER_UPLOAD_POLICIES[provider as keyof typeof PROVIDER_UPLOAD_POLICIES];
-        return { creationBoundary: plugin.creationBoundary, policy: policyForUploadProvider(provider), uploadVisibility: pinned.uploadVisibility ?? "private" };
-    }
-    if (!plugin.policy) throw new Error(`Destination ${provider}: ${entry.plugin} declares no upload policy`);
+    if (!plugin.policy) throw new Error(`Destination ${provider}: ${entry.plugin} declares no upload policy (a build older than this pipeline?)`);
     const { minimumDurationSeconds, maximumDurationSeconds, maximumFileBytes, uploadVisibility } = plugin.policy;
     return {
         creationBoundary: plugin.creationBoundary,
-        policy: { providers: [], minimumDurationSeconds, maximumDurationSeconds, maximumFileBytes, unresolvedConstraints: [] },
+        policy: { destination: provider, minimumDurationSeconds, maximumDurationSeconds, maximumFileBytes },
         uploadVisibility,
     };
 }

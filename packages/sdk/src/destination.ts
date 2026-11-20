@@ -147,9 +147,8 @@ export interface DestinationPlugin {
     sdkVersion: typeof SDK_VERSION;
     // What the core needs without opening a session: when the remote copy comes into
     // existence (the same as every Destination's creationBoundary), and the upload limits.
-    // VideoHost's limits are the core's pinned table, so it declares none.
     creationBoundary: Destination["creationBoundary"];
-    policy?: DestinationPolicy;
+    policy: DestinationPolicy;
     createDestination(host: DestinationHost): Destination;
 }
 

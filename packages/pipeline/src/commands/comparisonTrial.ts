@@ -98,7 +98,6 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
                 artifactSizeBytes: artifact?.sizeBytes ?? null,
                 resolutionPolicy: recording ? database.comparisonPolicyReason(recording.id) : null,
                 uploadId: remote?.remoteId ?? null, uploadedUrl: remote?.remoteUrl ?? null,
-                uploadEditUrl: remote ? `https://video-host.example/edit-video/${remote.remoteId}/` : null,
                 verifiedOnline: remote?.verified ?? false,
                 uploadDiagnostics: recording ? database.latestUploadDiagnostics(recording.id) : null,
                 // Online verification is not an assertion of frame fidelity.
@@ -116,7 +115,7 @@ export async function writeComparisonReport(config: PipelineConfig): Promise<unk
             `Queued so far: ${rows.length}. Campaign: ${report.state}. Queue drained: ${trial.completedAt ?? "not yet"}.`, "",
             ...trial.fileErrors.map((error) => `Selection-file error: ${escape(error)}`), "",
             "| Recording | State | Original | Converted/remuxed | Uploaded |", "| --- | --- | --- | --- | --- |",
-            ...rows.map((row) => `| ${escape(row.recordingId)} | ${escape(row.failure ?? row.state)} | [original](${row.originalUrl}) | ${row.artifactPath ? `[${row.artifactExists ? "local MP4" : "MISSING"}](<${row.artifactPath}>)` : "pending"} | ${row.uploadedUrl ? `[${row.verifiedOnline ? "verified online" : "submitted"}](${row.uploadedUrl})` : row.uploadEditUrl ? `[awaiting verification](${row.uploadEditUrl})` : "pending"} |`), "",
+            ...rows.map((row) => `| ${escape(row.recordingId)} | ${escape(row.failure ?? row.state)} | [original](${row.originalUrl}) | ${row.artifactPath ? `[${row.artifactExists ? "local MP4" : "MISSING"}](<${row.artifactPath}>)` : "pending"} | ${row.uploadedUrl ? `[${row.verifiedOnline ? "verified online" : "submitted"}](${row.uploadedUrl})` : row.uploadId ? `awaiting verification (${escape(row.uploadId)})` : "pending"} |`), "",
             "The adjacent JSON report records source fingerprints, artifact SHA-256, policy decisions, and remote IDs.", ""].join("\n");
         for (const [name, content] of [["comparison.json", JSON.stringify(report, null, 2) + "\n"], ["comparison.md", markdown]]) {
             const target = path.join(config.stagingRoot, name);

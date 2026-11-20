@@ -8,8 +8,7 @@
 //     list line formats and source links moved with the site catalogs: they are
 //     pinned in private/test/pinsListsAndTokens.test.mjs, the pipeline's copy of the
 //     source links in pipeline/test/sourceLinks.test.mjs, and
-//     targetMembershipIdentifiers in sdk/test/toolkit.test.mjs);
-//   - the active destination's limits.
+//     targetMembershipIdentifiers in sdk/test/toolkit.test.mjs).
 import assert from "node:assert/strict";
 import { promises as fsPromises } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -27,9 +26,6 @@ process.env.VIDEO_SERVICES_DATA_ROOT = otherDataRoot;
 const {
     CredentialStore,
     extractRecordingIdentifier,
-    PROVIDER_UPLOAD_POLICIES,
-    UPLOAD_PROVIDER_PLAN,
-    policyForUploadProvider,
 } = await import("../dist/index.js");
 test.after(async () => {
     await rm(home, { recursive: true, force: true });
@@ -90,28 +86,4 @@ test("pin: the recording identity is everything after the folder's date and time
     assert.equal(extractRecordingIdentifier("two words"), "two words");
     // The first two words are dropped whatever they are.
     assert.equal(extractRecordingIdentifier("not a timestamp"), "timestamp");
-});
-
-test("pin: the active destination's limits", () => {
-    assert.equal(UPLOAD_PROVIDER_PLAN.primary, "videohost");
-    const { evidence, ...videohost } = PROVIDER_UPLOAD_POLICIES.videohost;
-    assert.deepEqual(videohost, {
-        provider: "videohost",
-        uploadVisibility: "public",
-        minimumDurationSeconds: 120,
-        maximumDurationSeconds: null,
-        maximumFileBytes: 10_000_000_000,
-        inactiveDeletionDays: null,
-        maintenanceVisitIntervalDays: null,
-        unresolvedConstraints: ["acceptedContainersAndCodecsBeyondH264AacMp4"],
-    });
-    assert.equal(evidence.length, 3);
-    // What the pipeline's upload and shorts code reads.
-    assert.deepEqual(policyForUploadProvider("videohost"), {
-        providers: ["videohost"],
-        minimumDurationSeconds: 120,
-        maximumDurationSeconds: null,
-        maximumFileBytes: 10_000_000_000,
-        unresolvedConstraints: ["videohost.acceptedContainersAndCodecsBeyondH264AacMp4"],
-    });
 });

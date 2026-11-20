@@ -10,20 +10,6 @@ export { systemBrowserPath } from "./systemBrowser.js";
 export { createLogger, journalPriority } from "./logger.js";
 export { moveToDesktopTrash } from "./desktopTrash.js";
 export {
-    PROVIDER_UPLOAD_POLICIES,
-    SHARED_UPLOAD_POLICY,
-    UPLOAD_PROVIDER_PLAN,
-    deriveSharedUploadPolicy,
-    policyForUploadProvider,
-} from "./uploadPolicy.js";
-export type {
-    ProviderUploadPolicy,
-    SharedUploadPolicy,
-    UploadPolicyEvidence,
-    UploadProvider,
-    UploadProviderPlan,
-} from "./uploadPolicy.js";
-export {
     assessFinalArtifact,
     assessRecording,
     planRecordingsForUpload,
@@ -37,5 +23,6 @@ export type {
     UploadAssessment,
     UploadCandidate,
     UploadDisposition,
+    UploadLimits,
     UploadNotification,
 } from "./uploadPlanner.js";
