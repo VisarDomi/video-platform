@@ -11,7 +11,7 @@ import { shutdownSignal } from "../shutdown.js";
 // The destination the sites file names for this provider ID, created on the
 // pipeline-owned browser profile (everyday and shared profiles are refused here, before
 // the plug-in sees a path) with the provider's credentials.
-export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider = "videohost"): Promise<Destination> {
+export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider): Promise<Destination> {
     assertUploadProvider(provider);
     const profilePath = path.resolve(config.videohostBrowserProfilePath ?? config.browserProfilePath);
     let ancestor = profilePath;

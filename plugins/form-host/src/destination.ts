@@ -75,6 +75,17 @@ export class FormHostDestination implements Destination {
         };
     }
 
+    // A redirect to the home or login page: the host signed this session out.
+    private signedOutRedirect(reply: HostReply): boolean {
+        return isRedirect(reply) && /^\/(?:login\/)?$/.test(new URL(reply.location ?? "", this.config.baseUrl).pathname);
+    }
+
+    // Any other redirect is unexpected: a passing problem, never a reason to sign in.
+    private requireSignedIn(reply: HostReply): void {
+        if (this.signedOutRedirect(reply)) throw new ProviderSessionLostError(`form-host is signed out; ${this.session.lostAdvice}`);
+        if (isRedirect(reply)) throw new Error(`form-host: an unexpected redirect to ${reply.location ?? "nowhere"}`);
+    }
+
     private client(): FormHostClient {
         return new FormHostClient(this.config.baseUrl, path.join(this.host.stateDir, "session.json"), this.host.stopSignal);
     }
@@ -86,8 +97,7 @@ export class FormHostDestination implements Destination {
         const reply = await client.request("/upload-video/");
         if (cached(reply)) throw new Error("form-host: the upload page came from a shared cache; the session state is unknown");
         const loggedIn = reply.status === 200 && hasUploadForm(reply.text);
-        const loggedOut = (isRedirect(reply) && /^\/(?:login\/)?$/.test(new URL(reply.location ?? "", this.config.baseUrl).pathname))
-            || (reply.status === 200 && hasLoginForm(reply.text));
+        const loggedOut = this.signedOutRedirect(reply) || (reply.status === 200 && hasLoginForm(reply.text));
         if (!loggedIn && !loggedOut) throw new Error(`form-host: the upload page answered ${reply.status}; the session state is unknown`);
         const token = client.cookie("remember") ?? client.cookie("sid");
         return {
@@ -103,7 +113,9 @@ export class FormHostDestination implements Destination {
         for (let attempt = 1; ; attempt++) {
             const page = await client.request("/login/");
             if (isRedirect(page)) return; // The remember-me cookie signed in already.
-            const csrf = inputValue(page.text, "csrf_token");
+            // A cached or failing login page is a passing problem, not a refused login.
+            if (cached(page)) throw new Error("form-host: the login page came from a shared cache");
+            const csrf = page.status === 200 ? inputValue(page.text, "csrf_token") : null;
             if (!csrf) throw new Error(`form-host: the login page (${page.status}) has no form`);
             const { email, password } = this.host.credentials();
             const form = new URLSearchParams({ action: "login", csrf_token: csrf, username: email, pass: password });
@@ -112,7 +124,12 @@ export class FormHostDestination implements Destination {
             if (isRedirect(reply)) { await client.notePasswordLogin(new Date()); return; }
             if (reply.status === 403 && attempt < 2) continue; // A stale security token: once more.
             const errors = genericErrors(reply.text);
-            throw new HumanActionRequiredError("session_login", `form-host refused the login: ${errors.join(" ") || `HTTP ${reply.status}`}`);
+            // Only the login form answered again with its error is a refusal a person must
+            // look at (the account's password); anything else is retried later.
+            if (reply.status === 200 && hasLoginForm(reply.text) && errors.length) {
+                throw new HumanActionRequiredError("session_login", `form-host refused the login: ${errors.join(" ")}`);
+            }
+            throw new Error(`form-host: the login answered ${reply.status}`);
         }
     }
 
@@ -122,7 +139,7 @@ export class FormHostDestination implements Destination {
             const reply = await client.request("/upload-video/");
             if (cached(reply)) throw new Error("form-host: the upload page came from a shared cache");
             if (reply.status === 200 && hasUploadForm(reply.text)) return reply.text;
-            const signedOut = isRedirect(reply) || (reply.status === 200 && hasLoginForm(reply.text));
+            const signedOut = this.signedOutRedirect(reply) || (reply.status === 200 && hasLoginForm(reply.text));
             if (!signedOut) throw new Error(`form-host: the upload page answered ${reply.status}`);
             if (attempt > 1 || !this.config.allowPasswordLogin) {
                 throw new ProviderSessionLostError(`form-host is signed out; ${this.session.lostAdvice}`);
@@ -141,16 +158,30 @@ export class FormHostDestination implements Destination {
 
     // ---- the uploads list ----
 
-    // Every video of the account, both tabs, read to the end: past the last page the host
-    // answers 404, asked twice (a single 404 can be transient). A page the block said
-    // exists answering anything but its rows means the listing is incomplete.
+    // Every video of the account. One scan can miss a video when the list shifts under it
+    // (a removal moves later rows up a page), so two scans in a row must agree.
     private async listAll(client: FormHostClient): Promise<ListedVideo[]> {
+        let previous = await this.scan(client);
+        for (let scan = 2; scan <= 3; scan++) {
+            const current = await this.scan(client);
+            const ids = (videos: ListedVideo[]) => videos.map((video) => video.id).sort().join(",");
+            if (ids(current) === ids(previous)) return current;
+            previous = current;
+        }
+        throw new Error("form-host: the uploads list kept changing while it was read; the listing is inconclusive");
+    }
+
+    // Both tabs, read to the end: past the last page the host answers 404, asked twice (a
+    // single 404 can be transient). A page the block said exists answering anything but its
+    // rows, or a page from a shared cache, means the listing is incomplete.
+    private async scan(client: FormHostClient): Promise<ListedVideo[]> {
         const videos = new Map<string, ListedVideo>();
         for (const isPrivate of [0, 1]) {
             let page = 1, known = 1, misses = 0;
             for (;;) {
                 const reply = await client.request(`${LIST_BLOCK}&is_private=${isPrivate}&from_my_videos=${page}`);
-                if (isRedirect(reply)) throw new ProviderSessionLostError(`form-host is signed out; ${this.session.lostAdvice}`);
+                this.requireSignedIn(reply);
+                if (cached(reply)) throw new Error(`form-host: list page ${page} came from a shared cache; the listing is incomplete`);
                 if (reply.status === 404) {
                     if (page <= known) throw new Error(`form-host: list page ${page} of ${known} answered 404; the listing is incomplete`);
                     if (++misses >= 2) break;
@@ -197,7 +228,8 @@ export class FormHostDestination implements Destination {
     private async probe(client: FormHostClient, remoteId: string): Promise<UploadProbe> {
         if (!/^\d+$/.test(remoteId)) throw new Error("form-host: video IDs are numeric");
         const edit = await client.request(`/edit-video/${remoteId}/`);
-        if (isRedirect(edit)) throw new ProviderSessionLostError(`form-host is signed out; ${this.session.lostAdvice}`);
+        this.requireSignedIn(edit);
+        if (cached(edit)) return { outcome: "not_ready", remoteUrl: null, reason: "the edit page came from a shared cache", retrySoon: true };
         if (edit.status === 404) {
             // The edit page is 404 while processing, after a failure and after removal:
             // only the complete list tells them apart.
@@ -260,11 +292,13 @@ export class FormHostDestination implements Destination {
                 form.set("total", String(total));
                 form.set("filename", name);
                 form.set("content", piece, name);
-                // Counted before it leaves: a reset connection may have sent it all.
+                // Counted, and recorded, before it leaves: a reset connection (or a power cut)
+                // may have sent it all, and the core bills what was recorded.
                 transmitted += piece.size + CHUNK_FRAMING_BYTES;
+                await request.onProgress?.("file_uploading", transmitted);
                 const reply = await client.request(context.uploadUrl, { method: "POST", body: form }).catch((error: unknown) => error as Error);
                 if (!(reply instanceof Error)) {
-                    if (isRedirect(reply)) throw new ProviderSessionLostError(`form-host signed the upload out; ${this.session.lostAdvice}`);
+                    this.requireSignedIn(reply);
                     const answer = reply.status === 200 ? parseJson(reply.text) : null;
                     if (answer?.status === "success") break;
                 }
@@ -275,7 +309,6 @@ export class FormHostDestination implements Destination {
                 }
                 await delay(this.config.retryDelayMs * attempt, undefined, { signal: this.host.stopSignal });
             }
-            await request.onProgress?.("file_uploading", transmitted);
         }
         const finish = new FormData();
         finish.set("upload_token", uploadToken);
@@ -283,7 +316,7 @@ export class FormHostDestination implements Destination {
         finish.set("filename", name);
         finish.set("filesize", String(size));
         const finished = await client.request(context.finishUrl, { method: "POST", body: finish });
-        if (isRedirect(finished)) throw new ProviderSessionLostError(`form-host signed the upload out; ${this.session.lostAdvice}`);
+        this.requireSignedIn(finished);
         const assembled = parseJson(finished.text);
         const fileToken = assembled?.status === "success" && typeof assembled.file_token === "string" ? assembled.file_token : null;
         if (!fileToken) throw new TransferAbortedBeforeSubmissionError(`form-host: the upload was not assembled (${finished.status} ${finished.text.slice(0, 200)})`);

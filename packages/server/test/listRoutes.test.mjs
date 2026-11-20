@@ -108,7 +108,7 @@ test("resolve answers the identity, plus the site's pages when its catalog has t
     const dir = await mkdtemp(path.join(tmpdir(), "list-route-"));
     t.after(() => rm(dir, { recursive: true }));
     const plain = await listServer(t, { id: "demo", filePath: path.join(dir, "demo.txt"), catalog: catalog() });
-    assert.deepEqual(await (await fetch(`${plain}/resolve?identifier=a1`)).json(), { id: "a1", label: "a1-label" });
+    assert.deepEqual(await (await fetch(`${plain}/resolve?identifier=a1`)).json(), { id: "a1", label: "a1-label", channelUrl: null, aliasUrl: null });
     const linked = await listServer(t, { id: "live-a", filePath: path.join(dir, "live-a.txt"), catalog: catalog({
         sourceLinks: ({ id, label }) => ({ channelUrl: `http://live-a.test/${id}`, aliasUrl: label === id ? null : `http://live-a.test/@${label}` }),
     }) });

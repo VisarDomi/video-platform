@@ -26,7 +26,7 @@ const SESSION_KEEPALIVE_MILLISECONDS = 10 * 60_000;
 export async function keepVideoHostSessionAlive(config: PipelineConfig, now = new Date(),
     // The destination's own light session check, on the shared session file.
     check: (sessionFilePath: string) => Promise<DestinationSessionCheck>
-        = async () => await (await createProviderUploader(config)).session.check()): Promise<void> {
+        = async () => await (await createProviderUploader(config, "videohost")).session.check()): Promise<void> {
     if (!config.networkUploadsEnabled || !config.videohostSessionPath) return;
     if (await recoveryInProgress(config.databasePath)) return;
     const database = new PipelineDatabase(config.databasePath);

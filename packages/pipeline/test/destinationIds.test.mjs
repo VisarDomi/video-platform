@@ -152,3 +152,38 @@ test("a trial's progress lists the configured sources in order, then any other s
     assert.deepEqual(database.getCampaignTrialProgress(["live-a"]).map(({ provider, admitted }) => [provider, admitted]),
         [["live-a", 0], ["tslive", 1]], "an admitted recording is never left out");
 });
+
+test("an older server's resolution (no pages) stores nothing; a site without pages goes to review", async () => {
+    const { TargetCatalogResolver, SourcePagesUnavailableError } = await import("../dist/provenance/targetResolver.js");
+    const input = { provider: "live-a", sourceKind: "edited", sourcePath: "/x/2026-01-01 010000 court", playlistPath: "/x/p.m3u8", sourceFingerprint: "f", durationSeconds: 1 };
+    const older = TargetCatalogResolver.load({ resolveIdentifier: async () => ({ id: "1", label: "court" }) });
+    await assert.rejects(older.resolve(input), SourcePagesUnavailableError);
+    const pageless = TargetCatalogResolver.load({ resolveIdentifier: async () => ({ id: "1", label: "court", channelUrl: null, aliasUrl: null }) });
+    const review = await pageless.resolve(input);
+    assert.equal(review.status, "review_required");
+    assert.equal(review.reason, "no_source_links:live-a");
+    const linked = TargetCatalogResolver.load({ resolveIdentifier: async () => ({ id: "1", label: "court", channelUrl: "https://live-a.test/1", aliasUrl: "https://live-a.test/@court" }) });
+    const resolved = await linked.resolve(input);
+    assert.deepEqual([resolved.status, resolved.streamerUrl, resolved.aliasUrl], ["resolved", "https://live-a.test/1", "https://live-a.test/@court"]);
+});
+
+test("a destination build without a creation boundary is refused; settling then skips once instead of stopping", async (t) => {
+    const { destinationFacts, settleUnsubmitted } = await import("../dist/upload/destinationFacts.js");
+    const { directory } = await ledger(t);
+    const stale = path.join(directory, "stale-destination.mjs");
+    await writeFile(stale, `export const destination = { id: "old", sdkVersion: 1, createDestination() {} };`);
+    const sitesFile = path.join(directory, "sites.json");
+    await writeFile(sitesFile, JSON.stringify({ destinations: [{ id: "old", plugin: `file://${stale}` }], sites: [] }));
+    const previous = process.env.VIDEO_SITES_FILE;
+    process.env.VIDEO_SITES_FILE = sitesFile;
+    t.after(() => { process.env.VIDEO_SITES_FILE = previous; });
+    await assert.rejects(destinationFacts("old"), /declares no creation boundary/);
+    const calls = [];
+    const database = { getActiveUploadProvider: () => "old", settleUnsubmittedAttempts: (...args) => { calls.push(args); return ["x"]; } };
+    const logged = [];
+    const error = console.error;
+    console.error = (line) => logged.push(String(line));
+    try { assert.deepEqual(await settleUnsubmitted(database), []); } finally { console.error = error; }
+    assert.deepEqual(calls, [], "nothing settled without the boundary");
+    assert.match(logged.join("\n"), /destination-facts-unavailable/);
+});

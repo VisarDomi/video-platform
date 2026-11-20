@@ -92,9 +92,11 @@ export class CampaignWorker {
         if (this.database.getComparisonTrial() && !this.database.comparisonAllows(candidate)) {
             return { disposition: "idle", reviewRequired: 0 };
         }
+        // Resolved first: a resolution that fails (a server older than this pipeline)
+        // leaves nothing half-admitted, and a later step admits the recording.
+        const resolution = await this.resolver.resolve(candidate, now);
         const recording = this.database.discover(candidate, now);
         this.database.enrollCampaignTrial(recording, now);
-        const resolution = await this.resolver.resolve(candidate, now);
         this.database.saveProvenance(recording.id,
             this.database.getProvenanceOverride(candidate.provider, resolution.observedIdentifier) ?? resolution);
         return { disposition: "admitted", recordingId: recording.id, state: recording.state };

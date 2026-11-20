@@ -180,8 +180,10 @@ export function createListRoutes(site: ListSite): Router {
             if (!resolved) {
                 return res.status(404).json({ error: `Could not resolve: ${identifier}` });
             }
+            // Always present (null for a site whose catalog gives no pages), so the pipeline
+            // can tell this reply from an older server's, which had neither field.
             const links = catalog.sourceLinks?.(resolved);
-            res.json({ id: resolved.id, label: resolved.label, ...(links ? { channelUrl: links.channelUrl, aliasUrl: links.aliasUrl } : {}) });
+            res.json({ id: resolved.id, label: resolved.label, channelUrl: links?.channelUrl ?? null, aliasUrl: links?.aliasUrl ?? null });
         } catch (error) {
             logger.error(`Error resolving ${site.id} identifier`, { error });
             res.status(500).json({ error: "Failed to resolve identifier" });
