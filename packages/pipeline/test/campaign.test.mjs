@@ -14,7 +14,7 @@ import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { ChromiumVideoHostUploader } from "../../../private/plugins/videohost/dist/chromiumVideoHostUploader.js";
-import { ProviderSessionLostError, SESSION_LOST_ADVICE } from "../dist/upload/providerWarnings.js";
+import { ProviderSessionLostError } from "../dist/upload/providerWarnings.js";
 import { campaignStatus, configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
 function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_000) {
@@ -87,7 +87,7 @@ test("a failed in-flight upload preserves a subsequent manual pause", async t =>
     const worker = new CampaignWorker(database, { ...config, networkUploadsEnabled: true,
         automaticShortsEnabled: false, discoveryRoots: [] }, resolver, async () => {
         database.setCampaignState("paused");
-        throw new ProviderSessionLostError(`VideoHost session is logged out; ${SESSION_LOST_ADVICE}`);
+        throw new ProviderSessionLostError("The destination session is logged out; run `restore-session` to restore it");
     });
     assert.equal((await worker.step()).disposition, "attention_required");
     assert.equal(database.getCampaignControl().state, "paused");

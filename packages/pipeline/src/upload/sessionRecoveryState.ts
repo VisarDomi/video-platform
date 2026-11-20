@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isDestinationId } from 'sdk';
 
 export interface RecoveryState {
     version: 1;
@@ -11,25 +12,36 @@ export interface RecoveryState {
     lastError?: string;
 }
 export { RecoveryDeferredError } from "sdk";
-export const recoveryLockPath = (databasePath: string) => path.join(path.dirname(databasePath), 'videohost-recovery.lock');
-export const recoveryStatePath = (databasePath: string) => path.join(path.dirname(databasePath), 'videohost-recovery.json');
-export async function recoveryInProgress(databasePath: string): Promise<boolean> {
-    const target = recoveryLockPath(databasePath);
+// A shared session's recovery (see Destination.session.keepAlive), per destination, beside
+// the ledger: <destination>-recovery.lock while one runs, <destination>-recovery.json for
+// its backoff. The recovery itself is the destination's own command; the core only waits
+// for it and reads its state.
+export const recoveryLockPath = (databasePath: string, destination: string) =>
+    path.join(path.dirname(databasePath), `${destinationId(destination)}-recovery.lock`);
+export const recoveryStatePath = (databasePath: string, destination: string) =>
+    path.join(path.dirname(databasePath), `${destinationId(destination)}-recovery.json`);
+function destinationId(value: string): string {
+    if (!isDestinationId(value)) throw new Error(`Invalid destination ID ${JSON.stringify(value)}`);
+    return value;
+}
+export async function recoveryInProgress(databasePath: string, destination: string): Promise<boolean> {
+    const target = recoveryLockPath(databasePath, destination);
     if (!await fs.stat(target).then(() => true, () => false)) return false;
     const result = spawnSync('flock', ['-n', target, 'true'], { stdio: 'ignore', timeout: 2_000 });
     if (result.error) throw result.error;
     if (result.status !== 0 && result.status !== 1) throw new Error('Could not inspect session recovery lock');
     return result.status === 1;
 }
-export async function readRecoveryState(databasePath: string): Promise<RecoveryState> {
+export async function readRecoveryState(databasePath: string, destination: string): Promise<RecoveryState> {
+    const target = recoveryStatePath(databasePath, destination);
     try {
-        const value = JSON.parse(await fs.readFile(recoveryStatePath(databasePath), 'utf8'));
+        const value = JSON.parse(await fs.readFile(target, 'utf8'));
         if (value.version !== 1 || !Number.isInteger(value.failures) || value.failures < 0) throw new Error();
         return value;
     } catch { return { version: 1, failures: 0 }; }
 }
-export async function writeRecoveryState(databasePath: string, state: RecoveryState): Promise<void> {
-    const target = recoveryStatePath(databasePath), temporary = `${target}.${randomUUID()}.tmp`;
+export async function writeRecoveryState(databasePath: string, destination: string, state: RecoveryState): Promise<void> {
+    const target = recoveryStatePath(databasePath, destination), temporary = `${target}.${randomUUID()}.tmp`;
     await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
     try {
         await fs.writeFile(temporary, JSON.stringify(state) + '\n', { mode: 0o600, flag: 'wx' });
@@ -41,9 +53,9 @@ export async function writeRecoveryState(databasePath: string, state: RecoverySt
 
 // A kernel flock is held by a tiny pipe-bound process. Closing the pipe (also
 // on parent SIGKILL) releases it; persistent files/PID reuse cannot strand it.
-export async function withRecoveryLock<T>(databasePath: string, action: () => Promise<T>): Promise<{ acquired: false } | { acquired: true; value: T }> {
+export async function withRecoveryLock<T>(databasePath: string, destination: string, action: () => Promise<T>): Promise<{ acquired: false } | { acquired: true; value: T }> {
+    const target = recoveryLockPath(databasePath, destination);
     await fs.mkdir(path.dirname(databasePath), { recursive: true, mode: 0o700 });
-    const target = recoveryLockPath(databasePath);
     const file = await fs.open(target, 'a', 0o600); await file.close();
     const keeper = spawn('flock', ['-n', '--no-fork', target, 'sh', '-c', 'printf "locked\\n"; read -r release || :'],
         { stdio: ['pipe', 'pipe', 'pipe'] });

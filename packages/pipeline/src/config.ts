@@ -24,8 +24,6 @@ export interface PipelineConfig {
     readonly chromiumExecutablePath: string;
     readonly credentialsFilePath: string;
     readonly uploadProvider?: ActiveUploadProvider;
-    readonly videohostBrowserProfilePath?: string;
-    readonly videohostSessionPath?: string;
     readonly cleanupEnabled: boolean;
     readonly networkUploadsEnabled: boolean;
     readonly automaticShortsEnabled?: boolean;
@@ -39,7 +37,7 @@ const databasePath = process.env.VIDEO_PIPELINE_DB
     ?? path.join(dataRoot, "pipeline", "pipeline.sqlite");
 // A persistent service owns its own profile, beside its database. General agent
 // browsing must never contend for its singleton lock or cookie-storage backend.
-const browserProfilePath = process.env.VIDEO_VIDEOHOST_BROWSER_PROFILE
+const browserProfilePath = process.env.VIDEO_PIPELINE_BROWSER_PROFILE
     ?? path.join(path.dirname(databasePath), "browser");
 const artifactsRoot = process.env.VIDEO_PIPELINE_ARTIFACTS_ROOT
     ?? process.env.VIDEO_PIPELINE_STAGING
@@ -96,9 +94,6 @@ export const pipelineConfig: PipelineConfig = {
     chromiumExecutablePath: systemBrowserPath(),
     credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
-    videohostBrowserProfilePath: browserProfilePath,
-    videohostSessionPath: process.env.VIDEO_VIDEOHOST_SESSION_FILE
-        ?? path.join(os.homedir(), ".config", "video-services", "videohost-session.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
     monthlyUploadLimitBytes: Number.parseInt(
         process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? String(DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES),

@@ -10,7 +10,6 @@ import { campaignStep } from "./campaign.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
 import type { DestinationSessionCheck } from "sdk";
 import { createProviderUploader } from "../upload/providerFactory.js";
-import { SESSION_LOST_ADVICE } from "../upload/providerWarnings.js";
 import { notifyDesktop, stepNotification } from "../notify.js";
 import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecoveryState.js";
 import { access } from "node:fs/promises";
@@ -19,46 +18,58 @@ const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
 const SESSION_KEEPALIVE_MILLISECONDS = 10 * 60_000;
 
-// Keeps the shared VideoHost session from idling out and records its health
-// (the history answers how long videohost keeps a session alive). A logged-out
-// session pauses the campaign with its reason instead of logging in again,
-// which would log the phone out.
-export async function keepVideoHostSessionAlive(config: PipelineConfig, now = new Date(),
-    // The destination's own light session check, on the shared session file.
-    check: (sessionFilePath: string) => Promise<DestinationSessionCheck>
-        = async () => await (await createProviderUploader(config, "videohost")).session.check()): Promise<void> {
-    if (!config.networkUploadsEnabled || !config.videohostSessionPath) return;
-    if (await recoveryInProgress(config.databasePath)) return;
+// Keeps a destination's shared session (Destination.session.keepAlive) from idling out
+// and records its health; the history answers how long the destination keeps a session
+// alive. A logged-out session pauses the campaign with its reason instead of logging in
+// again, which would log the other device out; once a recovery restored it, the campaign
+// resumes. Destinations without a shared session are left alone.
+export async function keepDestinationSessionAlive(config: PipelineConfig, now = new Date(),
+    // The destination's own light session check (a test passes one).
+    check?: () => Promise<DestinationSessionCheck>): Promise<void> {
+    if (!config.networkUploadsEnabled) return;
     const database = new PipelineDatabase(config.databasePath);
     try {
-        if ((config.uploadProvider ?? database.getActiveUploadProvider()) !== "videohost") return;
-        const before = database.getCampaignControl();
-        let result;
+        const provider = config.uploadProvider ?? database.getActiveUploadProvider();
+        if (await recoveryInProgress(config.databasePath, provider)) return;
+        let destination;
         try {
-            result = await check(config.videohostSessionPath);
+            destination = await createProviderUploader(config, provider);
         } catch (error) {
-            database.recordProviderSessionEvent({ provider: "videohost", kind: "keepalive_error",
+            // A broken sites file or plug-in build: the session's health is unknown.
+            database.recordProviderSessionEvent({ provider, kind: "keepalive_error",
                 note: error instanceof Error ? error.message : String(error) }, now);
             return;
         }
-        database.recordProviderSessionEvent({ provider: "videohost", kind: "keepalive", loggedIn: result.loggedIn,
+        const keepAlive = destination.session.keepAlive;
+        if (!keepAlive) return;
+        const { label } = keepAlive, advice = destination.session.lostAdvice;
+        const before = database.getCampaignControl();
+        let result;
+        try {
+            result = await (check ?? (() => destination.session.check()))();
+        } catch (error) {
+            database.recordProviderSessionEvent({ provider, kind: "keepalive_error",
+                note: error instanceof Error ? error.message : String(error) }, now);
+            return;
+        }
+        database.recordProviderSessionEvent({ provider, kind: "keepalive", loggedIn: result.loggedIn,
             fingerprint: result.fingerprint, passwordLoginAt: result.passwordLoginAt, note: result.note }, now);
-        if (await recoveryInProgress(config.databasePath)) return;
+        if (await recoveryInProgress(config.databasePath, provider)) return;
         const manuallyHeld = await access(path.join(path.dirname(config.databasePath), "user-pause.json")).then(() => true, () => false);
-        const recovery = await readRecoveryState(config.databasePath);
+        const recovery = await readRecoveryState(config.databasePath, provider);
         const control = database.getCampaignControl();
         if (result.loggedIn && !manuallyHeld && (!recovery.status || recovery.status === "healthy")
             && before.state === "paused" && before.resumeAt === null
-            && before.attentionReason?.startsWith("VideoHost ") && before.attentionReason.includes(SESSION_LOST_ADVICE)
+            && before.attentionReason?.startsWith(`${label} `) && before.attentionReason.includes(advice)
             && control.updatedAt === before.updatedAt && control.attentionReason === before.attentionReason
             && control.state === "paused") {
             database.setCampaignState("running", now);
-            console.log(JSON.stringify({ event: "videohost-session-recovered", fingerprint: result.fingerprint, campaign: "running" }));
+            console.log(JSON.stringify({ event: `${provider}-session-recovered`, fingerprint: result.fingerprint, campaign: "running" }));
         }
         if (!result.loggedIn && database.getCampaignControl().state === "running") {
-            database.pauseForAttention(`VideoHost shared session is logged out (${result.note}); ${SESSION_LOST_ADVICE}`, now);
-            console.log(journalPriority("error") + JSON.stringify({ event: "videohost-session-lost", note: result.note, fingerprint: result.fingerprint }));
-            notifyDesktop("VideoHost session lost: pipeline paused", `${result.note}. Run: npm run vhost:connect-iphone`, true);
+            database.pauseForAttention(`${label} shared session is logged out (${result.note}); ${advice}`, now);
+            console.log(journalPriority("error") + JSON.stringify({ event: `${provider}-session-lost`, note: result.note, fingerprint: result.fingerprint }));
+            notifyDesktop(`${label} session lost: pipeline paused`, `${result.note}. Run: ${keepAlive.restoreCommand}`, true);
         }
     } finally {
         database.close();
@@ -76,6 +87,17 @@ function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
         }
         signal.addEventListener("abort", done, { once: true });
     });
+}
+
+// The destination uploads go to: the configured one, else the ledger's active one.
+function activeDestination(config: PipelineConfig): string {
+    if (config.uploadProvider) return config.uploadProvider;
+    const database = new PipelineDatabase(config.databasePath);
+    try {
+        return database.getActiveUploadProvider();
+    } finally {
+        database.close();
+    }
 }
 
 function confirmationsAreDue(config: PipelineConfig): boolean {
@@ -154,8 +176,8 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     const keepalive = () => {
         if (keepingAlive || signal.aborted) return;
         keepingAlive = true;
-        void keepVideoHostSessionAlive(config).catch((error: unknown) => {
-            console.error(journalPriority("error", 2) + JSON.stringify({ event: "videohost-keepalive-error", error: String(error) }));
+        void keepDestinationSessionAlive(config).catch((error: unknown) => {
+            console.error(journalPriority("error", 2) + JSON.stringify({ event: "session-keepalive-error", error: String(error) }));
         }).finally(() => { keepingAlive = false; });
     };
     keepalive();
@@ -191,14 +213,14 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     let waitingForRecovery = false;
     while (!signal.aborted) {
         try {
-            if (await recoveryInProgress(config.databasePath)) {
+            if (await recoveryInProgress(config.databasePath, activeDestination(config))) {
                 waitingForRecovery = true;
                 await wait(1_000, signal);
                 continue;
             }
             if (waitingForRecovery) {
                 waitingForRecovery = false;
-                await keepVideoHostSessionAlive(config);
+                await keepDestinationSessionAlive(config);
             }
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
                 const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
