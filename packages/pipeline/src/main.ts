@@ -71,6 +71,16 @@ function assertCampaignIdle(config: PipelineConfig): void {
     }
 }
 
+// A destination this deployment configures (the sites file's "destinations"): only such
+// a destination can become the active one or be checked.
+async function requireConfiguredDestination(requested: string): Promise<void> {
+    assertUploadProvider(requested);
+    const configured = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath());
+    if (!configured.some((destination) => destination.id === requested)) {
+        throw new Error(`The sites file names no destination "${requested}"`);
+    }
+}
+
 // "all", or one of the sites the sites file lists.
 function campaignProvider(value: string | null): CampaignProviderFilter {
     const choices = ["all", ...sourceSiteIds()];
@@ -361,12 +371,7 @@ async function main(): Promise<void> {
             const requested = option(args, "--provider");
             if (requested !== null) {
                 requireApply(args);
-                assertUploadProvider(requested);
-                // Only a destination this deployment configures can become the active one.
-                const configured = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath());
-                if (!configured.some((destination) => destination.id === requested)) {
-                    throw new Error(`The sites file names no destination "${requested}"`);
-                }
+                await requireConfiguredDestination(requested);
                 if (database.campaignIsActive()) throw new Error("Stop the campaign worker before switching the upload provider");
                 database.setActiveUploadProvider(requested);
             }
@@ -380,7 +385,7 @@ async function main(): Promise<void> {
             // Read-only: composed metadata versus every phrase the provider
             // rejected before. The campaign applies the same check before upload.
             const requested = option(process.argv.slice(3), "--provider") ?? database.getActiveUploadProvider();
-            assertUploadProvider(requested);
+            await requireConfiguredDestination(requested);
             const candidates = database.list().filter((recording) => !["upload_verified", "cleanup_eligible"].includes(recording.state)
                 && database.getUploadMetadata(recording.id));
             const findings = [];
