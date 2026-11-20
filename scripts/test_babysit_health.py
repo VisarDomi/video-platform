@@ -27,8 +27,8 @@ class HealthClassificationTests(unittest.TestCase):
             CREATE TABLE manual_pieces(recording_id TEXT,part TEXT,reason TEXT);
             CREATE TABLE worker_heartbeat(id INTEGER,updated_at TEXT);
             CREATE TABLE upload_attempts(status TEXT);
-            INSERT INTO recordings VALUES ('old-loss','blocked','videohost removed video 100 after upload',NULL);
-            INSERT INTO provider_removals VALUES ('old-loss','videohost','100','provider copy removed','2026-10-01T00:00:00Z');
+            INSERT INTO recordings VALUES ('old-loss','blocked','form-host removed video 100 after upload',NULL);
+            INSERT INTO provider_removals VALUES ('old-loss','form-host','100','provider copy removed','2026-10-01T00:00:00Z');
             INSERT INTO recordings VALUES ('short-a','short_waiting',NULL,NULL),('short-b','short_joined',NULL,NULL);
             INSERT INTO short_parts VALUES ('batch'),('batch');
             INSERT INTO worker_heartbeat VALUES (1,'2026-11-01T00:00:00Z');
@@ -75,7 +75,7 @@ class HealthClassificationTests(unittest.TestCase):
 
     def test_new_removed_copy_is_not_hidden_by_old_recording_acknowledgement(self):
         self.acknowledge()
-        self.db.execute("INSERT INTO provider_removals VALUES ('old-loss','videohost','200','new copy removed','2026-11-01T00:00:00Z')")
+        self.db.execute("INSERT INTO provider_removals VALUES ('old-loss','form-host','200','new copy removed','2026-11-01T00:00:00Z')")
         self.db.commit()
         health = self.health()
         self.assertEqual([r["remote_id"] for r in health["unacknowledged_provider_removals"]], ["200"])
