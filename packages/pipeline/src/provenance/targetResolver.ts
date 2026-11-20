@@ -8,14 +8,19 @@ import type { RecordingInput, RecordingProvenance } from "../domain/types.js";
 // the site's pages for it (the catalog's sourceLinks). The pipeline keeps no
 // catalog-matching logic and no site addresses of its own.
 
-// One resolution: the channel's ID and label and, from a site whose catalog has them,
-// its pages (channelUrl; aliasUrl when the label is a name of its own).
+// One resolution: the channel's ID and label, and its pages (channelUrl; aliasUrl when the
+// label is a name of its own), null for a site whose catalog gives none. Absent pages mean
+// a server older than this pipeline.
 export interface ResolvedTarget {
     readonly id: string;
     readonly label: string;
-    readonly channelUrl?: string;
+    readonly channelUrl?: string | null;
     readonly aliasUrl?: string | null;
 }
+
+// A server that answers identities but not pages: older than this pipeline (deploy the
+// server first). Nothing is stored; the recording is admitted on a later step.
+export class SourcePagesUnavailableError extends Error {}
 
 export interface TargetResolverConfig {
     readonly serverUrl?: string;
@@ -48,10 +53,12 @@ function defaultServerResolver(serverUrl: string): ProviderIdentifierResolver {
                 try {
                     const parsed = JSON.parse(body) as { id?: unknown; label?: unknown; channelUrl?: unknown; aliasUrl?: unknown };
                     if (typeof parsed.id === "string" && typeof parsed.label === "string") {
+                        const page = (value: unknown) => typeof value === "string" || value === null ? { value } : null;
+                        const channel = page(parsed.channelUrl), alias = page(parsed.aliasUrl);
                         resolve({
                             id: parsed.id, label: parsed.label,
-                            ...(typeof parsed.channelUrl === "string" ? { channelUrl: parsed.channelUrl } : {}),
-                            ...(typeof parsed.aliasUrl === "string" || parsed.aliasUrl === null ? { aliasUrl: parsed.aliasUrl } : {}),
+                            ...(channel ? { channelUrl: channel.value as string | null } : {}),
+                            ...(alias ? { aliasUrl: alias.value as string | null } : {}),
                         });
                     } else {
                         resolve(null);
@@ -95,6 +102,9 @@ export class TargetCatalogResolver {
                 reason: "identifier_not_resolved_by_server",
                 updatedAt: timestamp,
             };
+        }
+        if (resolved.channelUrl === undefined) {
+            throw new SourcePagesUnavailableError(`The server resolved ${recording.provider} "${observedIdentifier}" without its pages: it is older than this pipeline`);
         }
         // A site whose catalog gives no pages leaves the recording for review: its
         // description must name its source.

@@ -1,4 +1,4 @@
-import { destinationFacts } from "../upload/destinationFacts.js";
+import { settleUnsubmitted } from "../upload/destinationFacts.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, rename } from "node:fs/promises";
@@ -246,8 +246,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
         }
         const recovery = [...database.recoverInterruptedUploads(),
             // Never-submitted attempts published nothing: back in the queue now.
-            ...database.settleUnsubmittedAttempts(database.getActiveUploadProvider(),
-                (await destinationFacts(database.getActiveUploadProvider())).creationBoundary).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
+            ...(await settleUnsubmitted(database)).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const worker = new CampaignWorker(
             database,

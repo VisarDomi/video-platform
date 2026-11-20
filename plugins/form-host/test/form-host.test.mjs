@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { MetadataRejectedError, ProviderSessionLostError, SDK_VERSION } from 'sdk';
+import { HumanActionRequiredError, MetadataRejectedError, ProviderSessionLostError, SDK_VERSION } from 'sdk';
 import { MediaLibrary, SimClock, prepAll, startSimulator } from 'simulator';
 import { destination, pages, readConfig } from '../dist/index.js';
 
@@ -168,6 +168,10 @@ test('a dropped chunk is sent again under its index', async (t) => {
     assert.equal(events('video-created').length, 1);
     assert.deepEqual(events('chunk').map((e) => e.index), [...Array(Math.ceil(job.sizeBytes / 65536)).keys()], 'every index stored once, in order');
     assert.ok(outcome.receipt.transmittedBytes >= job.sizeBytes + 65536, 'the dropped chunk counts as sent');
+    // Every send is recorded before it leaves, the dropped one too: the core bills them all.
+    const sends = job.progress.filter(([phase]) => phase === 'file_uploading');
+    assert.equal(sends.length, Math.ceil(job.sizeBytes / 65536) + 1);
+    assert.equal(sends.at(-1)[1], outcome.receipt.transmittedBytes);
 });
 
 test('a chunk that keeps failing stops the transfer before the metadata form', async (t) => {
@@ -178,6 +182,7 @@ test('a chunk that keeps failing stops the transfer before the metadata form', a
     const job = request(artifact, '2026-06-01 120000 court-three');
     await assert.rejects(host.upload(job), /chunk 2 of \d+ failed 2 times/);
     assert.ok(!job.progress.some(([phase]) => phase === 'metadata_submitting'));
+    assert.equal(job.progress.filter(([phase]) => phase === 'file_uploading').length, 3, 'chunk 1, then chunk 2 twice: all recorded as sent');
     assert.equal(events('video-created').length, 0);
 });
 
@@ -226,4 +231,23 @@ test('a removed video is missing; a cached upload page is inconclusive', async (
     clock.set(EPOCH + 510_000);
     await host.session.check(); // The first request in the window fills the cache.
     await assert.rejects(host.session.check(), /shared cache/);
+});
+
+test('a list or login page from a shared cache proves nothing: no "absent", no refused login', async (t) => {
+    const { clock, make, sim, control } = await start(t, { faults: [
+        { type: 'cacheWindow', at: 500, until: 600, path: '/my/videos/' },
+        { type: 'cacheWindow', at: 700, until: 800, path: '/login/' },
+    ] });
+    const host = make();
+    await host.withSession(async () => {});
+    clock.set(EPOCH + 510_000);
+    // The first scan fills the cache; the second (the stability check) reads it back.
+    await assert.rejects(host.findUploadedCopy('2026-06-01 120000 x'), /shared cache/);
+    clock.set(EPOCH + 610_000);
+    assert.deepEqual(await host.findUploadedCopy('2026-06-01 120000 x'), { kind: 'not_found' });
+
+    clock.set(EPOCH + 710_000);
+    await fetch(`${sim.urls['form-host']}/login/`); // Someone else fills the login page's cache.
+    await control('logout', { account: 'coach', revokeRemember: true });
+    await assert.rejects(host.withSession(async () => {}), (error) => /shared cache/.test(error.message) && !(error instanceof HumanActionRequiredError));
 });

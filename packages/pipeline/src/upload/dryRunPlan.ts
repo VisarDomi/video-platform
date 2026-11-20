@@ -20,7 +20,7 @@ export function createDryRunUploadPlan(
     timeZone = "Europe/Tirane",
     monthlyLimitBytes = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES,
     stagingRoot?: string,
-    provider: ActiveUploadProvider = "videohost",
+    provider: ActiveUploadProvider = database.getActiveUploadProvider(),
 ): DryRunUploadItem[] {
     let simulatedReserved = 0;
     const budget = database.uploadBudget(now, timeZone, monthlyLimitBytes);
