@@ -2,7 +2,7 @@ import { destinationFacts } from "../upload/destinationFacts.js";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, rename } from "node:fs/promises";
-import type { PipelineConfig } from "../config.js";
+import { sourcesOf, type PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
@@ -201,7 +201,7 @@ export function campaignStatus(config: PipelineConfig, now = new Date()): unknow
         return {
             ...control,
             uploadBudget: database.uploadBudget(now, config.uploadTimeZone, control.monthlyUploadLimitBytes),
-            trial: database.getCampaignTrialProgress(),
+            trial: database.getCampaignTrialProgress(sourcesOf(config)),
             comparison: database.getComparisonTrial(),
             productionVersion: database.getProductionVersion(),
             productionRolloverRequired: database.getProductionVersion() !== CURRENT_PRODUCTION_VERSION,

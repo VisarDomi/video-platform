@@ -1456,7 +1456,8 @@ export class PipelineDatabase {
             if (active.count > 0) throw new Error("Wait for in-flight work to finish before changing the trial limit");
             const control = this.getCampaignControl();
             if (trialPerProvider !== null && control.trialPerProvider !== null && control.trialFinishedAt === null
-                && this.getCampaignTrialProgress().some((progress) => progress.admitted > trialPerProvider)) {
+                && (this.database.prepare(`SELECT COALESCE(MAX(n), 0) AS most FROM (SELECT COUNT(*) AS n FROM campaign_trial_recordings GROUP BY provider)`)
+                    .get() as { most: number }).most > trialPerProvider) {
                 throw new Error("Trial limit cannot be lower than the number already admitted");
             }
         }
@@ -1479,14 +1480,17 @@ export class PipelineDatabase {
         });
     }
 
-    getCampaignTrialProgress(): Array<{ provider: string; admitted: number; recordings: Array<{ id: string; state: string }> }> {
+    // Per source site: the ones given, in their order (the pipeline's sources, as the sites
+    // file lists them), then any other site that has trial recordings, so none is left out.
+    getCampaignTrialProgress(sources: readonly string[]): Array<{ provider: string; admitted: number; recordings: Array<{ id: string; state: string }> }> {
         const rows = this.database.prepare(`
             SELECT t.recording_id AS id, t.provider, CASE WHEN p.status IN ('missing','unavailable') THEN 'source_missing' ELSE COALESCE(r.state, 'source_missing') END AS state
             FROM campaign_trial_recordings t LEFT JOIN recordings r ON r.id = t.recording_id
             LEFT JOIN local_source_presence p ON p.recording_id=t.recording_id
             ORDER BY t.admitted_at, t.recording_id
         `).all() as unknown as Array<{ id: string; provider: string; state: string }>;
-        return ["tslive", "ladder", "fmp4"].map((provider) => ({
+        const listed = [...new Set([...sources, ...rows.map((row) => row.provider)])];
+        return listed.map((provider) => ({
             provider,
             admitted: rows.filter((row) => row.provider === provider).length,
             recordings: rows.filter((row) => row.provider === provider).map(({ id, state }) => ({ id, state })),
