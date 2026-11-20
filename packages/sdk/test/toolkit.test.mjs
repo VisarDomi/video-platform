@@ -60,10 +60,10 @@ test("a missing playlist is recognized by brand, also from another copy of the c
 // Moved from shared/test/pins.test.mjs with the same assertion (the helper moved here so
 // the core and the catalogs share it).
 test("pin: the names a listed target answers to: ID, label, former names, trimmed, unique", () => {
-    const fmp4 = { id: "20000002", label: "synthetic_room" };
-    assert.deepEqual(targetMembershipIdentifiers(fmp4, [" old_room ", "synthetic_room", ""]),
+    const room = { id: "20000002", label: "synthetic_room" };
+    assert.deepEqual(targetMembershipIdentifiers(room, [" old_room ", "synthetic_room", ""]),
         ["20000002", "synthetic_room", "old_room"]);
-    assert.deepEqual(targetMembershipIdentifiers(fmp4), ["20000002", "synthetic_room"]);
+    assert.deepEqual(targetMembershipIdentifiers(room), ["20000002", "synthetic_room"]);
 });
 
 test("a list knows an entry by its ID, or by its label while it has none", () => {

@@ -17,7 +17,7 @@ files, `~/.local/share/video-services/session/<account>.json` (home-relative, wh
 serializes plus `lastWriteMs`, durably (temporary file, fsync, rename, directory
 fsync), one save at a time per account. A site's consumers read it through
 `ctx.credentials` (the account the sites file names) on every use, with `readAtMs` and
-`writtenAtMs`; the TsLive plug-in turns them into the 401 diagnostics (`ttlAtReadSec`,
+`writtenAtMs`; a site's plug-in may turn them into its 401 diagnostics (`ttlAtReadSec`,
 `tokenAgeMs`).
 
 ## The sites registry

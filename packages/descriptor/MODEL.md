@@ -170,7 +170,7 @@ reclaim. Evidence:
 
 ## Near-128K benchmark
 
-- Source: `~/Videos/downloads/tslive/edited/2026-02-04 120231 channel-2248/playlist.m3u8`
+- Source: a 1,840-second edited live recording (`~/Videos/downloads/<site>/edited/<recording>/playlist.m3u8`)
 - Remux: stream copy to MP4; source media is not transcoded
 - MP4 duration: 1,840.025667 seconds
 - MP4 size: 778,657,307 bytes (743 MiB)

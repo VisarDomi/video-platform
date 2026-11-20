@@ -73,7 +73,7 @@ test('every production browser launch keeps Chromium\'s sandbox', () => {
             seen++;
             if (!/\bchromiumSandbox\s*:\s*true\b/.test(launch.call)) unsandboxed.push(`${relative}:${source.slice(0, launch.index).split('\n').length}`);
         }
-        // The VideoHost uploader launches through an injectable function.
+        // An uploader may launch through an injectable function.
         for (const match of source.matchAll(/this\.launchContext\(/g)) {
             seen++;
             const call = launches(source.slice(match.index).replace(/^this\.launchContext\(/, 'chromium.launch('))[0]?.call ?? '';

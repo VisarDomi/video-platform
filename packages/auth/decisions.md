@@ -10,16 +10,14 @@ renewals, the record the session is stored as, `classify(error)` and
 loops, the hedging, the save queue and every re-login decision, taken from
 `classify()`: `reauthenticate` and `verification` sign in again (a verification
 request names the site in its warning), `needs-attention` stops automatic sign-ins,
-anything else is an outage that keeps the session and retries. TsLive's code is in
-`private/plugins/tslive/src/auth/` (its browser owner, Google sign-in and the phone's
-token family).
+anything else is an outage that keeps the session and retries. A real site's sign-in
+(a browser that owns the login, a third-party sign-in, a phone's own token family) lives
+in its plug-in.
 
-## TsLive token lifetimes and refresh cadence
+## Token lifetimes and refresh cadence
 
-`private/plugins/tslive/src/auth/constants.ts` holds the external lifetimes:
-`TSLIVE_SESSION_TOKEN_TTL_S = 3600` (access token, `TsLive-ST`) and
-`TSLIVE_STREAM_TOKEN_TTL_S = 10` (stream tokens `tt`/`ttu`/`tte`). Each refresh
-cadence is half its TTL: stream tokens every 5 seconds, the session every 30
+A site's plug-in holds its external lifetimes, for example a one-hour access token and
+ten-second stream tokens. Each refresh cadence is half its TTL: stream tokens every 5 seconds, the session every 30
 minutes. The stream-token cadence runs from the start of each refresh, so a slow
 answer does not delay the next one. A refresh unanswered after 1 second gets a
 second, parallel request and the first answer wins (each bounded by 10 seconds);
@@ -27,13 +25,12 @@ a failed refresh is retried after 1 second. The usual failure is one request tha
 hangs while a fresh one answers in a fraction of a second; abandoning the slow
 request instead would also cut off a merely slow API. Stream-token requests do
 not go through the auth request queue, which runs one request at a time. A session refresh also returns a replacement refresh token
-(`TsLive-RT`) when TsLive issues one; a 401 or 403 from the refresh falls back to
-a browser login.
+when the site issues one; a 401 or 403 from the refresh falls back to a browser login.
 
 The tokens are written to
 `~/.local/share/video-services/session/<account email>.json` through the core's
 `CredentialStore` (`packages/shared`), which the site's consumers read on every call
-for the account the sites file names (TsLive's capture and catalog through
+for the account the sites file names (a site's capture and catalog through
 `ctx.credentials`, with headers from `auth.headersFor`).
 
 ## Persist a rotated refresh token before anything else
@@ -58,7 +55,7 @@ extract tokens; a body-only result would lose them.
 
 ## Login waiters cannot outlive their error handling
 
-The TsLive response and Google popup waits are armed before navigation/clicks and
+A site's sign-in response and third-party popup waits are armed before navigation/clicks and
 have rejection handlers immediately. If a trigger fails or browser cleanup closes
 the context, the unused waiter cannot crash the daemon as an unhandled rejection.
 Awaiting the popup still reports its original failure normally; the existing login

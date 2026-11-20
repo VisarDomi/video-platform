@@ -99,7 +99,7 @@ export interface Destination {
     // The upload carrying this identity, if the destination has one (ambiguous throws).
     findUploadedCopy(identity: string): Promise<{ kind: "found"; remoteId: string; remoteUrl: string } | { kind: "not_found" }>;
     // Runs action in one signed-in session. Whether it may sign in with a password to get
-    // one is the destination's rule (VideoHost never does: that would end the phone's login).
+    // one is the destination's rule (one whose login is shared with a phone never does: that would end the phone's login).
     withSession<T>(action: (session: DestinationSession) => Promise<T>): Promise<T>;
     readonly session: {
         check(): Promise<DestinationSessionCheck>;
