@@ -1,3 +1,4 @@
+import { isSiteId } from "sdk";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -1409,8 +1410,10 @@ export class PipelineDatabase {
         now = new Date(),
         trialPerProvider?: number | null,
     ): CampaignControl {
-        if (!["all", "tslive", "ladder", "fmp4"].includes(providerFilter)) {
-            throw new Error("Campaign provider must be all, tslive, ladder, or fmp4");
+        // Which sites exist is the sites file's business (the CLI checks it); the ledger
+        // keeps "all" or a site ID.
+        if (providerFilter !== "all" && !isSiteId(providerFilter)) {
+            throw new Error(`Campaign provider must be all or a site ID, not ${JSON.stringify(providerFilter)}`);
         }
         if (this.getComparisonTrial() && (providerFilter !== "all" || (trialPerProvider !== undefined && trialPerProvider !== null))) {
             throw new Error("The comparison queue is controlled by selected paths, not provider quotas");
@@ -3044,7 +3047,7 @@ export class PipelineDatabase {
         const known = attempt.metadata_rejection?.split(", ").filter(Boolean) ?? [];
         this.database.prepare("UPDATE upload_attempts SET metadata_rejection = ? WHERE id = ?")
             .run([...new Set([...known, ...phrases])].join(", "), attemptId);
-        this.recordRejectedPhrases("videohost", phrases, attemptId, now);
+        this.recordRejectedPhrases(attempt.provider, phrases, attemptId, now);
     }
 
     recordRejectedPhrases(provider: ActiveUploadProvider, phrases: readonly string[], attemptId: string | null, now = new Date()): void {
@@ -3150,7 +3153,7 @@ export class PipelineDatabase {
             this.recordUploadEvidence(attemptId, { stage: "provider_removed", remoteId, reason }, now);
             const timestamp = now.toISOString();
             this.database.prepare(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
-                VALUES (?, ?, ?, ?, ?)`).run(attempt.recording_id, "videohost",
+                VALUES (?, ?, ?, ?, ?)`).run(attempt.recording_id, attempt.provider,
                 remoteId, reason, timestamp);
             this.database.prepare(`UPDATE upload_attempts SET status = 'failed', error = ?, retry_not_before = started_at WHERE id = ?`)
                 .run(reason, attemptId);
@@ -3256,6 +3259,9 @@ export class PipelineDatabase {
     // Keep configuration changes behind the same paused, settled-worker guard.
     setActiveUploadProvider(provider: ActiveUploadProvider, now = new Date()): CampaignControl {
         assertUploadProvider(provider);
+        if (this.database.prepare("SELECT 1 FROM destinations WHERE id = ? AND state = 'retired'").get(provider)) {
+            throw new Error(`Upload provider ${provider} is retired; a retired destination never becomes active again`);
+        }
         return this.transaction(() => {
             const control = this.getCampaignControl();
             const leaving = control.uploadProvider;

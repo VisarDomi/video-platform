@@ -58,7 +58,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         results.push(...database.recoverInterruptedUploads(now));
         database.recoverAcceptedVerifications(now);
         results.push(...await cleanupAcceptedConversions(database,config,now));
-        results.push(...database.settleUnsubmittedAttempts("videohost", now)
+        results.push(...database.settleUnsubmittedAttempts(database.getActiveUploadProvider(), now)
             .map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" })));
         // One login flow, then every due confirmation is checked on that same
         // authenticated page.
