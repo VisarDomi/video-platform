@@ -1,7 +1,7 @@
 {
   "version": 1,
   "providers": {
-    "videohost": {
+    "form-host": {
       "username": "",
       "password": ""
     }

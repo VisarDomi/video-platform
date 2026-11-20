@@ -20,20 +20,21 @@ recording moves through convert → validate → describe → metadata → uploa
 online verification.
 
 - SQLite (`~/.local/share/video-services/pipeline/pipeline.sqlite`, override
-  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 16) holds recording state,
+  `VIDEO_PIPELINE_DB`; WAL, synchronous FULL, schema 17) holds recording state,
   transition events, leases, artifact hashes, description evidence, provenance,
   metadata, upload reservations/attempts, transmitted-byte accounting and remote
   identity. Recording IDs are the source folder names (datetime + alias).
 - Provenance is resolved by the API server through `GET /api/{provider}/resolve`
-  (TsLive alias registry + live TsLive API, LADDER numeric IDs, Fmp4Live username
+  (each site plug-in's catalog says how: an alias registry, numeric IDs or a username
   lookup; server `https://127.0.0.1:9999`, override `VIDEO_SERVER_URL`), with
   grouped review and reusable manual overrides. Identifiers the server cannot
-  resolve upload with `Source: TODO LATER` (see `docs/upload-recovery.md`).
+  resolve upload with the content profile's placeholder source (see
+  `docs/upload-recovery.md`).
 - Public titles are `<descriptive title> [<recording folder>]`, or
   `<descriptive title> [<recording folder> | part N]` for one shape of a split
   recording. Descriptions end with `Recorded:`, `Source:` and an optional
-  `Alias:` line. Tags are only the provider tag (`tslive`, `ladder`, `fmp4live`)
-  and `live`.
+  `Alias:` line. The footer and the tags come from the content profile (the
+  tennis profile: the site's ID and `tennis`).
 - Upload identity is the local ledger plus the captured provider video ID and
   the exact bracketed title suffix; the model-written title is never used to
   find a video.
@@ -53,11 +54,9 @@ online verification.
   retries automatically at the next release; it needs no manual resume.
   `campaign:status` includes `uploadBudget` with the local day, released limit,
   spent, reserved and remaining bytes.
-- VideoHost file transfers use the site's own upload script with chunks capped at
-  4 MiB. After 60 seconds without byte progress/response, the current request
-  retries at the same index, keeping accepted chunks. Byte-level progress counts
-  even below one displayed percent. Retries are bounded by three attempts per
-  chunk and the durable upload reservation; see [upload recovery](docs/upload-recovery.md).
+- File transfers belong to the destination's plug-in. It reports byte progress,
+  which the ledger records durably, and the core decides what a failure means from
+  the destination's creation boundary; see [upload recovery](docs/upload-recovery.md).
 - Network commands require `VIDEO_PIPELINE_NETWORK_UPLOADS=1`. The managed
   worker verifies due uploads inline.
 
@@ -97,7 +96,7 @@ dropped**. Source folders and their playlists are never modified.
   destination's minimum enter automatic same-streamer joining (below).
   Every shape is converted; small pieces do not become manual review items.
 - **Size.** Each shape is scaled until it covers 1920×1080: at least 1920 wide
-  **and** 1080 tall (VideoHost makes its 1080p version only from a source at least
+  **and** 1080 tall (a video host makes its 1080p version only from a source at least
   1920 wide, and names it by height; 4:3 becomes 1920×1440), keeping its aspect
   ratio, and never smaller than its largest picture: 1440p/4K keep their size. No crop, no
   padding; square pixels; zscale Lanczos, libx264 slow/CRF 16/yuv420p.
@@ -131,8 +130,8 @@ dropped**. Source folders and their playlists are never modified.
   skew, not whether an upstream camera/microphone feed was originally in sync.
 - **Limits.** A short upload waits for automatic joining; other artifacts
   outside the active provider's limits are blocked, judged on their own
-  duration/size. VideoHost takes two
-  minutes to 10 GB at any length.
+  duration/size. The limits are the destination plug-in's own
+  (`DestinationPlugin.policy`).
 - Local work without a `resolution-policy-v6` assessment is reset and
   converted again; uploaded recordings are not touched. The local-stage lease
   is 12 hours.
@@ -320,7 +319,7 @@ npm run campaign:resume -w pipeline
 npm run campaign:pause -w pipeline
 ```
 
-The provider filter may be `all`, `tslive`, `ladder`, or `fmp4`; ordering is always
+The provider filter may be `all` or one of the sites file's site IDs; ordering is always
 oldest first. The worker rereads paused/running intent between every durable
 stage. `campaign:step` advances at most one admission, local stage, or upload
 and is meant for bounded integration testing.
@@ -371,8 +370,8 @@ bandwidth accounting remain in the ledger; a removed copy is no longer backup ev
 npm run campaign:configure -w pipeline -- --provider all --trial-per-provider 10 --apply
 ```
 
-With a cap, the worker admits at most N recordings per provider (tslive, ladder,
-fmp4), oldest eligible first; queued work also consumes slots and cannot bypass
+With a cap, the worker admits at most N recordings per source site, oldest
+eligible first; queued work also consumes slots and cannot bypass
 older sources. Slots persist across restarts, pauses, retries and missing
 sources; failures and uncertain uploads keep their slot. Once every admitted
 recording is verified, the campaign pauses; a shortfall or failed/blocked slot
@@ -411,17 +410,18 @@ frame-fidelity test or human quality approval.
 
 ## Upload providers
 
-The destination is VideoHost. SQLite stores that intent in
-`campaign_control.upload_provider`; the credentials file holds secrets only. Inspect it
-while the campaign is paused:
+Destinations are the sites file's `destinations` entries, each a plug-in (see
+`packages/sdk/src/destination.ts`); a new ledger starts with the first. SQLite stores
+the active one in `campaign_control.upload_provider`; the credentials file holds
+secrets only. Inspect or switch it while the campaign is paused:
 
 ```sh
 npm run upload-provider -w pipeline
-npm run upload-provider:set -w pipeline -- --provider videohost
+npm run upload-provider:set -w pipeline -- --provider DESTINATION
 ```
 
-VideoHost is the only upload destination. Its verification receipts, removal bans and
-shared session remain authoritative.
+A switch waits until the leaving destination has no upload in flight and no
+confirmation pending; a retired destination never becomes active again.
 
 Credentials live in `~/.config/video-services/upload-providers.json` (chmod
 600 is enforced; format in `config/upload-providers.example.json`; override
@@ -438,85 +438,6 @@ retry) is not found by an exact lookup. A submitted upload is never accepted on
 submit alone: durable complete-file/metadata acceptance and a captured ID release
 only the matching conversion; playback is checked daily; seven days is only the re-upload gate. Recovery rules are in `docs/upload-recovery.md`.
 
-### VideoHost
-
-Uploads are public, in the Webcam category. The profile is `VIDEO_VIDEOHOST_BROWSER_PROFILE` (else
-`browser/` beside the configured pipeline database, normally
-`~/.local/share/video-services/pipeline/browser/`). This directory belongs only
-to the pipeline and its coordinated session recovery. It is persistent across
-reboots; never point it at the general agent or everyday Chromium profile. The
-factory rejects those reserved paths and aliases. No live general profile is
-copied, moved or closed during setup: the existing shared VideoHost JSON supplies
-only its two authorized cookies. Headful service Chromium stays on Xvfb `:111`,
-with a fixed GNOME encrypted cookie backend and without Playwright's basic/mock
-keychain defaults. VideoHost
-keeps one session per account, so the pipeline and the uploads iPhone app
-share one session, stored in `~/.config/video-services/videohost-session.json`
-(chmod 600; override `VIDEO_VIDEOHOST_SESSION_FILE`). The pipeline never signs
-in on its own: an upload or the worker's ten-minute keep-alive check that finds
-an explicit authentication redirect pauses the campaign. HTTP failures and unexpected
-pages remain transient errors; they do not prove logout and cannot replace the stored
-PHP session with an anonymous cookie. A later authenticated keep-alive automatically
-resumes a campaign held only for that session failure. Manual pauses and other holds
-remain paused, including a manual pause issued while the check is in flight.
-
-```sh
-npm run vhost:connect-iphone -w pipeline
-```
-
-pauses a running campaign, waits for the current upload and the browser
-profile, reuses the session, copies it into the phone app through
-the Mac (`VIDEO_MAC_SSH_TARGET`, `VIDEO_MAC_KNOWN_HOSTS`, `VIDEO_IPHONE_DEVICE`),
-checks both, and resumes the campaign if it was running or paused for a lost
-session.
-
-The default command reuses an existing authenticated session. If every saved copy is
-rejected, the agent is authorized to perform coordinated recovery without asking again:
-`npm run vhost:connect-iphone -w pipeline -- --allow-password-login`. It creates one PC
-login and immediately shares it with the uploads app; it never logs in independently on the
-phone or uses the site's member cookie. A manually paused campaign remains paused throughout.
-
-`video-vhost-session.timer` checks authentication every ten minutes even when
-the user has manually stopped the upload worker. A fresh worker heartbeat
-suppresses duplicate healthy checks, while a known authentication loss or pending phone
-delivery remains recoverable. Requests use cache-busting nonces and no-cache headers;
-cached responses and network failures cannot authorize login. The managed job requires
-two matching authentication failures, inspects retained phone cookies first, and performs
-coordinated recovery automatically when needed. A failed handoff is retried using the
-already valid PC session; it never causes another password login. Private recovery state
-and kernel locking survive crashes and prevent concurrent login attempts. This job never
-changes campaign intent or starts uploads. Session reports mark checks older than fifteen minutes unknown and do
-not claim that an invalidated session necessarily expired by age.
-
-The phone bridge uses the Mac's `apple-tool devicectl` entry point and existing pairing
-repair, with bounded SSH/device operations. It does not invoke the Xcode launcher stubs
-that repeat component setup. `vhost-session-keepalive --apply --sync-phone` with
-`VIDEO_VHOST_AUTO_RECOVER=1` exercises delivery without replacing a valid PC login.
-`pipeline/videohost-recovery.json` records pending delivery/backoff without cookie values.
-
-The transfer follows the page's own progress bar and fails after ten minutes
-without progress. VideoHost creates the video only when the metadata form is
-submitted, so a failure before that click is a plain failure with no weekly
-hold; after it, the pipeline tries for about a minute to read the new video's
-ID from My Videos (otherwise reconciliation finds it by its title suffix).
-Verification opens `/edit-video/<id>/`, follows the published `/video/<id>/`
-link and probes the actual player MP4 sources, highest label first, with download
-links as fallback, for a Full-HD
-version (at least 1080 on its short side). A video still processing is checked again after 24 hours.
-An advertised Full-HD link whose playback probe fails is recorded as unavailable and
-also retried after 24 hours, even when a lower tier works; it is never verified from
-the label alone or reported as having no Full-HD tier. Words
-VideoHost silently replaced in the stored title/description are learned as
-rejected phrases.
-
-Read-only reports on the shared session (they never sign in):
-
-```sh
-npm run vhost:session-report -w pipeline
-npm run vhost:uploads -w pipeline -- --limit 25
-npm run vhost:tiers -w pipeline -- --record /absolute/tiers.jsonl
-```
-
 ## Rejected metadata phrases
 
 The metadata guard avoids learned rejected phrases as case-insensitive substrings, so
@@ -525,7 +446,7 @@ innocent words trip them: "surface" (ace), "planet" (net),
 form was never validated and no video exists. The pipeline therefore:
 
 - learns every refused phrase per provider in SQLite (`rejected_phrases`), plus
-  the words VideoHost silently replaced in a published video,
+  the words a destination silently replaced in a published video,
 - appends all learned phrases to the description prompt (the base prompt file is
   unchanged; the appended text is part of the prompt version),
 - checks composed metadata locally before any reservation or byte is sent. A
@@ -536,7 +457,7 @@ form was never validated and no video exists. The pipeline therefore:
   no weekly duplicate hold, no reconcile) and returns the recording to
   upload-ready, where that check runs again.
 
-`npm run metadata:check -w pipeline [-- --provider videohost]` is the
+`npm run metadata:check -w pipeline [-- --provider DESTINATION]` is the
 read-only version of that check over every composed, not-yet-verified recording
 (default: the active provider). Visibility labels on published videos ("limited
 visibility due to : …", naming a topic) are informational only and never affect retries.
@@ -651,51 +572,3 @@ VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run upload-one -w pipeline -- 
 
 VIDEO_PIPELINE_NETWORK_UPLOADS=1 DISPLAY=:111 npm run reconcile-uploads -w pipeline
 ```
-
-## Destination retirement and restored sources
-
-Schema 14 uses destination-neutral `upload_*` lifecycle states. It retires the removed
-destination's active receipts, attempts and inventory into `retired_destination_audit`;
-they cannot satisfy the upload identity guard or authorize cleanup. Their original byte
-accounting remains charged. Existing VideoHost copies, pending confirmations and removal
-bans are preserved. Sources without a VideoHost copy re-enter `server_ready`, or
-`short_waiting` below two minutes, for the normal conversion and upload stages. The
-migration is transactional and does not resume a paused campaign. Before applying it to
-the live ledger, take a private SQLite snapshot under `pipeline/history/`.
-
-A recording restored from Trash must return to its exact
-`~/Videos/downloads/<provider>/edited/<recording>/` path, with its playlist and media
-fingerprint unchanged. Desktop staging is not a discovery root. Restored VideoHost-backed
-recordings remain complete; moving them back does not authorize duplicate uploads.
-The `user-pause.json` operational hold keeps `video-pipeline.service` disabled until
-the user explicitly requests resumption. It covers conversion, description and uploading;
-`video-downloader`, `video-server`, `video-auth` and `video-xvfb` keep running normally.
-
-Upload control belongs to this repository's `scripts/pipeline_control.py`.
-Game launch, focus, exit, calibration and benchmarking do not inspect or change
-pipeline state. The owner chooses when to stop or resume it.
-
-The standalone commands are installed in `~/.local/bin` as links to that script:
-
-```bash
-pipeline-force-stop
-pipeline-force-start
-```
-
-To install or restore the links:
-
-```bash
-ln -sfn "$HOME/Documents/work/video/video-platform/scripts/pipeline_control.py" "$HOME/.local/bin/pipeline-force-stop"
-ln -sfn "$HOME/Documents/work/video/video-platform/scripts/pipeline_control.py" "$HOME/.local/bin/pipeline-force-start"
-```
-
-Both commands accept `--dry-run` without changing services or hold files.
-The explicit `heavy-resources-stop/start` controls also retain their wider trader
-model/lab scope; their video stop delegates to this script.
-
-`pipeline-force-stop` applies the bounded stop and persistent hold. `pipeline-force-start` clears `pipeline/user-pause.json` and the matching operational
-`video-pipeline.service.d/90-user-requested-pause.conf` override, reloads systemd, resumes
-campaign intent through the existing built CLI, then enables and starts only
-`video-pipeline.service`. The CLI runs before the unit's startup build to avoid a build
-race. Neither pipeline command affects the downloader, server, auth, display or monitoring schedule.
-Manual stop receipts live in `pipeline/pause-completed.json` alongside the hold; all control code is versioned here.

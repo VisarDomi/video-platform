@@ -1,6 +1,6 @@
 # Upload recovery policy
 
-Applies to VideoHost. An upload's identity is its exact title
+Applies to every destination. An upload's identity is its exact title
 suffix: `[<recording folder>]`, `[<recording folder> | part N]` for one shape of a split recording,
 or the comparison-queue diagnostic `[<recording folder> | production-v6 | <part>]`.
 
