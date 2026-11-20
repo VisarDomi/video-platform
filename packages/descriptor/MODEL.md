@@ -48,18 +48,18 @@ marked "request" set `input_video.fps` per request on the pinned fork.
 
 | Video | Duration | Sampling | Prompt tokens | Wall time | Prompt rate | Peak server VRAM | Result |
 |---|---:|---:|---:|---:|---:|---:|---|
-| `channel-1136` | 12.35 s | 0.5 FPS | 464 | 3.08 s | 199.2 tok/s | 8,488 MiB | success: fractional FPS |
-| `channel-1136` | 12.35 s | 4 FPS | 3,396 | 11.0 s | — | — | success |
-| `channel-1136` | 12.35 s | 8 FPS | 6,720 | 27.8 s | 253.0 tok/s | 8,304 MiB | success |
-| `channel-1136` | 12.35 s | 16 FPS | 13,452 | 55.9 s | 250.0 tok/s | 8,406 MiB | success |
-| `channel-1136` | 12.35 s | native 29.97 FPS | 25,148 | 106.7 s | 243.6 tok/s | 8,430 MiB | success |
-| `channel-1223` | 176.27 s | 1 FPS | 12,272 | 58.5 s | 232.0 tok/s | 8,336 MiB | success |
-| `channel-1223` | 176.27 s | 4 FPS | 47,972 | 219.5 s | 227.2 tok/s | 8,398 MiB | success |
-| `channel-2248` | 1,840.03 s | 1 FPS | 129,014 | 628.2 s | 224.2 tok/s | 8,820 MiB | success: Q8_0 weights + F16 KV |
-| `channel-1136` | 12.35 s | request 0.5 FPS | 553 | 10.08 s | 269.6 tok/s | — | success |
-| `channel-1136` | 12.35 s | request 1 FPS | 961 | 32.27 s | 206.0 tok/s | — | success: quality comparison |
-| `channel-1223` | 176.27 s | request 0.5 FPS | 6,445 | 43.89 s | 215.4 tok/s | — | success: quality comparison |
-| `channel-1223` | 176.27 s | request 1 FPS | 12,361 | 59.81 s | 260.2 tok/s | — | success |
+| `clip-a` | 12.35 s | 0.5 FPS | 464 | 3.08 s | 199.2 tok/s | 8,488 MiB | success: fractional FPS |
+| `clip-a` | 12.35 s | 4 FPS | 3,396 | 11.0 s | — | — | success |
+| `clip-a` | 12.35 s | 8 FPS | 6,720 | 27.8 s | 253.0 tok/s | 8,304 MiB | success |
+| `clip-a` | 12.35 s | 16 FPS | 13,452 | 55.9 s | 250.0 tok/s | 8,406 MiB | success |
+| `clip-a` | 12.35 s | native 29.97 FPS | 25,148 | 106.7 s | 243.6 tok/s | 8,430 MiB | success |
+| `clip-b` | 176.27 s | 1 FPS | 12,272 | 58.5 s | 232.0 tok/s | 8,336 MiB | success |
+| `clip-b` | 176.27 s | 4 FPS | 47,972 | 219.5 s | 227.2 tok/s | 8,398 MiB | success |
+| `clip-c` | 1,840.03 s | 1 FPS | 129,014 | 628.2 s | 224.2 tok/s | 8,820 MiB | success: Q8_0 weights + F16 KV |
+| `clip-a` | 12.35 s | request 0.5 FPS | 553 | 10.08 s | 269.6 tok/s | — | success |
+| `clip-a` | 12.35 s | request 1 FPS | 961 | 32.27 s | 206.0 tok/s | — | success: quality comparison |
+| `clip-b` | 176.27 s | request 0.5 FPS | 6,445 | 43.89 s | 215.4 tok/s | — | success: quality comparison |
+| `clip-b` | 176.27 s | request 1 FPS | 12,361 | 59.81 s | 260.2 tok/s | — | success |
 
 Observations:
 
@@ -119,11 +119,11 @@ Selected: 4/2/1 FPS duration tiers with token-budget adaptation below them
 The comparison used the same Q8_0/F16 configuration, schema, and prompt on two
 persistent remuxes:
 
-- `channel-1136`, 12.35 seconds: 553 prompt tokens at 0.5 FPS, 961 at 1 FPS, and
+- `clip-a`, 12.35 seconds: 553 prompt tokens at 0.5 FPS, 961 at 1 FPS, and
   3,477 at 4 FPS. All three identified the subject, clothing,
   setting, and action. The 4 FPS result added one small detail but did
   not materially change the description; 1 FPS used 72% fewer prompt tokens.
-- `channel-1223`, 176.27 seconds: 6,445 prompt tokens at 0.5 FPS, 12,361 at 1 FPS,
+- `clip-b`, 176.27 seconds: 6,445 prompt tokens at 0.5 FPS, 12,361 at 1 FPS,
   and 48,061 at 4 FPS. The 0.5 FPS result retained the subject, backdrop,
   outfit changes, and action, but 1 FPS described the range of
   clothing more specifically. The 4 FPS result was less specific

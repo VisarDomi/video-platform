@@ -73,15 +73,15 @@ test("an fMP4 restart gets its discontinuity before the map; legacy names are le
     const fmp4 = `#EXTM3U
 #EXT-X-MAP:URI="init.mp4"
 #EXTINF:2,
-0_fmp4_693.ts
+0_live-c_693.ts
 #EXT-X-MAP:URI="init_1.mp4"
 #EXTINF:2,
-1_fmp4_26.ts
+1_live-c_26.ts
 #EXT-X-ENDLIST
 `;
     const result = markCompoundSequenceRestarts(fmp4);
-    assert.deepEqual(result.restartSegmentNames, ["1_fmp4_26.ts"]);
-    assert.match(result.content, /0_fmp4_693\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_1\.mp4"\n#EXTINF:2,\n1_fmp4_26\.ts/);
+    assert.deepEqual(result.restartSegmentNames, ["1_live-c_26.ts"]);
+    assert.match(result.content, /0_live-c_693\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_1\.mp4"\n#EXTINF:2,\n1_live-c_26\.ts/);
 
     const legacy = markCompoundSequenceRestarts(MEDIA_PLAYLIST);
     assert.equal(legacy.content, MEDIA_PLAYLIST);
