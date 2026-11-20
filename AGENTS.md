@@ -1,7 +1,7 @@
 # Video platform
 
 Agent owns repo/recordings; user deletion of originals is normal. Read README.md,
-notes.md, decisions.md and affected package docs; iOS: apps/ios/README.md,
+notes.md, decisions.md and affected package docs; iOS: private/apps/ios/README.md,
 ../../ios-tools/native/README.md; access: ../../../environment/mac-access.md.
 
 - Phone explores; PC backs up. Phone renewal survives expiry/background/network
@@ -25,11 +25,11 @@ notes.md, decisions.md and affected package docs; iOS: apps/ios/README.md,
   scrolling. VOD neighbours pause; TsLive live neighbours play muted. Zoom disables
   carousel navigation; visibility never initiates snapping.
 - FileHost serves original bytes: no transcoding or playback copies. Keep overrides
-  selected only in apps/ios/FileHost. Preserve other providers' shipped engine and
+  selected only in private/apps/ios/FileHost. Preserve other providers' shipped engine and
   shared HLS playlists/segments byte-for-byte; report native codec limits.
 - Codec diagnostic: stable identity/container/Local Network permission within a
   session; stop after each run. Finally uninstall and verify app/process absence:
-  apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private-dir>.
+  private/apps/ios/scripts/check-original-video.py --cleanup --device <UDID> --out <private-dir>.
 - Diagnose source/history, installed artifacts and backend before asking the owner.
   Restore the full causal path, preserving unrelated fixes; verify other providers.
 - Missing originals retain catalogue, remote IDs, upload/removal receipts and

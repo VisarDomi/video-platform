@@ -1,13 +1,13 @@
 # Safari extensions hosted by TsLive
 
-Two Safari web extensions hosted by the TsLive app (`apps/ios`, provider `tslive-live`) that
+Two Safari web extensions hosted by the TsLive app (`private/apps/ios`, provider `tslive-live`) that
 add or remove the open streamer from a PC download list: **LADDER live** (`ladder-live.example`,
 `/api/ladder`) and **FMP4 live** (`fmp4-live.example`, `/api/fmp4`). On a streamer's page each shows a
 fixed top bar with a +/- toggle. The bar shows the website viewer's button: it imports
 `DownloadListButton` and `buttons.css` from the `app` workspace (states and styles are
 described in `packages/app/README.md`), inside a shadow root so the site's styles and the
 button's stay apart. TsLive's own +/- is in the app's native viewer
-(`apps/ios/VideoApp/ViewerOverlay.swift`).
+(`private/apps/ios/VideoApp/ViewerOverlay.swift`).
 
 **Where the sites come in.** The LADDER live and FMP4 live bars are built from their site plug-ins:
 each declares its extension in `extension.json` (key, name, matches, `runAt`, and its page
@@ -112,6 +112,6 @@ node packages/live-extensions/test/filehost-album.mjs # takeover, intrinsic dime
 
 The build writes `manifest.json`, `content.js`, and `background.js` to
 `dist/extension/{ladder-live,fmp4-live,filehost}/` at the repository root.
-`apps/ios/scripts/deploy.py tslive-live sync` builds and stages them into the
+`private/apps/ios/scripts/deploy.py tslive-live sync` builds and stages them into the
 TsLive app's `LADDERLive`, `SCLive` and `FileHost` extension targets. Each needs enabling once in Safari's
 extension settings, with its site allowed.

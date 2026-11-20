@@ -112,7 +112,7 @@ keeps no in-memory cache.
 ## The iPhone apps are native
 
 The iPhone apps (local lists, Video Vault, TsLive) are native lists with a native viewer
-(`apps/ios`, see its `README.md`), not web views around this website, so a change here does
+(`private/apps/ios`, see its `README.md`), not web views around this website, so a change here does
 not reach them. Video Vault's rules (both upload sites in one list, only the pipeline's
 bracketed uploads, the shared VideoHost session) and TsLive's live list are described there.
 

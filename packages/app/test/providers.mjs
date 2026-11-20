@@ -7,7 +7,7 @@ import { testLadderLogin } from './ladder-login.mjs';
 
 // Isolated browser fixtures exercise the built website (the local lists and their web viewer)
 // and the LADDER/FMP4 live Safari extensions, in the system's Chromium (WebKit by opt-in, see
-// support/browser.mjs). The iPhone apps are native (apps/ios).
+// support/browser.mjs). The iPhone apps are native (private/apps/ios).
 const web = 'packages/app/build';
 const browser = await launchPageBrowser({ headless: true });
 const options = { viewport: { width: 428, height: 800 }, hasTouch: true,
