@@ -168,7 +168,8 @@ export function createListRoutes(site: ListSite): Router {
 
     // Read-only resolution for every site: the same resolveIdentifier the add flow uses,
     // without list writes or follow actions. The pipeline consumes this for recording
-    // provenance instead of re-implementing its own catalog-scoped matching.
+    // provenance instead of re-implementing its own catalog-scoped matching, and takes the
+    // site's pages for the target from it (the catalog's sourceLinks) when it has them.
     router.get(`${prefix}/resolve`, async (req, res) => {
         const identifier = typeof req.query.identifier === "string" ? req.query.identifier.trim() : "";
         if (!identifier) {
@@ -179,7 +180,8 @@ export function createListRoutes(site: ListSite): Router {
             if (!resolved) {
                 return res.status(404).json({ error: `Could not resolve: ${identifier}` });
             }
-            res.json({ id: resolved.id, label: resolved.label });
+            const links = catalog.sourceLinks?.(resolved);
+            res.json({ id: resolved.id, label: resolved.label, ...(links ? { channelUrl: links.channelUrl, aliasUrl: links.aliasUrl } : {}) });
         } catch (error) {
             logger.error(`Error resolving ${site.id} identifier`, { error });
             res.status(500).json({ error: "Failed to resolve identifier" });

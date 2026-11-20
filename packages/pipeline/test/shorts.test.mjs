@@ -41,7 +41,11 @@ async function fixture(t) {
     const config = { ...pipelineConfig, databasePath, finalizationDatabasePath, automaticShortsEnabled:true,
         stagingRoot:path.join(root,'artifacts/production-v6'), artifactsRoot:path.join(root,'artifacts'),
         discoveryRoots:['tslive','ladder','fmp4'].map(provider=>({provider,sourceKind:'edited',path:path.join(root,provider,'edited')})), uploadProvider:'videohost', cleanupEnabled:false };
-    const resolver = TargetCatalogResolver.load({ resolveIdentifier:async (_provider, alias) => ({id:alias.startsWith('alice')?'alice-id':alias,label:alias}) });
+    // As the server answers for TsLive (its catalog's sourceLinks).
+    const resolver = TargetCatalogResolver.load({ resolveIdentifier:async (_provider, alias) => {
+        const id = alias.startsWith('alice') ? 'alice-id' : alias;
+        return { id, label: alias, channelUrl: `https://ts-live.example/${id}`, aliasUrl: alias === id ? null : `https://ts-live.example/${alias}` };
+    } });
     let index = 0;
     async function add(alias='alice', pieces=[[64,36,65]]) {
         const id = `2026-01-01 0000${String(index++).padStart(2,'0')} ${alias}`;

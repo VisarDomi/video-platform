@@ -15,17 +15,18 @@ async function rootFixture(t) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-upload-flow-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     // The resolver delegates to the per-provider server capability; the test
-    // injects a stub standing in for GET /api/{provider}/resolve.
+    // injects a stub standing in for GET /api/{provider}/resolve, which also answers the
+    // site's pages (each catalog's sourceLinks, pinned in private/test).
     const resolver = TargetCatalogResolver.load({
         resolveIdentifier: async (provider, identifier) => {
             if (provider === "tslive" && identifier === "old_alias") {
-                return { id: "account-id", label: "current_alias" };
+                return { id: "account-id", label: "current_alias", channelUrl: "https://ts-live.example/account-id", aliasUrl: "https://ts-live.example/current_alias" };
             }
             if (provider === "ladder" && identifier === "68190398") {
-                return { id: "68190398", label: "68190398" };
+                return { id: "68190398", label: "68190398", channelUrl: "https://ladder-live.example/68190398/", aliasUrl: null };
             }
             if (provider === "fmp4" && identifier === "channel-561") {
-                return { id: "226494362", label: "channel-561" };
+                return { id: "226494362", label: "channel-561", channelUrl: "https://fmp4-live.example/226494362", aliasUrl: "https://fmp4-live.example/channel-561" };
             }
             return null;
         },
