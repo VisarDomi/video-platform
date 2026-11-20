@@ -5,6 +5,7 @@ export { parseNativeMediaPlaylist, nativeMediaBoundary, nativeMediaRuns, renderN
     safeNativeMediaName } from "./nativeMedia.js";
 export type { NativeMediaSegment, NativeMediaPlaylist } from "./nativeMedia.js";
 export { authAccountsPath, CredentialStore, servicesHome, servicesStateHome } from "./credentialStore.js";
+export { systemBrowserPath } from "./systemBrowser.js";
 
 export { createLogger, journalPriority } from "./logger.js";
 export { moveToDesktopTrash } from "./desktopTrash.js";

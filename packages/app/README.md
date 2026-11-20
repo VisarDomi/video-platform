@@ -42,12 +42,13 @@ npm ci
 npm run check -w app
 npm run build:app
 npm run build -w live-extensions
-npm exec -w app -- playwright-core install webkit
-npm run test:app:webkit
+npm run test:app:pages
 ```
 
-`test:app:webkit` reads `packages/app/build` and `dist/extension/ladder-live`, so build them
-first. Its WebKit fixtures cover all three local providers (playback and editing controls,
+`test:app:pages` reads `packages/app/build` and `dist/extension/ladder-live`, so build them
+first. It drives the system's Chromium (`/usr/bin/chromium`, or `$VIDEO_CHROMIUM_PATH`), never a
+browser Playwright downloads; set `WEBKIT_EXECUTABLE_PATH` to run it in a WebKit build instead.
+Its fixtures cover all three local providers (playback and editing controls,
 shared scroll settlement) and the download-list button in the LADDER/FMP4 live extensions' bar,
 including ⚠️ for an unreachable PC and LADDER's automatic Login click (before parsing completes, late rendering,
 visibility and repeat-redirect protection). They do not establish physical iPhone momentum

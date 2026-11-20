@@ -12,6 +12,7 @@ import {
 } from "sdk";
 import { downloadListPath, servicesDataRoot } from "./providerLayout.js";
 import { CredentialStore, servicesHome, servicesStateHome } from "./credentialStore.js";
+import { systemBrowserPath } from "./systemBrowser.js";
 
 // The plumbing every service shares to run the sites of a deployment: the sites file,
 // each site's context (logger, store, paths) and the loading of their plug-ins.
@@ -79,6 +80,7 @@ export function siteContext(entry: SiteEntry, plugin: SitePlugin, host: SiteHost
         clock: { now: () => Date.now() },
         ...(host.aliases ? { aliases: host.aliases } : {}),
         credentials: (host.credentials ?? new CredentialStore()).source(entry.account),
+        browser: { executablePath: systemBrowserPath() },
     };
 }
 

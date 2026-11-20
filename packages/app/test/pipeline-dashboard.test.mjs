@@ -5,8 +5,10 @@ import {readFile} from 'node:fs/promises';
 import {chromium,webkit} from 'playwright-core';
 
 const ASSETS=new URL('../../pipeline/dashboard/web/',import.meta.url);
-const engines=[['Chromium',chromium,{executablePath:'/usr/bin/chromium'}],
- ['WebKit',webkit,{executablePath:process.env.WEBKIT_EXECUTABLE_PATH||'/home/visar/.cache/ms-playwright/webkit-2370/pw_run.sh'}]];
+// The system's Chromium; WebKit only by opt-in (WEBKIT_EXECUTABLE_PATH): browsers that
+// Playwright downloads are never used.
+const engines=[['Chromium',chromium,{executablePath:process.env.VIDEO_CHROMIUM_PATH??'/usr/bin/chromium'}],
+ ...(process.env.WEBKIT_EXECUTABLE_PATH?[['WebKit',webkit,{executablePath:process.env.WEBKIT_EXECUTABLE_PATH}]]:[])];
 
 function fixture(){
  const now=new Date().toISOString();
