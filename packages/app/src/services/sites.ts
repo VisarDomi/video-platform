@@ -11,7 +11,8 @@ let loaded: Promise<readonly Site[]> | undefined;
 export function loadSites(): Promise<readonly Site[]> {
 	loaded ??= fetch('/api/sites').then(async (response) => {
 		if (!response.ok) throw new Error(`The site list could not be loaded: ${response.status}`);
-		const { sites } = (await response.json()) as { sites?: Site[] };
+		// An older server answers unknown paths with the page itself: not a list.
+		const { sites } = (await response.json().catch(() => ({}))) as { sites?: Site[] };
 		if (!Array.isArray(sites) || sites.length === 0) throw new Error('The server lists no sites');
 		return sites;
 	}).catch((error: unknown) => {

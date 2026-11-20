@@ -38,10 +38,14 @@ try {
     const local = await browser.newContext(options);
     await mediaFixture(local);
     const writes = [];
+    let sitesAsked = 0;
     await local.route('**/*', route => {
         const request = route.request(), url = new URL(request.url());
         if (request.method() !== 'GET') { writes.push(url.pathname); return route.abort(); }
-        if (url.pathname === '/api/sites') return route.fulfill({ json: { sites: SITES } });
+        // The first answer is an older server's page instead of the list: the site waits and asks again.
+        if (url.pathname === '/api/sites') return sitesAsked++ === 0
+            ? route.fulfill({ contentType: 'text/html', body: '<!doctype html><p>app</p>' })
+            : route.fulfill({ json: { sites: SITES } });
         if (url.pathname === '/api/videos') return route.fulfill({ json: [1,2,3].map(n => ({ filename: `fixture-${n}`, type: 'original', duration: 120, size: 0, isLive: false })) });
         if (/^\/api\/live-[abc]\/member$/.test(url.pathname)) return route.fulfill({ json: { member: false } });
         if (url.pathname.startsWith('/hls/')) return route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: '#EXTM3U\n#EXTINF:120,\nfixture.ts\n#EXT-X-ENDLIST\n' });
@@ -51,6 +55,7 @@ try {
     const localPage = await local.newPage();
     await localPage.goto('https://local.invalid/');
     await localPage.waitForURL('https://local.invalid/videos/live-a');
+    assert.ok(sitesAsked >= 2, 'the site list was asked for again after an unusable answer');
     for (const { id: provider } of SITES) {
         await localPage.goto(`https://local.invalid/videos/${provider}`);
         await localPage.locator('a.video-row').first().click();

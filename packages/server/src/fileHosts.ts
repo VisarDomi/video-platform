@@ -7,7 +7,7 @@ import os from "node:os";
 import { loadFileHostPlugin, parseFileHosts } from "sdk";
 import { servicesDataRoot, sitesFilePath } from "shared";
 import { createFileHostRoutes } from "./api/fileHost.routes.js";
-import { createFileHostLibraryRoutes } from "./api/fileHostLibrary.routes.js";
+import { createFileHostLibraryFallback, createFileHostLibraryRoutes } from "./api/fileHostLibrary.routes.js";
 import { FileHostDownloads } from "./services/fileHostDownloads.js";
 import { MP4Library } from "./services/video/mp4Library.js";
 
@@ -18,9 +18,12 @@ const certificates = path.join(os.homedir(), ".local/share/mkcert/pwa");
 const port = Number(process.env.VIDEO_FILE_HOSTS_PORT ?? 9998);
 const file = sitesFilePath();
 const entries = parseFileHosts(readFileSync(file, "utf8"), file);
+// A deployment without file hosts has no reason to run this service: say so and stop as
+// failed, without systemd restarting it (the unit's RestartPreventExitStatus).
+const NOTHING_TO_SERVE = 78;
 if (entries.length === 0) {
-    console.info(`${file} names no file host; nothing to serve`);
-    process.exit(0);
+    console.error(`${file} names no file host ("fileHosts"); nothing to serve`);
+    process.exit(NOTHING_TO_SERVE);
 }
 
 // "~/..." is the home directory's.
@@ -55,6 +58,7 @@ for (const entry of entries) {
     app.use(createFileHostLibraryRoutes(entry.id, plugin.label, library));
     running.push({ queue, library });
 }
+app.use(createFileHostLibraryFallback(entries.map((entry) => entry.id)));
 const server = https.createServer({
     key: readFileSync(path.join(certificates, "key.pem")),
     cert: readFileSync(path.join(certificates, "cert.pem")),

@@ -105,13 +105,24 @@ def source_evidence(path):
             "size_bytes": size, "file_count": files}
 
 
-def retired_destinations(db):
-    # Destinations the ledger retired (schema 17), and the label their bandwidth keeps:
-    # their receipts are audit history only, never cleanup evidence.
+def trusted_destinations(db):
+    """The destinations whose verified receipts may authorize cleanup: the campaign's
+    active one and those the ledger records as active. A retired destination's receipts
+    (and the "retired" bandwidth label) are audit history only; a destination the ledger
+    has never recorded is not evidence either."""
+    trusted = set()
     try:
-        return {row[0] for row in db.execute("SELECT id FROM destinations WHERE state='retired'")} | {"retired"}
+        row = db.execute("SELECT upload_provider FROM campaign_control WHERE id=1").fetchone()
+        if row and row[0]:
+            trusted.add(row[0])
     except sqlite3.OperationalError:
-        return {"retired"}  # Schema 16: retired destinations' attempts were already moved out.
+        pass
+    try:
+        trusted |= {row[0] for row in db.execute("SELECT id FROM destinations WHERE state='active'")}
+        trusted -= {row[0] for row in db.execute("SELECT id FROM destinations WHERE state='retired'")}
+    except sqlite3.OperationalError:
+        pass
+    return trusted - {"retired"}
 
 
 def verified_recording(db, recording_id):
@@ -157,7 +168,7 @@ def verified_recording(db, recording_id):
     if not uploads:
         raise ValueError("no_verified_destination")
     for upload in uploads:
-        if upload["attempt_status"] != "accepted" or upload["provider"] in retired_destinations(db):
+        if upload["attempt_status"] != "accepted" or upload["provider"] not in trusted_destinations(db):
             raise ValueError("unverified_destination_identity")
         if not upload["remote_id"] or not upload["remote_url"] or not upload["verified_at"]:
             raise ValueError("incomplete_destination_evidence")

@@ -7,9 +7,10 @@ import { originalVideoContentType } from "../services/video/originalVideo.js";
 // and byte-range playback of the original files (/media/<host>/...).
 export function createFileHostLibraryRoutes(id: string, label: string, library: MP4Library) {
     const router = Router();
-    router.get(["/api/videos", "/api/videos/changes"], async (req, res) => {
+    router.get(["/api/videos", "/api/videos/changes"], async (req, res, next) => {
+        // Another host's library answers it (fileHosts.ts ends with the error for none).
+        if (req.query.provider !== id) { next(); return; }
         res.set("Cache-Control", "no-store");
-        if (req.query.provider !== id) { res.status(400).json({ error: `Expected provider=${id}` }); return; }
         try {
             if (req.path === "/api/videos") { res.json(await library.videos(typeof req.query.after === "string" ? req.query.after : undefined)); return; }
             const since = req.query.since === undefined ? undefined : Number(req.query.since);
@@ -62,6 +63,15 @@ export function createFileHostLibraryRoutes(id: string, label: string, library: 
             for (const [name, value] of Object.entries((error as { headers?: Record<string, string> }).headers ?? {})) res.set(name, value);
             res.status((error as { status?: number }).status ?? 500).end();
         });
+    });
+    return router;
+}
+
+// After every host's library: a list request for no configured host.
+export function createFileHostLibraryFallback(ids: readonly string[]) {
+    const router = Router();
+    router.get(["/api/videos", "/api/videos/changes"], (_req, res) => {
+        res.set("Cache-Control", "no-store").status(400).json({ error: `Expected provider=${ids.join("|")}` });
     });
     return router;
 }

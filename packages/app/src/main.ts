@@ -4,8 +4,23 @@ import { openVideoList } from './routes/videoList.js';
 import type { VideoType } from './types.js';
 import { VIDEO_TYPE } from './constants.js';
 
+// The site list comes from the PC; while it cannot be read (the server restarting, a
+// network hiccup), say so and keep trying, then carry on as if nothing happened.
+async function sitesWhenReachable(): Promise<Awaited<ReturnType<typeof loadSites>>> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await loadSites();
+		} catch (error) {
+			console.error(error);
+			if (attempt === 0) showError('Waiting for the PC to list its sites…');
+			await new Promise((resolve) => setTimeout(resolve, Math.min(10_000, 1_000 * 2 ** attempt)));
+		}
+	}
+}
+
 async function main(): Promise<void> {
-	const sites = await loadSites();
+	const sites = await sitesWhenReachable();
+	document.querySelector('p.status-error')?.remove();
 	const isProvider = (value: string): boolean => sites.some((site) => site.id === value);
 	const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
 	if (parts.length === 0) {

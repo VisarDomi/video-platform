@@ -21,8 +21,7 @@ const text = await readFile(sitesFile, 'utf8');
 // The deployment: the PC the extensions talk to (its server on :9999, its file hosts on
 // :9998), and the app that hosts them.
 const settings = JSON.parse(text).extensions ?? {};
-const PC = settings.pc ?? 'https://localhost';
-const HOST_APP = settings.hostApp ?? 'the iPhone app';
+const PC = settings.pc, HOST_APP = settings.hostApp;
 
 async function specOf(entry, kind) {
     const directory = dirname(require.resolve(`${entry.plugin}/package.json`));
@@ -66,6 +65,10 @@ mountDownloadListBar(adapter);
 }
 
 const names = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(EXTENSIONS);
+// An extension built for the wrong PC fails silently on the phone: refuse instead.
+if (names.length && (typeof PC !== 'string' || !/^https:\/\/[^/:]+$/.test(PC) || typeof HOST_APP !== 'string' || !HOST_APP)) {
+    throw new Error(`${sitesFile}: "extensions" must name the PC ("pc": "https://<address>") and the hosting app ("hostApp")`);
+}
 for (const key of names) {
     const extension = EXTENSIONS[key];
     if (!extension) throw new Error(`Usage: node scripts/build.mjs [${Object.keys(EXTENSIONS).join('|')}]`);

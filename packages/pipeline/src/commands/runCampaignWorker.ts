@@ -177,7 +177,9 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         if (keepingAlive || signal.aborted) return;
         keepingAlive = true;
         void keepDestinationSessionAlive(config).catch((error: unknown) => {
-            console.error(journalPriority("error", 2) + JSON.stringify({ event: "session-keepalive-error", error: String(error) }));
+            let provider = "session";
+            try { provider = activeDestination(config); } catch { /* The ledger is what failed. */ }
+            console.error(journalPriority("error", 2) + JSON.stringify({ event: `${provider}-keepalive-error`, error: String(error) }));
         }).finally(() => { keepingAlive = false; });
     };
     keepalive();
