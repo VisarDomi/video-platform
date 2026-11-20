@@ -1,3 +1,4 @@
-// The video platform server whose download lists these extensions edit.
-export const SERVER = "https://192.168.1.197:9999";
-export const FILEHOST_SERVER = "https://192.168.1.197:9998";
+// The PC's server whose download lists these extensions edit: a build input (the sites
+// file's "extensions" block, see scripts/build.mjs).
+declare const __PC_SERVER__: string;
+export const SERVER = __PC_SERVER__;

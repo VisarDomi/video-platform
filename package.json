@@ -9,6 +9,7 @@
         "build:app": "npm run build -w app",
         "test:app:pages": "node packages/app/test/providers.mjs",
         "test:extension:pages": "node private/test/liveExtensionPages.mjs",
+        "test:filehost:pages": "node private/plugins/filehost/test/extension.pages.mjs && node private/plugins/filehost/test/album.pages.mjs",
         "build:frontend": "npm run build:app",
         "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
         "build:auth": "npm run build:shared && npm run build:plugins && npm run build -w auth",
@@ -77,6 +78,7 @@
         "private/plugins/tslive",
         "private/plugins/ladder",
         "private/plugins/fmp4",
+        "private/plugins/filehost",
         "private/plugins/videohost",
         "private/ops/videohost",
         "private/profiles/original"

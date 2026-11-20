@@ -5,8 +5,10 @@ recordings handed off through `.pending`, and non-download operational logic.
 
 ## API details
 
-- Recordings (`provider` is a capture site of the sites file, `tslive`, `ladder` or `fmp4` in
-  production; without one, the first capture site, `tslive`), served from the library index
+- The website's sites: `GET /api/sites` → `{ sites: [{ id, label, list }] }`, the sites
+  file's capture sites in order (`src/api/sites.routes.ts`).
+- Recordings (`provider` is a capture site of the sites file; without one, the first capture
+  site), served from the library index
   (`src/services/video/library-index.ts`: in memory and in
   `~/.local/share/video-services/list-index/<provider>.json`, following the folders through
   inotify and a 30 s stat rescan; playlists are read only when their stat changes):
@@ -20,17 +22,16 @@ recordings handed off through `.pending`, and non-download operational logic.
     `{ epoch, revision, videos }` instead. The iPhone local apps keep their list this way.
   - Edits and moves through the API refresh the index before answering.
 - Download list endpoints, one set per site in the sites file that has a catalog
-  (`provider` is the site ID: `tslive`, `ladder` or `fmp4` in production). The core serves
-  them (`src/api/providers/list-routes.ts`) and owns the list file; each site's plug-in
-  catalog (`private/plugins/<site>/src/catalog.ts`) parses and formats its lines with
+  (`provider` is the site ID). The core serves them (`src/api/providers/list-routes.ts`)
+  and owns the list file; each site's plug-in catalog parses and formats its lines with
   the same parser the downloader records from, and knows the site:
   - `POST /api/{provider}/add` with `{ identifier }`
   - `POST /api/{provider}/remove` with `{ identifier }`
   - `GET /api/{provider}/list`
-  - `GET /api/{provider}/member?identifier=` → `{ member }`, by ID: a listed name or ID answers at once; any other name resolves through the provider (TsLive: the alias registry, then TsLive; Fmp4Live, which also resolves old usernames; LADDER compares IDs only).
-  - `GET /api/{provider}/exists?identifier=` → `{ exists }`: whether the provider itself has a streamer by that name (TsLive by current or recent alias, Fmp4Live by username including old ones, LADDER by channel ID with a non-empty profile). A provider that cannot answer is `502 { error }`, never `exists: false`.
+  - `GET /api/{provider}/member?identifier=` → `{ member }`, by ID: a listed name or ID answers at once; any other name resolves through the provider (as its catalog knows how: an alias registry, a username lookup that also knows old names, or IDs only).
+  - `GET /api/{provider}/exists?identifier=` → `{ exists }`: whether the provider itself has a streamer by that name (by current or recent alias, by username including old ones, or by channel ID, as the catalog decides). A provider that cannot answer is `502 { error }`, never `exists: false`.
   - `GET /api/{provider}/resolve?identifier=` → `{ id, label }`: read-only resolution with the same logic as add (no list write, no follow); used by the pipeline for provenance.
-  - TsLive adds unblock the account if it is blocked, then follow it if needed.
+  - A catalog may do more on add (one follows the account on the site, unblocking it first).
 - Library maintenance: `POST /api/videos/:filename/repair-playlist` and
   `POST /api/videos/repair-playlists?provider=&scope=all|downloads|edited` run
   PlaylistAuthority duration repair (the bulk form skips `.active` and `.pending`).
@@ -41,7 +42,7 @@ and publish through the existing revision feed. Fragmented/encrypted HLS is prob
 its local playlist context so init maps and keys are available. MP4 dimensions share the
 existing stat-fingerprint metadata cache. Neither path transcodes or changes media files.
 
-FileHost playback serves original files byte-for-byte. Automatic conversion/transcoding is
+File-host playback (`src/fileHosts.ts`) serves original files byte-for-byte. Automatic conversion/transcoding is
 not permitted. Codec incompatibility must be reported without rewriting or substituting media.
 The queue and local library use the same completed-container contract (MP4, M4V,
 MOV, MKV, WebM, AVI and TS); partially downloaded files remain private. Playback

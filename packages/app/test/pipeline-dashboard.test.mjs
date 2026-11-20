@@ -26,7 +26,7 @@ function fixture(){
   history:Array.from({length:14},(_,i)=>({date:`2026-10-${String(19+i%13).padStart(2,'0')}`,submitted:i%5,verified:i%3})),
   activity:[{recording:'fixture',alias:'fixture-active',stage:'verify',at:now},{recording:'fixture-done',alias:'fixture-done',stage:'verified',at:now}],
   storage:{total:4000000000000,free:500000000000,inventory:{downloads:1900000000000,artifacts:300000000000,retained_trash:20000000000,desktop_staging:0},inventory_at:now},
-  services:Object.fromEntries(['video-downloader','video-server','video-auth','video-pipeline','video-xvfb','video-filehost-downloads'].map(n=>[n,{...service}])),
+  services:Object.fromEntries(['video-downloader','video-server','video-auth','video-pipeline','video-xvfb'].map(n=>[n,{...service}])),
   monitoring:{cadence:'daily',last_check:now}};
 }
 
