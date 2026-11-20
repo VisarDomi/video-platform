@@ -103,3 +103,16 @@ test("a site without an existence check answers 501, one without resolution 500"
     assert.equal(added.status, 500);
     assert.deepEqual(await (await fetch(`${base}/list`)).json(), []);
 });
+
+test("resolve answers the identity, plus the site's pages when its catalog has them", async (t) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "list-route-"));
+    t.after(() => rm(dir, { recursive: true }));
+    const plain = await listServer(t, { id: "demo", filePath: path.join(dir, "demo.txt"), catalog: catalog() });
+    assert.deepEqual(await (await fetch(`${plain}/resolve?identifier=a1`)).json(), { id: "a1", label: "a1-label" });
+    const linked = await listServer(t, { id: "live-a", filePath: path.join(dir, "live-a.txt"), catalog: catalog({
+        sourceLinks: ({ id, label }) => ({ channelUrl: `http://live-a.test/${id}`, aliasUrl: label === id ? null : `http://live-a.test/@${label}` }),
+    }) });
+    assert.deepEqual(await (await fetch(`${linked}/resolve?identifier=a1`)).json(),
+        { id: "a1", label: "a1-label", channelUrl: "http://live-a.test/a1", aliasUrl: "http://live-a.test/@a1-label" });
+    assert.equal((await fetch(`${linked}/resolve?identifier=`)).status, 400);
+});

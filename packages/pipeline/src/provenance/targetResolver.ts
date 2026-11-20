@@ -1,26 +1,31 @@
 import https from "node:https";
 import path from "node:path";
 import { extractRecordingIdentifier } from "shared";
-import { streamerSourceLinks, type StreamProvider } from "./sourceLinks.js";
 import type { RecordingInput, RecordingProvenance } from "../domain/types.js";
 
-// Recording provenance is resolved by the SERVER's own per-provider capability
-// (GET /api/{provider}/resolve): the TsLive alias registry + live TsLive API,
-// LADDER numeric IDs, and the Fmp4Live username lookup. The pipeline keeps no
-// catalog-matching logic of its own.
+// Recording provenance is resolved by the SERVER, through each site's catalog
+// (GET /api/{site}/resolve): the identity of the channel a recording's folder names, and
+// the site's pages for it (the catalog's sourceLinks). The pipeline keeps no
+// catalog-matching logic and no site addresses of its own.
+
+// One resolution: the channel's ID and label and, from a site whose catalog has them,
+// its pages (channelUrl; aliasUrl when the label is a name of its own).
+export interface ResolvedTarget {
+    readonly id: string;
+    readonly label: string;
+    readonly channelUrl?: string;
+    readonly aliasUrl?: string | null;
+}
 
 export interface TargetResolverConfig {
     readonly serverUrl?: string;
-    readonly resolveIdentifier?: (
-        provider: StreamProvider,
-        identifier: string,
-    ) => Promise<{ id: string; label: string } | null>;
+    readonly resolveIdentifier?: ProviderIdentifierResolver;
 }
 
 export type ProviderIdentifierResolver = (
-    provider: StreamProvider,
+    provider: string,
     identifier: string,
-) => Promise<{ id: string; label: string } | null>;
+) => Promise<ResolvedTarget | null>;
 
 // The API server serves HTTPS with a local mkcert certificate, so the
 // client accepts the local certificate instead of failing TLS verification.
@@ -41,9 +46,13 @@ function defaultServerResolver(serverUrl: string): ProviderIdentifierResolver {
             response.on("end", () => {
                 if (response.statusCode !== 200) return resolve(null);
                 try {
-                    const parsed = JSON.parse(body) as { id?: unknown; label?: unknown };
+                    const parsed = JSON.parse(body) as { id?: unknown; label?: unknown; channelUrl?: unknown; aliasUrl?: unknown };
                     if (typeof parsed.id === "string" && typeof parsed.label === "string") {
-                        resolve({ id: parsed.id, label: parsed.label });
+                        resolve({
+                            id: parsed.id, label: parsed.label,
+                            ...(typeof parsed.channelUrl === "string" ? { channelUrl: parsed.channelUrl } : {}),
+                            ...(typeof parsed.aliasUrl === "string" || parsed.aliasUrl === null ? { aliasUrl: parsed.aliasUrl } : {}),
+                        });
                     } else {
                         resolve(null);
                     }
@@ -56,10 +65,6 @@ function defaultServerResolver(serverUrl: string): ProviderIdentifierResolver {
         request.on("timeout", () => { request.destroy(); resolve(null); });
         request.end();
     });
-}
-
-function isProvider(value: string): value is StreamProvider {
-    return value === "tslive" || value === "ladder" || value === "fmp4";
 }
 
 export class TargetCatalogResolver {
@@ -78,18 +83,6 @@ export class TargetCatalogResolver {
     ): Promise<Omit<RecordingProvenance, "recordingId">> {
         const observedIdentifier = extractRecordingIdentifier(path.basename(recording.sourcePath));
         const timestamp = now.toISOString();
-        if (!isProvider(recording.provider)) {
-            return {
-                observedIdentifier,
-                status: "review_required",
-                streamerId: null,
-                alias: null,
-                streamerUrl: null,
-                aliasUrl: null,
-                reason: `unsupported_provider:${recording.provider}`,
-                updatedAt: timestamp,
-            };
-        }
         const resolved = await this.resolveIdentifier(recording.provider, observedIdentifier);
         if (!resolved) {
             return {
@@ -103,18 +96,27 @@ export class TargetCatalogResolver {
                 updatedAt: timestamp,
             };
         }
-        const links = streamerSourceLinks({
-            provider: recording.provider,
-            id: resolved.id,
-            label: resolved.label,
-        });
+        // A site whose catalog gives no pages leaves the recording for review: its
+        // description must name its source.
+        if (!resolved.channelUrl) {
+            return {
+                observedIdentifier,
+                status: "review_required",
+                streamerId: null,
+                alias: null,
+                streamerUrl: null,
+                aliasUrl: null,
+                reason: `no_source_links:${recording.provider}`,
+                updatedAt: timestamp,
+            };
+        }
         return {
             observedIdentifier,
             status: "resolved",
             streamerId: resolved.id,
             alias: resolved.label,
-            streamerUrl: links.streamerUrl,
-            aliasUrl: links.aliasUrl,
+            streamerUrl: resolved.channelUrl,
+            aliasUrl: resolved.aliasUrl ?? null,
             reason: null,
             updatedAt: timestamp,
         };
