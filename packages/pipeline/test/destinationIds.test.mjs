@@ -137,3 +137,18 @@ test("only a destination whose copy starts at the metadata form settles unsubmit
     assert.equal(attempt().status, "failed");
     assert.equal(database.get(recording.id).state, "metadata_ready");
 });
+
+test("a trial's progress lists the configured sources in order, then any other source with trial recordings", async (t) => {
+    const { directory, databasePath } = await ledger(t);
+    const database = new PipelineDatabase(databasePath);
+    t.after(() => database.close());
+    database.configureCampaign("all", 1_000_000_000, new Date(), 2);
+    const sourcePath = path.join(directory, "2026-01-01 010000 fixture");
+    const recording = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath,
+        playlistPath: path.join(sourcePath, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
+    database.enrollCampaignTrial(recording);
+    assert.deepEqual(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"]).map(({ provider, admitted }) => [provider, admitted]),
+        [["tslive", 1], ["ladder", 0], ["fmp4", 0]], "production's sources, as before");
+    assert.deepEqual(database.getCampaignTrialProgress(["live-a"]).map(({ provider, admitted }) => [provider, admitted]),
+        [["live-a", 0], ["tslive", 1]], "an admitted recording is never left out");
+});

@@ -106,7 +106,7 @@ test("schema eight gains trial controls without changing generation, history, or
     assert.equal(migrated.getCampaignControl().monthlyUploadLimitBytes, 123_456_789);
     assert.equal(migrated.getCampaignControl().trialPerProvider, null);
     assert.equal(migrated.getCampaignControl().trialFinishedAt, null);
-    assert(migrated.getCampaignTrialProgress().every((provider) => provider.admitted === 0));
+    assert(migrated.getCampaignTrialProgress(["tslive", "ladder", "fmp4"]).every((provider) => provider.admitted === 0));
 });
 
 test("schema eleven widens the artifact part checks to shapes without losing rows", async (t) => {

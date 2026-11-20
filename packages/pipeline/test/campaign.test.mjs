@@ -433,12 +433,12 @@ test("trial slots survive missing sources, limits can be adjusted, and incomplet
     database.configureCampaign("all", 1_000_000_000, now, 1);
     database.enrollCampaignTrial(recording);
     database.enrollCampaignTrial(recording);
-    assert.equal(database.getCampaignTrialProgress()[0].admitted, 1);
+    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].admitted, 1);
     assert.equal(database.campaignTrialAllows("tslive"), false);
     database.setLocalSourcePresence(recording.id, 'missing', 'user removed source');
     await rm(recording.sourcePath, {recursive:true,force:true});
     assert.equal(database.campaignTrialAllows("tslive"), false);
-    assert.equal(database.getCampaignTrialProgress()[0].recordings[0].state, "source_missing");
+    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].recordings[0].state, "source_missing");
     database.setCampaignState("running");
     assert.throws(() => database.configureCampaign("all", 1_000_000_000, now, 2), /Pause/);
     const worker = new CampaignWorker(database, { ...config, discoveryRoots: [], cleanupEnabled: false }, resolver);
@@ -449,7 +449,7 @@ test("trial slots survive missing sources, limits can be adjusted, and incomplet
     assert.equal(database.getCampaignControl().trialPerProvider, 1);
     database.setCampaignState("paused");
     database.configureCampaign("all", 1_000_000_000, now, 2);
-    assert.equal(database.getCampaignTrialProgress()[0].admitted, 1);
+    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].admitted, 1);
     database.configureCampaign("all", 1_000_000_000, now, null);
     assert.equal(database.getCampaignControl().trialPerProvider, null);
 });
@@ -523,7 +523,7 @@ test("campaign resume performs a pending production rollover and archives retire
     const inspection = new PipelineDatabase(databasePath);
     assert.equal(inspection.getCampaignControl().state, "running");
     assert.equal(inspection.getCampaignControl().trialPerProvider, 10);
-    assert(inspection.getCampaignTrialProgress().every((provider) => provider.admitted === 0));
+    assert(inspection.getCampaignTrialProgress(["tslive", "ladder", "fmp4"]).every((provider) => provider.admitted === 0));
     assert.deepEqual(inspection.list(), []);
     inspection.setCampaignState("paused");
     inspection.close();

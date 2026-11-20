@@ -62,6 +62,11 @@ export function sourceSiteIds(): readonly string[] {
     return sources;
 }
 
+// The source sites a configuration covers, in order: its discovery roots' sites.
+export function sourcesOf(config: Pick<PipelineConfig, "discoveryRoots">): string[] {
+    return [...new Set(config.discoveryRoots.map((root) => root.provider))];
+}
+
 // Roots come from the shared layout module: the single source of truth.
 const discoveryRoots = (): DiscoveryRoot[] => sourceSiteIds().map((provider) => ({
     provider,

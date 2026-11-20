@@ -1,7 +1,7 @@
 import path from "node:path";
 import { access, unlink } from "node:fs/promises";
 
-import type { PipelineConfig } from "../config.js";
+import { sourcesOf, type PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import type { Recording, RecordingInput } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
@@ -153,8 +153,7 @@ export class CampaignWorker {
             roots: this.config.discoveryRoots,
             providerFilter: control.providerFilter,
             pipelineDatabase: this.database,
-            allowedProviders: [...new Set(this.config.discoveryRoots.map((root) => root.provider))]
-                .filter((provider) => this.database.campaignTrialAllows(provider)),
+            allowedProviders: sourcesOf(this.config).filter((provider) => this.database.campaignTrialAllows(provider)),
         });
         let trialNextId: string | undefined;
         if (control.trialPerProvider !== null) {
@@ -162,7 +161,7 @@ export class CampaignWorker {
                 "server_ready", "remuxed", "artifact_valid", "described", "metadata_ready",
             ].includes(recording.state) && this.database.campaignTrialAllows(recording.provider, recording.id)), control.providerFilter);
             const first = pending[0];
-            const enrolled = new Set(this.database.getCampaignTrialProgress().flatMap((item) => item.recordings.map((recording) => recording.id)));
+            const enrolled = new Set(this.database.getCampaignTrialProgress(sourcesOf(this.config)).flatMap((item) => item.recordings.map((recording) => recording.id)));
             // Already queued local work must not take a slot ahead of an older,
             // not-yet-discovered source. Once admitted, finish its stages first.
             if (first && !enrolled.has(first.id)) {
@@ -370,7 +369,7 @@ export class CampaignWorker {
                 return { disposition: "comparison_finished" };
             }
             if (control.trialPerProvider !== null) {
-                const trial = this.database.getCampaignTrialProgress();
+                const trial = this.database.getCampaignTrialProgress(sourcesOf(this.config));
                 const pending = trial.flatMap((provider) => provider.recordings);
                 if (pending.some((recording) => ["upload_admitted", "uploading", "uploaded", "upload_uncertain"].includes(recording.state))) {
                     // Verification runs inline even without new campaign work.
