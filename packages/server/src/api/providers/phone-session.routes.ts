@@ -67,9 +67,8 @@ export function phoneSessionDependencies(site: PhoneSite, auth: Required<Pick<Si
         login: async requestId => {
             // One persistent owner lives with this existing server. Do not create
             // a fresh Google/browser session for each native renewal request. Its browser
-            // runs on the Xvfb display, from the browsers installed with Playwright.
+            // (the system's Chromium, from the site's context) runs on the Xvfb display.
             process.env.DISPLAY ??= ":111";
-            process.env.PLAYWRIGHT_BROWSERS_PATH ??= "0";
             const account = await phoneAccount(site, accounts, firstAuthSite);
             return auth.provisionDevice(account, requestId??randomBytes(16).toString("hex"));
         },

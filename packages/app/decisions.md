@@ -132,8 +132,9 @@ native apps do all three. Safari keeps this website.
 
 ## Regression checks
 
-`npm run test:app:webkit` drives the built website and the LADDER/FMP4 live extensions in WebKit
-with isolated fixtures, including scroll settlement on a local list (see `README.md`).
+`npm run test:app:pages` drives the built website and the LADDER/FMP4 live extensions in the system's
+Chromium (WebKit only by opt-in; browsers Playwright downloads are never used, as nothing
+updates them) with isolated fixtures, including scroll settlement on a local list (see `README.md`).
 
 `node packages/app/test/viewer.mjs`, run from the repo root after `npm run build:app`, loads
 the deployed frontend that the PC server serves from `packages/app/build` (default

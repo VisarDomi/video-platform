@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { webkit } from 'playwright-core';
+import { launchPageBrowser } from './support/browser.mjs';
 import { testScrollSettlement } from './scroll-settlement.mjs';
 import { testLadderLogin } from './ladder-login.mjs';
 
-// Isolated WebKit fixtures exercise the built website (the local lists and their web viewer)
-// and the LADDER/FMP4 live Safari extensions. The iPhone apps are native (apps/ios).
+// Isolated browser fixtures exercise the built website (the local lists and their web viewer)
+// and the LADDER/FMP4 live Safari extensions, in the system's Chromium (WebKit by opt-in, see
+// support/browser.mjs). The iPhone apps are native (apps/ios).
 const web = 'packages/app/build';
-const browser = await webkit.launch({ headless: true });
+const browser = await launchPageBrowser({ headless: true });
 const options = { viewport: { width: 428, height: 800 }, hasTouch: true,
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1' };
 

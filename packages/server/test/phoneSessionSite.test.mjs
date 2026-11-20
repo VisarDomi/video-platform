@@ -43,7 +43,10 @@ test("the phone signs in with the site's account, on the Xvfb display, and the h
     delete process.env.DISPLAY;
     delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     assert.deepEqual(await dependencies.login("fixture-request-12345678"), { cookies: [{ name: "fixture" }] });
-    assert.deepEqual(calls, [["provision", "phone@example.invalid", "fixture-request-12345678", ":111", "0"]]);
+    // Changed on purpose: the sign-in no longer points Playwright at the browsers it
+    // downloads (it used to set PLAYWRIGHT_BROWSERS_PATH to 0); the site launches the
+    // system's Chromium.
+    assert.deepEqual(calls, [["provision", "phone@example.invalid", "fixture-request-12345678", ":111", undefined]]);
 
     // The receipt of a handoff, kept until the phone acknowledges it.
     dependencies.retain("fixture-request-12345678", { cookies: [] });

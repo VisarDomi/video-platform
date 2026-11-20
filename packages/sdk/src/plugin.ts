@@ -55,6 +55,10 @@ export interface PluginContext {
     // The site account's credentials as the auth daemon last saved them (the account the
     // sites file names for the site), read from the core's credential store.
     credentials: CredentialSource;
+    // The browser a plug-in launches (sign-ins): the system's own Chromium, which the OS
+    // keeps updated. A plug-in never launches a browser a library downloaded (nothing
+    // updates those), so it always passes this as the executable.
+    browser: { readonly executablePath: string };
 }
 
 export interface SitePlugin {

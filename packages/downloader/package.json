@@ -10,8 +10,7 @@
         "start": "npm run build && systemctl --user start video-downloader",
         "restart": "npm run build && systemctl --user restart video-downloader",
         "stop": "systemctl --user stop video-downloader",
-        "logs": "journalctl --user -u video-downloader -f",
-        "postinstall": "PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium"
+        "logs": "journalctl --user -u video-downloader -f"
     },
     "keywords": [],
     "author": "visardomi4@gmail.com",

@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { providerFolders } from "shared";
+import { providerFolders, systemBrowserPath } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 import { CURRENT_PRODUCTION_VERSION } from "./domain/productionVersion.js";
 import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES } from "./domain/uploadBudget.js";
@@ -70,7 +70,7 @@ export const pipelineConfig: PipelineConfig = {
     manualRemuxRoots,
     serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
     browserProfilePath,
-    chromiumExecutablePath: process.env.VIDEO_CHROMIUM_PATH ?? "/usr/bin/chromium",
+    chromiumExecutablePath: systemBrowserPath(),
     credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
     videohostBrowserProfilePath: browserProfilePath,
