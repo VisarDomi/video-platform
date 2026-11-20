@@ -1,41 +1,69 @@
-# What
+# Video platform
 
-A full video pipeline that saves the list of streamers to download, downloads their streams (local backup), views the downloads, edits the downloads, converts the edited videos, describes them, uploads them (online backup)
+A self-hosted pipeline for live video: it records live streams as they happen, finalizes
+and repairs the recordings, lets you watch and edit them from a phone, converts and
+describes them, uploads them to a video host, and verifies the uploads until they are
+safe to clean up locally. It runs unattended on one PC and is built to survive a power cut
+at any moment.
 
-# Why
+The core knows no site. Live sources, file hosts, upload destinations and the way
+recordings are described are **plug-ins** behind a small SDK. This repository ships the
+core, the SDK, a **simulator** of every kind of site, and public plug-ins written against
+the simulator, so the whole system runs end to end without touching a real service.
 
-This project started out as a simple downloader, then it crept on scope until a full pipeline was developed. 
+## What is in here
 
-# How
+| Path | What it is |
+|---|---|
+| `packages/sdk` | The plug-in contracts (site, live capture, catalog, sign-in, file host, destination, content profile), the plug-in registry and a crash-safe plug-in store |
+| `packages/downloader` | Live capture: HLS playlists polled per channel, segments written durably, edge failover, honest gap accounting |
+| `packages/server` | The API, finalization (repairing and closing recordings), download lists, the website's backend |
+| `packages/auth` | Keeps every site's sign-in fresh, in one place |
+| `packages/pipeline` | Conversion, description, upload and verification: a SQLite ledger with a state machine, a monthly upload budget, retries that never duplicate an upload, removal bans, receipt-matched cleanup, and a dashboard |
+| `packages/descriptor` | Describes a recording with a local vision model (llama.cpp) for its title and description |
+| `packages/app` | The website: lists, a viewer with editing, phone-first gestures |
+| `packages/live-extensions` | Safari web extensions built from each site plug-in's description |
+| `packages/simulator` | Simulated live sites, a file host and two upload destinations (a browser-style form host and an API host), with scenarios, faults, a ground-truth log and a checker |
+| `plugins/*` | Public plug-ins for the simulated sites: `ladder-live`, `fmp4-live` (live sources), `form-host` (upload destination) |
+| `e2e/` | End-to-end runs: the real downloader against the simulated sites (`npm run e2e:capture`), the real pipeline against the simulated destination (`npm run e2e:pipeline`) |
+| `deploy/vm` | A QEMU harness that hard-resets a VM at random points and checks every invariant after each boot |
+| `systemd/` | The user services |
 
-One provider I implemented myself, the other two are inspired by other github repos. This repo has gone through a lot of changes since the first provider. So it saves all the 1second .ts files of a stream in a folder. From the ui you can then either view it using apple's mpegts requirements, because safari apple is very strict on metadata and format of the stream. So the download and server try to keep the best playlist.m3u8 possible so that it's playable on safari ios. So discontinuities and changes of quality are present in the playlist in the appropriate place. Streamers can be added to the download lists straight from the providers' sites on the phone, without needing to use a pc: the +/- button in the iPhone apps and the LADDER live and FMP4 live Safari extensions (hosted by the TsLive app) edit the provider .txt files. The provider I implemented uses google oauth, so i have a playwright backup to login automatically using google by using xvfb of linux to load the chrome headful on memory, so that it bypasses the usual bot checks. This is not useful when scraping a lot, but it's useful for low impact actions you would usually do manually and rarely. The UI has swipe gestures to make navigation feel polished. On the iPhone, six apps (TsLive local, LADDER local, FMP4 local, FileHost local, Video Vault and TsLive) play the videos in a native player that keeps playing through lock and the background.
+A deployment's own plug-ins, configuration and operations live in a separate private
+repository, checked out at `private/`. The core finds them through the sites file, so it
+never imports one (a test enforces it).
 
-# setup
-[setup notes](./notes.md)
+## Ideas worth a look
 
-Phone dashboard: **https://192.168.1.197:8791/** — live pipeline, queue, upload
-allowance, short batches and verification history. Safari → Share → Add to Home
-Screen. [Dashboard guide](packages/pipeline/dashboard/README.md).
+- **No lost or duplicated work across a power cut.** Every durable write is temp file +
+  fsync + rename + directory fsync; the ledger migrates in one transaction (tested by
+  killing the process mid-migration); the VM harness cuts power for real.
+- **The creation boundary.** A destination says when a remote copy comes into existence
+  (at the metadata form, or when the transfer starts). Before it, a failure is a plain
+  failure; after it, the attempt is confirmed against the destination's list, never
+  retried blind.
+- **"Absent" needs proof.** A destination may say a video is absent only after a complete
+  listing; a cached page or a page that should exist but fails is inconclusive.
+- **Removed means never again.** A copy the destination removed is recorded and that
+  recording is never uploaded there again.
+- **Bytes are reserved before they leave**, so the monthly upload budget holds even when a
+  transfer dies halfway.
 
-# Docs
+## Running it
 
-Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:
+Node 22, ffmpeg, and the system Chromium (`/usr/bin/chromium`; browsers that Playwright
+downloads are never used).
 
-- [AGENTS.md](./AGENTS.md): ownership, and where to start.
-- [notes.md](./notes.md): setup: packages, services, logs, data outside the repository, download lists.
-- [decisions.md](./decisions.md): the system's rules and why: components, recording lifecycle, conversion and upload policy, operations.
-- [issues.md](./issues.md): open issues (HTTP caching).
-- [private/apps/ios/README.md](./private/apps/ios/README.md): the six iPhone apps: behaviour, rules, build, deploy, tests, frame reports, renewal. (`private/apps/tslive` holds only the TsLive unblock script it describes.)
-- [packages/app/README.md](./packages/app/README.md), [decisions.md](./packages/app/decisions.md): the website (lists, viewer, edits) and its WebKit tests.
-- [packages/auth/decisions.md](./packages/auth/decisions.md), [SESSION-RECOVERY.md](./private/plugins/tslive/SESSION-RECOVERY.md): the PC's TsLive session and how to recover it.
-- [packages/descriptor/setup.md](./packages/descriptor/setup.md), [MODEL.md](./packages/descriptor/MODEL.md): the local description model, its runtime and the measurements behind its settings.
-- [packages/downloader/README.md](./packages/downloader/README.md), [decisions.md](./packages/downloader/decisions.md): stream capture.
-- [packages/live-extensions/README.md](./packages/live-extensions/README.md): LADDER/FMP4 controls and the FileHost-to-PC Safari extension hosted by TsLive.
-- [packages/pipeline/setup.md](./packages/pipeline/setup.md), [docs/upload-recovery.md](./packages/pipeline/docs/upload-recovery.md): conversion, description, upload and verification; upload recovery.
-- [packages/server/README.md](./packages/server/README.md), [decisions.md](./packages/server/decisions.md): the API, finalization and download lists.
-- [packages/shared/decisions.md](./packages/shared/decisions.md): storage layout, token reader, logging.
-- [systemd/README.md](./systemd/README.md): the user units and how they are installed.
+```sh
+npm ci
+npm run build:backend
+npm test -w sdk && npm test -w pipeline
+npm run build -w simulator && npm run build:sim-plugins
+npm run test:sim-plugins
+npm run e2e:capture     # about two minutes
+npm run e2e:pipeline    # about twenty seconds
+```
 
-Outside the repository: the [NativeKit guide](../../ios-tools/native/README.md) (shared iPhone code and rules), [Mac and phone access](../../../environment/mac-access.md), [renewal](../../ios-tools/renewal/README.md).
+## Licence
 
-Earlier docs (the iPhone port log, the web-era TsLive app docs, pipeline launch reports) are in git history; the last commit before this layout is `817cd7f`.
+MIT, see [LICENSE](./LICENSE).
