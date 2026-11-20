@@ -77,8 +77,11 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 try {
                 let remoteId = database.getUncertainUploadRemote(confirmation.attemptId)?.remoteId ?? null;
                 let probe = remoteId ? await session.probe(remoteId) : null;
-                const removed = async (id: string, reason: string | undefined) => {
-                    if(database.acceptedUpload(confirmation.attemptId)) {
+                // A copy the destination proved removed (gone from its complete list) is
+                // recorded at once and never uploaded there again. Only a copy that failed or
+                // never became playable waits for the seven-day gate and is then uploaded again.
+                const removed = async (id: string, reason: string | undefined, proven: boolean) => {
+                    if(!proven && database.acceptedUpload(confirmation.attemptId)) {
                         const accepted=database.acceptedUpload(confirmation.attemptId)!;
                         if(now.toISOString()<accepted.retryAfter) {
                             database.postponeConfirmation(confirmation.attemptId,reason ?? 'Copy is not ready; check daily before the seven-day retry deadline',now,UPLOAD_CHECK_MILLISECONDS);
@@ -102,7 +105,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     results.push({ recordingId: confirmation.recordingId, disposition: "provider_removed", remoteId: id });
                 };
                 if (remoteId && probe?.outcome === "missing") {
-                    await removed(remoteId, probe.reason);
+                    await removed(remoteId, probe.reason, probe.removed === true);
                     continue;
                 }
                 if (!remoteId) {
@@ -138,7 +141,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                 }
                 probe ??= await session.probe(remoteId);
                 if (probe.outcome === "missing") {
-                    await removed(remoteId, probe.reason);
+                    await removed(remoteId, probe.reason, probe.removed === true);
                     continue;
                 }
                 const { stored, ...probeEvidence } = probe;
@@ -170,7 +173,7 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
                     // seven-day deadline is rebuilt; transport/probe failures are
                     // inconclusive and published low-resolution legacy copies stay held.
                     if(probe.processing === true && database.acceptedUpload(confirmation.attemptId)) {
-                        await removed(remoteId,probe.reason);
+                        await removed(remoteId,probe.reason,false);
                         continue;
                     }
                     database.postponeConfirmation(confirmation.attemptId,

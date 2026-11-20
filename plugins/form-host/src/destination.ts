@@ -237,7 +237,7 @@ export class FormHostDestination implements Destination {
             if (listed.kind === "found" && listed.failed) return { outcome: "missing", remoteUrl: null, reason: "form-host processing failed; no video is published" };
             if (listed.kind === "found" && listed.processing) return { outcome: "not_ready", remoteUrl: null, reason: "form-host is still processing the video", processing: true };
             if (listed.kind === "found") return { outcome: "not_ready", remoteUrl: listed.remoteUrl, reason: "listed as published; the edit page is not available yet", retrySoon: true };
-            return { outcome: "missing", remoteUrl: null, reason: "the edit page is 404 and the complete list does not hold the video" };
+            return { outcome: "missing", remoteUrl: null, removed: true, reason: "the edit page is 404 and the complete list does not hold the video" };
         }
         const stored = edit.status === 200 ? editPage(edit.text) : null;
         if (!stored) return { outcome: "not_ready", remoteUrl: null, reason: `the edit page answered ${edit.status}`, retrySoon: true };
