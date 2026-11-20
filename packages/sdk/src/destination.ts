@@ -123,9 +123,24 @@ export interface DestinationHost {
     readonly stopSignal: AbortSignal;
 }
 
+// A destination's upload limits. The core checks every artifact against them before any
+// byte leaves, and uploads with the visibility given.
+export interface DestinationPolicy {
+    // Shorter recordings wait to be joined with compatible footage (null: no minimum).
+    readonly minimumDurationSeconds: number | null;
+    readonly maximumDurationSeconds: number | null;
+    readonly maximumFileBytes: number;
+    readonly uploadVisibility: "public" | "private";
+}
+
 export interface DestinationPlugin {
     id: string;
     sdkVersion: typeof SDK_VERSION;
+    // What the core needs without opening a session: when the remote copy comes into
+    // existence (the same as every Destination's creationBoundary), and the upload limits.
+    // VideoHost's limits are the core's pinned table, so it declares none.
+    creationBoundary: Destination["creationBoundary"];
+    policy?: DestinationPolicy;
     createDestination(host: DestinationHost): Destination;
 }
 

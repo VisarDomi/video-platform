@@ -1,6 +1,7 @@
 import { cleanupAcceptedConversions } from "./acceptedConversions.js";
 import { UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
-import { assessFinalArtifact, policyForUploadProvider } from "shared";
+import { assessFinalArtifact } from "shared";
+import { destinationFacts } from "../upload/destinationFacts.js";
 import { probeDuration } from "descriptor";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase } from "../db/pipelineDatabase.js";
@@ -82,12 +83,13 @@ export async function uploadOne(
         }
         // The file's own length: one shape of a split is shorter than its recording.
         const actualSeconds = await probeDuration(artifact.path);
+        const facts = await destinationFacts(provider);
         const assessment = assessFinalArtifact({
             id: recording.id,
             path: artifact.path,
             durationSeconds: actualSeconds,
             sizeBytes: artifact.sizeBytes,
-        }, policyForUploadProvider(provider));
+        }, facts.policy);
         if (assessment.disposition !== "ready_for_upload") {
             if (assessment.disposition === "skipped_too_short" && config.automaticShortsEnabled) {
                 if (database.shortParts(undefined, recordingId).length) {
@@ -145,7 +147,7 @@ export async function uploadOne(
                 title: submitted.title,
                 description: submitted.description,
                 tags: submitted.tags,
-                visibility: provider === "videohost" ? "public" : "private",
+                visibility: facts.uploadVisibility,
                 lookupBeforeUpload: database.hasUploadAttempt(recordingId),
                 streamerAlias: provenance.alias ?? provenance.streamerId ?? undefined,
             },

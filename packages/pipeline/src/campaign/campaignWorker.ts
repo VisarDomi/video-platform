@@ -294,7 +294,8 @@ export class CampaignWorker {
                     // A user may have paused while the upload was in flight.
                     // Keep that manual hold instead of making it auto-recoverable.
                     if (this.database.getCampaignControl().state === "running") this.database.pauseForAttention(error.message, now);
-                    this.database.recordProviderSessionEvent({ provider: "videohost", kind: "lost", loggedIn: false, note: error.message }, now);
+                    this.database.recordProviderSessionEvent({ provider: this.config.uploadProvider ?? this.database.getActiveUploadProvider(),
+                        kind: "lost", loggedIn: false, note: error.message }, now);
                     return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
                 }
                 if (error instanceof MetadataRejectedError) {
