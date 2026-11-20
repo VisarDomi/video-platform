@@ -69,7 +69,7 @@ type DimensionProbe = (inputPath: string) => Promise<VideoDimensions>;
 // is turned 90° counterclockwise; each shape is its own upload, at least
 // 1920 wide and 1080 tall.
 export const RESOLUTION_POLICY_VERSION = "resolution-policy-v6";
-// VideoHost makes its 1080p version only from a source at least 1920 wide, and
+// The destination makes its 1080p version only from a source at least 1920 wide, and
 // names it by height: a 4:3 upload of 1664x1248 got 480p and 720p only.
 export const FULL_HD_WIDTH = 1920;
 export const FULL_HD_HEIGHT = 1080;

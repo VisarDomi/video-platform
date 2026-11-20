@@ -108,7 +108,7 @@ test("a destination's limits and creation boundary come from its plug-in; VideoH
     const formHost = await destinationFacts("form-host");
     assert.deepEqual({ ...formHost, policy: { ...formHost.policy } }, {
         creationBoundary: "metadata_submit", uploadVisibility: "public",
-        policy: { providers: [], minimumDurationSeconds: null, maximumDurationSeconds: null, maximumFileBytes: 10 * 1024 ** 3, unresolvedConstraints: [] },
+        policy: { destination: "form-host", minimumDurationSeconds: null, maximumDurationSeconds: null, maximumFileBytes: 10 * 1024 ** 3 },
     });
     await assert.rejects(destinationFacts("api-host"), /names no destination "api-host"/);
 });

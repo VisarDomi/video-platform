@@ -487,11 +487,11 @@ test("dry-run plans are deterministic and mutate neither state nor quota", async
     advanceToMetadataReady(database, recording, directory, 400);
     const before = database.get(recording.id);
     const limit = REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000;
-    const first = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
-    const second = createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
+    const first = await createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
+    const second = await createDryRunUploadPlan(database, new Date("2026-08-12T08:00:00Z"), "Europe/Tirane", limit);
     assert.deepEqual(first, second);
     assert.equal(first[0].disposition, "would_upload");
-    const wrongGeneration = createDryRunUploadPlan(
+    const wrongGeneration = await createDryRunUploadPlan(
         database,
         new Date("2026-08-12T08:00:00Z"),
         "Europe/Tirane",
@@ -516,11 +516,11 @@ test("dry-run releases match admission, including overhead and simulated reserva
     seed.close();
     const beforeRelease = new Date("2026-11-10T22:59:59.999Z");
     assert.equal(database.canReserve(REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000, beforeRelease), true);
-    assert.deepEqual(createDryRunUploadPlan(database, beforeRelease).map(item => item.disposition),
+    assert.deepEqual((await createDryRunUploadPlan(database, beforeRelease)).map(item => item.disposition),
         ["would_upload", "blocked"]);
-    assert.equal(createDryRunUploadPlan(database, beforeRelease)[1].reason, "monthly_upload_limit");
+    assert.equal((await createDryRunUploadPlan(database, beforeRelease))[1].reason, "monthly_upload_limit");
     const afterRelease = new Date("2026-11-10T23:00:00.000Z");
-    assert.deepEqual(createDryRunUploadPlan(database, afterRelease).map(item => item.disposition),
+    assert.deepEqual((await createDryRunUploadPlan(database, afterRelease)).map(item => item.disposition),
         ["would_upload", "would_upload"]);
     assert.deepEqual(database.uploadUsage("2026-11"), { spent, reserved: 0 });
 });

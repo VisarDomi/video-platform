@@ -65,8 +65,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         // authenticated page.
         const due = database.dueUploadConfirmations(now);
         if (due.length === 0) return { checkedAt: now.toISOString(), results };
-        // Destination is pinned to the attempt, not today's active provider.
-        // Old the upload provider confirmations remain the upload provider checks after selecting VideoHost.
+        // Each confirmation is checked at the destination its attempt went to, not today's
+        // active one: switching destinations never strands an earlier upload unconfirmed.
         for (const provider of new Set(due.map(confirmation => confirmation.uploadProvider))) {
         const providerDue = due.filter(confirmation => confirmation.uploadProvider === provider);
         try {

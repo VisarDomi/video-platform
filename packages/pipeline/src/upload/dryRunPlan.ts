@@ -1,4 +1,5 @@
-import { assessFinalArtifact, policyForUploadProvider } from "shared";
+import { assessFinalArtifact } from "shared";
+import { destinationFacts } from "./destinationFacts.js";
 import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
 import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
@@ -14,14 +15,15 @@ export interface DryRunUploadItem {
     readonly reason: string | null;
 }
 
-export function createDryRunUploadPlan(
+export async function createDryRunUploadPlan(
     database: PipelineDatabase,
     now = new Date(),
     timeZone = "Europe/Tirane",
     monthlyLimitBytes = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES,
     stagingRoot?: string,
     provider: ActiveUploadProvider = database.getActiveUploadProvider(),
-): DryRunUploadItem[] {
+): Promise<DryRunUploadItem[]> {
+    const { policy } = await destinationFacts(provider);
     let simulatedReserved = 0;
     const budget = database.uploadBudget(now, timeZone, monthlyLimitBytes);
     return database.list("metadata_ready").map((recording) => {
@@ -74,7 +76,7 @@ export function createDryRunUploadPlan(
             path: artifact.path,
             durationSeconds: recording.durationSeconds,
             sizeBytes: artifact.sizeBytes,
-        }, policyForUploadProvider(provider));
+        }, policy);
         if (assessment.disposition !== "ready_for_upload") {
             return {
                 recordingId: recording.id,
