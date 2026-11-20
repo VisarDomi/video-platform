@@ -10,24 +10,24 @@ test("refresh merges fetched history while preserving the fetched current alias"
     t.after(() => import("node:fs/promises").then(fs => fs.rm(dir, { recursive: true })));
     const filePath = path.join(dir, "aliases.json");
     await writeFile(filePath, JSON.stringify({
-        account: ["existing-history", "channel-1101"],
+        account: ["existing-history", "court_a1"],
     }));
 
     const registry = new AliasRegistry(filePath);
     await registry.load();
     await registry.refresh(async () => ({
         account: {
-            current: "channel-1101",
-            history: ["channel-2622", "channel-1100", " channel-1100 ", ""],
+            current: "court_a1",
+            history: ["former_court", "court_a", " court_a ", ""],
         },
     }), ["account"]);
 
-    assert.equal(registry.resolve("account"), "channel-1101");
+    assert.equal(registry.resolve("account"), "court_a1");
     assert.deepEqual(registry.getAllWithHistory().account, [
         "existing-history",
-        "channel-2622",
-        "channel-1100",
-        "channel-1101",
+        "former_court",
+        "court_a",
+        "court_a1",
     ]);
 
     const persisted = JSON.parse(await readFile(filePath, "utf8"));
@@ -38,17 +38,17 @@ test("refresh changes current explicitly and deduplicates prior aliases", async 
     const dir = await mkdtemp(path.join(tmpdir(), "alias-registry-"));
     t.after(() => import("node:fs/promises").then(fs => fs.rm(dir, { recursive: true })));
     const filePath = path.join(dir, "aliases.json");
-    await writeFile(filePath, JSON.stringify({ account: ["channel-1100", "channel-1101"] }));
+    await writeFile(filePath, JSON.stringify({ account: ["court_a", "court_a1"] }));
 
     const registry = new AliasRegistry(filePath);
     await registry.load();
     await registry.refresh(async () => ({
-        account: { current: "bellabr2", history: ["channel-1101", "channel-1100"] },
+        account: { current: "court_a2", history: ["court_a1", "court_a"] },
     }), ["account"]);
 
-    assert.equal(registry.resolve("account"), "bellabr2");
-    assert.deepEqual(registry.getAllWithHistory().account, ["channel-1100", "channel-1101", "bellabr2"]);
-    assert.equal(registry.getReverse().channel-1100, "account");
+    assert.equal(registry.resolve("account"), "court_a2");
+    assert.deepEqual(registry.getAllWithHistory().account, ["court_a", "court_a1", "court_a2"]);
+    assert.equal(registry.getReverse().court_a, "account");
 });
 
 test("loading a cyclic history never mistakes an older alias for current", async (t) => {
@@ -56,21 +56,21 @@ test("loading a cyclic history never mistakes an older alias for current", async
     t.after(() => import("node:fs/promises").then(fs => fs.rm(dir, { recursive: true })));
     const filePath = path.join(dir, "aliases.json");
     await writeFile(filePath, JSON.stringify({
-        account: ["channel-1100", "channel-1101", "channel-1100"],
+        account: ["court_a", "court_a1", "court_a"],
     }));
 
     const registry = new AliasRegistry(filePath);
     await registry.load();
 
-    assert.equal(registry.resolve("account"), "channel-1100");
-    assert.deepEqual(registry.getAllWithHistory().account, ["channel-1101", "channel-1100"]);
+    assert.equal(registry.resolve("account"), "court_a");
+    assert.deepEqual(registry.getAllWithHistory().account, ["court_a1", "court_a"]);
 });
 
 test("the catalogs' view (AliasBook) answers from the registry without copying it", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "alias-registry-"));
     t.after(() => import("node:fs/promises").then(fs => fs.rm(dir, { recursive: true })));
     const filePath = path.join(dir, "aliases.json");
-    await writeFile(filePath, JSON.stringify({ account: ["channel-1100", "channel-1101"], other: ["solo"] }));
+    await writeFile(filePath, JSON.stringify({ account: ["court_a", "court_a1"], other: ["solo"] }));
     const registry = new AliasRegistry(filePath);
     await registry.load();
 
@@ -80,7 +80,7 @@ test("the catalogs' view (AliasBook) answers from the registry without copying i
     assert.equal(registry.names("constructor"), undefined);
     // The caller gets its own array.
     registry.names("account").push("mutated");
-    assert.deepEqual(registry.names("account"), ["channel-1100", "channel-1101"]);
-    assert.equal(registry.current("account"), "channel-1101");
-    assert.equal(registry.idForName("channel-1100"), "account");
+    assert.deepEqual(registry.names("account"), ["court_a", "court_a1"]);
+    assert.equal(registry.current("account"), "court_a1");
+    assert.equal(registry.idForName("court_a"), "account");
 });
