@@ -24,13 +24,13 @@ test("compound names round-trip recording IDs containing separators", () => {
     });
 });
 
-test("Fmp4Live UTC identities stay visible without URI escape sequences", () => {
+test("UTC segment identities stay visible without URI escape sequences", () => {
     const raw = "2026-08-12T09:08:47Z";
     const normalized = "2026-08-12T090847Z";
     const name = formatSegmentName(0, raw, 765);
     assert.equal(normalizeRecordingId(raw), normalized);
     assert.equal(name, `0_${normalized}_765.ts`);
-    assert.equal(decodeURIComponent(new URL(name, "https://example.test/hls/fmp4/video/").pathname.split("/").at(-1)), name);
+    assert.equal(decodeURIComponent(new URL(name, "https://example.test/hls/live-c/video/").pathname.split("/").at(-1)), name);
     assert.deepEqual(parseCompoundSegmentName(name), {
         localNumber: 0,
         recordingId: normalized,
@@ -102,20 +102,20 @@ async function liveCapture(t, recordingId) {
     return { root, disk, manager, poll, playlist };
 }
 
-test("an LADDER-like media-sequence restart 1112 -> 1 is new media after one discontinuity", async (t) => {
-    const capture = await liveCapture(t, "ladder-start");
+test("a media-sequence restart 1112 -> 1 is new media after one discontinuity", async (t) => {
+    const capture = await liveCapture(t, "live-b-start");
     assert.deepEqual(await capture.poll(1108, 5), [1108, 1109, 1110, 1111, 1112]);
     assert.deepEqual(await capture.poll(1, 4), [1, 2, 3, 4]);
     // The new run is the baseline now: its overlap is deduplicated normally.
     assert.deepEqual(await capture.poll(3, 4), [5, 6]);
     const content = await capture.playlist();
     assert.equal((content.match(/#EXT-X-DISCONTINUITY/g) ?? []).length, 1);
-    assert.match(content, /4_ladder-start_1112\.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:2,\n5_ladder-start_1\.ts\n/);
+    assert.match(content, /4_live-b-start_1112\.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:2,\n5_live-b-start_1\.ts\n/);
     assert.deepEqual(content.split("\n").filter((line) => line.endsWith(".ts")).map((line) => line.split("_").at(-1)),
         ["1108.ts", "1109.ts", "1110.ts", "1111.ts", "1112.ts", "1.ts", "2.ts", "3.ts", "4.ts", "5.ts", "6.ts"]);
 });
 
-test("an FMP4-like edge renumbering 693 -> 26 is accepted instead of skipped until 694", async (t) => {
+test("an edge renumbering 693 -> 26 is accepted instead of skipped until 694", async (t) => {
     const capture = await liveCapture(t, "2026-09-21T134247Z");
     assert.deepEqual(await capture.poll(689, 5), [689, 690, 691, 692, 693]);
     assert.deepEqual(await capture.poll(22, 5), [22, 23, 24, 25, 26]);
@@ -145,7 +145,7 @@ test("a stale window slightly below the baseline is still deduplicated, not a re
 test("resume after a committed restart takes the playlist tail, not the maximum", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-resume-restart-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
-    const recordingId = "ladder-start";
+    const recordingId = "live-b-start";
     const entries = [[0, 1110], [1, 1111], [2, 1112], [3, 1], [4, 2], [5, 3]];
     await writeFile(path.join(root, "playlist.m3u8"), [
         "#EXTM3U",
@@ -173,7 +173,7 @@ test("resume after a committed restart takes the playlist tail, not the maximum"
 test("an HLS window overlapping by more than ten segments downloads only its new edge", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-long-overlap-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
-    const recordingId = "ladder-start";
+    const recordingId = "live-b-start";
     const disk = new DiskSession("alias", { update() {} }, async () => root);
     const manager = new PlaylistManager(disk, recordingId);
 
@@ -197,10 +197,10 @@ test("an HLS window overlapping by more than ten segments downloads only its new
     assert.equal(nextWindow[0].localName, formatSegmentName(17, recordingId, 19));
 });
 
-test("a reset LADDER URI remains new when its HLS media sequence is monotonic", async (t) => {
+test("a reset URI remains new when its HLS media sequence is monotonic", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-uri-reset-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
-    const recordingId = "ladder-start";
+    const recordingId = "live-b-start";
     const disk = new DiskSession("alias", { update() {} }, async () => root);
     const manager = new PlaylistManager(disk, recordingId);
 
@@ -313,7 +313,7 @@ test("resume keeps unreferenced media that is empty, unreadable, or older than t
 test("fMP4 media written after a buffered map change is re-appended under its own map", async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-fmp4-orphan-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
-    const recordingId = "fmp4-epoch";
+    const recordingId = "live-c-epoch";
     for (const name of ["init.mp4", "init_2.mp4", formatSegmentName(0, recordingId, 40),
         formatSegmentName(1, recordingId, 41), formatSegmentName(2, recordingId, 42)]) {
         await writeFile(path.join(root, name), name);
@@ -328,7 +328,7 @@ test("fMP4 media written after a buffered map change is re-appended under its ow
     const manager = new PlaylistManager(disk, recordingId);
     await manager.initializeFromExistingPlaylist(async () => ({ valid: true, duration: 2 }));
     assert.match(await readFile(path.join(root, "playlist.m3u8"), "utf8"),
-        /1_fmp4-epoch_41\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_2\.mp4"\n#EXTINF:2\.000,\n2_fmp4-epoch_42\.ts\n$/);
+        /1_live-c-epoch_41\.ts\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI="init_2\.mp4"\n#EXTINF:2\.000,\n2_live-c-epoch_42\.ts\n$/);
 });
 
 test("resume after first media write advances beyond the unreferenced local number", async (t) => {

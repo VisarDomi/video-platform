@@ -1,8 +1,7 @@
 // Pinning test: how a recording folder names its streamer. The folder name is read
 // back by the server, the pipeline and the players.
 //
-// The real sites' list lines and TsLive's token file are pinned with their plug-ins
-// (private/test/pinsListsAndTokens.test.mjs).
+// The real sites' list lines and token files are pinned with their plug-ins.
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";

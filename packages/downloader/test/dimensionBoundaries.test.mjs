@@ -76,7 +76,7 @@ test("resumed TS capture marks the first new segment without probing the existin
     assert.deepEqual((await boundaries(root)).map((s) => s.tags), [0, 1]);
 });
 
-test("FMP4 init-map quality changes still retain fragments and publish one map boundary", async (t) => {
+test("fMP4 init-map quality changes still retain fragments and publish one map boundary", async (t) => {
     const { root, disk, manager, segments } = await setup(t, true);
     const tracker = new InitTracker(disk);
     const first = await tracker.commitInit("720-init", async () => ({ data: Buffer.from("720-init") }), 0);
