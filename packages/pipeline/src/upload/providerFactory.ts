@@ -13,7 +13,7 @@ import { shutdownSignal } from "../shutdown.js";
 // the plug-in sees a path) with the provider's credentials.
 export async function createProviderUploader(config: PipelineConfig, provider: ActiveUploadProvider): Promise<Destination> {
     assertUploadProvider(provider);
-    const profilePath = path.resolve(config.videohostBrowserProfilePath ?? config.browserProfilePath);
+    const profilePath = path.resolve(config.browserProfilePath);
     let ancestor = profilePath;
     const missing: string[] = [];
     let actual: string;
@@ -45,7 +45,6 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
         config: entry.config ?? {},
         stateDir,
         browser: { executablePath: config.chromiumExecutablePath, profilePath },
-        ...(config.videohostSessionPath ? { sessionFilePath: config.videohostSessionPath } : {}),
         credentials: () => readProviderCredentials(config.credentialsFilePath, provider),
         stopSignal: shutdownSignal,
     });

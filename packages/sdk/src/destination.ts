@@ -106,12 +106,18 @@ export interface Destination {
         // What a session-lost message tells the owner to run. The campaign's attention
         // text carries it, and resuming after a recovery recognises the text by it.
         readonly lostAdvice: string;
+        // For a login the account shares with another device (one session per account, the
+        // newest login wins, so the core must never sign in again on its own). The core then
+        // checks it every ten minutes so it never idles out, records its health, pauses the
+        // campaign when it is lost ("<label> shared session is logged out (...); <lostAdvice>")
+        // and resumes it once a recovery restored it. restoreCommand is what the owner runs.
+        readonly keepAlive?: { readonly label: string; readonly restoreCommand: string };
     };
 }
 
 // What the host gives a destination it creates. The host owns the browser profile (it
-// refuses everyday and shared profiles) and the shared session file; the plug-in only
-// uses them.
+// refuses everyday and shared profiles); the plug-in only uses it. Where a destination
+// keeps its signed-in session is its own business: its state folder, or its config.
 export interface DestinationHost {
     // The destination's own block from its sites-file entry ("config"): addresses, choices.
     readonly config: Readonly<Record<string, unknown>>;
@@ -119,7 +125,6 @@ export interface DestinationHost {
     // keeps between runs, such as its signed-in session.
     readonly stateDir: string;
     readonly browser: { readonly executablePath: string; readonly profilePath: string; readonly headless?: boolean };
-    readonly sessionFilePath?: string;
     // Read only when a password login actually happens (never for uploads, lookups or
     // session checks on the shared login), so those keep working without the file.
     readonly credentials: () => { readonly email: string; readonly password: string };

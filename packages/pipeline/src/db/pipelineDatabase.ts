@@ -3256,9 +3256,9 @@ export class PipelineDatabase {
             fingerprint: row.fingerprint, passwordLoginAt: row.password_login_at, note: row.note }));
     }
 
-    // VideoHost uploads that reached the provider, newest first, with what the
-    // pipeline submitted and where verification stands.
-    listVideoHostUploads(limit = 25): Array<{
+    // One destination's uploads that reached it (uncertain or accepted), newest first, with
+    // what the pipeline submitted and where verification stands.
+    listDestinationUploads(provider: string, limit = 25): Array<{
         recordingId: string; state: string; remoteId: string | null; startedAt: string; confirmAfter: string | null;
         verifiedAt: string | null; metadata: { title: string; description: string; tags: string[] } | null;
     }> {
@@ -3268,8 +3268,8 @@ export class PipelineDatabase {
             LEFT JOIN upload_confirmations c ON c.attempt_id = a.id AND c.status = 'pending'
             LEFT JOIN remote_uploads u ON u.attempt_id = a.id
             LEFT JOIN upload_metadata m ON m.recording_id = a.recording_id
-            WHERE a.provider = 'videohost' AND a.status IN ('uncertain', 'accepted')
-            ORDER BY a.started_at DESC LIMIT ?`).all(limit) as unknown as Array<{
+            WHERE a.provider = ? AND a.status IN ('uncertain', 'accepted')
+            ORDER BY a.started_at DESC LIMIT ?`).all(provider, limit) as unknown as Array<{
             recording_id: string; state: string; remote_id: string | null; started_at: string; confirm_after: string | null;
             verified_at: string | null; title: string | null; description: string | null; tags_json: string | null;
         }>).map((row) => ({ recordingId: row.recording_id, state: row.state, remoteId: row.remote_id, startedAt: row.started_at,

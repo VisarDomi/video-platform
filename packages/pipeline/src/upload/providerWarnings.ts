@@ -9,11 +9,6 @@ export function rejectedPhrases(text: string): string[] {
         .map((match) => match[1].trim().toLowerCase()).filter(Boolean))];
 }
 
-// The campaign's session-lost attention text ends with this; resuming after a recovery
-// recognises the text by it. The destination says the same in its own messages (a test
-// keeps the two identical until the generic session engine owns the text).
-export const SESSION_LOST_ADVICE = "run `npm run vhost:connect-iphone` to restore the shared session";
-
 // Informational only: a published video whose reach the provider limited.
 // Never interpret the account-wide "N videos blocked" banner as this video's flag.
 export function limitedVisibilityWarning(text: string): string | null {
