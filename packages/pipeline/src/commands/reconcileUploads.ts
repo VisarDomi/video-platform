@@ -1,3 +1,4 @@
+import { destinationFacts } from "../upload/destinationFacts.js";
 import type { PipelineConfig } from "../config.js";
 import { PipelineDatabase, UPLOAD_CHECK_MILLISECONDS } from "../db/pipelineDatabase.js";
 import { cleanupAcceptedConversions } from "./acceptedConversions.js";
@@ -58,7 +59,8 @@ export async function reconcileDueUploads(config: PipelineConfig, now = new Date
         results.push(...database.recoverInterruptedUploads(now));
         database.recoverAcceptedVerifications(now);
         results.push(...await cleanupAcceptedConversions(database,config,now));
-        results.push(...database.settleUnsubmittedAttempts(database.getActiveUploadProvider(), now)
+        const active = database.getActiveUploadProvider();
+        results.push(...database.settleUnsubmittedAttempts(active, (await destinationFacts(active)).creationBoundary, now)
             .map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" })));
         // One login flow, then every due confirmation is checked on that same
         // authenticated page.

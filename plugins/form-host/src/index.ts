@@ -8,6 +8,10 @@ import { FormHostDestination, readConfig } from "./destination.js";
 export const destination: DestinationPlugin = {
     id: "form-host",
     sdkVersion: SDK_VERSION,
+    creationBoundary: "metadata_submit",
+    // The simulated host's limits: 10 GiB a file, no duration limits (its processing rules
+    // may still fail a video), public uploads.
+    policy: { minimumDurationSeconds: null, maximumDurationSeconds: null, maximumFileBytes: 10 * 1024 ** 3, uploadVisibility: "public" },
     createDestination(host: DestinationHost): Destination {
         return new FormHostDestination(readConfig(host.config), host);
     },

@@ -3124,12 +3124,12 @@ export class PipelineDatabase {
             .run(attemptId);
     }
 
-    // VideoHost creates the video only when its metadata form is submitted.
-    // Uncertain attempts that never reached that click published nothing:
-    // settle them as plain failures, without the weekly duplicate hold.
-    settleUnsubmittedAttempts(provider: ActiveUploadProvider, now = new Date()): string[] {
+    // A destination that creates the video only when its metadata form is submitted:
+    // uncertain attempts that never reached that click published nothing, so settle
+    // them as plain failures, without the weekly duplicate hold.
+    settleUnsubmittedAttempts(provider: ActiveUploadProvider, creationBoundary: "metadata_submit" | "transfer_start", now = new Date()): string[] {
         assertUploadProvider(provider);
-        if (provider !== "videohost") return [];
+        if (creationBoundary !== "metadata_submit") return [];
         return this.transaction(() => {
             const rows = this.database.prepare(`SELECT a.id, a.recording_id FROM upload_attempts a
                 JOIN recordings r ON r.id = a.recording_id

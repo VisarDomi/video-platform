@@ -90,3 +90,50 @@ test("the CLI checks campaign sources and destinations against the sites file", 
     assert.equal(switched.status, 0, switched.stderr);
     assert.equal(JSON.parse(switched.stdout).activeUploadProvider, "form-host");
 });
+
+test("a destination's limits and creation boundary come from its plug-in; VideoHost keeps the pinned table", async (t) => {
+    const { destinationFacts } = await import("../dist/upload/destinationFacts.js");
+    const videohost = await destinationFacts("videohost");
+    assert.equal(videohost.creationBoundary, "metadata_submit");
+    assert.equal(videohost.uploadVisibility, "public");
+    assert.equal(videohost.policy.minimumDurationSeconds, 120);
+    assert.equal(videohost.policy.maximumFileBytes, 10_000_000_000);
+
+    const { directory } = await ledger(t);
+    const sitesFile = path.join(directory, "sites.json");
+    await writeFile(sitesFile, JSON.stringify({ destinations: [{ id: "form-host", plugin: "plugin-form-host", config: { baseUrl: "http://127.0.0.1:1" } }], sites: [] }));
+    const previous = process.env.VIDEO_SITES_FILE;
+    process.env.VIDEO_SITES_FILE = sitesFile;
+    t.after(() => { process.env.VIDEO_SITES_FILE = previous; });
+    const formHost = await destinationFacts("form-host");
+    assert.deepEqual({ ...formHost, policy: { ...formHost.policy } }, {
+        creationBoundary: "metadata_submit", uploadVisibility: "public",
+        policy: { providers: [], minimumDurationSeconds: null, maximumDurationSeconds: null, maximumFileBytes: 10 * 1024 ** 3, unresolvedConstraints: [] },
+    });
+    await assert.rejects(destinationFacts("api-host"), /names no destination "api-host"/);
+});
+
+test("only a destination whose copy starts at the metadata form settles unsubmitted attempts", async (t) => {
+    const { directory, databasePath } = await ledger(t);
+    const database = new PipelineDatabase(databasePath);
+    t.after(() => database.close());
+    const sourcePath = path.join(directory, "2026-01-01 010000 fixture");
+    const recording = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath,
+        playlistPath: path.join(sourcePath, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
+    // An attempt interrupted during the file transfer: uncertain, never at the metadata form.
+    const raw = new DatabaseSync(databasePath);
+    raw.prepare("UPDATE recordings SET state = 'upload_uncertain' WHERE id = ?").run(recording.id);
+    raw.prepare(`INSERT INTO upload_attempts (id, recording_id, provider, status, phase, started_at)
+        VALUES ('attempt-1', ?, 'form-host', 'uncertain', 'file_uploading', '2026-01-02T00:00:00.000Z')`).run(recording.id);
+    raw.close();
+    const attempt = () => { const db = new DatabaseSync(databasePath, { readOnly: true }); try { return { ...db.prepare("SELECT status FROM upload_attempts WHERE id = 'attempt-1'").get() }; } finally { db.close(); } };
+
+    // A copy that may exist from the first byte: nothing is settled as harmless.
+    assert.deepEqual(database.settleUnsubmittedAttempts("form-host", "transfer_start"), []);
+    assert.equal(attempt().status, "uncertain");
+    assert.equal(database.get(recording.id).state, "upload_uncertain");
+    // A copy made only by the metadata form: the transfer published nothing.
+    assert.deepEqual(database.settleUnsubmittedAttempts("form-host", "metadata_submit"), [recording.id]);
+    assert.equal(attempt().status, "failed");
+    assert.equal(database.get(recording.id).state, "metadata_ready");
+});

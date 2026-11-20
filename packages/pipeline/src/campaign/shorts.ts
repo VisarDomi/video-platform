@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { journalPriority, policyForUploadProvider } from "shared";
+import { journalPriority } from "shared";
+import { destinationFacts } from "../upload/destinationFacts.js";
 import type { PipelineConfig } from "../config.js";
 import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
@@ -209,7 +210,7 @@ async function ingestShorts(database: PipelineDatabase, config: PipelineConfig, 
 export async function maintainAutomaticShorts(database: PipelineDatabase, config: PipelineConfig,
     resolver: TargetCatalogResolver, now = new Date()): Promise<{ registered: number; joined: string[] }> {
     const provider = config.uploadProvider ?? database.getActiveUploadProvider();
-    const minimum = policyForUploadProvider(provider).minimumDurationSeconds ?? 0;
+    const minimum = (await destinationFacts(provider)).policy.minimumDurationSeconds ?? 0;
     let registered = 0;
     if (now.getTime() - (scanTimes.get(config.databasePath) ?? 0) >= SCAN_INTERVAL_MS) {
         if (minimum > 0) registered = await ingestShorts(database, config, resolver, provider, minimum, now);
