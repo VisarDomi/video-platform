@@ -1,14 +1,12 @@
 {
     "name": "live-extensions",
     "version": "3",
-    "description": "Safari extensions hosted by TsLive: LADDER/FMP4 download-list controls and FileHost downloads to the PC",
+    "description": "Safari extensions built from plug-ins: download-list bars and file-host send-to-PC extensions",
     "private": true,
     "type": "module",
     "scripts": {
         "build": "node scripts/build.mjs",
-        "check": "tsc --noEmit",
-        "test:filehost": "node test/filehost.mjs",
-        "test:filehost-album": "node test/filehost-album.mjs"
+        "check": "tsc --noEmit"
     },
     "dependencies": {
         "app": "0.0.1",

@@ -75,7 +75,6 @@ export interface SiteInstance {
     catalog?: Catalog;
     capture?: LiveCapture;
     auth?: SiteAuth;
-    fileHost?: FileHost;
     // Called once by the host after it has read the site's download list, before the first
     // poll: slow or logged start-up work (e.g. loading key files) goes here, not in create.
     init?(): Promise<void> | void;
@@ -309,22 +308,13 @@ export interface SiteAuth {
     acknowledgeDevice?(requestId: string): Promise<void>;
 }
 
-// ---- File host ------------------------------------------------------------------------
-
-export interface FileHost {
-    canonicalPage(url: string): string | null;
-    // The core still checks every redirect hop against this (SSRF guard).
-    isAllowedHost(url: URL): boolean;
-    resolve(page: string): Promise<{ url: string; filename: string; headers?: Record<string, string> }>;
-    // Stable job key for a page; the browser extension computes the same.
-    jobKey(page: string): string;
-}
-
 // ---- Browser extension build inputs -------------------------------------------------
 
-// A Safari web extension a site plug-in contributes, declared in the plug-in package's
+// A Safari web extension a plug-in contributes, declared in the plug-in package's
 // `extension.json` (read at build time by live-extensions, so it needs no plug-in build).
-// The core builds the rest: the bar, the background page that talks to the PC, the manifest.
+// A site plug-in's is a download-list bar: the core builds the bar, the background page
+// that talks to the PC and the manifest. A file host plug-in's sends file pages to the PC
+// (SendToPcExtensionSpec).
 export interface ExtensionSpec {
     // A download-list bar: the open channel's +/- for the PC's download list of this site.
     kind: "download-list";
@@ -341,6 +331,23 @@ export interface ExtensionSpec {
     // DownloadListAdapter) and, with runAt document_start, `onDocumentStart()`, which runs
     // before the page has a body; the bar mounts once it has one.
     entry: string;
+}
+
+// A file host's extension: its own content script (the page's download controls) and
+// background page, which the build gives __PC_SERVER__ (the PC's file-host service) and
+// __API_PATH__ ("/api/<host>"). The manifest's content scripts are its matches with each
+// path in turn, e.g. "/f/*" at document_end.
+export interface SendToPcExtensionSpec {
+    kind: "send-to-pc";
+    key: string;
+    name: string;
+    siteName: string;
+    version?: string;
+    matches: string[];
+    contentScripts: Array<{ path: string; runAt: "document_start" | "document_end" }>;
+    // Modules relative to the plug-in package.
+    entry: string;
+    background: string;
 }
 
 // How the bar reads the current page.

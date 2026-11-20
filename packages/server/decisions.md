@@ -2,7 +2,7 @@
 
 ## Finalization is non-destructive and every recording publishes
 
-For TsLive, LADDER, and FMP4, the downloader atomically writes `#EXT-X-ENDLIST` and
+For every live site, the downloader atomically writes `#EXT-X-ENDLIST` and
 renames the recording from `downloaded/.active/` to the hidden
 `downloaded/.pending/`. The server watches each `.pending` root directly and
 non-recursively (the roots are created at startup), runs a reconciliation scan
@@ -60,8 +60,8 @@ Processing a pending recording (`processFinalizedRecording`):
    warning.
 6. Each published recording logs one line. It is a warning when the report has
    a finding other than successful lossless splits or damaged segments, or damage beyond 2% of the
-   playlist; damage below that comes from the stream itself (most TsLive
-   recordings carry a few corrupted macroblocks) and is an info line.
+   playlist; damage below that comes from the stream itself (some sites' recordings
+   carry a few corrupted macroblocks) and is an info line.
 
 Finalization may rewrite `playlist.m3u8` and create lossless sample-copy
 fragments/init maps. It never discards captured media or moves/deletes an original.
@@ -221,43 +221,41 @@ links, the names to refresh). Site code lives in the plug-ins only.
 The server reads each list with the plug-in's `parseTargetLine`, the downloader's
 parser, so the routes see exactly the targets that are recorded. Until 2026-11-19 the
 server had parsers of its own that disagreed: they skipped lines the downloader
-recorded (bare LADDER IDs, `http://` or query-string LADDER URLs, TsLive tab separators, FMP4
-bare usernames, subdomains and non-numeric room IDs), so `remove` could not take them
+recorded (bare IDs, `http://` or query-string URLs, tab separators, bare usernames,
+subdomains and non-numeric room IDs), so `remove` could not take them
 off the list, and accepted some it never recorded. The server parses silently; the
-downloader logs malformed lines. An entry without an ID (an FMP4 username not yet
-resolved) is known by its label, as the downloader keys it: `remove` and `member`
+downloader logs malformed lines. An entry without an ID (a username not yet resolved)
+is known by its label, as the downloader keys it: `remove` and `member`
 match it by that label. New lines are written by `formatTargetLine`, byte-identical to
-before (pinned in `private/test/pinsListsAndTokens.test.mjs`).
+before (pinned with each plug-in).
 
 ## Providers are the sites file's capture sites
 
 The recordings the server serves (`/api/videos`, `/hls`, edits, moves, the library
 index, the finalizer's `.pending` roots, `finalize-library`) are those of the sites
 file's capture sites, in its order (`configureProviders` at startup; `finalize-library`
-loads the sites file itself). A request without a provider means the first one (`tslive`
-in production, the old fixed default), and the disk check measures its folder. A
+loads the sites file itself). A request without a provider means the first one, and the
+disk check measures its folder. A
 disabled site's recordings are not served.
 
-## FMP4 room IDs resolved at write time
+## Usernames resolved to stable IDs at write time
 
-Adding an FMP4 streamer resolves the username once (`resolveScUsername`) and
-stores the stable numeric room ID next to it in `fmp4.txt`
-(`https://fmp4-live.example/<username> <roomId>`). Membership and removal resolve
-names to room IDs. An hourly refresh asks Fmp4Live for the current usernames of
-all listed room IDs (100 per request) and rewrites changed usernames in
-`fmp4.txt`.
+On a site whose usernames change, adding a streamer resolves the username once (the
+catalog's resolution) and stores the stable numeric ID next to it in the list line.
+Membership and removal resolve names to IDs. An hourly refresh asks the site for the
+current usernames of all listed IDs (in batches) and rewrites changed usernames.
 
-**Why:** Usernames change; room IDs don't. Polling by a stale username fails on
+**Why:** Usernames change; IDs don't. Polling by a stale username fails on
 every cycle.
 
 ## AliasRegistry is server-only
 
 AliasRegistry lives in the server core. Only the server reads and writes
 `aliases.json`; catalogs see it as `ctx.aliases` (the SDK's `AliasBook`). The
-downloader takes folder names from `tslive.txt`, which the server's alias refresh keeps
-in sync. `GET /api/tslive/list` returns each listed streamer's ID with its current and
-historical aliases (the TsLive catalog's `enrichList`). The file is not namespaced by
-site (its format is pinned); only TsLive keeps history in it today.
+downloader takes folder names from the site's list, which the server's alias refresh keeps
+in sync. `GET /api/<site>/list` returns each listed streamer's ID with its current and
+historical aliases (the catalog's `enrichList`), for a site whose catalog keeps history.
+The file is not namespaced by site (its format is pinned).
 
 `aliases.json` writes take a directory lock (`aliases.json.lock`,
 `services/fileLock.ts`): `mkdir` is atomic, and `holder.json` inside records
@@ -272,53 +270,52 @@ every later write. `aliases.json` is replaced through `core/durableFile.ts`
 ## Alias refresh: hourly batch + list sync
 
 `services/aliasRefreshService.ts` runs each catalog's `refreshAliases` at start and
-then at its interval (hourly for TsLive and FMP4), and rewrites the list with
+then at its interval (hourly, typically), and rewrites the list with
 `renameListedTargets` (`services/listRenames.ts`): a line whose ID has a new current
 name is written again by `formatTargetLine`, every other line keeps its bytes.
 
-- TsLive (`keepHistory`): the followed account IDs (`size=5000`) plus every account in
-  `tslive.txt`, their profiles from the batch profile API in sequential chunks of 500
-  (the API's per-request maximum), persisted to `aliases.json`; `tslive.txt` then takes
-  each ID's current alias from the registry. Logged by `[AliasRegistry]`
-  (`tslive.txt sync: <id> <old> -> <new>`, `Periodic refresh failed: ...`) and
-  `[AliasRefresh] Batch fetch failed for chunk <n>`.
-- FMP4: every listed room ID, 100 per request; `fmp4.txt` takes the usernames this refresh
-  returned. Logged as `[FMP4 Alias Refresh] ...`.
+- A catalog that keeps history (`keepHistory`): its followed accounts plus every listed
+  account, their profiles in batches of the API's per-request maximum, persisted to
+  `aliases.json`; the list then takes each ID's current alias from the registry. Logged
+  by `[AliasRegistry]` (`<list> sync: <id> <old> -> <new>`, `Periodic refresh failed: ...`).
+- Any other: every listed ID, in batches; the list takes the usernames this refresh
+  returned.
 
 The downloader's target manager picks up the change through its directory watch.
 
 ## Download lists are replaced atomically, one change at a time
 
-The +/- routes, the TsLive alias sync and the FMP4 alias sync all change a list
+The +/- routes and the alias syncs all change a list
 through `mutateTextFile` (`core/durableFile.ts`). The read, the decision and the
 write are one step serialized per file inside the server, and the write replaces
 the file: temporary file, fsync, rename, directory fsync. Why: a list torn by a
 power cut, or an entry dropped by two concurrent changes, ends that streamer's
 live capture, since the downloader finalizes sessions missing from the list. The
-FMP4 alias sync fetches usernames before taking that step and applies them to the
+An alias sync fetches usernames before taking that step and applies them to the
 list as it is then, so an add or remove made during the fetch survives. The
 downloader's target managers watch the list's directory, not the file, because
 an atomic replacement orphans a watcher on the old file.
 
 ## Notes
 
-- FileHost downloads (`/api/filehost`) are a separate, one-at-a-time durable byte-copy
-  queue into `~/Videos/plab/filehost`, driven by TsLive's FileHost Safari extension.
+- File-host downloads (`/api/<host>`, `src/fileHosts.ts`) are a separate, one-at-a-time
+  durable byte-copy queue per file host of the sites file (`fileHosts`) into its folder,
+  driven by the host's Safari extension (see `packages/sdk/src/fileHost.ts`).
   Jobs are acknowledged only after atomic write/fsync, retain `.part` bytes and
   data-before-metadata checkpoints, and publish only complete flushed files
   without overwriting existing destinations. Power-loss tails are retained and
   resume requires exact entity/range proof. The queue does not join the live
-  library or upload campaign. Details are in `packages/live-extensions/README.md`.
-  The same HTTPS :9998 service exposes FileHost local's MP4 library through
-  `/api/videos?provider=filehost`, `/api/videos/changes?provider=filehost` and
-  `/media/filehost/:filename`. A directory watcher and safety scan find published
+  library or upload campaign.
+  The same HTTPS :9998 service exposes each host's local MP4 library through
+  `/api/videos?provider=<host>`, `/api/videos/changes?provider=<host>` and
+  `/media/<host>/:filename`. A directory watcher and safety scan find published
   files and manual removals; stat-matched duration metadata is cached outside the
   media folder. The original MP4 is streamed with HEAD and byte-range support,
   never buffered whole, transcoded or treated as an HLS recording. Hidden files,
   partials and symbolic links are excluded from listing and playback.
-  Native Rename uses `POST /api/filehost/files/:id/rename` with an expected filename.
+  Native Rename uses `POST /api/<host>/files/:id/rename` with an expected filename.
   IDs are derived from device/inode/birth time and remain stable when a file is
-  renamed. `/media/filehost/id/:id` supports seeking without tying an active player
+  renamed. `/media/<host>/id/:id` supports seeking without tying an active player
   to its display name; durable aliases preserve older filename URLs. Renames
   create a non-overwriting hard link, flush it, update the matching completed
   download receipts and aliases, then remove only the original link to that same
@@ -327,7 +324,7 @@ an atomic replacement orphans a watcher on the old file.
 
 - The API server uses HTTPS with the mkcert certificate in
   `~/.local/share/mkcert/pwa/` and falls back to HTTP when it is missing.
-- The LADDER/FMP4 live extensions and the viewer's +/- button drive the download
+- The live extensions and the viewer's +/- button drive the download
   lists through the `/api/{provider}/member|exists|add|remove` endpoints; the
   extensions send these requests from their background page, so page security
   policies never apply.

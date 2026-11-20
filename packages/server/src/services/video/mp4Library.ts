@@ -38,8 +38,10 @@ export class MP4Library {
     private renameHooks: MP4RenameHooks;
     private journalFile: string;
     private aliasesFile: string;
-    constructor(readonly directory = path.join(os.homedir(), "Videos/plab/filehost"), options: { stateFile?: string; probe?: Probe; renameHooks?: MP4RenameHooks } = {}) {
-        this.stateFile = options.stateFile ?? path.join(os.homedir(), ".local/share/video-services/filehost-library/index.json");
+    private readonly label: string;
+    constructor(readonly directory = path.join(os.homedir(), "Videos", "library"), options: { stateFile?: string; probe?: Probe; renameHooks?: MP4RenameHooks; label?: string } = {}) {
+        this.label = options.label ?? "Video";
+        this.stateFile = options.stateFile ?? path.join(os.homedir(), ".local/share/video-services/library/index.json");
         this.probe = options.probe ?? mediaMetadata;
         this.needsDisplaySize = !options.probe;
         this.journalFile = path.join(path.dirname(this.stateFile), "rename-journal.json");
@@ -58,7 +60,7 @@ export class MP4Library {
             try { this.aliases = JSON.parse(await readFile(this.aliasesFile, "utf8")).aliases ?? {}; }
             catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
             await this.refresh();
-            this.timer = setInterval(() => void this.refresh().catch(error => console.error("FileHost library rescan:", error.message)), 30_000);
+            this.timer = setInterval(() => void this.refresh().catch(error => console.error(`${this.label} library rescan:`, error.message)), 30_000);
             this.timer.unref();
         })();
         this.started = starting;
@@ -74,7 +76,7 @@ export class MP4Library {
                 if (this.debounce) return;
                 this.debounce = setTimeout(() => {
                     this.debounce = undefined;
-                    void this.refresh().catch(error => console.error("FileHost library update:", error.message));
+                    void this.refresh().catch(error => console.error(`${this.label} library update:`, error.message));
                 }, 100);
             });
             this.watchedDirectory = identity;
@@ -109,7 +111,7 @@ export class MP4Library {
             }
             let metadata: MediaMetadata = { duration: 0 };
             try { const value = await this.probe(file); metadata = typeof value === "number" ? { duration: value } : value; }
-            catch { console.warn("FileHost MP4 metadata unavailable:", filename); }
+            catch { console.warn(`${this.label} MP4 metadata unavailable:`, filename); }
             const after = await lstat(file).catch(() => undefined);
             if (!after?.isFile() || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ino !== stat.ino) {
                 // Do not replace a stable row with metadata read while a file was changing.
@@ -145,7 +147,7 @@ export class MP4Library {
             await writeFile(`${this.stateFile}.tmp`, JSON.stringify({ version: 2, entries: [...this.entries.values()] }));
             const handle = await open(`${this.stateFile}.tmp`, "r"); try { await handle.sync(); } finally { await handle.close(); }
             await rename(`${this.stateFile}.tmp`, this.stateFile);
-        } catch (error) { console.warn("FileHost library cache could not save:", (error as Error).message); }
+        } catch (error) { console.warn(`${this.label} library cache could not save:`, (error as Error).message); }
     }
     async videos(after?: string): Promise<MP4Video[]> {
         await this.start();
@@ -211,7 +213,7 @@ export class MP4Library {
         if (change.version !== 1 || !["prepared", "linked"].includes(change.stage) || !Number.isSafeInteger(change.bytes) || change.bytes <= 0
             || !Array.isArray(change.jobs) || change.jobs.some(id => typeof id !== "string") || !/^[a-f0-9]{24}$/.test(change.fileId)
             || !mp4Name(change.from) || mp4RenameName(change.to, originalVideoExtension(change.from)) !== change.to || change.from === change.to) {
-            throw new Error("Invalid FileHost rename journal");
+            throw new Error(`Invalid ${this.label} rename journal`);
         }
         const source = path.join(this.directory, change.from), target = path.join(this.directory, change.to);
         const before = await lstat(source).catch(() => undefined); let after = await lstat(target).catch(() => undefined);

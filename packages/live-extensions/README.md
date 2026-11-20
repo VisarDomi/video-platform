@@ -1,117 +1,33 @@
-# Safari extensions hosted by TsLive
+# Safari extensions
 
-Two Safari web extensions hosted by the TsLive app (`private/apps/ios`, provider `tslive-live`) that
-add or remove the open streamer from a PC download list: **LADDER live** (`ladder-live.example`,
-`/api/ladder`) and **FMP4 live** (`fmp4-live.example`, `/api/fmp4`). On a streamer's page each shows a
-fixed top bar with a +/- toggle. The bar shows the website viewer's button: it imports
-`DownloadListButton` and `buttons.css` from the `app` workspace (states and styles are
-described in `packages/app/README.md`), inside a shadow root so the site's styles and the
-button's stay apart. TsLive's own +/- is in the app's native viewer
-(`private/apps/ios/VideoApp/ViewerOverlay.swift`).
+Safari web extensions for the phone, built from the plug-ins of a deployment's sites file
+(`$VIDEO_SITES_FILE`, else `<data root>/sites.json`). The iPhone app that hosts them is
+the deployment's own; this package builds their files.
 
-**Where the sites come in.** The LADDER live and FMP4 live bars are built from their site plug-ins:
-each declares its extension in `extension.json` (key, name, matches, `runAt`, and its page
-code, which exports the `adapter` that reads the streamer from the URL and, for LADDER, the
-`onDocumentStart()` login click). `scripts/build.mjs` builds one bar per enabled site of the
-sites file (`$VIDEO_SITES_FILE`, else `<data root>/sites.json`) whose plug-in has one; this
-package keeps only the bar, the background page and the manifest. FileHost to PC still keeps
-its sources here.
+- **Download-list bars**, one per enabled site whose plug-in declares one: on a streamer's
+  page a fixed top bar with the website viewer's +/- button (it imports
+  `DownloadListButton` and `buttons.css` from the `app` workspace, inside a shadow root so
+  the site's styles and the button's stay apart). The plug-in's `extension.json` names
+  the pages and its page code, which exports the `adapter` that reads the streamer from
+  the URL (and, for a `document_start` script, `onDocumentStart()`). This package keeps
+  the bar (`src/core/downloadListBar.ts`), the background page that talks to the PC
+  (`src/extension/background.ts`, `/api/<site>/member|add|remove`, so page security
+  policies never apply) and the manifest.
+- **Send-to-PC extensions**, one per file host of the sites file (`fileHosts`) whose
+  plug-in declares one (`kind: "send-to-pc"`): the plug-in brings its content script and
+  background page; the build gives them the PC's file-host service (`:9998`) and the
+  host's API path, `/api/<host>` (see `packages/server/src/fileHosts.ts`).
 
-The existing list server is `SERVER` in `src/core/config.ts`
-(`https://192.168.1.197:9999`); FileHost uses `FILEHOST_SERVER` on port `9998`.
-
-**FileHost to PC** handles video pages at `https://file-host.example/f/...`, `file-host.example/f/...`
-and `file-host.example/f/...`. It probes the PC from its background page. With a recently
-reachable PC, tapping the file's Download button queues the original video in
-`~/Videos/plab/filehost/` and shows its progress on the button. Opening or refreshing
-the same file page discovers its existing job by the PC's deterministic ID,
-without another tap or submission. A per-tab cache keeps the last confirmed
-progress visible during an outage; it says reconnecting until the PC answers.
-Foreground, page restoration and network recovery refresh status immediately,
-with bounded requests and automatic polling. A lost submission acknowledgement
-is resolved by reading the existing job rather than submitting again. Related-file links
-and modified clicks keep their normal behavior. When the PC is unavailable,
-the site's Download button works normally for a new download. A known active PC
-job stays attached during a connection loss, avoiding an accidental duplicate
-download on the phone. An explicit retry is idempotent.
-
-On `/a/<id>` it takes over the document at `document_start`, using the same
-`window.stop()` / document rewrite boundary as Manga Reader and Stream Viewer.
-The page contains only the full album title/totals and a tightly packed file
-list. Each row has the full filename, size/date, the `/f/` player's contact-sheet
-poster and an adjacent gray PC download/status button. There is no row or image
-padding, fixed thumbnail aspect, crop or enlargement. Cached natural image
-dimensions reserve the layout before decoding. Safari owns Back navigation.
-The details keep their normal text size when they fit; a small resize-driven
-measurement shrinks the whole details block only when it is taller than its
-thumbnail, and restores the size when room returns. It recalculates after poster
-loads, rotation and status changes. CSS controls all font proportions and button
-spacing. `text-fit` currently fits line width and is unavailable in Safari, so it
-cannot provide this height-based behavior by itself.
-The file page's declared `videoCoverUrl` is read as a JSON string; its player and
-scripts are never executed by the album. The original small album thumbnail is
-retained if the file poster cannot be loaded. Visible/nearby rows fetch posters
-and PC status with at most three concurrent requests of each kind; hidden rows
-stop polling. Album and file-page buttons share `core/filehostDownload.ts`, including
-refresh restoration, offline progress, explicit retry, and lost-acknowledgement
-lookup. Browsing never submits a download. `/f/` keeps its original page layout
-and existing native-download fallback when no PC job is known.
-
-The independent `video-filehost-downloads.service` on HTTPS :9998 resolves FileHost's numeric metadata and expiring signature itself; Safari
-can close after acceptance. `/api/filehost/health` advertises this capability;
-`POST /api/filehost/downloads` accepts a file-page URL with the extension's
-`X-Video-Download: 1` header; `GET /api/filehost/downloads/:id` reports progress.
-Website origins cannot submit work. The server follows only the three FileHost
-domains, their `dl` hosts and FileHost's `*.cdn.cr` hosts, with bounded metadata
-responses. Only video filenames are accepted. The unit is enabled at boot and
-systemd restarts it after an unexpected exit. This is an ordinary byte-copy
-download, separate from capture and the conversion/description/upload campaign.
-
-Jobs persist outside the checkout in
-`~/.local/share/video-services/filehost-downloads/`. One transfer runs at a time.
-Acceptance follows an fsynced atomic job write and directory flush; duplicate
-taps share that pending receipt, and a worker cannot start an uncommitted job.
-Receipt writes are serialized per video, and accepted FIFO order survives restart. Partial
-files have a `.part` suffix, checkpoint every 8 MiB or five seconds with data
-flushed before the checkpoint, and recover after abrupt power loss. An
-uncommitted tail is retained separately before resuming the last durable prefix.
-Resume requires a matching ETag and Content-Range; if the CDN cannot prove the
-same bytes, the previous partial stays retained and a fresh copy starts.
-Completion requires exact byte length, a file flush and an atomic non-overwriting
-publication with directory flushes. A crash between publication and marking the
-job complete rejoins the existing complete file. Downloads retry five times
-with backoff; a failed job can be retried from the button. No media is cleaned up
-automatically, including retained partials. This service does not transcode or
-send anything to an upload provider.
-
-LADDER live starts watching at `document_start` and clicks the site's visible Login link
-as soon as the parser inserts it, without waiting for DOMContentLoaded, images, or the
-download-list bar. It also handles links added later. It follows LADDER's `/login/` link with
-its return URL, in any site language; signing in on LADDER ID still uses Safari's normal login
-page. It clicks once per
-tab session, remembered in `sessionStorage` across reloads and return visits to prevent
-redirect loops.
-
-## Layout
-
-- `src/core/downloadListBar.ts`: the one shared bar around the viewer's button; providers only classify routes
-  (`src/provider/ladder-live.ts`: numeric ID; `fmp4-live.ts`: username, skipping
-  non-streamer pages). The bar re-checks the route every second and hides on other pages.
-- `src/extension/<name>.ts` is each content script; `background.ts` performs the
-  PC requests (`https://192.168.1.197:9999/api/<ladder|fmp4>/member|add|remove`), only
-  for its own provider, so page security policies never apply.
+The sites file's `extensions` block names the PC (`"pc"`, e.g. `https://192.168.1.10`;
+the list server is on `:9999`) and the hosting app (`"hostApp"`, in the descriptions).
 
 ## Build
 
 ```bash
-npm run build -w live-extensions            # all three extensions
+npm run build -w live-extensions            # every extension the sites file declares
 npm run check -w live-extensions            # type check
-node packages/live-extensions/test/filehost.mjs # mobile WebKit + background fixtures
-node packages/live-extensions/test/filehost-album.mjs # takeover, intrinsic dimensions, full text, packed rows and status/recovery
 ```
 
-The build writes `manifest.json`, `content.js`, and `background.js` to
-`dist/extension/{ladder-live,fmp4-live,filehost}/` at the repository root.
-`private/apps/ios/scripts/deploy.py tslive-live sync` builds and stages them into the
-TsLive app's `LADDERLive`, `SCLive` and `FileHost` extension targets. Each needs enabling once in Safari's
-extension settings, with its site allowed.
+The build writes `manifest.json`, `content.js` and `background.js` to
+`dist/extension/<key>/` at the repository root. Each extension needs enabling once in
+Safari's extension settings, with its site allowed.
