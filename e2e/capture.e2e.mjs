@@ -296,7 +296,7 @@ const REPAIR = /\[StreamDownloader\] (\S+) repaired segment (\S+): (.*)$/;
 const EDGE_SWITCH = /\[StreamDownloader\] (\S+) EDGE-SWITCH (\S+) → (\S+)/;
 const ENDED = /\[StreamSession\] (\S+): recording ended \(([^)]*)\)/;
 const LEVEL = /\[downloader\] (\w+):/;
-const RENAMED = /\[fMP4 Live\] Channel (\d+) is now named (\S+) \(was (\S+)\)/;
+const RENAMED = /\[Australian Open\] Channel (\d+) is now named (\S+) \(was (\S+)\)/;
 const UNDECODABLE = /Cannot decode playlists with key/;
 
 function logFacts(lines) {

@@ -13,7 +13,7 @@ import { Fmp4Provider } from "./provider.js";
 // repaired on arrival. The site's address, keys and timings come from config.ts.
 export const plugin: SitePlugin = {
     id: "fmp4-live",
-    label: "fMP4 Live",
+    label: "Australian Open",
     sdkVersion: SDK_VERSION,
     create(context: PluginContext): SiteInstance {
         const config = readConfig(context.config);

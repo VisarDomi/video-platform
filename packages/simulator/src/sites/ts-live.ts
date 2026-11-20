@@ -183,7 +183,7 @@ export class TsLiveSite implements SiteModule {
     // ---------- web login ----------
 
     private loginPage(): Reply {
-        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Sign in</title></head><body>
+        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Wimbledon · Sign in</title></head><body>
 <h1>Sign in</h1>
 <form method="post" action="/login" data-testid="login-form">
   <label>Username <input name="username" autocomplete="username" data-testid="login-username"></label>
@@ -500,7 +500,7 @@ export class TsLiveSite implements SiteModule {
             return `<li data-account-id="${escapeHtml(m.spec.id)}" data-live="${live}"><a href="/${encodeURIComponent(name)}">${escapeHtml(name)}</a>${live ? " (live)" : ""}</li>`;
         }).join("\n");
         const signedIn = this.requireSession(ctx);
-        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Live</title></head><body>
+        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Wimbledon · Live courts</title></head><body>
 <header>${"status" in signedIn ? `<a href="/login" data-testid="visitor-sign-in">Sign in</a>` : `<span data-testid="signed-in">Signed in</span>`}</header>
 <ul data-testid="channels">${items}</ul></body></html>`);
     }
