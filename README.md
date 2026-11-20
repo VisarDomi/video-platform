@@ -36,8 +36,9 @@ never imports one (a test enforces it).
 ## Ideas worth a look
 
 - **No lost or duplicated work across a power cut.** Every durable write is temp file +
-  fsync + rename + directory fsync; the ledger migrates in one transaction (tested by
-  killing the process mid-migration); the VM harness cuts power for real.
+  fsync + rename + directory fsync; every ledger change is one SQLite transaction, a new
+  ledger included (tested by killing the process in the middle of creating one); the VM
+  harness cuts power for real.
 - **The creation boundary.** A destination says when a remote copy comes into existence
   (at the metadata form, or when the transfer starts). Before it, a failure is a plain
   failure; after it, the attempt is confirmed against the destination's list, never

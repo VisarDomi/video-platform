@@ -27,14 +27,3 @@ test('startup tolerates a concurrent writer longer than the former five-second t
  assert.equal(reopened.get(f.recording.id).sourceFingerprint,'exact-source');
  assert.equal(reopened.integrityCheck(),'ok');reopened.close();await exited;
 });
-test('already initialized retention tables do not request a writer transaction on every open',async t=>{
- const {file,db}=await fixture(t);t.after(()=>db.close());
- const writer=new DatabaseSync(file);t.after(()=>writer.close());writer.exec('BEGIN IMMEDIATE');
- try{db.initializeRetention(false);}finally{writer.exec('ROLLBACK');}
-});
-test('an interrupted initial schema setup still creates the missing retention tables',async t=>{
- const {file,db,recording}=await fixture(t);db.close();const raw=new DatabaseSync(file);
- raw.exec('DROP TABLE local_source_presence');raw.close();
- const reopened=new PipelineDatabase(file);assert.equal(reopened.get(recording.id).sourceFingerprint,'exact-source');
- assert.equal(reopened.setLocalSourcePresence(recording.id,'present',null),true);reopened.close();
-});

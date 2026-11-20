@@ -80,20 +80,3 @@ test("an upload to the provider that removed the video is blocked before any net
     assert.match(db.get(r.id).blockReason, /^videohost removed video 91957324/);
 });
 
-test("reopening an older ledger learns its provider removals, not the owner's own deletions", async t => {
-    const { config, db, r, attempt } = await fixture(t);
-    // Evidence as written before removals had their own table.
-    db.recordUploadEvidence(attempt, { stage: "provider_removed", remoteId: "91957324",
-        reason: "owner deleted the unrotated upload 91957324 for re-processing" }, day(1));
-    db.recordUploadEvidence(attempt, { stage: "provider_removed", remoteId: "91957324",
-        reason: "videohost removed video 91957324 after upload (edit page 404)" }, day(1));
-    assert.deepEqual(db.providerRemovals(r.id), []);
-    // Written by code before schema 17; removals are learned when such a ledger is upgraded.
-    const raw = new DatabaseSync(config.databasePath);
-    raw.exec("UPDATE schema_version SET version = 16");
-    raw.close();
-    const reopened = new PipelineDatabase(config.databasePath);
-    t.after(() => reopened.close());
-    assert.deepEqual(reopened.providerRemovals(r.id).map(({ provider, remoteId, reason }) => ({ provider, remoteId, reason })),
-        [{ provider: "videohost", remoteId: "91957324", reason: "videohost removed video 91957324 after upload (edit page 404)" }]);
-});
