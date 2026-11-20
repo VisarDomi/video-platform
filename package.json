@@ -17,6 +17,7 @@
         "test:sites": "node --test private/test/*.test.mjs private/plugins/*/test/*.test.mjs",
         "build:sim-plugins": "npm run build:sdk && npm run build -w plugins",
         "test:sim-plugins": "node --test plugins/*/test/*.test.mjs",
+        "test:ops": "npm test --if-present -w private/ops",
         "e2e:capture": "node e2e/capture.e2e.mjs",
         "e2e:pipeline": "node e2e/pipeline.e2e.mjs",
         "build:server": "npm run build:shared && npm run build:plugins && npm run build -w server && npm run build:app",
