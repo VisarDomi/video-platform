@@ -1,10 +1,10 @@
 # Website
 
 The list, stylesheet, overlay, player units, timeline and gestures in `src` are the local
-website (`main.ts`; providers `tslive`, `ladder`, `fmp4`) that Safari and the PC open. The server
-serves its build (`packages/app/build`), so `npm run build:app` needs no restart. The iPhone
-apps (the local lists, the uploads app and TsLive) are native (`private/apps/ios`, see its `README.md`);
-a change here does not reach them. Rules and their reasons are in `decisions.md`.
+website (`main.ts`) that Safari and the PC open; its sites are the server's (`GET /api/sites`:
+the sites file's capture sites, the first being the default page). The server serves its
+build (`packages/app/build`), so `npm run build:app` needs no restart. The iPhone apps are
+native (a deployment's own, under `private/`); a change here does not reach them. Rules and their reasons are in `decisions.md`.
 
 Local adapters (`providers/local.ts`) use the PC's HLS, save/cut/return and download-list
 APIs. The provider types still allow `kind: 'online'` adapters (listing pages, login,
@@ -22,9 +22,9 @@ when the list cannot be read or a lookup fails, and a yellow ring with the last 
 state when a change fails; the reason is the tooltip. A change is confirmed by asking
 membership again. Membership is asked by name and answered by the server by ID
 (`GET /api/<list>/member`), so a streamer recorded under a name from before a rename (an old
-TsLive alias, a renamed Fmp4Live username) still shows ➖.
+alias, a renamed username) still shows ➖.
 
-The website's viewer and the LADDER/FMP4 live extensions' bar (`packages/live-extensions`) both
+The website's viewer and the live extensions' bar (`packages/live-extensions`) both
 use it; each only says how to reach the list
 (`services/downloadList.ts` for the viewer). Its styles are `player/buttons.css`, imported by
 `style.css` and bundled into the extensions. It imports nothing else from the app.
@@ -41,16 +41,11 @@ From the video-platform root:
 npm ci
 npm run check -w app
 npm run build:app
-npm run build -w live-extensions
 npm run test:app:pages
 ```
 
-`test:app:pages` reads `packages/app/build` and `dist/extension/ladder-live`, so build them
-first. It drives the system's Chromium (`/usr/bin/chromium`, or `$VIDEO_CHROMIUM_PATH`), never a
+`test:app:pages` reads `packages/app/build`, so build it first. It drives the system's Chromium (`/usr/bin/chromium`, or `$VIDEO_CHROMIUM_PATH`), never a
 browser Playwright downloads; set `WEBKIT_EXECUTABLE_PATH` to run it in a WebKit build instead.
-Its fixtures cover all three local providers (playback and editing controls,
-shared scroll settlement) and the download-list button in the LADDER/FMP4 live extensions' bar,
-including ⚠️ for an unreachable PC and LADDER's automatic Login click (before parsing completes, late rendering,
-visibility and repeat-redirect protection). They do not establish physical iPhone momentum
-or native HLS playback. The iPhone apps are tested by `private/apps/ios/scripts/test.sh`; for Mac access use
-the runbook at `/home/user/Documents/environment/mac-access.md`.
+Its fixtures cover the root opening the first site and every site's list (playback and
+editing controls, shared scroll settlement). They do not establish physical iPhone momentum
+or native HLS playback.

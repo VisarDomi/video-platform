@@ -19,8 +19,9 @@ try {
             writes.push(request.url());
             return route.abort();
         }
+        if (url.pathname === '/api/sites') return route.fulfill({ json: { sites: [{ id: 'live-a', label: 'Live A', list: true }] } });
         if (url.pathname === '/api/videos') return route.fulfill({ json: records });
-        if (url.pathname === '/api/tslive/member') return route.fulfill({ json: { member: false } });
+        if (url.pathname === '/api/live-a/member') return route.fulfill({ json: { member: false } });
         if (url.pathname.startsWith('/api/')) return route.abort();
         if (url.pathname.startsWith('/hls/')) {
             if (!url.pathname.endsWith('.m3u8')) return route.abort();
@@ -50,7 +51,7 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${origin}/videos/tslive`);
+    await page.goto(`${origin}/videos/live-a`);
     await page.waitForSelector('a.video-row');
     const homeHistory = await page.evaluate(() => history.length);
     await page.locator('a.video-row').first().click();
@@ -81,7 +82,7 @@ try {
     assert.ok(seek.after > seek.before, 'Horizontal seeking remains available');
     await page.goBack();
     await page.waitForSelector('a.video-row');
-    assert.equal(new URL(page.url()).pathname, '/videos/tslive');
+    assert.equal(new URL(page.url()).pathname, '/videos/live-a');
     assert.deepEqual(writes, [], 'No edit, save, or membership mutation may reach the real server');
     assert.deepEqual(errors, []);
 
@@ -103,13 +104,13 @@ try {
         window.webkit = { messageHandlers: { videoViewer: { postMessage: async message => { window.viewerMessages.push(message); } } } };
     });
     const native = await nativeContext.newPage();
-    await native.goto(`${origin}/videos/tslive`);
+    await native.goto(`${origin}/videos/live-a`);
     await native.waitForSelector('a.video-row');
     recorded = true;
     await native.waitForFunction(() => window.viewerMessages.some(message => message.type === 'append'));
     assert.deepEqual(await native.evaluate(() => window.viewerMessages.map(message => [message.type, message.videos?.map(video => video.filename) ?? null])),
         [['list', ['fixture-1', 'fixture-2', 'fixture-3']], ['ready', null], ['append', ['fixture-4']]]);
-    assert.ok((await native.evaluate(() => window.viewerMessages[2].videos[0].media.url)).endsWith('/hls/tslive/fixture-4/playlist.m3u8'));
+    assert.ok((await native.evaluate(() => window.viewerMessages[2].videos[0].media.url)).endsWith('/hls/live-a/fixture-4/playlist.m3u8'));
     console.log('PASS: deployed frontend; native list/URL navigation; outgoing progress, marker reset, mute and horizontal seek; no server mutations; the native viewer gets only new rows.');
 } finally {
     await browser.close();

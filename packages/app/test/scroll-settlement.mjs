@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 // Drive the production UI with deterministic touch/scroll boundaries. This is
 // not a simulation of iOS momentum: the physical flick still needs native Safari.
-export async function testScrollSettlement(page, provider = 'tslive', prefix = 'fixture-') {
+export async function testScrollSettlement(page, provider = 'live-a', prefix = 'fixture-') {
     const videoId = n => prefix + n;
     await page.evaluate(() => {
         const stage = document.querySelector('.video-stage');

@@ -1,17 +1,15 @@
 import './style.css';
-import { DEFAULT_PROVIDER, PROVIDERS, type LocalProvider } from './constants.js';
+import { loadSites } from './services/sites.js';
 import { openVideoList } from './routes/videoList.js';
 import type { VideoType } from './types.js';
 import { VIDEO_TYPE } from './constants.js';
 
-function isProvider(value: string): value is LocalProvider {
-	return PROVIDERS.includes(value as LocalProvider);
-}
-
 async function main(): Promise<void> {
+	const sites = await loadSites();
+	const isProvider = (value: string): boolean => sites.some((site) => site.id === value);
 	const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
 	if (parts.length === 0) {
-		location.replace(`/videos/${DEFAULT_PROVIDER}`);
+		location.replace(`/videos/${encodeURIComponent(sites[0].id)}`);
 		return;
 	}
 	if (parts[0] === 'videos' && parts.length === 2 && isProvider(parts[1])) {
