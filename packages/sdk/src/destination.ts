@@ -94,7 +94,8 @@ export interface Destination {
     upload(request: UploadRequest): Promise<UploadOutcome>;
     // The upload carrying this identity, if the destination has one (ambiguous throws).
     findUploadedCopy(identity: string): Promise<{ kind: "found"; remoteId: string; remoteUrl: string } | { kind: "not_found" }>;
-    // Runs action in one signed-in session; it never signs in with a password.
+    // Runs action in one signed-in session. Whether it may sign in with a password to get
+    // one is the destination's rule (VideoHost never does: that would end the phone's login).
     withSession<T>(action: (session: DestinationSession) => Promise<T>): Promise<T>;
     readonly session: {
         check(): Promise<DestinationSessionCheck>;
@@ -108,6 +109,11 @@ export interface Destination {
 // refuses everyday and shared profiles) and the shared session file; the plug-in only
 // uses them.
 export interface DestinationHost {
+    // The destination's own block from its sites-file entry ("config"): addresses, choices.
+    readonly config: Readonly<Record<string, unknown>>;
+    // The destination's private state folder (created by the core, mode 0700), for what it
+    // keeps between runs, such as its signed-in session.
+    readonly stateDir: string;
     readonly browser: { readonly executablePath: string; readonly profilePath: string; readonly headless?: boolean };
     readonly sessionFilePath?: string;
     // Read only when a password login actually happens (never for uploads, lookups or
@@ -127,13 +133,15 @@ export interface DestinationPlugin {
 // the pipeline, so a destination never becomes a capture site:
 //
 //   { "destinations": [ { "id": "form-host", "plugin": "plugin-form-host",
-//                         "commands": "ops-form-host" } ], "sites": [ ... ] }
+//                         "commands": "ops-form-host", "config": { ... } } ], "sites": [ ... ] }
 //
-// "commands" optionally names a package of extra pipeline CLI commands for it.
+// "commands" optionally names a package of extra pipeline CLI commands for it; "config" is
+// the destination's own block (DestinationHost.config).
 export interface DestinationEntry {
     id: string;
     plugin: string;
     commands?: string;
+    config?: Record<string, unknown>;
 }
 
 const DESTINATION_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -163,7 +171,10 @@ export function parseDestinations(text: string, source = "sites file"): Destinat
         seen.add(entry.id);
         if (typeof entry.plugin !== "string" || !entry.plugin) throw new Error(`${where}: plugin is required`);
         if (entry.commands !== undefined && (typeof entry.commands !== "string" || !entry.commands)) throw new Error(`${where}: commands must be a package name`);
-        return { id: entry.id, plugin: entry.plugin, ...(entry.commands ? { commands: entry.commands } : {}) };
+        if (entry.config !== undefined && (typeof entry.config !== "object" || entry.config === null || Array.isArray(entry.config))) {
+            throw new Error(`${where}: config must be an object`);
+        }
+        return { id: entry.id, plugin: entry.plugin, ...(entry.commands ? { commands: entry.commands } : {}), ...(entry.config ? { config: entry.config } : {}) };
     });
 }
 

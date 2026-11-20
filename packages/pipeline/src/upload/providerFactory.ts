@@ -37,7 +37,13 @@ export async function createProviderUploader(config: PipelineConfig, provider: A
     const entry = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath()).find((destination) => destination.id === provider);
     if (!entry) throw new Error(`The sites file names no destination "${provider}"`);
     const plugin = await loadDestinationPlugin(entry);
+    // Each destination's own state, beside the ledger: <pipeline data>/destinations/<id>.
+    const stateDir = path.join(path.dirname(config.databasePath), "destinations", provider);
+    await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    await chmod(stateDir, 0o700);
     return plugin.createDestination({
+        config: entry.config ?? {},
+        stateDir,
         browser: { executablePath: config.chromiumExecutablePath, profilePath },
         ...(config.videohostSessionPath ? { sessionFilePath: config.videohostSessionPath } : {}),
         credentials: () => readProviderCredentials(config.credentialsFilePath, provider),

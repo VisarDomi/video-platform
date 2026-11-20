@@ -68,6 +68,7 @@
         "packages/simulator",
         "plugins/ladder-live",
         "plugins/fmp4-live",
+        "plugins/form-host",
         "private/plugins/tslive",
         "private/plugins/ladder",
         "private/plugins/fmp4",
