@@ -60,6 +60,30 @@ test('every browser launch names its executable', () => {
     assert.deepEqual(missing, [], 'these launches would run a browser Playwright downloaded');
 });
 
+// Production browsers open live websites, so they keep Chromium's sandbox, which Playwright
+// turns off unless a launch asks for it.
+test('every production browser launch keeps Chromium\'s sandbox', () => {
+    const unsandboxed = [];
+    let seen = 0;
+    for (const file of files(ROOT)) {
+        const relative = path.relative(ROOT, file);
+        if (!SOURCE.test(file) || !/(?:^|\/)src\//.test(relative)) continue;
+        const source = readFileSync(file, 'utf8');
+        for (const launch of launches(source)) {
+            seen++;
+            if (!/\bchromiumSandbox\s*:\s*true\b/.test(launch.call)) unsandboxed.push(`${relative}:${source.slice(0, launch.index).split('\n').length}`);
+        }
+        // The VideoHost uploader launches through an injectable function.
+        for (const match of source.matchAll(/this\.launchContext\(/g)) {
+            seen++;
+            const call = launches(source.slice(match.index).replace(/^this\.launchContext\(/, 'chromium.launch('))[0]?.call ?? '';
+            if (!/\bchromiumSandbox\s*:\s*true\b/.test(call)) unsandboxed.push(`${relative}:${source.slice(0, match.index).split('\n').length}`);
+        }
+    }
+    assert.ok(seen >= 3, `only ${seen} production launches found`);
+    assert.deepEqual(unsandboxed, []);
+});
+
 test('nothing downloads or points at Playwright\'s browsers', () => {
     const offending = [];
     for (const file of files(ROOT)) {
