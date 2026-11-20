@@ -8,7 +8,7 @@ test("handoff mailboxes are watched directly and non-recursively", async () => {
     const trace = [];
     const listeners = new Map();
     const observer = new PendingDirectoryObserver(
-        ["/library/tslive/.pending", "/library/ladder/.pending"],
+        ["/library/live-a/.pending", "/library/live-b/.pending"],
         (candidate) => trace.push(`candidate:${candidate}`),
         () => trace.push("reconcile"),
         (root, error) => trace.push(`error:${root}:${error.message}`),
@@ -25,16 +25,16 @@ test("handoff mailboxes are watched directly and non-recursively", async () => {
 
     await observer.start();
     assert.deepEqual(trace, [
-        "watch:/library/tslive/.pending",
-        "watch:/library/ladder/.pending",
+        "watch:/library/live-a/.pending",
+        "watch:/library/live-b/.pending",
         "reconcile",
     ]);
 
-    listeners.get("/library/ladder/.pending")("rename", "recording");
-    listeners.get("/library/ladder/.pending")("rename", "recording/segment.ts");
-    listeners.get("/library/ladder/.pending")("rename", null);
+    listeners.get("/library/live-b/.pending")("rename", "recording");
+    listeners.get("/library/live-b/.pending")("rename", "recording/segment.ts");
+    listeners.get("/library/live-b/.pending")("rename", null);
     assert.deepEqual(trace.slice(3), [
-        "candidate:/library/ladder/.pending/recording",
+        "candidate:/library/live-b/.pending/recording",
         "reconcile",
     ]);
     observer.close();

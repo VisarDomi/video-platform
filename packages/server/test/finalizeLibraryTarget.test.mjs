@@ -14,7 +14,7 @@ async function fixture(t) {
     return {
         temporaryRoot,
         managedRoot,
-        roots: [{ provider: "tslive", scope: "downloads", rootPath: managedRoot }],
+        roots: [{ provider: "live-a", scope: "downloads", rootPath: managedRoot }],
     };
 }
 
@@ -25,7 +25,7 @@ test("single-recording mode resolves exactly one immediate managed recording", a
     await writeFile(path.join(recording, "playlist.m3u8"), "#EXTM3U\n#EXT-X-ENDLIST\n");
 
     assert.deepEqual(await resolveManagedRecordingTarget(recording, roots), {
-        provider: "tslive",
+        provider: "live-a",
         scope: "downloads",
         recordingPath: recording,
     });
