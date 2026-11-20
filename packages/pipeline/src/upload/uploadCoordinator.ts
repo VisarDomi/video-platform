@@ -39,7 +39,9 @@ export class UploadCoordinator {
         now = new Date(),
     ): Promise<UploadOutcome> {
         if (request.recordingId !== recordingId) throw new Error("Upload request recording identity mismatch");
-        const provider = this.uploader.provider ?? "videohost";
+        // The destination the bytes were reserved for, unless the uploader names its own
+        // (then beginUpload checks they agree).
+        const provider = this.uploader.provider ?? this.database.reservationProvider(reservationId);
         const attemptId = this.database.beginUpload(recordingId, reservationId, now, provider);
         let outcome: UploadOutcome;
         try {

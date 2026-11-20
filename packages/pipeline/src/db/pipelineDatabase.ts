@@ -2373,7 +2373,7 @@ export class PipelineDatabase {
         return Number.isSafeInteger(bytes) && bytes > 0 && bytes <= budget.remainingBytes;
     }
 
-    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = "videohost"): string {
+    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = this.getActiveUploadProvider()): string {
         assertUploadProvider(provider);
         if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Upload reservation bytes must be a positive integer");
         const month = calendarMonth(now, timeZone);
@@ -2404,7 +2404,9 @@ export class PipelineDatabase {
         return reservationId;
     }
 
-    beginUpload(id: string, reservationId: string, now = new Date(), provider: ActiveUploadProvider = "videohost"): string {
+    // The attempt belongs to the destination its bytes were reserved for; an uploader that
+    // names another one is refused.
+    beginUpload(id: string, reservationId: string, now = new Date(), provider: ActiveUploadProvider = this.reservationProvider(reservationId)): string {
         assertUploadProvider(provider);
         const attemptId = randomUUID();
         const timestamp = now.toISOString();
@@ -2805,7 +2807,7 @@ export class PipelineDatabase {
 
     // The folder's video already exists on the upload provider: park it as uncertain with
     // the known edit ID and let the daily reconcile confirm it online.
-    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = "videohost"): Recording {
+    parkUploadedCopy(id: string, remoteId: string, remoteUrl: string | null, now = new Date(), provider: ActiveUploadProvider = this.getActiveUploadProvider()): Recording {
         assertUploadProvider(provider);
         if (!remoteId.trim()) throw new Error("Existing upload requires a remote identity");
         const timestamp = now.toISOString();
@@ -3020,7 +3022,8 @@ export class PipelineDatabase {
             checked_at: string | null;
         }>;
         return rows.map((row) => ({
-            uploadProvider: "videohost",
+            // The attempt's own destination: verification goes where the copy was made.
+            uploadProvider: row.provider,
             attemptId: row.attempt_id,
             recordingId: row.recording_id,
             confirmAfter: row.confirm_after,
@@ -3278,6 +3281,13 @@ export class PipelineDatabase {
         return (this.database.prepare("SELECT id, recording_id, provider FROM upload_attempts WHERE status = 'started'")
             .all() as unknown as Array<{ id: string; recording_id: string; provider: string }>)
             .map((row) => ({ id: row.id, recordingId: row.recording_id, provider: row.provider }));
+    }
+
+    // The destination an upload reservation was made for.
+    reservationProvider(reservationId: string): ActiveUploadProvider {
+        const row = this.database.prepare("SELECT provider FROM upload_reservations WHERE id = ?").get(reservationId) as { provider: string } | undefined;
+        if (!row) throw new Error(`No upload reservation ${reservationId}`);
+        return row.provider;
     }
 
     getActiveUploadProvider(): ActiveUploadProvider {

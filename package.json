@@ -17,6 +17,7 @@
         "build:sim-plugins": "npm run build:sdk && npm run build -w plugins",
         "test:sim-plugins": "node --test plugins/*/test/*.test.mjs",
         "e2e:capture": "node e2e/capture.e2e.mjs",
+        "e2e:pipeline": "node e2e/pipeline.e2e.mjs",
         "build:server": "npm run build:shared && npm run build:plugins && npm run build -w server && npm run build:app",
         "build:descriptor": "npm run build:shared && npm run build:profiles && npm run build -w descriptor",
         "build:live-extensions": "npm run build -w live-extensions",

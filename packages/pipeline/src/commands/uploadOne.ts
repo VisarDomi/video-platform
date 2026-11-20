@@ -10,7 +10,7 @@ import { createProviderUploader } from "../upload/providerFactory.js";
 import { UploadCoordinator } from "../upload/uploadCoordinator.js";
 import { verifyCurrentServerAuthority } from "../discovery/verifyCurrentAuthority.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
-import { productionUploadIdentity } from "../metadata/composeUploadMetadata.js";
+import { productionUploadIdentity, uploadLookupIdentity } from "../metadata/composeUploadMetadata.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
@@ -141,7 +141,9 @@ export async function uploadOne(
             reservationId,
             {
                 recordingId,
-                uploadIdentity: productionUploadIdentity(recording, artifactPart),
+                // What the destination searches its list by: the identity the title carries
+                // (the same one reconcile looks up).
+                uploadIdentity: uploadLookupIdentity(recording, artifactPart, submitted.title) ?? productionUploadIdentity(recording, artifactPart),
                 artifactPath: artifact.path,
                 sizeBytes: artifact.sizeBytes,
                 title: submitted.title,
