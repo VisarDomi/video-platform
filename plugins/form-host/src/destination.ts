@@ -307,10 +307,12 @@ export class FormHostDestination implements Destination {
             if (words.length) throw new MetadataRejectedError(words);
             throw new Error(`form-host: the metadata form answered ${reply.status}${errors.length ? `: ${errors.join(" ")}` : ""}`);
         }
-        // The new video is listed (processing) at once; capture its ID now.
-        const listed = await this.lookup(client, request.uploadIdentity).catch(() => null);
-        const remoteId = listed?.kind === "found" ? listed.remoteId : null;
+        // The new video is listed (processing) at once; capture its ID now. When that fails,
+        // the core confirms the attempt against the list later; the reason is kept.
+        const listed = await this.lookup(client, request.uploadIdentity).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+        const remoteId = !(listed instanceof Error) && listed.kind === "found" ? listed.remoteId : null;
         if (remoteId) await request.onEvidence?.({ stage: "remote_identity_captured", remoteId });
+        else await request.onEvidence?.({ stage: "remote_identity_not_captured", reason: listed instanceof Error ? listed.message : listed.kind });
         return { kind: "uploaded", receipt: { transmittedBytes: transmitted, submittedVideoId: remoteId, metadataSubmittedAt: submittedAt.toISOString() } };
     }
 }
