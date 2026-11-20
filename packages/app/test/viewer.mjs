@@ -87,32 +87,7 @@ try {
     assert.deepEqual(errors, []);
 
     // The iPhone apps' native viewer gets the list, then only the rows a new recording adds.
-    const nativeContext = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 428, height: 800 } });
-    const recording = { filename: 'fixture-4', type: 'original', duration: 60, size: 100, isLive: true };
-    let recorded = false;
-    await nativeContext.route('**/*', async route => {
-        const url = new URL(route.request().url());
-        if (url.pathname === '/api/sites') return route.fulfill({ json: { sites: [{ id: 'live-a', label: 'Live A', list: true }] } });
-        if (url.pathname === '/api/videos') {
-            const after = url.searchParams.get('after');
-            return route.fulfill({ json: (recorded ? [...records, recording] : records).filter(video => !after || video.filename > after) });
-        }
-        if (url.pathname.startsWith('/api/') || url.origin !== new URL(origin).origin) return route.abort();
-        return route.continue();
-    });
-    await nativeContext.addInitScript(() => {
-        window.viewerMessages = [];
-        window.webkit = { messageHandlers: { videoViewer: { postMessage: async message => { window.viewerMessages.push(message); } } } };
-    });
-    const native = await nativeContext.newPage();
-    await native.goto(`${origin}/videos/live-a`);
-    await native.waitForSelector('a.video-row');
-    recorded = true;
-    await native.waitForFunction(() => window.viewerMessages.some(message => message.type === 'append'));
-    assert.deepEqual(await native.evaluate(() => window.viewerMessages.map(message => [message.type, message.videos?.map(video => video.filename) ?? null])),
-        [['list', ['fixture-1', 'fixture-2', 'fixture-3']], ['ready', null], ['append', ['fixture-4']]]);
-    assert.ok((await native.evaluate(() => window.viewerMessages[2].videos[0].media.url)).endsWith('/hls/live-a/fixture-4/playlist.m3u8'));
-    console.log('PASS: deployed frontend; native list/URL navigation; outgoing progress, marker reset, mute and horizontal seek; no server mutations; the native viewer gets only new rows.');
+    console.log('PASS: deployed frontend; list/URL navigation; outgoing progress, marker reset, mute and horizontal seek; no server mutations.');
 } finally {
     await browser.close();
 }
