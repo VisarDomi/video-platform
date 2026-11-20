@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import {MP4Library} from '../dist/services/video/mp4Library.js';
-import {createFileHostLibraryRoutes} from '../dist/api/fileHostLibrary.routes.js';
+import {createFileHostLibraryFallback,createFileHostLibraryRoutes} from '../dist/api/fileHostLibrary.routes.js';
 const execute=promisify(execFile);
 async function fixture(t,probe=async()=>12.5){
     const root=await mkdtemp(path.join(os.tmpdir(),'file-host-library-'));await mkdir(path.join(root,'media'));
@@ -91,7 +91,7 @@ test('MP4 routes stream byte ranges and HEAD for seeking; partials, symlinks and
     const f=await fixture(t);const bytes=Buffer.alloc(4096);for(let i=0;i<bytes.length;i++)bytes[i]=i%251;
     const name='file #1?%.mp4';await writeFile(path.join(f.directory,name),bytes);await writeFile(path.join(f.directory,'unfinished.mp4.part'),'partial');
     await writeFile(path.join(f.root,'outside.mp4'),'private');await symlink(path.join(f.root,'outside.mp4'),path.join(f.directory,'link.mp4'));
-    const app=express();app.use(createFileHostLibraryRoutes('file-host','File host',f.library));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+    const app=express();app.use(createFileHostLibraryRoutes('file-host','File host',f.library));app.use(createFileHostLibraryFallback(['file-host']));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
     const base=`http://127.0.0.1:${server.address().port}`,url=base+'/media/file-host/'+encodeURIComponent(name);
     const first=await fetch(url,{headers:{Range:'bytes=100-199'}});assert.equal(first.status,206);assert.equal(first.headers.get('content-type'),'video/mp4');assert.equal(first.headers.get('content-range'),'bytes 100-199/4096');assert.deepEqual(Buffer.from(await first.arrayBuffer()),bytes.subarray(100,200));
     const head=await fetch(url,{method:'HEAD'});assert.equal(head.status,200);assert.equal(head.headers.get('content-length'),'4096');assert.equal((await head.arrayBuffer()).byteLength,0);
@@ -115,4 +115,15 @@ test('non-MP4 originals retain their container type and exact bytes on both play
         assert.equal(response.status,206);assert.equal(response.headers.get('content-type'),video.filename.endsWith('.mkv')?'video/x-matroska':'video/webm');
         assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes.subarray(2,9));
     }
+});
+
+test('several file hosts: each library answers its own provider, and an unknown one gets the list of hosts',async t=>{
+    const a=await fixture(t),b=await fixture(t);
+    const app=express();app.use(createFileHostLibraryRoutes('host-a','Host A',a.library));app.use(createFileHostLibraryRoutes('host-b','Host B',b.library));
+    app.use(createFileHostLibraryFallback(['host-a','host-b']));
+    const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+    const base=`http://127.0.0.1:${server.address().port}`;
+    for(const id of ['host-a','host-b'])assert.equal((await fetch(`${base}/api/videos?provider=${id}`)).status,200,id);
+    const other=await fetch(`${base}/api/videos?provider=live-a`);assert.equal(other.status,400);
+    assert.deepEqual(await other.json(),{error:'Expected provider=host-a|host-b'});
 });

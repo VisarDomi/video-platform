@@ -28,6 +28,8 @@ CREATE TABLE upload_confirmations(recording_id TEXT, status TEXT);
 CREATE TABLE upload_reservations(recording_id TEXT, status TEXT);
 CREATE TABLE provider_removals(recording_id TEXT, provider TEXT, remote_id TEXT);
 CREATE TABLE manual_pieces(recording_id TEXT);
+CREATE TABLE campaign_control(id INTEGER PRIMARY KEY, upload_provider TEXT NOT NULL);
+INSERT INTO campaign_control VALUES (1, 'form-host');
 """
 
 
@@ -83,6 +85,15 @@ class CleanupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unverified_destination_identity"):
             cleanup.verified_recording(self.db, self.id)
         self.execute("UPDATE destinations SET state='active'")
+        cleanup.verified_recording(self.db, self.id)
+
+    def test_only_the_campaigns_or_an_active_destinations_receipt_is_evidence(self):
+        # A destination the ledger never recorded as in use (a test host) proves nothing.
+        self.execute("UPDATE campaign_control SET upload_provider='api-host'")
+        with self.assertRaisesRegex(ValueError, "unverified_destination_identity"):
+            cleanup.verified_recording(self.db, self.id)
+        self.execute("CREATE TABLE destinations (id TEXT PRIMARY KEY, state TEXT NOT NULL, retirement_audit TEXT, recorded_at TEXT NOT NULL)")
+        self.execute("INSERT INTO destinations VALUES ('form-host','active',NULL,'at')")
         cleanup.verified_recording(self.db, self.id)
 
     def test_dry_run_does_not_write_or_move(self):
