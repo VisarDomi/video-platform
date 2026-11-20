@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 const CACHE_KEY='pipeline.snapshot.v1';
 const LABELS={convert:'Converting',validate:'Validating',describe:'Describing',metadata:'Preparing metadata',ready:'Ready to upload',upload:'Uploading',verify:'Awaiting verification',verified:'Verified',shorts:'Waiting for matching clips',history:'Retained history',attention:'Needs attention'};
-const SERVICE_NAMES={'video-downloader':'Recorder','video-server':'Library & finalization','video-auth':'Authentication','video-pipeline':'Conversion & uploads','video-xvfb':'Browser session','video-filehost-downloads':'FileHost downloads'};
+const SERVICE_NAMES={'video-downloader':'Recorder','video-server':'Library & finalization','video-auth':'Authentication','video-pipeline':'Conversion & uploads','video-xvfb':'Browser session'};
 let data=null, live=false, page='overview', filter='next', shown=40, timer=null, pending=null, generation=0;
 let queueSignature=null,activitySignature=null;
 const num=new Intl.NumberFormat('en');
@@ -12,7 +12,8 @@ function date(value){const d=new Date(String(value).slice(0,10)+'T12:00:00Z');re
 function ago(value){const n=(Date.now()-new Date(value).valueOf())/1000;if(!Number.isFinite(n))return '—';return n<10?'just now':n<60?`${Math.floor(n)}s ago`:n<3600?`${Math.floor(n/60)}m ago`:n<86400?`${Math.floor(n/3600)}h ago`:`${Math.floor(n/86400)}d ago`;}
 function el(tag,className,text){const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=String(text);return n;}
 function text(id,value){$(id).textContent=value;}
-function provider(name){return el('span','provider '+(name||''),name==='tslive'?'TSLIVE':name==='fmp4'?'FMP4':name==='ladder'?'LADDER':name||'LOCAL');}
+// A site's badge: its ID, coloured by its place in the sites file.
+function provider(name){const index=(data?.sources||[]).indexOf(name);return el('span','provider'+(index>=0?' p'+(index%6):''),name?name.toUpperCase():'LOCAL');}
 function empty(message){return el('p','empty-inline',message);}
 function formatCount(n){return n===null||n===undefined?'—':num.format(n);}
 function working(){return data?.services['video-pipeline']?.state==='active'&&!['user_paused','paused','worker_stopped','worker_unresponsive','status_unavailable','cooldown'].includes(data.campaign.state);}
@@ -101,7 +102,7 @@ function renderStorage(){
 }
 
 function renderServices(){
- const list=$('services');list.replaceChildren();for(const [id,label] of Object.entries(SERVICE_NAMES)){const s=data.services[id]||{state:'unknown'};const row=el('div','service-row');const dot=el('span','service-light'+(s.state==='active'?'':s.state==='unknown'?' unknown':' stopped'));const name=el('div','',label);name.append(el('small','',s.state==='active'?`Running ${duration(s.uptime_seconds)}`:s.state==='inactive'&&id==='video-pipeline'?'Stopped · manual control':s.state));const values=el('div','service-values',s.cpu_percent===null||s.cpu_percent===undefined?'CPU —':`${s.cpu_percent.toFixed(1)}% CPU`);values.append(el('small','',bytes(s.anonymous_bytes)));row.append(dot,name,values);list.append(row);}
+ const list=$('services');list.replaceChildren();for(const [id,label] of Object.entries({...SERVICE_NAMES,...(data.service_labels||{})})){const s=data.services[id]||{state:'unknown'};const row=el('div','service-row');const dot=el('span','service-light'+(s.state==='active'?'':s.state==='unknown'?' unknown':' stopped'));const name=el('div','',label);name.append(el('small','',s.state==='active'?`Running ${duration(s.uptime_seconds)}`:s.state==='inactive'&&id==='video-pipeline'?'Stopped · manual control':s.state));const values=el('div','service-values',s.cpu_percent===null||s.cpu_percent===undefined?'CPU —':`${s.cpu_percent.toFixed(1)}% CPU`);values.append(el('small','',bytes(s.anonymous_bytes)));row.append(dot,name,values);list.append(row);}
  text('retained-summary',`${formatCount(data.health.historical_removals)} historical provider removals · acknowledged`);
  text('monitoring-note',`Babysitting: ${data.monitoring.cadence||'scheduled'}. Last completed check ${data.monitoring.last_check?time(data.monitoring.last_check,true):'not yet recorded'}. Service RAM excludes file cache.`);
 }
@@ -130,7 +131,7 @@ function renderActivity(){
 }
 
 function render(snapshot,isLive){
- data=snapshot;live=isLive;$('loading').hidden=true;$('dashboard').hidden=false;document.body.classList.toggle('saved-data',!isLive);
+ data=snapshot;live=isLive;if(snapshot.destination)$('destination').textContent=`PC → ${snapshot.destination.toUpperCase()}`;$('loading').hidden=true;$('dashboard').hidden=false;document.body.classList.toggle('saved-data',!isLive);
  text('overview-date',new Intl.DateTimeFormat('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Tirane'}).format(new Date(snapshot.generated_at)).toUpperCase());
  const healthyLabels={user_paused:'Paused by you',paused:'Upload worker paused',cooldown:'Retry scheduled',monthly_quota_wait:'Waiting for allowance',resource_wait:'Waiting for resources',status_unavailable:'Service status unavailable'};
  text('health-label',!isLive?'Last known status':snapshot.health.attention?`${snapshot.health.attention} need attention`:healthyLabels[snapshot.campaign.state]||'All moving as expected');$('health-label').classList.toggle('attention',snapshot.health.attention>0||snapshot.campaign.state==='status_unavailable');
