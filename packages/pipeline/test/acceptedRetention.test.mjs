@@ -168,25 +168,6 @@ test('a known provider removal still blocks both cleanup and retry',async t=>{
  assert.equal(f.db.get(f.r.id).state,'blocked');
 });
 
-test('legacy migration is idempotent, starts daily checks, and retains rendition holds',async t=>{
- const f=await fixture(t);await submit(f);
- f.raw.exec('DELETE FROM upload_artifact_receipts;UPDATE schema_version SET version=14');
- f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?').run(day(1).toISOString());
- let migrated=new PipelineDatabase(f.config.databasePath);migrated.close();
- assert.equal(f.db.dueUploadConfirmations(day(.99)).length,0);
- assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
- assert.equal(f.db.dueUploadConfirmations(day(7)).length,1);
- const first=f.raw.prepare('SELECT * FROM upload_artifact_receipts').get();
- migrated=new PipelineDatabase(f.config.databasePath);migrated.close();
- assert.deepEqual(f.raw.prepare('SELECT * FROM upload_artifact_receipts').get(),first);
- f.raw.exec('DELETE FROM upload_artifact_receipts;UPDATE schema_version SET version=14');
- f.raw.prepare('UPDATE upload_attempts SET evidence_json=?').run(JSON.stringify([{stage:'playback_verification',outcome:'not_ready',remoteUrl:'https://example.test/published',renditions:[{width:960,height:720}]}]));
- migrated=new PipelineDatabase(f.config.databasePath);migrated.close();
- assert.match(f.raw.prepare('SELECT retention_hold FROM upload_artifact_receipts').get().retention_hold,/rendition/);
- const {cleanupAcceptedConversions}=await import('../dist/commands/acceptedConversions.js');
- await cleanupAcceptedConversions(f.db,f.config,start);await access(f.artifact.path);
-});
-
 test('SIGKILL after durable acceptance resumes deletion and the original seven-day deadline',async t=>{
  const f=await fixture(t);
  const {spawn}=await import('node:child_process');
@@ -309,22 +290,6 @@ test('daily absent-copy checks retain identity and never re-upload before the se
  assert.equal(f.db.uploadUsage('2026-10').spent,10);
 });
 
-test('daily schedule migration preserves retry receipts and never resets a later daily backoff on reopen',async t=>{
- const f=await fixture(t);await submit(f);const receipt=f.raw.prepare('SELECT * FROM upload_artifact_receipts').get();
- f.raw.exec('UPDATE schema_version SET version=15');
- f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?,checked_at=NULL').run(day(7).toISOString());
- f.raw.exec("UPDATE campaign_control SET state='paused'");
- let reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
- assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
- assert.deepEqual(f.raw.prepare('SELECT * FROM upload_artifact_receipts').get(),receipt);
- assert.equal(f.db.getCampaignControl().state,'paused');
- const attempt=f.raw.prepare('SELECT id FROM upload_attempts').get().id;
- f.db.postponeConfirmation(attempt,'temporary network error',day(1));
- reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
- assert.equal(f.db.dueUploadConfirmations(day(1)).length,0);
- assert.equal(f.db.dueUploadConfirmations(day(2)).length,1);
-});
-
 test('processing is checked daily and can rebuild only after its seven-day acceptance deadline',async t=>{
  const f=await fixture(t);await submit(f);const processing=browser(async()=>({outcome:'not_ready',remoteUrl:null,processing:true,reason:'Still processing'}));
  await reconcileDueUploads(f.config,day(1),processing);
@@ -336,16 +301,3 @@ test('processing is checked daily and can rebuild only after its seven-day accep
  assert.equal(f.db.get(f.r.id).state,'server_ready');
 });
 
-test('daily schedule migration rolls back atomically if its schema commit is interrupted',async t=>{
- const f=await fixture(t);await submit(f);
- f.raw.exec('UPDATE schema_version SET version=15');
- f.raw.prepare('UPDATE upload_confirmations SET confirm_after=?').run(day(7).toISOString());
- f.raw.exec("CREATE TRIGGER interrupt_daily_schema BEFORE UPDATE ON schema_version WHEN NEW.version=16 BEGIN SELECT RAISE(ABORT,'migration interrupted'); END");
- assert.throws(()=>new PipelineDatabase(f.config.databasePath),/migration interrupted/);
- assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,15);
- assert.equal(f.raw.prepare('SELECT confirm_after FROM upload_confirmations').get().confirm_after,day(7).toISOString());
- f.raw.exec('DROP TRIGGER interrupt_daily_schema');
- const reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
- assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,17);
- assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
-});

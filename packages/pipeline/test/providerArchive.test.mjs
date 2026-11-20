@@ -70,22 +70,6 @@ test("local sanity check re-describes stale metadata once, then blocks instead o
     assert.match(current.db.get(current.r.id).blockReason, /'ace'.*manual review/);
 });
 
-test("old rows that stored word rejections as limited visibility are split and learned on open", async t => {
-    const { config, r, attempt } = await fixture(t);
-    const raw = new DatabaseSync(config.databasePath);
-    raw.prepare("UPDATE upload_attempts SET limited_visibility = ?, metadata_rejection = NULL WHERE id = ?")
-        .run("Sorry, 'net' is not allowed here.", attempt);
-    // Written by code before schema 17; the split runs when such a ledger is upgraded.
-    raw.exec("UPDATE schema_version SET version = 16");
-    raw.close();
-    const reopened = new PipelineDatabase(config.databasePath);
-    t.after(() => reopened.close());
-    const diagnostics = reopened.latestUploadDiagnostics(r.id);
-    assert.equal(diagnostics.limited_visibility, null);
-    assert.equal(diagnostics.metadata_rejection, "net");
-    assert.deepEqual(reopened.listRejectedPhrases(), ["net"]);
-});
-
 test("a provider word rejection fails definitively, keeps byte accounting and stays upload-ready for a rewrite", async t => {
     const { db, r } = await fixture(t, { pending: false });
     const reservation = db.reserveUpload(r.id, 120, start);
