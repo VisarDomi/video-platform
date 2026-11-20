@@ -326,6 +326,6 @@ test('daily schedule migration rolls back atomically if its schema commit is int
  assert.equal(f.raw.prepare('SELECT confirm_after FROM upload_confirmations').get().confirm_after,day(7).toISOString());
  f.raw.exec('DROP TRIGGER interrupt_daily_schema');
  const reopened=new PipelineDatabase(f.config.databasePath);reopened.close();
- assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,16);
+ assert.equal(f.raw.prepare('SELECT version FROM schema_version').get().version,17);
  assert.equal(f.db.dueUploadConfirmations(day(1)).length,1);
 });

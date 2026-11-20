@@ -75,6 +75,8 @@ test("old rows that stored word rejections as limited visibility are split and l
     const raw = new DatabaseSync(config.databasePath);
     raw.prepare("UPDATE upload_attempts SET limited_visibility = ?, metadata_rejection = NULL WHERE id = ?")
         .run("Sorry, 'waisted' is not allowed here.", attempt);
+    // Written by code before schema 17; the split runs when such a ledger is upgraded.
+    raw.exec("UPDATE schema_version SET version = 16");
     raw.close();
     const reopened = new PipelineDatabase(config.databasePath);
     t.after(() => reopened.close());
