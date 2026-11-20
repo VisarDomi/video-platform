@@ -11,3 +11,6 @@ build/
 .svelte-kit/
 .claude/
 __pycache__/
+
+# A deployment's own repository (plug-ins, configuration, operations), checked out here.
+/private/
