@@ -92,6 +92,7 @@ try {
     let recorded = false;
     await nativeContext.route('**/*', async route => {
         const url = new URL(route.request().url());
+        if (url.pathname === '/api/sites') return route.fulfill({ json: { sites: [{ id: 'live-a', label: 'Live A', list: true }] } });
         if (url.pathname === '/api/videos') {
             const after = url.searchParams.get('after');
             return route.fulfill({ json: (recorded ? [...records, recording] : records).filter(video => !after || video.filename > after) });
