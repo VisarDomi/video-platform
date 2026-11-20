@@ -28,7 +28,7 @@ const { PlaylistManager } = playlistModule;
 const { ActiveRecordingReconciler } = await import("../dist/services/common/activeRecordingReconciler.js");
 const { DiskSession } = await import("../dist/services/download/diskSession.js");
 
-const FMP4_LIVE = "https://cdn.fmp4-live.example/b-hls-08/9001/9001_720p.m3u8?psch=v2&pkey=synthetic";
+const EDGE_LIVE = "https://media-hls.live-c.example/b-hls-08/9001/9001_720p.m3u8?psch=v2&pkey=synthetic";
 
 test("pin: timing constants", () => {
     assert.equal(timing.RATE_LIMIT_RETRY_MS, 2_000);
@@ -48,7 +48,7 @@ test("pin: an offline recording ends after two observations at least 60 000 ms a
         activeSessions: () => [{ streamerId: "30000001", hasMedia: false }],
         async finalizeStreamer(id) { finalized.push(id); return true; },
     };
-    const reconciler = new ActiveRecordingReconciler("fmp4", manager, () => null, path.join(sandbox, "no-active-root"));
+    const reconciler = new ActiveRecordingReconciler("live-c", manager, () => null, path.join(sandbox, "no-active-root"));
     const offline = (observedAt) => ({ observedAt, live: new Map(), terminalTargetIds: new Set(["30000001"]) });
     await reconciler.reconcile(offline(0));
     await reconciler.reconcile(offline(59_999));
@@ -72,7 +72,7 @@ test("pin: local media names for fMP4 fragments end in .ts; the first map become
         "#EXTINF:2.000,",
         "9001_720p_501.mp4?x=1",
         "",
-    ].join("\n"), (line) => new URL(line, FMP4_LIVE).href);
+    ].join("\n"), (line) => new URL(line, EDGE_LIVE).href);
     assert.deepEqual(segments.map((segment) => [segment.localName, segment.providerSequence]), [
         ["0_2026-03-04T050607Z_500.ts", 500],
         ["1_2026-03-04T050607Z_501.ts", 501],

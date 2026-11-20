@@ -10,7 +10,7 @@ import { formatSegmentName } from "../dist/services/download/segmentIdentity.js"
 async function fixture(t, activeSegmentPaths = () => new Set()) {
     const root = await mkdtemp(path.join(os.tmpdir(), "video-platform-active-"));
     t.after(() => import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })));
-    const finalizedRoot = path.join(root, "ladder", "downloader");
+    const finalizedRoot = path.join(root, "live-b", "downloader");
     const activeRoot = path.join(finalizedRoot, ".active");
     const pendingRoot = path.join(finalizedRoot, ".pending");
     const name = "2026-08-12 090000 12345";
@@ -37,7 +37,7 @@ async function fixture(t, activeSegmentPaths = () => new Set()) {
         pendingRoot,
         name,
         recordingPath,
-        reconciler: new ActiveRecordingReconciler("ladder", manager, (alias) => alias, activeRoot),
+        reconciler: new ActiveRecordingReconciler("live-b", manager, (alias) => alias, activeRoot),
     };
 }
 
@@ -56,7 +56,7 @@ test("same recording identity is offered for resume", async (t) => {
     assert.equal(result.resumePaths.get("12345"), value.recordingPath);
 });
 
-test("the folder target wins when another LADDER channel shares its start_time", async (t) => {
+test("the folder target wins when another channel shares its start_time", async (t) => {
     const value = await fixture(t);
     const result = await value.reconciler.reconcile({
         observedAt: 0,
@@ -163,16 +163,16 @@ test("a first segment persisted before playlist creation remains resumable", asy
 });
 
 // Running sessions as the downloads manager reports them, by provider; finalizing ends one.
-function runningSessions(fmp4) {
+function runningSessions(listed) {
     const finalized = [];
     const manager = {
         hasStreamer: () => false,
-        activeSessions: provider => provider === "fmp4"
-            ? fmp4.filter((session) => !finalized.includes(session.streamerId))
+        activeSessions: provider => provider === "live-c"
+            ? listed.filter((session) => !finalized.includes(session.streamerId))
             : [{ streamerId: "225716607", hasMedia: false }],
         async finalizeStreamer(id) { finalized.push(id); return true; },
     };
-    const reconciler = new ActiveRecordingReconciler("fmp4", manager, () => null, path.join(os.tmpdir(), "video-platform-no-active-root"));
+    const reconciler = new ActiveRecordingReconciler("live-c", manager, () => null, path.join(os.tmpdir(), "video-platform-no-active-root"));
     return { reconciler, finalized };
 }
 

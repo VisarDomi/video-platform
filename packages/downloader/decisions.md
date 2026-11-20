@@ -1,12 +1,16 @@
 # Downloader Decisions
 
+The sites named here are the simulator's (`packages/simulator`): ts-live (account-gated
+HLS over MPEG-TS), ladder-live (an HLS address from a control-channel handshake, with a
+quality ladder) and fmp4-live (fMP4 from several CDN edges). Each behaves like a kind of
+real site the downloader records; a site's own rules live in its plug-in.
+
 ## `.active` plus recording identity owns restart recovery
 
 The downloader writes each recording under
 `<downloads root>/<provider>/downloaded/.active/<YYYY-MM-DD HHMMSS alias>/`
-(local time, chosen by the application). The recording identity is TsLive
-`streamId`, LADDER `start_time`, or Fmp4Live `statusChangedAt`; a public stream
-without one is refused. Segment files are named
+(local time, chosen by the application). The recording identity is the site's own (ts-live's stream ID, ladder-live's start
+time, fmp4-live's status-change time); a public stream without one is refused. Segment files are named
 `<local number>_<recording identity>_<provider sequence>.ts`. A UTC identity
 keeps the provider's `Z` but drops the colons (`2026-08-12T09:08:47Z` is stored
 as `2026-08-12T090847Z`); provider snapshots and parsed filenames use the same
@@ -16,7 +20,7 @@ numeric filenames are readable but never guessed as a resumable identity.
 Shutdown and transport/API failures leave the folder in `.active` without
 ENDLIST. Provider snapshots decide whether it resumes or ends: the same
 recording identity resumes, a different identity or an upstream ENDLIST ends
-it at once, a TsLive live-playlist HTTP 404 ends it, and an absent/non-public
+it at once, a ts-live live-playlist HTTP 404 ends it, and an absent/non-public
 streamer ends it only after two observations at least 60 seconds apart with no
 playlist progress. An unavailable provider response never ends a recording.
 
@@ -73,8 +77,8 @@ The appended entry also gets a discontinuity after any sequence gap, a change
 of TS dimensions/SAR (unknown dimensions count as a change), a new init map, or
 a resume.
 
-**Why:** Providers restart their numbering mid-recording (FMP4 edges number
-independently, TsLive restarts at 0, LADDER has gone from 1112 to 1). A baseline
+**Why:** Providers restart their numbering mid-recording (fmp4-live's edges number
+independently, ts-live restarts at 0, ladder-live has gone from 1112 to 1). A baseline
 that only grows would skip every later segment until the counter passed the
 old maximum.
 
@@ -99,12 +103,12 @@ fetches it again while the live window still lists it. After 5 rejections
 moves past it, and the next saved segment gets a sequence-gap discontinuity.
 An upstream ENDLIST is acted on only after a pending refetch is resolved.
 
-Validators: TsLive and LADDER require a nonempty file and probe its dimensions with
-ffprobe; unknown dimensions keep the segment with an input boundary. FMP4 requires
+Validators: ts-live and ladder-live require a nonempty file and probe its dimensions with
+ffprobe; unknown dimensions keep the segment with an input boundary. fmp4-live requires
 a readable fragment whose index addresses only its own mdat and lists no
 zero-size sample, and takes the duration from the fMP4 fragment.
 
-FMP4 fragments are repaired as they arrive. A source stall can leave a sample
+fmp4-live fragments are repaired as they arrive. A source stall can leave a sample
 entry of zero bytes (an empty video frame) in a fragment's index; ffmpeg refuses
 such a fragment, and Safari stops playback ("Cannot Parse") as soon as it reads
 that far ahead, about 70 seconds before the fragment. The session drops each
@@ -139,11 +143,11 @@ early), and a NUL line reads as a segment name.
 
 ## Capture keeps every resolution
 
-TsLive selects the master variant with the most pixels (then bandwidth),
+ts-live selects the master variant with the most pixels (then bandwidth),
 including portrait variants and low-resolution-only streams, and uses a media
 playlist served in place of a master directly. Every resolution is kept,
 including 360p. Upstream EXTINF stays provisional while the stream is live:
-TsLive and LADDER keep it, FMP4 uses the fragment duration. TARGETDURATION is raised
+ts-live and ladder-live keep it, fmp4-live uses the fragment duration. TARGETDURATION is raised
 whenever a segment needs it.
 
 ## StreamSession owns the recording lifecycle
@@ -156,12 +160,12 @@ After each attempt exits, the session may use the latest successful provider
 snapshot to resolve a fresh URL, but it does not infer completion from
 transport failure. Shared snapshot reconciliation owns the recording lifecycle:
 
-- **FMP4:** bulk status (`public` and `isLive`) every 5 seconds, plus
-  `statusChangedAt` from the cam detail API, re-read once a minute while a
+- **fmp4-live:** bulk status (`public` and live) every 5 seconds, plus
+  the status-change time from the channel detail API, re-read once a minute while a
   streamer stays live.
-- **TsLive:** bulk account lookup with `streamId`, restricted to `tslive.txt`,
-  once a second. A successful `code: "OK", totalCount: 0` result may omit
-  `records`; it is an authoritative empty snapshot, so cached live entries
+- **ts-live:** bulk account lookup with the stream ID, restricted to its list,
+  once a second. A successful empty result may omit
+  its records; it is an authoritative empty snapshot, so cached live entries
   clear and existing offline confirmation rules apply. Other absent/malformed
   records or unsuccessful lookups stay inconclusive. File replacements reload
   targets (the directory is watched),
@@ -173,12 +177,12 @@ transport failure. Shared snapshot reconciliation owns the recording lifecycle:
   recovery line. The master is used only to select the
   initial live URL: master failures never end a recording, and polling and
   retries keep the selected live URL without refreshing the master.
-- **LADDER control replies** match the initial HLS request ID captured for that
+- **ladder-live control replies** match the initial HLS request ID captured for that
   socket. Another channel's handshake or heartbeat may advance the shared
   outgoing counter, but cannot invalidate an outstanding reply. Unsolicited
   replies before the socket sends its request are ignored. A late close from
   a replaced socket cannot close its newer session for that channel.
-- **LADDER:** the adult all-channel list (`allchannellist.php`) with `start_time`,
+- **ladder-live:** the all-channel list with each channel's start time,
   polled every 30 seconds. A transport failure gets one retry after one second,
   with a fresh request deadline; HTTP refusals and malformed responses do not retry.
   Persistent failures retain the last known snapshot and log transport cause codes;
@@ -205,7 +209,7 @@ offline.
 
 ## Discovery normalizes to session candidates
 
-Sites are plug-ins (`private/plugins/<site>` for the real ones). A site owns only
+Sites are plug-ins (`plugins/` for the simulated ones). A site owns only
 its own knowledge: the list line format (`catalog.parseTargetLine`), its status
 API and cadence (`capture.lookup`, `pollIntervalMs`, `pollFromStart`), public/paid
 rules, identity refresh, and master URL derivation (`capture.resolveMaster`, called
@@ -213,8 +217,8 @@ just before a capture starts). One generic `DiscoveryLoop` per site owns the res
 reading the list (`TargetManager`), ending removed targets' sessions, reconciling
 with the folders on disk, the 60 s terminal rule, cooldowns, the "a new recording
 identity replaces the running session" rule (a site opts in with
-`replaceSessionOnNewRecording`; only TsLive does), and starting sessions. Every
-lookup of a running capture is by site and streamer ID: LADDER and FMP4 IDs are both
+`replaceSessionOnNewRecording`; only ts-live does), and starting sessions. Every
+lookup of a running capture is by site and streamer ID: ladder-live and fmp4-live IDs are both
 numeric and may collide. Once the loop has a candidate (`streamerId`, `alias`,
 `recordingId`, `masterPlaylistUrl`, optional resume folder), `startStreamSession`
 owns the common lifecycle: add to `DownloadsManager`, create `StreamSession`,
@@ -226,11 +230,11 @@ rule.
 
 ## Download loop: only the loop changes its state
 
-Recovery runs inline in the download loop. TsLive never checks the master during
-capture. FMP4 and LADDER re-check the master every 10 seconds; the check runs beside
+Recovery runs inline in the download loop. ts-live never checks the master during
+capture. fmp4-live and ladder-live re-check the master every 10 seconds; the check runs beside
 polling and only returns an answer, which the loop applies at the top of its
 next iteration if the live URL is still the one checked, logging a different
-selection as `VARIANT_CHANGE`. FMP4 also tries variant recovery when the live
+selection as `VARIANT_CHANGE`. fmp4-live also tries variant recovery when the live
 playlist fails. Sixty seconds without a saved segment exit the attempt (30
 seconds logs `STALE`, a debug line); non-terminal exits retain the recording for
 retry.
@@ -248,10 +252,10 @@ next regular poll, after the batch is saved.
 
 **Why:** A timer running beside the loop can act on state the loop has already
 left, so nothing beside the loop changes its state: the loop applies a check's
-answer itself and drops a stale one. TsLive and FMP4 list about six seconds of
+answer itself and drops a stale one. ts-live and fmp4-live list about six seconds of
 media, so one slow segment download, or one master or playlist request that
 stalls for 5–10 seconds while a fresh request answers at once, would otherwise
-let segments leave the window before the loop polls again. A TsLive request that
+let segments leave the window before the loop polls again. A ts-live request that
 stalls also outlives its 10-second stream token and comes back 401.
 
 ## Segment fetches: network errors and 429 retry, other HTTP errors stop
@@ -266,7 +270,7 @@ Any other HTTP error stops the attempt. A live playlist answering 429 is polled
 again after 2 seconds, without variant recovery.
 
 **Why:** A transient network failure should neither end the recording nor
-advance past media that has not been downloaded. FMP4's CDN rate-limits in busy
+advance past media that has not been downloaded. fmp4-live's CDN rate-limits in busy
 hours (several 429s most evenings); stopping the attempt then waited 5 seconds,
 long enough for the segment to leave its six-second window.
 
@@ -284,7 +288,7 @@ session retries, per-fetch failures that a retry absorbs.
 
 Repeated HTTP failures are aggregated into one access incident spanning
 retry-created sessions: one immediate `ACCESS_INCIDENT_OPEN` warning and one
-`ACCESS_INCIDENT_CLOSE` with duration and counts. The optional FMP4 snapshot arrives
+`ACCESS_INCIDENT_CLOSE` with duration and counts. The optional fmp4-live snapshot arrives
 separately as `ACCESS_INCIDENT_EVIDENCE`; all three carry the incident's start
 time and recording identity, even when evidence arrives after recovery.
 Diagnostic network probes never block capture or change its state. At most one
@@ -292,11 +296,11 @@ diagnostic runs per recording session, including retry attempts; another inciden
 logs its open/close but starts no additional probe. Recovery candidates that never
 work stay at debug level.
 
-The FMP4 evidence snapshot is observational and does not change download
+The fmp4-live evidence snapshot is observational and does not change download
 behavior. It records a fresh cam status, the complete master variant ranking,
 the selected and next-lower variants, and bounded probes of the selected
 variant on two CDN TLDs plus the next-lower variant. Variant URLs are
-represented by paths and metadata; SignKey query keys are not logged.
+represented by paths and metadata; signing query keys are not logged.
 
 After an edge switch, a re-listed segment is skipped as a duplicate only when
 its program date-time is not newer than the last saved one and within 60
@@ -363,36 +367,36 @@ active append correctness; the server's finalizer owns everything after the
 **Why:** A serve-time healer hides capture bugs, and invented durations break
 iOS Safari playback.
 
-## FMP4 bulk status uses `isLive`, not `isOnline`
+## fmp4-live's bulk status uses `live`, not `online`
 
 A streamer is recordable when the bulk API reports `status: "public"` and
-`isLive`. `isOnline` is `false` for some actively broadcasting streamers.
+`live`. `online` is `false` for some actively broadcasting streamers.
 
-## FMP4 selects the highest-bandwidth named variant, including source
+## fmp4-live selects the highest-bandwidth named variant, including source
 
 Every master variant with a `RESOLUTION`, including `NAME="source"`, competes
 on bandwidth; the best unnamed (auto) variant is used only when no named one
 exists. `source` is the broadcaster's own feed and downloads with the same
-SignKey parameters as the transcoded variants.
+signing parameters as the transcoded variants.
 
 Selection logs carry the variant name, resolution, bandwidth, and whether it is
 the master's best. A different URL is logged as `VARIANT_CHANGE`, not assumed to
 be an upgrade, because edge moves and source-resolution changes also change the
 URL or init map.
 
-## LADDER skips paid streams
+## ladder-live skips paid streams
 
-The adult channel list marks paid streams with `pay != 0`. Only entries with
-`pay == 0` are recorded; a paid or absent channel counts as not live.
+The channel list marks paid streams with `paid != 0`. Only entries with
+`paid == 0` are recorded; a paid or absent channel counts as not live.
 
 **Why:** A paid broadcast can be live while its HLS WebSocket handshake stays
 unavailable without payment.
 
 ## No token cache: read from disk on every request
 
-The TsLive client reads tokens through its context's credentials (the core's
-credential store, `shared/src/credentialStore.ts`, mapped by the plug-in's
-`src/auth/tokens.ts`), which read the session file on every call. There is no
+A signed-in site's client reads tokens through its context's credentials (the core's
+credential store, `shared/src/credentialStore.ts`, mapped by the plug-in's own
+token code), which read the session file on every call. There is no
 watcher and no cache.
 
 **Why:** Stream tokens live 10 seconds and are refreshed every 5. Any cache age

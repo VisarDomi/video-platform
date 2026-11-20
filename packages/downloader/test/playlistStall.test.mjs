@@ -20,7 +20,7 @@ async function fixture(t, provider) {
     const manager = new PlaylistManager(disk, 'recording');
     const incidents = new AccessIncidentTracker();
     const downloader = new StreamDownloader(handle, {
-        providerName: 'tslive',
+        providerName: 'live-a',
         playlistRetryMs: 100,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         recoverVariant: async () => null,
@@ -135,7 +135,7 @@ test('an outstanding diagnostic does not multiply probes or borrow a later recor
     const f = await fixture(t, { diagnoseAccessFailure: () => { probes++; return pending; } });
     const failure = { kind: 'network', error: 'TypeError' };
     const nextAttempt = new StreamDownloader(f.handle,
-        { providerName: 'tslive', diagnoseAccessFailure: () => { probes++; return pending; } }, f.incidents);
+        { providerName: 'live-a', diagnoseAccessFailure: () => { probes++; return pending; } }, f.incidents);
     nextAttempt.recordAccessFailure('playlist', 'example', 'https://example.test/master', 'https://example.test/live', failure);
     f.downloader.closeAccessIncident('example', 'https://example.test/live', 'recovered');
     f.handle.update({ recordingId: 'later-recording' });

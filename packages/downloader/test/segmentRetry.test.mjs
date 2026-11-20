@@ -21,7 +21,7 @@ async function fixture(t, fetchSegment) {
     const manager = new PlaylistManager(disk, 'recording');
     const tracker = new InitTracker(disk);
     const provider = {
-        providerName: 'tslive', refreshMasterDuringDownload: false,
+        providerName: 'live-a', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist: async () => playlist, fetchSegment }),
         validateSegment: validateTsSegment,
@@ -76,7 +76,7 @@ test('a slow segment does not stop polling: media listed meanwhile is saved, not
         return { data: Buffer.from(`unprobeable media: ${url}`) };
     };
     const provider = {
-        providerName: 'tslive', refreshMasterDuringDownload: false,
+        providerName: 'live-a', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
         validateSegment: validateTsSegment,
@@ -106,7 +106,7 @@ test('a playlist that ends while a slow segment downloads still saves that segme
         return { data: Buffer.from(`unprobeable media: ${url}`) };
     };
     const provider = {
-        providerName: 'tslive', refreshMasterDuringDownload: false,
+        providerName: 'live-a', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         createDownloadSession: () => ({ fetchPlaylist, fetchSegment }),
         validateSegment: validateTsSegment,
@@ -128,7 +128,7 @@ test('a rate-limited playlist is polled again without variant recovery', { timeo
     let recoveries = 0;
     let lastFailure = null;
     const provider = {
-        providerName: 'fmp4', refreshMasterDuringDownload: false,
+        providerName: 'live-c', refreshMasterDuringDownload: false,
         parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
         recoverVariant: async () => { recoveries++; return null; },
         createDownloadSession: () => ({
