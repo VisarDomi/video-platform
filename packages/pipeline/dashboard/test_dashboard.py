@@ -25,6 +25,7 @@ class DashboardDataTests(unittest.TestCase):
         (self.root / "babysit").mkdir()
         self.downloads = self.root / "downloads"
         self.downloads.mkdir()
+        (self.root / "sites.json").write_text(json.dumps({"sites": [{"id": "live-a"}, {"id": "live-b"}, {"id": "live-c"}]}))
         self.path = self.root / "pipeline/pipeline.sqlite"
         self.db = sqlite3.connect(self.path)
         self.addCleanup(self.db.close)
@@ -35,7 +36,7 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE artifacts(recording_id TEXT,path TEXT,size_bytes INTEGER);
           CREATE TABLE upload_metadata(recording_id TEXT,title TEXT);
           CREATE TABLE descriptions(recording_id TEXT,output_json TEXT);
-          CREATE TABLE campaign_control(id INTEGER,state TEXT,monthly_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT);
+          CREATE TABLE campaign_control(id INTEGER,state TEXT,monthly_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT,upload_provider TEXT);
           CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT);
           CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT);
           CREATE TABLE upload_confirmations(attempt_id TEXT,recording_id TEXT,confirm_after TEXT,status TEXT);
@@ -46,11 +47,11 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE provider_removals(recording_id TEXT,provider TEXT,remote_id TEXT,reason TEXT,removed_at TEXT);
           CREATE TABLE worker_heartbeat(id INTEGER,updated_at TEXT);
           CREATE TABLE manual_pieces(recording_id TEXT,part TEXT,reason TEXT);
-          INSERT INTO campaign_control VALUES (1,'running',700000000000,NULL,NULL);
+          INSERT INTO campaign_control VALUES (1,'running',700000000000,NULL,NULL,'video-host');
           INSERT INTO worker_heartbeat VALUES (1,'2026-11-01T00:00:00Z');
-          INSERT INTO recordings VALUES ('2026-01-01 010000 alice','tslive','/unused','edited',600,'uploading',NULL,NULL,'2026-11-01T00:00:00Z');
-          INSERT INTO recordings VALUES ('2026-01-02 010000 bob','tslive','/unused','edited',500,'upload_verified',NULL,NULL,'2026-11-01T00:00:00Z');
-          INSERT INTO recordings VALUES ('2026-01-03 010000 carol','fmp4','/unused','edited',20,'short_waiting',NULL,NULL,'2026-11-01T00:00:00Z');
+          INSERT INTO recordings VALUES ('2026-01-01 010000 alice','live-a','/unused','edited',600,'uploading',NULL,NULL,'2026-11-01T00:00:00Z');
+          INSERT INTO recordings VALUES ('2026-01-02 010000 bob','live-a','/unused','edited',500,'upload_verified',NULL,NULL,'2026-11-01T00:00:00Z');
+          INSERT INTO recordings VALUES ('2026-01-03 010000 carol','live-c','/unused','edited',20,'short_waiting',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO artifacts VALUES ('2026-01-01 010000 alice','/private/file.mp4',1000000000);
           INSERT INTO upload_attempts VALUES ('attempt','2026-01-01 010000 alice','started','started','2026-10-31T23:00:00Z','[]',1,'ticket',1000000000,NULL);
           INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved');
@@ -83,7 +84,7 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data["budget"]["reserved"], 4000000000)
 
     def test_active_job_includes_exact_source_path_and_final_upload_title_only(self):
-        source = '/home/user/Videos/downloads/tslive/edited/2026-01-01 010000 alice'
+        source = '/data/downloads/live-a/edited/2026-01-01 010000 alice'
         self.db.execute("UPDATE recordings SET source_path=? WHERE state='uploading'", (source,))
         self.db.execute("INSERT INTO upload_metadata VALUES ('2026-01-01 010000 alice',?)", ('Generated title [2026-01-01 010000 alice]',))
         self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Earlier descriptor title'}),))
@@ -139,8 +140,8 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(day['submitted'],2)
 
     def test_acknowledged_provider_history_is_not_an_attention_banner(self):
-        self.db.execute("INSERT INTO recordings VALUES ('old-loss','tslive','/unused','edited',60,'blocked','videohost removed video 99 after upload',NULL,'2026-10-01T00:00:00Z')")
-        self.db.execute("INSERT INTO provider_removals VALUES ('old-loss','videohost','99','provider removed its copy','2026-10-01T00:00:00Z')")
+        self.db.execute("INSERT INTO recordings VALUES ('old-loss','live-a','/unused','edited',60,'blocked','video-host removed video 99 after upload',NULL,'2026-10-01T00:00:00Z')")
+        self.db.execute("INSERT INTO provider_removals VALUES ('old-loss','video-host','99','provider removed its copy','2026-10-01T00:00:00Z')")
         self.db.commit()
         acknowledge_current_removals(self.path,self.root/'babysit/monitoring.json')
         data=self.read()
@@ -184,19 +185,31 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data['campaign']['state'],'worker_unresponsive')
         self.assertEqual(data['health']['alerts'][0]['message'],'The upload worker heartbeat is late')
 
+    def test_sites_destination_and_extra_units_come_from_the_deployment(self):
+        from collector import extra_units
+        self.assertEqual(extra_units("video-x=X files;bad unit=no;video-y"), {"video-x": "X files", "video-y": "video-y"})
+        # The newest check is another destination's: the active one's is what counts.
+        self.db.execute("INSERT INTO provider_session_events VALUES (1,'video-host','keepalive',1,'2026-11-01T00:00:00Z')")
+        self.db.execute("INSERT INTO provider_session_events VALUES (2,'other-host','keepalive',0,'2026-11-01T00:01:00Z')")
+        self.db.commit()
+        data = self.read()
+        self.assertEqual(data['destination'], 'video-host')
+        self.assertEqual(data['sources'], ['live-a', 'live-b', 'live-c'])
+        self.assertTrue(data['authentication']['confirmed'])
+
     def test_recording_status_exposes_no_signed_urls_or_private_paths(self):
-        folder=self.downloads/'fmp4/downloaded/.active/2026-11-01 010000 capture';folder.mkdir(parents=True)
+        folder=self.downloads/'live-c/downloaded/.active/2026-11-01 010000 capture';folder.mkdir(parents=True)
         (folder/'playlist.m3u8').write_text('#EXTM3U\n#EXTINF:2,\n1.ts\n')
         (self.root/'live-status.json').write_text(json.dumps({'downloads':[{'alias':'capture','segmentsDirPath':str(folder),
             'masterPlaylistUrl':'https://private.invalid/?secret=must-not-leak','liveUrl':'https://private.invalid/?pkey=must-not-leak'}]}))
         data=self.read();body=json.dumps(data)
-        self.assertEqual(data['captures'][0]['provider'],'fmp4')
+        self.assertEqual(data['captures'][0]['provider'],'live-c')
         self.assertEqual(data['captures'][0]['segments'],1)
         for forbidden in ['must-not-leak','masterPlaylistUrl','segmentsDirPath','/private/file.mp4',str(folder)]:
             self.assertNotIn(forbidden,body)
 
     def test_new_capture_without_a_media_directory_keeps_the_api_available(self):
-        folder = self.downloads/'fmp4/downloaded/.active/2026-11-03 133300 active'
+        folder = self.downloads/'live-c/downloaded/.active/2026-11-03 133300 active'
         folder.mkdir(parents=True)
         (folder/'playlist.m3u8').write_text('#EXTM3U\n#EXTINF:2,\n1.ts\n')
         (self.root/'live-status.json').write_text(json.dumps({'downloads':[

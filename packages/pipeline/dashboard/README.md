@@ -24,7 +24,7 @@ waits are labeled normally. Manual pipeline controls remain independent; the
 dashboard keeps working while the heavy worker is stopped and shows capture
 separately. It never starts/resumes anything.
 
-Upload percentage uses media bytes acknowledged by VideoHost, reported at most
+Upload percentage uses media bytes acknowledged by the destination, reported at most
 every thirty seconds through the attempt's existing bounded evidence. Transfer
 completion is separate from metadata submission and online verification. The
 ledger's conservative full-file byte claim is **not** transfer progress. An

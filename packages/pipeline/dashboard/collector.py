@@ -17,7 +17,29 @@ sys.path.insert(0, str(REPOSITORY / "scripts"))
 from babysit_health import capture_health
 
 TZ = ZoneInfo("Europe/Tirane")
-UNITS = ("video-downloader", "video-server", "video-auth", "video-pipeline", "video-xvfb", "video-filehost-downloads")
+CORE_UNITS = ("video-downloader", "video-server", "video-auth", "video-pipeline", "video-xvfb")
+
+
+def extra_units(value=None):
+    """A deployment's own services, "unit=Label;unit=Label" (VIDEO_DASHBOARD_EXTRA_UNITS)."""
+    value = os.environ.get("VIDEO_DASHBOARD_EXTRA_UNITS", "") if value is None else value
+    units = {}
+    for item in value.split(";"):
+        unit, _, label = item.partition("=")
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]*", unit.strip()):
+            units[unit.strip()] = label.strip() or unit.strip()
+    return units
+
+
+EXTRA_UNITS = extra_units()
+UNITS = CORE_UNITS + tuple(unit for unit in EXTRA_UNITS if unit not in CORE_UNITS)
+
+
+def source_sites(data_root):
+    """The sites the recordings come from, in the sites file's order."""
+    sites_file = Path(os.environ.get("VIDEO_SITES_FILE") or data_root / "sites.json")
+    sites = (read_json(sites_file, {}) or {}).get("sites", [])
+    return [site["id"] for site in sites if isinstance(site, dict) and isinstance(site.get("id"), str)]
 STAGES = {"server_ready": "convert", "remuxed": "validate", "artifact_valid": "describe",
           "described": "metadata", "metadata_ready": "ready", "upload_admitted": "upload",
           "uploading": "upload", "upload_uncertain": "verify", "upload_verified": "verified",
@@ -119,7 +141,7 @@ def latest_worker_step():
     return None
 
 
-def captures(data_root, downloads_root):
+def captures(data_root, downloads_root, sources=()):
     data = read_json(data_root / "live-status.json", {}) or {}
     result = []
     for item in data.get("downloads", [])[:100]:
@@ -133,7 +155,7 @@ def captures(data_root, downloads_root):
         row = {"alias": str(item.get("alias") or item.get("streamerId") or "Recording"),
                "provider": folder.parent.parent.parent.name if folder.parent.name == ".active" else None,
                "segments": None, "seconds": None, "last_media_at": None}
-        if row["provider"] not in ("tslive", "ladder", "fmp4"):
+        if row["provider"] not in sources:
             row["provider"] = None
         try:
             if not folder.resolve().is_relative_to(downloads_root.resolve()):
@@ -281,8 +303,11 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                      "stage": STAGES.get(e["to_state"], e["to_state"]), "at": e["created_at"]}
                     for e in events if e["from_state"] != e["to_state"]][:50]
         budget = upload_budget(db, control, now)
-        session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider='videohost' AND kind='keepalive' ORDER BY id DESC LIMIT 1").fetchone()
-    live = captures(data_root, downloads_root)
+        # The active destination's shared-session checks (none for a destination without one).
+        session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider=? AND kind='keepalive' ORDER BY id DESC LIMIT 1",
+                             (control.get("upload_provider"),)).fetchone()
+    sources = source_sites(data_root)
+    live = captures(data_root, downloads_root, sources)
     for row in live:
         last_media = stamp(row["last_media_at"])
         row["active"] = bool(last_media and (now - last_media).total_seconds() <= 30
@@ -349,6 +374,6 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
             "active": active, "captures": live, "finalization": finalized, "queue": queue,
             "confirmations": confirmations, "shorts": {"waiting": short_waiting, "batches": sorted(batches, key=lambda b: b["id"])},
             "budget": budget, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
-            "services": current_services, "storage": storage,
+            "services": current_services, "service_labels": EXTRA_UNITS, "sources": sources, "destination": control.get("upload_provider"), "storage": storage,
             "authentication": {"confirmed": bool(session and session[0]), "checked_at": session[1] if session else None},
             "monitoring": {"cadence": monitoring.get("cadence"), "last_check": monitoring.get("last_completed_window_end")}}
