@@ -11,7 +11,7 @@ import { LadderProvider } from "./provider.js";
 // captured. The site's address and timings come from the sites file (config.ts).
 export const plugin: SitePlugin = {
     id: "ladder-live",
-    label: "Ladder Live",
+    label: "Roland-Garros",
     sdkVersion: SDK_VERSION,
     create(context: PluginContext): SiteInstance {
         const config = readConfig(context.config);

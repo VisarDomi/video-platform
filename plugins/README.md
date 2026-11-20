@@ -52,7 +52,7 @@ both; `npm run test:sim-plugins` tests them.
 ```ts
 export const plugin: SitePlugin = {
     id: "fmp4-live",                // the plug-in type
-    label: "fMP4 Live",             // log prefix "[fMP4 Live] ...", pinned in the plug-in
+    label: "Australian Open",       // log prefix "[Australian Open] ...", pinned in the plug-in
     sdkVersion: SDK_VERSION,        // the core refuses another SDK version
     create(context) {               // once per site in the sites file
         const config = readConfig(context.config);

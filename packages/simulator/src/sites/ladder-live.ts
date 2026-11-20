@@ -303,7 +303,7 @@ export class LadderLiveSite implements SiteModule {
     private home(ctx: RequestContext): Reply {
         const items = this.sim.engine.siteChannels(SITE).filter(m => m.sessionAt(ctx.now))
             .map(m => `<li><a href="/${m.spec.id}">${m.nameAt(ctx.now)}</a></li>`).join("\n");
-        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Live channels</title></head><body><ul data-testid="live">${items}</ul></body></html>`);
+        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Roland-Garros · Live courts</title></head><body><ul data-testid="live">${items}</ul></body></html>`);
     }
 
     private login(ctx: RequestContext): Reply {

@@ -238,7 +238,7 @@ export class Fmp4LiveSite implements SiteModule {
             const s = this.showStatus(m, ctx.now);
             return `<li data-channel-id="${m.spec.id}" data-status="${s.status}"><a href="/${m.nameAt(ctx.now)}">${m.nameAt(ctx.now)}</a></li>`;
         }).join("\n");
-        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Live</title></head><body><ul data-testid="channels">${items}</ul></body></html>`);
+        return html(200, `<!doctype html><html><head><meta charset="utf-8"><title>Australian Open · Live courts</title></head><body><ul data-testid="channels">${items}</ul></body></html>`);
     }
 
     private page(ctx: RequestContext): Reply {
