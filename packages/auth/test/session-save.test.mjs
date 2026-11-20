@@ -83,13 +83,13 @@ test('a failed save does not prevent a later token from being saved', async t =>
 
 test('loading a session: a missing file is no session, a torn or unreadable one is reported', async t => {
     const { file, errors } = await fixture(t);
-    // The site's auth reads its own fields (as TsLive's does: data.tsliveRT).
-    const reader = { deserializeTokens: data => data.tsliveRT ? bag(data.tsliveRT) : null };
+    // The site's auth reads its own fields (here data.accessRT).
+    const reader = { deserializeTokens: data => data.accessRT ? bag(data.accessRT) : null };
     const context = new AuthContext('fixture@example.invalid', reader);
     assert.equal(await context.loadTokenFromFile(), false);
     assert.equal(errors.length, 0, 'a missing file is not an error');
 
-    await fs.writeFile(file, JSON.stringify({ tsliveRT: 'saved' }));
+    await fs.writeFile(file, JSON.stringify({ accessRT: 'saved' }));
     assert.equal(await context.loadTokenFromFile(), true);
     assert.equal(context.getRefreshToken(), 'saved');
 

@@ -2,19 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AuthService } from '../dist/auth/authService.js';
 
-// The core's own refresh mechanics with fake sites. (The TsLive session's requests are tested
-// with the plug-in; the core with TsLive's decisions in private/test/authService.test.mjs.)
+// The core's own refresh mechanics with fake sites. (A real site's session requests are
+// tested with its plug-in.)
 
 test('late playback tokens from an old ST cannot overwrite a new session generation',async()=>{
     let resolve;
     const provider={fetchShortTokens:()=>new Promise(r=>{resolve=r;})};
-    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'tslive'},provider);
-    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{tsliveBrowserState:'retained-state'}});
+    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'live-a'},provider);
+    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{browserState:'retained-state'}});
     const request=service.setTokenData();
-    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',extras:{tsliveBrowserState:'fresh-state'}});
+    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',extras:{browserState:'fresh-state'}});
     resolve({extras:{tt:'stale-stream-token',ttu:'stale',tte:'9999999999'}});
     await request;
-    assert.deepEqual(service.authContext.getTokenBag(),{refreshToken:'new-refresh',sessionToken:'new-access',extras:{tsliveBrowserState:'fresh-state'}});
+    assert.deepEqual(service.authContext.getTokenBag(),{refreshToken:'new-refresh',sessionToken:'new-access',extras:{browserState:'fresh-state'}});
 });
 
 test('a stream-token refresh unanswered for a second is hedged by a parallel request', async () => {
@@ -23,7 +23,7 @@ test('a stream-token refresh unanswered for a second is hedged by a parallel req
         // The first request hangs; the second answers at once.
         fetchShortTokens: () => ++calls === 1 ? new Promise(() => {}) : Promise.resolve({extras:{tt:'t', ttu:'u', tte:'9999999999'}}),
     };
-    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'}, provider);
+    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'live-a'}, provider);
     service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:'access',extras:{}});
     const started = Date.now();
     await service.setTokenData(true);
@@ -35,7 +35,7 @@ test('a stream-token refresh unanswered for a second is hedged by a parallel req
 test('a quick stream-token answer sends no second request', async () => {
     let calls = 0;
     const provider = { fetchShortTokens: async () => { calls++; return {extras:{tt:'t', ttu:'u', tte:'9999999999'}}; } };
-    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'tslive'}, provider);
+    const service = new AuthService({email:'test@example.invalid',password:'fixture',provider:'live-a'}, provider);
     service.authContext.updateFromLogin({refreshToken:'refresh',sessionToken:'access',extras:{}});
     await service.setTokenData(true);
     await new Promise(resolve => setTimeout(resolve, 1200));

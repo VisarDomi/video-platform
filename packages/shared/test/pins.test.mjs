@@ -1,9 +1,8 @@
 // Pinning tests for contracts other packages and production files depend on.
 // Change them only on purpose:
 //   - the session files of the core's credential store (session/<account>.json): a
-//     different path turns every TsLive playlist request into a 401 loop (the account
-//     is the sites file's; its name is pinned in private/test/sitesFile.test.mjs and the
-//     TsLive field mapping in private/test/pinsListsAndTokens.test.mjs);
+//     different path turns every playlist request of a signed-in site into a 401 loop (the account
+//     is the sites file's; a site's own field mapping is pinned with its plug-in);
 //   - the recording identity: it decides which streamer a folder belongs to (the
 //     list line formats and source links moved with the site catalogs: they are
 //     pinned in private/test/pinsListsAndTokens.test.mjs, the pipeline's copy of the
@@ -62,12 +61,12 @@ test("pin: the store reads what auth saves, with lastWriteMs, and nothing from a
     await mkdir(path.dirname(file), { recursive: true });
     const now = 1_800_000_000_123;
     t.mock.method(Date, "now", () => now);
-    await store.write(ACCOUNT, { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st" });
-    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st", lastWriteMs: now });
+    await store.write(ACCOUNT, { accessRT: "synthetic-refresh", accessST: "synthetic-st" });
+    assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { accessRT: "synthetic-refresh", accessST: "synthetic-st", lastWriteMs: now });
     assert.equal((await stat(file)).mode & 0o777, 0o600);
     assert.deepEqual(await readdir(path.dirname(file)), [path.basename(file)], "no temporary file is left");
     assert.deepEqual(await store.read(ACCOUNT), {
-        record: { tsliveRT: "synthetic-refresh", tsliveST: "synthetic-st", lastWriteMs: now }, writtenAtMs: now, readAtMs: now });
+        record: { accessRT: "synthetic-refresh", accessST: "synthetic-st", lastWriteMs: now }, writtenAtMs: now, readAtMs: now });
     const none = { record: null, writtenAtMs: null, readAtMs: now };
     await writeFile(file, "{ torn");
     assert.deepEqual(await store.read(ACCOUNT), none);
