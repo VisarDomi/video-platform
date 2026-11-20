@@ -32,7 +32,27 @@ import type {
     UploadMetadataRecord,
 } from "../domain/types.js";
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
+// Schema 17: destination and source IDs are data. These checks enumerated today's
+// destination and sources; code validates IDs (against the sites file) instead.
+const ENUMERATED_ID_CHECKS = /\s*CHECK \((?:provider_filter IN \('all', 'tslive', 'ladder', 'fmp4'\)|upload_provider = 'videohost'|provider IN \('tslive', 'ladder', 'fmp4'\)|provider = 'videohost')\)/g;
+
+// The destinations a ledger has used. A retired one never becomes the campaign's
+// destination again (schema 17; the triggers stand in for the enumerating check).
+const DESTINATIONS_SQL = `
+    CREATE TABLE IF NOT EXISTS destinations (
+        id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('active', 'retired')),
+        retirement_audit TEXT REFERENCES retired_destination_audit(destination),
+        recorded_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TRIGGER IF NOT EXISTS campaign_control_retired_destination_insert BEFORE INSERT ON campaign_control
+        WHEN EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')
+        BEGIN SELECT RAISE(ABORT, 'a retired upload destination cannot become active again'); END;
+    CREATE TRIGGER IF NOT EXISTS campaign_control_retired_destination_update BEFORE UPDATE OF upload_provider ON campaign_control
+        WHEN EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')
+        BEGIN SELECT RAISE(ABORT, 'a retired upload destination cannot become active again'); END;
+`;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -402,7 +422,7 @@ export class PipelineDatabase {
             CREATE TABLE IF NOT EXISTS campaign_control (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 state TEXT NOT NULL CHECK (state IN ('paused', 'running')),
-                provider_filter TEXT NOT NULL CHECK (provider_filter IN ('all', 'tslive', 'ladder', 'fmp4')),
+                provider_filter TEXT NOT NULL,
                 ordering TEXT NOT NULL CHECK (ordering = 'oldest'),
                 monthly_upload_limit_bytes INTEGER NOT NULL CHECK (monthly_upload_limit_bytes > 0),
                 antibot_failures INTEGER NOT NULL DEFAULT 0,
@@ -419,7 +439,7 @@ export class PipelineDatabase {
             ) STRICT;
             CREATE TABLE IF NOT EXISTS campaign_trial_recordings (
                 recording_id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL CHECK (provider IN ('tslive', 'ladder', 'fmp4')),
+                provider TEXT NOT NULL,
                 admitted_at TEXT NOT NULL
             ) STRICT;
             CREATE TABLE IF NOT EXISTS comparison_trial (
@@ -530,13 +550,15 @@ export class PipelineDatabase {
             -- provider never gets the recording again.
             CREATE TABLE IF NOT EXISTS provider_removals (
                 recording_id TEXT NOT NULL,
-                provider TEXT NOT NULL CHECK (provider = 'videohost'),
+                provider TEXT NOT NULL,
                 remote_id TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 removed_at TEXT NOT NULL,
                 PRIMARY KEY (recording_id, provider, remote_id)
             ) STRICT;
         `);
+        // Backfills for rows older code wrote run until schema 17; they are complete by then.
+        const storedVersion = (this.database.prepare("SELECT version FROM schema_version").get() as { version: number }).version;
         const controlColumns = this.database.prepare("PRAGMA table_info(campaign_control)").all() as unknown as Array<{ name: string }>;
         const comparisonColumns = this.database.prepare("PRAGMA table_info(comparison_trial)").all() as unknown as Array<{ name: string }>;
         if (!comparisonColumns.some((column) => column.name === "selection_errors_json")) {
@@ -559,8 +581,7 @@ export class PipelineDatabase {
         }
         if (!controlColumns.some((column) => column.name === "upload_provider")) {
             // The one active destination is campaign intent, not a credential.
-            this.database.exec(`ALTER TABLE campaign_control ADD COLUMN upload_provider TEXT NOT NULL DEFAULT 'videohost'
-                CHECK (upload_provider = 'videohost')`);
+            this.database.exec(`ALTER TABLE campaign_control ADD COLUMN upload_provider TEXT NOT NULL DEFAULT 'videohost'`);
         }
         const inventoryColumns = this.database.prepare("PRAGMA table_info(provider_inventory)").all() as unknown as Array<{ name: string }>;
         if (!inventoryColumns.some((column) => column.name === "removal_pending")) {
@@ -568,7 +589,9 @@ export class PipelineDatabase {
                 CHECK (removal_pending IN (0, 1))`);
         }
         // Same rule as isRemovalPendingStatus, for rows stored before the column.
-        this.database.exec("UPDATE provider_inventory SET removal_pending = 1 WHERE removal_pending = 0 AND lower(status) LIKE '%delet%'");
+        if (storedVersion < 17) {
+            this.database.exec("UPDATE provider_inventory SET removal_pending = 1 WHERE removal_pending = 0 AND lower(status) LIKE '%delet%'");
+        }
         const attemptColumns = this.database.prepare("PRAGMA table_info(upload_attempts)").all() as unknown as Array<{ name: string }>;
         for (const column of ["retry_not_before", "lookup_state", "lookup_checked_at", "limited_visibility", "metadata_rejection"]) {
             if (!attemptColumns.some((existing) => existing.name === column)) {
@@ -582,7 +605,7 @@ export class PipelineDatabase {
         }
         // Preserve warning evidence from pre-upgrade attempts before daily
         // checks rotate it out of the bounded diagnostic history.
-        {
+        if (storedVersion < 17) {
             // Idempotent even if power failed after adding the column but
             // before backfilling it. Only rows with possible warning text need parsing.
             const rows = this.database.prepare(`SELECT id, evidence_json FROM upload_attempts
@@ -597,7 +620,7 @@ export class PipelineDatabase {
         }
         // Removals recorded before their table, from the reconcile's own reason
         // text; an owner's deliberate deletion is worded differently.
-        this.database.exec(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
+        if (storedVersion < 17) this.database.exec(`INSERT OR IGNORE INTO provider_removals (recording_id, provider, remote_id, reason, removed_at)
             SELECT a.recording_id, a.provider,
                 json_extract(e.value, '$.remoteId'), json_extract(e.value, '$.reason'), json_extract(e.value, '$.checkedAt')
             FROM upload_attempts a, json_each(a.evidence_json) e
@@ -674,9 +697,11 @@ export class PipelineDatabase {
         if (version.version < 14) retireUploadDestination(this.database);
         this.initializeRetention(version.version < 15 || isNewDatabase);
         this.initializeDailyUploadChecks(version.version < 16 || isNewDatabase);
+        this.migrateToSchema17(version.version < 17 || isNewDatabase, !isNewDatabase);
+        this.database.exec(DESTINATIONS_SQL);
         // Older code stored metadata word rejections as a visibility warning,
         // which also blocked their retry. Split them out once; learn the words.
-        for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
+        if (storedVersion < 17) for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
             WHERE provider='videohost' AND limited_visibility LIKE '%is not allowed here%'`).all() as unknown as Array<{ id: string; limited_visibility: string }>) {
             const label = row.limited_visibility.replace(/Sorry, '[^'\n]+' is not allowed here\.?/g, "").trim();
             this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(label || null, row.id);
@@ -856,6 +881,42 @@ export class PipelineDatabase {
             FROM upload_artifact_receipts WHERE attempt_id=? AND accepted_at IS NOT NULL AND retention_hold IS NULL`)
             .get(attemptId) as {acceptedAt:string; retryAfter:string} | undefined;
         return row ?? null;
+    }
+
+    // Schema 17, in one transaction with the version (a cut leaves schema 16):
+    // - The tables whose checks enumerate destination or source IDs are rebuilt without
+    //   those checks, from their own stored definitions (column order and every other
+    //   constraint kept).
+    // - An upgraded ledger records its destinations: VideoHost in use, OldHost retired
+    //   (its evidence is the retirement audit row). A retired one can never become the
+    //   campaign's destination again; the database refuses it, not only the code.
+    private migrateToSchema17(migrate: boolean, seedDestinations: boolean): void {
+        if (!migrate) return;
+        this.transaction(() => {
+            const tables = this.database.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'
+                AND name IN ('campaign_control', 'campaign_trial_recordings', 'provider_removals')`)
+                .all() as unknown as Array<{ name: string; sql: string }>;
+            for (const table of tables) {
+                const sql = table.sql.replace(ENUMERATED_ID_CHECKS, "");
+                if (sql === table.sql) continue;
+                const indexes = (this.database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL")
+                    .all(table.name) as unknown as Array<{ sql: string }>).map((index) => index.sql);
+                const rebuilt = `${table.name}_v17`;
+                this.database.exec(`${sql.replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?("?)[A-Za-z_]+\1/, `CREATE TABLE ${rebuilt}`)};
+                    INSERT INTO ${rebuilt} SELECT * FROM "${table.name}";
+                    DROP TABLE "${table.name}";
+                    ALTER TABLE ${rebuilt} RENAME TO ${table.name};`);
+                for (const index of indexes) this.database.exec(index);
+            }
+            this.database.exec(DESTINATIONS_SQL);
+            if (seedDestinations) {
+                const now = new Date().toISOString();
+                this.database.prepare("INSERT OR IGNORE INTO destinations (id, state, retirement_audit, recorded_at) VALUES ('videohost', 'active', NULL, ?)").run(now);
+                this.database.prepare(`INSERT OR IGNORE INTO destinations (id, state, retirement_audit, recorded_at)
+                    VALUES ('oldhost', 'retired', (SELECT destination FROM retired_destination_audit WHERE destination = 'retired-upload-provider'), ?)`).run(now);
+            }
+            this.database.exec("UPDATE schema_version SET version=17");
+        });
     }
 
     close(): void { this.database.close(); }

@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
@@ -87,6 +88,10 @@ test("reopening an older ledger learns its provider removals, not the owner's ow
     db.recordUploadEvidence(attempt, { stage: "provider_removed", remoteId: "91957324",
         reason: "videohost removed video 91957324 after upload (edit page 404)" }, day(1));
     assert.deepEqual(db.providerRemovals(r.id), []);
+    // Written by code before schema 17; removals are learned when such a ledger is upgraded.
+    const raw = new DatabaseSync(config.databasePath);
+    raw.exec("UPDATE schema_version SET version = 16");
+    raw.close();
     const reopened = new PipelineDatabase(config.databasePath);
     t.after(() => reopened.close());
     assert.deepEqual(reopened.providerRemovals(r.id).map(({ provider, remoteId, reason }) => ({ provider, remoteId, reason })),
