@@ -13,7 +13,6 @@ import { CampaignWorker } from "../dist/campaign/campaignWorker.js";
 import { TargetCatalogResolver } from "../dist/provenance/targetResolver.js";
 import { inspectFinalizedRecording } from "../dist/discovery/inspectRecording.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
-import { ChromiumVideoHostUploader } from "../../../private/plugins/videohost/dist/chromiumVideoHostUploader.js";
 import { ProviderSessionLostError } from "../dist/upload/providerWarnings.js";
 import { campaignStatus, configureCampaign, setCampaignRunning } from "../dist/commands/campaign.js";
 
@@ -38,15 +37,15 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         status: "resolved",
         streamerId: "streamer-id",
         alias: "alias",
-        streamerUrl: "https://ts-live.example/streamer-id",
-        aliasUrl: "https://ts-live.example/alias",
+        streamerUrl: "https://live-a.example/streamer-id",
+        aliasUrl: "https://live-a.example/alias",
         reason: null,
         updatedAt: new Date("2026-08-12T08:00:00Z").toISOString(),
     });
     database.saveUploadMetadata(recording.id, {
         title: "Specific test title [alias]",
         description: "A concrete test description.",
-        tags: ["tslive", "live"],
+        tags: ["live-a", "tennis"],
     });
     database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v6: test fixture");
 }
@@ -57,11 +56,11 @@ async function campaignWorkerFixture(t) {
     const finalizationPath = path.join(root, "finalization.sqlite");
     const authority = new DatabaseSync(finalizationPath);
     authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT NOT NULL, report_json TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT");
-    const sourcePath = await addFinalized(authority, path.join(root, "tslive", "edited"), "2026-08-16 120000 testalias");
+    const sourcePath = await addFinalized(authority, path.join(root, "live-a", "edited"), "2026-08-16 120000 testalias");
     authority.close();
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
     t.after(() => database.close());
-    const inspection = await inspectFinalizedRecording(sourcePath, "tslive", "edited");
+    const inspection = await inspectFinalizedRecording(sourcePath, "live-a", "edited");
     assert.equal(inspection.status, "finalized");
     const recording = database.discover(inspection.recording);
     advanceToMetadataReady(database, recording, root);
@@ -100,7 +99,7 @@ test("campaign waits for the next budget release and retries without a manual re
     const seed = new DatabaseSync(databasePath);
     seed.prepare(`INSERT INTO bandwidth_events
         (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
-        VALUES ('prior-recording', 'prior-attempt', 'videohost', '2026-11', 100000000000, '2026-11-01T12:00:00Z')`).run();
+        VALUES ('prior-recording', 'prior-attempt', 'video-host', '2026-11', 100000000000, '2026-11-01T12:00:00Z')`).run();
     seed.close();
     database.configureCampaign("all", 700_000_000_000);
     database.setCampaignState("running");
@@ -129,12 +128,12 @@ test("provider policy block is manual review, not reported as an upload or retri
     let calls = 0;
     const worker = new CampaignWorker(database, config, resolver, async id => {
         calls++;
-        database.transition(id, "metadata_ready", "blocked", "videohost: blocked_too_large; 10000000000-byte maximum");
+        database.transition(id, "metadata_ready", "blocked", "video-host: blocked_too_large; 10000000000-byte maximum");
         return { state: "blocked" };
     });
     const first = await worker.step();
     assert.equal(first.disposition, "attention_required");
-    assert.match(first.reason, /videohost: blocked_too_large/);
+    assert.match(first.reason, /video-host: blocked_too_large/);
     assert.equal(database.get(recording.id).state, "blocked");
     await worker.step();
     assert.equal(calls, 1);
@@ -182,19 +181,19 @@ test("campaign selection uses exact ready checkpoints, edited roots, oldest time
         report_json TEXT NOT NULL,
         updated_at TEXT NOT NULL
     ) STRICT`);
-    const tsliveEdited = path.join(root, "tslive", "edited");
-    const ladderEdited = path.join(root, "ladder", "edited");
-    const tsliveDownloader = path.join(root, "tslive", "downloaded");
-    const tslivePath = await addFinalized(authority, tsliveEdited, "2025-02-03 040506 tslive_alias");
-    const ladderPath = await addFinalized(authority, ladderEdited, "2024-01-02 030405 12345");
-    await addFinalized(authority, tsliveDownloader, "2020-01-01 000000 ignored_raw");
+    const liveAEdited = path.join(root, "live-a", "edited");
+    const liveBEdited = path.join(root, "live-b", "edited");
+    const liveADownloader = path.join(root, "live-a", "downloaded");
+    const liveAPath = await addFinalized(authority, liveAEdited, "2025-02-03 040506 live_a_alias");
+    const liveBPath = await addFinalized(authority, liveBEdited, "2024-01-02 030405 12345");
+    await addFinalized(authority, liveADownloader, "2020-01-01 000000 ignored_raw");
     authority.close();
 
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
     t.after(() => database.close());
     const roots = [
-        { provider: "tslive", sourceKind: "edited", path: tsliveEdited },
-        { provider: "ladder", sourceKind: "edited", path: ladderEdited },
+        { provider: "live-a", sourceKind: "edited", path: liveAEdited },
+        { provider: "live-b", sourceKind: "edited", path: liveBEdited },
     ];
     const oldest = await selectOldestFinalizedEditedCandidate({
         finalizationDatabasePath: finalizationPath,
@@ -202,7 +201,7 @@ test("campaign selection uses exact ready checkpoints, edited roots, oldest time
         providerFilter: "all",
         pipelineDatabase: database,
     });
-    assert.equal(oldest?.sourcePath, ladderPath);
+    assert.equal(oldest?.sourcePath, liveBPath);
     database.discover(oldest);
     const next = await selectOldestFinalizedEditedCandidate({
         finalizationDatabasePath: finalizationPath,
@@ -210,15 +209,15 @@ test("campaign selection uses exact ready checkpoints, edited roots, oldest time
         providerFilter: "all",
         pipelineDatabase: database,
     });
-    assert.equal(next?.sourcePath, tslivePath);
+    assert.equal(next?.sourcePath, liveAPath);
     const emptyDatabase = new PipelineDatabase(":memory:");
-    const tsliveOnly = await selectOldestFinalizedEditedCandidate({
+    const liveAOnly = await selectOldestFinalizedEditedCandidate({
         finalizationDatabasePath: finalizationPath,
         roots,
-        providerFilter: "tslive",
+        providerFilter: "live-a",
         pipelineDatabase: emptyDatabase,
     });
-    assert.equal(tsliveOnly?.sourcePath, tslivePath);
+    assert.equal(liveAOnly?.sourcePath, liveAPath);
     emptyDatabase.close();
 });
 
@@ -278,12 +277,12 @@ test("cooldown resumes the same recording at resume_at and doubles the wait per 
     assert.equal(database.get(recording.id).state, "metadata_ready");
 });
 
-test("the VideoHost daily upload limit parks the campaign for exactly 24h and resets the antibot streak", async (t) => {
+test("the video-host daily upload limit parks the campaign for exactly 24h and resets the antibot streak", async (t) => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
     database.setCampaignState("running");
     database.recordAntibotFailure(2, 120_000, new Date("2026-08-17T09:00:00Z"));
     const worker = new CampaignWorker(database, config, resolver, async () => {
-        throw new HumanActionRequiredError("daily_limit", "VideoHost daily upload limit reached");
+        throw new HumanActionRequiredError("daily_limit", "video-host daily upload limit reached");
     }, undefined, "worker-test");
     database.resumeFromCooldown(new Date("2026-08-17T10:00:00Z"));
     const result = await worker.step(new Date("2026-08-17T10:00:00Z"));
@@ -323,7 +322,7 @@ test("campaign intent and limits persist independently of worker lifetime", asyn
     const databasePath = path.join(root, "pipeline.sqlite");
     const first = new PipelineDatabase(databasePath);
     assert.equal(first.getCampaignControl().state, "paused");
-    first.configureCampaign("fmp4", 123_456_789);
+    first.configureCampaign("live-c", 123_456_789);
     first.setCampaignState("running");
     first.close();
     const reopened = new PipelineDatabase(databasePath);
@@ -331,7 +330,7 @@ test("campaign intent and limits persist independently of worker lifetime", asyn
         state: reopened.getCampaignControl().state,
         provider: reopened.getCampaignControl().providerFilter,
         limit: reopened.getCampaignControl().monthlyUploadLimitBytes,
-    }, { state: "running", provider: "fmp4", limit: 123_456_789 });
+    }, { state: "running", provider: "live-c", limit: 123_456_789 });
     reopened.setCampaignState("paused");
     reopened.close();
     const configured = configureCampaign({ ...pipelineConfig, comparisonTrialOnly: false, databasePath }, "all", undefined, 10);
@@ -346,7 +345,7 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
     const finalizationDatabasePath = path.join(root, "finalization.sqlite");
     const authority = new DatabaseSync(finalizationDatabasePath);
     authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT NOT NULL, report_json TEXT NOT NULL, updated_at TEXT NOT NULL) STRICT");
-    const providers = ["tslive", "ladder", "fmp4"];
+    const providers = ["live-a", "live-b", "live-c"];
     const roots = providers.map((provider) => ({ provider, sourceKind: "edited", path: path.join(root, provider, "edited") }));
     for (const [providerIndex, discoveryRoot] of roots.entries()) {
         for (let index = 1; index <= 11; index++) {
@@ -371,7 +370,7 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
         return { state: "upload_uncertain" };
     };
     let worker = new CampaignWorker(database, config, resolver, upload);
-    const newer = await inspectFinalizedRecording(path.join(roots[0].path, "2020-01-11 120000 tslive"), "tslive", "edited");
+    const newer = await inspectFinalizedRecording(path.join(roots[0].path, "2020-01-11 120000 live-a"), "live-a", "edited");
     const queued = database.discover(newer.recording);
     advanceToMetadataReady(database, queued, root);
     database.configureCampaign("all", 1_000_000_000, new Date(), 10);
@@ -419,7 +418,7 @@ test("a 30-recording trial stops at ten per provider, persists, and normal resum
     assert.equal(database.getCampaignControl().trialPerProvider, null);
     const next = await worker.step();
     assert.equal(next.disposition, "upload_completed");
-    assert.equal(database.get(next.recordingId).provider, "tslive");
+    assert.equal(database.get(next.recordingId).provider, "live-a");
     assert.match(database.get(next.recordingId).sourcePath, /2020-01-11/);
 });
 
@@ -429,16 +428,16 @@ test("trial slots survive missing sources, limits can be adjusted, and incomplet
     for (const limit of [0, -1, 1.5, NaN, Infinity]) {
         assert.throws(() => database.configureCampaign("all", 1_000_000_000, now, limit), /positive integer/);
     }
-    assert.throws(() => database.configureCampaign("fmp4", 1_000_000_000, now, 10), /provider all/);
+    assert.throws(() => database.configureCampaign("live-c", 1_000_000_000, now, 10), /provider all/);
     database.configureCampaign("all", 1_000_000_000, now, 1);
     database.enrollCampaignTrial(recording);
     database.enrollCampaignTrial(recording);
-    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].admitted, 1);
-    assert.equal(database.campaignTrialAllows("tslive"), false);
+    assert.equal(database.getCampaignTrialProgress(["live-a", "live-b", "live-c"])[0].admitted, 1);
+    assert.equal(database.campaignTrialAllows("live-a"), false);
     database.setLocalSourcePresence(recording.id, 'missing', 'user removed source');
     await rm(recording.sourcePath, {recursive:true,force:true});
-    assert.equal(database.campaignTrialAllows("tslive"), false);
-    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].recordings[0].state, "source_missing");
+    assert.equal(database.campaignTrialAllows("live-a"), false);
+    assert.equal(database.getCampaignTrialProgress(["live-a", "live-b", "live-c"])[0].recordings[0].state, "source_missing");
     database.setCampaignState("running");
     assert.throws(() => database.configureCampaign("all", 1_000_000_000, now, 2), /Pause/);
     const worker = new CampaignWorker(database, { ...config, discoveryRoots: [], cleanupEnabled: false }, resolver);
@@ -449,7 +448,7 @@ test("trial slots survive missing sources, limits can be adjusted, and incomplet
     assert.equal(database.getCampaignControl().trialPerProvider, 1);
     database.setCampaignState("paused");
     database.configureCampaign("all", 1_000_000_000, now, 2);
-    assert.equal(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"])[0].admitted, 1);
+    assert.equal(database.getCampaignTrialProgress(["live-a", "live-b", "live-c"])[0].admitted, 1);
     database.configureCampaign("all", 1_000_000_000, now, null);
     assert.equal(database.getCampaignControl().trialPerProvider, null);
 });
@@ -523,7 +522,7 @@ test("campaign resume performs a pending production rollover and archives retire
     const inspection = new PipelineDatabase(databasePath);
     assert.equal(inspection.getCampaignControl().state, "running");
     assert.equal(inspection.getCampaignControl().trialPerProvider, 10);
-    assert(inspection.getCampaignTrialProgress(["tslive", "ladder", "fmp4"]).every((provider) => provider.admitted === 0));
+    assert(inspection.getCampaignTrialProgress(["live-a", "live-b", "live-c"]).every((provider) => provider.admitted === 0));
     assert.deepEqual(inspection.list(), []);
     inspection.setCampaignState("paused");
     inspection.close();
@@ -545,7 +544,7 @@ test("campaign resume performs a pending production rollover and archives retire
 function inputForRollover(directory) {
     const sourcePath = path.join(directory, "2025-01-01 000000 alias");
     return {
-        provider: "tslive",
+        provider: "live-a",
         sourceKind: "edited",
         sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"),
@@ -557,10 +556,9 @@ function inputForRollover(directory) {
 test("browser launch failures use the 15-minute transport cooldown, retaining the real diagnostic", async t => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
     database.setCampaignState('running');
-    const uploader = new ChromiumVideoHostUploader({executablePath:'unused',profilePath:'unused'},
-        async()=>{throw Error('profile owner still closing');},async()=>{});
+    // What a destination's uploader throws when its browser cannot start: nothing was sent.
     const worker = new CampaignWorker(database,config,resolver,
-        async()=>uploader.withAuthenticatedPage(async()=>{}));
+        async()=>{throw new Error('Browser launch failed after two attempts: profile owner still closing');});
     const result=await worker.step(new Date('2026-11-02T00:00:00Z'));
     assert.equal(result.disposition,'upload_retry_cooldown');
     assert.equal(result.resumeAt,'2026-11-02T00:15:00.000Z');

@@ -1,0 +1,5 @@
+Analyze the complete chronological recording of a tennis match. Use only concrete evidence from the video: the court and its surface, the players and their clothing, the scoreboard when it is legible, and the play.
+
+Write a specific natural title of six to twelve words without filler words such as video, clip, content, or footage.
+
+Write a factual two-to-four sentence description covering the court, the players, the rallies, and meaningful changes over time.

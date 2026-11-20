@@ -23,8 +23,8 @@ async function ledger(t) {
 }
 
 test("a destination ID is any well-formed ID", () => {
-    for (const id of ["videohost", "form-host", "api-host2"]) assertUploadProvider(id);
-    for (const id of ["", "VideoHost", "form host", "a/b", "-x", "retired", 7, null]) assert.throws(() => assertUploadProvider(id), /destination ID/);
+    for (const id of ["video-host", "form-host", "api-host2"]) assertUploadProvider(id);
+    for (const id of ["", "Video-Host", "form host", "a/b", "-x", "retired", 7, null]) assert.throws(() => assertUploadProvider(id), /destination ID/);
 });
 
 test("the ledger stores a new destination and refuses a retired one", async (t) => {
@@ -35,10 +35,10 @@ test("the ledger stores a new destination and refuses a retired one", async (t) 
     raw.prepare("INSERT INTO destinations VALUES ('old-host', 'retired', NULL, 'at')").run();
     raw.close();
     assert.throws(() => database.setActiveUploadProvider("old-host"), /Upload provider old-host is retired/);
-    assert.equal(database.getActiveUploadProvider(), "videohost");
+    assert.equal(database.getActiveUploadProvider(), "video-host");
     database.setActiveUploadProvider("form-host");
     assert.equal(database.getActiveUploadProvider(), "form-host");
-    assert.deepEqual(database.listUploadProviderEvents().map(({ fromProvider, toProvider }) => [fromProvider, toProvider]), [["videohost", "form-host"]]);
+    assert.deepEqual(database.listUploadProviderEvents().map(({ fromProvider, toProvider }) => [fromProvider, toProvider]), [["video-host", "form-host"]]);
 });
 
 test("a campaign filters by any site ID the ledger is given", async (t) => {
@@ -52,12 +52,12 @@ test("a campaign filters by any site ID the ledger is given", async (t) => {
 
 test("the pipeline's sources are the sites file's sites, in its order", () => {
     // The test sites file lists production's three sites.
-    assert.deepEqual(sourceSiteIds(), ["tslive", "ladder", "fmp4"]);
-    assert.deepEqual(pipelineConfig.discoveryRoots, ["tslive", "ladder", "fmp4"].map((provider) => ({
+    assert.deepEqual(sourceSiteIds(), ["live-a", "live-b", "live-c"]);
+    assert.deepEqual(pipelineConfig.discoveryRoots, ["live-a", "live-b", "live-c"].map((provider) => ({
         provider, sourceKind: "edited", path: providerFolders(provider).edited,
     })));
     assert.deepEqual(pipelineConfig.manualRemuxRoots.map(({ provider, sourceKind }) => `${provider}/${sourceKind}`),
-        ["tslive/downloader", "tslive/edited", "ladder/downloader", "ladder/edited", "fmp4/downloader", "fmp4/edited"]);
+        ["live-a/downloader", "live-a/edited", "live-b/downloader", "live-b/edited", "live-c/downloader", "live-c/edited"]);
 });
 
 function cli(args, env) {
@@ -68,36 +68,36 @@ test("the CLI checks campaign sources and destinations against the sites file", 
     const { directory, databasePath } = await ledger(t);
     const sitesFile = path.join(directory, "sites.json");
     await writeFile(sitesFile, JSON.stringify({
-        contentProfile: "profile-original",
-        destinations: [{ id: "videohost", plugin: "plugin-videohost" }, { id: "form-host", plugin: "plugin-form-host" }],
-        sites: [{ id: "tslive", plugin: "plugin-tslive" }, { id: "ladder", plugin: "plugin-ladder" }, { id: "fmp4", plugin: "plugin-fmp4" }],
+        contentProfile: "profile-tennis",
+        destinations: [{ id: "video-host", plugin: new URL("./support/videoHost.mjs", import.meta.url).href }, { id: "form-host", plugin: "plugin-form-host" }],
+        sites: [{ id: "live-a", plugin: "plugin-ladder-live" }, { id: "live-b", plugin: "plugin-fmp4-live" }, { id: "live-c", plugin: "plugin-ts-live" }],
     }));
     const env = { VIDEO_PIPELINE_DB: databasePath, VIDEO_SITES_FILE: sitesFile };
 
-    const badSource = cli(["campaign-configure", "--provider", "live-a", "--apply"], env);
+    const badSource = cli(["campaign-configure", "--provider", "live-d", "--apply"], env);
     assert.equal(badSource.status, 1);
     // The message production prints, from the sites file's list.
-    assert.match(badSource.stderr, /Campaign provider must be all, tslive, ladder, or fmp4/);
+    assert.match(badSource.stderr, /Campaign provider must be all, live-a, live-b, or live-c/);
 
     const unknown = cli(["upload-provider", "--provider", "api-host", "--apply"], env);
     assert.equal(unknown.status, 1);
     assert.match(unknown.stderr, /The sites file names no destination "api-host"/);
-    const check = cli(["metadata-check", "--provider", "oldhost"], env);
+    const check = cli(["metadata-check", "--provider", "old-host"], env);
     assert.equal(check.status, 1, "a retired or unknown destination has nothing to check");
-    assert.match(check.stderr, /The sites file names no destination "oldhost"/);
+    assert.match(check.stderr, /The sites file names no destination "old-host"/);
 
     const switched = cli(["upload-provider", "--provider", "form-host", "--apply"], env);
     assert.equal(switched.status, 0, switched.stderr);
     assert.equal(JSON.parse(switched.stdout).activeUploadProvider, "form-host");
 });
 
-test("a destination's limits and creation boundary come from its plug-in; VideoHost keeps the pinned table", async (t) => {
+test("a destination's limits and creation boundary come from its plug-in", async (t) => {
     const { destinationFacts } = await import("../dist/upload/destinationFacts.js");
-    const videohost = await destinationFacts("videohost");
-    assert.equal(videohost.creationBoundary, "metadata_submit");
-    assert.equal(videohost.uploadVisibility, "public");
-    assert.equal(videohost.policy.minimumDurationSeconds, 120);
-    assert.equal(videohost.policy.maximumFileBytes, 10_000_000_000);
+    const videoHost = await destinationFacts("video-host");
+    assert.equal(videoHost.creationBoundary, "metadata_submit");
+    assert.equal(videoHost.uploadVisibility, "public");
+    assert.equal(videoHost.policy.minimumDurationSeconds, 120);
+    assert.equal(videoHost.policy.maximumFileBytes, 10_000_000_000);
 
     const { directory } = await ledger(t);
     const sitesFile = path.join(directory, "sites.json");
@@ -118,7 +118,7 @@ test("only a destination whose copy starts at the metadata form settles unsubmit
     const database = new PipelineDatabase(databasePath);
     t.after(() => database.close());
     const sourcePath = path.join(directory, "2026-01-01 010000 fixture");
-    const recording = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath,
+    const recording = database.discover({ provider: "live-a", sourceKind: "edited", sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
     // An attempt interrupted during the file transfer: uncertain, never at the metadata form.
     const raw = new DatabaseSync(databasePath);
@@ -144,13 +144,13 @@ test("a trial's progress lists the configured sources in order, then any other s
     t.after(() => database.close());
     database.configureCampaign("all", 1_000_000_000, new Date(), 2);
     const sourcePath = path.join(directory, "2026-01-01 010000 fixture");
-    const recording = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath,
+    const recording = database.discover({ provider: "live-a", sourceKind: "edited", sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
     database.enrollCampaignTrial(recording);
-    assert.deepEqual(database.getCampaignTrialProgress(["tslive", "ladder", "fmp4"]).map(({ provider, admitted }) => [provider, admitted]),
-        [["tslive", 1], ["ladder", 0], ["fmp4", 0]], "production's sources, as before");
-    assert.deepEqual(database.getCampaignTrialProgress(["live-a"]).map(({ provider, admitted }) => [provider, admitted]),
-        [["live-a", 0], ["tslive", 1]], "an admitted recording is never left out");
+    assert.deepEqual(database.getCampaignTrialProgress(["live-a", "live-b", "live-c"]).map(({ provider, admitted }) => [provider, admitted]),
+        [["live-a", 1], ["live-b", 0], ["live-c", 0]], "the configured sources, in order");
+    assert.deepEqual(database.getCampaignTrialProgress(["live-d"]).map(({ provider, admitted }) => [provider, admitted]),
+        [["live-d", 0], ["live-a", 1]], "an admitted recording is never left out");
 });
 
 test("an older server's resolution (no pages) stores nothing; a site without pages goes to review", async () => {

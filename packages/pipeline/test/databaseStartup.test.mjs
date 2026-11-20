@@ -11,7 +11,7 @@ async function fixture(t){
  const root=await mkdtemp(path.join(os.tmpdir(),'pipeline-db-startup-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
  const file=path.join(root,'pipeline.sqlite');const db=new PipelineDatabase(file);
- const recording=db.discover({provider:'tslive',sourceKind:'edited',sourcePath:path.join(root,'2026-11-01 120000 source'),playlistPath:path.join(root,'playlist.m3u8'),sourceFingerprint:'exact-source',durationSeconds:120});
+ const recording=db.discover({provider:'live-a',sourceKind:'edited',sourcePath:path.join(root,'2026-11-01 120000 source'),playlistPath:path.join(root,'playlist.m3u8'),sourceFingerprint:'exact-source',durationSeconds:120});
  return {file,db,recording};
 }
 test('startup tolerates a concurrent writer longer than the former five-second timeout',async t=>{

@@ -7,7 +7,6 @@ import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { pipelineConfig } from "../dist/config.js";
 import { reconcileDueUploads } from "../dist/commands/reconcileUploads.js";
 import { productionOutputDimensions } from "../dist/stages/resolutionPolicy.js";
-import { parsePlaybackRenditions, hasFullHdPlayback } from "../../../private/plugins/videohost/dist/playbackQuality.js";
 import { HumanActionRequiredError } from "../dist/upload/browserUpload.js";
 import { CURRENT_PRODUCTION_VERSION } from "../dist/domain/productionVersion.js";
 
@@ -20,14 +19,14 @@ async function fixture(t, remoteId) {
         networkUploadsEnabled: true, cleanupEnabled: false, comparisonTrialOnly: false };
     const db = new PipelineDatabase(config.databasePath);
     t.after(() => db.close());
-    const r = db.discover({ provider: "fmp4", sourceKind: "edited", sourcePath: path.join(root, "2026-09-11 120000 example"),
+    const r = db.discover({ provider: "live-c", sourceKind: "edited", sourcePath: path.join(root, "2026-09-11 120000 example"),
         playlistPath: path.join(root, "playlist.m3u8"), sourceFingerprint: "source", durationSeconds: 100 });
     db.transition(r.id, "server_ready", "remuxed");
     db.saveArtifact(r.id, { path: path.join(root, "file.mp4"), sizeBytes: 100, sha256: "a".repeat(64), validatedAt: now.toISOString() });
     db.saveDescription(r.id, { artifactSha256: "a".repeat(64), promptVersion: "test", fps: 1,
         output: { title: "Example", description: "Example" }, evidencePath: path.join(root, "evidence.json") });
     db.saveProvenance(r.id, { observedIdentifier:"example",status:"resolved",streamerId:"123",alias:"example",
-        streamerUrl:"https://fmp4-live.example/123",aliasUrl:null,reason:null,updatedAt:now.toISOString() });
+        streamerUrl:"https://live-c.example/123",aliasUrl:null,reason:null,updatedAt:now.toISOString() });
     db.saveUploadMetadata(r.id, { title: `Example [${r.id} | ${CURRENT_PRODUCTION_VERSION} | full]`, description: "Example", tags: [] });
     const reservation = db.reserveUpload(r.id, 1024, now);
     const attempt = db.beginUpload(r.id, reservation, now);
@@ -47,7 +46,7 @@ test("production size: covers 1920x1080 (at least 1920 wide and 1080 tall), land
         const portrait = height > displayWidth;
         assert.equal(out.rotate, portrait, `${width}x${height} turned only when portrait`);
         assert(out.width >= out.height, "always landscape (or square) after the turn");
-        // VideoHost makes its 1080p version only from a source at least 1920 wide,
+        // video-host makes its 1080p version only from a source at least 1920 wide,
         // and names it by height.
         assert(out.width >= 1920, `${width}x${height}: at least 1920 wide`);
         assert(out.height >= 1080, `${width}x${height}: at least 1080 tall`);
@@ -64,17 +63,6 @@ test("production size: covers 1920x1080 (at least 1920 wide and 1080 tall), land
     assert.deepEqual(productionOutputDimensions({ width: 2000, height: 1000, sampleAspectRatio: "1:1" }), { width: 2160, height: 1080, rotate: false });
     assert.deepEqual(productionOutputDimensions({ width: 3840, height: 2160, sampleAspectRatio: "1:1" }), { width: 3840, height: 2160, rotate: false });
     assert.deepEqual(productionOutputDimensions({ width: 1080, height: 1920, sampleAspectRatio: "1:1" }), { width: 1920, height: 1080, rotate: true });
-});
-
-test("Full HD is a version at least 1080 tall: the 1080p version of a 4:3 or 5:4 upload passes, labels count for nothing", () => {
-    for (const size of ["1110x832", "1072x858", "1280x720", "1920x1036"]) {
-        const rs = parsePlaybackRenditions(`#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=${size},NAME="1080p"\nvideo.m3u8`);
-        assert.equal(hasFullHdPlayback(rs), false, "misleading labels cannot substitute for pixels");
-    }
-    for (const size of ["1920x1080", "1080x1920", "1440x1080", "1350x1080", "1920x1440", "2560x1440", "1918x1078"]) {
-        assert(hasFullHdPlayback(parsePlaybackRenditions(`#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=${size}\na.m3u8`)));
-    }
-    assert.equal(hasFullHdPlayback(parsePlaybackRenditions("<html>Login</html>")), false);
 });
 
 test("missing ID stays uncertain, retries daily across reopen, then attaches only recovered identity", async t => {

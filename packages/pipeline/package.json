@@ -6,7 +6,7 @@
     "main": "dist/main.js",
     "scripts": {
         "build": "rm -rf dist && tsc",
-        "test": "npm run build && node --no-warnings --import ./test/support/originalProfile.mjs --test test/*.test.mjs",
+        "test": "npm run build && node --no-warnings --import ./test/support/preload.mjs --test test/*.test.mjs",
         "status": "npm run build && node --no-warnings dist/main.js status",
         "discover:plan": "npm run build && node --no-warnings dist/main.js discover-plan",
         "discover": "npm run build && node --no-warnings dist/main.js discover --apply",
@@ -42,6 +42,7 @@
     },
     "devDependencies": {
         "@types/node": "^22.19.0",
+        "profile-tennis": "1.0.0",
         "typescript": "^5.4.5"
     }
 }

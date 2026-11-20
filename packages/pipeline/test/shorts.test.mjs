@@ -36,15 +36,15 @@ async function fixture(t) {
     t.after(() => authority.close());
     const database = new PipelineDatabase(databasePath);
     t.after(() => database.close());
-    const sources = path.join(root, 'tslive/edited');
+    const sources = path.join(root, 'live-a/edited');
     await mkdir(sources, { recursive: true });
     const config = { ...pipelineConfig, databasePath, finalizationDatabasePath, automaticShortsEnabled:true,
         stagingRoot:path.join(root,'artifacts/production-v6'), artifactsRoot:path.join(root,'artifacts'),
-        discoveryRoots:['tslive','ladder','fmp4'].map(provider=>({provider,sourceKind:'edited',path:path.join(root,provider,'edited')})), uploadProvider:'videohost', cleanupEnabled:false };
-    // As the server answers for TsLive (its catalog's sourceLinks).
+        discoveryRoots:['live-a','live-b','live-c'].map(provider=>({provider,sourceKind:'edited',path:path.join(root,provider,'edited')})), uploadProvider:'video-host', cleanupEnabled:false };
+    // As the server answers for live-a (its catalog's sourceLinks).
     const resolver = TargetCatalogResolver.load({ resolveIdentifier:async (_provider, alias) => {
         const id = alias.startsWith('alice') ? 'alice-id' : alias;
-        return { id, label: alias, channelUrl: `https://ts-live.example/${id}`, aliasUrl: alias === id ? null : `https://ts-live.example/${alias}` };
+        return { id, label: alias, channelUrl: `https://live-a.example/${id}`, aliasUrl: alias === id ? null : `https://live-a.example/${alias}` };
     } });
     let index = 0;
     async function add(alias='alice', pieces=[[64,36,65]]) {
@@ -63,7 +63,7 @@ async function fixture(t) {
         await writeFile(path.join(source,'playlist.m3u8'),playlist);
         authority.prepare('INSERT INTO integrity_checkpoints VALUES(?,?,?,?)').run(source,
             createHash('sha256').update(playlist).digest('hex'),JSON.stringify({version:2,status:'ready'}),new Date().toISOString());
-        const result=await inspectFinalizedRecording(source,'tslive','edited');
+        const result=await inspectFinalizedRecording(source,'live-a','edited');
         assert.equal(result.status,'finalized');
         return {id,source,input:result.recording,playlist};
     }
@@ -77,7 +77,7 @@ async function fixture(t) {
         const raw=new DatabaseSync(databasePath);
         raw.prepare("UPDATE recordings SET state='uploaded' WHERE id=?").run(batchId);
         raw.prepare(`INSERT INTO upload_attempts(id,recording_id,provider,status,phase,remote_id,remote_url,started_at,completed_at,artifact_part)
-            VALUES(?,?,'videohost','accepted','metadata_submitting',?,?,?,?,?)`).run(`attempt-${remoteId}`,batchId,remoteId,
+            VALUES(?,?,'video-host','accepted','metadata_submitting',?,?,?,?,?)`).run(`attempt-${remoteId}`,batchId,remoteId,
                 `https://video-host.example/video/${remoteId}/fixture`,new Date().toISOString(),new Date().toISOString(),database.getArtifactPart(batchId)??'full');
         raw.close();
         return database.markRemoteVerified(batchId,remoteId,`https://video-host.example/video/${remoteId}/fixture`);
@@ -85,13 +85,13 @@ async function fixture(t) {
     return {root,database,config,resolver,add,verified,authority};
 }
 
-const part=(id,seconds,aspect=16/9,streamer='tslive:alice',destination='videohost')=>({recordingId:id,part:'full',
+const part=(id,seconds,aspect=16/9,streamer='live-a:alice',destination='video-host')=>({recordingId:id,part:'full',
     sourceFingerprint:'hash',streamerKey:streamer,destinationProvider:destination,aspectRatio:aspect,
     durationSeconds:seconds,playlist:'',batchId:null,verified:false});
 
 test('groups only the same resolved streamer, destination and compatible shape',()=>{
-    const clips=[part('a',65),part('b',65,16/9,'tslive:bob'),part('c',65,9/16),
-        part('d',65,16/9,'tslive:alice','retired'),part('e',65)];
+    const clips=[part('a',65),part('b',65,16/9,'live-a:bob'),part('c',65,9/16),
+        part('d',65,16/9,'live-a:alice','retired'),part('e',65)];
     assert.deepEqual(compatibleShortGroups(clips,121).map(g=>g.map(p=>p.recordingId)),[['a','e']]);
 });
 test('incompatible earliest clip cannot starve a later compatible pair',()=>{
@@ -186,8 +186,8 @@ test('a short part pools independently while the longer compatible job continues
         validatedAt:new Date().toISOString(),segmentCount:1,sourceDimensions:[part==='shape1'?'64x36':'36x64']});
     f.database.saveProductionArtifactSet(recorded.id,artifact('shape1'),[artifact('shape2')],'resolution-policy-v6: fixture');
     const raw=new DatabaseSync(f.config.databasePath);raw.prepare("UPDATE recordings SET state='metadata_ready' WHERE id=?").run(recorded.id);raw.close();
-    await poolRecordingPart(f.database,recorded,'videohost','shape1',65);
-    f.database.deferShortArtifact(recorded.id,'videohost');
+    await poolRecordingPart(f.database,recorded,'video-host','shape1',65);
+    f.database.deferShortArtifact(recorded.id,'video-host');
     assert.equal(f.database.get(recorded.id).state,'artifact_valid');
     assert.equal(f.database.getArtifactPart(recorded.id),'shape2');
     await f.add('alice');
@@ -274,7 +274,7 @@ test('user deletion cancels an unsent batch without restoring files or blocking 
 
 test('fMP4 joins preserve separate init maps and fragment boundaries',async t=>{
     const f=await fixture(t);
-    const sourceRoot=path.join(f.root,'fmp4/edited');await mkdir(sourceRoot,{recursive:true});
+    const sourceRoot=path.join(f.root,'live-c/edited');await mkdir(sourceRoot,{recursive:true});
     for(let index=0;index<2;index++){
         const source=path.join(sourceRoot,`2026-01-01 00000${index} alice`);await mkdir(source);
         execFileSync('ffmpeg',['-v','error','-f','lavfi','-i','color=c=blue:s=64x36:r=1','-t','65','-c:v','libx264',
@@ -295,9 +295,9 @@ test('removed recordings cannot be smuggled into a new batch for the same provid
     const f=await fixture(t);const a=await f.add();await f.add();
     const recording=f.database.discover(a.input);f.database.saveProvenance(recording.id,await f.resolver.resolve(a.input));
     const raw=new DatabaseSync(f.config.databasePath);
-    raw.prepare('INSERT INTO provider_removals VALUES(?,?,?,?,?)').run(a.id,'videohost','old-id','removed',new Date().toISOString());raw.close();
-    assert.throws(()=>f.database.waitForShorts(a.id,'videohost'),/Removed/);
-    await assert.rejects(poolRecordingPart(f.database,recording,'videohost'),/removed/);
+    raw.prepare('INSERT INTO provider_removals VALUES(?,?,?,?,?)').run(a.id,'video-host','old-id','removed',new Date().toISOString());raw.close();
+    assert.throws(()=>f.database.waitForShorts(a.id,'video-host'),/Removed/);
+    await assert.rejects(poolRecordingPart(f.database,recording,'video-host'),/removed/);
 });
 
 test('compatible joined source uses the normal conversion and artifact validation stages',async t=>{

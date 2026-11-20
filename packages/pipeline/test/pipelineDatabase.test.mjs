@@ -22,7 +22,7 @@ async function databaseFixture(t, closeAfter = true) {
 function input(directory, suffix = "one") {
     const sourcePath = path.join(directory, suffix);
     return {
-        provider: "tslive",
+        provider: "live-a",
         sourceKind: "edited",
         sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"),
@@ -56,15 +56,15 @@ function advanceToMetadataReady(database, recording, directory, sizeBytes = 1_00
         status: "resolved",
         streamerId: "streamer-id",
         alias: "alias",
-        streamerUrl: "https://ts-live.example/streamer-id",
-        aliasUrl: "https://ts-live.example/alias",
+        streamerUrl: "https://live-a.example/streamer-id",
+        aliasUrl: "https://live-a.example/alias",
         reason: null,
         updatedAt: new Date("2026-08-12T08:00:00Z").toISOString(),
     });
     database.saveUploadMetadata(recording.id, {
         title: `Specific test title [${path.basename(directory)}]`,
-        description: "A concrete test description.\n\nRecorded: unknown\nSource: https://ts-live.example/streamer-id",
-        tags: ["tslive", "live", "room"],
+        description: "A concrete test description.\n\nRecorded: unknown\nSource: https://live-a.example/streamer-id",
+        tags: ["live-a", "tennis", "room"],
     });
     database.recordResolutionPolicyAssessment(recording.id, "resolution-policy-v6: test fixture");
     return database.get(recording.id);
@@ -96,7 +96,7 @@ test("production rollover retires workflow state while preserving quota, overrid
         alias: "alias",
         streamerUrl: "https://example.test/manual-id",
     });
-    database.configureCampaign("fmp4", 123_456_789);
+    database.configureCampaign("live-c", 123_456_789);
     const now = new Date("2026-08-30T10:00:00Z");
     const reservation = database.reserveUpload(recording.id, 1_000, now);
     const attempt = database.beginUpload(recording.id, reservation, now);
@@ -135,8 +135,8 @@ test("production rollover retires workflow state while preserving quota, overrid
     assert.equal(reopened.getProductionVersion(), "production-v6");
     assert.deepEqual(reopened.list(), []);
     assert.deepEqual(reopened.uploadUsage("2026-08"), { spent: 900, reserved: 0 });
-    assert.equal(reopened.getProvenanceOverride("tslive", "alias")?.streamerId, "manual-id");
-    assert.equal(reopened.getCampaignControl().providerFilter, "fmp4");
+    assert.equal(reopened.getProvenanceOverride("live-a", "alias")?.streamerId, "manual-id");
+    assert.equal(reopened.getCampaignControl().providerFilter, "live-c");
     assert.equal(reopened.getCampaignControl().monthlyUploadLimitBytes, 123_456_789);
     assert.deepEqual(reopened.listProductionRollovers().map((row) => ({
         fromVersion: row.fromVersion,
@@ -412,7 +412,7 @@ test("dry-run releases match admission, including overhead and simulated reserva
     const seed = new DatabaseSync(databasePath);
     seed.prepare(`INSERT INTO bandwidth_events
         (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
-        VALUES ('prior-recording', 'prior-attempt', 'videohost', '2026-11', ?, '2026-11-01T12:00:00Z')`).run(spent);
+        VALUES ('prior-recording', 'prior-attempt', 'video-host', '2026-11', ?, '2026-11-01T12:00:00Z')`).run(spent);
     seed.close();
     const beforeRelease = new Date("2026-11-10T22:59:59.999Z");
     assert.equal(database.canReserve(REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000, beforeRelease), true);
@@ -580,7 +580,7 @@ test("verification promotes the converted mixed artifact and completes only afte
         database.saveUploadMetadata(recording.id, {
             title: label,
             description: `${label} description`,
-            tags: ["tslive", "live"],
+            tags: ["live-a", "tennis"],
         });
     };
     const uploadAndVerify = (remoteId, now) => {
@@ -699,7 +699,7 @@ test("the upload coordinator parks submit success as uncertain until daily video
         sizeBytes: 500,
         title: "Fake upload",
         description: "No network transport exists in this test.",
-        tags: ["tslive", "live"],
+        tags: ["live-a", "tennis"],
         visibility: "private",
     }, now);
     assert.equal(calls, 1);
@@ -743,7 +743,7 @@ test("transport errors meter bytes and uncertain acceptance cannot retry", async
         sizeBytes: 500,
         title: "Fake upload",
         description: "No network transport exists in this test.",
-        tags: ["tslive", "live"],
+        tags: ["live-a", "tennis"],
         visibility: "private",
     }, now), /response disappeared/);
     assert.equal(database.get(recording.id)?.state, "upload_uncertain");
@@ -820,37 +820,37 @@ test("destination is pinned through reservation, interruption and confirmation; 
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
     const now = new Date("2026-10-02T08:00:00Z");
-    const reservation = database.reserveUpload(recording.id, 550, now, "Europe/Tirane", 600_000_000_000, "videohost");
+    const reservation = database.reserveUpload(recording.id, 550, now, "Europe/Tirane", 600_000_000_000, "video-host");
     assert.throws(() => database.beginUpload(recording.id, reservation, now, "retired"), /provider/);
-    const attempt = database.beginUpload(recording.id, reservation, now, "videohost");
+    const attempt = database.beginUpload(recording.id, reservation, now, "video-host");
     database.updateUploadProgress(attempt, "metadata_submitting", 500, now);
     database.close();
     const restarted = new PipelineDatabase(databasePath);
     t.after(() => restarted.close());
     restarted.recoverInterruptedUploads(now);
     const dueAt = new Date(now.getTime() + 24 * 3600_000);
-    assert.equal(restarted.dueUploadConfirmations(dueAt)[0].uploadProvider, "videohost");
+    assert.equal(restarted.dueUploadConfirmations(dueAt)[0].uploadProvider, "video-host");
     const raw = new DatabaseSync(databasePath);
-    assert.equal(raw.prepare("SELECT provider FROM bandwidth_events WHERE attempt_id = ?").get(attempt).provider, "videohost");
+    assert.equal(raw.prepare("SELECT provider FROM bandwidth_events WHERE attempt_id = ?").get(attempt).provider, "video-host");
     raw.close();
-    assert.throws(() => restarted.reserveUpload(recording.id, 550, dueAt, "Europe/Tirane", 600_000_000_000, "videohost"));
+    assert.throws(() => restarted.reserveUpload(recording.id, 550, dueAt, "Europe/Tirane", 600_000_000_000, "video-host"));
 });
 
-test("manual VideoHost adoption records destination, not recording origin", async t => {
+test("manual video-host adoption records destination, not recording origin", async t => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
     database.parkUploadedCopy(recording.id, "123456", null);
-    assert.equal(database.dueUploadConfirmations(new Date(Date.now() + 1000))[0].uploadProvider, "videohost");
+    assert.equal(database.dueUploadConfirmations(new Date(Date.now() + 1000))[0].uploadProvider, "video-host");
 });
 
 test("already uploaded recording can be adopted and verified without preparing another artifact", async t => {
     const { database, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     const now = new Date("2026-10-02T08:00:00Z");
-    database.parkUploadedCopy(recording.id, "3314558", "https://video-host.example/video/3314558/example", now, "videohost");
+    database.parkUploadedCopy(recording.id, "3314558", "https://video-host.example/video/3314558/example", now, "video-host");
     const confirmation = database.dueUploadConfirmations(now)[0];
-    assert.equal(confirmation.uploadProvider, "videohost");
+    assert.equal(confirmation.uploadProvider, "video-host");
     assert.equal(database.getUploadIdentity(recording.id).remoteId, "3314558");
     database.verifyUpload(confirmation.attemptId, "3314558", "https://video-host.example/video/3314558/example", now);
     assert.equal(database.get(recording.id).state, "upload_verified");
@@ -858,7 +858,7 @@ test("already uploaded recording can be adopted and verified without preparing a
     assert.equal(database.getArtifact(recording.id), null);
 });
 
-test("existing VideoHost upload is refused even when state is reset and VideoHost is selected", async t => {
+test("existing video-host upload is refused even when state is reset and video-host is selected", async t => {
     const { database, databasePath, directory } = await databaseFixture(t);
     const recording = database.discover(input(directory));
     advanceToMetadataReady(database, recording, directory, 500);
@@ -873,7 +873,7 @@ test("existing VideoHost upload is refused even when state is reset and VideoHos
     const raw = new DatabaseSync(databasePath);
     raw.prepare("UPDATE recordings SET state = 'metadata_ready' WHERE id = ?").run(recording.id);
     raw.close();
-    assert.throws(() => database.reserveUpload(recording.id, 550, new Date("2026-11-02"), "Europe/Tirane", 600_000_000_000, "videohost"), /remote upload/);
+    assert.throws(() => database.reserveUpload(recording.id, 550, new Date("2026-11-02"), "Europe/Tirane", 600_000_000_000, "video-host"), /remote upload/);
 });
 
 for (const cleaned of [false, true]) test(`a provider removal revokes ${cleaned ? "cleanup eligibility" : "verified coverage"} without erasing receipts`, async t => {

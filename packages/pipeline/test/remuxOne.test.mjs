@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 test("manual remux accepts an exact server-verified downloader folder outside production discovery", async (t) => {
     const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "pipeline-remux-one-"));
     t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
-    const managedRoot = path.join(temporaryRoot, "downloads", "tslive", "downloader");
+    const managedRoot = path.join(temporaryRoot, "downloads", "live-a", "downloader");
     const recordingPath = path.join(managedRoot, "recording");
     const dataRoot = path.join(temporaryRoot, "data");
     await mkdir(recordingPath, { recursive: true });
@@ -57,11 +57,11 @@ test("manual remux accepts an exact server-verified downloader folder outside pr
         stagingRoot: path.join(artifactsRoot, "production-v6"),
         manualStagingRoot: path.join(artifactsRoot, "production-v6", "manual"),
         discoveryRoots: [{
-            provider: "tslive",
+            provider: "live-a",
             sourceKind: "edited",
-            path: path.join(temporaryRoot, "downloads", "tslive", "editor", "edited"),
+            path: path.join(temporaryRoot, "downloads", "live-a", "editor", "edited"),
         }],
-        manualRemuxRoots: [{ provider: "tslive", sourceKind: "downloader", path: managedRoot }],
+        manualRemuxRoots: [{ provider: "live-a", sourceKind: "downloader", path: managedRoot }],
         uploadTimeZone: "Europe/Tirane",
         monthlyUploadLimitBytes: 600_000_000_000,
         cleanupEnabled: false,
@@ -124,8 +124,8 @@ test("single remux refuses a historical folder without exact server authority", 
         artifactsRoot: path.join(temporaryRoot, "artifacts"),
         stagingRoot: path.join(temporaryRoot, "artifacts", "production-v6"),
         manualStagingRoot: path.join(temporaryRoot, "artifacts", "production-v6", "manual"),
-        discoveryRoots: [{ provider: "fmp4", sourceKind: "edited", path: managedRoot }],
-        manualRemuxRoots: [{ provider: "fmp4", sourceKind: "edited", path: managedRoot }],
+        discoveryRoots: [{ provider: "live-c", sourceKind: "edited", path: managedRoot }],
+        manualRemuxRoots: [{ provider: "live-c", sourceKind: "edited", path: managedRoot }],
         uploadTimeZone: "Europe/Tirane",
         monthlyUploadLimitBytes: 600_000_000_000,
         cleanupEnabled: false,
