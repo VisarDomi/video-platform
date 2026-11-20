@@ -3,7 +3,7 @@
 The list, stylesheet, overlay, player units, timeline and gestures in `src` are the local
 website (`main.ts`; providers `tslive`, `ladder`, `fmp4`) that Safari and the PC open. The server
 serves its build (`packages/app/build`), so `npm run build:app` needs no restart. The iPhone
-apps (the local lists, the uploads app and TsLive) are native (`apps/ios`, see its `README.md`);
+apps (the local lists, the uploads app and TsLive) are native (`private/apps/ios`, see its `README.md`);
 a change here does not reach them. Rules and their reasons are in `decisions.md`.
 
 Local adapters (`providers/local.ts`) use the PC's HLS, save/cut/return and download-list
@@ -31,7 +31,7 @@ use it; each only says how to reach the list
 
 The viewer uses its own site's `/api/<provider>/member|add|remove`, by the streamer in the
 recording's filename; the live extensions ask their background page. The native apps have
-their own button (`apps/ios` `VideoApp/ViewerOverlay.swift`), with the same states.
+their own button (`private/apps/ios` `VideoApp/ViewerOverlay.swift`), with the same states.
 
 ## Build and verify
 
@@ -52,5 +52,5 @@ Its fixtures cover all three local providers (playback and editing controls,
 shared scroll settlement) and the download-list button in the LADDER/FMP4 live extensions' bar,
 including ⚠️ for an unreachable PC and LADDER's automatic Login click (before parsing completes, late rendering,
 visibility and repeat-redirect protection). They do not establish physical iPhone momentum
-or native HLS playback. The iPhone apps are tested by `apps/ios/scripts/test.sh`; for Mac access use
+or native HLS playback. The iPhone apps are tested by `private/apps/ios/scripts/test.sh`; for Mac access use
 the runbook at `/home/user/Documents/environment/mac-access.md`.

@@ -13,11 +13,11 @@ build/
 __pycache__/
 
 # The iPhone apps' private build inputs (the PC's TsLive login key).
-apps/ios/Private/
-apps/ios/ThirdParty/VLCKit/VLCKit.xcframework/
-apps/ios/ThirdParty/VLCKit/MobileVLCKit.xcframework/
-apps/ios/ThirdParty/VLCKit/binary-receipt.json
-apps/ios/ThirdParty/FFmpegBuild/Sources/*.xcframework/
-apps/ios/ThirdParty/FFmpegBuild/binary-receipt.json
-apps/ios/ThirdParty/LibDovi/Dovi.xcframework/
-apps/ios/ThirdParty/LibDovi/binary-receipt.json
+private/apps/ios/Private/
+private/apps/ios/ThirdParty/VLCKit/VLCKit.xcframework/
+private/apps/ios/ThirdParty/VLCKit/MobileVLCKit.xcframework/
+private/apps/ios/ThirdParty/VLCKit/binary-receipt.json
+private/apps/ios/ThirdParty/FFmpegBuild/Sources/*.xcframework/
+private/apps/ios/ThirdParty/FFmpegBuild/binary-receipt.json
+private/apps/ios/ThirdParty/LibDovi/Dovi.xcframework/
+private/apps/ios/ThirdParty/LibDovi/binary-receipt.json
