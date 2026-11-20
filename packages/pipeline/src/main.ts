@@ -1,6 +1,6 @@
 import { journalPriority, sitesFilePath } from "shared";
 import { markStopping } from "./shutdown.js";
-import { pipelineConfig, type PipelineConfig } from "./config.js";
+import { pipelineConfig, sourceSiteIds, type PipelineConfig } from "./config.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "./upload/dryRunPlan.js";
 import { applyDiscovery, planDiscovery } from "./discovery/discover.js";
@@ -71,9 +71,11 @@ function assertCampaignIdle(config: PipelineConfig): void {
     }
 }
 
+// "all", or one of the sites the sites file lists.
 function campaignProvider(value: string | null): CampaignProviderFilter {
-    if (value === "all" || value === "tslive" || value === "ladder" || value === "fmp4") return value;
-    throw new Error("Campaign provider must be all, tslive, ladder, or fmp4");
+    const choices = ["all", ...sourceSiteIds()];
+    if (value !== null && choices.includes(value)) return value;
+    throw new Error(`Campaign provider must be ${choices.length > 1 ? `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}` : choices[0]}`);
 }
 
 // The CLI commands a destination adds: its sites-file entry names a package whose
@@ -360,6 +362,11 @@ async function main(): Promise<void> {
             if (requested !== null) {
                 requireApply(args);
                 assertUploadProvider(requested);
+                // Only a destination this deployment configures can become the active one.
+                const configured = parseDestinations(await readFile(sitesFilePath(), "utf8"), sitesFilePath());
+                if (!configured.some((destination) => destination.id === requested)) {
+                    throw new Error(`The sites file names no destination "${requested}"`);
+                }
                 if (database.campaignIsActive()) throw new Error("Stop the campaign worker before switching the upload provider");
                 database.setActiveUploadProvider(requested);
             }

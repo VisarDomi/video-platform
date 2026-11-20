@@ -138,6 +138,12 @@ export interface DestinationEntry {
 
 const DESTINATION_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+// Whether a value has the form of a destination ID (the ledger stores it with every
+// attempt, reservation and removal).
+export function isDestinationId(value: unknown): value is string {
+    return typeof value === "string" && DESTINATION_ID.test(value);
+}
+
 export function parseDestinations(text: string, source = "sites file"): DestinationEntry[] {
     let parsed: unknown;
     try {

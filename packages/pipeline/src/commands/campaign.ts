@@ -195,6 +195,7 @@ export async function setCampaignRunning(config: PipelineConfig, running: boolea
 export function campaignStatus(config: PipelineConfig, now = new Date()): unknown {
     const database = new PipelineDatabase(config.databasePath);
     try {
+        const active = config.uploadProvider ?? database.getActiveUploadProvider();
         const control = database.getCampaignControl();
         return {
             ...control,
@@ -210,8 +211,8 @@ export function campaignStatus(config: PipelineConfig, now = new Date()): unknow
             systemdUnitInstalled: true,
             cleanupEnabled: config.cleanupEnabled && !database.getComparisonTrial(),
             networkUploadsEnabled: config.networkUploadsEnabled,
-            activeUploadProvider: config.uploadProvider ?? database.getActiveUploadProvider(),
-            providerInventorySync: { videohost: database.getProviderInventorySync("videohost") },
+            activeUploadProvider: active,
+            providerInventorySync: { [active]: database.getProviderInventorySync(active) },
             uploadCredentialsFile: config.credentialsFilePath,
             counts: Object.entries(Object.groupBy(database.list(), (recording) => recording.state))
                 .map(([state, recordings]) => ({ state, count: recordings?.length ?? 0 })),
@@ -243,8 +244,8 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
             );
         }
         const recovery = [...database.recoverInterruptedUploads(),
-            // Never-submitted VideoHost attempts published nothing: back in the queue now.
-            ...database.settleUnsubmittedAttempts("videohost").map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
+            // Never-submitted attempts published nothing: back in the queue now.
+            ...database.settleUnsubmittedAttempts(database.getActiveUploadProvider()).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
         const worker = new CampaignWorker(
             database,

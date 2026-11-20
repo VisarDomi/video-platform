@@ -89,7 +89,8 @@ export interface UploadMetadataRecord {
 }
 
 export interface UploadConfirmation {
-    readonly uploadProvider: "videohost";
+    // The destination ID (sites file).
+    readonly uploadProvider: string;
     readonly attemptId: string;
     readonly recordingId: string;
     readonly confirmAfter: string;
@@ -97,7 +98,8 @@ export interface UploadConfirmation {
     readonly checkedAt: string | null;
 }
 
-export type CampaignProviderFilter = "all" | "tslive" | "ladder" | "fmp4";
+// "all", or a site ID from the sites file.
+export type CampaignProviderFilter = string;
 
 export interface CampaignControl {
     readonly state: "paused" | "running";
@@ -108,7 +110,8 @@ export interface CampaignControl {
     readonly resumeAt: string | null;
     readonly trialPerProvider: number | null;
     readonly trialFinishedAt: string | null;
-    readonly uploadProvider: "videohost";
+    // The destination ID (sites file).
+    readonly uploadProvider: string;
     readonly attentionReason: string | null;
     readonly updatedAt: string;
 }

@@ -35,6 +35,11 @@ export interface LoadOptions {
 
 const SITE_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+// Whether a value has the form of a site ID (it names folders, lists and routes).
+export function isSiteId(value: unknown): value is string {
+    return typeof value === "string" && SITE_ID.test(value);
+}
+
 export function parseSitesFile(text: string, source = "sites file"): SiteEntry[] {
     let parsed: unknown;
     try {

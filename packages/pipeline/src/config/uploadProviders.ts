@@ -1,6 +1,8 @@
 import { readFileSync, statSync } from "node:fs";
+import { isDestinationId } from "sdk";
 
-export type ActiveUploadProvider = "videohost";
+// A destination ID from the sites file ("destinations"); the ledger stores it as data.
+export type ActiveUploadProvider = string;
 export interface UploadProvidersFile {
     version: 1;
     // Ignored: the active destination lives in the pipeline database.
@@ -8,8 +10,11 @@ export interface UploadProvidersFile {
     providers: Partial<Record<ActiveUploadProvider, { email?: string; username?: string; password: string }>>;
 }
 
+// The form of a destination ID. Whether the sites file names it is checked where a
+// destination is chosen or created. "retired" is the ledger's own: the bandwidth of
+// retired destinations is kept under it.
 export function assertUploadProvider(value: unknown): asserts value is ActiveUploadProvider {
-    if (value !== "videohost") throw new Error("Upload provider must be videohost");
+    if (!isDestinationId(value) || value === "retired") throw new Error(`Upload provider must be a destination ID, not ${JSON.stringify(value)}`);
 }
 
 export function readUploadProvidersFile(filePath: string): UploadProvidersFile {
