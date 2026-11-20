@@ -8,22 +8,37 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sourceRoot = path.join(repositoryRoot, "systemd", "user");
-const managedFiles = [
-    "video-auth.service",
-    "video-filehost-downloads.service",
-    "video-downloader.service",
-    "video-pipeline.service",
-    "video-pipeline-dashboard.service",
-    "video-vhost-session.service",
-    "video-vhost-session.timer",
-    "video-processing.slice",
-    "video-server.service",
-    "video-xvfb.service",
-    path.join("video-pipeline.service.d", "resources.conf"),
-    path.join("video-server.service.d", "resources.conf"),
-    path.join("video-finalize-library-single.scope.d", "resources.conf"),
-];
+// The core's units (systemd/user) and the deployment's own (private/systemd/user, when the
+// private plug-ins are checked out): every unit, timer, slice and drop-in under them.
+const sourceRoots = [path.join(repositoryRoot, "systemd", "user"), path.join(repositoryRoot, "private", "systemd", "user")];
+const UNIT = /\.(?:service|timer|slice|socket|path)$|\.d\/[^/]+\.conf$/;
+
+async function unitsUnder(root) {
+    const found = [];
+    async function walk(directory) {
+        let entries;
+        try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch (error) {
+            if (error?.code === "ENOENT") return;
+            throw error;
+        }
+        for (const entry of entries) {
+            const full = path.join(directory, entry.name);
+            if (entry.isDirectory()) await walk(full);
+            else if (UNIT.test(path.relative(root, full))) found.push(path.relative(root, full));
+        }
+    }
+    await walk(root);
+    return found;
+}
+
+// relative path -> source file; a unit defined in both roots is a mistake.
+const managedFiles = new Map();
+for (const root of sourceRoots) {
+    for (const relativePath of await unitsUnder(root)) {
+        if (managedFiles.has(relativePath)) throw new Error(`${relativePath} is defined twice`);
+        managedFiles.set(relativePath, path.join(root, relativePath));
+    }
+}
 
 function usage() {
     throw new Error("Usage: node scripts/sync-systemd.mjs <--check|--apply> [--home ABSOLUTE_PATH]");
@@ -72,8 +87,7 @@ async function installAtomic(content, targetPath) {
 }
 
 const mismatches = [];
-for (const relativePath of managedFiles) {
-    const sourcePath = path.join(sourceRoot, relativePath);
+for (const [relativePath, sourcePath] of managedFiles) {
     const targetPath = path.join(targetRoot, relativePath);
     const [sourceTemplate, target] = await Promise.all([
         fs.readFile(sourcePath),
@@ -92,7 +106,7 @@ if (mode === "--check") {
     }
 } else {
     for (const relativePath of mismatches) {
-        const sourceTemplate = await fs.readFile(path.join(sourceRoot, relativePath));
+        const sourceTemplate = await fs.readFile(managedFiles.get(relativePath));
         await installAtomic(
             renderTemplate(sourceTemplate, relativePath),
             path.join(targetRoot, relativePath),

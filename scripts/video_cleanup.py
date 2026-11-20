@@ -105,6 +105,15 @@ def source_evidence(path):
             "size_bytes": size, "file_count": files}
 
 
+def retired_destinations(db):
+    # Destinations the ledger retired (schema 17), and the label their bandwidth keeps:
+    # their receipts are audit history only, never cleanup evidence.
+    try:
+        return {row[0] for row in db.execute("SELECT id FROM destinations WHERE state='retired'")} | {"retired"}
+    except sqlite3.OperationalError:
+        return {"retired"}  # Schema 16: retired destinations' attempts were already moved out.
+
+
 def verified_recording(db, recording_id):
     row = db.execute("SELECT * FROM recordings WHERE id=?", (recording_id,)).fetchone()
     if not row:
@@ -148,7 +157,7 @@ def verified_recording(db, recording_id):
     if not uploads:
         raise ValueError("no_verified_destination")
     for upload in uploads:
-        if upload["attempt_status"] != "accepted" or upload["provider"] not in ("videohost",):
+        if upload["attempt_status"] != "accepted" or upload["provider"] in retired_destinations(db):
             raise ValueError("unverified_destination_identity")
         if not upload["remote_id"] or not upload["remote_url"] or not upload["verified_at"]:
             raise ValueError("incomplete_destination_evidence")
@@ -288,7 +297,7 @@ def paths(args):
                 if name.endswith(".mp4") and not name.startswith(".") and ".partial" not in name:
                     yield Path(parent) / name
     else:
-        for provider in ("tslive", "fmp4", "ladder"):
+        for provider in args.sources:
             for kind in ("downloaded", "edited"):
                 folder = args.recordings_root / provider / kind
                 if folder.exists():
@@ -402,6 +411,8 @@ def main(mode):
     parser.add_argument("--artifacts-root", type=Path, default=Path(os.environ.get("VIDEO_PIPELINE_ARTIFACTS_ROOT", data / "pipeline/artifacts")))
     parser.add_argument("--recordings-root", type=Path, default=Path(os.environ.get("VIDEO_DOWNLOADS_ROOT", Path.home() / "Videos/downloads")))
     parser.add_argument("--desktop", type=Path, default=Path.home() / "Desktop")
+    # The sites whose recordings live under the recordings root: the sites file's, in its order.
+    parser.add_argument("--sites-file", type=Path, default=Path(os.environ.get("VIDEO_SITES_FILE", data / "sites.json")))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true", help="print full machine-readable result")
     if mode == "move-conversions":
@@ -409,6 +420,7 @@ def main(mode):
     else:
         parser.add_argument("--days", type=int, help="override default of one calendar month")
     args = parser.parse_args()
+    args.sources = [site["id"] for site in json.loads(args.sites_file.read_text())["sites"]]
     if args.days is not None and args.days < 1:
         parser.error("--days must be positive")
     args.mode = mode
