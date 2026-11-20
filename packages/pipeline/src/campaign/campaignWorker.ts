@@ -153,7 +153,8 @@ export class CampaignWorker {
             roots: this.config.discoveryRoots,
             providerFilter: control.providerFilter,
             pipelineDatabase: this.database,
-            allowedProviders: ["tslive", "ladder", "fmp4"].filter((provider) => this.database.campaignTrialAllows(provider)),
+            allowedProviders: [...new Set(this.config.discoveryRoots.map((root) => root.provider))]
+                .filter((provider) => this.database.campaignTrialAllows(provider)),
         });
         let trialNextId: string | undefined;
         if (control.trialPerProvider !== null) {

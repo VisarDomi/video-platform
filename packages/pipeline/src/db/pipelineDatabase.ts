@@ -38,8 +38,14 @@ const SCHEMA_VERSION = 17;
 // destination and sources; code validates IDs (against the sites file) instead.
 const ENUMERATED_ID_CHECKS = /\s*CHECK \((?:provider_filter IN \('all', 'tslive', 'ladder', 'fmp4'\)|upload_provider = 'videohost'|provider IN \('tslive', 'ladder', 'fmp4'\)|provider = 'videohost')\)/g;
 
-// The destinations a ledger has used. A retired one never becomes the campaign's
-// destination again (schema 17; the triggers stand in for the enumerating check).
+// The destinations a ledger has used. The triggers stand in for the enumerating check
+// (schema 17): the campaign's destination is a destination ID (the code's rule, "retired"
+// being the ledger's own label), and a retired one never becomes it again. The insert
+// triggers ignore the row that already exists (every open inserts it if missing).
+const BAD_DESTINATION_ID = `(NEW.upload_provider = 'retired' OR length(NEW.upload_provider) NOT BETWEEN 1 AND 32
+        OR NEW.upload_provider GLOB '*[^a-z0-9-]*' OR substr(NEW.upload_provider, 1, 1) = '-')`;
+const RETIRED_DESTINATION = "EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')";
+const NEW_CONTROL_ROW = "NOT EXISTS (SELECT 1 FROM campaign_control WHERE id = NEW.id)";
 const DESTINATIONS_SQL = `
     CREATE TABLE IF NOT EXISTS destinations (
         id TEXT PRIMARY KEY,
@@ -47,13 +53,21 @@ const DESTINATIONS_SQL = `
         retirement_audit TEXT REFERENCES retired_destination_audit(destination),
         recorded_at TEXT NOT NULL
     ) STRICT;
+    CREATE TRIGGER IF NOT EXISTS campaign_control_destination_id_insert BEFORE INSERT ON campaign_control
+        WHEN ${NEW_CONTROL_ROW} AND ${BAD_DESTINATION_ID}
+        BEGIN SELECT RAISE(ABORT, 'the upload destination must be a destination ID'); END;
+    CREATE TRIGGER IF NOT EXISTS campaign_control_destination_id_update BEFORE UPDATE OF upload_provider ON campaign_control
+        WHEN ${BAD_DESTINATION_ID}
+        BEGIN SELECT RAISE(ABORT, 'the upload destination must be a destination ID'); END;
     CREATE TRIGGER IF NOT EXISTS campaign_control_retired_destination_insert BEFORE INSERT ON campaign_control
-        WHEN EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')
+        WHEN ${NEW_CONTROL_ROW} AND ${RETIRED_DESTINATION}
         BEGIN SELECT RAISE(ABORT, 'a retired upload destination cannot become active again'); END;
     CREATE TRIGGER IF NOT EXISTS campaign_control_retired_destination_update BEFORE UPDATE OF upload_provider ON campaign_control
-        WHEN EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')
+        WHEN ${RETIRED_DESTINATION}
         BEGIN SELECT RAISE(ABORT, 'a retired upload destination cannot become active again'); END;
 `;
+// What an enumerating check looks like, whatever its exact list: none may survive schema 17.
+const ANY_ENUMERATED_ID_CHECK = /CHECK \((?:provider_filter|upload_provider|provider) (?:IN \(|= ')/;
 
 // Production artifact parts: the old 1080p split names, or "shapeN" (one upload
 // per picture shape, 2026-10-05). Kept in SQL so a bad name cannot be stored.
@@ -698,16 +712,17 @@ export class PipelineDatabase {
         if (version.version < 14) retireUploadDestination(this.database);
         this.initializeRetention(version.version < 15 || isNewDatabase);
         this.initializeDailyUploadChecks(version.version < 16 || isNewDatabase);
-        this.migrateToSchema17(version.version < 17 || isNewDatabase, !isNewDatabase);
-        this.database.exec(DESTINATIONS_SQL);
         // Older code stored metadata word rejections as a visibility warning,
-        // which also blocked their retry. Split them out once; learn the words.
+        // which also blocked their retry. Split them out once; learn the words. (Before
+        // the schema-17 commit: once that commits, this never runs again.)
         if (storedVersion < 17) for (const row of this.database.prepare(`SELECT id, limited_visibility FROM upload_attempts
             WHERE provider='videohost' AND limited_visibility LIKE '%is not allowed here%'`).all() as unknown as Array<{ id: string; limited_visibility: string }>) {
             const label = row.limited_visibility.replace(/Sorry, '[^'\n]+' is not allowed here\.?/g, "").trim();
             this.database.prepare("UPDATE upload_attempts SET limited_visibility = ? WHERE id = ?").run(label || null, row.id);
             this.recordProviderMessages(row.id, row.limited_visibility, new Date());
         }
+        this.migrateToSchema17(version.version < 17 || isNewDatabase, !isNewDatabase);
+        this.database.exec(DESTINATIONS_SQL);
         this.database.prepare(`
             INSERT OR IGNORE INTO production_version (id, version, activated_at)
             VALUES (1, ?, ?)
@@ -903,11 +918,20 @@ export class PipelineDatabase {
                 const indexes = (this.database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL")
                     .all(table.name) as unknown as Array<{ sql: string }>).map((index) => index.sql);
                 const rebuilt = `${table.name}_v17`;
+                // Rowids are kept too: readers use them as cursors (babysit_ledger's removals).
+                const columns = ["rowid", ...(this.database.prepare(`SELECT name FROM pragma_table_info('${table.name}')`)
+                    .all() as unknown as Array<{ name: string }>).map((column) => `"${column.name}"`)].join(", ");
                 this.database.exec(`${sql.replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?("?)[A-Za-z_]+\1/, `CREATE TABLE ${rebuilt}`)};
-                    INSERT INTO ${rebuilt} SELECT * FROM "${table.name}";
+                    INSERT INTO ${rebuilt} (${columns}) SELECT ${columns} FROM "${table.name}";
                     DROP TABLE "${table.name}";
                     ALTER TABLE ${rebuilt} RENAME TO ${table.name};`);
                 for (const index of indexes) this.database.exec(index);
+            }
+            // A table whose stored SQL had another form keeps its check: stop at schema 16,
+            // loudly, rather than claim 17.
+            for (const { name, sql } of this.database.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'table'
+                AND name IN ('campaign_control', 'campaign_trial_recordings', 'provider_removals')`).all() as unknown as Array<{ name: string; sql: string }>) {
+                if (ANY_ENUMERATED_ID_CHECK.test(sql)) throw new Error(`Schema 17: ${name} still has a check that lists IDs; the ledger stays at schema 16`);
             }
             this.database.exec(DESTINATIONS_SQL);
             if (seedDestinations) {

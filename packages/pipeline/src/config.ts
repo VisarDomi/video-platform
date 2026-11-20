@@ -50,7 +50,15 @@ const artifactsRoot = process.env.VIDEO_PIPELINE_ARTIFACTS_ROOT
 // first needed, so commands that never look for recordings do not need the file.
 let sources: string[] | undefined;
 export function sourceSiteIds(): readonly string[] {
-    sources ??= parseSitesFile(readFileSync(sitesFilePath(), "utf8"), sitesFilePath()).map((site) => site.id);
+    if (!sources) {
+        const file = sitesFilePath();
+        let text: string;
+        try { text = readFileSync(file, "utf8"); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            throw new Error(`${file}: no sites file; the pipeline reads the sites it uploads from it`);
+        }
+        sources = parseSitesFile(text, file).map((site) => site.id);
+    }
     return sources;
 }
 

@@ -68,6 +68,7 @@ test("the CLI checks campaign sources and destinations against the sites file", 
     const { directory, databasePath } = await ledger(t);
     const sitesFile = path.join(directory, "sites.json");
     await writeFile(sitesFile, JSON.stringify({
+        contentProfile: "profile-original",
         destinations: [{ id: "videohost", plugin: "plugin-videohost" }, { id: "form-host", plugin: "plugin-form-host" }],
         sites: [{ id: "tslive", plugin: "plugin-tslive" }, { id: "ladder", plugin: "plugin-ladder" }, { id: "fmp4", plugin: "plugin-fmp4" }],
     }));
@@ -81,6 +82,9 @@ test("the CLI checks campaign sources and destinations against the sites file", 
     const unknown = cli(["upload-provider", "--provider", "api-host", "--apply"], env);
     assert.equal(unknown.status, 1);
     assert.match(unknown.stderr, /The sites file names no destination "api-host"/);
+    const check = cli(["metadata-check", "--provider", "oldhost"], env);
+    assert.equal(check.status, 1, "a retired or unknown destination has nothing to check");
+    assert.match(check.stderr, /The sites file names no destination "oldhost"/);
 
     const switched = cli(["upload-provider", "--provider", "form-host", "--apply"], env);
     assert.equal(switched.status, 0, switched.stderr);
