@@ -16,7 +16,7 @@ async function fixture(t) {
         await mkdir(path.join(dir, name), { recursive: true });
         if (text !== undefined) await writeFile(path.join(dir, name, "playlist.m3u8"), text);
     };
-    return { root, dirs, add, state: path.join(root, "state", "tslive.json") };
+    return { root, dirs, add, state: path.join(root, "state", "live-a.json") };
 }
 
 test("playlist durations sum EXTINF values as the Go helper did", () => {
@@ -31,7 +31,7 @@ test("the index lists, follows changes, long-polls and survives a restart", asyn
     await add(dirs.live, "2026-01-03 100000 carol", playlist(4));
     await add(dirs.live, "2026-01-03 110000 dave"); // no playlist yet: not listed
     await add(dirs.original, ".pending");
-    const index = new ProviderIndex("tslive", dirs, state);
+    const index = new ProviderIndex("live-a", dirs, state);
     t.after(() => index.stop());
     const videos = await index.videos();
     assert.deepEqual(videos.map(v => [v.filename, v.type, v.duration, v.isLive]), [
@@ -65,7 +65,7 @@ test("the index lists, follows changes, long-polls and survives a restart", asyn
 
     // Saved and reloaded: the same list without reading playlists again.
     await index.stop();
-    const reopened = new ProviderIndex("tslive", dirs, state);
+    const reopened = new ProviderIndex("live-a", dirs, state);
     t.after(() => reopened.stop());
     assert.deepEqual((await reopened.videos()).map(v => [v.filename, v.type, v.duration]), [
         ["2026-01-01 100000 alice", "edited", 30],
@@ -77,7 +77,7 @@ test("the index lists, follows changes, long-polls and survives a restart", asyn
 
 test("folder events alone update the index", async (t) => {
     const { dirs, add, state } = await fixture(t);
-    const index = new ProviderIndex("tslive", dirs, state);
+    const index = new ProviderIndex("live-a", dirs, state);
     t.after(() => index.stop());
     const start = await index.changes(undefined, undefined);
     assert.equal(start.videos.length, 0);

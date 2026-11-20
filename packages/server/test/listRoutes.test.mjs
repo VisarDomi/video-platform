@@ -20,35 +20,35 @@ async function listServer(t, site) {
     return `http://127.0.0.1:${address.port}/api/${site.id}`;
 }
 
-// Moved from tslive.routes.test.mjs (the adapter became a catalog; same assertions).
+// Moved from live-a.routes.test.mjs (the adapter became a catalog; same assertions).
 test("GET member finds a streamer by a listed name at once, and by an old name through the provider", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "member-route-"));
     t.after(() => rm(dir, { recursive: true }));
-    const filePath = path.join(dir, "fmp4.txt");
-    await writeFile(filePath, "https://fmp4-live.example/channel-551 channel-66\n");
+    const filePath = path.join(dir, "live-c.txt");
+    await writeFile(filePath, "https://live-c.example/centre_court 1001\n");
     const resolved = [];
     const base = await listServer(t, {
-        id: "fmp4",
+        id: "live-c",
         filePath,
         catalog: {
             parseTargetLine: line => {
-                const match = line.match(/^https:\/\/fmp4live\.com\/(\S+) (\d+)$/);
+                const match = line.match(/^https:\/\/live-c\.example\/(\S+) (\d+)$/);
                 return match ? { id: match[2], label: match[1] } : null;
             },
             resolveIdentifier: async () => null,
-            formatTargetLine: entry => `https://fmp4-live.example/${entry.label} ${entry.id}`,
+            formatTargetLine: entry => `https://live-c.example/${entry.label} ${entry.id}`,
             resolveForRemove: async name => {
                 resolved.push(name);
-                return name === "channel-2488" ? "channel-66" : name;
+                return name === "former_name" ? "1001" : name;
             },
         },
     });
     const member = async name => (await (await fetch(`${base}/member?identifier=${encodeURIComponent(name)}`)).json()).member;
 
-    assert.equal(await member("channel-551"), true);
-    assert.equal(await member("channel-66"), true);
+    assert.equal(await member("centre_court"), true);
+    assert.equal(await member("1001"), true);
     assert.deepEqual(resolved, [], "A listed name or ID needs no provider lookup");
-    assert.equal(await member("channel-2488"), true, "A renamed streamer is still listed");
+    assert.equal(await member("former_name"), true, "A renamed streamer is still listed");
     assert.equal(await member("someone_else"), false);
     assert.equal((await fetch(`${base}/member`)).status, 400);
 });

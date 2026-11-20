@@ -32,12 +32,12 @@ test('dimension backfill does not block lists, publishes changes and survives re
  for(const dir of Object.values(dirs))await mkdir(dir,{recursive:true});
  await mkdir(path.join(dirs.original,'recording'));await writeFile(path.join(dirs.original,'recording','playlist.m3u8'),'#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n');
  let deliver;const ready=new Promise(resolve=>{deliver=resolve});let calls=0;
- const state=path.join(root,'index.json');const index=new ProviderIndex('fmp4',dirs,state,async()=>{calls++;return ready});
+ const state=path.join(root,'index.json');const index=new ProviderIndex('live-c',dirs,state,async()=>{calls++;return ready});
  const before=await index.videos();assert.equal(before.length,1);assert.equal(before[0].width,undefined);
  const base=await index.changes(undefined,undefined);const changed=index.changes(base.revision,base.epoch,2000);
  deliver({width:720,height:1280});const delta=await changed;
  assert.equal(delta.changes[0].item.width,720);assert.equal(delta.changes[0].item.height,1280);
  await index.stop();
- const reopened=new ProviderIndex('fmp4',dirs,state,async()=>{throw Error('cached size was unnecessarily probed')});
+ const reopened=new ProviderIndex('live-c',dirs,state,async()=>{throw Error('cached size was unnecessarily probed')});
  const list=await reopened.videos();assert.equal(list[0].width,720);assert.equal(list[0].height,1280);assert.equal(calls,1);await reopened.stop();
 });

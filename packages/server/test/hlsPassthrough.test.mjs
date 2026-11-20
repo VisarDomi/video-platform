@@ -6,13 +6,13 @@ import path from 'node:path';
 import express from 'express';
 import {configureProviders,getProviderPaths} from '../dist/core/config.js';
 
-// The server serves the capture sites the sites file names; here, one called fmp4.
-configureProviders(['fmp4']);
+// The server serves the capture sites the sites file names; here, one called live-c.
+configureProviders(['live-c']);
 import hls from '../dist/api/hls.routes.js';
 
 test('shared HLS responses preserve stored playlist and fragment bytes',async t=>{
  const root=await mkdtemp(path.join(tmpdir(),'hls-passthrough-'));
- const paths=getProviderPaths('fmp4'),previous={...paths};
+ const paths=getProviderPaths('live-c'),previous={...paths};
  Object.assign(paths,{downloaded:path.join(root,'downloaded'),edited:path.join(root,'edited'),trash:path.join(root,'trash')});
  const folder=path.join(paths.downloaded,'fixture');await mkdir(folder,{recursive:true});
  const playlist='#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:2.123456,\n0.ts\n#EXT-X-ENDLIST\n';
@@ -21,7 +21,7 @@ test('shared HLS responses preserve stored playlist and fragment bytes',async t=
  const app=express();app.use(hls);const server=app.listen(0,'127.0.0.1');
  await new Promise(resolve=>server.once('listening',resolve));
  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));Object.assign(paths,previous);await rm(root,{recursive:true,force:true});});
- const origin='http://127.0.0.1:'+server.address().port+'/hls/fmp4/fixture/';
+ const origin='http://127.0.0.1:'+server.address().port+'/hls/live-c/fixture/';
  for(const [name,bytes,type] of [['playlist.m3u8',Buffer.from(playlist),'application/vnd.apple.mpegurl'],['0.ts',segment,'video/mp2t'],['init.mp4',initialization,'video/mp4']]){
   const response=await fetch(origin+name);assert.equal(response.status,200);assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
   if(name!=='playlist.m3u8')assert.ok(response.headers.get('content-type').startsWith(type));

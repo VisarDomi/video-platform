@@ -78,7 +78,7 @@ test("a list write replaces the file instead of rewriting it in place", async (t
     assert.equal(await readFile(filePath, "utf-8"), "\nfirst first-label\nsecond second-label\n");
 });
 
-// The FMP4 alias refresh test moved to private/test/aliasRefresh.test.mjs.
+// A site's alias refresh is tested with its plug-in.
 
 test("a lock left without a holder by a power cut is taken over once stale", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "lock-"));

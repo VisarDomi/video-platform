@@ -50,23 +50,23 @@ test("compound media-sequence restarts are kept in order; only a missing discont
 #EXT-X-MEDIA-SEQUENCE:1111
 #EXT-X-TARGETDURATION:1
 #EXTINF:1,
-0_ladder-start_1111.ts
+0_live-b-start_1111.ts
 #EXTINF:1,
-1_ladder-start_1112.ts
+1_live-b-start_1112.ts
 #EXTINF:1,
-2_ladder-start_1.ts
+2_live-b-start_1.ts
 #EXTINF:1,
-3_ladder-start_2.ts
+3_live-b-start_2.ts
 #EXT-X-DISCONTINUITY
 #EXTINF:1,
-4_ladder-start_0.ts
+4_live-b-start_0.ts
 #EXT-X-ENDLIST
 `;
     const result = markCompoundSequenceRestarts(playlist);
 
-    assert.deepEqual(result.restartSegmentNames, ["2_ladder-start_1.ts", "4_ladder-start_0.ts"]);
+    assert.deepEqual(result.restartSegmentNames, ["2_live-b-start_1.ts", "4_live-b-start_0.ts"]);
     assert.equal(result.insertedDiscontinuityCount, 1);
-    assert.equal(result.content, playlist.replace("1_ladder-start_1112.ts\n", "1_ladder-start_1112.ts\n#EXT-X-DISCONTINUITY\n"));
+    assert.equal(result.content, playlist.replace("1_live-b-start_1112.ts\n", "1_live-b-start_1112.ts\n#EXT-X-DISCONTINUITY\n"));
 });
 
 test("an fMP4 restart gets its discontinuity before the map; legacy names are left alone", () => {
