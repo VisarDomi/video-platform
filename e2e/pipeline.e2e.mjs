@@ -2,7 +2,7 @@
 // End-to-end: the real pipeline (packages/pipeline/dist/main.js, as child processes)
 // takes finalized recordings of a simulated live site through discovery, conversion,
 // description and upload to the simulated form host (through the public plugin-form-host),
-// then verifies them a day later, and holds a copy the host removed at the seven-day gate.
+// then verifies them a day later, and bans a copy the host removed.
 //
 //   npm run build:pipeline && npm run build -w simulator && npm run build -w plugin-form-host
 //   npm run e2e:pipeline           (a few minutes; E2E_KEEP=1 keeps everything)
@@ -17,9 +17,8 @@
 //    passes between two commands; the simulator's clock is set to the same time.
 // 5. The run: configure, choose the destination, resume, campaign steps until every
 //    recording is submitted (a forced logout on the way); the host removes one; a day
-//    later reconcile verifies the other two and holds the removed one at the seven-day
-//    gate (its ID was captured at submission, so it counts as accepted), and a retry of
-//    it uploads nothing.
+//    later reconcile verifies the other two and records the removal (banned); a retry
+//    and eight more days upload nothing again.
 //
 // Exit status: 0 when every assertion holds, 1 otherwise, 2 when the run could not
 // happen (missing build, isolation guard).
@@ -227,7 +226,7 @@ try {
     const descriptionsSent = ledger('SELECT description FROM upload_metadata').map((row) => row.description);
     check(descriptionsSent.length === names.length && descriptionsSent.every((text) => text.includes(`Source: https://${SITE}.test/id-`)), 'every description names its source page from the catalog');
 
-    say('the host removes one before verification; a day later reconcile verifies the others');
+    say('the host removes one before verification; a day later reconcile verifies the others and bans the removed one');
     const removedName = names[2];
     const removedId = created.find((event) => event.title.endsWith(`[${removedName}]`)).video;
     await control('remove', { id: removedId, reason: 'rule' });
@@ -237,16 +236,22 @@ try {
     say(`reconcile: ${results.join(', ')}`);
     const verified = ledger('SELECT recording_id FROM remote_uploads').map((row) => row.recording_id).sort();
     check(JSON.stringify(verified) === JSON.stringify(names.slice(0, 2)), `the two others are verified online (${verified.length})`);
-    // The removed video's ID was captured at submission (an accepted upload): the core
-    // waits for the seven-day gate before it decides anything about a missing accepted copy.
-    check(reconciled.json().results.some((r) => r.recordingId === removedName && r.disposition === 'not_ready'),
-        'the removed, accepted upload waits for the seven-day gate');
-    check(ledger('SELECT 1 FROM provider_removals').length === 0 && ledger("SELECT 1 FROM remote_uploads WHERE recording_id = ?", removedName).length === 0,
-        'nothing is decided about it yet: not verified, not recorded as removed');
+    // Gone from the host's complete list: removed (not a failed processing), so it is
+    // recorded at once, accepted or not, and never uploaded to form-host again.
+    check(reconciled.json().results.some((r) => r.recordingId === removedName && r.disposition === 'provider_removed'),
+        'the removed upload is recorded as removed by the host');
+    const removals = ledger('SELECT recording_id, provider, remote_id FROM provider_removals');
+    check(removals.length === 1 && removals[0].recording_id === removedName && removals[0].provider === 'form-host' && removals[0].remote_id === removedId,
+        'the removal is recorded against form-host, with the video ID the host had given');
+    check(ledger('SELECT state FROM recordings WHERE id = ?', removedName)[0].state === 'blocked', 'the recording is blocked for review');
     const retried = await pipeline('retry', removedName, '--apply');
     say(`retry: exit ${retried.code}: ${(retried.stderr || retried.stdout).trim().split('\n')[0].slice(0, 200)}`);
     for (let step = 0; step < 5; step++) await pipeline('campaign-step', '--apply');
-    check(retried.code !== 0 && events('video-created').length === names.length, 'a retry refuses it while it is unresolved, and nothing is uploaded again');
+    say('eight days later: nothing is due, and the removed recording is not uploaded again');
+    now += 8 * 24 * 3_600_000;
+    await must('reconcile-uploads', '--apply');
+    for (let step = 0; step < 5; step++) await pipeline('campaign-step', '--apply');
+    check(retried.code !== 0 && events('video-created').length === names.length, 'a retry refuses the removed recording, and it is never uploaded again'); 
     const bandwidth = ledger("SELECT COALESCE(SUM(transmitted_bytes), 0) AS bytes FROM bandwidth_events WHERE provider = 'form-host'")[0].bytes;
     check(bandwidth > 0, `bytes sent are billed to form-host (${bandwidth})`);
 } catch (error) {

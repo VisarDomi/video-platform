@@ -65,6 +65,26 @@ test('acceptance starts daily checks and a seven-day retry window; cleanup needs
  assert(f.raw.prepare('SELECT deleted_at FROM upload_artifact_receipts').get().deleted_at);
 });
 
+test('an accepted copy the destination proves removed is banned at once, never rebuilt',async t=>{
+ const f=await fixture(t);await submit(f);
+ let calls=0;
+ // Gone from the complete uploads list: removed, not a failed processing.
+ const probe=browser(async()=>{calls++;return {outcome:'missing',removed:true,reason:'404 and absent from the complete list',remoteUrl:null};});
+ const result=await reconcileDueUploads(f.config,day(1),probe);
+ assert.equal(calls,1);
+ assert.deepEqual(result.results.filter(r=>r.disposition==='provider_removed').map(r=>r.remoteId),['123']);
+ assert.equal(f.db.get(f.r.id).state,'blocked');
+ assert.match(f.db.get(f.r.id).blockReason,/excluded from re-upload/);
+ assert.deepEqual(f.db.providerRemovals(f.r.id).map(({provider,remoteId})=>({provider,remoteId})),[{provider:'videohost',remoteId:'123'}]);
+ // A week later nothing is due and nothing is queued again.
+ assert.deepEqual(f.db.dueUploadConfirmations(day(8)),[]);
+ await reconcileDueUploads(f.config,day(8),probe);
+ assert.equal(calls,1);
+ assert.equal(f.db.get(f.r.id).state,'blocked');
+ assert.equal(f.db.getRetryPart(f.r.id),null);
+ assert.equal(f.db.uploadUsage('2026-10').spent,10,'its bytes stay billed');
+});
+
 test('never-verified missing copy rebuilds after seven days without erasing its ID or billing',async t=>{
  const f=await fixture(t);await submit(f);
  let calls=0;

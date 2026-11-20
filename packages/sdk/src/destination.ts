@@ -67,6 +67,10 @@ export interface UploadProbe {
     readonly reason?: string;
     readonly processing?: boolean;
     readonly retrySoon?: boolean;
+    // "missing" because a complete listing of the account's uploads lacks the video: the
+    // destination removed it. (A failed processing stays listed, as failed, and is not
+    // this.) The core then never uploads the recording to that destination again.
+    readonly removed?: boolean;
     readonly stored?: StoredUploadMetadata | null;
     readonly [evidence: string]: unknown;
 }

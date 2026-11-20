@@ -226,6 +226,7 @@ test('a removed video is missing; a cached upload page is inconclusive', async (
     await control('remove', { id: receipt.submittedVideoId, reason: 'rule' });
     const gone = await host.withSession((s) => s.probe(receipt.submittedVideoId));
     assert.equal(gone.outcome, 'missing');
+    assert.equal(gone.removed, true, 'gone from the complete list: removed, not failed');
     assert.match(gone.reason, /complete list/);
 
     clock.set(EPOCH + 510_000);
