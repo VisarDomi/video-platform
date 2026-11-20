@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { launchPageBrowser } from './support/browser.mjs';
 import { testScrollSettlement } from './scroll-settlement.mjs';
-import { testLadderLogin } from './ladder-login.mjs';
 
 // Isolated browser fixtures exercise the built website (the local lists and their web viewer)
-// and the LADDER/FMP4 live Safari extensions, in the system's Chromium (WebKit by opt-in, see
-// support/browser.mjs). The iPhone apps are native (private/apps/ios).
+// in the system's Chromium (WebKit by opt-in, see support/browser.mjs). The sites are the
+// server's (GET /api/sites); here three neutral ones.
 const web = 'packages/app/build';
 const browser = await launchPageBrowser({ headless: true });
+const SITES = [{ id: 'live-a', label: 'Live A', list: true }, { id: 'live-b', label: 'Live B', list: true }, { id: 'live-c', label: 'Live C', list: true }];
 const options = { viewport: { width: 428, height: 800 }, hasTouch: true,
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1' };
 
@@ -34,40 +34,6 @@ async function mediaFixture(context) {
 }
 
 try {
-    await testLadderLogin(browser, options);
-    const extension = await browser.newContext(options);
-    const barErrors = [];
-    await extension.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<p id="native">LADDER</p>' }));
-    const bar = async (reply) => {
-        const page = await extension.newPage();
-        page.on('pageerror', error => barErrors.push(error.message));
-        await page.addInitScript(reply => {
-            let list = ['other'];
-            window.listCalls = [];
-            window.browser = { runtime: { sendMessage: async message => {
-                window.listCalls.push([message.action, message.identifier].filter(Boolean).join(' '));
-                if (reply) return reply;
-                if (message.action === 'add') list = [...list, message.identifier];
-                return message.action === 'member' ? { ok: true, status: 200, member: list.includes(message.identifier) } : { ok: true, status: 200 };
-            } } };
-        }, reply);
-        await page.goto('https://ladder-live.example/12345/');
-        await page.addScriptTag({ content: fs.readFileSync('dist/extension/ladder-live/content.js', 'utf8') });
-        return page;
-    };
-    const ladder = await bar(null);
-    await ladder.locator('button.list-add:not(:disabled)').click();
-    await ladder.waitForSelector('button.list-remove:not(:disabled)');
-    assert.equal(await ladder.locator('button.list-remove').textContent(), '➖', 'The bar shows the viewer\'s +/- button');
-    assert.deepEqual(await ladder.evaluate(() => window.listCalls), ['member 12345', 'add 12345', 'member 12345']);
-    const ladderDown = await bar({ ok: false, status: 0, error: 'Load failed' });
-    await ladderDown.waitForSelector('button.list-error:disabled');
-    assert.deepEqual([await ladderDown.locator('button').textContent(), await ladderDown.locator('button').getAttribute('title')], ['⚠️', 'Load failed'],
-        'As in TsLive, an unreachable PC shows ⚠️ with the reason');
-    assert.equal(await ladderDown.locator('#native').isVisible(), true, 'The site stays usable below the bar');
-    assert.deepEqual(barErrors, []);
-    console.log('PASS: LADDER/FMP4 live extensions show the viewer\'s +/- download-list button, ⚠️ when the PC is unreachable.');
-    await extension.close();
 
     const local = await browser.newContext(options);
     await mediaFixture(local);
@@ -75,14 +41,17 @@ try {
     await local.route('**/*', route => {
         const request = route.request(), url = new URL(request.url());
         if (request.method() !== 'GET') { writes.push(url.pathname); return route.abort(); }
+        if (url.pathname === '/api/sites') return route.fulfill({ json: { sites: SITES } });
         if (url.pathname === '/api/videos') return route.fulfill({ json: [1,2,3].map(n => ({ filename: `fixture-${n}`, type: 'original', duration: 120, size: 0, isLive: false })) });
-        if (/^\/api\/(tslive|ladder|fmp4)\/member$/.test(url.pathname)) return route.fulfill({ json: { member: false } });
+        if (/^\/api\/live-[abc]\/member$/.test(url.pathname)) return route.fulfill({ json: { member: false } });
         if (url.pathname.startsWith('/hls/')) return route.fulfill({ contentType: 'application/vnd.apple.mpegurl', body: '#EXTM3U\n#EXTINF:120,\nfixture.ts\n#EXT-X-ENDLIST\n' });
         const file = path.join(web, url.pathname.startsWith('/assets/') ? url.pathname : 'index.html');
         return route.fulfill({ body: fs.readFileSync(file), contentType: file.endsWith('.js') ? 'application/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html' });
     });
     const localPage = await local.newPage();
-    for (const provider of ['tslive', 'ladder', 'fmp4']) {
+    await localPage.goto('https://local.invalid/');
+    await localPage.waitForURL('https://local.invalid/videos/live-a');
+    for (const { id: provider } of SITES) {
         await localPage.goto(`https://local.invalid/videos/${provider}`);
         await localPage.locator('a.video-row').first().click();
         await localPage.waitForSelector('.video-stage:not(.viewer-loading)');
@@ -90,10 +59,10 @@ try {
         assert.ok(await localPage.locator('.buttons button').filter({ hasText: '📍' }).isVisible());
         assert.match(await localPage.locator('.current-scope video').getAttribute('src'), new RegExp(`/hls/${provider}/fixture-1/playlist.m3u8`));
     }
-    await localPage.goto('https://local.invalid/videos/tslive/fixture-1?type=original');
+    await localPage.goto('https://local.invalid/videos/live-a/fixture-1?type=original');
     await localPage.waitForSelector('.video-stage:not(.viewer-loading)');
-    await testScrollSettlement(localPage);
+    await testScrollSettlement(localPage, 'live-a');
     assert.deepEqual(writes, [], 'Fixtures never mutate real libraries');
-    console.log('PASS: all three local providers retain playback/editing controls and shared scrolling.');
+    console.log('PASS: the root opens the first site; every site\'s list keeps playback/editing controls and shared scrolling.');
     await local.close();
 } finally { await browser.close(); }

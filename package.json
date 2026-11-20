@@ -8,6 +8,7 @@
         "build:shared": "npm run build:sdk && npm run build -w shared",
         "build:app": "npm run build -w app",
         "test:app:pages": "node packages/app/test/providers.mjs",
+        "test:extension:pages": "node private/test/liveExtensionPages.mjs",
         "build:frontend": "npm run build:app",
         "build:backend": "npm run build:auth && npm run build:downloader && npm run build:server && npm run build:descriptor && npm run build:pipeline",
         "build:auth": "npm run build:shared && npm run build:plugins && npm run build -w auth",

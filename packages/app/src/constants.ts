@@ -1,7 +1,6 @@
-export const PROVIDERS = ['tslive', 'ladder', 'fmp4'] as const;
-export type LocalProvider = (typeof PROVIDERS)[number];
+// A site ID of the sites file (the server lists them: services/sites.ts).
+export type LocalProvider = string;
 export type Provider = LocalProvider;
-export const DEFAULT_PROVIDER: Provider = 'tslive';
 
 const mediaOrigin = '';
 
@@ -24,11 +23,9 @@ export const API = {
 		`${mediaOrigin}/hls/${encodeURIComponent(provider)}/${encodeURIComponent(filename)}/playlist.m3u8`
 } as const;
 
-export const LIST_API = {
-	tslive: { member: '/api/tslive/member', exists: '/api/tslive/exists', add: '/api/tslive/add', remove: '/api/tslive/remove' },
-	ladder: { member: '/api/ladder/member', exists: '/api/ladder/exists', add: '/api/ladder/add', remove: '/api/ladder/remove' },
-	fmp4: { member: '/api/fmp4/member', exists: '/api/fmp4/exists', add: '/api/fmp4/add', remove: '/api/fmp4/remove' }
-} as const;
+// A site's download-list endpoints.
+export type ListAction = 'member' | 'exists' | 'add' | 'remove';
+export const LIST_API = (site: string, action: ListAction): string => `/api/${encodeURIComponent(site)}/${action}`;
 
 // The PC's website, for online pages that use its download lists (they run on another origin).
 export const PC_SERVER = 'https://192.168.1.197:9999';

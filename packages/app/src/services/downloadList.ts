@@ -1,10 +1,8 @@
-import { LIST_API, PC_SERVER, PROVIDERS, type LocalProvider } from '../constants.js';
+import { LIST_API, PC_SERVER, type ListAction } from '../constants.js';
 import type { Membership } from '../player/DownloadListButton.js';
 import { getProvider } from '../providers/index.js';
 import type { ListEntry } from '../providers/types.js';
 import type { Video } from '../types.js';
-
-const LIST_NAMES: Record<LocalProvider, string> = { tslive: 'TsLive', ladder: 'LADDER', fmp4: 'FMP4' };
 
 // The +/- button's streamer: recordings by the streamer in their filename, live videos are
 // streamers. Null: the video has none.
@@ -32,10 +30,10 @@ function membership(entry: ListEntry, via: Via): Membership {
 // Local pages use their own site's list; a live provider's page, the PC's.
 type Via = 'site' | 'pc';
 
-async function request({ list, identifier }: ListEntry, via: Via, action: keyof (typeof LIST_API)[LocalProvider]): Promise<unknown> {
+async function request({ list, identifier }: ListEntry, via: Via, action: ListAction): Promise<unknown> {
 	const failed = (status: number, body?: unknown) =>
 		new Error((body as { error?: string } | null)?.error ?? `Download-list ${action} failed: ${status}`);
-	const url = (via === 'pc' ? PC_SERVER : '') + LIST_API[list][action];
+	const url = (via === 'pc' ? PC_SERVER : '') + LIST_API(list, action);
 	const response = await (action === 'add' || action === 'remove'
 		? fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier }) })
 		: fetch(`${url}?identifier=${encodeURIComponent(identifier)}`));

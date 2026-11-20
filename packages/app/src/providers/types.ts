@@ -64,7 +64,7 @@ export interface ListEntry {
 	readonly identifier: string;
 }
 
-// Live streams: the streamer actions and list rules of TsLive (formerly Stream Viewer).
+// Live streams: the streamer actions and list rules of a live site's app.
 // Videos are streamers (filename = streamer ID) and their current streams.
 export interface LiveActions {
 	// The PC download list that the +/- button edits, by streamer ID.

@@ -2,8 +2,10 @@ import type { Provider } from '../constants.js';
 import { localProvider } from './local.js';
 import type { VideoProvider } from './types.js';
 
-const providers = { tslive: localProvider('tslive'), ladder: localProvider('ladder'), fmp4: localProvider('fmp4') };
+// One provider per site ID, made when first asked for (the server lists the sites).
+const providers = new Map<Provider, VideoProvider>();
 export function getProvider(id: Provider): VideoProvider {
-	if (!(id in providers)) throw new Error(`Provider is not included in this build: ${id}`);
-	return providers[id as keyof typeof providers];
+	let provider = providers.get(id);
+	if (!provider) providers.set(id, provider = localProvider(id));
+	return provider;
 }

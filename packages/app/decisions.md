@@ -111,10 +111,8 @@ keeps no in-memory cache.
 
 ## The iPhone apps are native
 
-The iPhone apps (local lists, Video Vault, TsLive) are native lists with a native viewer
-(`private/apps/ios`, see its `README.md`), not web views around this website, so a change here does
-not reach them. Video Vault's rules (both upload sites in one list, only the pipeline's
-bracketed uploads, the shared VideoHost session) and TsLive's live list are described there.
+The iPhone apps are native lists with a native viewer (a deployment's own, under
+`private/`), not web views around this website, so a change here does not reach them.
 
 **Why:** WebKit pauses a page's video when the phone locks or the app leaves the screen, and
 a web view cannot open instantly from a saved list or survive the app being killed; the
@@ -132,7 +130,7 @@ native apps do all three. Safari keeps this website.
 
 ## Regression checks
 
-`npm run test:app:pages` drives the built website and the LADDER/FMP4 live extensions in the system's
+`npm run test:app:pages` drives the built website in the system's
 Chromium (WebKit only by opt-in; browsers Playwright downloads are never used, as nothing
 updates them) with isolated fixtures, including scroll settlement on a local list (see `README.md`).
 

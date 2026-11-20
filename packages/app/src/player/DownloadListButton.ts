@@ -1,5 +1,5 @@
-// The PC download-list +/- button of TsLive (formerly Stream Viewer), shared by the viewer (local
-// apps, TsLive, Video Vault) and the LADDER/FMP4 live extensions' bar: ⏳ while checking or changing,
+// The PC download-list +/- button, shared by the viewer (the local apps, the live app, Video
+// Vault) and the live extensions' bar: ⏳ while checking or changing,
 // ➕/➖, ⚠️ when the list cannot be read, and a yellow ring when a change failed (keeping the last
 // confirmed state). The reason is the tooltip. Where a change can go to several lists (Video
 // Vault's uploads), the button gives way to one button per list until one is picked, and 🔍

@@ -10,6 +10,7 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { createListRoutes } from "./api/providers/list-routes.js";
 import { createPhoneSessionRoutes, phoneSessionDependencies } from "./api/providers/phone-session.routes.js";
+import { createSitesRoutes } from "./api/sites.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
 import { captureSiteIds, loadServerSites } from "./sites.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
@@ -59,6 +60,9 @@ async function startServer() {
   startDiskSpaceMonitor();
   startLibraryIndexes();
 
+  // The website's site list: the capture sites, in order.
+  app.use("/", createSitesRoutes(sites.filter((site) => site.instance.capture)
+    .map((site) => ({ id: site.id, label: site.label, list: Boolean(site.instance.catalog) }))));
   // /api/<site>/{list,add,remove,member,exists,resolve} for every site with a catalog.
   for (const site of listSites) {
     app.use("/", createListRoutes({ id: site.id, filePath: site.listPath, catalog: site.catalog }));
