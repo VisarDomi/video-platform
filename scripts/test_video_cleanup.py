@@ -49,33 +49,41 @@ class CleanupTests(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.executescript(SCHEMA)
         self.id = "2026-01-01 120000 fixture"
-        self.source = self.sources / "tslive/edited" / self.id
+        self.source = self.sources / "live-a/edited" / self.id
         self.source.mkdir(parents=True)
         (self.source / "one.ts").write_bytes(b"original media")
         (self.source / "init.mp4").write_bytes(b"init bytes")
         (self.source / "playlist.m3u8").write_text('#EXTM3U\n#EXT-X-MAP:URI="init.mp4"\n#EXTINF:3,\none.ts\n#EXT-X-ENDLIST\n')
         fingerprint = cleanup.source_evidence(self.source)["fingerprint"]
         self.db.execute("INSERT INTO recordings VALUES(?,?,?,?,?,?,?,?)",
-                        (self.id, "tslive", "edited", str(self.source), str(self.source / "playlist.m3u8"), fingerprint, "upload_verified", None))
+                        (self.id, "live-a", "edited", str(self.source), str(self.source / "playlist.m3u8"), fingerprint, "upload_verified", None))
         self.conversion = self.artifacts / "production-v6" / (self.id + ".production-v6.mp4")
         self.conversion.parent.mkdir()
         self.conversion.write_bytes(b"converted media")
         old = (NOW - dt.timedelta(days=10)).timestamp()
         os.utime(self.conversion, (old, old))
         self.db.execute("INSERT INTO artifacts VALUES(?,?,?,?,?,?)", (self.id, str(self.conversion), self.conversion.stat().st_size, "hash", (NOW - dt.timedelta(days=9)).isoformat(), "full"))
-        self.db.execute("INSERT INTO upload_attempts VALUES(?,?,?,?)", ("attempt", self.id, "videohost", "accepted"))
-        self.db.execute("INSERT INTO remote_uploads VALUES(?,?,?,?,?,?)", (self.id, "full", "attempt", "123", "https://video-host.example/video/123/fixture", NOW.isoformat()))
+        self.db.execute("INSERT INTO upload_attempts VALUES(?,?,?,?)", ("attempt", self.id, "form-host", "accepted"))
+        self.db.execute("INSERT INTO remote_uploads VALUES(?,?,?,?,?,?)", (self.id, "full", "attempt", "123", "https://form-host.test/video/123/fixture", NOW.isoformat()))
         self.db.commit()
 
     def args(self, mode="move-conversions", dry=True):
         return SimpleNamespace(mode=mode, database=self.db_path, artifacts_root=self.artifacts,
-                               recordings_root=self.sources, desktop=self.desktop, dry_run=dry,
+                               recordings_root=self.sources, desktop=self.desktop, dry_run=dry, sources=["live-a"],
                                destination=self.desktop / "video-pipeline" / mode,
                                cutoff=NOW - dt.timedelta(days=7) if mode == "move-conversions" else cleanup.month_before(NOW))
 
     def execute(self, sql, params=()):
         self.db.execute(sql, params)
         self.db.commit()
+
+    def test_a_retired_destinations_receipt_is_never_cleanup_evidence(self):
+        self.execute("CREATE TABLE destinations (id TEXT PRIMARY KEY, state TEXT NOT NULL, retirement_audit TEXT, recorded_at TEXT NOT NULL)")
+        self.execute("INSERT INTO destinations VALUES ('form-host','retired',NULL,'at')")
+        with self.assertRaisesRegex(ValueError, "unverified_destination_identity"):
+            cleanup.verified_recording(self.db, self.id)
+        self.execute("UPDATE destinations SET state='active'")
+        cleanup.verified_recording(self.db, self.id)
 
     def test_dry_run_does_not_write_or_move(self):
         result = cleanup.run(self.args())
@@ -122,15 +130,15 @@ class CleanupTests(unittest.TestCase):
         self.execute('UPDATE remote_uploads SET recording_id=?', (batch_id,))
         self.execute('UPDATE upload_attempts SET recording_id=?', (batch_id,))
         self.execute('INSERT INTO short_parts VALUES(?,?,?,?)', (self.id,'full',batch_id,1))
-        self.execute('INSERT INTO provider_removals VALUES(?,?,?)', (batch_id,'videohost','123'))
+        self.execute('INSERT INTO provider_removals VALUES(?,?,?)', (batch_id,'form-host','123'))
         self.assertEqual(cleanup.run(self.args('move-recordings'))['eligible_count'], 0)
 
     def test_removal_of_this_destination_prevents_move(self):
-        self.execute("INSERT INTO provider_removals VALUES(?,?,?)", (self.id, "videohost", "123"))
+        self.execute("INSERT INTO provider_removals VALUES(?,?,?)", (self.id, "form-host", "123"))
         self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 0)
 
     def test_old_removal_does_not_invalidate_other_verified_upload(self):
-        self.execute("INSERT INTO provider_removals VALUES(?,?,?)", (self.id, "videohost", "older-id"))
+        self.execute("INSERT INTO provider_removals VALUES(?,?,?)", (self.id, "form-host", "older-id"))
         self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 1)
 
     def test_unuploaded_short_piece_and_pending_upload_keep_source(self):
@@ -140,7 +148,7 @@ class CleanupTests(unittest.TestCase):
                 self.execute(f"INSERT INTO {table} VALUES({','.join('?' for _ in values)})", values)
                 self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 0)
                 self.execute(f"DELETE FROM {table}")
-        self.execute("INSERT INTO upload_attempts VALUES(?,?,?,?)", ("inflight", self.id, "videohost", "started"))
+        self.execute("INSERT INTO upload_attempts VALUES(?,?,?,?)", ("inflight", self.id, "form-host", "started"))
         self.assertEqual(cleanup.run(self.args("move-recordings"))["eligible_count"], 0)
 
     def test_all_split_parts_must_be_verified(self):
@@ -171,7 +179,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(cleanup.source_evidence(self.source)["fingerprint"], expected.hexdigest())
 
     def test_same_name_raw_folder_is_not_the_uploaded_edited_source(self):
-        raw = self.sources / "tslive/downloaded" / self.id
+        raw = self.sources / "live-a/downloaded" / self.id
         raw.mkdir(parents=True)
         result = cleanup.run(self.args("move-recordings"))
         self.assertEqual(result["eligible_count"], 1)
@@ -206,7 +214,7 @@ class CleanupTests(unittest.TestCase):
     def test_source_folder_moves_as_a_whole(self):
         result = cleanup.run(self.args("move-recordings", False))
         self.assertEqual(result["moved_count"], 1)
-        target = self.args("move-recordings").destination / "tslive/edited" / self.id
+        target = self.args("move-recordings").destination / "live-a/edited" / self.id
         self.assertEqual((target / "one.ts").read_bytes(), b"original media")
         self.assertTrue((target / "init.mp4").is_file())
         self.assertFalse(self.source.exists())

@@ -34,7 +34,7 @@ Start with [AGENTS.md](./AGENTS.md). Every doc in the repository:
 - [packages/pipeline/setup.md](./packages/pipeline/setup.md), [docs/upload-recovery.md](./packages/pipeline/docs/upload-recovery.md): conversion, description, upload and verification; upload recovery.
 - [packages/server/README.md](./packages/server/README.md), [decisions.md](./packages/server/decisions.md): the API, finalization and download lists.
 - [packages/shared/decisions.md](./packages/shared/decisions.md): storage layout, token reader, logging.
-- [systemd/setup.md](./systemd/setup.md): the user units and their resource limits.
+- [systemd/README.md](./systemd/README.md): the user units and how they are installed.
 
 Outside the repository: the [NativeKit guide](../../ios-tools/native/README.md) (shared iPhone code and rules), [Mac and phone access](../../../environment/mac-access.md), [renewal](../../ios-tools/renewal/README.md).
 
