@@ -32,7 +32,7 @@ async function setup(t) {
         artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v6"),
         comparisonSelectionFile: path.join(root, "test-videos.txt"), networkUploadsEnabled: false,
         serverUrl: "https://127.0.0.1:1", credentialsFilePath: path.join(root, "no-credentials"),
-        discoveryRoots: [{ provider: "tslive", sourceKind: "edited", path: edited }] };
+        discoveryRoots: [{ provider: "live-a", sourceKind: "edited", path: edited }] };
     await mkdir(edited);
     await writeFile(config.comparisonSelectionFile, "");
     await setCampaignRunning(config, false, true);
@@ -102,7 +102,7 @@ test("killing an actual encoder leaves no published artifact; worker restart cle
     await checkpoint(config, source);
     await writeFile(config.comparisonSelectionFile, source + "\n");
     await syncComparisonSelection(config);
-    const inspected = await inspectFinalizedRecording(source, "tslive", "edited");
+    const inspected = await inspectFinalizedRecording(source, "live-a", "edited");
     assert.equal(inspected.status, "finalized");
     const recording = database.discover(inspected.recording);
     const encoder = child(t, `

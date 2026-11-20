@@ -346,7 +346,7 @@ test("production keeps every segment: mixed 1080p/720p is one conversion at the 
     ].join("\n"));
     const recording = {
         id: "mixed",
-        provider: "fmp4",
+        provider: "live-c",
         sourceKind: "edited",
         sourcePath: source,
         playlistPath,

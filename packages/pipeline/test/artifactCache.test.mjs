@@ -25,7 +25,7 @@ async function fixture(t, generation = "production-v5") {
     raw.prepare("UPDATE production_version SET version = ?").run(generation);
     raw.close();
     const sourcePath = path.join(root, "2026-01-01 123456 cache-test");
-    const recording = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath,
+    const recording = database.discover({ provider: "live-a", sourceKind: "edited", sourcePath,
         playlistPath: path.join(sourcePath, "playlist.m3u8"), sourceFingerprint: "source-v1", durationSeconds: 1 });
     const oldRoot = path.join(config.artifactsRoot, generation);
     const newRoot = path.join(config.artifactsRoot, "production-v6");
@@ -103,7 +103,7 @@ test("reuse requires the current recipe tag, never a generation number or an old
 test("cache refuses changed source/provider/path, old policy, different recipe, and post-validation source mutation", async (t) => {
     const f = await fixture(t);
     await seed(f);
-    for (const change of [{ sourceFingerprint: "source-v2" }, { provider: "fmp4" }, { sourcePath: f.root },
+    for (const change of [{ sourceFingerprint: "source-v2" }, { provider: "live-c" }, { sourcePath: f.root },
         { playlistPath: path.join(f.root, "other.m3u8") }]) {
         assert.equal(await reuseCachedArtifact({ ...f.recording, ...change }, f.newRoot, f.config), null);
     }
@@ -184,7 +184,7 @@ test("real cache miss converts; next generation reuses artifact + descriptor cac
     await fs.mkdir(f.recording.sourcePath);
     const part = await fixturePart(f.recording.sourcePath, "part", { size: "1280x720", frames: 3 });
     await assemble(f.recording.sourcePath, [part]);
-    const inspected = await inspectRecording(f.recording.sourcePath, "tslive", "edited");
+    const inspected = await inspectRecording(f.recording.sourcePath, "live-a", "edited");
     const raw = new DatabaseSync(f.config.databasePath);
     raw.prepare("UPDATE recordings SET source_fingerprint = ?, duration_seconds = ?").run(
         inspected.recording.sourceFingerprint, inspected.recording.durationSeconds);
@@ -215,8 +215,8 @@ test("real cache miss converts; next generation reuses artifact + descriptor cac
     let submissions = 0;
     async function describeAndUpload() {
         f.database.saveProvenance(f.recording.id, { observedIdentifier: "cache-test", status: "resolved",
-            streamerId: "123", alias: "cache-test", streamerUrl: "https://ts-live.example/123",
-            aliasUrl: "https://ts-live.example/cache-test", reason: null, updatedAt: new Date().toISOString() });
+            streamerId: "123", alias: "cache-test", streamerUrl: "https://live-a.example/123",
+            aliasUrl: "https://live-a.example/cache-test", reason: null, updatedAt: new Date().toISOString() });
         assert.equal((await worker.processRecording(f.recording.id)).state, "described");
         assert.equal((await worker.processRecording(f.recording.id)).state, "metadata_ready");
         const cachedDescription = f.database.getDescription(f.recording.id);

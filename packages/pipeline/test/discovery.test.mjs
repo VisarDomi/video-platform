@@ -31,7 +31,7 @@ async function fixture(t, options = {}) {
 
 test("eligible discovery trusts a recording published in a finalized root", async (t) => {
     const { sourcePath } = await fixture(t);
-    const result = await inspectRecording(sourcePath, "tslive", "downloader");
+    const result = await inspectRecording(sourcePath, "live-a", "downloader");
     assert.equal(result.status, "eligible");
     assert.equal(result.recording.durationSeconds, 4);
     assert.match(result.recording.sourceFingerprint, /^[a-f0-9]{64}$/);
@@ -40,15 +40,15 @@ test("eligible discovery trusts a recording published in a finalized root", asyn
 test("live recordings are excluded and root scans ignore nondirectories", async (t) => {
     const { root, sourcePath } = await fixture(t, { endList: false });
     await writeFile(path.join(root, "ordinary-file"), "ignored");
-    assert.equal((await inspectRecording(sourcePath, "tslive", "downloader")).reason, "live_or_unfinalized");
-    const results = await scanRoots([{ provider: "tslive", sourceKind: "downloader", path: root }]);
+    assert.equal((await inspectRecording(sourcePath, "live-a", "downloader")).reason, "live_or_unfinalized");
+    const results = await scanRoots([{ provider: "live-a", sourceKind: "downloader", path: root }]);
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "excluded");
 });
 
 test("finalized discovery needs no per-recording integrity sidecar", async (t) => {
     const { sourcePath } = await fixture(t);
-    const result = await inspectFinalizedRecording(sourcePath, "tslive", "downloader");
+    const result = await inspectFinalizedRecording(sourcePath, "live-a", "downloader");
     assert.equal(result.status, "finalized");
 });
 
@@ -64,8 +64,8 @@ test("hidden active roots are ignored and finalized edited recordings supersede 
         await writeFile(path.join(sourcePath, "00001.ts"), "media");
     }
     const roots = [
-        { provider: "tslive", sourceKind: "downloader", path: downloader },
-        { provider: "tslive", sourceKind: "edited", path: edited },
+        { provider: "live-a", sourceKind: "downloader", path: downloader },
+        { provider: "live-a", sourceKind: "edited", path: edited },
     ];
     const preferred = await scanFinalizedRoots(roots);
     assert.equal(preferred.length, 1);

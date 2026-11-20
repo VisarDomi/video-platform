@@ -21,7 +21,7 @@ async function fixture(t) {
     const config = { ...pipelineConfig, databasePath: path.join(root, "pipeline.sqlite"), networkUploadsEnabled: true, cleanupEnabled: false };
     const db = new PipelineDatabase(config.databasePath);
     t.after(async () => { db.close(); await rm(root, { recursive: true, force: true }); });
-    const r = db.discover({ provider: "tslive", sourceKind: "edited", sourcePath: path.join(root, "2025-11-22 125658 example"),
+    const r = db.discover({ provider: "live-a", sourceKind: "edited", sourcePath: path.join(root, "2025-11-22 125658 example"),
         playlistPath: path.join(root, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
     db.recordResolutionPolicyAssessment(r.id, `${RESOLUTION_POLICY_VERSION}: test`, start);
     db.transition(r.id, "server_ready", "remuxed");
@@ -29,7 +29,7 @@ async function fixture(t) {
     db.saveDescription(r.id, { artifactSha256: "a".repeat(64), promptVersion: "test", fps: 1,
         output: { title: "Natural model title", description: "Saved description" }, evidencePath: path.join(root, "evidence.json") });
     db.saveProvenance(r.id, { observedIdentifier: "example", status: "resolved", streamerId: "123", alias: "example",
-        streamerUrl: "https://ts-live.example/123", aliasUrl: null, reason: null, updatedAt: start.toISOString() });
+        streamerUrl: "https://live-a.example/123", aliasUrl: null, reason: null, updatedAt: start.toISOString() });
     db.saveUploadMetadata(r.id, composeUploadMetadata(r, db.getDescription(r.id), db.getProvenance(r.id)));
     const reservation = db.reserveUpload(r.id, 120, start);
     const attempt = db.beginUpload(r.id, reservation, start);
@@ -51,21 +51,21 @@ test("a video the provider removed is blocked for manual review and recorded aga
     await reconcileDueUploads(config, day(1), removedBrowser);
     const recording = db.get(r.id);
     assert.equal(recording.state, "blocked");
-    assert.match(recording.blockReason, /^videohost removed video 91957324 after upload \(edit page 404\)/);
+    assert.match(recording.blockReason, /^video-host removed video 91957324 after upload \(edit page 404\)/);
     assert.match(recording.blockReason, /excluded from re-upload/);
     assert.doesNotMatch(recording.blockReason, /re-uploads/);
     assert.deepEqual(db.providerRemovals(r.id).map(({ provider, remoteId }) => ({ provider, remoteId })),
-        [{ provider: "videohost", remoteId: "91957324" }]);
+        [{ provider: "video-host", remoteId: "91957324" }]);
 });
 
-test("retry never resends a recording removed by VideoHost", async t => {
+test("retry never resends a recording removed by video-host", async t => {
     const { db, config, r } = await fixture(t);
     await reconcileDueUploads(config, day(1), removedBrowser);
-    assert.throws(() => retryRecording(db, r.id, day(2)), /videohost removed .*91957324.*excluded/s);
+    assert.throws(() => retryRecording(db, r.id, day(2)), /video-host removed .*91957324.*excluded/s);
     assert.equal(db.get(r.id).state, "blocked");
     db.setCampaignState("paused", day(2));
-    db.replaceProviderInventory("videohost", [], day(2));
-    db.setActiveUploadProvider("videohost", day(2));
+    db.replaceProviderInventory("video-host", [], day(2));
+    db.setActiveUploadProvider("video-host", day(2));
     assert.throws(() => retryRecording(db, r.id, day(2)), /excluded/);
 });
 
@@ -77,6 +77,6 @@ test("an upload to the provider that removed the video is blocked before any net
     const result = await uploadOne(r.id, config);
     assert.equal(result.disposition, "manual_review");
     assert.equal(db.get(r.id).state, "blocked");
-    assert.match(db.get(r.id).blockReason, /^videohost removed video 91957324/);
+    assert.match(db.get(r.id).blockReason, /^video-host removed video 91957324/);
 });
 

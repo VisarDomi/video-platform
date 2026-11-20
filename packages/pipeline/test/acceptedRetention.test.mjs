@@ -20,7 +20,7 @@ async function fixture(t) {
  await mkdir(source); await mkdir(stagingRoot);
  await writeFile(path.join(source, 'playlist.m3u8'), '#EXTM3U\n#EXTINF:600,\n0.ts\n#EXT-X-ENDLIST\n');
  await writeFile(path.join(source, '0.ts'), 'original media');
- const input = (await inspectFinalizedRecording(source, 'fmp4', 'edited')).recording;
+ const input = (await inspectFinalizedRecording(source, 'live-c', 'edited')).recording;
  const config = {...pipelineConfig, databasePath: path.join(root,'pipeline.sqlite'), stagingRoot,
  artifactsRoot: stagingRoot, cleanupEnabled:true, networkUploadsEnabled:true};
  const db = new PipelineDatabase(config.databasePath);
@@ -31,7 +31,7 @@ async function fixture(t) {
  await writeFile(artifact.path,'conversion');
  db.saveArtifact(r.id,artifact,start);
  db.saveDescription(r.id,{artifactSha256:artifact.sha256,promptVersion:'test',fps:1,output:{title:'Title',description:'Description'},evidencePath:path.join(root,'evidence.json')},start);
- db.saveProvenance(r.id,{observedIdentifier:'example',status:'resolved',streamerId:'42',alias:'example',streamerUrl:'https://fmp4-live.example/example',aliasUrl:null,reason:null,updatedAt:start.toISOString()});
+ db.saveProvenance(r.id,{observedIdentifier:'example',status:'resolved',streamerId:'42',alias:'example',streamerUrl:'https://live-c.example/example',aliasUrl:null,reason:null,updatedAt:start.toISOString()});
  db.saveUploadMetadata(r.id,{title:`Title [${r.id}]`,description:'Description',tags:['live']},start);
  const raw = new DatabaseSync(config.databasePath);
  t.after(async()=>{raw.close();db.close();await rm(root,{recursive:true,force:true});});
@@ -75,7 +75,7 @@ test('an accepted copy the destination proves removed is banned at once, never r
  assert.deepEqual(result.results.filter(r=>r.disposition==='provider_removed').map(r=>r.remoteId),['123']);
  assert.equal(f.db.get(f.r.id).state,'blocked');
  assert.match(f.db.get(f.r.id).blockReason,/excluded from re-upload/);
- assert.deepEqual(f.db.providerRemovals(f.r.id).map(({provider,remoteId})=>({provider,remoteId})),[{provider:'videohost',remoteId:'123'}]);
+ assert.deepEqual(f.db.providerRemovals(f.r.id).map(({provider,remoteId})=>({provider,remoteId})),[{provider:'video-host',remoteId:'123'}]);
  // A week later nothing is due and nothing is queued again.
  assert.deepEqual(f.db.dueUploadConfirmations(day(8)),[]);
  await reconcileDueUploads(f.config,day(8),probe);
@@ -224,7 +224,7 @@ test('retry conversion encodes only the selected shape from a real multi-shape p
  const left=await fixturePart(f.root,'landscape',{size:'320x180',frames:4});
  const right=await fixturePart(f.root,'portrait',{size:'180x320',frames:4});
  await assemble(f.source,[left,right],[121,121]);
- const input=(await inspectFinalizedRecording(f.source,'fmp4','edited')).recording;
+ const input=(await inspectFinalizedRecording(f.source,'live-c','edited')).recording;
  f.raw.prepare('UPDATE recordings SET source_fingerprint=? WHERE id=?').run(input.sourceFingerprint,f.r.id);
  f.raw.prepare("UPDATE artifacts SET part='shape2'").run();
  await submit(f);

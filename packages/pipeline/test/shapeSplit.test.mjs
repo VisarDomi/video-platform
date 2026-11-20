@@ -44,7 +44,7 @@ async function recording(root, entries) {
 async function ledger(t, root, source, playlistPath) {
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
     t.after(() => database.close());
-    const recorded = database.discover({ provider: "tslive", sourceKind: "edited", sourcePath: source, playlistPath,
+    const recorded = database.discover({ provider: "live-a", sourceKind: "edited", sourcePath: source, playlistPath,
         sourceFingerprint: "fingerprint", durationSeconds: 200 });
     return { database, recorded };
 }
@@ -90,9 +90,9 @@ test("a split consisting entirely of shorts stays automatic rather than becoming
 });
 
 test("split parts get their own public title suffix, and the lookup finds each one", () => {
-    const recorded = { id: "2026-02-01 120000 shapes", provider: "tslive", sourcePath: "/x/2026-02-01 120000 shapes" };
+    const recorded = { id: "2026-02-01 120000 shapes", provider: "live-a", sourcePath: "/x/2026-02-01 120000 shapes" };
     const provenance = { recordingId: recorded.id, observedIdentifier: "shapes", status: "resolved", streamerId: "1",
-        alias: "shapes", streamerUrl: "https://ts-live.example/1", aliasUrl: null, reason: null, updatedAt: "2026-02-01T00:00:00Z" };
+        alias: "shapes", streamerUrl: "https://live-a.example/1", aliasUrl: null, reason: null, updatedAt: "2026-02-01T00:00:00Z" };
     const description = { recordingId: recorded.id, artifactSha256: "a".repeat(64), promptVersion: "p", fps: 1,
         output: { title: "Title", description: "Description" }, evidencePath: "/x", createdAt: "2026-02-01T00:00:00Z" };
     assert.equal(composeUploadMetadata(recorded, description, provenance).title, "Title [2026-02-01 120000 shapes]");

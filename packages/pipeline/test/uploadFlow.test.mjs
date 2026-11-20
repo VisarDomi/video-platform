@@ -19,14 +19,14 @@ async function rootFixture(t) {
     // site's pages (each catalog's sourceLinks, pinned in private/test).
     const resolver = TargetCatalogResolver.load({
         resolveIdentifier: async (provider, identifier) => {
-            if (provider === "tslive" && identifier === "old_alias") {
-                return { id: "account-id", label: "current_alias", channelUrl: "https://ts-live.example/account-id", aliasUrl: "https://ts-live.example/current_alias" };
+            if (provider === "live-a" && identifier === "old_alias") {
+                return { id: "account-id", label: "current_alias", channelUrl: "https://live-a.example/account-id", aliasUrl: "https://live-a.example/current_alias" };
             }
-            if (provider === "ladder" && identifier === "68190398") {
-                return { id: "68190398", label: "68190398", channelUrl: "https://ladder-live.example/68190398/", aliasUrl: null };
+            if (provider === "live-b" && identifier === "2002") {
+                return { id: "2002", label: "2002", channelUrl: "https://live-b.example/2002/", aliasUrl: null };
             }
-            if (provider === "fmp4" && identifier === "channel-561") {
-                return { id: "226494362", label: "channel-561", channelUrl: "https://fmp4-live.example/226494362", aliasUrl: "https://fmp4-live.example/channel-561" };
+            if (provider === "live-c" && identifier === "centre_court") {
+                return { id: "1001", label: "centre_court", channelUrl: "https://live-c.example/1001", aliasUrl: "https://live-c.example/centre_court" };
             }
             return null;
         },
@@ -48,31 +48,31 @@ function input(root, provider, filename) {
 
 test("provenance resolution delegates to the per-provider server resolver", async (t) => {
     const { root, resolver } = await rootFixture(t);
-    const tslive = await resolver.resolve(input(root, "tslive", "2026-08-13 101112 old_alias"));
+    const liveA = await resolver.resolve(input(root, "live-a", "2026-08-13 101112 old_alias"));
     assert.deepEqual({
-        status: tslive.status,
-        streamerId: tslive.streamerId,
-        alias: tslive.alias,
-        streamerUrl: tslive.streamerUrl,
-        aliasUrl: tslive.aliasUrl,
+        status: liveA.status,
+        streamerId: liveA.streamerId,
+        alias: liveA.alias,
+        streamerUrl: liveA.streamerUrl,
+        aliasUrl: liveA.aliasUrl,
     }, {
         status: "resolved",
         streamerId: "account-id",
         alias: "current_alias",
-        streamerUrl: "https://ts-live.example/account-id",
-        aliasUrl: "https://ts-live.example/current_alias",
+        streamerUrl: "https://live-a.example/account-id",
+        aliasUrl: "https://live-a.example/current_alias",
     });
-    assert.equal((await resolver.resolve(input(root, "ladder", "2026-08-13 101112 68190398"))).status, "resolved");
-    assert.equal((await resolver.resolve(input(root, "fmp4", "2026-08-13 101112 channel-561"))).streamerId, "226494362");
+    assert.equal((await resolver.resolve(input(root, "live-b", "2026-08-13 101112 2002"))).status, "resolved");
+    assert.equal((await resolver.resolve(input(root, "live-c", "2026-08-13 101112 centre_court"))).streamerId, "1001");
     assert.equal(
-        (await resolver.resolve(input(root, "fmp4", "2026-08-13 101112 previous_fmp4_alias"))).status,
+        (await resolver.resolve(input(root, "live-c", "2026-08-13 101112 previous_alias"))).status,
         "review_required",
     );
 });
 
-test("metadata reserves provenance room and uses fixed provider/live tags", async (t) => {
+test("metadata reserves provenance room and uses the profile's tags", async (t) => {
     const { root } = await rootFixture(t);
-    const source = input(root, "fmp4", "2026-08-13 101112 channel-561");
+    const source = input(root, "live-c", "2026-08-13 101112 centre_court");
     const recording = {
         ...source,
         id: "a".repeat(64),
@@ -90,28 +90,28 @@ test("metadata reserves provenance room and uses fixed provider/live tags", asyn
         promptVersion: "test",
         fps: 1,
         output: {
-            title: "Woman performs in a brightly lit bedroom",
-            description: "A woman stands beside a bed and speaks to the camera. She changes position and adjusts her clothing.",
-            tags: ["Live", "Solo Female", "bedroom", "solo-female"],
+            title: "Two players trade long rallies on a grass court",
+            description: "Two players rally from the baseline on a grass court. The player in white wins the point at the net.",
+            tags: ["Tennis", "Grass Court", "rally", "grass-court"],
         },
         evidencePath: path.join(root, "evidence.json"),
         createdAt: "2026-08-13T08:00:00Z",
     }, {
         recordingId: recording.id,
-        observedIdentifier: "channel-561",
+        observedIdentifier: "centre_court",
         status: "resolved",
-        streamerId: "226494362",
-        alias: "channel-561",
-        streamerUrl: "https://fmp4-live.example/226494362",
-        aliasUrl: "https://fmp4-live.example/channel-561",
+        streamerId: "1001",
+        alias: "centre_court",
+        streamerUrl: "https://live-c.example/1001",
+        aliasUrl: "https://live-c.example/centre_court",
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
-    assert.deepEqual(metadata.tags, ["fmp4live", "live"]);
-    assert.equal(metadata.title, "Woman performs in a brightly lit bedroom [2026-08-13 101112 channel-561]");
+    assert.deepEqual(metadata.tags, ["live-c", "tennis"]);
+    assert.equal(metadata.title, "Two players trade long rallies on a grass court [2026-08-13 101112 centre_court]");
     assert(metadata.description.includes("Recorded: 2026-08-13 10:11:12"));
-    assert(metadata.description.includes("Source: https://fmp4-live.example/226494362"));
-    assert(metadata.description.includes("Alias: https://fmp4-live.example/channel-561"));
+    assert(metadata.description.includes("Source: https://live-c.example/1001"));
+    assert(metadata.description.includes("Alias: https://live-c.example/centre_court"));
     assert(metadata.description.length <= 1_000);
 });
 
@@ -144,9 +144,9 @@ test("orchestrator enables diagnostic titles only for a prepared comparison tria
         const db = new PipelineDatabase(path.join(root, `titles-${comparison}.sqlite`));
         try {
             if (comparison) db.prepareComparisonTrial();
-            const recording = db.discover(input(root, "ladder", "2026-09-09 120000 12345"));
+            const recording = db.discover(input(root, "live-b", "2026-09-09 120000 12345"));
             db.saveProvenance(recording.id, { observedIdentifier: "12345", status: "resolved", streamerId: "12345",
-                alias: "12345", streamerUrl: "https://ladder-live.example/12345/", aliasUrl: null, reason: null,
+                alias: "12345", streamerUrl: "https://live-b.example/12345/", aliasUrl: null, reason: null,
                 updatedAt: new Date().toISOString() });
             const artifactPath = path.join(root, "fixture.mp4");
             const orchestrator = new PipelineOrchestrator(db, {
@@ -169,7 +169,7 @@ test("a deferred stage leaves the recording in its state, unleased, for a later 
     const { root } = await rootFixture(t);
     const db = new PipelineDatabase(path.join(root, "deferred.sqlite"));
     t.after(() => db.close());
-    const recording = db.discover(input(root, "ladder", "2026-09-09 120000 12345"));
+    const recording = db.discover(input(root, "live-b", "2026-09-09 120000 12345"));
     const artifactPath = path.join(root, "fixture.mp4");
     let deferred = true;
     const orchestrator = new PipelineOrchestrator(db, {
@@ -196,7 +196,7 @@ test("a stage killed by a service stop leaves the recording in its state", async
     const { root } = await rootFixture(t);
     const db = new PipelineDatabase(path.join(root, "stopping.sqlite"));
     t.after(() => db.close());
-    const recording = db.discover(input(root, "ladder", "2026-09-09 120000 12345"));
+    const recording = db.discover(input(root, "live-b", "2026-09-09 120000 12345"));
     const orchestrator = new PipelineOrchestrator(db, {
         remux: async () => { markStopping(); throw new Error("ffmpeg exited (SIGTERM)"); },
         validateArtifact: async () => { throw new Error("not reached"); },
@@ -210,8 +210,8 @@ test("one manual alias override resolves every matching recording and survives r
     const { root } = await rootFixture(t);
     const database = new PipelineDatabase(path.join(root, "manual.sqlite"));
     t.after(() => database.close());
-    const first = database.discover(input(root, "fmp4", "2026-08-13 101112 old_name"));
-    const second = database.discover(input(root, "fmp4", "2026-08-14 121314 old_name"));
+    const first = database.discover(input(root, "live-c", "2026-08-13 101112 old_name"));
+    const second = database.discover(input(root, "live-c", "2026-08-14 121314 old_name"));
     for (const recording of [first, second]) {
         database.saveProvenance(recording.id, {
             observedIdentifier: "old_name",
@@ -227,12 +227,12 @@ test("one manual alias override resolves every matching recording and survives r
     database.saveManualProvenance(first.id, {
         streamerId: "123456",
         alias: "current_name",
-        streamerUrl: "https://fmp4-live.example/123456",
-        aliasUrl: "https://fmp4-live.example/current_name",
+        streamerUrl: "https://live-c.example/123456",
+        aliasUrl: "https://live-c.example/current_name",
     });
     assert.equal(database.getProvenance(first.id)?.status, "manual");
     assert.equal(database.getProvenance(second.id)?.streamerId, "123456");
-    const override = database.getProvenanceOverride("fmp4", "old_name");
+    const override = database.getProvenanceOverride("live-c", "old_name");
     assert.equal(override?.alias, "current_name");
     database.saveProvenance(first.id, {
         observedIdentifier: "old_name",
@@ -251,7 +251,7 @@ test("failure after the upload started is acceptance-unknown instead of an immed
     const { root } = await rootFixture(t);
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
     t.after(() => database.close());
-    const recording = database.discover(input(root, "ladder", "2026-08-13 101112 68190398"));
+    const recording = database.discover(input(root, "live-b", "2026-08-13 101112 2002"));
     database.transition(recording.id, "server_ready", "remuxed");
     const artifactPath = path.join(root, "artifact.mp4");
     database.saveArtifact(recording.id, {
@@ -268,19 +268,19 @@ test("failure after the upload started is acceptance-unknown instead of an immed
         evidencePath: path.join(root, "evidence.json"),
     });
     database.saveProvenance(recording.id, {
-        observedIdentifier: "68190398",
+        observedIdentifier: "2002",
         status: "resolved",
-        streamerId: "68190398",
-        alias: "68190398",
-        streamerUrl: "https://ladder-live.example/68190398/",
+        streamerId: "2002",
+        alias: "2002",
+        streamerUrl: "https://live-b.example/2002/",
         aliasUrl: null,
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
     database.saveUploadMetadata(recording.id, {
-        title: "Specific title [2026-08-13 101112 68190398]",
-        description: "Specific concrete description.\n\nSource: https://ladder-live.example/68190398/",
-        tags: ["ladder", "live"],
+        title: "Specific title [2026-08-13 101112 2002]",
+        description: "Specific concrete description.\n\nSource: https://live-b.example/2002/",
+        tags: ["live-b", "tennis"],
     });
     const now = new Date("2026-08-13T08:00:00Z");
     const reservationId = database.reserveUpload(recording.id, 100, now);
@@ -298,9 +298,9 @@ test("failure after the upload started is acceptance-unknown instead of an immed
                 recordingId: recording.id,
                 artifactPath,
                 sizeBytes: 100,
-                title: "Specific title [2026-08-13 101112 68190398]",
+                title: "Specific title [2026-08-13 101112 2002]",
                 description: "Specific concrete description.",
-                tags: ["ladder", "live"],
+                tags: ["live-b", "tennis"],
                 visibility: "private",
             },
             now,
@@ -318,7 +318,7 @@ test("the upload identity guard refuses unverified and cleans verified recording
     const { root } = await rootFixture(t);
     const database = new PipelineDatabase(path.join(root, "pipeline.sqlite"));
     t.after(() => database.close());
-    const recording = database.discover(input(root, "ladder", "2026-08-13 101112 68190398"));
+    const recording = database.discover(input(root, "live-b", "2026-08-13 101112 2002"));
     database.transition(recording.id, "server_ready", "remuxed");
     const artifactPath = path.join(root, "artifact.mp4");
     await writeFile(artifactPath, "artifact-bytes");
@@ -336,19 +336,19 @@ test("the upload identity guard refuses unverified and cleans verified recording
         evidencePath: path.join(root, "evidence.json"),
     });
     database.saveProvenance(recording.id, {
-        observedIdentifier: "68190398",
+        observedIdentifier: "2002",
         status: "resolved",
-        streamerId: "68190398",
-        alias: "68190398",
-        streamerUrl: "https://ladder-live.example/68190398/",
+        streamerId: "2002",
+        alias: "2002",
+        streamerUrl: "https://live-b.example/2002/",
         aliasUrl: null,
         reason: null,
         updatedAt: "2026-08-13T08:00:00Z",
     });
     database.saveUploadMetadata(recording.id, {
-        title: "Specific title [2026-08-13 101112 68190398]",
-        description: "Specific concrete description.\n\nSource: https://ladder-live.example/68190398/",
-        tags: ["ladder", "live"],
+        title: "Specific title [2026-08-13 101112 2002]",
+        description: "Specific concrete description.\n\nSource: https://live-b.example/2002/",
+        tags: ["live-b", "tennis"],
     });
     const now = new Date("2026-08-13T08:00:00Z");
     const reservationId = database.reserveUpload(recording.id, 100, now);

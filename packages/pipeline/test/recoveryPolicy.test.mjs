@@ -20,7 +20,7 @@ async function fixture(t, { pending = true, unresolved = false } = {}) {
     const config = { ...pipelineConfig, databasePath: path.join(root, "pipeline.sqlite"), networkUploadsEnabled: true, cleanupEnabled: false };
     const db = new PipelineDatabase(config.databasePath);
     t.after(async () => { db.close(); await rm(root, { recursive: true, force: true }); });
-    const r = db.discover({ provider: "tslive", sourceKind: "edited", sourcePath: path.join(root, "2025-11-22 125658 example"),
+    const r = db.discover({ provider: "live-a", sourceKind: "edited", sourcePath: path.join(root, "2025-11-22 125658 example"),
         playlistPath: path.join(root, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
     db.transition(r.id, "server_ready", "remuxed");
     db.saveArtifact(r.id, { path: path.join(root, "artifact.mp4"), sizeBytes: 100, sha256: "a".repeat(64), validatedAt: start.toISOString() });
@@ -28,7 +28,7 @@ async function fixture(t, { pending = true, unresolved = false } = {}) {
         output: { title: "Natural model title", description: "Saved description" }, evidencePath: path.join(root, "evidence.json") });
     db.saveProvenance(r.id, { observedIdentifier: "example", status: unresolved ? "review_required" : "resolved",
         streamerId: unresolved ? null : "123", alias: unresolved ? null : "example",
-        streamerUrl: unresolved ? null : "https://ts-live.example/123", aliasUrl: null,
+        streamerUrl: unresolved ? null : "https://live-a.example/123", aliasUrl: null,
         reason: unresolved ? "identifier_not_resolved_by_server" : null, updatedAt: start.toISOString() });
     const metadata = composeUploadMetadata(r, db.getDescription(r.id), db.getProvenance(r.id));
     db.saveUploadMetadata(r.id, metadata);
@@ -44,10 +44,10 @@ const browser = lookup => ({ withAuthenticatedPage: async run => run({}), lookup
     probeUploadStatus: async () => ({ outcome: "online", remoteUrl: "https://video-host.example/video.example/test",
         renditions: [{ width: 1080, height: 1920 }] }) });
 
-test("unresolved reference uploads as TODO LATER without inventing account data or changing title", async t => {
+test("unresolved reference uploads as unknown without inventing account data or changing title", async t => {
     const { db, r, metadata } = await fixture(t, { unresolved: true, pending: false });
     assert.equal(metadata.title, `Natural model title [${r.id}]`);
-    assert.match(metadata.description, /Source: TODO LATER$/);
+    assert.match(metadata.description, /Source: unknown$/);
     assert.equal(db.getProvenance(r.id).streamerId, null);
     assert.equal(db.get(r.id).state, "metadata_ready");
 });
@@ -107,7 +107,7 @@ test("word rejections are learned apart from informational visibility labels, wh
     const diagnostics = reopened.latestUploadDiagnostics(r.id);
     assert.equal(diagnostics.metadata_rejection, "waisted");
     assert.equal(diagnostics.limited_visibility, "Provider reports limited visibility: alcohol/gun/knife/alien");
-    assert.deepEqual(reopened.listRejectedPhrases("videohost"), ["waisted"]);
+    assert.deepEqual(reopened.listRejectedPhrases("video-host"), ["waisted"]);
     reopened.close();
     // A clean negative lookup after the weekly deadline requeues despite both flags.
     await reconcileDueUploads(config, day(30), browser(async () => ({ kind: "absent" })));

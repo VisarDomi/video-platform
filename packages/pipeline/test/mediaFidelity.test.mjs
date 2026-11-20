@@ -198,7 +198,7 @@ test("mixed 2640x1440/1320x720 keeps every frame at 2640x1440 in both orientatio
     }
 });
 
-test("a wide 2560x900 recording is scaled to 1080 tall (VideoHost tiers by height) with nothing dropped", async (t) => {
+test("a wide 2560x900 recording is scaled to 1080 tall (video-host tiers by height) with nothing dropped", async (t) => {
     const root = await temporary(t);
     const high = await fixturePart(root, "wide", { size: "2560x900", frames: 5, fmp4: true });
     const low = await fixturePart(root, "low", { size: "1280x450", frames: 1, offset: 100, fmp4: true });

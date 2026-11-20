@@ -22,7 +22,7 @@ async function fixture(t) {
         databasePath: path.join(root, "pipeline.sqlite"), finalizationDatabasePath: path.join(root, "finalization.sqlite"),
         artifactsRoot: path.join(root, "artifacts"), stagingRoot: path.join(root, "artifacts", "production-v6"),
         comparisonSelectionFile: path.join(root, "test-videos.txt"), cleanupEnabled: true, networkUploadsEnabled: true,
-        discoveryRoots: [{ provider: "tslive", sourceKind: "edited", path: path.join(root, "edited") }] };
+        discoveryRoots: [{ provider: "live-a", sourceKind: "edited", path: path.join(root, "edited") }] };
     const authority = new DatabaseSync(config.finalizationDatabasePath);
     authority.exec("CREATE TABLE integrity_checkpoints (recording_path TEXT PRIMARY KEY, playlist_fingerprint TEXT, report_json TEXT, updated_at TEXT)");
     const paths = [];
@@ -42,7 +42,7 @@ async function fixture(t) {
     const db = new PipelineDatabase(config.databasePath);
     t.after(() => db.close());
     const resolver = { resolve: async () => ({ observedIdentifier: "alias", status: "resolved", streamerId: "id", alias: "alias",
-        streamerUrl: "https://ts-live.example/id", aliasUrl: null, reason: null, updatedAt: new Date().toISOString() }) };
+        streamerUrl: "https://live-a.example/id", aliasUrl: null, reason: null, updatedAt: new Date().toISOString() }) };
     return { root, config, db, paths, resolver };
 }
 
@@ -122,7 +122,7 @@ test("selected worker waits on an empty file and obeys file order, not oldest li
     assert.equal((await worker.step()).disposition, "comparison_attention_required");
     assert.equal(db.getCampaignControl().state, "paused");
     assert.equal(db.list().length, 1);
-    const unselected = db.discover({ provider: "tslive", sourceKind: "edited", sourcePath: paths[0],
+    const unselected = db.discover({ provider: "live-a", sourceKind: "edited", sourcePath: paths[0],
         playlistPath: path.join(paths[0], "playlist.m3u8"), durationSeconds: 1, sourceFingerprint: "unselected" });
     await assert.rejects(() => uploadOne(unselected.id, config), /not in the explicit comparison selection/);
 });

@@ -18,19 +18,19 @@ import { MetadataRejectedError, TransferAbortedBeforeSubmissionError, containedP
 const start = new Date("2026-09-20T08:23:10.171Z");
 const day = n => new Date(start.getTime() + n * 86400000);
 
-async function fixture(t, { pending = true, description = "Purple ambient lighting in a bedroom", promptVersion = "test" } = {}) {
+async function fixture(t, { pending = true, description = "Purple ambient lighting over the court", promptVersion = "test" } = {}) {
     const root = await mkdtemp(path.join(os.tmpdir(), "pipeline-provider-archive-"));
     const config = { ...pipelineConfig, databasePath: path.join(root, "pipeline.sqlite"), networkUploadsEnabled: true, cleanupEnabled: false };
     const db = new PipelineDatabase(config.databasePath);
     t.after(async () => { db.close(); await rm(root, { recursive: true, force: true }); });
-    const r = db.discover({ provider: "tslive", sourceKind: "edited", sourcePath: path.join(root, "2025-10-16 015701 example"),
+    const r = db.discover({ provider: "live-a", sourceKind: "edited", sourcePath: path.join(root, "2025-10-16 015701 example"),
         playlistPath: path.join(root, "playlist.m3u8"), sourceFingerprint: "fingerprint", durationSeconds: 600 });
     db.transition(r.id, "server_ready", "remuxed");
     db.saveArtifact(r.id, { path: path.join(root, "artifact.mp4"), sizeBytes: 100, sha256: "a".repeat(64), validatedAt: start.toISOString() });
     db.saveDescription(r.id, { artifactSha256: "a".repeat(64), promptVersion, fps: 1,
         output: { title: "Natural model title", description }, evidencePath: path.join(root, "evidence.json") });
     db.saveProvenance(r.id, { observedIdentifier: "example", status: "resolved", streamerId: "123", alias: "example",
-        streamerUrl: "https://ts-live.example/123", aliasUrl: null, reason: null, updatedAt: start.toISOString() });
+        streamerUrl: "https://live-a.example/123", aliasUrl: null, reason: null, updatedAt: start.toISOString() });
     db.saveUploadMetadata(r.id, composeUploadMetadata(r, db.getDescription(r.id), db.getProvenance(r.id)));
     if (!pending) return { db, config, root, r };
     const reservation = db.reserveUpload(r.id, 120, start);
@@ -42,7 +42,7 @@ async function fixture(t, { pending = true, description = "Purple ambient lighti
 
 test("rejected phrases parse from provider text and match as substrings, like the provider", () => {
     assert.deepEqual(rejectedPhrases("x Sorry, 'Ambien' is not allowed here. y Sorry, 'rolling on' is not allowed here."), ["ambien", "rolling on"]);
-    assert.deepEqual(containedPhrases(["Purple AMBIENT glow", "scrolling on her phone"], ["ambien", "rolling on", "breath"]),
+    assert.deepEqual(containedPhrases(["Purple AMBIENT glow", "scrolling on a phone"], ["ambien", "rolling on", "breath"]),
         ["ambien", "rolling on"]);
 });
 
@@ -57,15 +57,15 @@ test("prompt append is absent without phrases, deterministic with them, and part
 
 test("local sanity check re-describes stale metadata once, then blocks instead of sending bytes", async t => {
     const stale = await fixture(t, { pending: false });
-    assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "videohost")).kind, "clean");
-    stale.db.recordRejectedPhrases("videohost", ["ambien"], null);
-    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "videohost", new Date(), null);
+    assert.equal((await checkRejectedPhrases(stale.db, stale.r.id, "video-host")).kind, "clean");
+    stale.db.recordRejectedPhrases("video-host", ["ambien"], null);
+    const verdict = await settleRejectedPhrases(stale.db, stale.r.id, "video-host", new Date(), null);
     assert.deepEqual(verdict, { kind: "stale_description", phrases: ["ambien"] });
     assert.equal(stale.db.get(stale.r.id).state, "artifact_valid");
 
     const current = await fixture(t, { pending: false, promptVersion: await descriptionPromptVersion(["ambien"]) });
-    current.db.recordRejectedPhrases("videohost", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "videohost", new Date(), null)).kind, "manual_review");
+    current.db.recordRejectedPhrases("video-host", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(current.db, current.r.id, "video-host", new Date(), null)).kind, "manual_review");
     assert.equal(current.db.get(current.r.id).state, "blocked");
     assert.match(current.db.get(current.r.id).blockReason, /'ambien'.*manual review/);
 });
@@ -73,7 +73,7 @@ test("local sanity check re-describes stale metadata once, then blocks instead o
 test("a provider word rejection fails definitively, keeps byte accounting and stays upload-ready for a rewrite", async t => {
     const { db, r } = await fixture(t, { pending: false });
     const reservation = db.reserveUpload(r.id, 120, start);
-    const uploader = { provider: "videohost", upload: async request => {
+    const uploader = { provider: "video-host", upload: async request => {
         await request.onProgress("file_uploading", 100);
         await request.onProgress("metadata_submitting", 100);
         throw new MetadataRejectedError(["ambien"]);
@@ -82,7 +82,7 @@ test("a provider word rejection fails definitively, keeps byte accounting and st
         recordingId: r.id, uploadIdentity: r.id, artifactPath: "/unused", sizeBytes: 100, title: "t", description: "d",
         tags: [], visibility: "private" }, start), MetadataRejectedError);
     assert.equal(db.get(r.id).state, "metadata_ready");
-    assert.deepEqual(db.listRejectedPhrases("videohost"), ["ambien"]);
+    assert.deepEqual(db.listRejectedPhrases("video-host"), ["ambien"]);
     assert.equal(db.dueUploadConfirmations(day(30)).length, 0, "nothing to reconcile: no remote video exists");
     assert.equal(db.uploadUsage("2026-09").spent, 100);
     assert.equal(db.canAttemptUpload(r.id, day(0.01)), true, "a definitive refusal does not hold the weekly slot");
@@ -90,10 +90,10 @@ test("a provider word rejection fails definitively, keeps byte accounting and st
 
 test("a transfer that stops before the provider's metadata form is a plain failure, not a week-long uncertainty", async t => {
     const { db, r } = await fixture(t, { pending: false });
-    const reservation = db.reserveUpload(r.id, 120, start, "Europe/Tirane", 600_000_000_000, "videohost");
-    const uploader = { provider: "videohost", upload: async request => {
+    const reservation = db.reserveUpload(r.id, 120, start, "Europe/Tirane", 600_000_000_000, "video-host");
+    const uploader = { provider: "video-host", upload: async request => {
         await request.onProgress("file_uploading", 100);
-        throw new TransferAbortedBeforeSubmissionError("VideoHost file transfer made no progress for 10 minutes (last 18%)");
+        throw new TransferAbortedBeforeSubmissionError("video-host file transfer made no progress for 10 minutes (last 18%)");
     } };
     await assert.rejects(new UploadCoordinator(db, uploader).uploadAdmitted(r.id, reservation, {
         recordingId: r.id, uploadIdentity: r.id, artifactPath: "/unused", sizeBytes: 100, title: "t", description: "d",
@@ -129,25 +129,25 @@ test("a video that had an ID and is now 404 was removed by the provider: blocked
 
 test("the local model's rewrite is kept only when clean; otherwise the full re-description still runs", async t => {
     const good = await fixture(t, { pending: false });
-    good.db.recordRejectedPhrases("videohost", ["ambien"], null);
+    good.db.recordRejectedPhrases("video-host", ["ambien"], null);
     const seen = [];
-    const verdict = await settleRejectedPhrases(good.db, good.r.id, "videohost", new Date(), async (text, phrases) => {
+    const verdict = await settleRejectedPhrases(good.db, good.r.id, "video-host", new Date(), async (text, phrases) => {
         seen.push(phrases);
         return { title: text.title, description: text.description.replace(/ambient/i, "soft") };
     });
     assert.deepEqual(verdict, { kind: "rewritten", phrases: ["ambien"] });
     assert.equal(good.db.get(good.r.id).state, "metadata_ready");
-    assert.match(good.db.getUploadMetadata(good.r.id).description, /^Purple soft lighting in a bedroom/);
+    assert.match(good.db.getUploadMetadata(good.r.id).description, /^Purple soft lighting over the court/);
     assert.match(good.db.getUploadMetadata(good.r.id).title, /\[2025-10-16 015701 example\]$/, "the folder identity suffix is recomposed, not lost");
-    assert.equal((await checkRejectedPhrases(good.db, good.r.id, "videohost")).kind, "clean");
+    assert.equal((await checkRejectedPhrases(good.db, good.r.id, "video-host")).kind, "clean");
     assert.deepEqual(seen, [["ambien"]]);
 
     const stubborn = await fixture(t, { pending: false });
-    stubborn.db.recordRejectedPhrases("videohost", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(stubborn.db, stubborn.r.id, "videohost", new Date(), async text => text)).kind, "stale_description");
+    stubborn.db.recordRejectedPhrases("video-host", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(stubborn.db, stubborn.r.id, "video-host", new Date(), async text => text)).kind, "stale_description");
     assert.equal(stubborn.db.get(stubborn.r.id).state, "artifact_valid");
 
     const broken = await fixture(t, { pending: false });
-    broken.db.recordRejectedPhrases("videohost", ["ambien"], null);
-    assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "videohost", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
+    broken.db.recordRejectedPhrases("video-host", ["ambien"], null);
+    assert.equal((await settleRejectedPhrases(broken.db, broken.r.id, "video-host", new Date(), async () => { throw new Error("model down"); })).kind, "stale_description");
 });
