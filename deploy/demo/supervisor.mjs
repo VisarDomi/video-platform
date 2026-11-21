@@ -59,9 +59,12 @@ async function prepareMedia() {
             const file = path.join(input, name);
             if (existsSync(file)) continue;
             say(`generating ${name}`);
+            // A test pattern is all detail: without a cap it comes out at several Mbit/s, and the
+            // simulator serves an H.264 source as it is, so every recording would be that heavy.
             execFileSync('nice', ['-n', '19', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
-                '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=48000`,
-                '-t', '60', '-c:v', 'libx264', '-preset', 'veryfast', '-g', '50', '-threads', '2', '-c:a', 'aac', '-b:a', '96k', `${file}.part.mkv`]);
+                '-f', 'lavfi', '-i', 'testsrc2=size=854x480:rate=25', '-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=48000`,
+                '-t', '60', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '30', '-maxrate', '700k', '-bufsize', '1400k',
+                '-g', '50', '-threads', '2', '-c:a', 'aac', '-b:a', '64k', `${file}.part.mkv`]);
             renameSync(`${file}.part.mkv`, file);
         }
     }
