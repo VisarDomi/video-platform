@@ -39,6 +39,10 @@ A deployment's own plug-ins, configuration and operations live in a separate pri
 repository, checked out at `private/`. The core finds them through the sites file, so it
 never imports one (a test enforces it).
 
+How it fits together, one recording from live stream to verified upload:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Things that broke and the tests that hold the
+fixes: [docs/STORIES.md](docs/STORIES.md).
+
 ## Ideas worth a look
 
 - **No lost or duplicated work across a power cut.** Every durable write is temp file +
