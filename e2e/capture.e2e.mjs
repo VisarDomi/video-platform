@@ -1,23 +1,26 @@
 #!/usr/bin/env node
 // End-to-end: the real downloader core records the simulated live sites through the
-// public plug-ins, and the simulator's checker judges every recording folder against
-// the ground-truth log.
+// public plug-ins, the real auth daemon keeps the account-gated site's session, and the
+// simulator's checker judges every recording folder against the ground-truth log.
 //
-//   npm run build:downloader && npm run build -w simulator && npm run build:sim-plugins
+//   npm run build:downloader && npm run build -w auth && npm run build -w simulator && npm run build:sim-plugins
 //   npm run e2e:capture            (under two minutes; E2E_KEEP=1 keeps everything)
 //
 // 1. Tiny generated media (a test pattern; ffmpeg under nice), prepared once per run.
 // 2. The simulator in this process, real clock, ephemeral ports on 127.0.0.1, with a
-//    scenario of eight channels on two sites (below): a healthy channel per site (one
-//    renamed, all fMP4 playlists obfuscated, with a key rotation), a playlist outage
+//    scenario of ten channels on three sites (below): a healthy channel per open site
+//    (one renamed, all fMP4 playlists obfuscated, with a key rotation), a playlist outage
 //    shorter and one longer than the live window, a provider skip with a numbering
 //    restart and a stream end, an edge outage that needs failover, fragments failing on
-//    one edge, and a damaged-segment window with a stream end.
-// 3. A sites file and download lists in a temporary data root, and the downloader
-//    (packages/downloader/dist/main.js) as a child process whose every path (data
-//    root, downloads root, sites file, HOME) points into that root.
+//    one edge, a damaged-segment window with a stream end, and on the account-gated
+//    site a revocation of every stream token in flight and a stream end.
+// 3. A sites file, an accounts file and download lists in a temporary data root; the
+//    auth daemon (packages/auth/dist/main.js) signs the account in and renews its
+//    stream tokens every five seconds, and the downloader (packages/downloader/dist/
+//    main.js) records with them. Both are child processes whose every path (data root,
+//    downloads root, sites file, accounts file, HOME) points into that root.
 // 4. After the run, SIGTERM (graceful stop), then the checker on every folder, the
-//    downloader's own log lines, and the assertions. A JSON and a Markdown report go to
+//    processes' own log lines, and the assertions. A JSON and a Markdown report go to
 //    the run's directory and the Markdown is printed.
 //
 // Exit status: 0 when every assertion holds, 1 otherwise, 2 when the run could not
@@ -35,14 +38,16 @@ const STOP_GRACE_MS = 30_000;
 
 const need = [
     'packages/downloader/dist/main.js',
+    'packages/auth/dist/main.js',
     'packages/simulator/dist/index.js',
     'packages/sdk/dist/index.js',
     'plugins/ladder-live/dist/index.js',
     'plugins/fmp4-live/dist/index.js',
+    'plugins/ts-live/dist/index.js',
 ];
 for (const file of need) {
     if (!existsSync(path.join(ROOT, file))) {
-        console.error(`missing ${file}: build first (npm run build:downloader && npm run build -w simulator && npm run build:sim-plugins)`);
+        console.error(`missing ${file}: build first (npm run build:downloader && npm run build -w auth && npm run build -w simulator && npm run build:sim-plugins)`);
         process.exit(2);
     }
 }
@@ -173,7 +178,15 @@ const CHANNELS = [
     { site: 'fmp4-live', id: '204', name: 'rally-four', start: 7, kind: 'segment-failover', obfuscated: true, window: 6,
       edges: [{ id: 'a' }, { id: 'b', lagMs: 300, pdtSkewMs: -20 }, { id: 'c', lagMs: 600, pdtSkewMs: -15 }],
       faults: [{ type: 'segmentStatus', edge: 'a', at: 30, until: 40, status: 503 }] },
+    // The account-gated site: at 40 s the site revokes every stream token it has issued
+    // (TS_REVOKE_S, a site fault), so both channels' playlists answer 401 until the auth
+    // daemon's next renewal (every five seconds) reaches the credential store.
+    { site: 'ts-live', id: 'acct-show', name: 'show-court', start: 8, kind: 'token-revoke', faults: [] },
+    { site: 'ts-live', id: 'acct-no1', name: 'no1-court', start: 9, kind: 'token-revoke-end', end: 70, faults: [] },
 ];
+
+const TS_ACCOUNT = { username: 'viewer', password: 'e2e-password', accountId: 'acct-viewer' };
+const TS_REVOKE_S = 40;
 
 function scenario(epoch) {
     const channel = (c) => ({
@@ -198,6 +211,11 @@ function scenario(epoch) {
                 faults: [{ type: 'obfuscationKey', at: 50, keyId: 'k2' }],
                 channels: CHANNELS.filter((c) => c.site === 'fmp4-live').map(channel),
             },
+            'ts-live': {
+                accounts: [TS_ACCOUNT],
+                faults: [{ type: 'tokenRevoke', at: TS_REVOKE_S }],
+                channels: CHANNELS.filter((c) => c.site === 'ts-live').map(channel),
+            },
         },
     };
 }
@@ -206,7 +224,45 @@ function scenario(epoch) {
 
 let sim = null;
 let child = null;
+let authChild = null;
 const logLines = [];
+const authLines = [];
+
+// A service as a child process with the run's environment; its output goes to a log file
+// and, without colour codes, to lines.
+function startService(script, logFile, lines) {
+    const logStream = createWriteStream(logFile);
+    const proc = spawn(process.execPath, [path.join(ROOT, script)], { cwd: runDir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const exited = new Promise((resolve) => proc.once('exit', (code, signal) => resolve({ code, signal })));
+    let partial = '';
+    const onData = (chunk) => {
+        logStream.write(chunk);
+        partial += chunk.toString();
+        const complete = partial.split('\n');
+        partial = complete.pop();
+        for (const line of complete) lines.push(line.replace(/\x1b\[[0-9;]*m/g, ''));
+    };
+    proc.stdout.on('data', onData);
+    proc.stderr.on('data', onData);
+    const close = async () => {
+        if (partial) lines.push(partial);
+        partial = '';
+        await new Promise((resolve) => logStream.end(resolve));
+    };
+    return { proc, exited, close };
+}
+
+// Stops a service with SIGTERM, then SIGKILL after the grace period.
+async function stopService(service, name) {
+    service.proc.kill('SIGTERM');
+    const stop = await Promise.race([service.exited, new Promise((resolve) => setTimeout(() => resolve(null), STOP_GRACE_MS))]);
+    await service.close();
+    if (!stop) {
+        service.proc.kill('SIGKILL');
+        throw new Error(`the ${name} did not stop within 30 s of SIGTERM`);
+    }
+    return stop;
+}
 
 async function run() {
     const seen = guardIsolation();
@@ -220,32 +276,40 @@ async function run() {
     sim = await startSimulator({
         scenario: scenario(epoch), media: cache, stateDir: dirs.sim, host: '127.0.0.1', ports: {}, clockMode: 'real',
     });
-    say(`simulator up: ladder-live ${sim.urls['ladder-live']}, fmp4-live ${sim.urls['fmp4-live']}`);
+    say(`simulator up: ladder-live ${sim.urls['ladder-live']}, fmp4-live ${sim.urls['fmp4-live']}, ts-live ${sim.urls['ts-live']}`);
 
     writeFileSync(sitesFile, JSON.stringify({ sites: [
         { id: 'ladder-live', plugin: 'plugin-ladder-live', config: { baseUrl: sim.urls['ladder-live'], pollIntervalMs: 2000, playlistRetryMs: 1000 } },
         { id: 'fmp4-live', plugin: 'plugin-fmp4-live', config: { baseUrl: sim.urls['fmp4-live'], playlistKeys: KEYS, pollIntervalMs: 2000, playlistRetryMs: 1000 } },
+        { id: 'ts-live', plugin: 'plugin-ts-live', account: TS_ACCOUNT.username, config: { baseUrl: sim.urls['ts-live'], pollIntervalMs: 2000, playlistRetryMs: 1000 } },
     ] }, null, 2));
+    mkdirSync(path.dirname(seen.authAccounts), { recursive: true });
+    writeFileSync(seen.authAccounts, JSON.stringify({ accounts: [{ email: TS_ACCOUNT.username, password: TS_ACCOUNT.password, provider: 'ts-live' }] }), { mode: 0o600 });
     mkdirSync(path.join(dirs.data, 'download-lists'), { recursive: true });
     writeFileSync(path.join(dirs.data, 'download-lists', 'ladder-live.txt'),
         CHANNELS.filter((c) => c.site === 'ladder-live').map((c) => `${c.id} ${c.name}`).join('\n') + '\n');
     writeFileSync(path.join(dirs.data, 'download-lists', 'fmp4-live.txt'),
         CHANNELS.filter((c) => c.site === 'fmp4-live').map((c) => `${c.name} ${c.id}`).join('\n') + '\n');
+    writeFileSync(path.join(dirs.data, 'download-lists', 'ts-live.txt'),
+        CHANNELS.filter((c) => c.site === 'ts-live').map((c) => `${c.id} ${c.name}`).join('\n') + '\n');
+
+    // The auth daemon first: the downloader reads the session it saves.
+    const authLogFile = path.join(runDir, 'auth.log');
+    const auth = startService('packages/auth/dist/main.js', authLogFile, authLines);
+    authChild = auth.proc;
+    const signedIn = Date.now() + 20_000;
+    while (!authLines.some((line) => /Token write — source=\S+ stream_expires=\d+/.test(line)) && Date.now() < signedIn && authChild.exitCode === null) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (!authLines.some((line) => /Token write — source=\S+ stream_expires=\d+/.test(line))) {
+        throw new Error(`the auth daemon saved no stream tokens within 20 s; see ${authLogFile}`);
+    }
+    say(`auth daemon signed in (pid ${authChild.pid})`);
 
     const logFile = path.join(runDir, 'downloader.log');
-    const logStream = createWriteStream(logFile);
-    child = spawn(process.execPath, [path.join(ROOT, 'packages/downloader/dist/main.js')], { cwd: runDir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
-    let partial = '';
-    const onData = (chunk) => {
-        logStream.write(chunk);
-        partial += chunk.toString();
-        const lines = partial.split('\n');
-        partial = lines.pop();
-        for (const line of lines) logLines.push(line.replace(/\x1b\[[0-9;]*m/g, ''));
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
+    const downloader = startService('packages/downloader/dist/main.js', logFile, logLines);
+    child = downloader.proc;
+    const exited = downloader.exited;
     say(`downloader started (pid ${child.pid}), recording until epoch + ${RUN_S}s`);
 
     const stopAt = epoch + RUN_S * 1000;
@@ -256,28 +320,24 @@ async function run() {
         if (!early && Date.now() < stopAt) say(`recording... ${((Date.now() - epoch) / 1000).toFixed(0)}s into the scenario, ${logLines.length} log lines`);
     }
     if (early) throw new Error(`the downloader exited early (${JSON.stringify(early)}); see ${logFile}`);
+    if (authChild.exitCode !== null) throw new Error(`the auth daemon exited early (${authChild.exitCode}); see ${authLogFile}`);
 
-    child.kill('SIGTERM');
-    const stop = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve(null), STOP_GRACE_MS))]);
-    if (!stop) {
-        child.kill('SIGKILL');
-        throw new Error('the downloader did not stop within 30 s of SIGTERM');
-    }
-    if (partial) logLines.push(partial);
-    await new Promise((resolve) => logStream.end(resolve));
+    const stop = await stopService(downloader, 'downloader');
     say(`downloader stopped (${JSON.stringify(stop)})`);
+    const authStop = await stopService(auth, 'auth daemon');
+    say(`auth daemon stopped (${JSON.stringify(authStop)})`);
     await sim.close();
     sim = null;
 
     const isolation = isolationHeld();
-    return { epoch, cache, stop, logFile, isolation };
+    return { epoch, cache, stop, authStop, logFile, authLogFile, isolation };
 }
 
 // ---- judging -------------------------------------------------------------------------
 
 function recordingFolders() {
     const folders = [];
-    for (const site of ['ladder-live', 'fmp4-live']) {
+    for (const site of ['ladder-live', 'fmp4-live', 'ts-live']) {
         for (const state of ['.active', '.pending']) {
             const dir = path.join(dirs.downloads, site, 'downloaded', state);
             if (!existsSync(dir)) continue;
@@ -297,10 +357,12 @@ const EDGE_SWITCH = /\[StreamDownloader\] (\S+) EDGE-SWITCH (\S+) → (\S+)/;
 const ENDED = /\[StreamSession\] (\S+): recording ended \(([^)]*)\)/;
 const LEVEL = /\[downloader\] (\w+):/;
 const RENAMED = /\[Australian Open\] Channel (\d+) is now named (\S+) \(was (\S+)\)/;
+const UNAUTHORIZED = /\[Wimbledon\] Playlist 401 \(stream token (\w+)\) url=\S+\/hls\/(\d+)\//;
+const AUTHORIZED = /\[Wimbledon\] Playlist authorized again after (\d+) 401 answer\(s\) url=\S+\/hls\/(\d+)\//;
 const UNDECODABLE = /Cannot decode playlists with key/;
 
 function logFacts(lines) {
-    const facts = { gaps: [], restarts: [], repairs: [], edgeSwitches: [], ended: [], renames: [], undecodable: 0, errors: [], warnings: 0 };
+    const facts = { gaps: [], restarts: [], repairs: [], edgeSwitches: [], ended: [], renames: [], unauthorized: [], authorized: [], undecodable: 0, errors: [], warnings: 0 };
     for (const line of lines) {
         const level = LEVEL.exec(line)?.[1] ?? 'unknown';
         if (level === 'warn') facts.warnings++;
@@ -312,6 +374,8 @@ function logFacts(lines) {
         else if ((m = EDGE_SWITCH.exec(line))) facts.edgeSwitches.push({ alias: m[1], from: m[2], to: m[3] });
         else if ((m = ENDED.exec(line))) facts.ended.push({ alias: m[1], reason: m[2] });
         else if ((m = RENAMED.exec(line))) facts.renames.push({ id: m[1], name: m[2], was: m[3] });
+        else if ((m = UNAUTHORIZED.exec(line))) facts.unauthorized.push({ reason: m[1], recording: m[2] });
+        else if ((m = AUTHORIZED.exec(line))) facts.authorized.push({ answers: Number(m[1]), recording: m[2] });
         if (UNDECODABLE.test(line)) facts.undecodable++;
     }
     return facts;
@@ -319,7 +383,7 @@ function logFacts(lines) {
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
-function judge({ cache, stop, logFile, isolation }) {
+function judge({ cache, stop, authStop, logFile, authLogFile, isolation }) {
     const truth = TruthIndex.fromFile(dirs.sim);
     const media = MediaLibrary.load(cache);
     const facts = logFacts(logLines);
@@ -338,6 +402,17 @@ function judge({ cache, stop, logFile, isolation }) {
         : 'the run wrote no live-status.json in its own home (redirect not proven)');
     expect(facts.errors.length === 0, 'downloader', `${facts.errors.length} error line(s): ${facts.errors.slice(0, 3).join(' | ')}`);
     expect(facts.undecodable === 0, 'fmp4-live', 'a playlist could not be decoded (key rotation)');
+    // The auth daemon: signed in once, logged no error, and renewed the stream tokens (ten
+    // seconds) every five seconds all along, by the site's own record of what it issued.
+    const authErrors = authLines.filter((line) => / error: /.test(line));
+    const issued = truth.responses({ site: 'ts-live', kind: 'auth', status: 200 })
+        .filter((r) => r.path.startsWith('/api/stream/token')).map((r) => r.t).sort((x, y) => x - y);
+    const longestWait = Math.max(0, ...issued.slice(1).map((t, i) => t - issued[i]));
+    expect(authStop.code === 0 || authStop.signal === 'SIGTERM', 'auth', `exit ${JSON.stringify(authStop)} after SIGTERM`);
+    expect(authLines.filter((line) => /Session successfully established for viewer/.test(line)).length === 1, 'auth', 'not exactly one sign-in');
+    expect(authErrors.length === 0, 'auth', `${authErrors.length} error line(s): ${authErrors.slice(0, 3).join(' | ')}`);
+    expect(issued.length >= Math.floor(RUN_S / 5) - 2 && longestWait <= 7_000, 'auth',
+        `${issued.length} stream-token renewals in ${RUN_S} s, the longest ${longestWait} ms apart`);
 
     for (const channel of CHANNELS) {
         const key = `${channel.site}/${channel.id}`;
@@ -350,6 +425,8 @@ function judge({ cache, stop, logFile, isolation }) {
         const repairs = facts.repairs.filter((r) => aliases.has(r.alias));
         const switches = facts.edgeSwitches.filter((s) => aliases.has(s.alias));
         const ended = facts.ended.filter((e) => aliases.has(e.alias));
+        const unauthorized = facts.unauthorized.filter((u) => identities.has(u.recording));
+        const authorized = facts.authorized.filter((a) => identities.has(a.recording));
 
         const result = { channel: key, name: channel.name, kind: channel.kind, folders: own.map((f) => `${f.state}/${f.name}`), expected: '', checker: null, logs: null, notes: [] };
         results.push(result);
@@ -372,6 +449,7 @@ function judge({ cache, stop, logFile, isolation }) {
             gapWarnings: clientGaps.length, gapWarnedSegments: clientGaps.reduce((n, g) => n + g.count, 0),
             siteSkipLines: siteGaps.length, siteSkippedSegments: siteGaps.reduce((n, g) => n + g.count, 0),
             restarts: restarts.length, repairs: repairs.length, edgeSwitches: switches.map((s) => `${s.from}→${s.to}`), ended: ended.map((e) => e.reason),
+            ...(channel.site === 'ts-live' ? { unauthorized: unauthorized.map((u) => u.reason), authorizedAgainAfter: authorized.map((a) => a.answers) } : {}),
         };
 
         // Every channel: nothing the site never published, no duplicate, nothing missing
@@ -446,6 +524,18 @@ function judge({ cache, stop, logFile, isolation }) {
             expect(edges.length >= 2 && switches.some((s) => s.from === 'a'), key, `recorded from ${edges.join(', ')} with ${switches.length} EDGE-SWITCH line(s)`);
             expect(c.missedByClient === 0, key, `${c.missedByClient} segment(s) missed across the restart`);
             break;
+        case 'token-revoke':
+        case 'token-revoke-end':
+            result.expected = `stream tokens revoked at ${TS_REVOKE_S} s: 401s until the auth daemon's renewal, then recorded on`
+                + (channel.kind === 'token-revoke-end' ? '; stream end finalizes it' : '');
+            expect(unauthorized.some((u) => u.reason === 'revoked'), key, `no "Playlist 401 (stream token revoked)" line (${unauthorized.map((u) => u.reason).join(', ') || 'none'})`);
+            expect(authorized.length >= 1 && authorized.every((a) => a.answers <= 10), key, `authorized again after ${authorized.map((a) => a.answers).join(', ') || 'never'} 401 answer(s)`);
+            expect(c.skippedBySite === 0, key, `${c.skippedBySite} segment(s) skipped by the site`);
+            if (channel.kind === 'token-revoke-end') {
+                expect(folder.state === 'pending' && report.recording.playlist.ended, key, `the ended stream is not finalized (${folder.state}, ENDLIST=${report.recording.playlist.ended})`);
+                expect(ended.length >= 1, key, 'no "recording ended" line');
+            }
+            break;
         case 'damage-end':
             result.expected = 'zero-size samples repaired; ENDLIST ends it';
             expect(repairs.length > 0 && c.byteMismatches === repairs.length, key, `${repairs.length} repairs, ${c.byteMismatches} mismatches`);
@@ -467,7 +557,7 @@ function markdown(summary) {
     return [
         `# Capture e2e: ${summary.ok ? 'PASS' : 'FAIL'}`,
         '',
-        `Run ${summary.runDir}, ${summary.durationS} s (recording ${RUN_S} s). Downloader exit: ${JSON.stringify(summary.stop)}.`,
+        `Run ${summary.runDir}, ${summary.durationS} s (recording ${RUN_S} s). Downloader exit: ${JSON.stringify(summary.stop)}; auth daemon exit: ${JSON.stringify(summary.authStop)}.`,
         '',
         '| Channel | Expected | Checker | Downloader log |',
         '|---|---|---|---|',
@@ -490,9 +580,11 @@ try {
         durationS: Math.round((Date.now() - started) / 1000),
         recordingS: RUN_S,
         stop: outcome.stop,
+        authStop: outcome.authStop,
         failures: judged.failures,
         results: judged.results,
         log: { file: judged.logFile, lines: logLines.length, warnings: judged.facts.warnings, errors: judged.facts.errors.length },
+        authLog: { file: outcome.authLogFile, lines: authLines.length },
     };
     writeFileSync(path.join(runDir, 'report.json'), JSON.stringify(summary, null, 2) + '\n');
     const text = markdown(summary);
@@ -507,6 +599,7 @@ try {
 } catch (error) {
     console.error(`[e2e] ${error?.stack ?? error}`);
     if (child && child.exitCode === null) child.kill('SIGKILL');
+    if (authChild && authChild.exitCode === null) authChild.kill('SIGKILL');
     if (sim) await sim.close().catch(() => {});
 }
 process.exit(exitCode);

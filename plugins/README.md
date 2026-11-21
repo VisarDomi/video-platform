@@ -6,20 +6,21 @@ discovery loops, lists, recording folders, polling, segment storage, failover be
 copies, stitching, finalization. The plug-in knows the site's protocol, never where the
 site runs or what the core does with the answers.
 
-The two plug-ins here are public and neutral, built against the simulated sites in
+The site plug-ins here are public and neutral, built against the simulated sites in
 `packages/simulator`, and they are the reference for writing one:
 
-| | `ladder-live` (`plugin-ladder-live`) | `fmp4-live` (`plugin-fmp4-live`) |
-|---|---|---|
-| List line | `<id> [name]` or `<site>/<id>` | `<name> <id>` (a bare name waits for the server to resolve it) |
-| Who is live | paged channel list; paid or absent = terminal | bulk status, 100 IDs per request; only public + live counts |
-| Recording identity | the broadcast's `started_at` | the status's `statusSince` (moves at every status change) |
-| Opening a stream | control-channel handshake (long-poll, replies by id) | stream API: name, edges, a master per edge |
-| Variant choice | best ladder rung within `maxHeight`, at the configured latency | the `source` variant, then by bandwidth |
-| Copies | one: no failover | several edges: `edgeOf`, `variantKey`, `recoverVariant` |
-| Stream end | playlist 403 + channel list says ended → `PlaylistNotFoundError` | playlist 404 + stream API says ended → `PlaylistNotFoundError` |
-| Segment handling | ffprobe dimensions (`probeSegmentDimensions`) | zero-size sample repair (`dropZeroSizeSamples`), index check, duration from `sidx` |
-| Extras | numbering restarts pass through to the core | obfuscated playlists (keys from config), renames (durable name history, hourly alias refresh), observe-only access diagnostics |
+| | `ts-live` (`plugin-ts-live`) | `ladder-live` (`plugin-ladder-live`) | `fmp4-live` (`plugin-fmp4-live`) |
+|---|---|---|---|
+| List line | `<accountId> <name>` | `<id> [name]` or `<site>/<id>` | `<name> <id>` (a bare name waits for the server to resolve it) |
+| Account | signed in by the auth daemon (`SiteAuth`, below); every request carries its tokens | none | none |
+| Who is live | live lookup by account ID, 500 per request; only live + public counts, and only the site's explicit empty answer means nobody | paged channel list; paid or absent = terminal | bulk status, 100 IDs per request; only public + live counts |
+| Recording identity | the stream ID | the broadcast's `started_at` | the status's `statusSince` (moves at every status change) |
+| Opening a stream | the lookup's master URL; playlists need the ten-second stream tokens | control-channel handshake (long-poll, replies by id) | stream API: name, edges, a master per edge |
+| Variant choice | the best resolution (the site lists the lowest first) | best ladder rung within `maxHeight`, at the configured latency | the `source` variant, then by bandwidth |
+| Copies | one: no failover | one: no failover | several edges: `edgeOf`, `variantKey`, `recoverVariant` |
+| Stream end | ENDLIST, then playlist 404 → `PlaylistNotFoundError` | playlist 403 + channel list says ended → `PlaylistNotFoundError` | playlist 404 + stream API says ended → `PlaylistNotFoundError` |
+| Segment handling | ffprobe dimensions (`probeSegmentDimensions`) | ffprobe dimensions (`probeSegmentDimensions`) | zero-size sample repair (`dropZeroSizeSamples`), index check, duration from `sidx` |
+| Extras | a 401 run logged once and its end; adding follows the account; hourly name refresh with history; a phone's own token family | numbering restarts pass through to the core | obfuscated playlists (keys from config), renames (durable name history, hourly alias refresh), observe-only access diagnostics |
 
 ## The package
 
@@ -138,14 +139,42 @@ start instead of capturing wrongly.
   is observe-only: it runs beside capture with short timeouts and changes nothing
   (fmp4-live probes every edge without recording an edge failure).
 
+## SiteAuth: accounts
+
+A site that serves only signed-in accounts returns `auth` (a `SiteAuth`) from `create`.
+The auth daemon (`packages/auth`) is its only caller for sign-ins and renewals: it signs
+in the account the sites file names (`"account"`, with the password from the accounts
+file, never the sites file), renews the session and the short-lived tokens on the
+plug-in's `intervals`, and saves the bag to the core's credential store after every
+change. Capture and catalog never sign in: they read the store on every request
+(`ctx.credentials.read()`), so a renewal reaches the next playlist poll without a
+restart. `ts-live` is the reference:
+
+- `login(account)` starts a token family; `refreshSession(bag)` rotates the refresh
+  token (the presented one is spent, so the daemon saves the renewal before anything
+  else uses the bag); `fetchShortTokens(bag, timeoutMs)` trades the session token for
+  the stream tokens.
+- `classify(error)` is the decision, from typed errors, never from message text: the
+  site refused the password → `needs-attention` (automatic sign-ins stop); a client
+  error with the site's own error code (a spent, expired or revoked token) →
+  `reauthenticate`; the site's device check → `verification`; anything else (a block
+  page, a server error, the network) → `outage`, and the tokens stay good.
+- `serializeTokens` / `deserializeTokens` define the stored record. Its field names are
+  a contract with every reader (`headersFor` builds the request headers from it), so
+  they never change without a migration.
+- `provisionDevice` / `acknowledgeDevice` (optional) give a phone a token family of its
+  own: the PC hands it over once per request ID and keeps none of it.
+
 ## Testing
 
 - Unit tests start the simulator in process on ephemeral ports with a manual clock
   (`startSimulator` from `simulator`, see its README) and tiny generated media (ffmpeg
   under `nice`). They build the plug-in through `plugin.create` with a test context, so
   they exercise exactly what the core loads, and move the clock to reach faults.
-- `npm run e2e:capture` runs the real downloader against both sites and judges every
-  recording folder with the simulator's checker (`packages/simulator/README.md`).
+- `npm run e2e:capture` runs the real downloader against the three live sites, with the
+  real auth daemon keeping the account-gated site's session (a revocation of every
+  stream token mid-run included), and judges every recording folder with the
+  simulator's checker (`packages/simulator/README.md`).
 
 ## Content profiles
 

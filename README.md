@@ -28,7 +28,7 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `packages/app` | The website: lists, a viewer with editing, phone-first gestures |
 | `packages/live-extensions` | Safari web extensions built from each site plug-in's description |
 | `packages/simulator` | Simulated live sites, a file host and two upload destinations (a browser-style form host and an API host), with scenarios, faults, a ground-truth log and a checker |
-| `plugins/*` | Public plug-ins for the simulated sites: `ladder-live`, `fmp4-live` (live sources), `form-host` (upload destination) |
+| `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `form-host` (upload destination) |
 | `profiles/tennis` | The tennis content profile: the descriptor's prompt, the description footer and the tags |
 | `e2e/` | End-to-end runs: the real downloader against the simulated sites (`npm run e2e:capture`), the real pipeline against the simulated destination (`npm run e2e:pipeline`) |
 | `deploy/vm` | A QEMU harness that hard-resets a VM at random points and checks every invariant after each boot |
