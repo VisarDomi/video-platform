@@ -796,11 +796,6 @@ export class MediaIntegrityQueue {
 
 export function startMediaIntegrityFinalizer(): void {
     const roots = pendingRoots();
-    // The handoff mailboxes are permanent infrastructure: create them eagerly
-    // so the direct non-recursive watches always have a live target.
-    for (const rootPath of roots) {
-        void fs.mkdir(rootPath, { recursive: true }).catch(() => {});
-    }
     const checkpointStore = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
     let catchUpRunning = false;
     const processingQueue = new MediaIntegrityQueue(async (streamPath) => {
@@ -884,6 +879,11 @@ export function startMediaIntegrityFinalizer(): void {
     };
 
     void (async () => {
+        // The handoff mailboxes are permanent infrastructure: they exist before the watches
+        // start, so a fresh installation (no recording yet) is watched from the first
+        // minute instead of falling back to the hourly reconciliation.
+        await Promise.all(roots.map((rootPath) => fs.mkdir(rootPath, { recursive: true }).catch((error: Error) =>
+            logger.error("[Finalization] could not create a pending root", { rootPath, error: error.message }))));
         const observer = new PendingDirectoryObserver(
             roots,
             (streamPath) => {
