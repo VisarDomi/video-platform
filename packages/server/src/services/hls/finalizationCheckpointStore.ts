@@ -64,6 +64,53 @@ export class FinalizationCheckpointStore {
         `).run(path.resolve(recordingPath), fingerprint, JSON.stringify(report), new Date().toISOString());
     }
 
+    // A move keeps the playlist byte for byte, so a ready checkpoint still holds for the folder
+    // at its new path. Writes it there (before the move; the caller clears the old row after) and
+    // says whether there was one to carry.
+    carry(fromPath: string, toPath: string, fingerprint: string): boolean {
+        const from = path.resolve(fromPath);
+        const report = this.readyReport(from, fingerprint);
+        if (!report) return false;
+        this.writeCarried(from, path.resolve(toPath), fingerprint, report);
+        return true;
+    }
+
+    // For a folder moved without the server (a file manager, an older server): adopts the ready
+    // checkpoint of a recording of the same folder name and the same playlist elsewhere, when
+    // this path has none. Returns the path it came from.
+    adoptMoved(recordingPath: string, fingerprint: string): string | null {
+        const target = path.resolve(recordingPath);
+        if (this.database.prepare("SELECT 1 FROM integrity_checkpoints WHERE recording_path = ?").get(target)) {
+            return null;
+        }
+        const suffix = path.sep + path.basename(target);
+        const rows = this.database.prepare(`
+            SELECT recording_path FROM integrity_checkpoints
+            WHERE substr(recording_path, -length(?)) = ? AND playlist_fingerprint = ?
+            ORDER BY updated_at DESC
+        `).all(suffix, suffix, fingerprint) as { recording_path: string }[];
+        for (const { recording_path: from } of rows) {
+            const report = this.readyReport(from, fingerprint);
+            if (!report) continue;
+            this.writeCarried(from, target, fingerprint, report);
+            return from;
+        }
+        return null;
+    }
+
+    private readyReport(recordingPath: string, fingerprint: string): Record<string, unknown> | null {
+        const report = this.read<Record<string, unknown>>(recordingPath, fingerprint);
+        return report && report.version === 2 && report.status === "ready" ? report : null;
+    }
+
+    private writeCarried(from: string, to: string, fingerprint: string, report: Record<string, unknown>): void {
+        const carried: Record<string, unknown> = { ...report, movedFrom: from };
+        if (typeof report.playlistPath === "string") {
+            carried.playlistPath = path.join(to, path.basename(report.playlistPath));
+        }
+        this.write(to, fingerprint, carried);
+    }
+
     clear(recordingPath: string): void {
         this.database.prepare("DELETE FROM integrity_checkpoints WHERE recording_path = ?")
             .run(path.resolve(recordingPath));

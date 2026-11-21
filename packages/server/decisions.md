@@ -112,6 +112,19 @@ dts" messages are bookkeeping, not corruption: they are filtered while stderr is
 streamed, before its bounded 16 KiB capture, so a truncated ignored message
 cannot become a false error. Demuxer and decoder errors are failures.
 
+## A recording's checkpoint moves with it
+
+Saving (OK in the viewer and the phone app), trashing and restoring move a recording's folder
+with a rename, which keeps its playlist byte for byte, so the validation still holds: the
+`ready` checkpoint is written under the destination before the rename, both folders are synced
+after it, and only then is the old row cleared. A saved recording is therefore as eligible for
+upload as a cut one; a cut writes its own checkpoint by derivation. A power cut at any point
+leaves the folder with a checkpoint wherever it is (at worst an extra row for a path that does
+not exist, which nothing admits).
+
+**Why:** Until 2026-11-21 a save moved only the folder. Every recording kept with OK lost its
+checkpoint and could never be uploaded; 1,117 had piled up since August.
+
 ## Finalization exposes work while systemd allocates resources
 
 The pending queue is one deduplicating FIFO with one worker per
@@ -164,7 +177,10 @@ npm run finalize-library -w server -- --recording "/exact/managed/folder" --appl
 It runs in a systemd scope inside `video-processing.slice` with a stable name,
 so a second invocation of the same kind cannot run concurrently and the
 operator can stop it by name. Unchanged playlists with a `ready` checkpoint are
-skipped; interrupted deep scans resume from their checkpoint. It processes
+skipped; interrupted deep scans resume from their checkpoint. A folder moved without its
+checkpoint (by hand, or by a server older than the carrying move) first takes the `ready` one
+its folder name has elsewhere with the same playlist, so only recordings that never had one are
+decoded. It processes
 folders in place and never publishes or trashes them, and it removes any
 legacy `.media-integrity.json` sidecar of a ready recording. A complete
 `all`/`all` run without failures records the `historical-finalization-v1`
