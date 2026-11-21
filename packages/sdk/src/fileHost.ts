@@ -14,7 +14,11 @@ import { SDK_VERSION } from "./plugin.js";
 //   { "fileHosts": [ { "id": "file-host", "plugin": "plugin-file-host",
 //                      "config": { "directory": "~/Videos/file-host" } } ], "sites": [ ... ] }
 //
-// "config.directory" is where completed files are published (default ~/Videos/<id>).
+// "config.directory" is where completed files are published (default ~/Videos/<id>); the
+// plug-in reads the rest of "config" (createFileHost). The core contacts a host only over
+// HTTPS on the default port; "allowPorts" (the entry's, not the config's) names the other
+// ports a deployment allows for that host, e.g. a simulated host on 127.0.0.1:18084. Only
+// the operator writes it: neither a plug-in nor a page can widen the guard.
 
 // What the core lets a file host fetch while it resolves a page: small answers (at most
 // 1 MiB) from its own hosts over HTTPS, redirects followed only to them.
@@ -43,19 +47,27 @@ export interface FileHost {
     jobKey(page: string): string;
 }
 
+export interface FileHostContext {
+    // The entry's "config" block from the sites file ({} without one).
+    config: Readonly<Record<string, unknown>>;
+}
+
 export interface FileHostPlugin {
     // The plug-in type, e.g. "file-host".
     id: string;
     // The host's display name, in messages and log lines.
     label: string;
     sdkVersion: typeof SDK_VERSION;
-    createFileHost(): FileHost;
+    // Throws on a config it cannot use: a broken sites file stops the start.
+    createFileHost(context: FileHostContext): FileHost;
 }
 
 export interface FileHostEntry {
     id: string;
     plugin: string;
     config?: Record<string, unknown>;
+    // Ports other than HTTPS's default that the core may contact this host on.
+    allowPorts?: number[];
 }
 
 const FILE_HOST_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -81,7 +93,13 @@ export function parseFileHosts(text: string, source = "sites file"): FileHostEnt
         if (entry.config !== undefined && (typeof entry.config !== "object" || entry.config === null || Array.isArray(entry.config))) {
             throw new Error(`${where}: config must be an object`);
         }
-        return { id: entry.id, plugin: entry.plugin, ...(entry.config ? { config: entry.config } : {}) };
+        const ports = entry.allowPorts;
+        if (ports !== undefined && (!Array.isArray(ports) || ports.length === 0
+            || !ports.every((port) => Number.isInteger(port) && port > 0 && port < 65536 && port !== 443)
+            || new Set(ports).size !== ports.length)) {
+            throw new Error(`${where}: allowPorts must be a list of distinct ports (1-65535, not 443)`);
+        }
+        return { id: entry.id, plugin: entry.plugin, ...(entry.config ? { config: entry.config } : {}), ...(ports ? { allowPorts: [...ports] } : {}) };
     });
 }
 

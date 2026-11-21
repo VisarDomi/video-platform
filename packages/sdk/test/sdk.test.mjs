@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FilePluginStore, loadSites, parseSitesFile, readSitesFile, sitesWith, SDK_VERSION } from "../dist/index.js";
+import { FilePluginStore, loadSites, parseFileHosts, parseSitesFile, readSitesFile, sitesWith, SDK_VERSION } from "../dist/index.js";
 
 test("the store replaces values durably and leaves no temporary files", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "sdk-store-"));
@@ -110,4 +110,15 @@ test("a failed load closes the instances it already created, so the process can 
     await assert.rejects(loadSites([{ id: "a", plugin: "good" }, { id: "t", plugin: "auth" }], { importPlugin, context }),
         /needs an "account"/);
     assert.deepEqual(closed.sort(), ["a", "t"]);
+});
+
+test("file hosts: ports besides HTTPS's default only as the entry's own distinct list", () => {
+    const parse = (entry) => parseFileHosts(JSON.stringify({ fileHosts: [{ id: "file-host", plugin: "plugin-file-host", ...entry }] }));
+    assert.deepEqual(parse({}), [{ id: "file-host", plugin: "plugin-file-host" }]);
+    assert.deepEqual(parse({ allowPorts: [18084, 18085], config: { origin: "https://127.0.0.1:18084" } }),
+        [{ id: "file-host", plugin: "plugin-file-host", config: { origin: "https://127.0.0.1:18084" }, allowPorts: [18084, 18085] }]);
+    for (const allowPorts of [[], [0], [65536], [1.5], ["18084"], [443], [80, 80], "18084"]) {
+        assert.throws(() => parse({ allowPorts }), /allowPorts/, JSON.stringify(allowPorts));
+    }
+    assert.deepEqual(parseFileHosts(JSON.stringify({ sites: [] })), []);
 });
