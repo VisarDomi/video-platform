@@ -56,4 +56,6 @@ systemctl --user start video-platform-demo
 With lingering enabled (`loginctl enable-linger`) it comes back after a reboot or a power
 cut: systemd restarts the pod, and the supervisor resumes from the volume (the ledger, the
 recordings, the simulator's state). Recordings accumulate on the volume unless
-`DEMO_CLEANUP=1`.
+`DEMO_CLEANUP=1`: with the generated media, 1 to 2 GB an hour while channels are live
+(more with your own videos, which are served at their own bitrate). `npm run demo:down` and
+`podman volume rm video-platform-demo` start over.
