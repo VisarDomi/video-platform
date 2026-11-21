@@ -27,6 +27,7 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `packages/descriptor` | Describes a recording with a local vision model (llama.cpp) for its title and description |
 | `packages/app` | The website: lists, a viewer with editing, phone-first gestures |
 | `packages/live-extensions` | Safari web extensions built from each site plug-in's description |
+| `apps/ios` | The iPhone apps (Swift, one shell): a local app per site that plays and edits the PC's recordings ("Wimbledon local"), and a live app for the account-gated site ("Wimbledon": the followed streams, signed in from the PC, stream tokens renewed while playing), with walk-throughs on a simulator ([apps/ios/README.md](apps/ios/README.md)) |
 | `packages/simulator` | Simulated live sites, a file host and two upload destinations (a browser-style form host and an API host), with scenarios, faults, a ground-truth log and a checker |
 | `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `file-host` (single files copied to the PC), `form-host`, `api-host` (upload destinations) |
 | `profiles/tennis` | The tennis content profile: the descriptor's prompt, the description footer and the tags |
