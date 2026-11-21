@@ -197,6 +197,25 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data['sources'], ['live-a', 'live-b', 'live-c'])
         self.assertTrue(data['authentication']['confirmed'])
 
+    def test_a_supervisor_other_than_systemd_reports_the_services(self):
+        from collector import supervised_report
+        report = self.root / 'services.json'
+        self.assertIsNone(supervised_report(''))
+        report.write_text(json.dumps({'written_at': 1000, 'services': {
+            'video-pipeline': {'state': 'active', 'restarts': 2, 'uptime_seconds': 30}, 'video-auth': {'state': 'activating'}},
+            'worker_step': {'disposition': 'idle', 'reason': None}}))
+        fresh = supervised_report(str(report), now=1030)
+        self.assertEqual(fresh['services']['video-pipeline'], {'state': 'active', 'restarts': 2, 'cpu_percent': None, 'anonymous_bytes': None, 'uptime_seconds': 30})
+        self.assertEqual(fresh['services']['video-auth']['state'], 'activating')
+        self.assertEqual(fresh['services']['video-xvfb']['state'], 'unknown')
+        self.assertEqual(fresh['worker_step'], {'disposition': 'idle', 'reason': ''})
+        # Its supervisor is gone: nothing it said holds.
+        stale = supervised_report(str(report), now=1100)
+        self.assertEqual({row['state'] for row in stale['services'].values()}, {'unknown'})
+        self.assertIsNone(stale['worker_step'])
+        data = snapshot(self.root, self.downloads, now=self.now, services=fresh['services'], worker_step=fresh['worker_step'])
+        self.assertNotEqual(data['campaign']['state'], 'status_unavailable')
+
     def test_recording_status_exposes_no_signed_urls_or_private_paths(self):
         folder=self.downloads/'live-c/downloaded/.active/2026-11-01 010000 capture';folder.mkdir(parents=True)
         (folder/'playlist.m3u8').write_text('#EXTM3U\n#EXTINF:2,\n1.ts\n')

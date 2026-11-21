@@ -1,0 +1,11 @@
+# The demo image's build context (deploy/demo/Containerfile).
+private
+.git
+**/node_modules
+**/dist
+**/dist-server
+**/build
+**/.svelte-kit
+deploy/vm/results
+*.har
+.env

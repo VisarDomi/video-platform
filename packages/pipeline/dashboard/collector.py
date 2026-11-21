@@ -81,7 +81,34 @@ def identity(row):
             "joined": " joined-" in name}
 
 
+def supervised_report(path=None, now=None):
+    """The services as a supervisor other than systemd reports them (the demo pod's), from
+    the file VIDEO_DASHBOARD_SERVICES_FILE names: {"written_at": epoch seconds, "services":
+    {unit: {"state", "restarts", "uptime_seconds"}}, "worker_step": {"disposition",
+    "reason"} or null}. None without such a file; a report older than a minute (its
+    supervisor is gone) reads as every unit unknown."""
+    path = path or os.environ.get("VIDEO_DASHBOARD_SERVICES_FILE")
+    if not path:
+        return None
+    report = read_json(Path(path), {}) or {}
+    fresh = isinstance(report.get("written_at"), (int, float)) and abs((now or time.time()) - report["written_at"]) <= 60
+    reported = report.get("services") if fresh and isinstance(report.get("services"), dict) else {}
+    services = {}
+    for name in UNITS:
+        row = reported.get(name) if isinstance(reported.get(name), dict) else {}
+        services[name] = {"state": row.get("state") if isinstance(row.get("state"), str) else "unknown",
+                          "restarts": row.get("restarts") if isinstance(row.get("restarts"), int) else 0,
+                          "cpu_percent": None, "anonymous_bytes": None,
+                          "uptime_seconds": row.get("uptime_seconds") if isinstance(row.get("uptime_seconds"), (int, float)) else None}
+    step = report.get("worker_step") if fresh and isinstance(report.get("worker_step"), dict) else None
+    return {"services": services,
+            "worker_step": {"disposition": step.get("disposition"), "reason": safe_reason(step.get("reason"))} if step else None}
+
+
 def read_services(previous=None):
+    supervised = supervised_report()
+    if supervised is not None:
+        return supervised["services"], previous
     command = ["systemctl", "--user", "show", *(name + ".service" for name in UNITS),
                "-p", "Id,ActiveState,SubState,NRestarts,MainPID,ControlGroup,CPUUsageNSec,ActiveEnterTimestampMonotonic,InvocationID"]
     now = time.monotonic()
@@ -123,6 +150,9 @@ def read_services(previous=None):
 
 
 def latest_worker_step():
+    supervised = supervised_report()
+    if supervised is not None:
+        return supervised["worker_step"]
     try:
         result = subprocess.run(["journalctl", "--user", "-u", "video-pipeline", "-n", "30", "-o", "json", "--no-pager"],
                                 capture_output=True, text=True, timeout=2, check=True)

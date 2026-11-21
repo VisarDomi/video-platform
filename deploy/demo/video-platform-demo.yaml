@@ -1,0 +1,60 @@
+# The demo pod: `podman kube play --replace deploy/demo/video-platform-demo.yaml` (after
+# building the image), or the Quadlet unit next to this file for an always-on demo.
+# Every service keeps its own port inside the pod; the host sees them 20000 higher, apart
+# from production's.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: video-platform-demo
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: video-platform-demo
+  labels:
+    app: video-platform-demo
+spec:
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 60
+  containers:
+    - name: platform
+      image: localhost/video-platform-demo:latest
+      env:
+        # Extra names or addresses for the certificate, e.g. the PC's LAN address so a
+        # phone can open the website (comma-separated; read when the certificate is made).
+        - name: DEMO_CERT_HOSTS
+          value: ""
+        # The destination the campaign uploads to: form-host or api-host.
+        - name: DEMO_DESTINATION
+          value: form-host
+      resources:
+        limits:
+          cpu: "2"
+          memory: 4Gi
+      ports:
+        - { name: website, containerPort: 9999, hostPort: 29999 }
+        - { name: file-queue, containerPort: 9998, hostPort: 29998 }
+        - { name: dashboard, containerPort: 8791, hostPort: 28791 }
+        - { name: sim-control, containerPort: 18080, hostPort: 28080 }
+        - { name: sim-ts-live, containerPort: 18081, hostPort: 28081 }
+        - { name: sim-ladder, containerPort: 18082, hostPort: 28082 }
+        - { name: sim-fmp4, containerPort: 18083, hostPort: 28083 }
+        - { name: sim-files, containerPort: 18084, hostPort: 28084 }
+        - { name: sim-form-host, containerPort: 18085, hostPort: 28085 }
+        - { name: sim-api-host, containerPort: 18086, hostPort: 28086 }
+        - { name: sim-files-cdn, containerPort: 18087, hostPort: 28087 }
+      volumeMounts:
+        - { name: state, mountPath: /demo }
+        # Your own videos for the simulated sites (read when the media is first prepared):
+        # - { name: media, mountPath: /media, readOnly: true }
+  volumes:
+    - name: state
+      persistentVolumeClaim:
+        claimName: video-platform-demo
+    # - name: media
+    #   hostPath: { path: /home/you/Videos/tennis, type: Directory }
