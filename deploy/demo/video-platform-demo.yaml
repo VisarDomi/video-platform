@@ -1,5 +1,5 @@
-# The demo pod: `podman kube play --replace deploy/demo/video-platform-demo.yaml` (after
-# building the image), or the Quadlet unit next to this file for an always-on demo.
+# The demo pod, started and stopped on demand by deploy/demo/demo.sh (or
+# `podman kube play --replace deploy/demo/video-platform-demo.yaml` after building the image).
 # Every service keeps its own port inside the pod; the host sees them 20000 higher, apart
 # from production's.
 apiVersion: v1
@@ -19,7 +19,8 @@ metadata:
   labels:
     app: video-platform-demo
 spec:
-  restartPolicy: Always
+  # A crash restarts the supervisor; a stop (or a reboot) does not bring the demo back.
+  restartPolicy: OnFailure
   terminationGracePeriodSeconds: 60
   containers:
     - name: platform

@@ -7,7 +7,9 @@
 // 1. Media: the videos in $DEMO_MEDIA_INPUT (mounted, e.g. a folder of tennis matches) or,
 //    without any, three generated test patterns; prepared once for the simulator.
 // 2. A certificate for the pod's HTTPS (127.0.0.1, localhost and $DEMO_CERT_HOSTS, e.g. the
-//    PC's LAN address for a phone), made once; or one mounted at ~/.local/share/mkcert/pwa.
+//    PC's LAN address for a phone), made once; or the deployment's own from /demo-config
+//    (deploy/demo/demo.sh mounts it: cert.pem and key.pem that its phones already trust, and
+//    the <site>-phone-key files its apps were built with).
 // 3. The simulator (packages/simulator/scenarios/demo.json, real clock): three live sites,
 //    a file host and two upload destinations, all over HTTPS.
 // 4. The sites file, the accounts files and the download lists, written for it (the lists
@@ -20,12 +22,12 @@
 //    (published into a site's edited/ folder with a ready checkpoint), so a few minutes after
 //    a recording is finalized the demo keeps all of it through the server's API, as a cut that
 //    keeps every segment does ($DEMO_AUTO_SAVE_MINUTES, default 5; $DEMO_AUTO_SAVE=0 leaves
-//    it to you). A plain save only moves the folder; it waits for an explicit finalize-library.
+//    it to you, in the viewer: a save or a cut).
 //
 // SIGTERM stops the services (the worker first, the simulator last) and exits.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import os from 'node:os';
@@ -78,6 +80,24 @@ async function prepareMedia() {
 }
 
 // ---- 2. certificate ------------------------------------------------------------------------
+
+// A deployment's own certificate and phone keys, mounted read-only, are copied into place
+// before anything reads them (the server keeps a site's phone key in its shared state).
+const CONFIG = process.env.DEMO_CONFIG ?? '/demo-config';
+function adoptConfig() {
+    if (!existsSync(CONFIG)) return;
+    if (existsSync(path.join(CONFIG, 'cert.pem')) && existsSync(path.join(CONFIG, 'key.pem'))) {
+        mkdirSync(CERTS, { recursive: true });
+        copyFileSync(path.join(CONFIG, 'cert.pem'), path.join(CERTS, 'cert.pem'));
+        copyFileSync(path.join(CONFIG, 'key.pem'), path.join(CERTS, 'key.pem'));
+        say(`using the mounted certificate from ${CONFIG}`);
+    }
+    for (const name of readdirSync(CONFIG).filter((entry) => entry.endsWith('-phone-key'))) {
+        mkdirSync(DATA, { recursive: true });
+        writeAtomically(path.join(DATA, name), readFileSync(path.join(CONFIG, name), 'utf8').trim() + '\n', 0o600);
+        say(`using the mounted ${name}`);
+    }
+}
 
 function certificate() {
     const cert = path.join(CERTS, 'cert.pem');
@@ -318,6 +338,7 @@ async function saveFinishedRecordings(sites, delayMs) {
 
 mkdirSync(DEMO, { recursive: true });
 const media = await prepareMedia();
+adoptConfig();
 const { cert, key } = certificate();
 const modelUrl = process.env.DEMO_MODEL_URL ?? await modelStandIn();
 
