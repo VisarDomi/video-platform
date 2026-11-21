@@ -110,7 +110,9 @@ export async function startSimulator(options: StartOptions): Promise<RunningSimu
     const host = options.host ?? "127.0.0.1";
     const urls = {} as Record<PortName, string>;
     const servers: http.Server[] = [];
-    const urlHost = host.includes(":") ? `[${host}]` : host;
+    // Listening on every address is no address to connect to: the URLs (and the links a
+    // site builds from them) name the loopback one.
+    const urlHost = host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "[::1]" : host.includes(":") ? `[${host}]` : host;
     try {
         for (const [site, module] of sim.sites) {
             for (const { name, router } of [{ name: site as string, router: module.router }, ...(module.extraServers ?? [])]) {

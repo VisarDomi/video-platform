@@ -1,0 +1,27 @@
+# The demo image: the whole platform and its simulator, built from this repository.
+#   podman build -t localhost/video-platform-demo:latest -f deploy/demo/Containerfile .
+# The build context is the repository; .containerignore keeps out private/ (a deployment's
+# own code never enters an image), installed modules and build output.
+FROM docker.io/library/node:22.19.0-trixie-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg openssl python3 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+# No browser is downloaded: the demo's sites need none.
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund \
+ && npm run build:backend \
+ && npm run build -w simulator \
+ && npm run build:sim-plugins \
+ && test ! -e private
+
+# Everything the demo keeps lives under $HOME, on the pod's volume.
+ENV HOME=/demo/home DEMO_MEDIA_INPUT=/media
+RUN mkdir -p /demo/home /media
+VOLUME /demo
+# The website and API, the file-host queue, the dashboard, the simulated sites.
+EXPOSE 9999 9998 8791 18080-18087
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["node", "/app/deploy/demo/supervisor.mjs"]
