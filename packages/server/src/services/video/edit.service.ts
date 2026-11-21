@@ -145,6 +145,9 @@ export async function editVideo(ref: VideoRef, segments: string[]): Promise<void
     } catch (error: any) {
         if (error?.code !== "ENOENT") throw error;
     }
+    // A fresh installation has no edited/ folder before its first edit; a new one is made
+    // durable (its parent synced) before anything is built inside it.
+    if (await fsPromises.mkdir(editedRoot, { recursive: true }) !== undefined) await syncPath(path.dirname(editedRoot));
     await fsPromises.mkdir(buildingPath);
 
     const movePromises = validSegments.map((file) =>

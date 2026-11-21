@@ -33,6 +33,12 @@ lists from `packages/simulator/scenarios/demo.json`. Then it starts the simulato
 service, and restarts a service that exits. The description model is a stand-in that answers
 in the descriptor's format; `DEMO_MODEL_URL` points the pipeline at a real one.
 
+The pipeline uploads only the recordings someone kept in the viewer: published into a site's
+`edited/` folder with a ready checkpoint, as a cut does. So that the demo runs on its own, the
+supervisor keeps all of each finished recording five minutes after it appears, through the
+server's API as a cut that keeps every segment does (`DEMO_AUTO_SAVE_MINUTES`;
+`DEMO_AUTO_SAVE=0` leaves the choice to you, on the website or the phone).
+
 Settings, in `video-platform-demo.yaml`:
 
 - `DEMO_DESTINATION`: `form-host` (default) or `api-host`.
