@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 // End-to-end: the real pipeline (packages/pipeline/dist/main.js, as child processes)
 // takes finalized recordings of a simulated live site through discovery, conversion,
-// description and upload to the simulated form host (through the public plugin-form-host),
-// then verifies them a day later, and bans a copy the host removed.
+// description and upload to a simulated destination, then verifies them a day later, and
+// bans a copy the host removed. The destination is the form host (plugin-form-host: the
+// video exists once its metadata form is submitted) or, with --destination api-host, the
+// API host (plugin-api-host: the video exists from the start of its resumable upload).
 //
-//   npm run build:pipeline && npm run build -w simulator && npm run build -w plugin-form-host
-//   npm run e2e:pipeline           (a few minutes; E2E_KEEP=1 keeps everything)
+//   npm run build:pipeline && npm run build -w simulator && npm run build:sim-plugins
+//   npm run e2e:pipeline           (about twenty seconds; E2E_KEEP=1 keeps everything)
+//   npm run e2e:pipeline -- --destination api-host
 //
 // 1. Three finalized recordings of "live-a" (generated 1080p HLS, ffmpeg under nice), and
 //    their finalization checkpoints, in a temporary downloads root and data root.
-// 2. The simulator in this process: the form host only, a manual clock, a refused word.
+// 2. The simulator in this process: the destination only, a manual clock, a refused word.
 // 3. Stand-ins for the other services: a model server (the descriptor's OpenAI-style
 //    endpoint) whose first description carries the refused word, and the server's
 //    resolve route over HTTPS (a self-signed certificate made now).
 // 4. The pipeline's clock is the run's simulated time (e2e/support/clock.mjs), so a day
 //    passes between two commands; the simulator's clock is set to the same time.
 // 5. The run: configure, choose the destination, resume, campaign steps until every
-//    recording is submitted (a forced logout on the way); the host removes one; a day
+//    recording is submitted (every session of the account ended on the way); the host removes one; a day
 //    later reconcile verifies the other two and records the removal (banned); a retry
 //    and eight more days upload nothing again.
 //
@@ -34,11 +37,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEEP = process.env.E2E_KEEP === '1';
+const flag = process.argv.indexOf('--destination');
+const DESTINATION = flag > 0 ? process.argv[flag + 1] : 'form-host';
+if (DESTINATION !== 'form-host' && DESTINATION !== 'api-host') {
+    console.error('--destination is form-host or api-host');
+    process.exit(2);
+}
 
-const need = ['packages/pipeline/dist/main.js', 'packages/simulator/dist/index.js', 'packages/sdk/dist/index.js', 'plugins/form-host/dist/index.js'];
+const need = ['packages/pipeline/dist/main.js', 'packages/simulator/dist/index.js', 'packages/sdk/dist/index.js', `plugins/${DESTINATION}/dist/index.js`];
 for (const file of need) {
     if (!existsSync(path.join(ROOT, file))) {
-        console.error(`missing ${file}: build first (npm run build:pipeline && npm run build -w simulator && npm run build -w plugin-form-host)`);
+        console.error(`missing ${file}: build first (npm run build:pipeline && npm run build -w simulator && npm run build:sim-plugins)`);
         process.exit(2);
     }
 }
@@ -99,23 +108,45 @@ try {
 
     // ---- 2. the simulator ----------------------------------------------------------------
 
-    say('starting the simulator (form host)');
+    say(`starting the simulator (${DESTINATION})`);
     mkdirSync(path.join(dirs.media, 'in'), { recursive: true });
     execFileSync('nice', ['-n', '19', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25',
         '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '2', path.join(dirs.media, 'in', 'Practice.mkv')]);
     await prepAll({ input: path.join(dirs.media, 'in'), out: path.join(dirs.media, 'cache') });
     const clock = new SimClock({ mode: 'manual', at: EPOCH + 3_600_000 * 11 });
+    // What differs between the two destinations; the story is the same.
+    const hosts = {
+        'form-host': {
+            spec: { accounts: [{ username: 'coach', password: 'pw', displayName: 'Coach' }],
+                chunkSize: 1 << 20, processingS: 120, bannedWords: [{ word: 'forbidden', action: 'refuse' }] },
+            config: (baseUrl) => ({ baseUrl, retryDelayMs: 100 }),
+            // Every session of the account ends, remember-me too.
+            signOutEverywhere: () => control('logout', { account: 'coach', revokeRemember: true }),
+            // An upload ends uncertain (until verified) after its last step: the metadata form.
+            lastPhase: 'metadata_submitting',
+            refusals: () => events('metadata-refused').length,
+            passwordLogins: () => events('login').filter((event) => event.via === 'password').length,
+        },
+        'api-host': {
+            spec: { accounts: [{ username: 'coach', password: 'pw' }], clients: [{ clientId: 'pipeline', clientSecret: 'e2e-client-secret' }],
+                rotateRefreshTokens: true, processingS: 120, bannedWords: [{ word: 'forbidden' }] },
+            config: (baseUrl) => ({ baseUrl, clientId: 'pipeline', clientSecret: 'e2e-client-secret', retryDelayMs: 100 }),
+            // Every token family of the account is revoked.
+            signOutEverywhere: () => control('revoke', { account: 'coach' }),
+            // The video exists from the create; the upload's last step is the last byte.
+            lastPhase: 'file_uploaded',
+            refusals: () => sim.memory.records.filter((r) => r.type === 'response' && r.site === 'api-host' && r.status === 422).length,
+            passwordLogins: () => events('login').length,
+        },
+    };
+    const destination = hosts[DESTINATION];
     sim = await startSimulator({
-        scenario: { name: 'pipeline e2e', seed: 'pipeline-e2e', epoch: EPOCH, sites: { 'form-host': {
-            accounts: [{ username: 'coach', password: 'pw', displayName: 'Coach' }],
-            chunkSize: 1 << 20, processingS: 120, bannedWords: [{ word: 'forbidden', action: 'refuse' }],
-        } } },
+        scenario: { name: 'pipeline e2e', seed: 'pipeline-e2e', epoch: EPOCH, sites: { [DESTINATION]: destination.spec } },
         media: MediaLibrary.load(path.join(dirs.media, 'cache')), clock, autoPublish: false, memoryTruth: true, host: '127.0.0.1',
     });
-    const formHost = sim.urls['form-host'];
-    const control = (action, body = {}) => fetch(`${sim.urls.control}/sites/form-host/${action}`, {
+    const control = (action, body = {}) => fetch(`${sim.urls.control}/sites/${DESTINATION}/${action}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
-    const events = (name) => sim.memory.records.filter((r) => r.type === 'event' && r.site === 'form-host' && r.event === name);
+    const events = (name) => sim.memory.records.filter((r) => r.type === 'event' && r.site === DESTINATION && r.event === name);
 
     // ---- 3. stand-ins ---------------------------------------------------------------------
 
@@ -153,10 +184,10 @@ try {
 
     writeFileSync(sitesFile, JSON.stringify({
         contentProfile: pathToFileURL(path.join(ROOT, 'e2e', 'support', 'profile.mjs')).href,
-        destinations: [{ id: 'form-host', plugin: 'plugin-form-host', config: { baseUrl: formHost, retryDelayMs: 100 } }],
+        destinations: [{ id: DESTINATION, plugin: `plugin-${DESTINATION}`, config: destination.config(sim.urls[DESTINATION]) }],
         sites: [{ id: SITE, plugin: 'plugin-ts-live' }],
     }, null, 2));
-    writeFileSync(credentialsFile, JSON.stringify({ version: 1, providers: { 'form-host': { username: 'coach', password: 'pw' } } }), { mode: 0o600 });
+    writeFileSync(credentialsFile, JSON.stringify({ version: 1, providers: { [DESTINATION]: { username: 'coach', password: 'pw' } } }), { mode: 0o600 });
 
     let now = EPOCH + 3_600_000 * 11; // 11:00, the day of the recordings
     const env = {
@@ -193,11 +224,11 @@ try {
 
     say('configuring the campaign and its destination');
     await must('campaign-configure', '--provider', 'all', '--apply');
-    await must('upload-provider', '--provider', 'form-host', '--apply');
+    await must('upload-provider', '--provider', DESTINATION, '--apply');
     await must('campaign-resume', '--apply');
 
     say('campaign steps until every recording is submitted');
-    const submitted = () => ledger("SELECT DISTINCT recording_id FROM upload_attempts WHERE status = 'uncertain' AND phase = 'metadata_submitting'").length;
+    const submitted = () => ledger("SELECT DISTINCT recording_id FROM upload_attempts WHERE status = 'uncertain' AND phase = ?", destination.lastPhase).length;
     let loggedOut = false;
     const dispositions = [];
     for (let step = 0; step < 60 && submitted() < names.length; step++) {
@@ -206,8 +237,8 @@ try {
         dispositions.push(disposition);
         if (result.code !== 0) say(`step ${step}:\n${result.stderr.trim().slice(0, 1500)}`);
         if (!loggedOut && submitted() === 1) {
-            // Every session of the account ends, remember-me too: the next upload signs in again.
-            await control('logout', { account: 'coach', revokeRemember: true });
+            // Every session of the account ends: the next upload signs in again.
+            await destination.signOutEverywhere();
             loggedOut = true;
         }
     }
@@ -218,10 +249,10 @@ try {
     for (const name of names) {
         check(created.filter((event) => event.title.endsWith(`[${name}]`)).length === 1, `"${name}": one video, its title stamped with the recording`);
     }
-    check(events('metadata-refused').length === 1, 'the refused word was refused once');
+    check(destination.refusals() === 1, 'the refused word was refused once');
     check(rewrites >= 1 && !created.some((event) => /forbidden/i.test(event.title)), 'the description was rewritten without it');
-    check(ledger("SELECT phrase FROM rejected_phrases WHERE provider = 'form-host'").some((row) => row.phrase === 'forbidden'), 'the refused word is learned for form-host');
-    check(events('login').filter((event) => event.via === 'password').length === 2, 'one password login, then one more after the forced logout');
+    check(ledger('SELECT phrase FROM rejected_phrases WHERE provider = ?', DESTINATION).some((row) => row.phrase === 'forbidden'), `the refused word is learned for ${DESTINATION}`);
+    check(destination.passwordLogins() === 2, 'one password login, then one more after every session ended');
     check(resolves.length >= names.length && resolves.every((line) => line.startsWith(`/api/${SITE}/resolve`)), 'provenance came from the server\'s resolve route');
     const descriptionsSent = ledger('SELECT description FROM upload_metadata').map((row) => row.description);
     check(descriptionsSent.length === names.length && descriptionsSent.every((text) => text.includes(`Source: https://${SITE}.test/id-`)), 'every description names its source page from the catalog');
@@ -237,12 +268,12 @@ try {
     const verified = ledger('SELECT recording_id FROM remote_uploads').map((row) => row.recording_id).sort();
     check(JSON.stringify(verified) === JSON.stringify(names.slice(0, 2)), `the two others are verified online (${verified.length})`);
     // Gone from the host's complete list: removed (not a failed processing), so it is
-    // recorded at once, accepted or not, and never uploaded to form-host again.
+    // recorded at once, accepted or not, and never uploaded to that destination again.
     check(reconciled.json().results.some((r) => r.recordingId === removedName && r.disposition === 'provider_removed'),
         'the removed upload is recorded as removed by the host');
     const removals = ledger('SELECT recording_id, provider, remote_id FROM provider_removals');
-    check(removals.length === 1 && removals[0].recording_id === removedName && removals[0].provider === 'form-host' && removals[0].remote_id === removedId,
-        'the removal is recorded against form-host, with the video ID the host had given');
+    check(removals.length === 1 && removals[0].recording_id === removedName && removals[0].provider === DESTINATION && removals[0].remote_id === removedId,
+        `the removal is recorded against ${DESTINATION}, with the video ID the host had given`);
     check(ledger('SELECT state FROM recordings WHERE id = ?', removedName)[0].state === 'blocked', 'the recording is blocked for review');
     const retried = await pipeline('retry', removedName, '--apply');
     say(`retry: exit ${retried.code}: ${(retried.stderr || retried.stdout).trim().split('\n')[0].slice(0, 200)}`);
@@ -252,8 +283,8 @@ try {
     await must('reconcile-uploads', '--apply');
     for (let step = 0; step < 5; step++) await pipeline('campaign-step', '--apply');
     check(retried.code !== 0 && events('video-created').length === names.length, 'a retry refuses the removed recording, and it is never uploaded again'); 
-    const bandwidth = ledger("SELECT COALESCE(SUM(transmitted_bytes), 0) AS bytes FROM bandwidth_events WHERE provider = 'form-host'")[0].bytes;
-    check(bandwidth > 0, `bytes sent are billed to form-host (${bandwidth})`);
+    const bandwidth = ledger('SELECT COALESCE(SUM(transmitted_bytes), 0) AS bytes FROM bandwidth_events WHERE provider = ?', DESTINATION)[0].bytes;
+    check(bandwidth > 0, `bytes sent are billed to ${DESTINATION} (${bandwidth})`);
 } catch (error) {
     failures.push(error.stack ?? String(error));
     console.error(error);

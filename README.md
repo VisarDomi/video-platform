@@ -28,9 +28,9 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `packages/app` | The website: lists, a viewer with editing, phone-first gestures |
 | `packages/live-extensions` | Safari web extensions built from each site plug-in's description |
 | `packages/simulator` | Simulated live sites, a file host and two upload destinations (a browser-style form host and an API host), with scenarios, faults, a ground-truth log and a checker |
-| `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `file-host` (single files copied to the PC), `form-host` (upload destination) |
+| `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `file-host` (single files copied to the PC), `form-host`, `api-host` (upload destinations) |
 | `profiles/tennis` | The tennis content profile: the descriptor's prompt, the description footer and the tags |
-| `e2e/` | End-to-end runs: the real downloader and auth daemon against the simulated live sites (`npm run e2e:capture`), the real pipeline against the simulated destination (`npm run e2e:pipeline`), the real file-host queue against the simulated file host, killed mid-transfer (`npm run e2e:file-host`) |
+| `e2e/` | End-to-end runs: the real downloader and auth daemon against the simulated live sites (`npm run e2e:capture`), the real pipeline against either simulated destination (`npm run e2e:pipeline`, `-- --destination api-host`), the real file-host queue against the simulated file host, killed mid-transfer (`npm run e2e:file-host`) |
 | `deploy/vm` | A QEMU harness that hard-resets a VM at random points and checks every invariant after each boot |
 | `systemd/` | The user services |
 
@@ -68,6 +68,7 @@ npm run build -w simulator && npm run build:sim-plugins
 npm run test:sim-plugins
 npm run e2e:capture     # about two minutes
 npm run e2e:pipeline    # about twenty seconds
+npm run e2e:pipeline -- --destination api-host
 npm run e2e:file-host   # about a minute
 ```
 

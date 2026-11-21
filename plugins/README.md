@@ -201,6 +201,40 @@ public reference:
     "config": { "origin": "https://127.0.0.1:18084", "downloadHosts": ["127.0.0.1"], "directory": "~/Videos/file-host" } } ] }
 ```
 
+## Destinations
+
+A destination is where finished recordings are uploaded (`DestinationPlugin` from `sdk`).
+The core owns attempts, the byte budget, retries, daily verification, removal bans and
+receipt-matched cleanup; the plug-in speaks its site's protocol. Two public references:
+
+| | `form-host` (`plugin-form-host`) | `api-host` (`plugin-api-host`) |
+|---|---|---|
+| Sign-in | a cookie session from the login form, remember-me | OAuth: a password grant, then a rotating refresh token saved durably before use |
+| The video exists | when the metadata form is submitted (`creationBoundary: "metadata_submit"`) | from the create of its resumable upload (`"transfer_start"`) |
+| Transfer | chunks under an index, each sent again on failure | byte ranges; after a failure, ask the host where its bytes end and go on from there |
+| A failed attempt | before the form: nothing exists, a plain failure | the next attempt asks for the same upload key (`clientRef`) and resumes that video |
+| Uploads list | two tabs, paged to a 404, two scans must agree | paged by cursor; the count on the first page must match |
+| Refused words | the form answers with them | 422 with the terms |
+
+The rules every destination keeps:
+
+- **Absence needs proof.** `lookup` says `"absent"` only after reading the whole uploads
+  list; a page that fails, a count that does not match or a cached answer makes the
+  listing inconclusive (throw), never a reason to upload again. A copy is a video that
+  holds the file: a failed or unfinished upload is not one.
+- **Bytes are recorded before they leave** (`onProgress`), and an upload never sends more
+  than its size plus `REQUEST_OVERHEAD_RESERVATION_BYTES`.
+- **Failures are typed**: `MetadataRejectedError` (the phrases are learned),
+  `HumanActionRequiredError` (a refused password, a daily limit), `ProviderSessionLostError`
+  (signed out where the plug-in may not sign in), `UploadTransportError` with
+  `acceptanceUnknown` when the destination may hold the file.
+- `probe` returns `"online"` only when the best rendition actually answers; `"missing"`
+  with `removed: true` only when the complete list lacks the video.
+
+`npm run e2e:pipeline` runs the real pipeline against either (`-- --destination
+api-host`): a refused word, every session ended mid-campaign, verification a day later, a
+removal that bans the recording from re-upload.
+
 ## Content profiles
 
 A content profile decides what a deployment's metadata says about its recordings. It is a
