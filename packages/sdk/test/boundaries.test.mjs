@@ -145,9 +145,10 @@ test('plug-in sources import only sdk, node: built-ins, their own files and decl
     const violations = [];
     const publicPlugins = subdirectories(path.join(ROOT, 'plugins'));
     let publicScanned = 0;
-    // Content profiles are plug-ins too, under the same rule.
-    const profiles = subdirectories(path.join(ROOT, 'private', 'profiles'));
-    assert.ok(profiles.length >= 1, `no content profiles found under ${path.join(ROOT, 'private', 'profiles')}`);
+    // Content profiles are plug-ins too, under the same rule: the public ones and, in a
+    // deployment's checkout, its own under private/ (a public clone has none).
+    const profiles = [...subdirectories(path.join(ROOT, 'profiles')), ...subdirectories(path.join(ROOT, 'private', 'profiles'))];
+    assert.ok(profiles.length >= 1, `no content profiles found under ${path.join(ROOT, 'profiles')}`);
     for (const pluginRoot of [...publicPlugins, ...subdirectories(path.join(ROOT, 'private', 'plugins')), ...profiles]) {
         if (publicPlugins.includes(pluginRoot)) publicScanned += sourceFiles(path.join(pluginRoot, 'src')).length > 0 ? 1 : 0;
         const manifest = JSON.parse(readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
