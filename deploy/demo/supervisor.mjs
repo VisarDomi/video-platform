@@ -16,12 +16,18 @@
 //    server (website and API on 9999), the file-host queue (9998), the dashboard (8791),
 //    and the pipeline's campaign worker, uploading to the form host. Its description model
 //    is a stand-in that answers in the descriptor's format ($DEMO_MODEL_URL: a real one).
+// 6. The reviewer's part: the pipeline uploads only recordings someone kept in the viewer
+//    (published into a site's edited/ folder with a ready checkpoint), so a few minutes after
+//    a recording is finalized the demo keeps all of it through the server's API, as a cut that
+//    keeps every segment does ($DEMO_AUTO_SAVE_MINUTES, default 5; $DEMO_AUTO_SAVE=0 leaves
+//    it to you). A plain save only moves the folder; it waits for an explicit finalize-library.
 //
 // SIGTERM stops the services (the worker first, the simulator last) and exits.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -263,6 +269,51 @@ function configureCampaign(env) {
     writeAtomically(marker, `${new Date().toISOString()}\n`);
 }
 
+// ---- 6. saving finished recordings for the pipeline ---------------------------------------------
+
+// The server's API (port 9999 inside the pod), trusting the demo's certificate.
+function serverCall(method, route, body) {
+    return new Promise((resolve, reject) => {
+        const payload = body === undefined ? undefined : JSON.stringify(body);
+        const headers = payload === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) };
+        const request = httpsRequest({ host: '127.0.0.1', port: 9999, path: route, method, headers, ca: readFileSync(path.join(CERTS, 'cert.pem')), timeout: 60_000 },
+            (response) => {
+                let body = '';
+                response.on('data', (chunk) => { body += chunk; });
+                response.on('end', () => {
+                    if (response.statusCode < 200 || response.statusCode > 299) return reject(new Error(`${method} ${route}: HTTP ${response.statusCode}`));
+                    try { resolve(body ? JSON.parse(body) : null); } catch { resolve(null); }
+                });
+            });
+        request.on('timeout', () => request.destroy(new Error(`${method} ${route}: timed out`)));
+        request.on('error', reject);
+        request.end(payload);
+    });
+}
+
+const firstSeen = new Map();
+async function saveFinishedRecordings(sites, delayMs) {
+    for (const site of sites) {
+        let videos;
+        try { videos = await serverCall('GET', `/api/videos?provider=${encodeURIComponent(site)}`); } catch { continue; }
+        for (const video of Array.isArray(videos) ? videos : []) {
+            if (video?.type !== 'original' || video.isLive || typeof video.filename !== 'string') continue;
+            const key = `${site}/${video.filename}`;
+            if (!firstSeen.has(key)) firstSeen.set(key, Date.now());
+            if (Date.now() - firstSeen.get(key) < delayMs) continue;
+            try {
+                const folder = path.join(HOME, 'Videos', 'downloads', site, 'downloaded', video.filename);
+                const segments = readdirSync(folder).filter((name) => name.endsWith('.ts')).sort();
+                await serverCall('POST', '/api/edit', { filename: video.filename, segments, provider: site });
+                say(`kept ${key} (${segments.length} segments) for the pipeline, as a cut that keeps every segment does`);
+            } catch (error) {
+                say(`could not save ${key}: ${error.message}`);
+            }
+            firstSeen.delete(key);
+        }
+    }
+}
+
 // ---- the run -------------------------------------------------------------------------------
 
 mkdirSync(DEMO, { recursive: true });
@@ -304,4 +355,13 @@ start('pipeline', process.execPath, ['--no-warnings', 'dist/main.js', 'campaign-
         } catch { /* not JSON after all */ }
     },
 });
+if (process.env.DEMO_AUTO_SAVE !== '0') {
+    const delayMs = Number(process.env.DEMO_AUTO_SAVE_MINUTES ?? 5) * 60_000;
+    let saving = false;
+    setInterval(() => {
+        if (saving || stopping) return;
+        saving = true;
+        saveFinishedRecordings(['ts-live', 'ladder-live', 'fmp4-live'], delayMs).finally(() => { saving = false; });
+    }, 60_000).unref();
+}
 say('all services started: the website on https://<host>:29999, the dashboard on :28791, the file-host queue on :29998');
