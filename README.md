@@ -32,7 +32,7 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `file-host` (single files copied to the PC), `form-host`, `api-host` (upload destinations) |
 | `profiles/tennis` | The tennis content profile: the descriptor's prompt, the description footer and the tags |
 | `e2e/` | End-to-end runs: the real downloader and auth daemon against the simulated live sites (`npm run e2e:capture`), the real pipeline against either simulated destination (`npm run e2e:pipeline`, `-- --destination api-host`), the real file-host queue against the simulated file host, killed mid-transfer (`npm run e2e:file-host`) |
-| `deploy/demo` | The whole platform against the simulator in one rootless Podman pod (`npm run demo`), and a Quadlet unit to keep it running |
+| `deploy/demo` | The whole platform against the simulator in one rootless Podman pod, on demand (`npm run demo`; stopping it, or a power cut, leaves nothing behind) |
 | `deploy/vm` | A QEMU harness that hard-resets a VM at random points and checks every invariant after each boot |
 | `systemd/` | The user services |
 

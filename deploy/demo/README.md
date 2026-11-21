@@ -7,8 +7,9 @@ live, the server finalizes the recordings and serves the website, the file-host 
 single files, and the pipeline converts, describes, uploads and verifies.
 
 ```sh
-npm run demo          # builds localhost/video-platform-demo and plays the pod
-npm run demo:down     # stops it (the volume stays)
+npm run demo          # deploy/demo/demo.sh start: a fresh demo (the image rebuilt when the sources changed)
+npm run demo:down     # deploy/demo/demo.sh stop: stopped, and everything it made deleted
+deploy/demo/demo.sh status
 podman logs -f video-platform-demo-platform
 ```
 
@@ -49,17 +50,25 @@ Settings, in `video-platform-demo.yaml`:
 - A folder of videos mounted at `/media` (commented out in the YAML).
 - The container is limited to two CPUs and 4 GiB.
 
-## Always on
+## On demand
 
-`video-platform-demo.kube` is a Quadlet unit for the same pod:
+The demo runs when you need it, to show or record the platform, and not otherwise: it records
+its simulated sites all the time (about 2.7 GB an hour) and converts on two CPUs, far slower
+than it records, so a demo left on would fill the disk. `deploy/demo/demo.sh`:
 
-```sh
-cp deploy/demo/video-platform-demo.{kube,yaml} ~/.config/containers/systemd/
-systemctl --user daemon-reload
-systemctl --user start video-platform-demo
-```
+- `start [--hours N]` stops any demo first and starts a fresh one: a new volume, the image
+  rebuilt only when the sources changed (labelled with their hash). It stops itself after N
+  hours (default 8; `--hours 0` never), a transient systemd timer.
+- `stop` stops the pod (SIGTERM: the supervisor ends the worker first and the simulator last,
+  within 60 s) and deletes its volume and the timer. Nothing of the demo is left.
+- `install` adds `video-platform-demo-cleanup.service`, which runs `stop` at every boot: a
+  demo cut off by a power loss or a reboot never comes back by itself (the pod's restart policy
+  is OnFailure, which Podman does not restart at boot) and its data is removed. It also links
+  `video-demo` into `~/.local/bin`.
 
-With lingering enabled (`loginctl enable-linger`) it comes back after a reboot or a power
-cut: systemd restarts the pod, and the supervisor resumes from the volume (the ledger, the
-recordings, the simulator's state). Recordings accumulate on the volume unless
-`DEMO_CLEANUP=1`.
+A deployment's own settings live in a folder the script mounts read-only at `/demo-config`
+(`~/.config/video-platform-demo`, or `$DEMO_CONFIG_DIR`): `cert.pem` and `key.pem`, a certificate
+its phones already trust, naming `127.0.0.1` and `localhost` (the services inside the pod use
+them) and the address phones open, with its issuing CA appended to `cert.pem`; and
+`<site>-phone-key` files, the keys its live apps were built with (`apps/ios`). The demo copies
+them into place at start, so the apps keep working across fresh starts.

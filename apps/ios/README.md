@@ -25,8 +25,16 @@ time, saving each rotated refresh token before it uses the new session.
 
 Without it the apps expect the demo pod (`deploy/demo`) on the same machine: the PC at
 `https://localhost:29999`, site A at `https://localhost:28081`. The phone key is the PC's
-`~/.local/share/video-services/ts-live-phone-key` (in the demo pod:
-`podman exec video-platform-demo-platform cat /demo/home/.local/share/video-services/ts-live-phone-key`).
+`~/.local/share/video-services/ts-live-phone-key`; for the demo, the `ts-live-phone-key` in its
+settings folder (deploy/demo/README.md, "On demand"), which every fresh start reuses.
+
+## Signing for a phone
+
+`scripts/renewal.py` declares the apps to a signing service (ios-tools' `ios-push`, which
+builds on the Mac, signs, and installs or publishes for an install from anywhere): name, bundle
+ID (`bundlePrefix` + the app's `bundleSuffix`), inputs, and `scripts/build-app.py APP`, the
+signed device build (`DEVELOPMENT_TEAM`, `SIGNING_DEVICE`). A phone build reaches the PC and
+the live site at the addresses `apps.local.json` names, e.g. the demo on the PC's LAN address.
 
 ## Building and checking on a Mac
 
