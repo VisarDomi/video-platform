@@ -6,7 +6,7 @@ import { closeSites, loadSiteRegistry } from "shared";
 import { FINALIZATION_DB_PATH, configureProviders, getAllProviders, getProviderPaths } from "../core/config.js";
 import logger from "../core/logger.js";
 import { captureSiteIds } from "../sites.js";
-import { FinalizationCheckpointStore } from "../services/hls/finalizationCheckpointStore.js";
+import { FinalizationCheckpointStore, playlistFingerprint } from "../services/hls/finalizationCheckpointStore.js";
 import { processFinalizedRecording } from "../services/hls/finalizedRecordingProcessor.js";
 import {
     resolveManagedRecordingTarget,
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     if (!options.apply) return;
 
     const checkpoints = new FinalizationCheckpointStore(FINALIZATION_DB_PATH);
-    const totals = { ready: 0, failed: 0, notFinalized: 0, sidecarsRemoved: 0 };
+    const totals = { ready: 0, failed: 0, notFinalized: 0, sidecarsRemoved: 0, carried: 0 };
     let nextIndex = 0;
     const worker = async () => {
         while (true) {
@@ -154,6 +154,16 @@ async function main(): Promise<void> {
             if (!target) return;
             const startedAt = Date.now();
             try {
+                // A recording moved without its checkpoint (saved before the server carried it,
+                // or moved by hand) takes the ready one it had under its old path.
+                let carriedFrom: string | null = null;
+                try {
+                    const playlist = await fs.readFile(path.join(target.recordingPath, "playlist.m3u8"), "utf8");
+                    carriedFrom = checkpoints.adoptMoved(target.recordingPath, playlistFingerprint(playlist));
+                } catch (error: any) {
+                    if (error?.code !== "ENOENT") throw error;
+                }
+                if (carriedFrom) totals.carried++;
                 const result = await processFinalizedRecording(target.recordingPath, {
                     checkpointStore: checkpoints,
                 });
@@ -182,6 +192,7 @@ async function main(): Promise<void> {
                     position: position + 1,
                     recordingPath: target.recordingPath,
                     status,
+                    carriedFrom,
                     error,
                     warnings: result.kind === "not-finalized" ? [] : (result.report.warnings ?? [])
                         .map((warning) => ({ kind: warning.kind, count: warning.names?.length ?? 0 })),
