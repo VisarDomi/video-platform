@@ -26,6 +26,10 @@ bundle_id = local.get('bundlePrefix', 'com.example.videoplatform') + '.' + confi
 pc_server = local.get('pcServer', 'https://localhost:29999')
 # The simulated tournament sites' download lists, by site.
 list_names = {'ts-live': 'Wimbledon', 'ladder-live': 'Roland-Garros', 'fmp4-live': 'Australian Open'}
+# Where the phone reaches a live site with an account: the demo pod's port on the host
+# (deploy/demo); apps.local.json "liveSites" overrides it, and "phoneKeys" holds the PC's key
+# for the site's phone sign-in (the shared state's <site>-phone-key; never in Git).
+live_sites = dict({'ts-live': 'https://localhost:28081'}, **local.get('liveSites', {}))
 
 sources = sorted(str(p.relative_to(root)) for p in (root/'App').glob('*.swift'))
 source_hash = hashlib.sha256(key.encode())
@@ -94,6 +98,9 @@ if config.get('native'):
     # The site's own list (App/NativeLists.swift), and the PC for its download lists.
     info['NativeList'] = config['native']
     info['NSLocalNetworkUsageDescription'] = 'Add or remove channels in your PC\'s download lists on your home network.'
+    if config['native'] == 'live':
+        info['LiveSite'] = live_sites[provider]
+        info['PhoneKey'] = local.get('phoneKeys', {}).get(provider, '')
 else:
     # The PC's recordings of one site (App/LocalList.swift).
     info['LocalProvider'] = provider

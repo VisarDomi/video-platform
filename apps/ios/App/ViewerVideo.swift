@@ -25,6 +25,8 @@ struct ViewerVideo: @unchecked Sendable {
     // A PC recording (save, cut, return; the PC playlist's timeline) and a live provider's stream.
     var local: Bool { raw["local"] as? Bool ?? false }
     var liveStream: Bool { raw["live"] as? Bool ?? false }
+    // A live stream whose site cannot block its streamer shows no block button.
+    var blockable: Bool { raw["blockable"] as? Bool ?? true }
     var media: MediaSource? { MediaSource(raw["media"]) }
     var declaredDuration: Double? { (raw["duration"] as? NSNumber)?.doubleValue }
     var duration: Double { declaredDuration ?? 0 }

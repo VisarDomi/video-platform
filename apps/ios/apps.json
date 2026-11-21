@@ -5,5 +5,13 @@
         "bundleSuffix": "WimbledonLocal",
         "provider": "ts-live",
         "build": "1"
+    },
+    "live-a": {
+        "name": "Wimbledon",
+        "product": "Wimbledon",
+        "bundleSuffix": "Wimbledon",
+        "provider": "ts-live",
+        "native": "live",
+        "build": "1"
     }
 }

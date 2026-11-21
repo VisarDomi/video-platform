@@ -319,7 +319,7 @@ final class ViewerOverlay: UIView {
         let local = video?.local ?? false
         let live = video?.liveStream ?? false
         follow.isHidden = !live
-        block.isHidden = !live
+        block.isHidden = !live || video?.blockable == false
         rename.isHidden = video?.canRename != true
         rename.isEnabled = interactive && !renaming
         rename.setTitle(renaming ? "⏳" : "✏️", for: .normal)
