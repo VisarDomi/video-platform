@@ -8,13 +8,18 @@ import type { FileHost, FileHostHttp } from "sdk";
 import { mp4Identity, MP4RenameError, type MP4Rename } from "./video/mp4Identity.js";
 import { originalVideoName } from "./video/originalVideo.js";
 
-// One file host as the queue sees it: its ID (paths, routes), display name (messages) and
-// plug-in.
+// One file host as the queue sees it: its ID (paths, routes), display name (messages),
+// plug-in, and the ports besides HTTPS's default the deployment allows for it (the sites
+// file entry's "allowPorts"; none by default).
 export interface HostedFileHost {
     readonly id: string;
     readonly label: string;
     readonly fileHost: FileHost;
+    readonly allowedPorts?: ReadonlySet<string>;
 }
+
+// The default HTTPS port, or one the deployment allows for this host.
+const portAllowed = (host: HostedFileHost, url: URL) => url.port === "" || (host.allowedPorts?.has(url.port) ?? false);
 
 type Fetcher = typeof fetch;
 const METADATA_LIMIT = 1_048_576;
@@ -23,7 +28,7 @@ const METADATA_LIMIT = 1_048_576;
 export function filePage(host: HostedFileHost, value: unknown): URL {
     const canonical = typeof value === "string" ? host.fileHost.canonicalPage(value) : null;
     const url = canonical === null ? null : new URL(canonical);
-    if (!url || url.protocol !== "https:" || url.port || url.username || url.password || url.search || url.hash) {
+    if (!url || url.protocol !== "https:" || !portAllowed(host, url) || url.username || url.password || url.search || url.hash) {
         throw new Error(`Expected a ${host.label} file page URL`);
     }
     return url;
@@ -31,7 +36,7 @@ export function filePage(host: HostedFileHost, value: unknown): URL {
 // Every request, and every redirect hop, stays on the host's own HTTPS servers.
 function allowedURL(host: HostedFileHost, value: string): URL {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.port || url.username || url.password || !host.fileHost.isAllowedHost(url)) {
+    if (url.protocol !== "https:" || !portAllowed(host, url) || url.username || url.password || !host.fileHost.isAllowedHost(url)) {
         throw new Error(`Unsupported ${host.label} download host`);
     }
     return url;

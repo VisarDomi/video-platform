@@ -44,6 +44,19 @@ test('only the host\'s HTTPS file pages are accepted; metadata cannot redirect t
     // The host's name comes back safe: no directories, no hidden file.
     assert.equal((await resolveFile(host,page,fixture(()=>assert.fail()))).filename,'.._.._clip.mp4'.replace(/^\.+/,'_'));
 });
+test('a port besides HTTPS\'s default only when the deployment allows it for that host',async()=>{
+    // The test host's own pages on any port, so only the core's port rule decides.
+    const anyPort=(value)=>{try{const url=new URL(value);const port=url.port;url.port='';const canonical=host.fileHost.canonicalPage(url.href);if(!canonical)return null;const page=new URL(canonical);page.port=port;return page.href;}catch{return null;}};
+    const withPorts={...host,fileHost:{...host.fileHost,canonicalPage:anyPort},allowedPorts:new Set(['9999'])};
+    assert.throws(()=>filePage({...withPorts,allowedPorts:undefined},'https://files.example:9999/f/abc'));
+    assert.throws(()=>filePage(host,'https://files.example:9999/f/abc'));
+    assert.equal(filePage(withPorts,'https://files.example:9999/f/abc').href,'https://files.example:9999/f/abc');
+    for(const url of ['https://files.example:9998/f/abc','http://files.example:9999/f/abc','https://files.example.evil:9999/f/abc'])assert.throws(()=>filePage(withPorts,url));
+    // Every hop is checked: an allowed port on another host, or another port, is refused.
+    const hop=(location)=>async()=>new Response(null,{status:302,headers:{location}});
+    await assert.rejects(resolveFile(withPorts,'https://files.example:9999/f/abc',hop('https://127.0.0.1:9999/x')),/Unsupported/);
+    await assert.rejects(resolveFile(withPorts,'https://files.example:9999/f/abc',hop('https://files.example:22/x')),/Unsupported/);
+});
 test('queued clicks deduplicate across domains, stream once, and publish only a complete safe filename',async t=>{
     let transfers=0;
     const {queue:q,options}=await queue(t,fixture(()=>{transfers++;return new Response('video-bytes',{headers:{'content-type':'video/mp4','content-length':'11',etag:'"one"'}});}));

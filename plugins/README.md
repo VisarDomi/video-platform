@@ -176,6 +176,31 @@ restart. `ts-live` is the reference:
   stream token mid-run included), and judges every recording folder with the
   simulator's checker (`packages/simulator/README.md`).
 
+## File hosts
+
+A file host is not a live site: the owner sends one of its file pages from the phone (the
+plug-in's browser extension), and the PC copies the original file into a local library.
+The core's queue (`packages/server`, `dist/fileHosts.js`) owns the transfer: durable jobs,
+resumes only with an identical entity (range + `If-Range` on the same ETag, from the last
+fsynced byte), publication without overwriting, and the network guard. A file host plug-in
+(`FileHostPlugin` from `sdk`) only knows its pages; `file-host` (`plugin-file-host`) is the
+public reference:
+
+- `canonicalPage(url)`: the page a job is known by, or null for anything else.
+- `isAllowedHost(url)`: the hosts its pages and downloads may use. The core checks it on
+  every request and every redirect hop, and allows HTTPS on the default port only, so
+  neither a page nor its metadata can point the PC at the LAN. A deployment whose host is
+  not on 443 (the simulator) lists the ports in the sites file entry's `allowPorts`; the
+  plug-in cannot widen the guard.
+- `resolve(page, http)`: the media URL and its original name, through `http.text` (small
+  answers, guarded the same way).
+- `jobKey(page)`: 24 hex digits, which the browser extension computes too.
+
+```json
+{ "fileHosts": [ { "id": "file-host", "plugin": "plugin-file-host", "allowPorts": [18084, 18085],
+    "config": { "origin": "https://127.0.0.1:18084", "downloadHosts": ["127.0.0.1"], "directory": "~/Videos/file-host" } } ] }
+```
+
 ## Content profiles
 
 A content profile decides what a deployment's metadata says about its recordings. It is a

@@ -42,7 +42,8 @@ app.use(express.json({ limit: "4kb" }));
 const running: Array<{ queue: FileHostDownloads; library: MP4Library }> = [];
 for (const entry of entries) {
     const plugin = await loadFileHostPlugin(entry);
-    const host = { id: entry.id, label: plugin.label, fileHost: plugin.createFileHost() };
+    const host = { id: entry.id, label: plugin.label, fileHost: plugin.createFileHost({ config: entry.config ?? {} }),
+        allowedPorts: new Set((entry.allowPorts ?? []).map(String)) };
     const queue = new FileHostDownloads(host, { directory: directoryOf(entry.id, entry.config ?? {}),
         stateDirectory: path.join(servicesDataRoot, `${entry.id}-downloads`) });
     const library = new MP4Library(queue.directory, {
