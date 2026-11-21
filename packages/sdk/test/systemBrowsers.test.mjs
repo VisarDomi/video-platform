@@ -42,21 +42,24 @@ test('the launch finder sees a launch without an executable', () => {
     assert.match(calls[1].call, /executablePath/);
 });
 
+// The scans below must read the repository's sources (a public clone has a few hundred);
+// how many launches they find depends on the checkout: most of a deployment's are in its
+// private/ plug-ins, which a public clone does not have.
 test('every browser launch names its executable', () => {
     const missing = [];
-    let seen = 0;
+    let scanned = 0;
     for (const file of files(ROOT)) {
         if (!SOURCE.test(file) || file === fileURLToPath(import.meta.url)) continue;
+        scanned++;
         const source = readFileSync(file, 'utf8');
         for (const launch of launches(source)) {
-            seen++;
             if (!/\bexecutablePath\b/.test(launch.call)) {
                 const line = source.slice(0, launch.index).split('\n').length;
                 missing.push(`${path.relative(ROOT, file)}:${line}`);
             }
         }
     }
-    assert.ok(seen >= 6, `only ${seen} launches found: is the scan looking in the right place?`);
+    assert.ok(scanned >= 200, `only ${scanned} source files found under ${ROOT}: is the scan looking in the right place?`);
     assert.deepEqual(missing, [], 'these launches would run a browser Playwright downloaded');
 });
 
@@ -64,23 +67,22 @@ test('every browser launch names its executable', () => {
 // turns off unless a launch asks for it.
 test('every production browser launch keeps Chromium\'s sandbox', () => {
     const unsandboxed = [];
-    let seen = 0;
+    let scanned = 0;
     for (const file of files(ROOT)) {
         const relative = path.relative(ROOT, file);
         if (!SOURCE.test(file) || !/(?:^|\/)src\//.test(relative)) continue;
+        scanned++;
         const source = readFileSync(file, 'utf8');
         for (const launch of launches(source)) {
-            seen++;
             if (!/\bchromiumSandbox\s*:\s*true\b/.test(launch.call)) unsandboxed.push(`${relative}:${source.slice(0, launch.index).split('\n').length}`);
         }
         // An uploader may launch through an injectable function.
         for (const match of source.matchAll(/this\.launchContext\(/g)) {
-            seen++;
             const call = launches(source.slice(match.index).replace(/^this\.launchContext\(/, 'chromium.launch('))[0]?.call ?? '';
             if (!/\bchromiumSandbox\s*:\s*true\b/.test(call)) unsandboxed.push(`${relative}:${source.slice(0, match.index).split('\n').length}`);
         }
     }
-    assert.ok(seen >= 3, `only ${seen} production launches found`);
+    assert.ok(scanned >= 150, `only ${scanned} production source files found under ${ROOT}`);
     assert.deepEqual(unsandboxed, []);
 });
 
