@@ -1,0 +1,9 @@
+{
+    "live-a-local": {
+        "name": "Wimbledon local",
+        "product": "WimbledonLocal",
+        "bundleSuffix": "WimbledonLocal",
+        "provider": "ts-live",
+        "build": "1"
+    }
+}
