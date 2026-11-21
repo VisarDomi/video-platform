@@ -1,0 +1,7 @@
+// Linux only: the SDK's `libxml2` module for KitHTML. Point the compiler at libxml2's headers
+// (-Xcc -I/usr/include/libxml2, or native/scripts/linux-swift's fallback) and link xml2.
+module libxml2 [system] {
+    header "shim.h"
+    link "xml2"
+    export *
+}
