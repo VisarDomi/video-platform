@@ -10,7 +10,7 @@ import KitNet
 // "+" puts its account on the PC's download list for the site (ViewerPC, the membership below).
 // The session is the phone's own; the first one comes from the PC (LivePCLogin).
 @MainActor
-final class LiveListController: VideoListController {
+final class LiveListController: VideoListController, SiteList {
     private let site: String
     private let session: LiveSession
     private let pc: LivePCLogin?
@@ -27,9 +27,16 @@ final class LiveListController: VideoListController {
     private var networkSignature: String?
     private let signIn = UIButton(type: .system)
 
+    // From the app's Info.plist: its live provider (the site's ID) and where it is (LiveSite).
+    static func make() -> Self? {
+        guard let site = (Bundle.main.object(forInfoDictionaryKey: "LiveProviders") as? [String])?.first,
+              let base = (Bundle.main.object(forInfoDictionaryKey: "LiveSite") as? String).flatMap(URL.init(string:)) else { return nil }
+        return Self(site: site, base: base)
+    }
+
     // `site` is the site's ID (the provider, its PC routes and list), `base` where the phone
     // reaches the site (Info.plist LiveSite).
-    init(site: String, base: URL, directory supplied: URL? = nil, configuration: URLSessionConfiguration? = nil, pcLogin: Bool = true) {
+    required init(site: String, base: URL, directory supplied: URL? = nil, configuration: URLSessionConfiguration? = nil, pcLogin: Bool = true) {
         let directory = supplied ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/LiveVideos")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
                                                  attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])

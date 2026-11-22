@@ -37,16 +37,12 @@ struct ViewerVideo: @unchecked Sendable {
               width.isFinite, height.isFinite, width >= 32, height >= 32 else { return nil }
         return CGSize(width: width, height: height)
     }
-    var needsAlternateDecoder: Bool {
-        let codec = (raw["videoCodec"] as? String ?? "").lowercased()
-        let container = (filename as NSString).pathExtension.lowercased()
-        return ["av1", "vp9", "vp8"].contains(codec) || ["mkv", "webm", "avi", "ts"].contains(container)
-    }
+    // The list's display dimensions (the PC's probe, a live list's own), before any decoding; a
+    // live provider's stream described without them is 9:16 (ProviderTraits).
     var displaySize: CGSize? {
-        if ProviderTraits.live.contains(provider) { return CGSize(width: 720, height: 1280) }
-        guard let width = raw["displayWidth"] as? Double, let height = raw["displayHeight"] as? Double,
-              width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
-        return CGSize(width: width, height: height)
+        if let width = raw["displayWidth"] as? Double, let height = raw["displayHeight"] as? Double,
+           width.isFinite, height.isFinite, width > 0, height > 0 { return CGSize(width: width, height: height) }
+        return ProviderTraits.live.contains(provider) ? CGSize(width: 720, height: 1280) : nil
     }
 
     var membership: MembershipInfo? { MembershipInfo(raw["membership"]) }

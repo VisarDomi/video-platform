@@ -116,7 +116,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     private var active: ViewerUnit { activeUnit }
     private var live: Bool { currentVideo?.liveStream ?? false }
     private var inBackground: Bool { UIApplication.shared.applicationState == .background }
-    private var playbackPolicy: ViewerPlaybackPolicy { ViewerPlaybackPolicy(provider: provider) }
+    private var playbackPolicy: ViewerPlaybackPolicy { ViewerPlaybackPolicy(live: live) }
     private var lastPlaybackEvidence: CFTimeInterval = 0
 
     override func viewDidLoad() {
@@ -359,8 +359,9 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
         if current.type != updated.type {
             for unit in units where unit !== active && unit.video?.sameRecording(current) == true { unit.clear() }
-            progress.set(updated.progressKey, 0)
-            loadVariant(filtered[index], in: active, play: active.wantsPlay)
+            let start = variantStart(from: current, to: updated, at: active.snapshot().currentTime)
+            progress.set(updated.progressKey, start)
+            loadVariant(filtered[index], in: active, start: start, play: active.wantsPlay)
         }
         else { active.update(filtered[index]) }
         layoutFeed(anchor: anchor)
@@ -423,10 +424,15 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard let window = geometry.playerWindow(top: feed.contentOffset.y, height: feed.bounds.height, current: currentIndex) else { return }
         let wanted = Set(window)
         let keys = Set(wanted.map { videos[$0].key })
+        // At rest only the current video shows; a neighbour that has no player yet loads once the
+        // current one plays (releaseNeighbours). While the document moves, every video it shows loads.
+        let scrolling = unsettled || feed.isDragging || feed.isDecelerating
+        let waiting = playbackPolicy.neighboursWaitForStart && !scrolling && neighboursFor != videos[currentIndex].key
         for index in wanted.sorted(by: { abs($0 - currentIndex) < abs($1 - currentIndex) }) {
             let video = videos[index]
             let unit: ViewerUnit
             if let kept = units.first(where: { $0.video?.same(video) == true }) { unit = kept }
+            else if waiting && index != currentIndex { continue }
             else if let spare = units.first(where: { $0.video.map { !keys.contains($0.key) } ?? true }) {
                 rememberProgress(spare)
                 unit = spare
@@ -460,6 +466,31 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         updateUnitVisibility()
     }
 
+    // The current video whose neighbours may load: it plays (or waits at the user's pause), or
+    // two seconds have passed since it became current (it ended at once, was paused before its
+    // first picture, was interrupted or cannot load).
+    private var neighboursFor: String?
+    private var neighbourFallback: Timer?
+
+    private func releaseNeighbours(waited: Bool = false) {
+        guard playbackPolicy.neighboursWaitForStart, revealed, let key = active.video?.key, neighboursFor != key, key == currentVideo?.key,
+              waited || active.isPlaying || (!active.wantsPlay && active.hasPicture) else { return }
+        neighboursFor = key
+        neighbourFallback?.invalidate(); neighbourFallback = nil
+        loadEdgeUnits()
+    }
+
+    private func awaitNeighbours() {
+        guard playbackPolicy.neighboursWaitForStart, let key = currentVideo?.key, neighboursFor != key else { return }
+        neighbourFallback?.invalidate()
+        neighbourFallback = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.closed, self.currentVideo?.key == key else { return }
+                self.releaseNeighbours(waited: true)
+            }
+        }
+    }
+
     private func updateUnitVisibility() {
         let revealNeighbours = unsettled && !zoomed
         for unit in units {
@@ -490,10 +521,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             for unit in units where unit.video != nil {
                 if unit !== active { unit.muted = true }
                 if shouldPlay(current: unit === active, inBackground: inBackground) { unit.play() }
-                else { unit.pause() }
+                else if unit === active { unit.pause() }
+                else { unit.park() }
             }
         }
         guard let video = currentVideo else { return }
+        awaitNeighbours()
         monitor.measure("activate.overlay") {
             overlay.setVideo(video)
             overlay.setTimeline(active.snapshot())
@@ -569,11 +602,13 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         if let size = progress.displaySize(old.key) { progress.setDisplaySize(new.key, size) }
     }
 
-    private func loadVariant(_ video: ViewerVideo, in unit: ViewerUnit, play: Bool) {
+    private func loadVariant(_ video: ViewerVideo, in unit: ViewerUnit, start: Double, play: Bool) {
         #if targetEnvironment(simulator)
         if let fixtureImage { unit.configureZoomCheck(video: video, size: aspect(of: video), image: fixtureImage); return }
         #endif
-        unit.load(video, start: 0, play: play)
+        unit.load(video, start: start, play: play)
+        // The watched video's new variant, paused by the user, is not a parked neighbour.
+        if !play { unit.pause() }
     }
 
     // MARK: the feed
@@ -1075,14 +1110,19 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         guard markers.count % 2 == 0 else { return }
         Task {
             do {
-                if markers.isEmpty { try await ViewerPC.save(video) }
+                if markers.isEmpty { pendingCut = nil; try await ViewerPC.save(video) }
                 else {
                     guard let url = video.media?.url else { return }
                     let playlist = try await Playlist.fetch(url)
-                    try await ViewerPC.cut(video, keep: playlist.keep(markers: markers, playbackDuration: playbackDuration))
+                    let keep = playlist.keep(markers: markers, playbackDuration: playbackDuration)
+                    let scale = playbackDuration > 0 && playlist.totalDuration > 0 ? playlist.totalDuration / playbackDuration : 1
+                    pendingCut = PendingCut(key: video.key, segments: playlist.segments.map { .init(name: $0.name, start: $0.start, end: $0.end) },
+                                            keep: Set(keep), scale: scale)
+                    try await ViewerPC.cut(video, keep: keep)
                 }
                 replaceCurrent(video.withVariant("edited"), replacing: video)
-            } catch { mutationFailed(error) }
+                pendingCut = nil
+            } catch { pendingCut = nil; mutationFailed(error) }
         }
     }
 
@@ -1096,6 +1136,21 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         }
     }
 
+    // The cut being made, so either its acknowledgement or the change feed (whichever comes
+    // first) continues at the kept moment (VariantPosition).
+    private struct PendingCut { let key: String; let segments: [VariantPosition.Segment]; let keep: Set<String>; let scale: Double }
+    private var pendingCut: PendingCut?
+
+    // OK and Return Original move the same playlist: the moment stays. A cut maps it through its
+    // kept segments. A variant changed elsewhere that is shorter than the moment starts over.
+    private func variantStart(from old: ViewerVideo, to new: ViewerVideo, at time: Double) -> Double {
+        guard time.isFinite, time > 0 else { return 0 }
+        if let cut = pendingCut, cut.key == old.key, new.edited {
+            return VariantPosition.afterCut(cut.segments, keeping: cut.keep, at: time * cut.scale)
+        }
+        return new.duration > 0 && time >= new.duration - 1 ? 0 : time
+    }
+
     private func replaceCurrent(_ video: ViewerVideo, replacing previous: ViewerVideo) {
         guard !closed else { host.changed(video); return }
         guard let index = videos.firstIndex(where: { $0.same(previous) }) ?? videos.firstIndex(where: { $0.same(video) }) else { host.changed(video); return }
@@ -1105,8 +1160,10 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         var anchor = documentAnchor
         if anchor?.key == previous.key { anchor?.key = video.key }
         carryGeometry(from: previous, to: video)
+        let watching = selected && active.video?.sameRecording(previous) == true
+        let start = variantStart(from: previous, to: video, at: watching ? active.snapshot().currentTime : progress.time(previous.progressKey))
         for unit in units where (!selected || unit !== active) && unit.video?.sameRecording(previous) == true { unit.clear() }
-        if !alreadySelected { progress.set(video.progressKey, 0) }
+        if !alreadySelected { progress.set(video.progressKey, start) }
         // A change feed may already contain the edited row when the action's
         // acknowledgement arrives. Replace once, retaining this document slot.
         let insertion = videos[..<index].filter { !$0.same(previous) && !$0.same(video) }.count
@@ -1119,7 +1176,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
             segments = []
             overlay.setSegments(segments)
             if active.video?.same(video) == true { active.update(video) }
-            else { loadVariant(video, in: active, play: playbackIntent.wantsPlay) }
+            else { loadVariant(video, in: active, start: start, play: playbackIntent.wantsPlay) }
         }
         layoutFeed(anchor: anchor)
         loadEdgeUnits()
@@ -1164,10 +1221,12 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     func unitTime(_ unit: ViewerUnit, _ snapshot: TimelineSnapshot) {
         guard unit === active else { return }
         if unit.hasPicture { removePoster() }
+        releaseNeighbours()
         FrameMonitor.shared.measure("viewer.time") { showTime(snapshot) }
     }
 
     private func showTime(_ snapshot: TimelineSnapshot) {
+        PlaybackEvidence.record(units, moving: moving, last: &lastPlaybackEvidence)
         overlay.setTimeline(snapshot)
         let now = CACurrentMediaTime()
         if now - lastProgressSave >= 3 {
@@ -1296,7 +1355,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
     // their players, and the neighbours wait until the screen is back.
     private func enteredBackground() {
         for unit in units { unit.setVideoEnabled(false) }
-        for unit in units where unit !== active { unit.pause() }
+        for unit in units where unit !== active { unit.park() }
         saveProgress()
         progress.flush()
         // The viewport was captured on resign; drain any later metadata write.
@@ -1310,7 +1369,8 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         for unit in units { unit.setVideoEnabled(true) }
         for unit in units where unit.video != nil {
             if shouldPlay(current: unit === active, inBackground: false) { unit.resume(liveEdge: unit !== active) }
-            else { unit.pause() }
+            else if unit === active { unit.pause() }
+            else { unit.park() }
         }
     }
 
@@ -1337,6 +1397,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
 
     private func closeNow(reveal: Bool) {
         revealTimer?.invalidate()
+        neighbourFallback?.invalidate(); neighbourFallback = nil
         // Written in the background (the progress stays in memory; leaving the app waits for it).
         FrameMonitor.shared.measure("close.save") {
             saveProgress()

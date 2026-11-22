@@ -14,7 +14,11 @@ final class ListNavigationChecks: VideoListController {
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        let provider = arguments.firstIndex(of: "-navigation-provider").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } ?? "recordings"
+        func value(_ name: String) -> String? { arguments.firstIndex(of: name).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
+        let provider = value("-navigation-provider") ?? "recordings"
+        // What the fixture rows are: the PC's recordings (with their edits), original files,
+        // a site's pages or a live site's streams (9:16).
+        let kind = value("-navigation-kind") ?? (ProviderTraits.live.contains(provider) ? "live" : "recordings")
         sourceProvider = provider
         let directory = URL.documentsDirectory.appendingPathComponent("navigation-check/" + provider)
         if arguments.contains("-reset-navigation-check") { try? FileManager.default.removeItem(at: directory) }
@@ -29,8 +33,8 @@ final class ListNavigationChecks: VideoListController {
         configureTestViewer = { $0.configureNavigationCheck(image: picture) }
         fixtureRows = (0..<120).map { index in
             ViewerVideo(["filename": String(format: "Video %03d.mp4", index), "provider": provider,
-                         "local": !ProviderTraits.live.contains(provider), "live": ProviderTraits.live.contains(provider),
-                         "duration": 400.0, "displayWidth": 1920.0, "displayHeight": 1080.0])!
+                         "local": kind == "recordings", "live": kind == "live",
+                         "duration": 400.0, "displayWidth": kind == "live" ? 720.0 : 1920.0, "displayHeight": kind == "live" ? 1280.0 : 1080.0])!
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unused") }

@@ -31,7 +31,7 @@ use it; each only says how to reach the list
 
 The viewer uses its own site's `/api/<provider>/member|add|remove`, by the streamer in the
 recording's filename; the live extensions ask their background page. The native apps have
-their own button (`private/apps/ios` `VideoApp/ViewerOverlay.swift`), with the same states.
+their own button (`apps/ios/App/ViewerOverlay.swift`), with the same states.
 
 ## Build and verify
 

@@ -1,0 +1,4 @@
+{
+  "about": "The simulated live site with an account (the demo's ts-live): its native list, its stream tokens and the PC's one-time sign-in.",
+  "lists": {"live": "LiveListController"}
+}

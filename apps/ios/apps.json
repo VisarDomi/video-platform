@@ -1,17 +1,26 @@
 {
-    "live-a-local": {
-        "name": "Wimbledon local",
-        "product": "WimbledonLocal",
-        "bundleSuffix": "WimbledonLocal",
-        "provider": "ts-live",
-        "build": "1"
-    },
-    "live-a": {
-        "name": "Wimbledon",
-        "product": "Wimbledon",
-        "bundleSuffix": "Wimbledon",
-        "provider": "ts-live",
-        "native": "live",
-        "build": "1"
+    "plugins": ["Providers/live"],
+    "bundlePrefix": "com.example.videoplatform",
+    "pcServer": "https://localhost:29999",
+    "pcAwayServer": "",
+    "listNames": {"ts-live": "Wimbledon", "ladder-live": "Roland-Garros", "fmp4-live": "Australian Open"},
+    "liveSites": {"ts-live": "https://localhost:28081"},
+    "apps": {
+        "live-a-local": {
+            "name": "Wimbledon local",
+            "product": "WimbledonLocal",
+            "bundleSuffix": "WimbledonLocal",
+            "provider": "ts-live",
+            "build": "1"
+        },
+        "live-a": {
+            "name": "Wimbledon",
+            "product": "Wimbledon",
+            "bundleSuffix": "Wimbledon",
+            "provider": "ts-live",
+            "native": "live",
+            "live": true,
+            "build": "1"
+        }
     }
 }

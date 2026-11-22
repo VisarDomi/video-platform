@@ -45,6 +45,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             TestHooks.shared.start()
             return
         }
+        // A plug-in's own checks (its plugin.json "checks").
+        if let check = Plugins.check(ProcessInfo.processInfo.arguments) {
+            window.rootViewController = check
+            window.makeKeyAndVisible()
+            self.window = window
+            TestHooks.shared.start()
+            return
+        }
         #endif
         let info = Bundle.main.infoDictionary ?? [:]
         let list: VideoListController
@@ -56,6 +64,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             let local = LocalListController(provider: provider, server: server, mediaKind: kind)
             (resumed, paused) = ({ [weak local] in local?.resumed(afterBackground: $0) }, { [weak local] in local?.paused() })
             list = local
+            #if targetEnvironment(simulator)
+            FluidityChecks.shared.install(local)
+            #endif
         } else if let name = info["NativeList"] as? String, let native = NativeLists.make(name) {
             (list, resumed, paused) = (native.list, native.resumed, native.paused)
         } else {
