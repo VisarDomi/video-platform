@@ -6,14 +6,16 @@ import { DownloadHandle } from "../state/downloadsManager.js";
 export class DiskSession {
     private readonly alias: string;
     private readonly handle: DownloadHandle;
-    private readonly setupDir: () => Promise<string | null>;
+    private readonly setupDir: (claim: (dirPath: string) => void) => Promise<string | null>;
     private _dirPath: string | null = null;
     private _materialized = false;
 
+    // `setupDir` creates the recording's folder and calls `claim` with its path before
+    // creating it (see setupDownloadDir).
     constructor(
         alias: string,
         handle: DownloadHandle,
-        setupDir: () => Promise<string | null>,
+        setupDir: (claim: (dirPath: string) => void) => Promise<string | null>,
         existingDirPath?: string,
     ) {
         this.alias = alias;
@@ -47,8 +49,10 @@ export class DiskSession {
     public async materialize(): Promise<boolean> {
         if (this._materialized) return true;
 
-        const dirPath = await this.setupDir();
+        // Owned from before it exists, so the folder scan never takes it for an abandoned one.
+        const dirPath = await this.setupDir((planned) => this.handle.update({ segmentsDirPath: planned }));
         if (!dirPath) {
+            this.handle.update({ segmentsDirPath: null });
             logger.error(`[DiskSession] ${this.alias}: failed to create download dir`);
             return false;
         }

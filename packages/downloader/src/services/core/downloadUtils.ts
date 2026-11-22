@@ -11,7 +11,15 @@ export function formatDownloadDirName(alias: string, date: Date): string {
     return `${formatTimestampForPath(date)} ${alias}`;
 }
 
-export async function setupDownloadDir(providerName: string, alias: string, date: Date): Promise<string | null> {
+// `claim` hands the folder to its session before the folder exists. The folder scan moves an
+// empty active folder that no session owns to the Trash, and the durable creation below syncs
+// every ancestor directory, long enough for a scan to see the new folder before it is owned.
+export async function setupDownloadDir(
+    providerName: string,
+    alias: string,
+    date: Date,
+    claim?: (dirPath: string) => void,
+): Promise<string | null> {
     const baseName = formatDownloadDirName(alias, date);
     const storageLocation = path.join(providerFolder(providerName, "downloaded"), ".active");
 
@@ -22,6 +30,7 @@ export async function setupDownloadDir(providerName: string, alias: string, date
     }
 
     const segmentsDirPath = path.resolve(storageLocation, baseName);
+    claim?.(segmentsDirPath);
     const segmentsDirExists = await FileSystemManager.ensureDirExists(segmentsDirPath);
     return segmentsDirExists ? segmentsDirPath : null;
 }

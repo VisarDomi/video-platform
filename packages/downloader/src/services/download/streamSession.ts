@@ -62,7 +62,7 @@ export class StreamSession {
         const disk = new DiskSession(
             this.alias,
             this.handle,
-            () => setupDownloadDir(this.provider.providerName, this.alias, new Date()),
+            (claim) => setupDownloadDir(this.provider.providerName, this.alias, new Date(), claim),
             this.existingDirPath,
         );
         const playlistManager = new PlaylistManager(disk, this.recordingId);
