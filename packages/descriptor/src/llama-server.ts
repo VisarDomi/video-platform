@@ -3,6 +3,16 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { descriptorConfig } from "./config.js";
 
+// The managed server did not start: it failed to launch, exited, or did not answer its
+// health check in time. About the machine (a disk too slow to load the model, a busy GPU),
+// not the video being described, so a caller may simply try again later.
+export class DescriptorStartupError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "DescriptorStartupError";
+    }
+}
+
 export class LlamaServer {
     private child: ChildProcess | null = null;
     private launchError: Error | null = null;
@@ -142,9 +152,9 @@ export class LlamaServer {
         let nextProgress = startedAt + 30_000;
         while (Date.now() < deadline) {
             if (this.stopping) throw new Error("Descriptor startup was stopped");
-            if (this.launchError) throw new Error(`Failed to launch llama-server: ${this.launchError.message}`);
+            if (this.launchError) throw new DescriptorStartupError(`Failed to launch llama-server: ${this.launchError.message}`);
             if (this.child && (this.child.exitCode !== null || this.child.signalCode !== null)) {
-                throw new Error(`llama-server exited (${this.child.signalCode ?? this.child.exitCode}): ${this.logTail.trim()}`);
+                throw new DescriptorStartupError(`llama-server exited (${this.child.signalCode ?? this.child.exitCode}): ${this.logTail.trim()}`);
             }
             try {
                 const response = await fetch(`${this.config.modelUrl}/health`, {
@@ -160,6 +170,6 @@ export class LlamaServer {
             }
             await delay(Math.max(1, Math.min(500, deadline - Date.now())));
         }
-        throw new Error(`llama-server did not become healthy at ${this.config.modelUrl} within ${this.config.startupTimeoutMilliseconds / 1000}s: ${this.logTail.trim()}`);
+        throw new DescriptorStartupError(`llama-server did not become healthy at ${this.config.modelUrl} within ${this.config.startupTimeoutMilliseconds / 1000}s: ${this.logTail.trim()}`);
     }
 }

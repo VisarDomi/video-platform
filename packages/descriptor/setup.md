@@ -12,6 +12,8 @@ output (about a thousand lines a run) is kept in memory, not logged: its last
 8 KB are appended to a startup failure. Failed description/rewrite requests retain
 the last 4 KB plus up to four assertion/CUDA-error lines, so an abort backtrace
 cannot hide its cause. Exited/signalled children and missing executables fail promptly.
+Every failure to start is a `DescriptorStartupError`, so a caller can tell the machine's
+trouble from a failed description and try again later.
 Failed starts clean up their child; shutdown sends SIGTERM and kills the child
 after ten seconds. An already-occupied health endpoint is refused in managed
 mode. Set `DESCRIPTOR_MODEL_URL` only when intentionally using an external

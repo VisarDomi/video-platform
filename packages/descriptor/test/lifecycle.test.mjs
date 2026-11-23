@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { LlamaServer } from '../dist/llama-server.js';
+import { DescriptorStartupError, LlamaServer } from '../dist/llama-server.js';
 import { descriptorConfig } from '../dist/config.js';
 
 async function fixture(t, scenario, timeout = 2000) {
@@ -52,20 +52,20 @@ for(const scenario of ['never','hang']) {
     test(`startup timeout cleans the child even when health ${scenario==='hang'?'hangs':'stays loading'}`,async t=>{
         const {llama,config}=await fixture(t,scenario,400);
         const start=Date.now();
-        await assert.rejects(()=>llama.start(),/did not become healthy/);
+        await assert.rejects(()=>llama.start(),error=>error instanceof DescriptorStartupError&&/did not become healthy/.test(error.message));
         assert(Date.now()-start<2500);
         await assert.rejects(()=>fetch(`${config.modelUrl}/health`));
     });
 }
 test('child failure exposes model logs instead of waiting for a generic timeout',async t=>{
     const {llama}=await fixture(t,'exit');
-    await assert.rejects(()=>llama.start(),/exited \(7\).*fixture model load failure/s);
+    await assert.rejects(()=>llama.start(),error=>error instanceof DescriptorStartupError&&/exited \(7\).*fixture model load failure/s.test(error.message));
 });
 test('signal death and missing executable fail promptly',async t=>{
     const {llama,config}=await fixture(t,'signal');
     await assert.rejects(()=>llama.start(),/SIGTERM/);
     const missing=new LlamaServer({...config,runtimeExecutable:'/nonexistent/descriptor-runtime'});
-    await assert.rejects(()=>missing.start(),/Failed to launch llama-server/);
+    await assert.rejects(()=>missing.start(),error=>error instanceof DescriptorStartupError&&/Failed to launch llama-server/.test(error.message));
     await missing.stop();
 });
 
