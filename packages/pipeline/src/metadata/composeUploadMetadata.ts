@@ -79,7 +79,7 @@ export function composeUploadMetadata(
         throw new Error("Cannot compose upload metadata with unresolved provenance");
     }
     const output = descriptorOutput(description.output);
-    // Restore the v1 public format: model title [source recording basename].
+    // The public format: model title [source recording basename].
     // sourcePath is the recording directory, already without a media extension;
     // never use the generated artifact's conversion/version suffix here.
     // Only an explicitly prepared comparison adds version/part diagnostics.

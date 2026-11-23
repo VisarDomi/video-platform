@@ -1,4 +1,4 @@
-// The e2e's content profile (the tennis profile is step 5): a fixed prompt, a model the
+// The e2e's own content profile (not profiles/tennis): a fixed prompt, a model the
 // fake model server stands in for, and plain footer and tags. The sites file names it by
 // file URL.
 import { fileURLToPath } from "node:url";

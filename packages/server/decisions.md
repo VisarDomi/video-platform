@@ -122,19 +122,23 @@ upload as a cut one; a cut writes its own checkpoint by derivation. A power cut 
 leaves the folder with a checkpoint wherever it is (at worst an extra row for a path that does
 not exist, which nothing admits).
 
-**Why:** Until 2026-11-21 a save moved only the folder. Every recording kept with OK lost its
-checkpoint and could never be uploaded; 1,117 had piled up since August.
+**Why:** The pipeline uploads only a recording whose `ready` checkpoint matches its current
+path. A move that left the checkpoint behind would make every recording kept with OK impossible
+to upload.
 
 ## Finalization exposes work while systemd allocates resources
 
 The pending queue is one deduplicating FIFO with one worker per
 `os.availableParallelism()` (cgroup-aware), each pausing 15 seconds between
 recordings; PlaylistAuthority probing and the library command use the same
-ceiling. This bounds parallel work; it is not a CPU throttle. systemd caps all
-processing in `video-processing.slice` (`CPUQuota=600%`, `MemoryHigh=70%`,
-`MemoryMax=80%`, no swap) and gives the server `CPUWeight=1000` over the
-weight-100 pipeline service and background scopes. Inside the slice Node
-reports six available CPUs; outside it, all twelve host CPUs.
+ceiling. This bounds parallel work; it is not a CPU throttle. The server, the pipeline
+service and the library scopes run in `video-processing.slice`, which has no CPU cap
+(`CPUQuota=` is empty), bounds memory (`MemoryHigh=70%`, `MemoryMax=80%`, no swap) and caps
+writes to the root filesystem's disk at `IOWriteBandwidthMax=/ 50M` (50 MiB/s for the slice
+as a whole). Inside it the server has `CPUWeight=1000`; the pipeline service runs at idle
+priority (`CPUWeight=idle`, `Nice=19`, `IOSchedulingClass=idle`, `IOWeight=10`), so bulk
+conversion yields to playback and to the rest of the desktop. With no CPU cap, Node reports
+every host CPU inside the slice too.
 
 FFmpeg receives no thread or priority flags, and the library command has no
 `--concurrency` option. Exact `--recording` library finalization runs as
@@ -178,11 +182,11 @@ It runs in a systemd scope inside `video-processing.slice` with a stable name,
 so a second invocation of the same kind cannot run concurrently and the
 operator can stop it by name. Unchanged playlists with a `ready` checkpoint are
 skipped; interrupted deep scans resume from their checkpoint. A folder moved without its
-checkpoint (by hand, or by a server older than the carrying move) first takes the `ready` one
+checkpoint (by hand, or by a file manager) first takes the `ready` one
 its folder name has elsewhere with the same playlist, so only recordings that never had one are
 decoded. It processes
 folders in place and never publishes or trashes them, and it removes any
-legacy `.media-integrity.json` sidecar of a ready recording. A complete
+`.media-integrity.json` sidecar of a ready recording (checkpoints live in the ledger). A complete
 `all`/`all` run without failures records the `historical-finalization-v1`
 contract the pipeline checks. `--recording` accepts exactly one visible
 immediate child of a managed `downloaded` or `edited` root (not a symlink, with
@@ -235,15 +239,14 @@ knows the site (name resolution, follow before add, existence, former names, sou
 links, the names to refresh). Site code lives in the plug-ins only.
 
 The server reads each list with the plug-in's `parseTargetLine`, the downloader's
-parser, so the routes see exactly the targets that are recorded. Until 2026-11-19 the
-server had parsers of its own that disagreed: they skipped lines the downloader
-recorded (bare IDs, `http://` or query-string URLs, tab separators, bare usernames,
-subdomains and non-numeric room IDs), so `remove` could not take them
-off the list, and accepted some it never recorded. The server parses silently; the
+parser, so the routes see exactly the targets that are recorded. A parser of the server's
+own could disagree with it: skip lines the downloader records (bare IDs, `http://` or
+query-string URLs, tab separators, bare usernames, subdomains and non-numeric room IDs), so
+that `remove` could not take them off the list, or accept lines it never records. The server parses silently; the
 downloader logs malformed lines. An entry without an ID (a username not yet resolved)
 is known by its label, as the downloader keys it: `remove` and `member`
-match it by that label. New lines are written by `formatTargetLine`, byte-identical to
-before (pinned with each plug-in).
+match it by that label. New lines are written by `formatTargetLine`, in the same bytes as
+the lines already in the lists (pinned with each plug-in).
 
 ## Providers are the sites file's capture sites
 
@@ -306,7 +309,7 @@ through `mutateTextFile` (`core/durableFile.ts`). The read, the decision and the
 write are one step serialized per file inside the server, and the write replaces
 the file: temporary file, fsync, rename, directory fsync. Why: a list torn by a
 power cut, or an entry dropped by two concurrent changes, ends that streamer's
-live capture, since the downloader finalizes sessions missing from the list. The
+live capture, since the downloader finalizes sessions missing from the list.
 An alias sync fetches usernames before taking that step and applies them to the
 list as it is then, so an add or remove made during the fetch survives. The
 downloader's target managers watch the list's directory, not the file, because

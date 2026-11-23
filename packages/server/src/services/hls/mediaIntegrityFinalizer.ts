@@ -68,7 +68,7 @@ export type MediaIntegrityWarningKind =
     | "unreferenced-media"
     // Entries whose provider sequence restarted (regressed); kept, with a discontinuity.
     | "sequence-restart"
-    // A destructive repair journal from an older server was cleared; nothing was moved.
+    // A destructive-repair journal found in the ledger is cleared; nothing is moved.
     | "retired-repair-journal"
     | "decoder-boundary-split"
     | "decoder-boundary-unrepaired";

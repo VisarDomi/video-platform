@@ -8,9 +8,9 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 
-// Changed on purpose: the providers are no longer a constant of the config module but the
-// capture sites of the sites file, configured at startup. Importing the config knows none;
-// configuring them still creates no storage directory.
+// The providers are the capture sites of the sites file, configured at startup, not a
+// constant of the config module. Importing the config knows none; configuring them creates
+// no storage directory.
 test("server config import does not create provider storage directories", async (t) => {
     const temporaryHome = await mkdtemp(path.join(tmpdir(), "video-server-home-"));
     t.after(() => rm(temporaryHome, { recursive: true }));

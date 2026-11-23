@@ -47,7 +47,7 @@ async function sessionFilePath(t, store = new CredentialStore()) {
     return requested[0];
 }
 
-// Moved from the readTokens pin (shared's reader went; the core's store is the one reader).
+// The core's credential store is the one reader of session files.
 test("pin: the credential store reads ~/.local/share/video-services/session/<account>.json, not the data root", async (t) => {
     const file = await sessionFilePath(t);
     assert.equal(path.dirname(file), path.join(home, ".local", "share", "video-services", "session"));

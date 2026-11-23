@@ -13,7 +13,7 @@ import { artifactSha256 } from "./validateArtifact.js";
 // Independent of the upload generation. Bump when encoder/filter/remux settings
 // change output semantics, even if the resolution-selection policy stays put.
 // Preserve source A/V offsets on a 90 kHz video clock, with microsecond MP4
-// edits. Older recipes rounded the video origin to its nominal frame interval.
+// edits; the video origin is never rounded to its nominal frame interval.
 export const ARTIFACT_RECIPE_VERSION = "artifact-recipe-v4";
 
 export interface ArtifactCacheConfig {

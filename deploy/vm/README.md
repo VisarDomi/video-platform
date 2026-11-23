@@ -177,7 +177,8 @@ zero bytes**. The new length had reached the disk; the data had not. That is
 consistent with ext4 allocating the blocks as unwritten extents, which read back
 as zeros until the completed write is recorded.
 
-In 160 cycles, the careful workload never lost an acknowledged record and never
+In 160 cycles (130 under `writeback`: 30 with seed 101 and 100 with seed 202; 30
+under `unsafe`), the careful workload never lost an acknowledged record and never
 showed a torn state. Its recovery step did real work once. In cycle 61 of the
 100-cycle run, the cut left 13,197 bytes of a half-written, unacknowledged
 record at the end of the journal. The cut had landed during that record's
@@ -199,21 +200,20 @@ about 30 s once.
   spends most of its time inside `fsync`, because a guest flush becomes a host
   `fdatasync`. A cut therefore usually lands while the newest acknowledged record
   exists only in the guest's page cache, or on its way to QEMU.
-- **Replacing the state in place** did not fail at first. In the first version
-  the state was rewritten from the same loop that appended records, and in 8
-  cycles it never tore. On ext4, `open(O_TRUNC)`, `write`, `close` is mostly
+- **Replacing the state in place** fails only when something else commits the
+  journal at the wrong moment. On ext4, `open(O_TRUNC)`, `write`, `close` is mostly
   saved by `auto_da_alloc`: after a truncate, `close()` starts writing the new
   data out, and the next journal commit waits for it. The file is then old or
   new on disk, never empty. Only a commit landing between the truncate and the
   close exposes the gap. A single-threaded loop never fsyncs there, which leaves
   only ext4's 5-second periodic commit, and that rarely lands in the gap.
-  The state writer was therefore moved to its own thread, in both workloads, as
-  a second component of one service would be. The journal thread's fsyncs then
+  The state writer therefore runs on its own thread, in both workloads, as a
+  second component of one service would. The journal thread's fsyncs then
   commit at arbitrary moments, including inside that gap, and torn (zero-filled)
-  states appeared.
-- **Concurrency exposes the bug, not size.** The state grew from 64 KB to
-  256 KB when it moved to a thread, so two runs separate the two changes. With
-  the thread and a 64 KB state, the state tore in 6 of 20 cycles, more often
+  states appear.
+- **Concurrency exposes the bug, not size.** The two experiment rows separate
+  the thread from the state's size. With the thread and a 64 KB state, the
+  state tore in 6 of 20 cycles, more often
   than at 256 KB: smaller rewrites are faster, so there are more of them to hit.
   With 256 KB and no thread (`--state-writer inline`), it tore in 0 of 30
   cycles, against 4 of 30 with the thread at the same size and seed. All 8
@@ -329,7 +329,6 @@ disk. Each result line is fsynced before the next cycle starts, and
 `summary.json` is written atomically. QEMU dies with the harness
 (`PR_SET_PDEATHSIG`), so no orphaned VM keeps running. On `SIGTERM` the run cuts
 the guest, writes `summary.json` with `"complete": false` and
-`"aborted": "terminated"`, and keeps its disk. That happened once by accident,
-at cycle 68 of a 100-cycle run, and left no QEMU process behind. If the host
+`"aborted": "terminated"`, and keeps its disk; no QEMU process is left behind. If the host
 itself goes down mid-run, the finished cycles in `results.jsonl` stay valid and
 `report` reads them. Start a new run; a run does not resume.

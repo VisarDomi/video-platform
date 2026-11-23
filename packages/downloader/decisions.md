@@ -14,8 +14,8 @@ time, fmp4-live's status-change time); a public stream without one is refused. S
 `<local number>_<recording identity>_<provider sequence>.ts`. A UTC identity
 keeps the provider's `Z` but drops the colons (`2026-08-12T09:08:47Z` is stored
 as `2026-08-12T090847Z`); provider snapshots and parsed filenames use the same
-canonicalizer, and URI percent escapes are never stored in filenames. Legacy
-numeric filenames are readable but never guessed as a resumable identity.
+canonicalizer, and URI percent escapes are never stored in filenames. Plain
+numeric filenames (no identity in them) are readable but never guessed as a resumable identity.
 
 Shutdown and transport/API failures leave the folder in `.active` without
 ENDLIST. Provider snapshots decide whether it resumes or ends: the same
@@ -25,8 +25,8 @@ streamer ends it only after two observations at least 60 seconds apart with no
 playlist progress. An unavailable provider response never ends a recording.
 
 At startup each `.active` folder is inspected: one that already has ENDLIST is
-handed off, one without any media goes to the desktop Trash, a legacy folder
-(no compound segment names) is finalized and handed off without guessing an
+handed off, one without any media goes to the desktop Trash, a folder without
+compound segment names is finalized and handed off without guessing an
 identity, and a folder mixing identities is left untouched with a warning.
 While running, the periodic scan hands off an ENDLIST folder only when no
 session owns it; a session hands off its own folder after writing ENDLIST.
@@ -78,7 +78,7 @@ of TS dimensions/SAR (unknown dimensions count as a change), a new init map, or
 a resume.
 
 **Why:** Providers restart their numbering mid-recording (fmp4-live's edges number
-independently, ts-live restarts at 0, ladder-live has gone from 1112 to 1). A baseline
+independently, ts-live restarts at 0, ladder-live can go from 1112 to 1). A baseline
 that only grows would skip every later segment until the counter passed the
 old maximum.
 
@@ -92,8 +92,8 @@ succeeds. Atomic playlist replacement retains its file/rename/directory barriers
 A failed write or flush stops the attempt without claiming success or deleting
 received bytes. Recovery flushes readable orphan media and its applicable init
 map before re-appending it. These barriers prevent a reboot from preserving a
-playlist entry ahead of its captured payload; they cannot reconstruct bytes lost
-before the fix or protect against storage hardware that ignores flush requests.
+playlist entry ahead of its captured payload; they cannot protect against storage
+hardware that ignores flush requests.
 
 An empty response body is not written. A written file that the provider's
 validator cannot read stays on disk. Either way the segment is not handled: the
@@ -124,7 +124,7 @@ re-appended in local-number order when they are nonempty, readable, do not
 repeat the tail's provider sequence, and (for fMP4) have their init map on disk;
 live capture then starts after a discontinuity. Every other unreferenced file
 stays on disk for the server to report. A torn line after the last valid entry
-is trimmed atomically; a playlist with legacy, mixed, or foreign names refuses
+is trimmed atomically; a playlist with plain numeric, mixed, or foreign names refuses
 to resume.
 
 A power loss can also leave NUL bytes at the end of the playlist and its last

@@ -6,11 +6,11 @@ import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES } from "../domain/uploadBudget.js";
 
 // The ledger's schema. A new ledger is created whole, in one transaction, so a power cut
-// leaves either no ledger or a complete one. Schema 17 is the first public schema: a
-// ledger older than that was upgraded by the release that wrote it, and is refused here.
+// leaves either no ledger or a complete one. This release opens schema 17 only and refuses
+// a ledger of any other schema.
 export const SCHEMA_VERSION = 17;
 
-// Production artifact parts: "full", the old 1080p split names, or "shapeN" (one upload
+// Production artifact parts: "full", the 1080p split's names, or "shapeN" (one upload
 // per picture shape). Kept in SQL so a bad name cannot be stored.
 function partCheck(column: string): string {
     return `${column} IN ('full', 'max1080p', 'nonmax1080p') OR (${column} GLOB 'shape[1-9]*' AND ${column} NOT GLOB 'shape*[^0-9]*')`;

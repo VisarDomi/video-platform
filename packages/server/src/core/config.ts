@@ -63,8 +63,7 @@ export function getAllProviders(): string[] {
     return [...providers.keys()];
 }
 
-// The provider a request without one means: the first capture site in the sites file
-// (production lists its former fixed default first).
+// The provider a request without one means: the first capture site in the sites file.
 export function defaultProvider(): string {
     return getAllProviders()[0] ?? "";
 }

@@ -8,7 +8,7 @@
 //   the runtime dependencies its package.json declares (devDependencies, such as the
 //   simulator its tests use, do not count).
 // - The server and the auth daemon reach other packages by name only (no path into a
-//   package's files or build output; the phone setup used to import auth's dist by path).
+//   package's files or build output).
 //   Which site names their sources may still contain is checked with the private word
 //   list in private/test/coreSiteNames.test.mjs.
 //

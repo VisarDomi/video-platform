@@ -75,7 +75,7 @@ export class FinalizationCheckpointStore {
         return true;
     }
 
-    // For a folder moved without the server (a file manager, an older server): adopts the ready
+    // For a folder moved without the server (by hand or by a file manager): adopts the ready
     // checkpoint of a recording of the same folder name and the same playlist elsewhere, when
     // this path has none. Returns the path it came from.
     adoptMoved(recordingPath: string, fingerprint: string): string | null {
@@ -116,8 +116,8 @@ export class FinalizationCheckpointStore {
             .run(path.resolve(recordingPath));
     }
 
-    // media_repairs holds journals of the retired destructive repair. Nothing
-    // writes them any more; finalization reads and clears leftovers.
+    // media_repairs may hold a destructive-repair journal. Nothing in this server
+    // writes one; finalization reads any it finds and clears it.
     readRepair<T>(recordingPath: string): T | null {
         const row = this.database.prepare("SELECT plan_json FROM media_repairs WHERE recording_path = ?")
             .get(path.resolve(recordingPath)) as { plan_json: string } | undefined;

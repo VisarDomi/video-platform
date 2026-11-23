@@ -69,8 +69,9 @@ The platform runs unattended on one PC, so a power cut can come at any instant. 
 
 The VM harness (`deploy/vm`) checks the rules against real power cuts: it hard-resets a QEMU
 guest at random points and checks every invariant after each boot. A journal written by the
-rules lost nothing in 130 cuts; the same journal without the fsyncs lost acknowledged
-records in 17 of 30 (`deploy/vm/README.md` has the table and the raw results).
+rules lost nothing in 160 cuts (130 with QEMU's `writeback` cache, 30 with `unsafe`); the same
+journal without the fsyncs lost acknowledged records in 17 of 30 under `writeback`
+(`deploy/vm/README.md` has the table and the raw results).
 
 ## The plug-in boundary
 

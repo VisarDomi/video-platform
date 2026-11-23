@@ -12,7 +12,7 @@ public struct StripPosition: Codable, Sendable, Equatable {
     public var zoom: ZoomState?
     public var aspect: Double?
     // Zoom can put the centre in the legal padding above/below the pages.
-    // Keep that exact location while `fraction` retains its legacy 0...1 meaning.
+    // Keep that exact location while `fraction` keeps its 0...1 meaning.
     public var point: Double?
     public init(index: Int, fraction: Double, zoom: ZoomState? = nil, aspect: Double? = nil, point: Double? = nil) {
         self.index = index
@@ -251,7 +251,7 @@ public final class StripReaderView: UIView, UIScrollViewDelegate {
         guard viewportReady, heights.indices.contains(position.index) else { pendingPosition = position; pendingTop = nil; pinnedTop = nil; return }
         var target = position
         // A fractional position is only exact in the geometry it was saved in.
-        // Older snapshots recover that geometry from the cached visible image's
+        // A snapshot saved without that geometry recovers it from the cached visible image's
         // header; no gallery-wide scan or image decode is needed.
         if target.aspect == nil, let file = delegate?.strip(self, localFileFor: target.index),
            let size = ImagePipeline.pixelSize(file), size.width > 0, size.height > 0 {

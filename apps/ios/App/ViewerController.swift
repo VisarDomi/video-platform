@@ -1336,7 +1336,7 @@ final class ViewerController: UIViewController, UIScrollViewDelegate, UIGestureR
         // Still showing the saved poster: it stays the one to show.
         guard poster == nil else { return }
         guard revealed, let video = currentVideo, active.presentationSize != .zero else { checkpoint.clearPoster(); return }
-        // Several partially visible videos can now share the viewport. Preserve that first
+        // Several partially visible videos can share the viewport. Preserve that first
         // frame as a whole, rather than restoring only the active video's rectangle.
         let rect = viewport.bounds
         guard rect.width > 1, rect.height > 1 else { checkpoint.clearPoster(); return }

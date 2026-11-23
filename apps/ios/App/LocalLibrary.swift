@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 
 enum LocalMediaKind: String, Sendable {
-    case hls, file, mp4 // mp4 remains readable for older saved/configured descriptors.
+    case hls, file, mp4 // mp4: accepted when a saved or configured descriptor names it.
     var originalFile: Bool { self != .hls }
 }
 

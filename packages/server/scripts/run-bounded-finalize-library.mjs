@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const packageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const isSingleRecording = process.argv.slice(2).includes("--recording");
-// A stable scope name makes the migration single-instance and gives the
+// A stable scope name makes the run single-instance and gives the
 // operator one predictable unit to stop, inspect, and restart.
 const scopeName = isSingleRecording ? "video-finalize-library-single" : "video-finalize-library";
 const arguments_ = [

@@ -1825,10 +1825,8 @@ export class PipelineDatabase {
         if (order[phase] < order[row.phase] || transmittedBytes < row.progress_bytes) {
             throw new Error("Upload progress cannot move backwards");
         }
-        // Keep the persisted phase at `started` while bytes are in flight. Older
-        // schema-v3 databases enforce the original three-value CHECK constraint;
-        // A separate durable flag records the transfer boundary even with zero
-        // bytes, without rebuilding historical tables to change that CHECK.
+        // The persisted phase stays `started` while bytes are in flight; the durable
+        // `transfer_started` flag records the transfer boundary, even with zero bytes.
         const persistedPhase = phase === "file_uploading" ? "started" : phase;
         this.database.prepare(`
             UPDATE upload_attempts SET phase = ?, progress_bytes = ?, transfer_started = 1 WHERE id = ?
@@ -2242,8 +2240,9 @@ export class PipelineDatabase {
         });
     }
 
-    // Repair the old crash window between acceptance and verification. This
-    // never sends bytes; it restores a pending check of the already known ID.
+    // An attempt accepted but left without a pending check (a crash between acceptance and
+    // verification) gets its check back. This never sends bytes; it restores a pending
+    // check of the already known ID.
     recoverAcceptedVerifications(now = new Date()): number {
         return this.transaction(() => {
             const rows = this.database.prepare(`SELECT a.id, a.recording_id, strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(x.accepted_at,a.completed_at), '+1 day') AS deadline FROM upload_attempts a

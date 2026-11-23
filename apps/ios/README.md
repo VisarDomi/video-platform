@@ -154,19 +154,20 @@ readiness, terminal media, foreground ownership, gesture visibility: `VideoPlayb
 `ChasingSeek`, `ViewerInteractionState`); callbacks from an older operation cannot finish a newer
 one, and recovery reuses the durable data instead of clearing it.
 
-### Opening and scrubbing speed (November 22)
+### Opening and scrubbing speed
 
-Opening a recording and scrubbing it had slowed once the continuous document gave every video
-it shows a player: at rest about seven, six of them hidden neighbours. Each parked neighbour
-asked AVPlayer for 0.5 s ahead, which AVPlayer treats as automatic below a segment: in the
-virtual iPhone every hidden neighbour downloaded 15-30 MB within five seconds of opening (about
-150 MB), beside the watched video's first segment and every later seek. Now neighbours wait
-for the current video to play, a parked neighbour asks for 2 s (honoured: about 1 MB, then
-idle), and a saved position is asked for before the item loads (the 0:00 frame no longer
-flashes first). Measured with `scripts/check-fluidity.py` on three recordings (720p and 1080p)
-opened at 5:00, the PC mirrored at a shared 100 Mbps like a phone's Wi-Fi:
+The continuous document gives every video it shows a player: at rest about seven, six of them
+hidden neighbours. Neighbours wait for the current video to play, and a parked neighbour asks
+AVPlayer for 2 s ahead, which it honours (about 1 MB, then idle). AVPlayer treats a smaller
+request, such as 0.5 s, as automatic below a segment: in the virtual iPhone every hidden
+neighbour then downloads 15-30 MB within five seconds of opening (about 150 MB), beside the
+watched video's first segment and every later seek. A saved position is asked for before the
+item loads, so the 0:00 frame never flashes first. Measured with `scripts/check-fluidity.py` on
+three recordings (720p and 1080p) opened at 5:00, the PC mirrored at a shared 100 Mbps like a
+phone's Wi-Fi, with this policy and with the opposite one (neighbours load at once and ask for
+0.5 s; the saved position is set after the item loads):
 
-| Step | Before | After |
+| Step | Opposite policy | This policy |
 | --- | --- | --- |
 | Open until playing | 6.5, 3.9, 4.1 s | 0.74, 0.90, 0.30 s |
 | +45 s drag: release until playing | 2.5, 1.3, 1.5 s | 0.13, 0.25, 0.55 s |

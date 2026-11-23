@@ -1,5 +1,5 @@
 // The phone-session route's production dependencies: the site's auth.provisionDevice
-// through the registry (it used to import the auth package's build output by path).
+// through the registry, never the auth package's build output by path.
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -43,9 +43,8 @@ test("the phone signs in with the site's account, on the Xvfb display, and the h
     delete process.env.DISPLAY;
     delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     assert.deepEqual(await dependencies.login("fixture-request-12345678"), { cookies: [{ name: "fixture" }] });
-    // Changed on purpose: the sign-in no longer points Playwright at the browsers it
-    // downloads (it used to set PLAYWRIGHT_BROWSERS_PATH to 0); the site launches the
-    // system's Chromium.
+    // The sign-in never points Playwright at the browsers it downloads (it sets no
+    // PLAYWRIGHT_BROWSERS_PATH); the site launches the system's Chromium.
     assert.deepEqual(calls, [["provision", "phone@example.invalid", "fixture-request-12345678", ":111", undefined]]);
 
     // The receipt of a handoff, kept until the phone acknowledges it.

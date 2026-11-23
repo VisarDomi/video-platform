@@ -75,7 +75,7 @@ SQLite, delete receipts, unblock/requeue footage, grant backup/cleanup coverage,
 or clear any provider-removal ban. New remote IDs and changed failure reasons
 remain actionable. Historical raw `blocked` rows remain the safety mechanism,
 while acknowledged external losses stop appearing as current pipeline faults.
-An old failed transfer attempt is history when its recording has since resumed.
+A failed transfer attempt is not a current failure once its recording has resumed.
 
 Tests use temporary databases and monitor files:
 `python3 -m unittest discover -s scripts -p 'test_babysit*.py'`.
@@ -308,12 +308,10 @@ Tests use temporary folders and databases:
 repository root. Direct entry points are `scripts/move-conversions` and
 `scripts/move-recordings`; both support explicit root/database arguments for tests.
 
-The schema-16 migration brings existing pending acceptance checks forward to the
-next daily date using acceptance/last-check timestamps. It commits atomically,
-preserves immutable retry deadlines and every receipt/removal ban, and does not
-reset a later daily backoff when reopened. The existing `verify_after` receipt
-column stores the seven-day retry gate; `upload_confirmations.confirm_after` is
-the next availability check. There is no extra timer or recurring task.
+The `verify_after` receipt column stores the seven-day retry gate, which never
+moves; `upload_confirmations.confirm_after` is the next daily availability check.
+Reopening the ledger does not reset a later daily backoff. There is no extra timer
+or recurring task.
 
 ## Durable campaign controls
 

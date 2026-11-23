@@ -20,7 +20,6 @@ async function listServer(t, site) {
     return `http://127.0.0.1:${address.port}/api/${site.id}`;
 }
 
-// Moved from live-a.routes.test.mjs (the adapter became a catalog; same assertions).
 test("GET member finds a streamer by a listed name at once, and by an old name through the provider", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "member-route-"));
     t.after(() => rm(dir, { recursive: true }));

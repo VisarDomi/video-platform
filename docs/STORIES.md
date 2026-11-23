@@ -33,8 +33,10 @@ while another appears on none. The rule held exactly as designed (absence was un
 nothing was uploaded twice); it just held too long. The fix does not depend on the cause.
 
 **Fix.** A short list is read again from the first page after a pause, and the rows of both
-reads count together; only if they still fall short is the upload stopped, with the rows per
-page in the error. After a deployment, a cooldown caused by the fixed fault is cleared
+reads count together. If they still fall short, the list counts as complete only when the
+missing rows are exactly the pipeline's own uploads of the last three hours, none of them a
+copy of the recording being uploaded; otherwise the upload is stopped, with the rows per page
+in the error. After a deployment, a cooldown caused by the fixed fault is cleared
 instead of waited out.
 
 ## A transfer that resumed from nothing
@@ -99,6 +101,7 @@ end-to-end run.
 
 **The answer.** The VM harness hard-resets a QEMU guest at random points while a workload
 writes, then checks every invariant after each boot. The same journal written both ways:
-with the rules it lost nothing in 130 cuts; without the fsyncs it lost acknowledged records
-in 17 of 30 cuts and left torn or empty state in 4. The numbers and raw results are in
+with the rules it lost nothing in 160 cuts (130 with QEMU's `writeback` cache, 30 with
+`unsafe`); without the fsyncs, under `writeback`, it lost acknowledged records in 17 of 30
+cuts and left torn state in 4. The numbers and raw results are in
 `deploy/vm/README.md`.

@@ -8,10 +8,9 @@ import * as types from "../../core/types.js";
 import logger from "../../core/logger.js";
 import { recordingDisplaySize, type DisplaySize } from "./displayMetadata.js";
 
-// Each provider's recordings, kept instead of rescanned for every request. The list used to
-// be rebuilt per request (three directory scans, a stat per recording, playlists re-read
-// after a restart) and sent whole (450 KB for the largest site's 4,000 recordings, uncompressed) to every
-// refresh. Now:
+// Each provider's recordings, kept instead of rescanned for every request (a rescan is three
+// directory scans and a stat per recording; the whole list of the largest site's 4,000
+// recordings is 450 KB uncompressed):
 // - the index lives in memory and on disk (<shared state>/list-index/<provider>.json, written
 //   atomically), so a restart rescans with stats only and reads only playlists that changed;
 // - it follows the folders as they change (inotify watches, debounced, plus a periodic stat

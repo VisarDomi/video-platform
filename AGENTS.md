@@ -17,4 +17,6 @@ deployment's own rules, which come on top of these.
   effect of a restart. Never rebuild the pipeline's build while its worker runs.
 - **Browsers:** the system Chromium only, with its sandbox for anything that opens a live
   website (`packages/sdk/test/systemBrowsers.test.mjs`).
+- **Current state only.** Docs and comments describe the current behavior only; history
+  lives in git and in `docs/STORIES.md`.
 - Work in a git worktree; leave other sessions' edits and processes alone.

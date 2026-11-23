@@ -31,7 +31,8 @@ export interface ArtifactRecord {
 }
 
 // "full": the whole recording. "shapeN": one upload per picture shape, in order
-// of first appearance (2026-10-05). max1080p/nonmax1080p: retired split, kept for old rows.
+// of first appearance. max1080p/nonmax1080p: the 1080p split's parts, valid in stored rows;
+// no new artifact gets them.
 export type ProductionArtifactPart = "full" | "max1080p" | "nonmax1080p" | `shape${number}`;
 
 export interface QueuedProductionArtifactRecord extends ArtifactRecord {

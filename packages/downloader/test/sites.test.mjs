@@ -195,8 +195,8 @@ test('the plug-in context names the site, its list and its own state directory',
     assert.equal(seen.length, 1);
     assert.equal(seen[0].siteId, 'live-c');
     assert.deepEqual(seen[0].config, { host: 'h' });
-    // Changed on purpose: two paths for sites with browser sign-ins were added (home-relative,
-    // named after the site); the two before are unchanged.
+    // Besides its state directory and download list, a site gets two paths for browser
+    // sign-ins (home-relative, named after the site).
     const home = path.join(os.homedir(), '.local');
     assert.deepEqual(seen[0].paths, {
         stateDir: path.join(sandbox, 'data', 'site-state', 'live-c'),

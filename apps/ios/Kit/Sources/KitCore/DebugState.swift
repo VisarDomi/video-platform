@@ -1,6 +1,6 @@
 import Foundation
 
-// What the inspector used to read from a WebKit page: each part of the app reports a small
+// The app's state for inspection from the Mac: each part of the app reports a small
 // JSON-able snapshot (current screen, scroll anchors, loaded images, queue lengths) and the
 // app writes them all to `debug-state.json` in its data folder whenever it resigns active.
 // From the Mac: `xcrun devicectl device copy from --domain-type appDataContainer

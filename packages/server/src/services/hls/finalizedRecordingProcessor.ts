@@ -32,7 +32,7 @@ export interface FinalizedRecordingProcessorDependencies {
     ) => Promise<MediaIntegrityFinalizationResult>;
 }
 
-// Journal shape written by the retired destructive repair (validator <= 3).
+// The shape of a destructive-repair journal in media_repairs (validator revisions up to 3).
 interface RetiredRepairJournal {
     readonly originalPlaylist?: string;
     readonly candidatePlaylist?: string;
@@ -86,7 +86,7 @@ async function defaultRepairPlaylist(streamPath: string, store?: FinalizationChe
     return { preservedNames: fmp4.preservedNames, warnings: [...fmp4.warnings, ...empty, ...sequence] };
 }
 
-// A journal left by the retired destructive repair is resolved without moving
+// A destructive-repair journal found in media_repairs is resolved without moving
 // any file: whichever playlist is on disk (original, or the already-published
 // candidate) is kept as is, and the journal is cleared.
 async function clearRetiredRepairJournal(

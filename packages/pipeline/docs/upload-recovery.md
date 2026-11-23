@@ -80,10 +80,10 @@ reservation before sending. A 2 KiB allowance covers each bounded multipart
 envelope. Claims include internal failed/retried requests and the remaining
 unique media, so retries cannot spend unreserved bytes. Full-artifact transfer
 intent remains conservatively charged on early failure; any additional claims
-are committed before transmission, and survive worker failure. Historical
-attempt charges are not rewritten. Exhausted retries/allowance return the
+are committed before transmission, and survive worker failure. Charges already
+recorded are never rewritten. Exhausted retries/allowance return the
 recording to the ordinary bounded campaign cooldown before metadata submission.
-An empty diagnostic from an older worker does not establish why it stalled.
+An attempt with an empty diagnostic does not establish why it stalled.
 
 The `lookup_state`, `lookup_checked_at`, `retry_not_before`, `limited_visibility` and `metadata_rejection`
 attempt columns survive worker restarts, independent of the bounded (16-entry) evidence history.
@@ -112,7 +112,7 @@ artifact flushing, and SIGKILL after transfer/ID persistence.
 `test/workerRecovery.test.mjs` exercises actual worker/encoder interruption and restart.
 
 `test/acceptedRetention.test.mjs` covers acceptance/deletion/reopen, seven-day retry
-and fresh deadlines, missing/changed originals, migration, legacy holds, known
+and fresh deadlines, missing/changed originals, known
 removal bans, SIGKILL at acceptance, split-part coverage and real selected-shape
 conversion. Upload-provider fixtures cover complete list checks across pagination
 and inconclusive errors. Original files are never cleanup targets.
