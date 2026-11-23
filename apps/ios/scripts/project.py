@@ -2,7 +2,7 @@
 its plug-ins, NativeKit (Kit/) and the app's Info.plist, in <registry>/build/app/VideoApp.xcodeproj.
 
     python3 scripts/project.py live-a-local                  # the public registry (apps/ios)
-    python3 engine/scripts/project.py --registry . <app>        # a deployment's, from its folder
+    python3 engine/scripts/project.py --registry . <app>     # a deployment's, from its folder
 
 Every app of a registry is the same target, VideoApp, with identical compiler inputs, so the apps
 share compiled modules. What differs is the Info.plist: the provider the app shows, its traits
