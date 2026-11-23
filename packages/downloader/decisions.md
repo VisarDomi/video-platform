@@ -244,11 +244,15 @@ request (`PLAYLIST_HEDGE_MS`); the first answer is used and the other is aborted
 An aborted request records no failure.
 
 Segments of a poll are fetched four at a time and saved in playlist order. While
-the loop waits more than a second for a segment, it polls the live playlist again
-and queues what the window newly lists behind the batch (`POLL_WHILE_WAITING_MS`).
-That poll runs only while the loop waits, never beside an append; a playlist that
-fails, ends, changes its init map or restarts its numbering there is left to the
-next regular poll, after the batch is saved.
+the loop waits more than a second for a segment, or for the disk to write, flush,
+check or append one, it polls the live playlist again and queues what the window
+newly lists behind the batch (`POLL_WHILE_WAITING_MS`). That poll runs only while
+the loop itself waits; a playlist that fails, ends, changes its init map or restarts
+its numbering there is left to the next regular poll, after the batch is saved. Beside
+an append it is safe: with a batch queued it identifies segments past the batch's last,
+never reading the baseline an append moves, and it creates the playlist header only
+when there is neither a file nor a pending header. A late poll's gap line reports the
+playlist request's time and the slowest write, check and append since the previous poll.
 
 **Why:** A timer running beside the loop can act on state the loop has already
 left, so nothing beside the loop changes its state: the loop applies a check's
@@ -256,7 +260,10 @@ answer itself and drops a stale one. ts-live and fmp4-live list about six second
 media, so one slow segment download, or one master or playlist request that
 stalls for 5–10 seconds while a fresh request answers at once, would otherwise
 let segments leave the window before the loop polls again. A ts-live request that
-stalls also outlives its 10-second stream token and comes back 401.
+stalls also outlives its 10-second stream token and comes back 401. The disk stalls
+too: each segment costs four fsyncs, and a slow drive flushing a large write elsewhere
+(the pipeline's conversions) or trimming took one flush long enough for two streams to
+miss 12 segments together.
 
 ## Segment fetches: network errors and 429 retry, other HTTP errors stop
 

@@ -90,6 +90,43 @@ test('a slow segment does not stop polling: media listed meanwhile is saved, not
         ['10.ts', '11.ts', '12.ts', '13.ts', '14.ts', '15.ts']);
 });
 
+// The disk can stall for seconds (a DRAM-less drive flushing a multi-GB pipeline write, or a
+// weekly fstrim): a segment's write, fsyncs and check then took the poll loop past the
+// moving window (2026-11-22 21:29: two streams 7-12 s late together, 12 segments lost).
+test('a slow disk does not stop polling: media listed while a segment is written and checked is saved', { timeout: 15000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const handle = { state: { alias: 'example' }, update(value) { Object.assign(this.state, value); } };
+    const disk = new DiskSession('example', handle, async () => root);
+    const manager = new PlaylistManager(disk, 'recording');
+    const tracker = new InitTracker(disk);
+    const started = Date.now();
+    const window = (first, ended = false) => `#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:${first}\n`
+        + [first, first + 1].map(sequence => `#EXTINF:1,\ns${sequence}.ts\n`).join('') + (ended ? '#EXT-X-ENDLIST\n' : '');
+    const fetchPlaylist = async () => {
+        const elapsed = Date.now() - started;
+        return elapsed < 900 ? window(10) : elapsed < 1900 ? window(12) : window(14, true);
+    };
+    let stalled = false;
+    const provider = {
+        providerName: 'live-a', refreshMasterDuringDownload: false,
+        parseMasterPlaylist: async () => 'https://example.test/live.m3u8',
+        createDownloadSession: () => ({ fetchPlaylist, fetchSegment: async url => ({ data: Buffer.from(`unprobeable media: ${url}`) }) }),
+        // The first segment's check waits 2.5 s on the disk.
+        validateSegment: async file => {
+            if (!stalled) { stalled = true; await new Promise(resolve => setTimeout(resolve, 2500)); }
+            return validateTsSegment(file);
+        },
+    };
+    const result = await new StreamDownloader(handle, provider, new AccessIncidentTracker())
+        .run('https://example.test/master.m3u8', manager, tracker, disk);
+    assert.equal(result.exitReason, 'remote-endlist');
+    assert.equal(manager.missedSegmentCount, 0);
+    const saved = await readFile(path.join(root, 'playlist.m3u8'), 'utf8');
+    assert.deepEqual(saved.split('\n').filter(line => line.endsWith('.ts')).map(line => line.split('_').at(-1)),
+        ['10.ts', '11.ts', '12.ts', '13.ts', '14.ts', '15.ts']);
+});
+
 test('a playlist that ends while a slow segment downloads still saves that segment', { timeout: 15000 }, async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
     t.after(() => rm(root, { recursive: true, force: true }));
