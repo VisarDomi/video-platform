@@ -26,8 +26,9 @@ export class UploadByteMeter {
     }
 }
 
-// How far back the destination is told about the videos this ledger created.
-const RECENT_UPLOADS_MILLISECONDS = 48 * 60 * 60_000;
+// How far back the destination is told about the videos this ledger created: a new video
+// was seen off the list for 12 to 35 minutes after its upload.
+const RECENT_UPLOADS_MILLISECONDS = 3 * 60 * 60_000;
 
 export class UploadCoordinator {
     constructor(
@@ -50,8 +51,10 @@ export class UploadCoordinator {
         try {
             outcome = await this.uploader.upload({
                 ...request,
-                recentUploads: request.recentUploads
-                    ?? this.database.recentRemoteUploads(provider, new Date(now.getTime() - RECENT_UPLOADS_MILLISECONDS)),
+                // None when an earlier submission of this recording may have created a video
+                // without a captured ID: a shortfall could then be that very copy.
+                recentUploads: request.recentUploads ?? (this.database.hasUncapturedSubmission(recordingId, provider) ? []
+                    : this.database.recentRemoteUploads(provider, new Date(now.getTime() - RECENT_UPLOADS_MILLISECONDS))),
                 onEvidence: async (evidence) => {
                     this.database.recordUploadEvidence(attemptId, evidence);
                     await request.onEvidence?.(evidence);

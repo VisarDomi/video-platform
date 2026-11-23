@@ -189,6 +189,9 @@ export class CampaignWorker {
             "server_ready", "remuxed", "artifact_valid", "described",
         ].includes(recording.state) && (!trialNextId || recording.id === trialNextId)
             && allows(recording)), control.providerFilter);
+        // A local stage waiting for a resource (memory, a disk trim, a model that would not
+        // start) holds only that recording: an already prepared upload still goes ahead.
+        let deferred: CampaignStepResult | undefined;
         if (local[0]) {
             this.database.enrollCampaignTrial(local[0], now);
             try {
@@ -217,17 +220,21 @@ export class CampaignWorker {
                 result = await this.orchestrator.processRecording(local[0].id, now);
             } catch (error) {
                 if (!(error instanceof StageDeferredError)) throw error;
-                return { disposition: "resource_wait", recordingId: local[0].id, reason: error.message };
+                deferred = { disposition: "resource_wait", recordingId: local[0].id, reason: error.message };
             }
-            if (!result) throw new Error(`Could not claim campaign recording ${local[0].id}`);
-            if (comparison && ["failed", "blocked", "provenance_review_required"].includes(result.state)) {
-                this.database.setCampaignState("paused", now);
+            if (!deferred) {
+                if (!result) throw new Error(`Could not claim campaign recording ${local[0].id}`);
+                if (comparison && ["failed", "blocked", "provenance_review_required"].includes(result.state)) {
+                    this.database.setCampaignState("paused", now);
+                }
+                return { disposition: "stage_completed", recordingId: result.id, state: result.state };
             }
-            return { disposition: "stage_completed", recordingId: result.id, state: result.state };
         }
 
+        // Oldest first, except that a wait on the oldest's local stage does not hold back an
+        // upload already prepared (a trial keeps its strict order).
         const uploadReady = order(this.database.list("metadata_ready")
-            .filter((recording) => (!trialNextId || recording.id === trialNextId)
+            .filter((recording) => (!trialNextId || recording.id === trialNextId || (deferred !== undefined && control.trialPerProvider === null))
                 && allows(recording) && this.database.canAttemptUpload(recording.id, now)), control.providerFilter)[0];
         if (uploadReady) {
             this.database.enrollCampaignTrial(uploadReady, now);
@@ -347,6 +354,8 @@ export class CampaignWorker {
                 throw error;
             }
         }
+        // Nothing to upload meanwhile: the wait is this step's outcome (no new admissions).
+        if (deferred) return deferred;
 
         const candidate = await selectCandidate();
         if (!candidate) {

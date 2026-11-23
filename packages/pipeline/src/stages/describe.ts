@@ -7,6 +7,10 @@ import { isCounterclockwiseArtifact } from "./artifactNaming.js";
 // The descriptor's llama-server holds about 11 GB of RAM while describing; on a
 // machine short of memory the kernel kills it and the stage would fail.
 const DESCRIBE_MIN_AVAILABLE_GIB = Number(process.env.VIDEO_PIPELINE_DESCRIBE_MIN_MEMORY_GIB ?? 16);
+// A model that fails to start this many times in a row for one recording is not a passing
+// state of the machine (a missing runtime, a broken model): the recording fails, visibly.
+export const DESCRIBE_START_ATTEMPTS = 3;
+const failedStarts = new Map<string, number>();
 
 // fstrim discards every free block of the filesystem; after a reboot that is all the free
 // space (760 GiB here, 3.5 to 4.5 hours each week). Meanwhile this disk reads at about
@@ -52,9 +56,13 @@ export async function describeValidatedArtifact(
         // The model did not start: a matter of the machine at that moment, not of this video.
         // The recording keeps its state and is described on a later step; the server's own
         // output goes to the journal for the daily check.
-        console.log(JSON.stringify({ event: "descriptor-start-failed", recordingId: artifact.recordingId, error: error.message }));
+        const attempts = (failedStarts.get(artifact.recordingId) ?? 0) + 1;
+        console.log(JSON.stringify({ event: "descriptor-start-failed", recordingId: artifact.recordingId, attempt: attempts, error: error.message }));
+        if (attempts >= DESCRIBE_START_ATTEMPTS) { failedStarts.delete(artifact.recordingId); throw error; }
+        failedStarts.set(artifact.recordingId, attempts);
         throw new StageDeferredError("the description model did not start; trying again (descriptor-start-failed in the journal)");
     }
+    failedStarts.delete(artifact.recordingId);
     return {
         artifactSha256: artifact.sha256,
         promptVersion: result.promptVersion,

@@ -1,3 +1,4 @@
+import "./threadPool.js";
 import { DownloaderService } from "./services/downloaderService.js";
 import logger from "./common/logger.js";
 

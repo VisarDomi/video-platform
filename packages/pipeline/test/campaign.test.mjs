@@ -565,3 +565,29 @@ test("browser launch failures use the 15-minute transport cooldown, retaining th
     assert.match(result.reason,/profile owner still closing/);
     assert.equal(database.get(recording.id).state,'metadata_ready');
 });
+
+test("a local stage waiting for a resource holds only its recording: a prepared upload still goes ahead", async (t) => {
+    const { database, config, resolver, recording } = await campaignWorkerFixture(t);
+    // An older recording whose next stage has to wait (a disk trim, a model that would not start).
+    const root = path.dirname(path.dirname(path.dirname(recording.sourcePath)));
+    const authority = new DatabaseSync(config.finalizationDatabasePath);
+    const olderPath = await addFinalized(authority, path.join(root, "live-a", "edited"), "2026-08-16 110000 olderalias");
+    authority.close();
+    const older = database.discover((await inspectFinalizedRecording(olderPath, "live-a", "edited")).recording);
+    database.setCampaignState("running");
+    const uploads = [];
+    const worker = new CampaignWorker(database, config, resolver, async id => { uploads.push(id); throw new HumanActionRequiredError("captcha", "fixture"); },
+        undefined, "worker-test");
+    const { StageDeferredError } = await import("../dist/scheduler/orchestrator.js");
+    worker.orchestrator = { processRecording: async id => { assert.equal(id, older.id); throw new StageDeferredError("waiting for fstrim to finish trimming the disk before starting the descriptor"); } };
+    const step = await worker.step(new Date("2026-08-17T10:00:00Z"));
+    assert.deepEqual(uploads, [recording.id], "the prepared upload went ahead");
+    assert.equal(step.recordingId, recording.id);
+    // With nothing to upload, the wait is the step's outcome and nothing new is admitted.
+    database.transition(recording.id, "metadata_ready", "blocked", "fixture: out of the way");
+    database.setCampaignState("running");
+    const waiting = await worker.step(new Date("2026-08-17T10:05:00Z"));
+    assert.equal(waiting.disposition, "resource_wait");
+    assert.equal(waiting.recordingId, older.id);
+    assert.match(waiting.reason, /fstrim/);
+});

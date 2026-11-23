@@ -28,6 +28,11 @@ test('a description model that cannot start leaves the recording to a later step
     const event = lines.map(line => JSON.parse(line)).find(entry => entry.event === 'descriptor-start-failed');
     assert.equal(event.recordingId, 'recording-1');
     assert.match(event.error, /Failed to launch llama-server/);
+    // A model that keeps failing to start is no passing state: the third time, the recording fails.
+    const artifact = { recordingId: 'recording-1', path: video, sha256: 'b'.repeat(64), sizeBytes: 1 };
+    await assert.rejects(describeValidatedArtifact(artifact), StageDeferredError);
+    await assert.rejects(describeValidatedArtifact(artifact), error => !(error instanceof StageDeferredError) && /Failed to launch llama-server/.test(error.message));
+    await assert.rejects(describeValidatedArtifact(artifact), StageDeferredError, 'the count starts again');
 });
 
 test('a running fstrim is found among the processes', async () => {

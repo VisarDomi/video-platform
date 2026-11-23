@@ -138,6 +138,12 @@ export class StreamDownloader {
     // meanwhile: a slow download must not keep the loop from listing segments
     // that would leave the live window before the next regular poll. The poll
     // runs only while waiting, never beside an append.
+    // How long a piece of disk work itself took, whatever the loop did while it waited.
+    private static timed<T>(work: Promise<T>, record: (milliseconds: number) => void): Promise<T> {
+        const startedAt = Date.now();
+        return work.finally(() => record(Date.now() - startedAt));
+    }
+
     // Waits for a segment's download or disk work, polling the playlist each second meanwhile
     // so segments listed in the meantime are queued before the live window drops them.
     private async awaitPolling<T>(
@@ -511,25 +517,23 @@ export class StreamDownloader {
                     if (rejection === null) {
                         // The disk can stall for seconds (a flush behind a large write elsewhere):
                         // the playlist is polled meanwhile, and the time is reported with a gap.
-                        const diskStartedAt = Date.now();
-                        if (!await this.awaitPolling(disk.materialize(), pollWhileWaiting)) {
+                        const slowest = (step: keyof typeof diskTimings) => (milliseconds: number) => { diskTimings[step] = Math.max(diskTimings[step], milliseconds); };
+                        if (!await this.awaitPolling(StreamDownloader.timed(disk.materialize(), slowest("write")), pollWhileWaiting)) {
                             logger.error(`[StreamDownloader] ${alias} disk materialization failed — stopping`);
                             segmentFailed = true;
                             break;
                         }
 
                         const segmentPath = path.join(disk.dirPath, segment.localName);
-                        const written = await this.awaitPolling(FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array), pollWhileWaiting);
-                        diskTimings.write = Math.max(diskTimings.write, Date.now() - diskStartedAt);
+                        const written = await this.awaitPolling(StreamDownloader.timed(
+                            FileSystemManager.writeFileExclusive(segmentPath, tsBuffer as unknown as Uint8Array), slowest("write")), pollWhileWaiting);
                         if (written !== "written") {
                             logger.error(`[StreamDownloader] ${alias} disk write failed segment=${segmentPath} — stopping`);
                             segmentFailed = true;
                             break;
                         }
 
-                        const checkStartedAt = Date.now();
-                        result = await this.awaitPolling(this.provider.validateSegment(segmentPath), pollWhileWaiting);
-                        diskTimings.check = Math.max(diskTimings.check, Date.now() - checkStartedAt);
+                        result = await this.awaitPolling(StreamDownloader.timed(this.provider.validateSegment(segmentPath), slowest("check")), pollWhileWaiting);
                         // Received bytes are never deleted; an unreadable file
                         // stays on disk and finalization reports it.
                         if (!result.valid) rejection = "unreadable-after-write";
@@ -560,9 +564,8 @@ export class StreamDownloader {
                         if (result.duration !== undefined) {
                             segment.accurateDuration = result.duration;
                         }
-                        const appendStartedAt = Date.now();
-                        await this.awaitPolling(playlistManager.appendSegmentToPlaylist(segment), pollWhileWaiting);
-                        diskTimings.append = Math.max(diskTimings.append, Date.now() - appendStartedAt);
+                        await this.awaitPolling(StreamDownloader.timed(playlistManager.appendSegmentToPlaylist(segment),
+                            milliseconds => { diskTimings.append = Math.max(diskTimings.append, milliseconds); }), pollWhileWaiting);
                         if (fetchResult.repair) {
                             logger.info(`[StreamDownloader] ${alias} repaired segment ${segment.localName}: ${fetchResult.repair}`);
                         }

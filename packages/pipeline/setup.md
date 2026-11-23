@@ -218,7 +218,9 @@ start during it took 6.5 to 10 minutes, one past the ten-minute limit). A server
 that still fails to start (it does not launch, exits, or misses its startup limit)
 is the machine's trouble, not the recording's: the step is a `resource_wait`, the
 server's output goes to the journal as `descriptor-start-failed`, and a later step
-describes the recording again.
+describes the recording again; the third failed start in a row fails the recording, so a
+missing runtime or a broken model shows. While a local stage waits like this, a recording
+already prepared for upload still goes ahead; nothing new is admitted.
 
 ### Accepted conversions and daily confirmation
 

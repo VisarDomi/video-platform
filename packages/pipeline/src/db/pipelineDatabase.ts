@@ -2384,13 +2384,23 @@ export class PipelineDatabase {
         `).run(now.toISOString(), attemptId);
     }
 
-    // The destination's videos this ledger created recently, newest first: the remote ID
-    // captured after their metadata was submitted, their recording and when.
+    // The destination's videos this ledger created recently and believes still exist, newest
+    // first: accepted or awaiting confirmation, with the remote ID captured after submission,
+    // never one the destination removed; one entry per remote ID.
     recentRemoteUploads(provider: string, since: Date): { remoteId: string; recordingId: string; submittedAt: string }[] {
-        return (this.database.prepare(`SELECT remote_id, recording_id, COALESCE(completed_at, started_at) AS submitted_at
-            FROM upload_attempts WHERE provider = ? AND remote_id IS NOT NULL AND remote_id <> '' AND started_at >= ?
-            ORDER BY started_at DESC LIMIT 50`).all(provider, since.toISOString()) as { remote_id: string; recording_id: string; submitted_at: string }[])
+        return (this.database.prepare(`SELECT a.remote_id, a.recording_id, MAX(COALESCE(a.completed_at, a.started_at)) AS submitted_at
+            FROM upload_attempts a WHERE a.provider = ? AND a.status IN ('accepted', 'uncertain')
+                AND a.remote_id IS NOT NULL AND a.remote_id <> '' AND a.started_at >= ?
+                AND NOT EXISTS (SELECT 1 FROM provider_removals r WHERE r.provider = a.provider AND r.remote_id = a.remote_id)
+            GROUP BY a.remote_id ORDER BY submitted_at DESC LIMIT 50`).all(provider, since.toISOString()) as { remote_id: string; recording_id: string; submitted_at: string }[])
             .map(row => ({ remoteId: row.remote_id, recordingId: row.recording_id, submittedAt: row.submitted_at }));
+    }
+
+    // Whether a submission of this recording to the destination may have created a video whose
+    // remote ID was never captured (its metadata step started, no ID was recorded).
+    hasUncapturedSubmission(recordingId: string, provider: string): boolean {
+        return this.database.prepare(`SELECT 1 FROM upload_attempts WHERE recording_id = ? AND provider = ?
+            AND phase = 'metadata_submitting' AND (remote_id IS NULL OR remote_id = '') LIMIT 1`).get(recordingId, provider) !== undefined;
     }
 
     recordUploadEvidence(attemptId: string, evidence: Record<string, unknown>, now = new Date()): void {

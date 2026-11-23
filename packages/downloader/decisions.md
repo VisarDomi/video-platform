@@ -253,6 +253,9 @@ an append it is safe: with a batch queued it identifies segments past the batch'
 never reading the baseline an append moves, and it creates the playlist header only
 when there is neither a file nor a pending header. A late poll's gap line reports the
 playlist request's time and the slowest write, check and append since the previous poll.
+The process runs libuv's thread pool with 32 threads (`src/threadPool.ts`, imported first):
+file system calls and DNS lookups share it, and four fsyncs stalled at once would
+otherwise leave the poll's lookup and token read waiting on the same disk.
 
 **Why:** A timer running beside the loop can act on state the loop has already
 left, so nothing beside the loop changes its state: the loop applies a check's

@@ -21,8 +21,9 @@ export interface UploadRequest {
     readonly streamerAlias?: string;
     // Search the destination for the identity first, inside the same session.
     readonly lookupBeforeUpload?: boolean;
-    // This destination's videos the core created in the last two days, newest first (the
-    // remote ID captured after submission, the recording, when). A destination whose
+    // This destination's videos the core created in the last three hours and believes still
+    // exist, newest first (the remote ID captured after submission, the recording, when);
+    // empty when an earlier submission of this recording has no captured ID. A destination whose
     // uploads list comes up short of its own totals may account for the shortfall with
     // them (a new video can drop out of a list while the site processes it), never with
     // a copy of this recording.
