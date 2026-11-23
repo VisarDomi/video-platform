@@ -18,13 +18,13 @@ function fixture(){
   counts:{verified:123,ready:2,short_waiting:1,prepared_batches:1,confirming:1,capturing:1,submitted:7,receipts_verified:3,converted:8},
   active:{id:'2026-01-01 010000 fixture-active',alias:'fixture-active',source_path:'/data/downloads/live-a/edited/2026-01-01 010000 fixture-active-with-a-very-long-unbroken-streamer-name',generated_title:'A generated title for the active recording [2026-01-01 010000 fixture-active]',provider:'live-a',captured_at:'2026-01-01 010000',stage:'upload',state:'uploading',seconds:900,size_bytes:1000000000,started_at:now,reservation_month:'2026-11',progress:{acknowledged_bytes:250000000,total_bytes:1000000000,percent:25,bytes_per_second:500000,eta_seconds:1500,fresh:true,updated_at:now}},
   captures:[{alias:'fixture-capture',provider:'live-c',segments:350,seconds:700,active:true}],finalization:{processing:0,completed24:6},
-  queue:[{id:'2026-01-02 010000 fixture-next',alias:'fixture-next',provider:'live-a',captured_at:'2026-01-02 010000',seconds:800,stage:'convert'},
-    {id:'2026-01-03 010000 fixture-later',alias:'fixture-later',provider:'live-b',captured_at:'2026-01-03 010000',seconds:900,stage:'describe'}],
-  confirmations:[{recording_id:'2026-01-01 020000 fixture-verify',alias:'fixture-verify',confirm_after:now,remote_id:'fixture-id'}],
-  shorts:{waiting:[{id:'2026-01-02 030000 fixture-short',alias:'fixture-short',stage:'shorts',provider:'live-a',seconds:30}],batches:[{id:'2026-01-03 040000 joined-fixture',alias:'fixture-joined',stage:'convert',provider:'live-c',seconds:180,clips:3,orientation:'Portrait'}]},
+  queue:[{id:'2026-01-02 010000 fixture-next',alias:'fixture-next',source_path:'/data/downloads/live-a/edited/2026-01-02 010000 fixture-next',provider:'live-a',captured_at:'2026-01-02 010000',seconds:800,state:'server_ready',stage:'convert'},
+    {id:'2026-01-03 010000 fixture-later',alias:'fixture-later',source_path:'/data/downloads/live-b/edited/2026-01-03 010000 fixture-later',provider:'live-b',captured_at:'2026-01-03 010000',seconds:900,state:'artifact_valid',stage:'describe'}],
+  confirmations:[{recording_id:'2026-01-01 020000 fixture-verify',alias:'fixture-verify',source_path:'/data/downloads/live-a/edited/2026-01-01 020000 fixture-verify',provider:'live-a',seconds:640,confirm_after:now,remote_id:'fixture-id'}],
+  shorts:{waiting:[{id:'2026-01-02 030000 fixture-short',alias:'fixture-short',source_path:'/data/downloads/live-a/edited/2026-01-02 030000 fixture-short',state:'short_waiting',stage:'shorts',provider:'live-a',seconds:30}],batches:[{id:'2026-01-03 040000 joined-fixture',alias:'fixture-joined',source_path:'/data/downloads/live-c/edited/2026-01-03 040000 joined-fixture',state:'server_ready',stage:'convert',provider:'live-c',seconds:180,clips:3,orientation:'Portrait'}]},
   budget:{month:'2026-11',day:1,released:100000000000,spent:20000000000,reserved:1000000000,remaining:79000000000,monthly_limit:700000000000,next_release:'2026-11-11T00:00:00+01:00',next_amount:300000000000,releases:[{day:1,bytes:100000000000},{day:11,bytes:300000000000},{day:21,bytes:700000000000}]},
   history:Array.from({length:14},(_,i)=>({date:`2026-10-${String(19+i%13).padStart(2,'0')}`,submitted:i%5,verified:i%3})),
-  activity:[{recording:'fixture',alias:'fixture-active',stage:'verify',at:now},{recording:'fixture-done',alias:'fixture-done',stage:'verified',at:now}],
+  activity:[{recording:'2026-01-01 010000 fixture-active',alias:'fixture-active',source_path:'/data/downloads/live-a/edited/2026-01-01 010000 fixture-active',provider:'live-a',from_state:'uploading',to_state:'upload_uncertain',stage:'verify',reason:'metadata submitted; awaiting daily verification',at:now},{recording:'2026-01-01 000000 fixture-done',alias:'fixture-done',source_path:'/data/downloads/live-b/edited/2026-01-01 000000 fixture-done',provider:'live-b',from_state:'uploaded',to_state:'upload_verified',stage:'verified',reason:'verified online',at:now}],
   storage:{total:4000000000000,free:500000000000,inventory:{downloads:1900000000000,artifacts:300000000000,retained_trash:20000000000,desktop_staging:0},inventory_at:now},
   services:Object.fromEntries(['video-downloader','video-server','video-auth','video-pipeline','video-xvfb'].map(n=>[n,{...service}])),
   monitoring:{cadence:'daily',last_check:now}};
@@ -60,11 +60,20 @@ for(const [name,engine,options] of engines){
   assert.equal(await p.locator('.stat strong').first().innerText(),'123');assert.equal(await p.locator('#progress-number').innerText(),'25.0%');
   assert.equal(await p.locator('#now-source-path').innerText(),f.getData().active.source_path);
   assert.equal(await p.locator('#now-generated-title').innerText(),f.getData().active.generated_title);
-  await p.getByRole('button',{name:/Queue$/}).click();await p.locator('#queue-search').fill('fixture-next');assert.equal(await p.locator('.queue-row').count(),1);
+  await p.getByRole('button',{name:/Queue$/}).click();
+  assert.match(await p.locator('#queue-list').innerText(),/\/data\/downloads\/live-a\/edited\/2026-01-02 010000 fixture-next/);
+  assert.match(await p.locator('#queue-list').innerText(),/Waiting · Convert/);
+  await p.locator('#queue-search').fill('live-a/edited/2026-01-02');assert.equal(await p.locator('.queue-row').count(),1);
+  await p.getByRole('button',{name:/Activity$/}).click();
+  assert.match(await p.locator('#activity-list').innerText(),/\/data\/downloads\/live-b\/edited\/2026-01-01 000000 fixture-done/);
+  assert.match(await p.locator('#activity-list').innerText(),/Verified online/);
+  await p.locator('#activity-search').fill('live-b/edited');assert.equal(await p.locator('.activity-row').count(),1);
+  for(const width of [320,390,1024]){await p.setViewportSize({width,height:844});assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`no activity overflow at ${width}`);}
+  await p.setViewportSize({width:390,height:844});
   await p.locator('.brand').click();assert.equal(await p.locator('#overview').isVisible(),true);
-  await p.locator('#show-shorts').click();assert.match(await p.locator('#queue-list').innerText(),/fixture-short/);
-  const changed=f.getData();changed.active.generated_title='<img src=x onerror="window.__unsafe=1">';changed.active.source_path='/recordings/<img src=x onerror="window.__unsafe=1">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('#now-generated-title').textContent.startsWith('<img'));
-  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#now-generated-title img,#now-source-path img').count(),0);
+  await p.locator('#show-shorts').click();assert.match(await p.locator('#queue-list').innerText(),/\/data\/downloads\/live-a\/edited\/2026-01-02 030000 fixture-short/);
+  const changed=f.getData();changed.active.generated_title='<img src=x onerror="window.__unsafe=1">';changed.active.source_path='/recordings/<img src=x onerror="window.__unsafe=1">';changed.queue[0].source_path='/queue/<img src=x onerror="window.__unsafe=2">';changed.activity[0].source_path='/activity/<img src=x onerror="window.__unsafe=3">';f.setData(changed);await p.locator('#refresh').click();await p.waitForFunction(()=>document.querySelector('#now-generated-title').textContent.startsWith('<img'));
+  assert.equal(await p.evaluate(()=>window.__unsafe),undefined);assert.equal(await p.locator('#now-generated-title img,#now-source-path img,#queue-list img,#activity-list img').count(),0);
   assert.equal(await p.locator('#now-source-path').innerText(),changed.active.source_path);
   assert.deepEqual(f.errors,[]);
  });

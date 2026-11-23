@@ -83,17 +83,26 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data["active"]["reservation_month"], "2026-10")
         self.assertEqual(data["budget"]["reserved"], 4000000000)
 
-    def test_active_job_includes_exact_source_path_and_final_upload_title_only(self):
-        source = '/data/downloads/live-a/edited/2026-01-01 010000 alice'
-        self.db.execute("UPDATE recordings SET source_path=? WHERE state='uploading'", (source,))
+    def test_active_queue_and_activity_include_source_paths_without_private_artifacts(self):
+        active_source = '/data/downloads/live-a/edited/2026-01-01 010000 alice'
+        queued_source = '/data/downloads/live-b/edited/2026-01-04 020000 dave'
+        verified_source = '/data/downloads/live-a/edited/2026-01-02 010000 bob'
+        self.db.execute("UPDATE recordings SET source_path=? WHERE id='2026-01-01 010000 alice'", (active_source,))
+        self.db.execute("UPDATE recordings SET source_path=? WHERE id='2026-01-02 010000 bob'", (verified_source,))
+        self.db.execute("INSERT INTO recordings VALUES ('2026-01-04 020000 dave','live-b',?,'edited',420,'server_ready',NULL,NULL,'2026-11-01T00:00:00Z')", (queued_source,))
         self.db.execute("INSERT INTO upload_metadata VALUES ('2026-01-01 010000 alice',?)", ('Generated title [2026-01-01 010000 alice]',))
         self.db.execute("INSERT INTO descriptions VALUES ('2026-01-01 010000 alice',?)", (json.dumps({'title':'Earlier descriptor title'}),))
         self.db.commit()
         data = self.read()
-        self.assertEqual(data['active']['source_path'], source)
+        self.assertEqual(data['active']['source_path'], active_source)
         self.assertEqual(data['active']['generated_title'], 'Generated title [2026-01-01 010000 alice]')
+        self.assertEqual(data['queue'][0]['source_path'], queued_source)
+        bob_event = next(e for e in data['activity'] if e['recording'] == '2026-01-02 010000 bob')
+        self.assertEqual(bob_event['source_path'], verified_source)
+        self.assertEqual(bob_event['from_state'], 'upload_uncertain')
+        self.assertEqual(bob_event['to_state'], 'upload_verified')
+        self.assertEqual(bob_event['provider'], 'live-a')
         self.assertNotIn('/private/file.mp4', json.dumps(data))
-        self.assertTrue(all('source_path' not in row and 'generated_title' not in row for row in data['queue']))
 
     def test_active_title_can_appear_before_upload_metadata_and_be_absent_before_description(self):
         self.assertIsNone(self.read()['active']['generated_title'])

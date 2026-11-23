@@ -86,6 +86,7 @@ def safe_reason(value):
 def identity(row):
     name = row["id"]
     return {"id": name, "alias": row.get("alias") or name[18:] or name,
+            "source_path": row.get("source_path"),
             "provider": row.get("provider"), "captured_at": name[:17],
             "state": row["state"], "stage": STAGES.get(row["state"], row["state"]),
             "seconds": row.get("duration_seconds"), "updated_at": row.get("updated_at"),
@@ -276,6 +277,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         counts = Counter(row["state"] for row in records)
         by_id = {row["id"]: row for row in records}
         artifact = {r["recording_id"]: dict(r) for r in db.execute("SELECT recording_id,path,size_bytes FROM artifacts")}
+        metadata_titles = {r["recording_id"]: r["title"] for r in db.execute("SELECT recording_id,title FROM upload_metadata") if r["title"]}
         attempts = [dict(r) for r in db.execute("""SELECT a.id,a.recording_id,a.phase,a.started_at,a.evidence_json,a.transfer_started,
             u.calendar_month FROM upload_attempts a LEFT JOIN upload_reservations u ON u.id=a.reservation_id
             WHERE a.status='started' ORDER BY a.started_at DESC LIMIT 3""")]
@@ -284,9 +286,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
             active_row = next((r for r in records if r["lease_owner"] and r["state"] in ACTIVE_STATES), None)
         active = identity(active_row) if active_row else None
         if active:
-            active["source_path"] = active_row["source_path"]
-            metadata = db.execute("SELECT title FROM upload_metadata WHERE recording_id=?", (active_row["id"],)).fetchone()
-            active["generated_title"] = metadata["title"] if metadata else None
+            active["generated_title"] = metadata_titles.get(active_row["id"])
             if not active["generated_title"]:
                 description = db.execute("SELECT output_json FROM descriptions WHERE recording_id=?", (active_row["id"],)).fetchone()
                 try:
@@ -308,14 +308,25 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                     active["output_bytes"] = sum(output)
                 except OSError:
                     active["output_bytes"] = None
-        queue = [identity(row) for row in records if row["state"] in ACTIVE_STATES
-                 and not (active and row["id"] == active["id"])]
+        queue = []
+        for row in records:
+            if row["state"] in ACTIVE_STATES and not (active and row["id"] == active["id"]):
+                item = identity(row)
+                item["size_bytes"] = artifact.get(row["id"], {}).get("size_bytes")
+                item["generated_title"] = metadata_titles.get(row["id"])
+                queue.append(item)
         confirmations = [dict(r) for r in db.execute("""SELECT c.recording_id,c.confirm_after,a.remote_id
             FROM upload_confirmations c JOIN upload_attempts a ON a.id=c.attempt_id
             WHERE c.status='pending' ORDER BY c.confirm_after LIMIT 100""")]
         for row in confirmations:
             source = by_id.get(row["recording_id"])
             row["alias"] = identity(source)["alias"] if source else row["recording_id"]
+            row["source_path"] = source.get("source_path") if source else None
+            row["provider"] = source.get("provider") if source else None
+            row["seconds"] = source.get("duration_seconds") if source else None
+            row["captured_at"] = row["recording_id"][:17]
+            row["generated_title"] = metadata_titles.get(row["recording_id"])
+            row["size_bytes"] = artifact.get(row["recording_id"], {}).get("size_bytes")
         batches = []
         for row in db.execute("""SELECT s.batch_id,COUNT(*) clips,SUM(s.duration_seconds) seconds,
             MIN(s.aspect_ratio) aspect FROM short_parts s WHERE s.batch_id IS NOT NULL GROUP BY s.batch_id"""):
@@ -323,7 +334,8 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
             source = by_id.get(r["batch_id"])
             if source and source["state"] != "short_cancelled":
                 batches.append({**identity(source), "clips": r["clips"], "seconds": r["seconds"],
-                                "orientation": "Portrait" if r["aspect"] < 1 else "Landscape"})
+                                "orientation": "Portrait" if r["aspect"] < 1 else "Landscape",
+                                "size_bytes": artifact.get(source["id"], {}).get("size_bytes")})
         short_waiting = [identity(row) for row in records if row["state"] == "short_waiting"]
         since = (now - timedelta(days=13)).astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)
         utc = lambda date: date.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -340,9 +352,24 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         totals24 = {key: value or 0 for key, value in dict(db.execute(aggregate, (utc(now-timedelta(hours=24)), utc(now+timedelta(milliseconds=1)))).fetchone()).items()}
         events = [dict(r) for r in db.execute("""SELECT recording_id,from_state,to_state,reason,created_at FROM state_events
             WHERE created_at>=? AND from_state IS NOT to_state ORDER BY id DESC LIMIT 50""", (utc(since),))]
-        activity = [{"recording": e["recording_id"], "alias": identity(by_id[e["recording_id"]])["alias"] if e["recording_id"] in by_id else e["recording_id"],
-                     "stage": STAGES.get(e["to_state"], e["to_state"]), "at": e["created_at"]}
-                    for e in events if e["from_state"] != e["to_state"]][:50]
+        activity = []
+        for e in events:
+            if e["from_state"] == e["to_state"]:
+                continue
+            source = by_id.get(e["recording_id"])
+            activity.append({
+                "recording": e["recording_id"],
+                "alias": identity(source)["alias"] if source else e["recording_id"],
+                "source_path": source.get("source_path") if source else None,
+                "provider": source.get("provider") if source else None,
+                "seconds": source.get("duration_seconds") if source else None,
+                "from_state": e["from_state"],
+                "to_state": e["to_state"],
+                "stage": STAGES.get(e["to_state"], e["to_state"]),
+                "reason": safe_reason(e["reason"]),
+                "at": e["created_at"],
+            })
+        activity = activity[:50]
         budget = upload_budget(db, control, now)
         # The active destination's shared-session checks (none for a destination without one).
         session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider=? AND kind='keepalive' ORDER BY id DESC LIMIT 1",
@@ -391,8 +418,10 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         heartbeat is None or (now - heartbeat).total_seconds() > 90)
     if late_heartbeat:
         state = "worker_unresponsive"
-    alerts = [{"recording": r["id"], "message": safe_reason(r["block_reason"]), "kind": r["state"]} for r in health["actionable_items"]]
-    alerts.extend({"recording": r["recording_id"], "message": "A new provider copy is missing", "kind": "provider_loss"} for r in health["unacknowledged_provider_removals"])
+    alerts = [{"recording": r["id"], "source_path": by_id.get(r["id"], {}).get("source_path"),
+               "message": safe_reason(r["block_reason"]), "kind": r["state"]} for r in health["actionable_items"]]
+    alerts.extend({"recording": r["recording_id"], "source_path": by_id.get(r["recording_id"], {}).get("source_path"),
+                   "message": "A new provider copy is missing", "kind": "provider_loss"} for r in health["unacknowledged_provider_removals"])
     if state == "worker_stopped":
         alerts.insert(0, {"message": "The upload worker is stopped", "kind": "service"})
     elif late_heartbeat:
