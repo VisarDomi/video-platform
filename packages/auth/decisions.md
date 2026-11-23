@@ -34,9 +34,10 @@ renewal: one playlist 401 per live stream (`test/session-refresh.test.mjs`).
 
 ## A browser sign-in is a bug event
 
-The session is meant to live on its refresh token. The browser signs in only when there
-is no usable saved session, or when `classify()` says the site refused a renewal
-(`reauthenticate`, `verification`). Every such sign-in is logged as an error,
+The session is meant to live on its refresh token. The one expected sign-in is when
+`classify()` says the session reached its own end (`expired`: the refresh token's expiry);
+it is logged as an ordinary info line. Every other sign-in (no usable saved session, or the
+site refused a renewal: `reauthenticate`, `verification`) is logged as an error,
 `[bug event] <site> browser sign-in for <account>: <cause>`, for the daily check to
 investigate; a sign-in the session's ordinary renewal could have avoided is a bug to fix.
 Each completed renewal logs `Session renewed by refresh token in <n> ms`.

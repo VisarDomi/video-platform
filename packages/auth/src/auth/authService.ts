@@ -54,7 +54,7 @@ export class AuthService {
     }
 
     private reauthenticates(decision: AuthDecision): boolean {
-        return decision === "reauthenticate" || decision === "verification";
+        return decision === "reauthenticate" || decision === "verification" || decision === "expired";
     }
 
     private sessionExpiresAt(): number | undefined {
@@ -67,6 +67,7 @@ export class AuthService {
 
         const migrating = loadedFromFile && !!this.provider.needsSessionMigration?.(this.authContext.getTokenBag()!);
         let reason = !loadedFromFile ? "no saved session" : migrating ? "the saved session predates its current format" : "";
+        let expected = false;
         if (loadedFromFile && !migrating) {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             // A freshly recovered access token is already usable. Validate it with the
@@ -91,6 +92,7 @@ export class AuthService {
                             ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                             : `Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
                         reason = `the saved session was refused: ${errorMessage}`;
+                        expected = decision === "expired";
                         break;
                     } else {
                         logger.error(`Failed to establish session for ${this.account.email}: ${errorMessage}. Retrying...`);
@@ -103,7 +105,7 @@ export class AuthService {
         logger.info(`Proceeding to browser login for ${this.account.email}.`);
         while (true) {
             try {
-                await this.performFreshLogin(reason);
+                await this.performFreshLogin(reason, expected);
                 logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
                 return;
             } catch (error) {
@@ -120,11 +122,13 @@ export class AuthService {
         void this.manageTokenLifecycle();
     }
 
-    // A browser sign-in. The session is meant to live on its refresh token, so every sign-in
-    // after the first is a bug event: logged as an error with its cause for the daily check.
-    private async performFreshLogin(reason = "unspecified") {
+    // A browser sign-in. The session is meant to live on its refresh token: the one expected
+    // sign-in is at the token's own expiry; any other is a bug event, logged as an error with
+    // its cause for the daily check.
+    private async performFreshLogin(reason = "unspecified", expected = false) {
         if (this.browserLoginBlocked) throw this.blockedBy;
-        logger.error(`[bug event] ${this.label} browser sign-in for ${this.account.email}: ${reason}`);
+        if (expected) logger.info(`${this.label} browser sign-in for ${this.account.email}: ${reason}`);
+        else logger.error(`[bug event] ${this.label} browser sign-in for ${this.account.email}: ${reason}`);
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
@@ -309,7 +313,8 @@ export class AuthService {
                         ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                         : `Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
                     try {
-                        await this.performFreshLogin(`the session renewal was refused: ${errorMessage}`);
+                        await this.performFreshLogin(decision === "expired" ? errorMessage : `the session renewal was refused: ${errorMessage}`,
+                            decision === "expired");
                         logger.info(`Successfully re-authenticated via browser login for ${this.account.email}.`);
                         return;
                     } catch (loginError) {

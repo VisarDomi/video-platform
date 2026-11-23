@@ -65,10 +65,11 @@ test('a quick stream-token answer sends no second request', async () => {
 class Rejected extends Error {}
 class Verify extends Error {}
 class Person extends Error {}
+class Expired extends Error {}
 const demo = (extra = {}) => ({
     intervals: { shortTokenRefresh: 5000, sessionRefresh: 1800000 },
     classify: error => error instanceof Person ? 'needs-attention' : error instanceof Verify ? 'verification'
-        : error instanceof Rejected ? 'reauthenticate' : 'outage',
+        : error instanceof Rejected ? 'reauthenticate' : error instanceof Expired ? 'expired' : 'outage',
     describeTokens: bag => ({ ...(bag.extras.short ? { shortExpiresAt: Number(bag.extras.short) * 1000 } : {}),
         summary: `short=${bag.extras.short || 'none'}` }),
     ...extra,
@@ -134,5 +135,22 @@ test("a token write names the short tokens as the site does and warns when they 
         ['warn', 'Token write — source=login short=none'],
         ['warn', `Token write — source=init short=${now + 2} ttl=Ns (below 5s refresh cycle)`],
         ['debug', `Token write — source=resume short=${now + 60} ttl=Ns`],
+    ]);
+});
+
+test("a refresh token at its own expiry signs in as the expected event; a refused session is a bug event", async (t) => {
+    const { default: logger } = await import('../dist/common/logger.js');
+    const lines = [];
+    for (const level of ['info', 'warn', 'error']) t.mock.method(logger, level, message => lines.push([level, message]));
+    for (const error of [new Expired('the refresh token expired on 2027-02-21T08:46:51.000Z'), new Rejected('Session refresh failed with status 401')]) {
+        const service = new AuthService(account, demo({ refreshSession: async () => { throw error; }, login: async () => { throw new Person('stop here'); } }),
+            { label: 'Demo', log: recorder().log });
+        service.authContext.updateFromLogin({ refreshToken: 'refresh', sessionToken: 'access', extras: {} });
+        await service.maintainSession();
+    }
+    const signIns = lines.filter(([, message]) => /browser sign-in/.test(message));
+    assert.deepEqual(signIns, [
+        ['info', 'Demo browser sign-in for fixture@example.invalid: the refresh token expired on 2027-02-21T08:46:51.000Z'],
+        ['error', '[bug event] Demo browser sign-in for fixture@example.invalid: the session renewal was refused: Session refresh failed with status 401'],
     ]);
 });

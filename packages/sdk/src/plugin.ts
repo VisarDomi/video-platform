@@ -276,7 +276,10 @@ export interface CredentialSource {
 // - verification: the site asked for an interactive check that the normal sign-in
 //   completes; sign in again;
 // - needs-attention: a person has to act; automatic sign-ins stop.
-export type AuthDecision = "outage" | "reauthenticate" | "verification" | "needs-attention";
+// "expired": the session reached its own end of life (its refresh token's expiry), the one
+// expected reason to sign in again; "reauthenticate" and "verification": the site refused
+// a session that should still be good, which is a bug to investigate.
+export type AuthDecision = "outage" | "reauthenticate" | "verification" | "expired" | "needs-attention";
 
 export interface SiteAuth {
     // How often the short-lived tokens and the session are renewed (ms). Pinned per site.
