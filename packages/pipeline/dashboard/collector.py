@@ -64,11 +64,22 @@ def stamp(value):
         return None
 
 
+def secret_names(value=None):
+    """The names whose values a reason never shows: the core's, plus a deployment's own
+    cookie or field names, "name,name" (VIDEO_DASHBOARD_SECRET_NAMES)."""
+    value = os.environ.get("VIDEO_DASHBOARD_SECRET_NAMES", "") if value is None else value
+    extra = [name.strip() for name in value.split(",") if re.fullmatch(r"[A-Za-z0-9_-]+", name.strip())]
+    return ("password", "PHPSESSID", "pkey", "token", *extra)
+
+
+SECRET_VALUE = re.compile(r"(?i)\b(?:" + "|".join(map(re.escape, secret_names())) + r")\s*[=:]\s*\S+")
+
+
 def safe_reason(value):
     text = str(value or "").split("\n", 1)[0]
     text = re.sub(r"https?://\S+", "[provider link]", text)
     text = re.sub(r"/(?:home|tmp|run)/[^\s,;]+", "[local file]", text)
-    text = re.sub(r"(?i)\b(?:password|PHPSESSID|pkey|token)\s*[=:]\s*\S+", "[redacted]", text)
+    text = SECRET_VALUE.sub("[redacted]", text)
     return text[:240]
 
 

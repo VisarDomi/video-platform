@@ -62,7 +62,7 @@ retryable transfers. Every transmitted byte stays charged.
   failures, do not hold a weekly retry deadline. Login/provider cooldowns still apply.
 
 Transfer diagnostics observe the page's same-origin multipart chunk POSTs to
-`/upload-video/`, as well as the older `mode=async&action=upload_file` URL.
+`/upload-video/`, including its `mode=async&action=upload_file` form.
 Listeners attach before file selection/submission, so immediate HTTP errors,
 login redirects and non-JSON rejections are retained in the attempt evidence.
 Chunk recognition uses request headers without buffering the media body.

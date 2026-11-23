@@ -2,9 +2,10 @@
 // One-shot migration: hash IDs -> folder-name IDs, zombie schema cleanup.
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, renameSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
-const dbPath = process.argv[2] ?? "/home/user/.local/share/video-services/pipeline/pipeline.sqlite";
+const dbPath = process.argv[2] ?? path.join(os.homedir(), ".local/share/video-services/pipeline/pipeline.sqlite");
 const db = new DatabaseSync(dbPath);
 db.exec("PRAGMA foreign_keys = OFF");
 

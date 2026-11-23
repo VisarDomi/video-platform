@@ -186,8 +186,9 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data['health']['alerts'][0]['message'],'The upload worker heartbeat is late')
 
     def test_sites_destination_and_extra_units_come_from_the_deployment(self):
-        from collector import extra_units
+        from collector import extra_units, secret_names
         self.assertEqual(extra_units("video-x=X files;bad unit=no;video-y"), {"video-x": "X files", "video-y": "video-y"})
+        self.assertEqual(secret_names("site_session, bad name,"), ("password", "PHPSESSID", "pkey", "token", "site_session"))
         # The newest check is another destination's: the active one's is what counts.
         self.db.execute("INSERT INTO provider_session_events VALUES (1,'video-host','keepalive',1,'2026-11-01T00:00:00Z')")
         self.db.execute("INSERT INTO provider_session_events VALUES (2,'other-host','keepalive',0,'2026-11-01T00:01:00Z')")
