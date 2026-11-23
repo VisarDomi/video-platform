@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { PipelineDatabase, calendarMonth } from "../dist/db/pipelineDatabase.js";
+import { PipelineDatabase, calendarMonth, retainedEvidence } from "../dist/db/pipelineDatabase.js";
 import { createDryRunUploadPlan } from "../dist/upload/dryRunPlan.js";
 import { PipelineOrchestrator } from "../dist/scheduler/orchestrator.js";
 import { UploadCoordinator, UploadTransportError } from "../dist/upload/uploadCoordinator.js";
@@ -723,6 +723,50 @@ test("the upload coordinator parks submit success as uncertain until daily video
     database.markRemoteVerified(recording.id, "91362268",
         "https://video-host.example/video.91362268/", after);
     assert.equal(database.get(recording.id)?.state, "upload_verified");
+});
+
+test("the destination is told which of its videos this ledger created in the last two days", async (t) => {
+    const { database, directory } = await databaseFixture(t);
+    const first = database.discover(input(directory, "first"));
+    const second = database.discover(input(directory, "second"));
+    for (const recording of [first, second]) advanceToMetadataReady(database, recording, directory, 500);
+    const seen = [];
+    const coordinator = new UploadCoordinator(database, {
+        async upload(request) {
+            seen.push(request.recentUploads);
+            return { kind: "uploaded", receipt: { transmittedBytes: 500, submittedVideoId: request.recordingId === first.id ? "1001" : "1002",
+                metadataSubmittedAt: new Date().toISOString() } };
+        },
+    });
+    let provider;
+    const send = (recording, now) => {
+        const reservation = database.reserveUpload(recording.id, 550, now);
+        provider = database.reservationProvider(reservation);
+        return coordinator.uploadAdmitted(recording.id, reservation, {
+        recordingId: recording.id, artifactPath: path.join(directory, "artifact.mp4"), sizeBytes: 500,
+        title: "Fake upload", description: "No network transport exists in this test.", tags: ["live-a"], visibility: "private",
+    }, now);
+    };
+    await send(first, new Date());
+    await send(second, new Date());
+    assert.deepEqual(seen[0], []);
+    assert.deepEqual(seen[1].map(upload => [upload.remoteId, upload.recordingId]), [["1001", first.id]]);
+    assert.ok(!Number.isNaN(Date.parse(seen[1][0].submittedAt)));
+    // Two days on, the first upload is no longer recent.
+    assert.deepEqual(database.recentRemoteUploads(provider, new Date(Date.now() + 49 * 60 * 60_000)), []);
+});
+
+test("an attempt's evidence keeps its latest progress samples, and diagnoses that progress samples cannot push out", () => {
+    const history = [{ stage: "transfer_diagnosis", reason: "slow" }];
+    for (let index = 0; index < 40; index++) history.push({ stage: "file_transfer_progress", index });
+    history.push({ stage: "transfer_stall" });
+    const kept = retainedEvidence(history);
+    assert.equal(kept[0].stage, "transfer_diagnosis");
+    assert.equal(kept.filter(item => item.stage === "file_transfer_progress").length, 16);
+    assert.equal(kept.at(-2).index, 39);
+    assert.equal(kept.at(-1).stage, "transfer_stall");
+    const many = Array.from({ length: 40 }, (_, index) => ({ stage: "chunk_recovery", index }));
+    assert.deepEqual(retainedEvidence(many).map(item => item.index), many.slice(-32).map(item => item.index));
 });
 
 test("transport errors meter bytes and uncertain acceptance cannot retry", async (t) => {

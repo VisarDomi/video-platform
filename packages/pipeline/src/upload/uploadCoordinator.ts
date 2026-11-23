@@ -26,6 +26,9 @@ export class UploadByteMeter {
     }
 }
 
+// How far back the destination is told about the videos this ledger created.
+const RECENT_UPLOADS_MILLISECONDS = 48 * 60 * 60_000;
+
 export class UploadCoordinator {
     constructor(
         private readonly database: PipelineDatabase,
@@ -47,6 +50,8 @@ export class UploadCoordinator {
         try {
             outcome = await this.uploader.upload({
                 ...request,
+                recentUploads: request.recentUploads
+                    ?? this.database.recentRemoteUploads(provider, new Date(now.getTime() - RECENT_UPLOADS_MILLISECONDS)),
                 onEvidence: async (evidence) => {
                     this.database.recordUploadEvidence(attemptId, evidence);
                     await request.onEvidence?.(evidence);

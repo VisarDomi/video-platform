@@ -182,6 +182,18 @@ function mapResolutionReviewArtifact(row: ResolutionReviewArtifactRow): Resoluti
     };
 }
 
+// An attempt's evidence, bounded: the latest progress samples (one each 30 s), and the
+// latest of everything else (diagnoses, recoveries, failures), which progress samples
+// must not push out: a failure's evidence is what explains it.
+export const RETAINED_PROGRESS_EVIDENCE = 16;
+export const RETAINED_OTHER_EVIDENCE = 32;
+export function retainedEvidence(history: readonly unknown[]): unknown[] {
+    const isProgress = (item: unknown) => (item as { stage?: unknown } | null)?.stage === "file_transfer_progress";
+    const kept = new Set([...history.filter(isProgress).slice(-RETAINED_PROGRESS_EVIDENCE),
+        ...history.filter(item => !isProgress(item)).slice(-RETAINED_OTHER_EVIDENCE)]);
+    return history.filter(item => kept.has(item));
+}
+
 export class PipelineDatabase {
     private readonly database: DatabaseSync;
 
@@ -2372,6 +2384,15 @@ export class PipelineDatabase {
         `).run(now.toISOString(), attemptId);
     }
 
+    // The destination's videos this ledger created recently, newest first: the remote ID
+    // captured after their metadata was submitted, their recording and when.
+    recentRemoteUploads(provider: string, since: Date): { remoteId: string; recordingId: string; submittedAt: string }[] {
+        return (this.database.prepare(`SELECT remote_id, recording_id, COALESCE(completed_at, started_at) AS submitted_at
+            FROM upload_attempts WHERE provider = ? AND remote_id IS NOT NULL AND remote_id <> '' AND started_at >= ?
+            ORDER BY started_at DESC LIMIT 50`).all(provider, since.toISOString()) as { remote_id: string; recording_id: string; submitted_at: string }[])
+            .map(row => ({ remoteId: row.remote_id, recordingId: row.recording_id, submittedAt: row.submitted_at }));
+    }
+
     recordUploadEvidence(attemptId: string, evidence: Record<string, unknown>, now = new Date()): void {
         this.transaction(() => {
             const row = this.database.prepare("SELECT evidence_json FROM upload_attempts WHERE id = ?")
@@ -2380,7 +2401,7 @@ export class PipelineDatabase {
             const history = JSON.parse(row.evidence_json) as unknown[];
             history.push({ ...evidence, checkedAt: now.toISOString() });
             this.database.prepare("UPDATE upload_attempts SET evidence_json = ? WHERE id = ?")
-                .run(JSON.stringify(history.slice(-16)), attemptId);
+                .run(JSON.stringify(retainedEvidence(history)), attemptId);
             this.recordProviderMessages(attemptId, [evidence.text, evidence.limitedVisibility]
                 .filter((value): value is string => typeof value === "string").join("\n"), now);
             if (evidence.stage === "remote_identity_captured" && typeof evidence.remoteId === "string" && /^\d+$/.test(evidence.remoteId)) {
