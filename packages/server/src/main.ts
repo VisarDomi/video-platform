@@ -10,9 +10,10 @@ import videoApiRouter from "./api/video.routes.js";
 import hlsRouter from "./api/hls.routes.js";
 import { createListRoutes } from "./api/providers/list-routes.js";
 import { createPhoneSessionRoutes, phoneSessionDependencies } from "./api/providers/phone-session.routes.js";
+import { createSharedSessionRoutes, sharedSessionDependencies } from "./api/providers/shared-session.routes.js";
 import { createSitesRoutes } from "./api/sites.routes.js";
 import { startAliasRefresh } from "./services/aliasRefreshService.js";
-import { captureSiteIds, loadServerSites } from "./sites.js";
+import { captureSiteIds, loadServerDestinations, loadServerSites } from "./sites.js";
 import { startMediaIntegrityFinalizer } from "./services/hls/mediaIntegrityFinalizer.js";
 import { startDiskSpaceMonitor } from "./services/diskSpaceMonitor.js";
 import { startLibraryIndexes } from "./services/video/library-index.js";
@@ -76,6 +77,13 @@ async function startServer() {
     const acknowledgeDevice = auth.acknowledgeDevice?.bind(auth);
     app.use("/", createPhoneSessionRoutes(site,
       phoneSessionDependencies(site, { provisionDevice, acknowledgeDevice }, authSites[0].id)));
+  }
+  // /api/<destination>/shared-session for destinations that share one session with a companion device.
+  for (const destination of await loadServerDestinations()) {
+    const read = destination.plugin.readSharedSession?.bind(destination.plugin);
+    if (!read) continue;
+    app.use("/", createSharedSessionRoutes(destination.id,
+      sharedSessionDependencies(destination.id, () => read(destination.config))));
   }
   app.use("/api", videoApiRouter);
   app.use("/", hlsRouter);

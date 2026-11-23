@@ -149,6 +149,21 @@ export interface DestinationPolicy {
     readonly uploadVisibility: "public" | "private";
 }
 
+export interface SharedSessionCookie {
+    readonly name: string;
+    readonly value: string;
+    readonly domain: string;
+    readonly path: string;
+    readonly secure?: boolean;
+    readonly httpOnly?: boolean;
+}
+
+export interface SharedSessionSnapshot {
+    readonly cookies: readonly SharedSessionCookie[];
+    readonly fingerprint: string | null;
+    readonly savedAt: string;
+}
+
 export interface DestinationPlugin {
     id: string;
     sdkVersion: typeof SDK_VERSION;
@@ -157,6 +172,9 @@ export interface DestinationPlugin {
     creationBoundary: Destination["creationBoundary"];
     policy: DestinationPolicy;
     createDestination(host: DestinationHost): Destination;
+    // Read-only snapshot of a destination's shared login cookies for a companion device.
+    // Never logs in, never sends credentials or persistent login tokens.
+    readSharedSession?(config: Readonly<Record<string, unknown>>): Promise<SharedSessionSnapshot | null>;
 }
 
 // The destinations a deployment uploads to, from its sites file. They are read only by

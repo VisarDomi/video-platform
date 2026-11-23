@@ -1,4 +1,5 @@
-import type { LoadedSite } from "sdk";
+import { readFile } from "node:fs/promises";
+import { loadDestinationPlugin, parseDestinations, type DestinationPlugin, type LoadedSite } from "sdk";
 import { createLogger, loadSiteRegistry, sitesFilePath, type HostedSite, type ServiceLogger } from "shared";
 import logger from "./core/logger.js";
 import { registry } from "./services/aliasRefreshService.js";
@@ -18,6 +19,21 @@ export async function loadServerSites(
     importPlugin?: (specifier: string) => Promise<unknown>,
 ): Promise<HostedSite[]> {
     return loadSiteRegistry({ logger, authLogger, aliases: registry }, filePath, importPlugin);
+}
+
+// The destinations configured in the sites file, for read-only companion endpoints
+// (such as sharing a single-session destination's cookies with the phone app).
+export async function loadServerDestinations(
+    filePath = sitesFilePath(),
+    importPlugin?: (specifier: string) => Promise<unknown>,
+): Promise<Array<{ id: string; config: Readonly<Record<string, unknown>>; plugin: DestinationPlugin }>> {
+    const entries = parseDestinations(await readFile(filePath, "utf8"), filePath);
+    const loaded: Array<{ id: string; config: Readonly<Record<string, unknown>>; plugin: DestinationPlugin }> = [];
+    for (const entry of entries) {
+        const plugin = await loadDestinationPlugin(entry, importPlugin);
+        loaded.push({ id: entry.id, config: entry.config ?? {}, plugin });
+    }
+    return loaded;
 }
 
 // The sites whose recordings the server serves (folders <downloads root>/<site>/): the
