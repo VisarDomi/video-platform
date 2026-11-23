@@ -211,10 +211,9 @@ about 11 GB of RAM. The describe stage first waits until the machine has
 `VIDEO_PIPELINE_DESCRIBE_MIN_MEMORY_GIB` (default 16) GiB available: until then the
 campaign step is `resource_wait`, retried every 30 seconds, and the recording
 keeps its state. Started on a machine short of memory, the server is killed by
-the kernel and the recording would fail. It also waits while `fstrim` runs: the
-weekly trim discards all free space after a reboot (hours on a large drive), and
-meanwhile a slow drive reads the 8 GB model at about 15 MB/s (on 2026-11-23 every
-start during it took 6.5 to 10 minutes, one past the ten-minute limit). A server
+the kernel and the recording would fail. It also waits while an uncapped `fstrim` runs: after a reboot ext4 re-trims all free space, which
+can slow cold reads of the 8 GB model enough for startup to hit its ten-minute limit (a slice-capped
+`fstrim` with a finite `wiops` limit in its cgroup's `io.max` does not block describing). A server
 that still fails to start (it does not launch, exits, or misses its startup limit)
 is the machine's trouble, not the recording's: the step is a `resource_wait`, the
 server's output goes to the journal as `descriptor-start-failed`, and a later step

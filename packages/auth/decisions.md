@@ -29,8 +29,8 @@ when the site issues one. The session renews 5 minutes before its token expires.
 
 A stream-token answer that arrives after a session renewal replaced the bag keeps its
 stream tokens when they are newer than the saved ones (they do not depend on the session
-generation), but never its session. Dropping it let the 10-second tokens lapse during a
-renewal: one playlist 401 per live stream (`test/session-refresh.test.mjs`).
+generation), but never its session. Dropping it would let the 10-second tokens lapse during
+a renewal (`test/session-refresh.test.mjs`).
 
 ## A browser sign-in is a bug event
 

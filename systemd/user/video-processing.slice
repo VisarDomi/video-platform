@@ -6,3 +6,4 @@ CPUQuota=
 MemoryHigh=70%
 MemoryMax=80%
 MemorySwapMax=0
+IOWriteBandwidthMax=/ 50M

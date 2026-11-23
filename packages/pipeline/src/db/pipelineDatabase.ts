@@ -2384,15 +2384,17 @@ export class PipelineDatabase {
         `).run(now.toISOString(), attemptId);
     }
 
-    // The destination's videos this ledger created recently and believes still exist, newest
-    // first: accepted or awaiting confirmation, with the remote ID captured after submission,
-    // never one the destination removed; one entry per remote ID.
-    recentRemoteUploads(provider: string, since: Date): { remoteId: string; recordingId: string; submittedAt: string }[] {
-        return (this.database.prepare(`SELECT a.remote_id, a.recording_id, MAX(COALESCE(a.completed_at, a.started_at)) AS submitted_at
+    // The destination's videos this ledger created since the cutoff and believes still exist,
+    // newest first: accepted or awaiting confirmation, with the remote ID captured after
+    // submission, never one the destination removed; one entry per remote ID. Accepted rows
+    // use started_at because completed_at is updated on later verification.
+    recentRemoteUploads(provider: string, since: Date, limit = 1000): { remoteId: string; recordingId: string; submittedAt: string }[] {
+        return (this.database.prepare(`SELECT a.remote_id, a.recording_id,
+                MAX(CASE WHEN a.status = 'uncertain' THEN COALESCE(a.completed_at, a.started_at) ELSE a.started_at END) AS submitted_at
             FROM upload_attempts a WHERE a.provider = ? AND a.status IN ('accepted', 'uncertain')
                 AND a.remote_id IS NOT NULL AND a.remote_id <> '' AND a.started_at >= ?
                 AND NOT EXISTS (SELECT 1 FROM provider_removals r WHERE r.provider = a.provider AND r.remote_id = a.remote_id)
-            GROUP BY a.remote_id ORDER BY submitted_at DESC LIMIT 50`).all(provider, since.toISOString()) as { remote_id: string; recording_id: string; submitted_at: string }[])
+            GROUP BY a.remote_id ORDER BY submitted_at DESC LIMIT ?`).all(provider, since.toISOString(), limit) as { remote_id: string; recording_id: string; submitted_at: string }[])
             .map(row => ({ remoteId: row.remote_id, recordingId: row.recording_id, submittedAt: row.submitted_at }));
     }
 

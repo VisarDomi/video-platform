@@ -225,7 +225,7 @@ export class AuthService {
         if (current !== tokenBag) {
             // A session renewal replaced the bag while this request ran. Its session must not
             // come back, but its short-lived tokens are still valid and may be newer than the
-            // ones saved: dropping them left the stream tokens to lapse during a renewal.
+            // ones saved: dropping them would let the stream tokens lapse during a renewal.
             if (current && this.newerShortTokens(current, result.extras)) this.authContext.updateFromTokenData({ extras: result.extras });
             return;
         }

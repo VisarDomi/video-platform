@@ -725,11 +725,12 @@ test("the upload coordinator parks submit success as uncertain until daily video
     assert.equal(database.get(recording.id)?.state, "upload_verified");
 });
 
-test("the destination is told which of its videos this ledger created in the last three hours and believes still exist", async (t) => {
+test("the destination is told which of its videos this ledger created recently and believes still exist", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const [first, second, third] = ["first", "second", "third"].map(suffix => database.discover(input(directory, suffix)));
     for (const recording of [first, second, third]) advanceToMetadataReady(database, recording, directory, 500);
     const seen = new Map();
+    let submitTime = new Date();
     const coordinator = new UploadCoordinator(database, {
         async upload(request) {
             seen.set(request.recordingId, request.recentUploads);
@@ -739,11 +740,12 @@ test("the destination is told which of its videos this ledger created in the las
                 throw new Error("connection lost after submit");
             }
             return { kind: "uploaded", receipt: { transmittedBytes: 500, submittedVideoId: request.recordingId === first.id ? "1001" : "1002",
-                metadataSubmittedAt: new Date().toISOString() } };
+                metadataSubmittedAt: submitTime.toISOString() } };
         },
     });
     let provider;
     const send = (recording, now = new Date()) => {
+        submitTime = now;
         const reservation = database.reserveUpload(recording.id, 550, now);
         provider = database.reservationProvider(reservation);
         return coordinator.uploadAdmitted(recording.id, reservation, {
@@ -751,19 +753,23 @@ test("the destination is told which of its videos this ledger created in the las
             title: "Fake upload", description: "No network transport exists in this test.", tags: ["live-a"], visibility: "private",
         }, now);
     };
-    await send(first);
+    const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60_000);
+    await send(first, twoDaysAgo);
+    // Verification a day later updates completed_at, but submittedAt still reports the upload time.
+    const [confirmation] = database.dueUploadConfirmations(new Date(twoDaysAgo.getTime() + 24 * 60 * 60_000));
+    database.reconcileUncertain(confirmation.attemptId, "1001", "https://video-host.example/video/1001/", new Date(twoDaysAgo.getTime() + 24 * 60 * 60_000));
     await send(second);
     assert.deepEqual(seen.get(first.id), []);
     assert.deepEqual(seen.get(second.id).map(upload => [upload.remoteId, upload.recordingId]), [["1001", first.id]]);
-    assert.ok(!Number.isNaN(Date.parse(seen.get(second.id)[0].submittedAt)));
+    assert.equal(seen.get(second.id)[0].submittedAt, twoDaysAgo.toISOString());
     await assert.rejects(send(third), /connection lost/);
     assert.equal(database.hasUncapturedSubmission(third.id, provider), true);
     assert.equal(database.hasUncapturedSubmission(first.id, provider), false);
-    // A video the destination removed is not counted on; three hours on, none is recent.
+    // A video the destination removed is not counted on; past the cutoff, none is returned.
     database.database.prepare("INSERT INTO provider_removals (recording_id, provider, remote_id, reason, removed_at) VALUES (?, ?, ?, ?, ?)")
         .run(second.id, provider, "1002", "removed by the destination", new Date().toISOString());
-    assert.deepEqual(database.recentRemoteUploads(provider, new Date(Date.now() - 60_000)).map(upload => upload.remoteId), ["1001"]);
-    assert.deepEqual(database.recentRemoteUploads(provider, new Date(Date.now() + 3 * 60 * 60_000 + 1)), []);
+    assert.deepEqual(database.recentRemoteUploads(provider, new Date(twoDaysAgo.getTime() - 60_000)).map(upload => upload.remoteId), ["1001"]);
+    assert.deepEqual(database.recentRemoteUploads(provider, new Date(Date.now() + 60_000)), []);
 });
 
 test("an attempt's evidence keeps its latest progress samples, and diagnoses that progress samples cannot push out", () => {

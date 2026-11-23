@@ -12,14 +12,29 @@ const DESCRIBE_MIN_AVAILABLE_GIB = Number(process.env.VIDEO_PIPELINE_DESCRIBE_MI
 export const DESCRIBE_START_ATTEMPTS = 3;
 const failedStarts = new Map<string, number>();
 
-// fstrim discards every free block of the filesystem; after a reboot that is all the free
-// space (760 GiB here, 3.5 to 4.5 hours each week). Meanwhile this disk reads at about
-// 15 MB/s: on 2026-11-23 every model start during it took 6.5 to 10 minutes instead of
-// seconds, and one passed the 10-minute limit. Describing waits for the trim to finish.
-export async function diskTrimRunning(proc = "/proc"): Promise<boolean> {
+// Whether a process's cgroup (or any ancestor slice) enforces a finite write/discard IOPS cap.
+async function hasWriteIopsCap(proc: string, pid: string, cgroupRoot: string): Promise<boolean> {
+    const raw = await readFile(`${proc}/${pid}/cgroup`, "utf8").catch(() => "");
+    const rel = raw.match(/^0::(\/.*)$/m)?.[1];
+    if (!rel) return false;
+    let current = rel;
+    while (current && current !== "/") {
+        const ioMax = await readFile(`${cgroupRoot}${current}/io.max`, "utf8").catch(() => "");
+        if (/\bwiops=\d+\b/.test(ioMax)) return true;
+        const slash = current.lastIndexOf("/");
+        current = slash > 0 ? current.slice(0, slash) : "/";
+    }
+    return false;
+}
+
+// An uncapped fstrim can saturate disk I/O enough to slow cold model reads past the startup
+// timeout. Describing waits while an uncapped fstrim runs; a slice-capped fstrim (finite
+// wiops in io.max) leaves enough read bandwidth and does not block describing.
+export async function diskTrimRunning(proc = "/proc", cgroupRoot = "/sys/fs/cgroup"): Promise<boolean> {
     for (const entry of await readdir(proc).catch(() => [] as string[])) {
         if (!/^\d+$/.test(entry)) continue;
-        if ((await readFile(`${proc}/${entry}/comm`, "utf8").catch(() => "")).trim() === "fstrim") return true;
+        if ((await readFile(`${proc}/${entry}/comm`, "utf8").catch(() => "")).trim() !== "fstrim") continue;
+        if (!await hasWriteIopsCap(proc, entry, cgroupRoot)) return true;
     }
     return false;
 }

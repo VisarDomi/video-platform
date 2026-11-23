@@ -26,9 +26,9 @@ export class UploadByteMeter {
     }
 }
 
-// How far back the destination is told about the videos this ledger created: a new video
-// was seen off the list for 12 to 35 minutes after its upload.
-const RECENT_UPLOADS_MILLISECONDS = 3 * 60 * 60_000;
+// How far back the destination is told about the videos this ledger created and believes
+// still exist, so a short uploads list can distinguish recent uploads from older missing ones.
+const RECENT_UPLOADS_MILLISECONDS = 30 * 24 * 60 * 60_000;
 
 export class UploadCoordinator {
     constructor(

@@ -90,9 +90,8 @@ test('a slow segment does not stop polling: media listed meanwhile is saved, not
         ['10.ts', '11.ts', '12.ts', '13.ts', '14.ts', '15.ts']);
 });
 
-// The disk can stall for seconds (a DRAM-less drive flushing a multi-GB pipeline write, or a
-// weekly fstrim): a segment's write, fsyncs and check then took the poll loop past the
-// moving window (2026-11-22 21:29: two streams 7-12 s late together, 12 segments lost).
+// The disk can stall for seconds (a drive flushing a large pipeline write or trimming):
+// polling continues while waiting on disk so segments do not slide out of the live window.
 test('a slow disk does not stop polling: media listed while a segment is written and checked is saved', { timeout: 15000 }, async (t) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'segment-retry-'));
     t.after(() => rm(root, { recursive: true, force: true }));

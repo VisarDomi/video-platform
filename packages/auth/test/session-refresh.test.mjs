@@ -5,9 +5,8 @@ import { AuthService } from '../dist/auth/authService.js';
 // The core's own refresh mechanics with fake sites. (A real site's session requests are
 // tested with its plug-in.)
 
-// A renewal used to drop a stream-token answer that arrived after it replaced the session;
-// with 10-second tokens refreshed every 5 s, that let them lapse (a playlist 401 on
-// 2026-11-22 21:27, 9.6 s after the last write).
+// A stream-token answer that arrives after a session renewal replaced the bag keeps its
+// newer stream tokens so 10-second tokens refreshed every 5 s cannot lapse during a renewal.
 const streamSite = (fetchShortTokens) => ({ fetchShortTokens,
     describeTokens: bag => ({ ...(bag.extras.tte ? { shortExpiresAt: Number(bag.extras.tte) * 1000 } : {}), summary: `tte=${bag.extras.tte || 'none'}` }) });
 

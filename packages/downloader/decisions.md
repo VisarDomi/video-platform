@@ -264,9 +264,9 @@ media, so one slow segment download, or one master or playlist request that
 stalls for 5–10 seconds while a fresh request answers at once, would otherwise
 let segments leave the window before the loop polls again. A ts-live request that
 stalls also outlives its 10-second stream token and comes back 401. The disk stalls
-too: each segment costs four fsyncs, and a slow drive flushing a large write elsewhere
-(the pipeline's conversions) or trimming took one flush long enough for two streams to
-miss 12 segments together.
+too: each segment costs four fsyncs, and a drive flushing a large write elsewhere
+(the pipeline's conversions) or trimming can stall long enough for live streams to
+miss segments from the moving window.
 
 ## Segment fetches: network errors and 429 retry, other HTTP errors stop
 

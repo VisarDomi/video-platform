@@ -35,15 +35,24 @@ test('a description model that cannot start leaves the recording to a later step
     await assert.rejects(describeValidatedArtifact(artifact), StageDeferredError, 'the count starts again');
 });
 
-test('a running fstrim is found among the processes', async () => {
+test('a running uncapped fstrim is found among the processes, while a slice-capped fstrim is not blocking', async () => {
     const proc = await mkdtemp(path.join(root, 'proc-'));
+    const cgroup = await mkdtemp(path.join(root, 'cgroup-'));
     for (const [pid, name] of [['1', 'systemd'], ['812', 'node'], ['self', 'fstrim']]) {
         await mkdir(path.join(proc, pid));
         await writeFile(path.join(proc, pid, 'comm'), `${name}\n`);
     }
-    assert.equal(await diskTrimRunning(proc), false, 'only numbered process entries count');
+    assert.equal(await diskTrimRunning(proc, cgroup), false, 'only numbered process entries count');
     await mkdir(path.join(proc, '9001'));
     await writeFile(path.join(proc, '9001', 'comm'), 'fstrim\n');
-    assert.equal(await diskTrimRunning(proc), true);
-    assert.equal(await diskTrimRunning(path.join(root, 'missing')), false);
+    assert.equal(await diskTrimRunning(proc, cgroup), true);
+    // An fstrim inside a slice with a finite write/discard IOPS cap does not block describing.
+    await writeFile(path.join(proc, '9001', 'cgroup'), '0::/fstrim.slice/fstrim.service\n');
+    await mkdir(path.join(cgroup, 'fstrim.slice', 'fstrim.service'), { recursive: true });
+    await writeFile(path.join(cgroup, 'fstrim.slice', 'io.max'), '259:0 rbps=max wbps=max riops=max wiops=40\n');
+    assert.equal(await diskTrimRunning(proc, cgroup), false);
+    // Without a finite wiops cap (max), it still blocks.
+    await writeFile(path.join(cgroup, 'fstrim.slice', 'io.max'), '259:0 rbps=max wbps=max riops=max wiops=max\n');
+    assert.equal(await diskTrimRunning(proc, cgroup), true);
+    assert.equal(await diskTrimRunning(path.join(root, 'missing'), cgroup), false);
 });
