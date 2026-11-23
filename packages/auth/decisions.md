@@ -25,7 +25,21 @@ a failed refresh is retried after 1 second. The usual failure is one request tha
 hangs while a fresh one answers in a fraction of a second; abandoning the slow
 request instead would also cut off a merely slow API. Stream-token requests do
 not go through the auth request queue, which runs one request at a time. A session refresh also returns a replacement refresh token
-when the site issues one; a 401 or 403 from the refresh falls back to a browser login.
+when the site issues one. The session renews 5 minutes before its token expires.
+
+A stream-token answer that arrives after a session renewal replaced the bag keeps its
+stream tokens when they are newer than the saved ones (they do not depend on the session
+generation), but never its session. Dropping it let the 10-second tokens lapse during a
+renewal: one playlist 401 per live stream (`test/session-refresh.test.mjs`).
+
+## A browser sign-in is a bug event
+
+The session is meant to live on its refresh token. The browser signs in only when there
+is no usable saved session, or when `classify()` says the site refused a renewal
+(`reauthenticate`, `verification`). Every such sign-in is logged as an error,
+`[bug event] <site> browser sign-in for <account>: <cause>`, for the daily check to
+investigate; a sign-in the session's ordinary renewal could have avoided is a bug to fix.
+Each completed renewal logs `Session renewed by refresh token in <n> ms`.
 
 The tokens are written to
 `~/.local/share/video-services/session/<account email>.json` through the core's

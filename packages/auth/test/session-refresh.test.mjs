@@ -5,16 +5,34 @@ import { AuthService } from '../dist/auth/authService.js';
 // The core's own refresh mechanics with fake sites. (A real site's session requests are
 // tested with its plug-in.)
 
-test('late playback tokens from an old ST cannot overwrite a new session generation',async()=>{
+// A renewal used to drop a stream-token answer that arrived after it replaced the session;
+// with 10-second tokens refreshed every 5 s, that let them lapse (a playlist 401 on
+// 2026-11-22 21:27, 9.6 s after the last write).
+const streamSite = (fetchShortTokens) => ({ fetchShortTokens,
+    describeTokens: bag => ({ ...(bag.extras.tte ? { shortExpiresAt: Number(bag.extras.tte) * 1000 } : {}), summary: `tte=${bag.extras.tte || 'none'}` }) });
+
+test('a renewal during a stream-token request keeps its newer stream tokens, never its old session', async () => {
     let resolve;
-    const provider={fetchShortTokens:()=>new Promise(r=>{resolve=r;})};
-    const service=new AuthService({email:'fixture@example.invalid',password:'unused',provider:'live-a'},provider);
-    service.authContext.updateFromLogin({refreshToken:'old-refresh',sessionToken:'old-access',extras:{browserState:'retained-state'}});
-    const request=service.setTokenData();
-    service.authContext.updateFromRefresh({newRefreshToken:'new-refresh',newSessionToken:'new-access',extras:{browserState:'fresh-state'}});
-    resolve({extras:{tt:'stale-stream-token',ttu:'stale',tte:'9999999999'}});
+    const service = new AuthService({ email: 'fixture@example.invalid', password: 'unused', provider: 'live-a' }, streamSite(() => new Promise(r => { resolve = r; })));
+    service.authContext.updateFromLogin({ refreshToken: 'old-refresh', sessionToken: 'old-access', extras: { browserState: 'retained-state', tte: '1000' } });
+    const request = service.setTokenData();
+    service.authContext.updateFromRefresh({ newRefreshToken: 'new-refresh', newSessionToken: 'new-access', extras: { browserState: 'fresh-state' } });
+    resolve({ extras: { tt: 'late-stream-token', ttu: 'late', tte: '9999999999' },
+        session: { newRefreshToken: 'stale-refresh', newSessionToken: 'stale-access' } });
     await request;
-    assert.deepEqual(service.authContext.getTokenBag(),{refreshToken:'new-refresh',sessionToken:'new-access',extras:{browserState:'fresh-state'}});
+    assert.deepEqual(service.authContext.getTokenBag(), { refreshToken: 'new-refresh', sessionToken: 'new-access',
+        extras: { browserState: 'fresh-state', tt: 'late-stream-token', ttu: 'late', tte: '9999999999' } });
+});
+
+test('a late stream-token answer never replaces newer stream tokens', async () => {
+    let resolve;
+    const service = new AuthService({ email: 'fixture@example.invalid', password: 'unused', provider: 'live-a' }, streamSite(() => new Promise(r => { resolve = r; })));
+    service.authContext.updateFromLogin({ refreshToken: 'old-refresh', sessionToken: 'old-access', extras: {} });
+    const request = service.setTokenData();
+    service.authContext.updateFromRefresh({ newRefreshToken: 'new-refresh', newSessionToken: 'new-access', extras: { tt: 'fresh', ttu: 'fresh', tte: '2000' } });
+    resolve({ extras: { tt: 'late', ttu: 'late', tte: '1500' } });
+    await request;
+    assert.equal(service.authContext.getTokenBag().extras.tt, 'fresh');
 });
 
 test('a stream-token refresh unanswered for a second is hedged by a parallel request', async () => {
@@ -94,7 +112,11 @@ test("needs-attention stops automatic sign-ins, and a later sign-in reports the 
     await service.maintainSession();
     await service.maintainSession();
     assert.equal(logins, 1);
-    assert.deepEqual(errors, ['A person has to look at the sign-in.']);
+    // The sign-in itself is a bug event: the session is meant to live on its refresh token.
+    assert.deepEqual(errors, [
+        '[bug event] Demo browser sign-in for fixture@example.invalid: the session renewal was refused: Session refresh failed with status 403.',
+        'A person has to look at the sign-in.',
+    ]);
     await assert.rejects(service.performFreshLogin(), error => error === person);
 });
 

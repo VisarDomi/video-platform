@@ -1,6 +1,6 @@
 import * as timersPromises from "timers/promises";
 
-import type { AuthDecision, Logger, SiteAuth } from "sdk";
+import type { AuthDecision, Logger, ShortTokens, SiteAuth, TokenBag } from "sdk";
 import { CredentialStore, taggedLogger } from "shared";
 import logger from "../common/logger.js";
 import { getConfig } from "../common/config.js";
@@ -65,7 +65,9 @@ export class AuthService {
     public async initiateAuth() {
         const loadedFromFile = await this.authContext.loadTokenFromFile();
 
-        if (loadedFromFile && !this.provider.needsSessionMigration?.(this.authContext.getTokenBag()!)) {
+        const migrating = loadedFromFile && !!this.provider.needsSessionMigration?.(this.authContext.getTokenBag()!);
+        let reason = !loadedFromFile ? "no saved session" : migrating ? "the saved session predates its current format" : "";
+        if (loadedFromFile && !migrating) {
             logger.info(`Refresh token for ${this.account.email} loaded from file. Attempting to establish session...`);
             // A freshly recovered access token is already usable. Validate it with the
             // stream-token endpoint before consuming its rotating refresh token again.
@@ -88,6 +90,7 @@ export class AuthService {
                         logger.warn(decision === "verification"
                             ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                             : `Stored token is invalid. Falling back to browser login for ${this.account.email}.`);
+                        reason = `the saved session was refused: ${errorMessage}`;
                         break;
                     } else {
                         logger.error(`Failed to establish session for ${this.account.email}: ${errorMessage}. Retrying...`);
@@ -100,7 +103,7 @@ export class AuthService {
         logger.info(`Proceeding to browser login for ${this.account.email}.`);
         while (true) {
             try {
-                await this.performFreshLogin();
+                await this.performFreshLogin(reason);
                 logger.info(`Session successfully established for ${this.account.email} via fresh browser login.`);
                 return;
             } catch (error) {
@@ -117,8 +120,11 @@ export class AuthService {
         void this.manageTokenLifecycle();
     }
 
-    private async performFreshLogin() {
+    // A browser sign-in. The session is meant to live on its refresh token, so every sign-in
+    // after the first is a bug event: logged as an error with its cause for the daily check.
+    private async performFreshLogin(reason = "unspecified") {
         if (this.browserLoginBlocked) throw this.blockedBy;
+        logger.error(`[bug event] ${this.label} browser sign-in for ${this.account.email}: ${reason}`);
         logger.info(`Adding full browser login for ${this.account.email} to the queue...`);
         const tokens = await loginQueue.add(this.account, this.provider);
         this.authContext.updateFromLogin(tokens);
@@ -171,8 +177,10 @@ export class AuthService {
             throw new Error(`Refresh token not found for ${this.account.email}.`);
         }
 
+        const startedAt = Date.now();
         const result = await this.provider.refreshSession(tokenBag);
         const receivedNewRT = this.authContext.updateFromRefresh(result);
+        this.siteLog.info(`Session renewed by refresh token in ${Date.now() - startedAt} ms${receivedNewRT ? " (rotated)" : ""}`);
         // The previous RT is consumed. Commit its replacement before requesting
         // stream tokens, which can fail independently or be interrupted.
         await this.authContext.saveTokenToFile();
@@ -209,9 +217,22 @@ export class AuthService {
                 throw error instanceof AggregateError ? error.errors[0] : error;
             }
         }
-        if (this.authContext.getTokenBag() !== tokenBag) return;
+        const current = this.authContext.getTokenBag();
+        if (current !== tokenBag) {
+            // A session renewal replaced the bag while this request ran. Its session must not
+            // come back, but its short-lived tokens are still valid and may be newer than the
+            // ones saved: dropping them left the stream tokens to lapse during a renewal.
+            if (current && this.newerShortTokens(current, result.extras)) this.authContext.updateFromTokenData({ extras: result.extras });
+            return;
+        }
         if(result.session)this.authContext.updateFromRefresh(result.session);
         this.authContext.updateFromTokenData(result);
+    }
+
+    private newerShortTokens(bag: TokenBag, extras: ShortTokens["extras"]): boolean {
+        const offered = this.provider.describeTokens({ ...bag, extras: { ...bag.extras, ...extras } }).shortExpiresAt;
+        const held = this.provider.describeTokens(bag).shortExpiresAt;
+        return offered !== undefined && (held === undefined || offered > held);
     }
 
     private async refreshShortLivedTokens() {
@@ -288,7 +309,7 @@ export class AuthService {
                         ? `${this.label} requested browser verification for ${this.account.email}; completing the normal browser login.`
                         : `Token became invalid during maintenance for ${this.account.email}. Attempting fresh browser login.`);
                     try {
-                        await this.performFreshLogin();
+                        await this.performFreshLogin(`the session renewal was refused: ${errorMessage}`);
                         logger.info(`Successfully re-authenticated via browser login for ${this.account.email}.`);
                         return;
                     } catch (loginError) {
