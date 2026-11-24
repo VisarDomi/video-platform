@@ -594,6 +594,19 @@ session the site replaced (`adoptSharedSession`). The PC refuses a runner whose 
 or commit differs from the one recorded in `uplink-runner.json` beside the ledger (the
 deployment's runner deploy writes it).
 
+With the section, conversion runs ahead of uploads (except in a per-provider trial or a
+comparison run). Each campaign step uploads to home when it can (no hold, the account slot
+free, home's allowance), else runs the oldest local stage, else admits the next recording
+while the ready files (`metadata_ready`, on a carrier or not) stay under one carrier's
+capacity plus two days of home's allowance and the artifacts filesystem keeps more than
+`minFreeBytes` free; at the cap the step reports `full_ahead`. A cooldown or an attention
+hold (a lost session) holds uploads only; a manual pause still stops everything. A failed
+daily verification holds uploads for that step instead of stopping it. The account slot
+lets one upload or uploads-list scan run at a time across both uplinks, and the recovery of
+interrupted uploads runs only while it is free (another lane may have an upload in flight).
+A file on a carrier never uploads from home. Without the section, a recording waiting for
+allowance (or any hold) still stops conversion, as before.
+
 ```bash
 # Where the runner is: its network, the carrier and its files, its browser, its commit.
 node packages/pipeline/dist/main.js uplink-probe [--carrier-dir DIR]

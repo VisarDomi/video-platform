@@ -13,6 +13,7 @@ import { createProviderUploader } from "../upload/providerFactory.js";
 import { notifyDesktop, stepNotification } from "../notify.js";
 import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecoveryState.js";
 import { access } from "node:fs/promises";
+import { AccountSlot } from "../campaign/accountSlot.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -146,7 +147,7 @@ export async function recoverWorkerAtBoot(config: PipelineConfig, signal: AbortS
     }
 }
 
-export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal): Promise<void> {
+export async function runCampaignWorker(config: PipelineConfig, signal: AbortSignal, slot = new AccountSlot()): Promise<void> {
     // Boot recovery is single-flight but still reports liveness and can be stopped.
     await recoverWorkerAtBoot(config, signal);
     if (signal.aborted) return;
@@ -211,6 +212,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     // pending verification is rechecked until it settles: each is logged when it
     // changes, not on every repetition.
     let lastStep = "";
+    let verificationHold: string | null = null;
     const reconcileOutcomes = new Map<string, string>();
     let waitingForRecovery = false;
     while (!signal.aborted) {
@@ -225,16 +227,27 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
                 await keepDestinationSessionAlive(config);
             }
             if (config.networkUploadsEnabled && confirmationsAreDue(config)) {
-                const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
-                const changed = (reconciled.results ?? []).filter((item) => {
-                    const outcome = `${item.disposition}\u0000${item.reason ?? ""}`;
-                    if (reconcileOutcomes.get(item.recordingId ?? "") === outcome) return false;
-                    reconcileOutcomes.set(item.recordingId ?? "", outcome);
-                    return true;
-                });
-                if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
+                const release = await slot.take("verification", signal);
+                try {
+                    const reconciled = await reconcileDueUploads(config) as { results?: Array<{ disposition?: string; recordingId?: string; remoteId?: string; reason?: string }> };
+                    const changed = (reconciled.results ?? []).filter((item) => {
+                        const outcome = `${item.disposition}\u0000${item.reason ?? ""}`;
+                        if (reconcileOutcomes.get(item.recordingId ?? "") === outcome) return false;
+                        reconcileOutcomes.set(item.recordingId ?? "", outcome);
+                        return true;
+                    });
+                    if (changed.length > 0) console.log(JSON.stringify({ event: "campaign-reconcile", result: { ...reconciled, results: changed } }));
+                    verificationHold = null;
+                } catch (error) {
+                    // Without a second uplink a failed verification stops the step (and the
+                    // conversions with it); with one, it holds uploads only.
+                    if (!config.uplink) throw error;
+                    const message = error instanceof Error ? error.message : String(error);
+                    if (verificationHold === null) console.error(journalPriority("warn") + JSON.stringify({ event: "campaign-reconcile-error", error: message }));
+                    verificationHold = `the daily verification failed: ${message}`;
+                } finally { release(); }
             }
-            const result = await campaignStep(config) as {
+            const result = await campaignStep(config, { slot, uploadHold: verificationHold }) as {
                 step?: { disposition?: string; resumeAt?: string };
             };
             const step = JSON.stringify(result);
@@ -244,7 +257,7 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             if (notice) notifyDesktop(notice.title, notice.body, notice.urgent);
             const disposition = result.step?.disposition;
             if ((disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown" || disposition === "upload_retry_cooldown")
-                && result.step?.resumeAt) {
+                && result.step?.resumeAt && !config.uplink) {
                 const resumeAt = Date.parse(result.step.resumeAt);
                 if (Number.isFinite(resumeAt)) {
                     // Keep verification and queue watching alive during an
@@ -255,6 +268,9 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
             }
             if (disposition === "admitted" || disposition === "stage_completed"
                 || disposition === "upload_completed" || disposition === "shorts_joined" || disposition === "shorts_waiting") continue;
+            // Converting ahead: a held upload never holds the next conversion.
+            if (config.uplink && (disposition === "antibot_cooldown" || disposition === "daily_limit_cooldown"
+                || disposition === "upload_retry_cooldown" || disposition === "metadata_rejected")) continue;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             console.error(journalPriority("error", 2) + JSON.stringify({ event: "campaign-error", error: message }));

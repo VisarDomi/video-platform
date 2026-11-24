@@ -1,9 +1,10 @@
 import path from "node:path";
-import { access, unlink } from "node:fs/promises";
+import { access, statfs, unlink } from "node:fs/promises";
+import type { AccountSlot } from "./accountSlot.js";
 
 import { sourcesOf, type PipelineConfig } from "../config.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import type { Recording, RecordingInput } from "../domain/types.js";
+import type { CampaignControl, Recording, RecordingInput } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { allowsUpload } from "../provenance/uploadPolicy.js";
 import { PipelineOrchestrator, StageDeferredError } from "../scheduler/orchestrator.js";
@@ -23,7 +24,8 @@ const PRE_TRANSFER_RETRY_MILLISECONDS = 15 * 60_000;
 export type CampaignStepResult =
     | { readonly disposition: "shorts_waiting" | "shorts_joined"; readonly registered: number; readonly joined: readonly string[] }
     | { readonly disposition: "comparison_finished" | "comparison_verification_wait" | "comparison_attention_required"; readonly reason?: string }
-    | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number }
+    | { readonly disposition: "paused" | "idle"; readonly reviewRequired: number; readonly uploads?: string }
+    | ({ readonly disposition: "full_ahead"; readonly reviewRequired: number; readonly uploads: string } & AheadRoom)
     | { readonly disposition: "trial_finished"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
     | { readonly disposition: "trial_verification_wait" | "trial_attention_required"; readonly reviewRequired: number; readonly trial: ReturnType<PipelineDatabase["getCampaignTrialProgress"]> }
     | { readonly disposition: "admitted" | "stage_completed"; readonly recordingId: string; readonly state: string }
@@ -37,6 +39,21 @@ export type CampaignStepResult =
     | { readonly disposition: "upload_retry_cooldown"; readonly recordingId: string; readonly resumeAt: string; readonly reason: string }
     | { readonly disposition: "metadata_rejected"; readonly recordingId: string; readonly rejectedPhrases: readonly string[] }
     | { readonly disposition: "upload_completed"; readonly recordingId: string; readonly result: unknown };
+
+export interface AheadRoom {
+    readonly readyBytes: number;
+    readonly limitBytes: number;
+    readonly freeBytes: number;
+    readonly floorBytes: number;
+    readonly admits: boolean;
+}
+
+export interface CampaignWorkerOptions {
+    // The account slot the worker's lanes share (none: this process is the only uploader).
+    readonly slot?: AccountSlot;
+    // Uploads are held for a reason outside the campaign row (the daily verification failed).
+    readonly uploadHold?: string | null;
+}
 
 function ordered(recordings: readonly Recording[], providerFilter: string): Recording[] {
     return recordings.filter((recording) => recording.sourceKind === "edited"
@@ -59,6 +76,7 @@ export class CampaignWorker {
         private readonly resolver: TargetCatalogResolver,
         private readonly upload?: (recordingId: string) => Promise<unknown>,
         workerId = `pipeline-campaign-${process.pid}`,
+        private readonly options: CampaignWorkerOptions = {},
     ) {
         this.orchestrator = new PipelineOrchestrator(
             database,
@@ -102,6 +120,210 @@ export class CampaignWorker {
         return { disposition: "admitted", recordingId: recording.id, state: recording.state };
     }
 
+    // One prepared recording's upload: the last checks, the allowance, the upload and what
+    // its outcome means for the campaign.
+    private async uploadPrepared(uploadReady: Recording, control: CampaignControl, comparison: unknown, now: Date): Promise<CampaignStepResult> {
+        this.database.enrollCampaignTrial(uploadReady, now);
+        try {
+            await verifyCurrentServerAuthority(uploadReady, this.config, this.database);
+            const resolutionResult = await this.enforceCurrentResolutionPolicy(uploadReady, now);
+            if (resolutionResult) return resolutionResult;
+        } catch (error) {
+            if (await cancelInvalidShortBatch(this.database, this.config, uploadReady.id, String(error), now)) {
+                return { disposition: "stage_completed", recordingId: uploadReady.id, state: "short_cancelled" };
+            }
+            if (comparison) this.database.setCampaignState("paused", now);
+            return {
+                disposition: "attention_required",
+                recordingId: uploadReady.id,
+                reason: error instanceof Error ? error.message : String(error),
+            };
+        }
+        const provenance = this.database.getProvenance(uploadReady.id);
+        if (!allowsUpload(provenance)) {
+            if (comparison) this.database.setCampaignState("paused", now);
+            return {
+                disposition: "attention_required",
+                recordingId: uploadReady.id,
+                reason: "streamer_unresolved",
+            };
+        }
+        const artifact = this.database.getArtifact(uploadReady.id);
+        if (!artifact) {
+            if (comparison) this.database.setCampaignState("paused", now);
+            return { disposition: "attention_required", recordingId: uploadReady.id, reason: "artifact_missing" };
+        }
+        if (!this.database.canReserve(
+            artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
+            now,
+            this.config.uploadTimeZone,
+            control.dailyUploadLimitBytes,
+        )) return { disposition: "upload_quota_wait", recordingId: uploadReady.id,
+            budget: this.database.uploadBudget(now, this.config.uploadTimeZone, control.dailyUploadLimitBytes) };
+        if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
+        try {
+            const result = await this.upload(uploadReady.id);
+            const afterUpload = this.database.get(uploadReady.id);
+            if (afterUpload?.state === "short_waiting" || afterUpload?.state === "artifact_valid"
+                && this.database.shortParts(uploadReady.id).some(part => !part.verified)) {
+                return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
+            }
+            if (afterUpload?.state === "blocked") return {
+                disposition: "attention_required", recordingId: uploadReady.id,
+                reason: afterUpload.blockReason ?? "Upload provider policy requires manual review",
+            };
+            // Rejected phrases found locally: nothing was sent, describe again.
+            if (afterUpload?.state === "artifact_valid") {
+                return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
+            }
+            this.database.resetAntibotFailures(now);
+            return {
+                disposition: "upload_completed",
+                recordingId: uploadReady.id,
+                result,
+            };
+        } catch (error) {
+            if (error instanceof ProviderSessionLostError) {
+                // Logging in again would log the phone out: stop and say why.
+                // A user may have paused while the upload was in flight.
+                // Keep that manual hold instead of making it auto-recoverable.
+                if (this.database.getCampaignControl().state === "running") this.database.pauseForAttention(error.message, now);
+                this.database.recordProviderSessionEvent({ provider: this.config.uploadProvider ?? this.database.getActiveUploadProvider(),
+                    kind: "lost", loggedIn: false, note: error.message }, now);
+                return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
+            }
+            if (error instanceof MetadataRejectedError) {
+                // Definitive and already learned; the recording is back for
+                // re-description. Not an anti-bot event, no cooldown.
+                return { disposition: "metadata_rejected", recordingId: uploadReady.id, rejectedPhrases: [...error.phrases] };
+            }
+            if (error instanceof HumanActionRequiredError && error.action === "daily_limit") {
+                const after = this.database.recordUploadLimitCooldown(now);
+                return {
+                    disposition: "daily_limit_cooldown",
+                    recordingId: uploadReady.id,
+                    resumeAt: after.resumeAt ?? "",
+                };
+            }
+            if (error instanceof HumanActionRequiredError) {
+                const streak = control.antibotFailures + 1;
+                const exponent = Math.min(streak - 1, 40);
+                const waitMilliseconds = error.action === "session_login" ? 24 * 60 * 60_000
+                    : Math.min(24 * 60 * 60_000, 60_000 * (2 ** exponent));
+                const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
+                return {
+                    disposition: "antibot_cooldown",
+                    recordingId: uploadReady.id,
+                    streak,
+                    resumeAt: after.resumeAt ?? "",
+                };
+            }
+            // Transport/login timeouts can arrive as ordinary Playwright
+            // errors. A failed pre-transfer attempt sent nothing and created
+            // no video, so it is retried soon, waiting twice as long after
+            // each failure in a row (the streak a successful upload resets);
+            // an uncertain transfer is reconciled separately, never repeated.
+            const afterFailure = this.database.get(uploadReady.id);
+            if (afterFailure?.state === "metadata_ready") {
+                const streak = control.antibotFailures + 1;
+                const waitMilliseconds = Math.min(24 * 60 * 60_000,
+                    PRE_TRANSFER_RETRY_MILLISECONDS * (2 ** Math.min(streak - 1, 40)));
+                const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
+                return { disposition: "upload_retry_cooldown", recordingId: uploadReady.id,
+                    resumeAt: after.resumeAt ?? "", reason: error instanceof Error ? error.message : String(error) };
+            }
+            if (afterFailure?.state === "upload_uncertain") {
+                return { disposition: "upload_completed", recordingId: uploadReady.id,
+                    result: { state: "upload_uncertain", reason: "Awaiting acceptance reconciliation; no re-upload" } };
+            }
+            if (comparison) this.database.setCampaignState("paused", now);
+            throw error;
+        }
+    }
+
+    // How far conversion is ahead of uploads: the ready files' bytes against the cap (one
+    // carrier's worth plus two days of home's allowance), and the free space on the
+    // artifacts filesystem against the uplink's floor.
+    async aheadRoom(control: CampaignControl = this.database.getCampaignControl()): Promise<AheadRoom> {
+        const uplink = this.config.uplink!;
+        const readyBytes = this.database.readyArtifactBytes();
+        const limitBytes = uplink.carrier.capacityBytes + 2 * control.dailyUploadLimitBytes;
+        const space = await statfs(this.config.stagingRoot).catch(() => statfs(this.config.artifactsRoot));
+        const freeBytes = space.bavail * space.bsize;
+        return { readyBytes, limitBytes, freeBytes, floorBytes: uplink.minFreeBytes,
+            admits: readyBytes < limitBytes && freeBytes > uplink.minFreeBytes };
+    }
+
+    // One step when conversion runs ahead: a home upload when one can go (no hold, the account
+    // slot free, home's allowance), else the oldest local stage, else a new recording while
+    // the cap and the disk allow. Files on a carrier belong to the other uplink.
+    private async stepAhead(control: CampaignControl, reviewRequired: number, hold: string | null, now: Date): Promise<CampaignStepResult> {
+        if (this.config.automaticShortsEnabled) {
+            const shorts = await maintainAutomaticShorts(this.database, this.config, this.resolver, now);
+            if (shorts.joined.length || shorts.registered) return {
+                disposition: shorts.joined.length ? "shorts_joined" : "shorts_waiting", ...shorts,
+            };
+        }
+        const allows = (recording: Recording) => this.database.campaignTrialAllows(recording.provider, recording.id);
+        const order = (recordings: readonly Recording[]) => ordered(recordings.filter((recording) =>
+            allows(recording) && !this.database.localSourceIsAbsent(recording.id)), control.providerFilter);
+        let uploads: string = hold ? `held: ${hold}` : this.upload ? "nothing ready" : "network uploads off";
+        if (!hold && this.upload) {
+            const uploadReady = order(this.database.list("metadata_ready").filter((recording) =>
+                this.database.canAttemptUpload(recording.id, now) && !this.database.carrierCopy(recording.id)))[0];
+            const artifact = uploadReady ? this.database.getArtifact(uploadReady.id) : null;
+            if (uploadReady && artifact && !this.database.canReserve(artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
+                now, this.config.uploadTimeZone, control.dailyUploadLimitBytes)) {
+                uploads = "waiting for home's allowance";
+            } else if (uploadReady) {
+                const release = this.options.slot ? this.options.slot.tryTake("home-upload") : () => undefined;
+                if (!release) uploads = `account busy (${this.options.slot?.heldBy})`;
+                else {
+                    try {
+                        const result = await this.uploadPrepared(uploadReady, control, null, now);
+                        if (result.disposition !== "upload_quota_wait" && result.disposition !== "awaiting_upload_activation") return result;
+                        uploads = result.disposition === "upload_quota_wait" ? "waiting for home's allowance" : "network uploads off";
+                    } finally { release(); }
+                }
+            }
+        }
+        const key = (recording: RecordingInput) => `${captureKeyFromFolderName(path.basename(recording.sourcePath))}|${recording.provider}|${recording.sourcePath}`;
+        const local = order(this.database.list().filter((recording) => ["server_ready", "remuxed", "artifact_valid", "described"].includes(recording.state)));
+        const room = await this.aheadRoom(control);
+        const candidate = room.admits ? await selectOldestFinalizedEditedCandidate({
+            finalizationDatabasePath: this.config.finalizationDatabasePath,
+            roots: this.config.discoveryRoots,
+            providerFilter: control.providerFilter,
+            pipelineDatabase: this.database,
+            allowedProviders: sourcesOf(this.config).filter((provider) => this.database.campaignTrialAllows(provider)),
+        }) : null;
+        // An older source goes before newer local work (joined shorts batches never jump ahead).
+        if (candidate && (!local[0] || key(candidate).localeCompare(key(local[0])) < 0)) return this.admit(candidate, now);
+        if (local[0]) {
+            const recording = local[0];
+            try {
+                await verifyCurrentServerAuthority(recording, this.config, this.database);
+                const resolutionResult = await this.enforceCurrentResolutionPolicy(recording, now);
+                if (resolutionResult) return resolutionResult;
+            } catch (error) {
+                if (await cancelInvalidShortBatch(this.database, this.config, recording.id, String(error), now)) {
+                    return { disposition: "stage_completed", recordingId: recording.id, state: "short_cancelled" };
+                }
+                return { disposition: "attention_required", recordingId: recording.id, reason: error instanceof Error ? error.message : String(error) };
+            }
+            try {
+                const result = await this.orchestrator.processRecording(recording.id, now);
+                if (!result) throw new Error(`Could not claim campaign recording ${recording.id}`);
+                return { disposition: "stage_completed", recordingId: result.id, state: result.state };
+            } catch (error) {
+                if (!(error instanceof StageDeferredError)) throw error;
+                return { disposition: "resource_wait", recordingId: recording.id, reason: error.message };
+            }
+        }
+        if (!room.admits) return { disposition: "full_ahead", reviewRequired, uploads, ...room };
+        return { disposition: "idle", reviewRequired, uploads };
+    }
+
     async step(now = new Date()): Promise<CampaignStepResult> {
         // Track local availability separately; never erase remote history.
         const swept = await sweepMissingRecordings(this.database, this.config, now);
@@ -112,12 +334,20 @@ export class CampaignWorker {
         const comparison = this.database.getComparisonTrial();
         const reviewRequired = this.database.listProvenanceReview().length
             + this.database.list("blocked").length;
+        // With a second uplink (and no trial or comparison run), conversion never waits for
+        // uploads: a cooldown or an attention hold holds uploads only.
+        const ahead = Boolean(this.config.uplink) && !comparison && !this.config.comparisonTrialOnly && control.trialPerProvider === null;
         if (control.state === "paused") {
             if (control.resumeAt && now.getTime() >= Date.parse(control.resumeAt)) {
                 control = this.database.resumeFromCooldown(now);
-            } else {
+            } else if (!ahead || (control.resumeAt === null && control.attentionReason === null)) {
                 return { disposition: "paused", reviewRequired };
             }
+        }
+        if (ahead) {
+            const hold = control.state === "paused"
+                ? control.attentionReason ?? `cooldown until ${control.resumeAt}` : this.options.uploadHold ?? null;
+            return await this.stepAhead(control, reviewRequired, hold, now);
         }
 
         if (this.config.comparisonTrialOnly && !comparison) {
@@ -236,124 +466,7 @@ export class CampaignWorker {
         const uploadReady = order(this.database.list("metadata_ready")
             .filter((recording) => (!trialNextId || recording.id === trialNextId || (deferred !== undefined && control.trialPerProvider === null))
                 && allows(recording) && this.database.canAttemptUpload(recording.id, now)), control.providerFilter)[0];
-        if (uploadReady) {
-            this.database.enrollCampaignTrial(uploadReady, now);
-            try {
-                await verifyCurrentServerAuthority(uploadReady, this.config, this.database);
-                const resolutionResult = await this.enforceCurrentResolutionPolicy(uploadReady, now);
-                if (resolutionResult) return resolutionResult;
-            } catch (error) {
-                if (await cancelInvalidShortBatch(this.database, this.config, uploadReady.id, String(error), now)) {
-                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: "short_cancelled" };
-                }
-                if (comparison) this.database.setCampaignState("paused", now);
-                return {
-                    disposition: "attention_required",
-                    recordingId: uploadReady.id,
-                    reason: error instanceof Error ? error.message : String(error),
-                };
-            }
-            const provenance = this.database.getProvenance(uploadReady.id);
-            if (!allowsUpload(provenance)) {
-                if (comparison) this.database.setCampaignState("paused", now);
-                return {
-                    disposition: "attention_required",
-                    recordingId: uploadReady.id,
-                    reason: "streamer_unresolved",
-                };
-            }
-            const artifact = this.database.getArtifact(uploadReady.id);
-            if (!artifact) {
-                if (comparison) this.database.setCampaignState("paused", now);
-                return { disposition: "attention_required", recordingId: uploadReady.id, reason: "artifact_missing" };
-            }
-            if (!this.database.canReserve(
-                artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
-                now,
-                this.config.uploadTimeZone,
-                control.dailyUploadLimitBytes,
-            )) return { disposition: "upload_quota_wait", recordingId: uploadReady.id,
-                budget: this.database.uploadBudget(now, this.config.uploadTimeZone, control.dailyUploadLimitBytes) };
-            if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
-            try {
-                const result = await this.upload(uploadReady.id);
-                const afterUpload = this.database.get(uploadReady.id);
-                if (afterUpload?.state === "short_waiting" || afterUpload?.state === "artifact_valid"
-                    && this.database.shortParts(uploadReady.id).some(part => !part.verified)) {
-                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
-                }
-                if (afterUpload?.state === "blocked") return {
-                    disposition: "attention_required", recordingId: uploadReady.id,
-                    reason: afterUpload.blockReason ?? "Upload provider policy requires manual review",
-                };
-                // Rejected phrases found locally: nothing was sent, describe again.
-                if (afterUpload?.state === "artifact_valid") {
-                    return { disposition: "stage_completed", recordingId: uploadReady.id, state: afterUpload.state };
-                }
-                this.database.resetAntibotFailures(now);
-                return {
-                    disposition: "upload_completed",
-                    recordingId: uploadReady.id,
-                    result,
-                };
-            } catch (error) {
-                if (error instanceof ProviderSessionLostError) {
-                    // Logging in again would log the phone out: stop and say why.
-                    // A user may have paused while the upload was in flight.
-                    // Keep that manual hold instead of making it auto-recoverable.
-                    if (this.database.getCampaignControl().state === "running") this.database.pauseForAttention(error.message, now);
-                    this.database.recordProviderSessionEvent({ provider: this.config.uploadProvider ?? this.database.getActiveUploadProvider(),
-                        kind: "lost", loggedIn: false, note: error.message }, now);
-                    return { disposition: "attention_required", recordingId: uploadReady.id, reason: error.message };
-                }
-                if (error instanceof MetadataRejectedError) {
-                    // Definitive and already learned; the recording is back for
-                    // re-description. Not an anti-bot event, no cooldown.
-                    return { disposition: "metadata_rejected", recordingId: uploadReady.id, rejectedPhrases: [...error.phrases] };
-                }
-                if (error instanceof HumanActionRequiredError && error.action === "daily_limit") {
-                    const after = this.database.recordUploadLimitCooldown(now);
-                    return {
-                        disposition: "daily_limit_cooldown",
-                        recordingId: uploadReady.id,
-                        resumeAt: after.resumeAt ?? "",
-                    };
-                }
-                if (error instanceof HumanActionRequiredError) {
-                    const streak = control.antibotFailures + 1;
-                    const exponent = Math.min(streak - 1, 40);
-                    const waitMilliseconds = error.action === "session_login" ? 24 * 60 * 60_000
-                        : Math.min(24 * 60 * 60_000, 60_000 * (2 ** exponent));
-                    const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
-                    return {
-                        disposition: "antibot_cooldown",
-                        recordingId: uploadReady.id,
-                        streak,
-                        resumeAt: after.resumeAt ?? "",
-                    };
-                }
-                // Transport/login timeouts can arrive as ordinary Playwright
-                // errors. A failed pre-transfer attempt sent nothing and created
-                // no video, so it is retried soon, waiting twice as long after
-                // each failure in a row (the streak a successful upload resets);
-                // an uncertain transfer is reconciled separately, never repeated.
-                const afterFailure = this.database.get(uploadReady.id);
-                if (afterFailure?.state === "metadata_ready") {
-                    const streak = control.antibotFailures + 1;
-                    const waitMilliseconds = Math.min(24 * 60 * 60_000,
-                        PRE_TRANSFER_RETRY_MILLISECONDS * (2 ** Math.min(streak - 1, 40)));
-                    const after = this.database.recordAntibotFailure(streak, waitMilliseconds, now);
-                    return { disposition: "upload_retry_cooldown", recordingId: uploadReady.id,
-                        resumeAt: after.resumeAt ?? "", reason: error instanceof Error ? error.message : String(error) };
-                }
-                if (afterFailure?.state === "upload_uncertain") {
-                    return { disposition: "upload_completed", recordingId: uploadReady.id,
-                        result: { state: "upload_uncertain", reason: "Awaiting acceptance reconciliation; no re-upload" } };
-                }
-                if (comparison) this.database.setCampaignState("paused", now);
-                throw error;
-            }
-        }
+        if (uploadReady) return await this.uploadPrepared(uploadReady, control, comparison, now);
         // Nothing to upload meanwhile: the wait is this step's outcome (no new admissions).
         if (deferred) return deferred;
 

@@ -8,6 +8,7 @@ import type { CampaignProviderFilter } from "../domain/types.js";
 import { TargetCatalogResolver } from "../provenance/targetResolver.js";
 import { CampaignWorker } from "../campaign/campaignWorker.js";
 import { uploadOne } from "./uploadOne.js";
+import type { AccountSlot } from "../campaign/accountSlot.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { syncComparisonSelection, writeComparisonReport } from "./comparisonTrial.js";
 
@@ -227,7 +228,14 @@ export function campaignStatus(config: PipelineConfig, now = new Date()): unknow
     }
 }
 
-export async function campaignStep(config: PipelineConfig): Promise<unknown> {
+export interface CampaignStepOptions {
+    // The worker's account slot: the recovery of interrupted uploads runs only while it is
+    // free (another lane may have an upload in flight), and the home upload takes it.
+    readonly slot?: AccountSlot;
+    readonly uploadHold?: string | null;
+}
+
+export async function campaignStep(config: PipelineConfig, options: CampaignStepOptions = {}): Promise<unknown> {
     if (config.comparisonTrialOnly) await syncComparisonSelection(config);
     const database = new PipelineDatabase(config.databasePath);
     try {
@@ -246,7 +254,10 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
                 `Pipeline database is waiting for ${CURRENT_PRODUCTION_VERSION} rollover; run campaign-resume --apply`,
             );
         }
-        const recovery = [...database.recoverInterruptedUploads(),
+        const interrupted = options.slot
+            ? (await options.slot.ifFree("recovery", () => database.recoverInterruptedUploads()))?.value ?? []
+            : database.recoverInterruptedUploads();
+        const recovery = [...interrupted,
             // Never-submitted attempts published nothing: back in the queue now.
             ...(await settleUnsubmitted(database)).map((recordingId) => ({ recordingId, disposition: "unsubmitted_attempt_released" }))];
         const resolver = TargetCatalogResolver.load({ serverUrl: config.serverUrl });
@@ -257,6 +268,8 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
             config.networkUploadsEnabled
                 ? (recordingId) => uploadOne(recordingId, config)
                 : undefined,
+            undefined,
+            options,
         );
         return { recovery, step: await worker.step() };
     } finally {

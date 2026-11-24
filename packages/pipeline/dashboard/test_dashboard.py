@@ -151,6 +151,27 @@ class DashboardDataTests(unittest.TestCase):
         office = upload_budget(self.db, control, datetime(2026, 11, 24, 10, tzinfo=timezone.utc), [{"id": "office", "daily": 50e9}])["uplinks"][1]
         self.assertEqual((office["id"], office["spent"], office["spent_today"], office["remaining"]), ("office", 9e9, 9e9, 91e9))
 
+    def test_converting_ahead_shows_ready_bytes_against_the_cap_and_held_uploads(self):
+        self.assertIsNone(self.read()["ahead"], "no uplink, no converting ahead")
+        (self.root / "sites.json").write_text(json.dumps({"sites": [{"id": "live-a"}], "uplink": {
+            "id": "office", "dailyBytes": 50000000000, "carrier": {"label": "CARRIER1", "capacityBytes": 230000000000}}}))
+        self.db.execute("UPDATE recordings SET state='metadata_ready' WHERE id='2026-01-01 010000 alice'")
+        self.db.execute("UPDATE campaign_control SET state='paused', attention_reason='Destination shared session is logged out'")
+        self.db.commit()
+        data = self.read(worker_step={"disposition": "stage_completed"})
+        self.assertEqual(data["ahead"], {"ready_bytes": 1000000000, "limit_bytes": 280000000000,
+                                         "uploads_held": "Destination shared session is logged out"})
+        self.assertEqual(data["campaign"]["state"], "uploads_held")
+        self.assertEqual([u["id"] for u in data["budget"]["uplinks"]], ["home", "office"])
+        self.assertEqual(data["budget"]["uplinks"][1]["daily"], 50000000000)
+        self.db.execute("UPDATE campaign_control SET state='running', attention_reason=NULL")
+        self.db.execute("UPDATE recordings SET state='metadata_ready'")
+        self.db.execute("UPDATE upload_attempts SET status='failed'")
+        self.db.commit()
+        data = self.read(worker_step={"disposition": "full_ahead", "uploads": "held: the daily verification failed: x"})
+        self.assertEqual(data["campaign"]["state"], "full_ahead")
+        self.assertEqual(data["ahead"]["uploads_held"], "the daily verification failed: x")
+
     def test_history_uses_both_sides_of_tirane_dst_day(self):
         for index,at in [(3,'2026-10-24T22:30:00Z'),(4,'2026-10-25T22:30:00Z')]:
             self.db.execute("INSERT INTO state_events VALUES (?,'fixture','uploading','upload_uncertain','metadata submitted; awaiting verification',?)",(index,at))

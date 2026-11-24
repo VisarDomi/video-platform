@@ -1725,6 +1725,20 @@ export class PipelineDatabase {
         };
     }
 
+    // The bytes of every converted file ready for upload (in transit on a carrier or not).
+    readyArtifactBytes(): number {
+        return (this.database.prepare(`SELECT COALESCE(SUM(a.size_bytes), 0) AS bytes FROM recordings r
+            JOIN artifacts a ON a.recording_id = r.id WHERE r.state = 'metadata_ready'`).get() as { bytes: number }).bytes;
+    }
+
+    // The carrier that holds this recording's file for the other uplink, if one does.
+    carrierCopy(recordingId: string): { carrierId: string; fileName: string; sizeBytes: number; sha256: string } | null {
+        const row = this.database.prepare(`SELECT carrier_id, file_name, size_bytes, sha256 FROM carrier_files
+            WHERE recording_id = ? AND state = 'copied'`).get(recordingId) as
+            { carrier_id: string; file_name: string; size_bytes: number; sha256: string } | undefined;
+        return row ? { carrierId: row.carrier_id, fileName: row.file_name, sizeBytes: row.size_bytes, sha256: row.sha256 } : null;
+    }
+
     // Bytes billed to a month and bytes reserved for it; per uplink, or all uplinks together
     // when none is named.
     uploadUsage(month: string, uplink?: string): UsageRow {

@@ -77,6 +77,10 @@ export async function uploadOne(
         if (recording.sourceKind !== "edited") {
             throw new Error("Production uploads are restricted to edited recordings");
         }
+        // A file on a carrier belongs to the other uplink until it is given back.
+        if (uplink === HOME_UPLINK && database.carrierCopy(recordingId)) {
+            throw new Error(`Recording ${recordingId} is on carrier ${database.carrierCopy(recordingId)!.carrierId}; it uploads from the other uplink`);
+        }
         // A provider that took this recording down never gets it again.
         const removal = database.providerRemovals(recordingId).find((entry) => entry.provider === provider);
         if (removal) {

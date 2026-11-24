@@ -40,6 +40,17 @@ def source_sites(data_root):
     sites_file = Path(os.environ.get("VIDEO_SITES_FILE") or data_root / "sites.json")
     sites = (read_json(sites_file, {}) or {}).get("sites", [])
     return [site["id"] for site in sites if isinstance(site, dict) and isinstance(site.get("id"), str)]
+
+
+def uplink_setting(data_root):
+    """The sites file's "uplink" section (a second network uploads leave from), or None."""
+    sites_file = Path(os.environ.get("VIDEO_SITES_FILE") or data_root / "sites.json")
+    uplink = (read_json(sites_file, {}) or {}).get("uplink")
+    if not isinstance(uplink, dict) or not isinstance(uplink.get("id"), str):
+        return None
+    return uplink
+
+
 STAGES = {"server_ready": "convert", "remuxed": "validate", "artifact_valid": "describe",
           "described": "metadata", "metadata_ready": "ready", "upload_admitted": "upload",
           "uploading": "upload", "upload_uncertain": "verify", "upload_verified": "verified",
@@ -249,6 +260,16 @@ def upload_budget(db, control, now, uplinks=()):
             "uplinks": [home] + [uplink_allowance(db, item["id"], item["daily"], now) for item in uplinks]}
 
 
+def uploads_held(control, worker_step):
+    """Why uploads are held while conversion goes on (None: they are not)."""
+    if control["state"] == "paused" and control["attention_reason"]:
+        return safe_reason(control["attention_reason"])
+    if control["state"] == "paused" and control["resume_at"]:
+        return "retry after " + control["resume_at"]
+    uploads = (worker_step or {}).get("uploads") or ""
+    return uploads[len("held: "):] if uploads.startswith("held: ") else None
+
+
 def transfer_progress(attempt, artifact_size, now):
     if not attempt:
         return None
@@ -385,7 +406,14 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                 "at": e["created_at"],
             })
         activity = activity[:50]
-        budget = upload_budget(db, control, now)
+        uplink = uplink_setting(data_root)
+        budget = upload_budget(db, control, now, [{"id": uplink["id"], "daily": int(uplink.get("dailyBytes", 0))}] if uplink else [])
+        ahead = None
+        if uplink:
+            ready_bytes = db.execute("SELECT COALESCE(SUM(a.size_bytes),0) FROM recordings r JOIN artifacts a ON a.recording_id=r.id "
+                                     "WHERE r.state='metadata_ready'").fetchone()[0]
+            ahead = {"ready_bytes": ready_bytes,
+                     "limit_bytes": int((uplink.get("carrier") or {}).get("capacityBytes", 0)) + 2 * control["daily_upload_limit_bytes"]}
         # The active destination's shared-session checks (none for a destination without one).
         session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider=? AND kind='keepalive' ORDER BY id DESC LIMIT 1",
                              (control.get("upload_provider"),)).fetchone()
@@ -420,13 +448,16 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         state = "status_unavailable"
     elif current_services.get("video-pipeline", {}).get("state") not in (None, "active"):
         state = "worker_stopped"
+    elif ahead is not None and control["state"] == "paused" and (control["resume_at"] or control["attention_reason"]):
+        # Converting ahead: a cooldown or an attention hold holds uploads only.
+        state = "uploads_held"
     elif control["state"] == "paused":
         state = "cooldown" if control["resume_at"] else "finishing" if active else "paused"
     elif not active and worker_step is None:
         # A bounded journal lookup can fail during boot or disk contention.
         # Running intent plus a heartbeat cannot establish the current wait.
         state = "status_unavailable"
-    elif not active and worker_step and worker_step["disposition"] in ("upload_quota_wait", "resource_wait"):
+    elif not active and worker_step and worker_step["disposition"] in ("upload_quota_wait", "resource_wait", "full_ahead"):
         state = worker_step["disposition"]
     heartbeat = stamp(health["worker_heartbeat"])
     late_heartbeat = not manual_hold and current_services.get("video-pipeline", {}).get("state") == "active" and (
@@ -456,7 +487,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                        "submitted": totals24["submitted"], "receipts_verified": totals24["verified"], "converted": totals24["converted"]},
             "active": active, "captures": live, "finalization": finalized, "queue": queue,
             "confirmations": confirmations, "shorts": {"waiting": short_waiting, "batches": sorted(batches, key=lambda b: b["id"])},
-            "budget": budget, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
+            "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
             "services": current_services, "service_labels": EXTRA_UNITS, "sources": sources, "destination": control.get("upload_provider"), "storage": storage,
             "authentication": {"confirmed": bool(session and session[0]), "checked_at": session[1] if session else None},
             "monitoring": {"cadence": monitoring.get("cadence"), "last_check": monitoring.get("last_completed_window_end")}}

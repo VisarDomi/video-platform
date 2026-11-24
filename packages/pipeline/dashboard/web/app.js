@@ -228,6 +228,9 @@ function renderHero() {
   if (state === 'cooldown') { title = 'Retry scheduled'; tag = 'AUTOMATIC RETRY'; }
   if (state === 'upload_quota_wait') { title = 'Waiting for allowance'; tag = 'AUTOMATIC BUDGET WAIT'; }
   if (state === 'resource_wait') { title = 'Waiting for resources'; tag = 'RESOURCE WAIT'; }
+  if (state === 'uploads_held' && !a) { title = 'Uploads held'; tag = 'CONVERTING AHEAD'; }
+  if (state === 'uploads_held' && a) { tag = 'UPLOADS HELD · CONVERTING'; }
+  if (state === 'full_ahead') { title = 'Converted ahead to the cap'; tag = 'WAITING FOR UPLOADS'; }
   if (state === 'status_unavailable') { title = 'Worker status unavailable'; tag = 'SERVICE STATUS UNAVAILABLE'; }
   if (state === 'finishing') { tag = 'FINISHING ACTIVE WORK'; }
 
@@ -255,6 +258,10 @@ function renderHero() {
     detail.textContent = `Next retry ${time(c.resume_at, true)}.`;
   } else if (state === 'upload_quota_wait') {
     detail.textContent = `Next allowance release ${date(data.budget.next_release)}. Resumes automatically.`;
+  } else if (state === 'uploads_held') {
+    detail.textContent = `Uploads held: ${data.ahead?.uploads_held || c.attention || 'retry scheduled'}. Conversion continues.`;
+  } else if (state === 'full_ahead') {
+    detail.textContent = `${bytes(data.ahead?.ready_bytes || 0, 0)} converted and waiting (cap ${bytes(data.ahead?.limit_bytes || 0, 0)}). Conversion resumes as files upload.`;
   } else if (state === 'resource_wait') {
     detail.textContent = c.step?.reason || 'Waiting for disk/CPU room before starting the next stage.';
   } else if (state === 'status_unavailable') {
@@ -399,7 +406,8 @@ function renderBudget() {
     month.append(el('span', '', `${u.id.toUpperCase()} · MONTH`), el('strong', '', bytes(u.available, 0)));
     schedule.append(n, left, month);
   }
-  text('budget-note', `${bytes(b.daily, 0)} more at midnight (${date(b.next_release)}). Unused allowance carries over within the month; at most ${bytes(2 * b.daily, 0)} a day.`);
+  const ahead = data.ahead ? ` Converted ahead: ${bytes(data.ahead.ready_bytes, 0)} of ${bytes(data.ahead.limit_bytes, 0)}${data.ahead.uploads_held ? ` · uploads held (${data.ahead.uploads_held})` : ''}.` : '';
+  text('budget-note', `${bytes(b.daily, 0)} more at midnight (${date(b.next_release)}). Unused allowance carries over within the month; at most ${bytes(2 * b.daily, 0)} a day.${ahead}`);
 }
 
 function svgNode(name, attributes) {
@@ -748,6 +756,8 @@ function render(snapshot, isLive) {
     paused: 'Upload worker paused',
     cooldown: 'Retry scheduled',
     upload_quota_wait: 'Waiting for allowance',
+    uploads_held: 'Uploads held, converting',
+    full_ahead: 'Converted ahead to the cap',
     resource_wait: 'Waiting for resources',
     status_unavailable: 'Service status unavailable',
   };
