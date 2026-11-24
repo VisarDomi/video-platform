@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { FilePluginStore, loadSites, parseFileHosts, parseSitesFile, readSitesFile, sitesWith, SDK_VERSION } from "../dist/index.js";
+import { FilePluginStore, loadSites, parseFileHosts, parseSitesFile, parseUplink, readSitesFile, sitesWith, SDK_VERSION } from "../dist/index.js";
 
 test("the store replaces values durably and leaves no temporary files", async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "sdk-store-"));
@@ -121,4 +121,33 @@ test("file hosts: ports besides HTTPS's default only as the entry's own distinct
         assert.throws(() => parse({ allowPorts }), /allowPorts/, JSON.stringify(allowPorts));
     }
     assert.deepEqual(parseFileHosts(JSON.stringify({ sites: [] })), []);
+});
+
+test("uplink: optional; one labelled drive or a directory, a gateway or a probe, a runner command", () => {
+    assert.equal(parseUplink(JSON.stringify({ sites: [] })), null);
+    const base = { id: "office", dailyBytes: 50, network: { gateway: "AA:BB:CC:DD:EE:FF" },
+        carrier: { label: "CARRIER1", capacityBytes: 230, remoteMount: "/Volumes/CARRIER1" }, runner: ["ssh", "mac", "node", "r.js"] };
+    const parse = (uplink) => parseUplink(JSON.stringify({ uplink, sites: [] }), "sites.json");
+    assert.deepEqual(parse(base), { id: "office", dailyBytes: 50, network: { gateway: "aa:bb:cc:dd:ee:ff" },
+        carrier: { label: "CARRIER1", capacityBytes: 230, remoteMount: "/Volumes/CARRIER1" }, runner: ["ssh", "mac", "node", "r.js"],
+        minFreeBytes: 100_000_000_000 });
+    assert.deepEqual(parse({ ...base, network: { gateway: "x", probe: ["cat", "/tmp/net"] }, carrier: { path: "/tmp/carrier", capacityBytes: 5 }, minFreeBytes: 7 }),
+        { id: "office", dailyBytes: 50, network: { gateway: "x", probe: ["cat", "/tmp/net"] },
+            carrier: { path: "/tmp/carrier", capacityBytes: 5, remoteMount: "/tmp/carrier" }, runner: ["ssh", "mac", "node", "r.js"], minFreeBytes: 7 });
+    for (const [bad, message] of [
+        [{ ...base, id: "home" }, /"home" is the PC's own network/],
+        [{ ...base, id: "Office" }, /invalid id/],
+        [{ ...base, dailyBytes: 0 }, /dailyBytes must be a positive integer/],
+        [{ ...base, network: {} }, /gateway is required/],
+        [{ ...base, network: { gateway: "x", probe: [] } }, /probe must be a non-empty list/],
+        [{ ...base, carrier: { capacityBytes: 1, remoteMount: "/x" } }, /either label or path/],
+        [{ ...base, carrier: { label: "A", path: "/x", capacityBytes: 1 } }, /either label or path/],
+        [{ ...base, carrier: { label: "has space", capacityBytes: 1, remoteMount: "/x" } }, /label must be/],
+        [{ ...base, carrier: { path: "relative", capacityBytes: 1 } }, /path must be absolute/],
+        [{ ...base, carrier: { label: "A", capacityBytes: 1 } }, /remoteMount must be an absolute path/],
+        [{ ...base, runner: "ssh mac" }, /runner must be a non-empty list/],
+        [{ ...base, extra: 1 }, /unknown key extra/],
+        ["office", /uplink must be an object/],
+    ]) assert.throws(() => parse(bad), message, JSON.stringify(bad));
+    assert.throws(() => parse({ ...base, dailyBytes: -1 }), /^Error: sites.json: uplink: dailyBytes/);
 });

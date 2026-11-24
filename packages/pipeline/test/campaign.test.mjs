@@ -93,30 +93,31 @@ test("a failed in-flight upload preserves a subsequent manual pause", async t =>
     assert.equal(database.getCampaignControl().attentionReason, null);
 });
 
-test("campaign waits for the next budget release and retries without a manual resume", async t => {
+test("campaign waits for the next daily release and retries without a manual resume", async t => {
     const { database, config, resolver, recording } = await campaignWorkerFixture(t);
     const databasePath = path.join(path.dirname(config.finalizationDatabasePath), "pipeline.sqlite");
     const seed = new DatabaseSync(databasePath);
     seed.prepare(`INSERT INTO bandwidth_events
         (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
-        VALUES ('prior-recording', 'prior-attempt', 'video-host', '2026-11', 100000000000, '2026-11-01T12:00:00Z')`).run();
+        VALUES ('prior-recording', 'prior-attempt', 'video-host', '2026-11', 250000000000, '2026-11-01T12:00:00Z')`).run();
     seed.close();
-    database.configureCampaign("all", 700_000_000_000);
+    database.configureCampaign("all", 25_000_000_000);
     database.setCampaignState("running");
     let calls = 0;
     const worker = new CampaignWorker(database, { ...config, automaticShortsEnabled: false,
         discoveryRoots: [] }, resolver, async () => { calls++; return {}; });
     const beforeRelease = new Date("2026-11-10T22:59:59.999Z");
     const waiting = await worker.step(beforeRelease);
-    assert.equal(waiting.disposition, "monthly_quota_wait");
-    assert.equal(waiting.budget.releasedLimitBytes, 100_000_000_000);
+    assert.equal(waiting.disposition, "upload_quota_wait");
+    assert.equal(waiting.budget.releasedBytes, 250_000_000_000);
     assert.equal(waiting.budget.remainingBytes, 0);
     assert.equal(calls, 0);
     assert.equal(database.get(recording.id).state, "metadata_ready");
     assert.equal(database.getCampaignControl().state, "running");
     const status = campaignStatus({ ...config, databasePath }, beforeRelease);
-    assert.equal(status.uploadBudget.spentBytes, 100_000_000_000);
-    assert.equal(status.uploadBudget.releasedLimitBytes, 100_000_000_000);
+    assert.equal(status.uploadBudget.uplink, "home");
+    assert.equal(status.uploadBudget.spentBytes, 250_000_000_000);
+    assert.equal(status.uploadBudget.releasedBytes, 250_000_000_000);
     assert.equal((await worker.step(new Date("2026-11-10T23:00:00Z"))).disposition, "upload_completed");
     assert.equal(calls, 1);
     assert.equal(database.getCampaignControl().state, "running");
@@ -329,12 +330,12 @@ test("campaign intent and limits persist independently of worker lifetime", asyn
     assert.deepEqual({
         state: reopened.getCampaignControl().state,
         provider: reopened.getCampaignControl().providerFilter,
-        limit: reopened.getCampaignControl().monthlyUploadLimitBytes,
+        limit: reopened.getCampaignControl().dailyUploadLimitBytes,
     }, { state: "running", provider: "live-c", limit: 123_456_789 });
     reopened.setCampaignState("paused");
     reopened.close();
     const configured = configureCampaign({ ...pipelineConfig, comparisonTrialOnly: false, databasePath }, "all", undefined, 10);
-    assert.equal(configured.monthlyUploadLimitBytes, 123_456_789);
+    assert.equal(configured.dailyUploadLimitBytes, 123_456_789);
     assert.equal(configured.state, "paused");
     assert.equal(configured.trialPerProvider, 10);
 });

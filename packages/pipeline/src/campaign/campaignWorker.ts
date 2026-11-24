@@ -29,7 +29,7 @@ export type CampaignStepResult =
     | { readonly disposition: "admitted" | "stage_completed"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "awaiting_upload_activation"; readonly recordingId: string }
     | { readonly disposition: "attention_required"; readonly recordingId: string; readonly reason: string }
-    | { readonly disposition: "monthly_quota_wait"; readonly recordingId: string; readonly budget: ReturnType<PipelineDatabase["uploadBudget"]> }
+    | { readonly disposition: "upload_quota_wait"; readonly recordingId: string; readonly budget: ReturnType<PipelineDatabase["uploadBudget"]> }
     | { readonly disposition: "resource_wait"; readonly recordingId: string; readonly reason: string }
     | { readonly disposition: "parked_existing_upload"; readonly recordingId: string; readonly state: string }
     | { readonly disposition: "antibot_cooldown"; readonly recordingId: string; readonly streak: number; readonly resumeAt: string }
@@ -57,7 +57,7 @@ export class CampaignWorker {
         private readonly database: PipelineDatabase,
         private readonly config: PipelineConfig,
         private readonly resolver: TargetCatalogResolver,
-        private readonly upload?: (recordingId: string, monthlyLimitBytes: number) => Promise<unknown>,
+        private readonly upload?: (recordingId: string) => Promise<unknown>,
         workerId = `pipeline-campaign-${process.pid}`,
     ) {
         this.orchestrator = new PipelineOrchestrator(
@@ -271,12 +271,12 @@ export class CampaignWorker {
                 artifact.sizeBytes + REQUEST_OVERHEAD_RESERVATION_BYTES,
                 now,
                 this.config.uploadTimeZone,
-                control.monthlyUploadLimitBytes,
-            )) return { disposition: "monthly_quota_wait", recordingId: uploadReady.id,
-                budget: this.database.uploadBudget(now, this.config.uploadTimeZone, control.monthlyUploadLimitBytes) };
+                control.dailyUploadLimitBytes,
+            )) return { disposition: "upload_quota_wait", recordingId: uploadReady.id,
+                budget: this.database.uploadBudget(now, this.config.uploadTimeZone, control.dailyUploadLimitBytes) };
             if (!this.upload) return { disposition: "awaiting_upload_activation", recordingId: uploadReady.id };
             try {
-                const result = await this.upload(uploadReady.id, control.monthlyUploadLimitBytes);
+                const result = await this.upload(uploadReady.id);
                 const afterUpload = this.database.get(uploadReady.id);
                 if (afterUpload?.state === "short_waiting" || afterUpload?.state === "artifact_valid"
                     && this.database.shortParts(uploadReady.id).some(part => !part.verified)) {

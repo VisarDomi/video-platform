@@ -36,27 +36,27 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE artifacts(recording_id TEXT,path TEXT,size_bytes INTEGER);
           CREATE TABLE upload_metadata(recording_id TEXT,title TEXT);
           CREATE TABLE descriptions(recording_id TEXT,output_json TEXT);
-          CREATE TABLE campaign_control(id INTEGER,state TEXT,monthly_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT,upload_provider TEXT);
+          CREATE TABLE campaign_control(id INTEGER,state TEXT,daily_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT,upload_provider TEXT);
           CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT);
-          CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT);
+          CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT,uplink TEXT NOT NULL DEFAULT 'home');
           CREATE TABLE upload_confirmations(attempt_id TEXT,recording_id TEXT,confirm_after TEXT,status TEXT);
           CREATE TABLE short_parts(batch_id TEXT,recording_id TEXT,duration_seconds REAL,aspect_ratio REAL);
           CREATE TABLE state_events(id INTEGER,recording_id TEXT,from_state TEXT,to_state TEXT,reason TEXT,created_at TEXT);
-          CREATE TABLE bandwidth_events(calendar_month TEXT,transmitted_bytes INTEGER);
+          CREATE TABLE bandwidth_events(calendar_month TEXT,transmitted_bytes INTEGER,created_at TEXT,uplink TEXT NOT NULL DEFAULT 'home');
           CREATE TABLE provider_session_events(id INTEGER,provider TEXT,kind TEXT,logged_in INTEGER,occurred_at TEXT);
           CREATE TABLE provider_removals(recording_id TEXT,provider TEXT,remote_id TEXT,reason TEXT,removed_at TEXT);
           CREATE TABLE worker_heartbeat(id INTEGER,updated_at TEXT);
           CREATE TABLE manual_pieces(recording_id TEXT,part TEXT,reason TEXT);
-          INSERT INTO campaign_control VALUES (1,'running',700000000000,NULL,NULL,'video-host');
+          INSERT INTO campaign_control VALUES (1,'running',25000000000,NULL,NULL,'video-host');
           INSERT INTO worker_heartbeat VALUES (1,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-01 010000 alice','live-a','/unused','edited',600,'uploading',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-02 010000 bob','live-a','/unused','edited',500,'upload_verified',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-03 010000 carol','live-c','/unused','edited',20,'short_waiting',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO artifacts VALUES ('2026-01-01 010000 alice','/private/file.mp4',1000000000);
           INSERT INTO upload_attempts VALUES ('attempt','2026-01-01 010000 alice','started','started','2026-10-31T23:00:00Z','[]',1,'ticket',1000000000,NULL);
-          INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved');
-          INSERT INTO bandwidth_events VALUES ('2026-11',2000000000),('2026-11',1000000000);
-          INSERT INTO upload_reservations VALUES ('other','2026-11',4000000000,'reserved');
+          INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved','home');
+          INSERT INTO bandwidth_events VALUES ('2026-11',2000000000,'2026-11-01T00:00:00Z','home'),('2026-11',1000000000,'2026-10-31T23:30:00Z','home');
+          INSERT INTO upload_reservations VALUES ('other','2026-11',4000000000,'reserved','home');
           INSERT INTO state_events VALUES (1,'2026-01-02 010000 bob','upload_uncertain','upload_verified','verified','2026-10-31T23:45:00Z');
           INSERT INTO state_events VALUES (2,'legacy-copy','upload_uncertain','upload_verified','verified','2026-10-31T23:50:00Z');
         """)
@@ -130,16 +130,26 @@ class DashboardDataTests(unittest.TestCase):
         self.assertFalse(transfer_progress({"evidence_json": json.dumps(evidence)},1000000000,
                          datetime(2026,11,1,1,tzinfo=timezone.utc))["fresh"])
 
-    def test_tirane_budget_boundaries_count_failed_bytes_and_outstanding_claims(self):
+    def test_daily_allowance_releases_at_tirane_midnight_and_caps_a_day_at_twice_the_amount(self):
         self.db.row_factory = sqlite3.Row
         control = dict(self.db.execute("SELECT * FROM campaign_control").fetchone())
-        for date, expected in [("2026-11-10T22:59:59+00:00",100e9),("2026-11-10T23:00:00+00:00",300e9),("2026-11-20T23:00:00+00:00",700e9)]:
+        # 3 GB billed on Nov 1 (local), 4 GB reserved for November.
+        for date, released, today in [("2026-11-10T22:59:59+00:00", 250e9, 0), ("2026-11-10T23:00:00+00:00", 275e9, 0),
+                                      ("2026-11-01T12:00:00+00:00", 25e9, 3e9), ("2026-10-31T23:00:00+00:00", 25e9, 3e9)]:
             with self.subTest(date=date):
-                budget=upload_budget(self.db,control,datetime.fromisoformat(date))
-                self.assertEqual(budget["released"],expected)
-                self.assertEqual(budget["remaining"],expected-7000000000)
-        control["monthly_upload_limit_bytes"]=200000000000
-        self.assertEqual(upload_budget(self.db,control,datetime(2026,11,25,tzinfo=timezone.utc))["released"],200000000000)
+                budget = upload_budget(self.db, control, datetime.fromisoformat(date))
+                self.assertEqual(budget["released"], released)
+                self.assertEqual(budget["spent_today"], today)
+                self.assertEqual(budget["available"], released - 7e9)
+                self.assertEqual(budget["today_room"], 50e9 - today - 4e9)
+                self.assertEqual(budget["remaining"], min(released - 7e9, 50e9 - today - 4e9))
+                self.assertEqual([u["id"] for u in budget["uplinks"]], ["home"])
+        budget = upload_budget(self.db, control, datetime(2026, 11, 24, 10, tzinfo=timezone.utc))
+        self.assertEqual((budget["month_total"], budget["next_amount"], budget["next_release"]),
+                         (750e9, 25e9, "2026-11-25T00:00:00+01:00"))
+        self.db.execute("INSERT INTO bandwidth_events VALUES ('2026-11',9000000000,'2026-11-24T08:00:00Z','office')")
+        office = upload_budget(self.db, control, datetime(2026, 11, 24, 10, tzinfo=timezone.utc), [{"id": "office", "daily": 50e9}])["uplinks"][1]
+        self.assertEqual((office["id"], office["spent"], office["spent_today"], office["remaining"]), ("office", 9e9, 9e9, 91e9))
 
     def test_history_uses_both_sides_of_tirane_dst_day(self):
         for index,at in [(3,'2026-10-24T22:30:00Z'),(4,'2026-10-25T22:30:00Z')]:
@@ -170,7 +180,7 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data["campaign"]["state"],"status_unavailable")
         self.assertEqual(data["health"]["attention"],0)
         self.services["video-pipeline"]["state"]="active"
-        data=self.read(worker_step={"disposition":"monthly_quota_wait","reason":"old wait"})
+        data=self.read(worker_step={"disposition":"upload_quota_wait","reason":"old wait"})
         self.assertEqual(data["campaign"]["state"],"running")
 
     def test_missing_idle_worker_telemetry_is_unknown_until_the_next_successful_read(self):
@@ -179,8 +189,8 @@ class DashboardDataTests(unittest.TestCase):
         self.db.commit()
         before = hashlib.sha256(self.path.read_bytes()).digest()
         self.assertEqual(self.read(worker_step=None)['campaign']['state'], 'status_unavailable')
-        data = self.read(worker_step={'disposition':'monthly_quota_wait', 'reason':''})
-        self.assertEqual(data['campaign']['state'], 'monthly_quota_wait')
+        data = self.read(worker_step={'disposition':'upload_quota_wait', 'reason':''})
+        self.assertEqual(data['campaign']['state'], 'upload_quota_wait')
         self.assertEqual(data['health']['attention'], 0)
         self.assertEqual(hashlib.sha256(self.path.read_bytes()).digest(), before)
         self.db.execute("UPDATE campaign_control SET state='paused'")

@@ -4,6 +4,7 @@ export * from "./registry.js";
 export * from "./contentProfile.js";
 export * from "./destination.js";
 export * from "./fileHost.js";
+export * from "./uplink.js";
 export * from "./toolkit/index.js";
 export { FilePluginStore, writeFileDurably, syncDirectory } from "./store.js";
 export type { PluginStore } from "./store.js";

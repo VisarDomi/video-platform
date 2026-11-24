@@ -66,6 +66,7 @@ const EVENT_STATE_META = {
 
 const BOILERPLATE_REASONS = new Set([
   'upload attempt started',
+  'upload bytes reserved',
   'monthly bytes reserved',
   'upload metadata composed',
   'description persisted for artifact hash',
@@ -225,7 +226,7 @@ function renderHero() {
   if (state === 'worker_stopped') { title = 'Worker stopped'; tag = 'UPLOAD WORKER OFFLINE'; }
   if (state === 'worker_unresponsive') { title = 'Worker unresponsive'; tag = 'HEARTBEAT LATE'; }
   if (state === 'cooldown') { title = 'Retry scheduled'; tag = 'AUTOMATIC RETRY'; }
-  if (state === 'monthly_quota_wait') { title = 'Waiting for allowance'; tag = 'AUTOMATIC BUDGET WAIT'; }
+  if (state === 'upload_quota_wait') { title = 'Waiting for allowance'; tag = 'AUTOMATIC BUDGET WAIT'; }
   if (state === 'resource_wait') { title = 'Waiting for resources'; tag = 'RESOURCE WAIT'; }
   if (state === 'status_unavailable') { title = 'Worker status unavailable'; tag = 'SERVICE STATUS UNAVAILABLE'; }
   if (state === 'finishing') { tag = 'FINISHING ACTIVE WORK'; }
@@ -252,7 +253,7 @@ function renderHero() {
     detail.textContent = `Last heartbeat ${ago(c.worker_heartbeat)}. Queue snapshot is preserved.`;
   } else if (state === 'cooldown') {
     detail.textContent = `Next retry ${time(c.resume_at, true)}.`;
-  } else if (state === 'monthly_quota_wait') {
+  } else if (state === 'upload_quota_wait') {
     detail.textContent = `Next allowance release ${date(data.budget.next_release)}. Resumes automatically.`;
   } else if (state === 'resource_wait') {
     detail.textContent = c.step?.reason || 'Waiting for disk/CPU room before starting the next stage.';
@@ -369,7 +370,7 @@ function renderBudget() {
   const month = new Date(b.month + '-15T12:00:00Z');
   text('budget-month', new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'Europe/Tirane' }).format(month).toUpperCase() + ' · ALLOWANCE');
   text('budget-remaining', bytes(b.remaining, 0));
-  $('released-ring').setAttribute('stroke-dasharray', `${Math.min(100, (b.released / b.monthly_limit) * 100)} 100`);
+  $('released-ring').setAttribute('stroke-dasharray', `${Math.min(100, (b.released / b.month_total) * 100)} 100`);
   $('used-ring').setAttribute('stroke-dasharray', `${Math.min(100, ((b.spent + b.reserved) / b.released) * 100)} 100`);
   $('used-ring').style.opacity = b.spent + b.reserved > 0 ? '1' : '0';
 
@@ -385,15 +386,20 @@ function renderBudget() {
     numbers.append(n);
   }
 
+  // One row per uplink (home first): sent today against its daily cap, and what is left.
   const schedule = $('release-schedule');
   schedule.replaceChildren();
-  for (const [i, r] of b.releases.entries()) {
-    const active = i === (b.day <= 10 ? 0 : b.day <= 20 ? 1 : 2);
-    const n = el('div', 'release-step' + (active ? ' current' : ''));
-    n.append(el('span', '', i === 0 ? 'DAYS 1–10' : i === 1 ? 'DAYS 11–20' : 'DAY 21+'), el('strong', '', bytes(Math.min(b.monthly_limit, r.bytes), 0)));
-    schedule.append(n);
+  for (const u of b.uplinks) {
+    const n = el('div', 'release-step' + (u.remaining > 0 ? ' current' : ''));
+    n.append(el('span', '', `${u.id.toUpperCase()} · TODAY`),
+      el('strong', '', `${bytes(u.spent_today, 0)} / ${bytes(2 * u.daily, 0)}`));
+    const left = el('div', 'release-step');
+    left.append(el('span', '', `${u.id.toUpperCase()} · LEFT`), el('strong', '', bytes(u.remaining, 0)));
+    const month = el('div', 'release-step');
+    month.append(el('span', '', `${u.id.toUpperCase()} · MONTH`), el('strong', '', bytes(u.available, 0)));
+    schedule.append(n, left, month);
   }
-  text('budget-note', `Next tier: ${bytes(b.next_amount, 0)} on ${date(b.next_release)}. Unused allowance rolls within the month.`);
+  text('budget-note', `${bytes(b.daily, 0)} more at midnight (${date(b.next_release)}). Unused allowance carries over within the month; at most ${bytes(2 * b.daily, 0)} a day.`);
 }
 
 function svgNode(name, attributes) {
@@ -741,7 +747,7 @@ function render(snapshot, isLive) {
     user_paused: 'Paused by you',
     paused: 'Upload worker paused',
     cooldown: 'Retry scheduled',
-    monthly_quota_wait: 'Waiting for allowance',
+    upload_quota_wait: 'Waiting for allowance',
     resource_wait: 'Waiting for resources',
     status_unavailable: 'Service status unavailable',
   };
@@ -814,7 +820,7 @@ function usable(value) {
     && value.services && value.storage && value.finalization && value.monitoring && value.shorts
     && Array.isArray(value.shorts.waiting) && Array.isArray(value.shorts.batches) && Array.isArray(value.queue)
     && Array.isArray(value.history) && Array.isArray(value.activity) && Array.isArray(value.captures)
-    && Array.isArray(value.confirmations) && Array.isArray(value.budget.releases);
+    && Array.isArray(value.confirmations) && Array.isArray(value.budget.uplinks);
 }
 
 async function refresh(force = false) {

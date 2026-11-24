@@ -1,11 +1,10 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseSitesFile } from "sdk";
+import { parseSitesFile, parseUplink, type UplinkSetting } from "sdk";
 import { providerFolders, sitesFilePath, systemBrowserPath } from "shared";
 import type { DiscoveryRoot } from "./discovery/inspectRecording.js";
 import { CURRENT_PRODUCTION_VERSION } from "./domain/productionVersion.js";
-import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES } from "./domain/uploadBudget.js";
 import type { ActiveUploadProvider } from "./config/uploadProviders.js";
 import { PipelineDatabase } from "./db/pipelineDatabase.js";
 
@@ -18,7 +17,6 @@ export interface PipelineConfig {
     readonly discoveryRoots: readonly DiscoveryRoot[];
     readonly manualRemuxRoots: readonly DiscoveryRoot[];
     readonly uploadTimeZone: string;
-    readonly monthlyUploadLimitBytes: number;
     readonly serverUrl: string;
     readonly browserProfilePath: string;
     readonly chromiumExecutablePath: string;
@@ -29,6 +27,9 @@ export interface PipelineConfig {
     readonly automaticShortsEnabled?: boolean;
     readonly comparisonTrialOnly?: boolean;
     readonly comparisonSelectionFile?: string;
+    // The sites file's "uplink" section: a second network uploads leave from, reached by a
+    // carrier drive. Absent (null or undefined): only home uploads, nothing converts ahead.
+    readonly uplink?: UplinkSetting | null;
 }
 
 const dataRoot = process.env.VIDEO_SERVICES_DATA_ROOT
@@ -60,6 +61,21 @@ export function sourceSiteIds(): readonly string[] {
     return sources;
 }
 
+// The sites file's optional "uplink" section, read when first needed.
+let uplink: UplinkSetting | null | undefined;
+export function uplinkSetting(): UplinkSetting | null {
+    if (uplink === undefined) {
+        const file = sitesFilePath();
+        let text: string;
+        try { text = readFileSync(file, "utf8"); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            text = "{}";
+        }
+        uplink = parseUplink(text, file);
+    }
+    return uplink;
+}
+
 // The source sites a configuration covers, in order: its discovery roots' sites.
 export function sourcesOf(config: Pick<PipelineConfig, "discoveryRoots">): string[] {
     return [...new Set(config.discoveryRoots.map((root) => root.provider))];
@@ -89,16 +105,13 @@ export const pipelineConfig: PipelineConfig = {
     manualStagingRoot: path.join(artifactsRoot, CURRENT_PRODUCTION_VERSION, "manual"),
     get discoveryRoots() { return discoveryRoots(); },
     get manualRemuxRoots() { return manualRemuxRoots(); },
+    get uplink() { return uplinkSetting(); },
     serverUrl: process.env.VIDEO_SERVER_URL ?? "https://127.0.0.1:9999",
     browserProfilePath,
     chromiumExecutablePath: systemBrowserPath(),
     credentialsFilePath: process.env.VIDEO_UPLOAD_PROVIDERS_FILE
         ?? path.join(os.homedir(), ".config", "video-services", "upload-providers.json"),
     uploadTimeZone: process.env.VIDEO_PIPELINE_UPLOAD_TIMEZONE ?? "Europe/Tirane",
-    monthlyUploadLimitBytes: Number.parseInt(
-        process.env.VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES ?? String(DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES),
-        10,
-    ),
     cleanupEnabled: process.env.VIDEO_PIPELINE_CLEANUP === "1",
     automaticShortsEnabled: true,
     comparisonTrialOnly: false,

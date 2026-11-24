@@ -213,25 +213,40 @@ def captures(data_root, downloads_root, sources=()):
     return result
 
 
-def upload_budget(db, control, now):
+def uplink_allowance(db, uplink, daily, now):
+    """One uplink's allowance (the same rule as the pipeline's domain/uploadBudget.ts): day N
+    of the local month has released N daily amounts; at most two daily amounts a day."""
     local = now.astimezone(TZ)
     month = local.strftime("%Y-%m")
-    released = min(control["monthly_upload_limit_bytes"], 100e9 if local.day <= 10 else 300e9 if local.day <= 20 else 700e9)
-    spent = db.execute("SELECT COALESCE(SUM(transmitted_bytes),0) FROM bandwidth_events WHERE calendar_month=?", (month,)).fetchone()[0]
-    reserved = db.execute("SELECT COALESCE(SUM(reserved_bytes),0) FROM upload_reservations WHERE calendar_month=? AND status='reserved'", (month,)).fetchone()[0]
-    if local.day <= 10:
-        next_release = local.replace(day=11, hour=0, minute=0, second=0, microsecond=0)
-        next_amount = min(control["monthly_upload_limit_bytes"], 300_000_000_000)
-    elif local.day <= 20:
-        next_release = local.replace(day=21, hour=0, minute=0, second=0, microsecond=0)
-        next_amount = min(control["monthly_upload_limit_bytes"], 700_000_000_000)
-    else:
-        next_release = (local.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        next_amount = min(control["monthly_upload_limit_bytes"], 100_000_000_000)
-    return {"month": month, "day": local.day, "released": int(released), "spent": spent, "reserved": reserved,
-            "remaining": max(0, int(released) - spent - reserved), "monthly_limit": control["monthly_upload_limit_bytes"],
-            "next_release": next_release.isoformat(), "next_amount": next_amount,
-            "releases": [{"day": 1, "bytes": 100_000_000_000}, {"day": 11, "bytes": 300_000_000_000}, {"day": 21, "bytes": 700_000_000_000}]}
+    released = daily * local.day
+    spent = db.execute("SELECT COALESCE(SUM(transmitted_bytes),0) FROM bandwidth_events WHERE calendar_month=? AND uplink=?",
+                       (month, uplink)).fetchone()[0]
+    reserved = db.execute("SELECT COALESCE(SUM(reserved_bytes),0) FROM upload_reservations WHERE calendar_month=? AND status='reserved' AND uplink=?",
+                          (month, uplink)).fetchone()[0]
+    since = (now - timedelta(days=2)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    today = local.date()
+    spent_today = sum(bytes_ for bytes_, at in db.execute(
+        "SELECT transmitted_bytes, created_at FROM bandwidth_events WHERE uplink=? AND created_at>=?", (uplink, since))
+        if (stamp(at) or now).astimezone(TZ).date() == today)
+    available = released - spent - reserved
+    today_room = 2 * daily - spent_today - reserved
+    return {"id": uplink, "daily": daily, "released": released, "spent": spent, "spent_today": spent_today,
+            "reserved": reserved, "available": max(0, available), "today_room": max(0, today_room),
+            "remaining": max(0, min(available, today_room))}
+
+
+def upload_budget(db, control, now, uplinks=()):
+    """Home's allowance at the top level, and every uplink's (home first) in "uplinks"."""
+    local = now.astimezone(TZ)
+    daily = control["daily_upload_limit_bytes"]
+    home = uplink_allowance(db, "home", daily, now)
+    next_month = (local.replace(day=28) + timedelta(days=4)).replace(day=1)
+    days_in_month = (next_month - timedelta(days=1)).day
+    next_release = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return {"month": local.strftime("%Y-%m"), "day": local.day, "days_in_month": days_in_month,
+            "month_total": daily * days_in_month, **{key: value for key, value in home.items() if key != "id"},
+            "next_release": next_release.isoformat(), "next_amount": daily,
+            "uplinks": [home] + [uplink_allowance(db, item["id"], item["daily"], now) for item in uplinks]}
 
 
 def transfer_progress(attempt, artifact_size, now):
@@ -411,7 +426,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         # A bounded journal lookup can fail during boot or disk contention.
         # Running intent plus a heartbeat cannot establish the current wait.
         state = "status_unavailable"
-    elif not active and worker_step and worker_step["disposition"] in ("monthly_quota_wait", "resource_wait"):
+    elif not active and worker_step and worker_step["disposition"] in ("upload_quota_wait", "resource_wait"):
         state = worker_step["disposition"]
     heartbeat = stamp(health["worker_heartbeat"])
     late_heartbeat = not manual_hold and current_services.get("video-pipeline", {}).get("state") == "active" and (

@@ -43,7 +43,7 @@ function usage(): never {
         "  upload-provider [--provider DESTINATION --apply]",
         "  metadata-check [--provider DESTINATION]",
         "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
-        "  campaign-configure --provider all|SITE [--monthly-upload-bytes N] [--trial-per-provider N|none] --apply",
+        "  campaign-configure --provider all|SITE [--daily-upload-bytes N] [--trial-per-provider N|none] --apply",
         "  campaign-resume --apply | campaign-pause --apply | campaign-status | campaign-step --apply",
         "  campaign-prepare --apply | campaign-select --file PATH --apply | comparison-report",
         "  campaign-worker (reserved for the future managed service)",
@@ -197,7 +197,8 @@ async function main(): Promise<void> {
         const args = process.argv.slice(3);
         requireApply(args);
         const provider = campaignProvider(option(args, "--provider"));
-        const rawLimit = option(args, "--monthly-upload-bytes");
+        if (args.includes("--monthly-upload-bytes")) throw new Error("--monthly-upload-bytes is gone: the allowance is daily (--daily-upload-bytes)");
+        const rawLimit = option(args, "--daily-upload-bytes");
         const limit = rawLimit === null ? undefined : Number(rawLimit);
         const rawTrial = option(args, "--trial-per-provider");
         if (args.includes("--trial-per-provider") && (rawTrial === null || rawTrial.startsWith("--"))) {
@@ -424,7 +425,7 @@ async function main(): Promise<void> {
                 database,
                 new Date(),
                 pipelineConfig.uploadTimeZone,
-                pipelineConfig.monthlyUploadLimitBytes,
+                database.getCampaignControl().dailyUploadLimitBytes,
                 pipelineConfig.stagingRoot,
                 database.getActiveUploadProvider(),
             ),

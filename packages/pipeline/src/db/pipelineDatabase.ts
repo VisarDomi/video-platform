@@ -3,9 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
-import { createLedger, initialDestination, SCHEMA_VERSION } from "./ledgerSchema.js";
+import { createLedger, initialDestination, SCHEMA_VERSION, UPGRADABLE_SCHEMA_VERSION, upgradeLedger } from "./ledgerSchema.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
-import { calendarMonth, DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, uploadBudget } from "../domain/uploadBudget.js";
+import { assertDailyBytes, calendarMonth, DEFAULT_DAILY_UPLOAD_BYTES, HOME_UPLINK, localCalendar, uploadAllowance } from "../domain/uploadBudget.js";
 export { calendarMonth } from "../domain/uploadBudget.js";
 import { allowsUpload, allowsPlaceholder } from "../provenance/uploadPolicy.js";
 import { isRemovalPendingStatus, limitedVisibilityWarning, rejectedPhrases } from "../upload/providerWarnings.js";
@@ -215,10 +215,22 @@ export class PipelineDatabase {
                 if (!this.hasSchema()) createLedger(this.database, initialDestination());
             });
         }
-        const { version } = this.database.prepare("SELECT version FROM schema_version").get() as { version: number };
-        if (version !== SCHEMA_VERSION) {
-            throw new Error(`Pipeline ledger schema ${version}: this release opens schema ${SCHEMA_VERSION} only`);
+        // A ledger one schema older is upgraded whole, in one transaction (another process
+        // may be upgrading it at the same moment: the second one finds it done).
+        if (this.schemaVersion() === UPGRADABLE_SCHEMA_VERSION) {
+            this.transaction(() => {
+                if (this.schemaVersion() === UPGRADABLE_SCHEMA_VERSION) upgradeLedger(this.database);
+            });
         }
+        const version = this.schemaVersion();
+        if (version !== SCHEMA_VERSION) {
+            throw new Error(`Pipeline ledger schema ${version}: this release opens schema ${SCHEMA_VERSION} `
+                + `and upgrades schema ${UPGRADABLE_SCHEMA_VERSION} only`);
+        }
+    }
+
+    private schemaVersion(): number {
+        return (this.database.prepare("SELECT version FROM schema_version").get() as { version: number }).version;
     }
 
     private hasSchema(): boolean {
@@ -570,7 +582,7 @@ export class PipelineDatabase {
             state: CampaignControl["state"];
             provider_filter: CampaignProviderFilter;
             ordering: "oldest";
-            monthly_upload_limit_bytes: number;
+            daily_upload_limit_bytes: number;
             antibot_failures: number;
             resume_at: string | null;
             trial_per_provider: number | null;
@@ -584,7 +596,7 @@ export class PipelineDatabase {
             state: row.state,
             providerFilter: row.provider_filter,
             ordering: row.ordering,
-            monthlyUploadLimitBytes: row.monthly_upload_limit_bytes,
+            dailyUploadLimitBytes: row.daily_upload_limit_bytes,
             antibotFailures: row.antibot_failures,
             resumeAt: row.resume_at,
             trialPerProvider: row.trial_per_provider,
@@ -800,7 +812,7 @@ export class PipelineDatabase {
 
     configureCampaign(
         providerFilter: CampaignProviderFilter,
-        monthlyUploadLimitBytes: number,
+        dailyUploadLimitBytes: number,
         now = new Date(),
         trialPerProvider?: number | null,
     ): CampaignControl {
@@ -812,9 +824,7 @@ export class PipelineDatabase {
         if (this.getComparisonTrial() && (providerFilter !== "all" || (trialPerProvider !== undefined && trialPerProvider !== null))) {
             throw new Error("The comparison queue is controlled by selected paths, not provider quotas");
         }
-        if (!Number.isSafeInteger(monthlyUploadLimitBytes) || monthlyUploadLimitBytes <= 0) {
-            throw new Error("Campaign monthly upload limit must be a positive integer");
-        }
+        assertDailyBytes(dailyUploadLimitBytes);
         if (trialPerProvider !== undefined) {
             if (trialPerProvider !== null && (!Number.isSafeInteger(trialPerProvider) || trialPerProvider <= 0)) {
                 throw new Error("Trial recordings per provider must be a positive integer or none");
@@ -844,8 +854,8 @@ export class PipelineDatabase {
             }
             this.database.prepare(`
                 UPDATE campaign_control SET provider_filter = ?, ordering = 'oldest',
-                    monthly_upload_limit_bytes = ?, updated_at = ? WHERE id = 1
-            `).run(providerFilter, monthlyUploadLimitBytes, now.toISOString());
+                    daily_upload_limit_bytes = ?, updated_at = ? WHERE id = 1
+            `).run(providerFilter, dailyUploadLimitBytes, now.toISOString());
             return this.getCampaignControl();
         });
     }
@@ -1715,35 +1725,53 @@ export class PipelineDatabase {
         };
     }
 
-    uploadUsage(month: string): UsageRow {
+    // Bytes billed to a month and bytes reserved for it; per uplink, or all uplinks together
+    // when none is named.
+    uploadUsage(month: string, uplink?: string): UsageRow {
+        const filter = uplink === undefined ? "" : " AND uplink = ?";
+        const args = uplink === undefined ? [month] : [month, uplink];
         const spent = this.database.prepare(`
             SELECT COALESCE(SUM(transmitted_bytes), 0) AS spent
-            FROM bandwidth_events WHERE calendar_month = ?
-        `).get(month) as { spent: number };
+            FROM bandwidth_events WHERE calendar_month = ?${filter}
+        `).get(...args) as { spent: number };
         const reserved = this.database.prepare(`
             SELECT COALESCE(SUM(reserved_bytes), 0) AS reserved
-            FROM upload_reservations WHERE calendar_month = ? AND status = 'reserved'
-        `).get(month) as { reserved: number };
+            FROM upload_reservations WHERE calendar_month = ? AND status = 'reserved'${filter}
+        `).get(...args) as { reserved: number };
         return { spent: spent.spent, reserved: reserved.reserved };
     }
 
-    uploadBudget(now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES) {
-        const budget = uploadBudget(now, timeZone, limit);
-        const usage = this.uploadUsage(budget.calendarMonth);
+    // Bytes the uplink sent on the local day of `now` (by when each attempt was settled).
+    private spentOnLocalDay(uplink: string, now: Date, timeZone: string): number {
+        const today = localCalendar(now, timeZone).date;
+        const since = new Date(now.getTime() - 2 * 24 * 60 * 60_000).toISOString();
+        const rows = this.database.prepare(`
+            SELECT transmitted_bytes AS bytes, created_at AS at FROM bandwidth_events
+            WHERE uplink = ? AND created_at >= ?
+        `).all(uplink, since) as unknown as Array<{ bytes: number; at: string }>;
+        return rows.filter((row) => localCalendar(new Date(row.at), timeZone).date === today)
+            .reduce((sum, row) => sum + row.bytes, 0);
+    }
+
+    // The uplink's allowance at `now` (see uploadAllowance): what it may still reserve.
+    uploadBudget(now = new Date(), timeZone = "Europe/Tirane", dailyBytes = DEFAULT_DAILY_UPLOAD_BYTES, uplink = HOME_UPLINK) {
+        const usage = this.uploadUsage(calendarMonth(now, timeZone), uplink);
         return {
-            ...budget,
-            spentBytes: usage.spent,
-            reservedBytes: usage.reserved,
-            remainingBytes: Math.max(0, budget.releasedLimitBytes - usage.spent - usage.reserved),
+            uplink,
+            ...uploadAllowance(now, timeZone, dailyBytes, {
+                spentMonth: usage.spent,
+                spentToday: this.spentOnLocalDay(uplink, now, timeZone),
+                reserved: usage.reserved,
+            }),
         };
     }
 
-    canReserve(bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES): boolean {
-        const budget = this.uploadBudget(now, timeZone, limit);
+    canReserve(bytes: number, now = new Date(), timeZone = "Europe/Tirane", dailyBytes = DEFAULT_DAILY_UPLOAD_BYTES, uplink = HOME_UPLINK): boolean {
+        const budget = this.uploadBudget(now, timeZone, dailyBytes, uplink);
         return Number.isSafeInteger(bytes) && bytes > 0 && bytes <= budget.remainingBytes;
     }
 
-    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", limit = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, provider: ActiveUploadProvider = this.getActiveUploadProvider()): string {
+    reserveUpload(id: string, bytes: number, now = new Date(), timeZone = "Europe/Tirane", dailyBytes = DEFAULT_DAILY_UPLOAD_BYTES, provider: ActiveUploadProvider = this.getActiveUploadProvider(), uplink = HOME_UPLINK): string {
         assertUploadProvider(provider);
         if (!Number.isSafeInteger(bytes) || bytes <= 0) throw new Error("Upload reservation bytes must be a positive integer");
         const month = calendarMonth(now, timeZone);
@@ -1759,17 +1787,18 @@ export class PipelineDatabase {
             if (!this.canAttemptUpload(id, now)) throw new Error("Weekly upload retry deadline has not elapsed");
             const artifactPart = this.getArtifactPart(id);
             if (!artifactPart) throw new Error(`Recording ${id} has no production artifact part`);
-            const budget = this.uploadBudget(now, timeZone, limit);
+            const budget = this.uploadBudget(now, timeZone, dailyBytes, uplink);
             if (bytes > budget.remainingBytes) {
-                throw new Error(`Monthly upload limit exceeded for ${month}: ${budget.releasedLimitBytes} bytes released through day ${budget.localDay}`);
+                throw new Error(`Upload allowance limit exceeded for ${uplink} on ${budget.localDate}: `
+                    + `${budget.availableBytes} bytes left this month, ${budget.todayRoomBytes} today`);
             }
             this.database.prepare(`
                 INSERT INTO upload_reservations (
                     id, recording_id, artifact_part, provider, calendar_month, reserved_bytes,
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)
-            `).run(reservationId, id, artifactPart, provider, month, bytes, timestamp, timestamp);
-            this.updateStateInTransaction(id, "metadata_ready", "upload_admitted", "monthly bytes reserved", timestamp);
+                    status, created_at, updated_at, uplink
+                ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?)
+            `).run(reservationId, id, artifactPart, provider, month, bytes, timestamp, timestamp, uplink);
+            this.updateStateInTransaction(id, "metadata_ready", "upload_admitted", uplink === HOME_UPLINK ? "upload bytes reserved" : `upload bytes reserved on ${uplink}`, timestamp);
         });
         return reservationId;
     }
@@ -1782,9 +1811,9 @@ export class PipelineDatabase {
         const timestamp = now.toISOString();
         this.transaction(() => {
             const reservation = this.database.prepare(`
-                SELECT id, artifact_part, provider FROM upload_reservations
+                SELECT id, artifact_part, provider, uplink FROM upload_reservations
                 WHERE id = ? AND recording_id = ? AND status = 'reserved'
-            `).get(reservationId, id) as { id: string; artifact_part: ProductionArtifactPart; provider: string } | undefined;
+            `).get(reservationId, id) as { id: string; artifact_part: ProductionArtifactPart; provider: string; uplink: string } | undefined;
             if (!reservation) throw new Error(`No active reservation ${reservationId} for ${id}`);
             if (reservation.provider !== provider) throw new Error("Uploader destination does not match the durable reservation");
             if (reservation.artifact_part !== this.getArtifactPart(id)) {
@@ -1792,10 +1821,10 @@ export class PipelineDatabase {
             }
             this.database.prepare(`
                 INSERT INTO upload_attempts (
-                    id, reservation_id, recording_id, artifact_part, provider, status, started_at, retry_not_before
-                ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?)
+                    id, reservation_id, recording_id, artifact_part, provider, status, started_at, retry_not_before, uplink
+                ) VALUES (?, ?, ?, ?, ?, 'started', ?, ?, ?)
             `).run(attemptId, reservationId, id, reservation.artifact_part, reservation.provider, timestamp,
-                new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString());
+                new Date(now.getTime() + UPLOAD_RETRY_MILLISECONDS).toISOString(), reservation.uplink);
             const artifact=this.getArtifact(id);
             const recording=this.requireRecording(id);
             if (artifact) this.database.prepare(`INSERT INTO upload_artifact_receipts
@@ -1868,7 +1897,7 @@ export class PipelineDatabase {
         });
         const attempts = this.database.prepare(`
             SELECT a.id, a.provider, a.recording_id, a.reservation_id, a.phase, a.progress_bytes, a.transfer_started,
-                r.calendar_month
+                r.calendar_month, a.uplink
             FROM upload_attempts a
             JOIN upload_reservations r ON r.id = a.reservation_id
             JOIN recordings rec ON rec.id = a.recording_id
@@ -1883,6 +1912,7 @@ export class PipelineDatabase {
             progress_bytes: number;
             transfer_started: number;
             calendar_month: string;
+            uplink: string;
         }>;
         const results: Array<{ recordingId: string; disposition: string }> = [];
         for (const attempt of attempts) {
@@ -1892,10 +1922,10 @@ export class PipelineDatabase {
                     this.database.prepare(`
                         INSERT INTO bandwidth_events (
                             recording_id, attempt_id, provider, calendar_month,
-                            transmitted_bytes, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            transmitted_bytes, created_at, uplink
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     `).run(attempt.recording_id, attempt.id, attempt.provider, attempt.calendar_month,
-                        attempt.progress_bytes, timestamp);
+                        attempt.progress_bytes, timestamp, attempt.uplink);
                 }
                 this.database.prepare(`
                     UPDATE upload_attempts SET status = ?, transmitted_bytes = ?, error = ?, completed_at = ?
@@ -1944,10 +1974,11 @@ export class PipelineDatabase {
         this.transaction(() => {
             const attempt = this.database.prepare(`
                 SELECT a.recording_id, a.provider, a.reservation_id, a.progress_bytes,
-                    r.reserved_bytes, r.calendar_month
+                    r.reserved_bytes, r.calendar_month, a.uplink
                 FROM upload_attempts a JOIN upload_reservations r ON r.id = a.reservation_id
                 WHERE a.id = ? AND a.status = 'started'
             `).get(attemptId) as {
+                uplink: string;
                 recording_id: string;
                 provider: string;
                 reservation_id: string;
@@ -1977,9 +2008,9 @@ export class PipelineDatabase {
             this.database.prepare(`
                 INSERT INTO bandwidth_events (
                     recording_id, attempt_id, provider, calendar_month,
-                    transmitted_bytes, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            `).run(recordingId, attemptId, attempt.provider, attempt.calendar_month, outcome.transmittedBytes, timestamp);
+                    transmitted_bytes, created_at, uplink
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(recordingId, attemptId, attempt.provider, attempt.calendar_month, outcome.transmittedBytes, timestamp, attempt.uplink);
             this.database.prepare(`
                 UPDATE upload_reservations SET status = ?, updated_at = ? WHERE id = ?
             `).run(outcome.status === "accepted" ? "consumed" : "released", timestamp, attempt.reservation_id);

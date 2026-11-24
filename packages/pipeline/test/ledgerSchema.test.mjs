@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -155,14 +156,127 @@ test("two processes creating the same ledger at once end with one ledger", async
     assert.equal(database.prepare("SELECT count(*) AS n FROM campaign_control").get().n, 1);
 });
 
-test("an older schema is refused and left untouched", async (t) => {
-    const { databasePath } = await ledger(t);
+test("a schema other than this one and the one before is refused and left untouched", async (t) => {
+    for (const version of [16, 19]) {
+        const { databasePath } = await ledger(t);
+        const raw = new DatabaseSync(databasePath);
+        raw.exec(`UPDATE schema_version SET version = ${version}`);
+        raw.close();
+        const before = contents(databasePath);
+        assert.throws(() => new PipelineDatabase(databasePath), new RegExp(`schema ${version}: this release opens schema 18 and upgrades schema 17 only`));
+        assert.deepEqual(contents(databasePath), before);
+    }
+});
+
+// A schema-17 ledger as the release before this one created it, with an upload history.
+const SCHEMA_17 = readFileSync(new URL("./fixtures/ledger-schema-17.sql", import.meta.url), "utf8");
+async function ledger17(t) {
+    const { directory, databasePath, sitesFile } = await setting(t);
     const raw = new DatabaseSync(databasePath);
-    raw.exec("UPDATE schema_version SET version = 16");
+    raw.exec("PRAGMA journal_mode = WAL");
+    raw.exec(SCHEMA_17);
+    raw.exec(`
+        INSERT INTO schema_version VALUES (17);
+        INSERT INTO campaign_control (id, state, provider_filter, ordering, monthly_upload_limit_bytes, updated_at, upload_provider)
+            VALUES (1, 'running', 'all', 'oldest', 700000000000, '2026-11-01T00:00:00.000Z', 'form-host');
+        INSERT INTO production_version VALUES (1, 'production-v6', '2026-01-01T00:00:00.000Z');
+        INSERT INTO recordings (id, provider, source_kind, source_path, playlist_path, source_fingerprint, duration_seconds,
+            state, created_at, updated_at) VALUES ('r1', 'live-a', 'edited', '/x/2026-01-01 010000 a', '/x/p.m3u8', 'f', 60,
+            'upload_uncertain', '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
+        INSERT INTO upload_reservations (id, recording_id, artifact_part, provider, calendar_month, reserved_bytes, status,
+            created_at, updated_at) VALUES ('res1', 'r1', 'full', 'form-host', '2026-11', 1000, 'released', '2026-11-02T00:00:00.000Z', '2026-11-02T00:00:00.000Z');
+        INSERT INTO upload_attempts (id, reservation_id, recording_id, provider, status, started_at)
+            VALUES ('att1', 'res1', 'r1', 'form-host', 'uncertain', '2026-11-02T00:00:00.000Z');
+        INSERT INTO bandwidth_events (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
+            VALUES ('r1', 'att1', 'form-host', '2026-11', 900, '2026-11-02T00:00:00.000Z');
+    `);
     raw.close();
+    return { directory, databasePath, sitesFile };
+}
+
+// The schema as SQLite describes it: every table's columns, indexes, triggers and checks,
+// with the stored SQL compared without layout.
+function schema(databasePath) {
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+        const flat = (sql) => sql?.replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").trim() ?? null;
+        return database.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all()
+            .map(({ type, name, tbl_name: table, sql }) => ({ type, name, table, sql: flat(sql),
+                columns: type === "table" ? database.prepare(`SELECT name, type, "notnull", dflt_value, pk FROM pragma_table_xinfo('${name}')`).all().map((row) => ({ ...row })) : undefined }));
+    } finally { database.close(); }
+}
+
+test("a schema-17 ledger is upgraded to the same schema a new ledger has, keeping its history", async (t) => {
+    const fresh = await setting(t);
+    new PipelineDatabase(fresh.databasePath).close();
+    const { databasePath } = await ledger17(t);
+    const database = new PipelineDatabase(databasePath);
+    t.after(() => database.close());
+    assert.deepEqual(schema(databasePath), schema(fresh.databasePath));
+    assert.equal(database.integrityCheck(), "ok");
+    const control = database.getCampaignControl();
+    assert.deepEqual([control.state, control.dailyUploadLimitBytes], ["running", 25_000_000_000]);
+    assert.deepEqual(database.uploadUsage("2026-11", "home"), { spent: 900, reserved: 0 });
+    assert.deepEqual(database.uploadUsage("2026-11", "office"), { spent: 0, reserved: 0 });
+    const raw = new DatabaseSync(databasePath, { readOnly: true });
+    t.after(() => raw.close());
+    assert.equal(raw.prepare("SELECT uplink FROM upload_attempts WHERE id = 'att1'").get().uplink, "home");
+    assert.equal(raw.prepare("SELECT uplink FROM upload_reservations WHERE id = 'res1'").get().uplink, "home");
+    assert.equal(raw.prepare("SELECT version FROM schema_version").get().version, 18);
+    // Opening the upgraded ledger again changes nothing.
     const before = contents(databasePath);
-    assert.throws(() => new PipelineDatabase(databasePath), /schema 16: this release opens schema 17 only/);
+    new PipelineDatabase(databasePath).close();
     assert.deepEqual(contents(databasePath), before);
+});
+
+test("SIGKILL in the middle of the upgrade leaves the schema-17 ledger; the next open upgrades it whole", async (t) => {
+    const { databasePath, sitesFile } = await ledger17(t);
+    const before = contents(databasePath);
+    const child = spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", `
+        import { writeSync } from "node:fs";
+        import { DatabaseSync } from "node:sqlite";
+        const prepare = DatabaseSync.prototype.prepare;
+        DatabaseSync.prototype.prepare = function (sql) {
+            if (sql.includes("UPDATE schema_version")) {
+                writeSync(1, "inside");
+                Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+            }
+            return prepare.call(this, sql);
+        };
+        const { PipelineDatabase } = await import(${JSON.stringify(MODULE)});
+        new PipelineDatabase(process.argv[1]);
+    `, databasePath], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, VIDEO_SITES_FILE: sitesFile } });
+    t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const [chunk] = await Promise.race([once(child.stdout, "data"), once(child, "exit").then(() => { throw new Error(`child exited first: ${stderr}`); })]);
+    assert.equal(String(chunk), "inside");
+    const exited = once(child, "exit");
+    child.kill("SIGKILL");
+    await exited;
+    assert.deepEqual(contents(databasePath), before, "the killed upgrade left the old ledger as it was");
+    const database = new PipelineDatabase(databasePath);
+    t.after(() => database.close());
+    assert.equal(database.getCampaignControl().dailyUploadLimitBytes, 25_000_000_000);
+    assert.equal(database.integrityCheck(), "ok");
+});
+
+test("two processes opening a schema-17 ledger at once upgrade it once", async (t) => {
+    const { databasePath, sitesFile } = await ledger17(t);
+    const open = () => spawn(process.execPath, ["--no-warnings", "--input-type=module", "-e", `
+        const { PipelineDatabase } = await import(${JSON.stringify(MODULE)});
+        const database = new PipelineDatabase(process.argv[1]);
+        process.stdout.write(String(database.getCampaignControl().dailyUploadLimitBytes));
+        database.close();
+    `, databasePath], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, VIDEO_SITES_FILE: sitesFile } });
+    const results = await Promise.all([open(), open(), open()].map(async (child) => {
+        let output = "", stderr = "";
+        child.stdout.on("data", (chunk) => { output += chunk; });
+        child.stderr.on("data", (chunk) => { stderr += chunk; });
+        const [code] = await once(child, "exit");
+        return { code, output, stderr };
+    }));
+    for (const result of results) assert.deepEqual({ code: result.code, output: result.output }, { code: 0, output: "25000000000" }, result.stderr);
 });
 
 test("the ledger refuses an upload destination that is not a destination ID", async (t) => {
@@ -173,7 +287,7 @@ test("the ledger refuses an upload destination that is not a destination ID", as
         assert.throws(() => database.prepare("UPDATE campaign_control SET upload_provider = ?").run(bad), /must be a destination ID/, bad);
     }
     database.exec("BEGIN; DELETE FROM campaign_control");
-    assert.throws(() => database.exec("INSERT INTO campaign_control (id, state, provider_filter, ordering, monthly_upload_limit_bytes, updated_at, upload_provider) VALUES (1, 'paused', 'all', 'oldest', 1, 'at', 'Bad')"), /must be a destination ID/);
+    assert.throws(() => database.exec("INSERT INTO campaign_control (id, state, provider_filter, ordering, daily_upload_limit_bytes, updated_at, upload_provider) VALUES (1, 'paused', 'all', 'oldest', 1, 'at', 'Bad')"), /must be a destination ID/);
     database.exec("ROLLBACK");
     database.prepare("UPDATE campaign_control SET upload_provider = 'a'").run();
     database.prepare(`UPDATE campaign_control SET upload_provider = '${"b".repeat(32)}'`).run();

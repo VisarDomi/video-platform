@@ -3,12 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseDestinations } from "sdk";
 import { sitesFilePath } from "shared";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
-import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES } from "../domain/uploadBudget.js";
+import { DEFAULT_DAILY_UPLOAD_BYTES } from "../domain/uploadBudget.js";
 
 // The ledger's schema. A new ledger is created whole, in one transaction, so a power cut
-// leaves either no ledger or a complete one. This release opens schema 17 only and refuses
-// a ledger of any other schema.
-export const SCHEMA_VERSION = 17;
+// leaves either no ledger or a complete one. A ledger one schema older is upgraded in one
+// transaction when it is opened; any other schema is refused.
+export const SCHEMA_VERSION = 18;
 
 // Production artifact parts: "full", the 1080p split's names, or "shapeN" (one upload
 // per picture shape). Kept in SQL so a bad name cannot be stored.
@@ -28,6 +28,43 @@ const BAD_DESTINATION_ID = `(NEW.upload_provider = 'retired' OR length(NEW.uploa
         OR NEW.upload_provider GLOB '*[^a-z0-9-]*' OR substr(NEW.upload_provider, 1, 1) = '-')`;
 const RETIRED_DESTINATION = "EXISTS (SELECT 1 FROM destinations WHERE id = NEW.upload_provider AND state = 'retired')";
 const NEW_CONTROL_ROW = "NOT EXISTS (SELECT 1 FROM campaign_control WHERE id = NEW.id)";
+
+// The second uplink (schema 18): the files a carrier drive holds for it, where each
+// carrier was last seen, and the uplink's own upload hold. A ready recording whose file
+// is on a carrier stays `metadata_ready`; its `copied` row says where the file is.
+const UPLINK_SQL = `
+    CREATE TABLE carrier_files (
+        carrier_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        recording_id TEXT NOT NULL REFERENCES recordings(id),
+        artifact_part TEXT NOT NULL CHECK (${partCheck("artifact_part")}),
+        size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+        sha256 TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('copied', 'uploaded', 'removed')),
+        copied_at TEXT NOT NULL,
+        settled_at TEXT,
+        PRIMARY KEY (carrier_id, file_name)
+    ) STRICT;
+    CREATE INDEX carrier_files_recording_idx ON carrier_files (recording_id);
+    CREATE UNIQUE INDEX carrier_files_one_copy_idx ON carrier_files (recording_id) WHERE state = 'copied';
+    CREATE TABLE carrier_state (
+        carrier_id TEXT PRIMARY KEY,
+        location TEXT NOT NULL CHECK (location IN ('home', 'away', 'uplink')),
+        seen_at TEXT NOT NULL,
+        free_bytes INTEGER,
+        in_transit_bytes INTEGER NOT NULL DEFAULT 0,
+        note TEXT,
+        last_notice TEXT,
+        last_notice_at TEXT
+    ) STRICT;
+    CREATE TABLE uplink_holds (
+        uplink TEXT PRIMARY KEY,
+        resume_at TEXT,
+        reason TEXT,
+        failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
+        updated_at TEXT NOT NULL
+    ) STRICT;
+`;
 
 const LEDGER_SQL = `
     CREATE TABLE schema_version (
@@ -183,7 +220,8 @@ const LEDGER_SQL = `
     ) STRICT;
 
     -- Uploads: bytes are reserved before they leave, every attempt is kept, a submitted
-    -- one is confirmed before any retry, and bytes sent are billed to the month.
+    -- one is confirmed before any retry, and bytes sent are billed to the month and to the
+    -- uplink (the network) they left from.
     CREATE TABLE upload_reservations (
         id TEXT PRIMARY KEY,
         recording_id TEXT NOT NULL REFERENCES recordings(id),
@@ -193,7 +231,8 @@ const LEDGER_SQL = `
         reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
         status TEXT NOT NULL CHECK (status IN ('reserved', 'consumed', 'released')),
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
     CREATE UNIQUE INDEX one_active_reservation_idx ON upload_reservations (recording_id) WHERE status = 'reserved';
     CREATE TABLE upload_attempts (
@@ -217,7 +256,8 @@ const LEDGER_SQL = `
         limited_visibility TEXT,
         metadata_rejection TEXT,
         evidence_json TEXT NOT NULL DEFAULT '[]',
-        transfer_started INTEGER NOT NULL DEFAULT 0
+        transfer_started INTEGER NOT NULL DEFAULT 0,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
     CREATE TABLE bandwidth_events (
         id INTEGER PRIMARY KEY,
@@ -226,7 +266,8 @@ const LEDGER_SQL = `
         provider TEXT NOT NULL,
         calendar_month TEXT NOT NULL,
         transmitted_bytes INTEGER NOT NULL CHECK (transmitted_bytes >= 0),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        uplink TEXT NOT NULL DEFAULT 'home'
     ) STRICT;
     CREATE TABLE upload_confirmations (
         attempt_id TEXT PRIMARY KEY REFERENCES upload_attempts(id),
@@ -310,7 +351,7 @@ const LEDGER_SQL = `
     ) STRICT;
     CREATE INDEX provider_session_events_idx ON provider_session_events (provider, occurred_at);
 
-    -- The campaign: intent (running or paused), the monthly budget, the destination.
+    -- The campaign: intent (running or paused), home's daily allowance, the destination.
     CREATE TABLE worker_heartbeat (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         updated_at TEXT NOT NULL
@@ -320,7 +361,7 @@ const LEDGER_SQL = `
         state TEXT NOT NULL CHECK (state IN ('paused', 'running')),
         provider_filter TEXT NOT NULL,
         ordering TEXT NOT NULL CHECK (ordering = 'oldest'),
-        monthly_upload_limit_bytes INTEGER NOT NULL CHECK (monthly_upload_limit_bytes > 0),
+        daily_upload_limit_bytes INTEGER NOT NULL CHECK (daily_upload_limit_bytes > 0),
         antibot_failures INTEGER NOT NULL DEFAULT 0,
         resume_at TEXT,
         updated_at TEXT NOT NULL,
@@ -421,7 +462,7 @@ const LEDGER_SQL = `
         retired_at TEXT NOT NULL,
         PRIMARY KEY (production_version, recording_id, artifact_part)
     ) STRICT;
-`;
+${UPLINK_SQL}`;
 
 // The destination a new ledger's campaign starts with: the sites file's first.
 export function initialDestination(): string {
@@ -440,9 +481,26 @@ export function initialDestination(): string {
 export function createLedger(database: DatabaseSync, destination: string, now = new Date()): void {
     database.exec(LEDGER_SQL);
     database.prepare("INSERT INTO schema_version (version) VALUES (?)").run(SCHEMA_VERSION);
-    database.prepare(`INSERT INTO campaign_control (id, state, provider_filter, ordering, monthly_upload_limit_bytes,
+    database.prepare(`INSERT INTO campaign_control (id, state, provider_filter, ordering, daily_upload_limit_bytes,
         updated_at, upload_provider) VALUES (1, 'paused', 'all', 'oldest', ?, '1970-01-01T00:00:00.000Z', ?)`)
-        .run(DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, destination);
+        .run(DEFAULT_DAILY_UPLOAD_BYTES, destination);
     database.prepare("INSERT INTO production_version (id, version, activated_at) VALUES (1, ?, ?)")
         .run(CURRENT_PRODUCTION_VERSION, now.toISOString());
+}
+
+// The upgrade from the schema before this one. The caller holds a write transaction and
+// has read that schema's version inside it, so a power cut leaves the old ledger or the
+// new one, never a mix. Schema 17 to 18: home's allowance becomes a daily amount, every
+// reservation, attempt and billed byte names its uplink, and the second uplink's tables.
+export const UPGRADABLE_SCHEMA_VERSION = 17;
+export function upgradeLedger(database: DatabaseSync): void {
+    database.exec(`
+        ALTER TABLE campaign_control RENAME COLUMN monthly_upload_limit_bytes TO daily_upload_limit_bytes;
+        ALTER TABLE upload_reservations ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
+        ALTER TABLE upload_attempts ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
+        ALTER TABLE bandwidth_events ADD COLUMN uplink TEXT NOT NULL DEFAULT 'home';
+        ${UPLINK_SQL}
+    `);
+    database.prepare("UPDATE campaign_control SET daily_upload_limit_bytes = ? WHERE id = 1").run(DEFAULT_DAILY_UPLOAD_BYTES);
+    database.prepare("UPDATE schema_version SET version = ?").run(SCHEMA_VERSION);
 }

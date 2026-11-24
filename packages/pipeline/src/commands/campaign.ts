@@ -22,13 +22,13 @@ function assertVersionedStagingRoot(artifactsRoot: string, stagingRoot: string):
 export function configureCampaign(
     config: PipelineConfig,
     provider: CampaignProviderFilter,
-    monthlyUploadLimitBytes?: number,
+    dailyUploadLimitBytes?: number,
     trialPerProvider?: number | null,
 ): unknown {
     const database = new PipelineDatabase(config.databasePath);
     try {
         return database.configureCampaign(provider,
-            monthlyUploadLimitBytes ?? database.getCampaignControl().monthlyUploadLimitBytes,
+            dailyUploadLimitBytes ?? database.getCampaignControl().dailyUploadLimitBytes,
             new Date(), trialPerProvider);
     } finally {
         database.close();
@@ -200,7 +200,9 @@ export function campaignStatus(config: PipelineConfig, now = new Date()): unknow
         const control = database.getCampaignControl();
         return {
             ...control,
-            uploadBudget: database.uploadBudget(now, config.uploadTimeZone, control.monthlyUploadLimitBytes),
+            uploadBudget: database.uploadBudget(now, config.uploadTimeZone, control.dailyUploadLimitBytes),
+            uplinks: [database.uploadBudget(now, config.uploadTimeZone, control.dailyUploadLimitBytes),
+                ...(config.uplink ? [database.uploadBudget(now, config.uploadTimeZone, config.uplink.dailyBytes, config.uplink.id)] : [])],
             trial: database.getCampaignTrialProgress(sourcesOf(config)),
             comparison: database.getComparisonTrial(),
             productionVersion: database.getProductionVersion(),
@@ -253,10 +255,7 @@ export async function campaignStep(config: PipelineConfig): Promise<unknown> {
             config,
             resolver,
             config.networkUploadsEnabled
-                ? (recordingId, monthlyUploadLimitBytes) => uploadOne(recordingId, {
-                    ...config,
-                    monthlyUploadLimitBytes,
-                })
+                ? (recordingId) => uploadOne(recordingId, config)
                 : undefined,
         );
         return { recovery, step: await worker.step() };

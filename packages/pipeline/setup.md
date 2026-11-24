@@ -38,22 +38,20 @@ online verification.
 - Upload identity is the local ledger plus the captured provider video ID and
   the exact bracketed title suffix; the model-written title is never used to
   find a video.
-- Uploads are budgeted per calendar month in `Europe/Tirane`
-  (`VIDEO_PIPELINE_UPLOAD_TIMEZONE`): the campaign uses the limit stored by
-  `campaign:configure` (default 700,000,000,000 bytes); `upload-one` uses
-  `VIDEO_PIPELINE_MONTHLY_UPLOAD_BYTES` (same default). The allowance is released
-  cumulatively at local midnight: days 1–10 have 100 GB, days 11–20 have 300 GB
-  (100 + 200), and day 21 through month-end have 700 GB (100 + 200 + 400).
-  GB is decimal (1,000,000,000 bytes). Unused allowance carries forward within
-  the month; the next month starts at 100 GB. Every transmitted byte, including
-  failed/retried transfers, and outstanding reservations count against the
-  released allowance. An explicitly lower monthly limit remains a ceiling;
-  increasing that limit cannot release a later period's allowance early.
-  Campaign, direct upload and dry-run admission share these checks, including
-  the 16 MiB request-overhead reservation. A quota wait keeps running intent and
-  retries automatically at the next release; it needs no manual resume.
-  `campaign:status` includes `uploadBudget` with the local day, released limit,
-  spent, reserved and remaining bytes.
+- Uploads are budgeted per day in `Europe/Tirane` (`VIDEO_PIPELINE_UPLOAD_TIMEZONE`),
+  per uplink (the network the bytes leave from: `home`, plus the sites file's optional
+  `uplink`). Home's daily amount is stored by `campaign:configure --daily-upload-bytes`
+  (default 25,000,000,000 bytes); an uplink's is its `dailyBytes`. On day N of the local
+  month N daily amounts are released, so unused allowance carries over until the month
+  ends, and no more than twice the daily amount leaves in one local day. GB is decimal
+  (1,000,000,000 bytes). Every transmitted byte, including failed/retried transfers,
+  and outstanding reservations count against the uplink's allowance; bytes are billed
+  to the uplink they left from. Campaign, direct upload and dry-run admission share
+  these checks, including the 16 MiB request-overhead reservation. A quota wait keeps
+  running intent and retries automatically after the next release; it needs no manual
+  resume. `campaign:status` includes `uploadBudget` (home) and `uplinks` (each uplink's
+  allowance: released, spent, spent today, reserved, available this month, room today
+  and remaining bytes).
 - File transfers belong to the destination's plug-in. It reports byte progress,
   which the ledger records durably, and the core decides what a failure means from
   the destination's creation boundary; see [upload recovery](docs/upload-recovery.md).
@@ -248,7 +246,7 @@ retry deletes its new conversion and starts a **new** seven-day retry window
 and daily checks. Other recordings continue during the wait. Auth/network/CDN failures remain inconclusive;
 a published but uncertain rendition is retained for verification. Known provider
 removals and previously verified copies later removed remain restoration bans.
-All retry traffic counts against the existing monthly allowance.
+All retry traffic counts against the uplink's allowance.
 
 Original downloader/editor folders are **never automatically deleted or moved**.
 Local presence lives separately in `local_source_presence`; source deletion never
@@ -317,7 +315,7 @@ Campaign intent is stored in SQLite independently of worker lifetime.
 
 ```bash
 npm run campaign:configure -w pipeline -- \
-  --provider all --monthly-upload-bytes 700000000000 --apply
+  --provider all --daily-upload-bytes 25000000000 --apply
 npm run campaign:status -w pipeline
 npm run campaign:resume -w pipeline
 npm run campaign:pause -w pipeline

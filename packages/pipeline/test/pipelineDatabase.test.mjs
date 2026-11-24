@@ -137,7 +137,7 @@ test("production rollover retires workflow state while preserving quota, overrid
     assert.deepEqual(reopened.uploadUsage("2026-08"), { spent: 900, reserved: 0 });
     assert.equal(reopened.getProvenanceOverride("live-a", "alias")?.streamerId, "manual-id");
     assert.equal(reopened.getCampaignControl().providerFilter, "live-c");
-    assert.equal(reopened.getCampaignControl().monthlyUploadLimitBytes, 123_456_789);
+    assert.equal(reopened.getCampaignControl().dailyUploadLimitBytes, 123_456_789);
     assert.deepEqual(reopened.listProductionRollovers().map((row) => ({
         fromVersion: row.fromVersion,
         toVersion: row.toVersion,
@@ -257,61 +257,82 @@ test("named artifact variants coexist without changing canonical state or artifa
     }, 10, 10), /valid source and dropped frame counts/);
 });
 
-test("upload budget releases 100, 300 and 700 GB cumulatively at Tirana midnight", async (t) => {
+test("the allowance releases one daily amount per local day and carries it over inside the month", async (t) => {
     const { database } = await databaseFixture(t);
     const gb = 1_000_000_000;
-    for (const [instant, released] of [
-        ["2026-11-10T22:59:59.999Z", 100],
-        ["2026-11-10T23:00:00.000Z", 300],
-        ["2026-11-20T22:59:59.999Z", 300],
-        ["2026-11-20T23:00:00.000Z", 700],
-        ["2026-11-30T22:59:59.999Z", 700],
-        ["2026-11-30T23:00:00.000Z", 100],
-        ["2026-06-10T21:59:59.999Z", 100],
-        ["2026-06-10T22:00:00.000Z", 300],
-        ["2026-02-28T23:00:00.000Z", 100],
-        ["2028-02-29T23:00:00.000Z", 100],
+    const daily = 25 * gb;
+    // Nothing spent: the twice-a-day cap (50 GB) binds from day 2; on day 1 only 25 GB exist.
+    for (const [instant, room] of [
+        ["2026-10-31T22:59:59.999Z", 50],   // Oct 31 in Tirana: released 775, capped at 50
+        ["2026-10-31T23:00:00.000Z", 25],   // Nov 1 in Tirana
+        ["2026-11-01T22:59:59.999Z", 25],
+        ["2026-11-01T23:00:00.000Z", 50],   // Nov 2
+        ["2026-06-30T21:59:59.999Z", 50],   // summer time: Jun 30
+        ["2026-06-30T22:00:00.000Z", 25],   // Jul 1
     ]) {
         const now = new Date(instant);
-        assert.equal(database.canReserve(released * gb, now), true, instant);
-        assert.equal(database.canReserve(released * gb + 1, now), false, instant);
+        assert.equal(database.canReserve(room * gb, now, "Europe/Tirane", daily), true, instant);
+        assert.equal(database.canReserve(room * gb + 1, now, "Europe/Tirane", daily), false, instant);
     }
-    assert.equal(database.canReserve(101 * gb, new Date("2026-11-01"), "Europe/Tirane", 800 * gb), false);
-    assert.equal(database.canReserve(301 * gb, new Date("2026-11-11"), "Europe/Tirane", 800 * gb), false);
-    assert.equal(database.canReserve(701 * gb, new Date("2026-11-21"), "Europe/Tirane", 800 * gb), false);
-    assert.equal(database.canReserve(51 * gb, new Date("2026-11-21"), "Europe/Tirane", 50 * gb), false);
+    const budget = database.uploadBudget(new Date("2026-11-24T10:00:00Z"), "Europe/Tirane", daily);
+    assert.deepEqual({ uplink: budget.uplink, day: budget.localDay, date: budget.localDate, released: budget.releasedBytes,
+        available: budget.availableBytes, today: budget.todayRoomBytes, remaining: budget.remainingBytes },
+    { uplink: "home", day: 24, date: "2026-11-24", released: 600 * gb, available: 600 * gb, today: 50 * gb, remaining: 50 * gb });
 });
 
-test("staged quota shares spent and reserved bytes, carries unused allowance and resets monthly", async (t) => {
-    const { database, directory } = await databaseFixture(t);
+test("spent and reserved bytes count per uplink, per month and per local day", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t);
     const first = database.discover(input(directory, "budget-one"));
     const second = database.discover(input(directory, "budget-two"));
-    advanceToMetadataReady(database, first, directory, 1_000);
-    advanceToMetadataReady(database, second, directory, 1_000);
+    const third = database.discover(input(directory, "budget-three"));
+    for (const recording of [first, second, third]) advanceToMetadataReady(database, recording, directory, 1_000);
     const gb = 1_000_000_000;
-    const day1 = new Date("2026-11-01T12:00:00Z");
-    const reservation = database.reserveUpload(first.id, 90 * gb, day1);
-    assert.equal(database.canReserve(10 * gb, day1), true);
-    assert.throws(() => database.reserveUpload(second.id, 10 * gb + 1, day1), /limit exceeded/);
-    const attempt = database.beginUpload(first.id, reservation, day1);
-    database.finishUploadAttempt(attempt, { status: "failed", transmittedBytes: 80 * gb }, day1);
-    assert.equal(database.canReserve(20 * gb, day1), true);
-    assert.equal(database.canReserve(20 * gb + 1, day1), false);
-    assert.equal(database.canReserve(220 * gb, new Date("2026-11-11")), true);
-    assert.equal(database.canReserve(220 * gb + 1, new Date("2026-11-11")), false);
-    assert.equal(database.canReserve(620 * gb, new Date("2026-11-21")), true);
-    assert.equal(database.canReserve(620 * gb + 1, new Date("2026-11-21")), false);
-    assert.equal(database.canReserve(100 * gb, new Date("2026-12-01")), true);
-    assert.deepEqual(database.uploadUsage("2026-11"), { spent: 80 * gb, reserved: 0 });
+    const daily = 25 * gb;
+    const tz = "Europe/Tirane";
+    // Nov 3, 10:00 in Tirana: 75 GB released, 50 GB room today.
+    const day3 = new Date("2026-11-03T09:00:00Z");
+    const reservation = database.reserveUpload(first.id, 40 * gb, day3, tz, daily);
+    assert.equal(database.canReserve(10 * gb, day3, tz, daily), true);
+    assert.equal(database.canReserve(10 * gb + 1, day3, tz, daily), false, "a reservation counts against today");
+    assert.throws(() => database.reserveUpload(second.id, 10 * gb + 1, day3, tz, daily), /limit exceeded/);
+    // Another uplink has its own allowance.
+    assert.equal(database.canReserve(50 * gb, day3, tz, daily, "office"), true);
+    const office = database.reserveUpload(second.id, 50 * gb, day3, tz, daily, database.getActiveUploadProvider(), "office");
+    const officeAttempt = database.beginUpload(second.id, office, day3);
+    database.finishUploadAttempt(officeAttempt, { status: "failed", transmittedBytes: 30 * gb }, day3);
+    assert.deepEqual(database.uploadUsage("2026-11", "office"), { spent: 30 * gb, reserved: 0 });
+    const attempt = database.beginUpload(first.id, reservation, day3);
+    database.finishUploadAttempt(attempt, { status: "failed", transmittedBytes: 35 * gb }, day3);
+    assert.deepEqual(database.uploadUsage("2026-11", "home"), { spent: 35 * gb, reserved: 0 });
+    assert.deepEqual(database.uploadUsage("2026-11"), { spent: 65 * gb, reserved: 0 });
+    assert.equal(database.canReserve(15 * gb, day3, tz, daily), true);
+    assert.equal(database.canReserve(15 * gb + 1, day3, tz, daily), false, "twice the daily amount in one local day");
+    // Local midnight: a new day. Released 100, spent 35: 65 left, room 50.
+    const day4 = new Date("2026-11-03T23:00:00Z");
+    assert.equal(database.canReserve(50 * gb, day4, tz, daily), true);
+    assert.equal(database.canReserve(50 * gb + 1, day4, tz, daily), false);
+    // Carry-over: by Nov 30, 750 released, 35 spent; the day caps it.
+    assert.equal(database.uploadBudget(new Date("2026-11-30T12:00:00Z"), tz, daily).availableBytes, 715 * gb);
+    // A new month starts again from one daily amount; nothing carries across.
+    const december = database.uploadBudget(new Date("2026-12-01T12:00:00Z"), tz, daily);
+    assert.deepEqual([december.availableBytes, december.remainingBytes], [25 * gb, 25 * gb]);
+    // Bytes are billed to the uplink the attempt left from, and the attempt names it.
+    const raw = new DatabaseSync(databasePath, { readOnly: true });
+    t.after(() => raw.close());
+    assert.deepEqual(raw.prepare("SELECT uplink, transmitted_bytes AS bytes FROM bandwidth_events ORDER BY id").all()
+        .map((row) => ({ ...row })), [{ uplink: "office", bytes: 30 * gb }, { uplink: "home", bytes: 35 * gb }]);
+    assert.deepEqual(raw.prepare("SELECT uplink FROM upload_attempts ORDER BY started_at, uplink DESC").all()
+        .map((row) => row.uplink), ["office", "home"]);
+    assert.equal(database.get(third.id).state, "metadata_ready");
 });
 
-test("monthly quota reserves atomically, counts retries, and rolls over by timezone", async (t) => {
+test("the allowance reserves atomically, counts retries, and rolls over by time zone", async (t) => {
     const { database, directory } = await databaseFixture(t);
     const first = database.discover(input(directory, "one"));
     const second = database.discover(input(directory, "two"));
     advanceToMetadataReady(database, first, directory, 600);
     advanceToMetadataReady(database, second, directory, 500);
-    const now = new Date("2026-08-12T08:00:00Z");
+    const now = new Date("2026-08-01T08:00:00Z");
     const firstReservation = database.reserveUpload(first.id, 600, now, "Europe/Tirane", 1_000);
     assert.throws(() => database.reserveUpload(second.id, 500, now, "Europe/Tirane", 1_000), /limit exceeded/);
     const attempt = database.beginUpload(first.id, firstReservation, now);
@@ -322,9 +343,10 @@ test("monthly quota reserves atomically, counts retries, and rolls over by timez
     }, now);
     assert.deepEqual(database.uploadUsage("2026-08"), { spent: 250, reserved: 0 });
     assert.throws(() => database.reserveUpload(first.id, 800, now, "Europe/Tirane", 1_000), /Weekly upload retry/);
-    assert.throws(() => database.reserveUpload(first.id, 800, new Date("2026-08-19T08:00:00Z"), "Europe/Tirane", 1_000), /limit exceeded/);
+    assert.throws(() => database.reserveUpload(first.id, 2_001, new Date("2026-08-08T08:00:00Z"), "Europe/Tirane", 1_000), /limit exceeded/);
     assert.equal(calendarMonth(new Date("2026-08-31T22:30:00Z"), "Europe/Tirane"), "2026-09");
-    assert(database.canReserve(800, new Date("2026-09-01T08:00:00Z"), "Europe/Tirane", 1_000));
+    assert(database.canReserve(1_000, new Date("2026-09-01T08:00:00Z"), "Europe/Tirane", 1_000));
+    assert(!database.canReserve(1_001, new Date("2026-09-01T08:00:00Z"), "Europe/Tirane", 1_000));
 });
 
 test("accepted uploads require remote identity and preserve exact byte accounting", async (t) => {
@@ -408,7 +430,8 @@ test("dry-run releases match admission, including overhead and simulated reserva
     for (const suffix of ["preview-one", "preview-two"]) {
         advanceToMetadataReady(database, database.discover(input(directory, suffix)), directory, 1_000);
     }
-    const spent = 100_000_000_000 - REQUEST_OVERHEAD_RESERVATION_BYTES - 1_500;
+    database.configureCampaign("all", 25_000_000_000);
+    const spent = 250_000_000_000 - REQUEST_OVERHEAD_RESERVATION_BYTES - 1_500;
     const seed = new DatabaseSync(databasePath);
     seed.prepare(`INSERT INTO bandwidth_events
         (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
@@ -418,7 +441,7 @@ test("dry-run releases match admission, including overhead and simulated reserva
     assert.equal(database.canReserve(REQUEST_OVERHEAD_RESERVATION_BYTES + 1_000, beforeRelease), true);
     assert.deepEqual((await createDryRunUploadPlan(database, beforeRelease)).map(item => item.disposition),
         ["would_upload", "blocked"]);
-    assert.equal((await createDryRunUploadPlan(database, beforeRelease))[1].reason, "monthly_upload_limit");
+    assert.equal((await createDryRunUploadPlan(database, beforeRelease))[1].reason, "upload_allowance");
     const afterRelease = new Date("2026-11-10T23:00:00.000Z");
     assert.deepEqual((await createDryRunUploadPlan(database, afterRelease)).map(item => item.disposition),
         ["would_upload", "would_upload"]);

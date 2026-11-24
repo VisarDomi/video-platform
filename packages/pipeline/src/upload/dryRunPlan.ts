@@ -2,7 +2,7 @@ import { assessFinalArtifact } from "shared";
 import { destinationFacts } from "./destinationFacts.js";
 import type { ActiveUploadProvider } from "../config/uploadProviders.js";
 import type { PipelineDatabase } from "../db/pipelineDatabase.js";
-import { DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES, REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
+import { REQUEST_OVERHEAD_RESERVATION_BYTES } from "../domain/uploadBudget.js";
 import { RESOLUTION_POLICY_VERSION } from "../stages/resolutionPolicy.js";
 import { CURRENT_PRODUCTION_VERSION } from "../domain/productionVersion.js";
 import { isDirectArtifactPath } from "../stages/remux.js";
@@ -19,13 +19,13 @@ export async function createDryRunUploadPlan(
     database: PipelineDatabase,
     now = new Date(),
     timeZone = "Europe/Tirane",
-    monthlyLimitBytes = DEFAULT_MONTHLY_UPLOAD_LIMIT_BYTES,
+    dailyBytes = database.getCampaignControl().dailyUploadLimitBytes,
     stagingRoot?: string,
     provider: ActiveUploadProvider = database.getActiveUploadProvider(),
 ): Promise<DryRunUploadItem[]> {
     const { policy } = await destinationFacts(provider);
     let simulatedReserved = 0;
-    const budget = database.uploadBudget(now, timeZone, monthlyLimitBytes);
+    const budget = database.uploadBudget(now, timeZone, dailyBytes);
     return database.list("metadata_ready").map((recording) => {
         if (!database.canAttemptUpload(recording.id, now)) {
             return { recordingId: recording.id, artifactPath: database.getArtifact(recording.id)?.path ?? null,
@@ -93,7 +93,7 @@ export async function createDryRunUploadPlan(
                 artifactPath: artifact.path,
                 sizeBytes: artifact.sizeBytes,
                 disposition: "blocked" as const,
-                reason: "monthly_upload_limit",
+                reason: "upload_allowance",
             };
         }
         simulatedReserved += reservedBytes;

@@ -106,7 +106,8 @@ export interface CampaignControl {
     readonly state: "paused" | "running";
     readonly providerFilter: CampaignProviderFilter;
     readonly ordering: "oldest";
-    readonly monthlyUploadLimitBytes: number;
+    // Home's daily upload allowance in bytes (see domain/uploadBudget.ts).
+    readonly dailyUploadLimitBytes: number;
     readonly antibotFailures: number;
     readonly resumeAt: string | null;
     readonly trialPerProvider: number | null;

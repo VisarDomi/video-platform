@@ -133,7 +133,7 @@ export async function uploadOne(
             reservedBytes,
             new Date(),
             config.uploadTimeZone,
-            config.monthlyUploadLimitBytes,
+            database.getCampaignControl().dailyUploadLimitBytes,
             provider,
         );
         const outcome = await new UploadCoordinator(database, uploader).uploadAdmitted(
