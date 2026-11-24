@@ -13,7 +13,7 @@ import test from "node:test";
 
 import { PipelineDatabase } from "../dist/db/pipelineDatabase.js";
 import { DirectoryCarrier, carrierFileNameOk } from "../dist/uplink/carrier.js";
-import { carrierPass } from "../dist/uplink/carrierLane.js";
+import { carrierPass, runCarrierLane } from "../dist/uplink/carrierLane.js";
 import { initCarrier, recallCarrier, writeOffCarrier } from "../dist/uplink/carrierCommands.js";
 
 const NOW = new Date("2026-11-24T10:00:00Z");
@@ -196,4 +196,25 @@ test("an unknown drive is refused once; recall gives files back except one in fl
     db.prepare("UPDATE upload_attempts SET status = 'failed' WHERE id = 'a2'").run();
     assert.deepEqual(writeOffCarrier({ databasePath: f.databasePath }, "CARRIER1"), { carrier: "CARRIER1", settled: 1 });
     assert.equal(f.database.carrierCopy(busy.id), null, "home's again");
+});
+
+test("the lane opens an idle plugged drive once, and again only when the ledger has work for it", async (t) => {
+    const f = await fixture(t, 2);
+    let opens = 0;
+    const counting = Object.assign(Object.create(Object.getPrototypeOf(f.carrier)), f.carrier, {
+        open: async () => { opens++; return f.drive; } });
+    const stop = new AbortController();
+    const lane = runCarrierLane({ databasePath: f.databasePath, uploadTimeZone: "Europe/Tirane" }, stop.signal, () => {}, counting, 10);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(opens, 1, "both recordings are home's reserve: nothing to do after the first pass");
+    // Home's allowance shrinks to nothing: its reserve becomes one daily amount (one file).
+    f.database.configureCampaign("all", 4_000);
+    const db = f.raw();
+    db.prepare(`INSERT INTO bandwidth_events (recording_id, attempt_id, provider, calendar_month, transmitted_bytes, created_at)
+        VALUES ('x', 'x', 'form-host', '2026-11', 96000, ?)`).run(new Date().toISOString());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    stop.abort();
+    await lane;
+    assert.ok(opens >= 2);
+    assert.deepEqual(await f.onDrive(), [f.recordings[1].name]);
 });

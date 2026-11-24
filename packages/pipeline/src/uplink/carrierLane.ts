@@ -182,17 +182,35 @@ export async function carrierPass(database: PipelineDatabase, config: Pick<Pipel
     }
 }
 
-// The carrier lane: a pass every 30 seconds while the worker runs (and the setting names a
-// carrier), one at a time, each with its own ledger connection.
+// Whether a pass has work while the carrier stays plugged in: a recorded file to delete, or
+// a recording to copy while the last pass did not find the drive full.
+export function carrierHasWork(database: PipelineDatabase, config: Pick<PipelineConfig, "uploadTimeZone">, carrierId: string,
+    lastWasFull: boolean, now = new Date()): boolean {
+    if (database.carrierFiles(carrierId, "copied").some((file) => database.carrierFileVerdict(file) !== "keep")) return true;
+    return !lastWasFull && carrierCandidates(database, config, now).candidates.length > 0;
+}
+
+// The carrier lane: every 30 seconds while the worker runs (and the setting names a
+// carrier), a pass when the drive was just plugged in or the ledger says there is work (so
+// an idle drive is not mounted again and again), each with its own ledger connection.
 export async function runCarrierLane(config: PipelineConfig, signal: AbortSignal, notify: Notify,
-    carrier: Carrier | null = config.uplink ? carrierFor(config.uplink) : null): Promise<void> {
+    carrier: Carrier | null = config.uplink ? carrierFor(config.uplink) : null, intervalMs = CARRIER_PASS_MILLISECONDS): Promise<void> {
     if (!carrier) return;
     let last = "";
+    let plugged = false, lastWasFull = false;
     while (!signal.aborted) {
         try {
             const database = new PipelineDatabase(config.databasePath);
             try {
+                const present = await carrier.present();
+                if (present && plugged && !carrierHasWork(database, config, carrier.id, lastWasFull)) {
+                    await pause(intervalMs, signal);
+                    continue;
+                }
                 const result = await carrierPass(database, config, carrier, { notify, signal });
+                // A pass that ran to its end settles the plug-in; a pulled drive is looked at anew.
+                plugged = result.present && !result.gone && result.marker === "ok";
+                lastWasFull = result.full;
                 const summary = JSON.stringify({ present: result.present, marker: result.marker, deleted: result.deleted, lost: result.lost,
                     copied: result.copied, refused: result.refused, full: result.full, gone: result.gone });
                 if (summary !== last && (result.copied.length || result.deleted.length || result.lost.length || result.refused.length
@@ -206,10 +224,15 @@ export async function runCarrierLane(config: PipelineConfig, signal: AbortSignal
         } catch (error) {
             console.error(journalPriority("error", 2) + JSON.stringify({ event: "carrier-lane-error", error: error instanceof Error ? error.message : String(error) }));
         }
-        await new Promise<void>((resolve) => {
-            const timer = setTimeout(done, CARRIER_PASS_MILLISECONDS);
-            function done() { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); }
-            signal.addEventListener("abort", done, { once: true });
-        });
+        await pause(intervalMs, signal);
     }
+}
+
+function pause(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        const timer = setTimeout(done, milliseconds);
+        function done() { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); }
+        signal.addEventListener("abort", done, { once: true });
+    });
 }
