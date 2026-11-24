@@ -332,7 +332,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         artifact = {r["recording_id"]: dict(r) for r in db.execute("SELECT recording_id,path,size_bytes FROM artifacts")}
         metadata_titles = {r["recording_id"]: r["title"] for r in db.execute("SELECT recording_id,title FROM upload_metadata") if r["title"]}
         attempts = [dict(r) for r in db.execute("""SELECT a.id,a.recording_id,a.phase,a.started_at,a.evidence_json,a.transfer_started,
-            u.calendar_month FROM upload_attempts a LEFT JOIN upload_reservations u ON u.id=a.reservation_id
+            a.uplink,u.calendar_month FROM upload_attempts a LEFT JOIN upload_reservations u ON u.id=a.reservation_id
             WHERE a.status='started' ORDER BY a.started_at DESC LIMIT 3""")]
         active_row = next((r for r in records if r["state"] in ("uploading", "upload_admitted")), None)
         if active_row is None:
@@ -353,6 +353,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
             active["started_at"] = attempt["started_at"] if attempt else active_row["updated_at"]
             active["progress"] = transfer_progress(attempt, active["size_bytes"], now)
             active["reservation_month"] = attempt["calendar_month"] if attempt else None
+            active["uplink"] = attempt["uplink"] if attempt else None
             active["phase"] = attempt["phase"] if attempt else active["stage"]
             if active["stage"] == "convert":
                 try:
@@ -427,12 +428,20 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
         budget = upload_budget(db, control, now, [{"id": uplink["id"], "daily": int(uplink.get("dailyBytes", 0))}] if uplink else [])
         ahead = None
         carrier = None
+        office = None
         if uplink:
             ready_bytes = db.execute("SELECT COALESCE(SUM(a.size_bytes),0) FROM recordings r JOIN artifacts a ON a.recording_id=r.id "
                                      "WHERE r.state='metadata_ready'").fetchone()[0]
             ahead = {"ready_bytes": ready_bytes,
                      "limit_bytes": int((uplink.get("carrier") or {}).get("capacityBytes", 0)) + 2 * control["daily_upload_limit_bytes"]}
             carrier = carrier_summary(db, uplink, ready_bytes, budget)
+            hold = db.execute("SELECT resume_at, reason, failures FROM uplink_holds WHERE uplink=?", (uplink["id"],)).fetchone()
+            sending = next((a for a in attempts if a["uplink"] == uplink["id"]), None)
+            office = {"id": uplink["id"],
+                      "hold": {"resume_at": hold["resume_at"], "reason": safe_reason(hold["reason"]), "failures": hold["failures"]}
+                      if hold and hold["resume_at"] and (stamp(hold["resume_at"]) or now) > now else None,
+                      "uploading": identity(by_id[sending["recording_id"]])["alias"] if sending and sending["recording_id"] in by_id else None,
+                      "progress": transfer_progress(sending, artifact.get(sending["recording_id"], {}).get("size_bytes"), now) if sending else None}
         # The active destination's shared-session checks (none for a destination without one).
         session = db.execute("SELECT logged_in,occurred_at FROM provider_session_events WHERE provider=? AND kind='keepalive' ORDER BY id DESC LIMIT 1",
                              (control.get("upload_provider"),)).fetchone()
@@ -506,7 +515,7 @@ def snapshot(data_root, downloads_root, *, now=None, services=None, worker_step=
                        "submitted": totals24["submitted"], "receipts_verified": totals24["verified"], "converted": totals24["converted"]},
             "active": active, "captures": live, "finalization": finalized, "queue": queue,
             "confirmations": confirmations, "shorts": {"waiting": short_waiting, "batches": sorted(batches, key=lambda b: b["id"])},
-            "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "carrier": carrier, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
+            "budget": budget, "ahead": ahead and {**ahead, "uploads_held": uploads_held(control, worker_step)}, "carrier": carrier, "office": office, "history": [{"date": day, **values} for day, values in days.items()], "activity": activity,
             "services": current_services, "service_labels": EXTRA_UNITS, "sources": sources, "destination": control.get("upload_provider"), "storage": storage,
             "authentication": {"confirmed": bool(session and session[0]), "checked_at": session[1] if session else None},
             "monitoring": {"cadence": monitoring.get("cadence"), "last_check": monitoring.get("last_completed_window_end")}}

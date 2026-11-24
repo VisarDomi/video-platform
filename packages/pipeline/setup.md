@@ -623,6 +623,21 @@ pass repairs whatever it left. The lane notifies once per plug-in when the drive
 full ("take it to the office") or not a set-up carrier, and records where it was last seen
 (`carrier_state`). The PC keeps its own copy of every file until the site accepted it.
 
+The office lane runs in the worker beside the other two. Every five minutes, while the
+ledger has files on the carrier and the carrier is not in the PC, it asks the runner where
+it is (`probe`); on the uplink's network with the carrier there, it sends the oldest ready
+recording the carrier holds (name and size as the probe lists them, hash still the
+artifact's) within the uplink's own allowance, through the same `upload-one` as home,
+holding the account slot. A failure holds this lane only (`uplink_holds`: 15 minutes,
+twice as long after each failure in a row, at most a day; a day at once, with a
+notification, when a person is needed); the home campaign and its cooldowns are untouched.
+A copy the runner refused (missing, the wrong size or hash) is settled and copied again at
+home. A manual pause, an attention hold (a lost session: the uplink shares it), a trial or
+comparison run, or a failed daily verification hold it. With nothing left to send it asks
+the runner to unmount the carrier and notifies once that the drive is done. The lane sends
+nothing until a first upload from the uplink, run by a person with `upload-one --uplink`,
+settled with the site's video ID.
+
 ```bash
 node packages/pipeline/dist/main.js carrier-init --apply      # an empty drive becomes the carrier
 node packages/pipeline/dist/main.js carrier-status            # where it is, what it holds, what waits

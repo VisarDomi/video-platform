@@ -37,7 +37,7 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE upload_metadata(recording_id TEXT,title TEXT);
           CREATE TABLE descriptions(recording_id TEXT,output_json TEXT);
           CREATE TABLE campaign_control(id INTEGER,state TEXT,daily_upload_limit_bytes INTEGER,resume_at TEXT,attention_reason TEXT,upload_provider TEXT);
-          CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT);
+          CREATE TABLE upload_attempts(id TEXT,recording_id TEXT,phase TEXT,status TEXT,started_at TEXT,evidence_json TEXT,transfer_started INTEGER,reservation_id TEXT,progress_bytes INTEGER,remote_id TEXT,uplink TEXT DEFAULT 'home');
           CREATE TABLE upload_reservations(id TEXT,calendar_month TEXT,reserved_bytes INTEGER,status TEXT,uplink TEXT NOT NULL DEFAULT 'home');
           CREATE TABLE upload_confirmations(attempt_id TEXT,recording_id TEXT,confirm_after TEXT,status TEXT);
           CREATE TABLE short_parts(batch_id TEXT,recording_id TEXT,duration_seconds REAL,aspect_ratio REAL);
@@ -49,13 +49,14 @@ class DashboardDataTests(unittest.TestCase):
           CREATE TABLE manual_pieces(recording_id TEXT,part TEXT,reason TEXT);
           CREATE TABLE carrier_files(carrier_id TEXT,file_name TEXT,recording_id TEXT,size_bytes INTEGER,state TEXT);
           CREATE TABLE carrier_state(carrier_id TEXT,location TEXT,seen_at TEXT,free_bytes INTEGER,note TEXT,last_notice TEXT);
+          CREATE TABLE uplink_holds(uplink TEXT,resume_at TEXT,reason TEXT,failures INTEGER);
           INSERT INTO campaign_control VALUES (1,'running',25000000000,NULL,NULL,'video-host');
           INSERT INTO worker_heartbeat VALUES (1,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-01 010000 alice','live-a','/unused','edited',600,'uploading',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-02 010000 bob','live-a','/unused','edited',500,'upload_verified',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO recordings VALUES ('2026-01-03 010000 carol','live-c','/unused','edited',20,'short_waiting',NULL,NULL,'2026-11-01T00:00:00Z');
           INSERT INTO artifacts VALUES ('2026-01-01 010000 alice','/private/file.mp4',1000000000);
-          INSERT INTO upload_attempts VALUES ('attempt','2026-01-01 010000 alice','started','started','2026-10-31T23:00:00Z','[]',1,'ticket',1000000000,NULL);
+          INSERT INTO upload_attempts VALUES ('attempt','2026-01-01 010000 alice','started','started','2026-10-31T23:00:00Z','[]',1,'ticket',1000000000,NULL,'home');
           INSERT INTO upload_reservations VALUES ('ticket','2026-10',1016777216,'reserved','home');
           INSERT INTO bandwidth_events VALUES ('2026-11',2000000000,'2026-11-01T00:00:00Z','home'),('2026-11',1000000000,'2026-10-31T23:30:00Z','home');
           INSERT INTO upload_reservations VALUES ('other','2026-11',4000000000,'reserved','home');
@@ -168,6 +169,12 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(data["carrier"]["id"], "CARRIER1")
         self.assertIsNone(data["carrier"]["location"])
         self.assertEqual((data["carrier"]["on_drive_bytes"], data["carrier"]["files"], data["carrier"]["capacity_bytes"]), (0, 0, 230000000000))
+        self.assertEqual(data["office"], {"id": "office", "hold": None, "uploading": None, "progress": None})
+        self.db.execute("INSERT INTO uplink_holds VALUES ('office','2026-11-01T06:00:00Z','page timeout',2)")
+        self.db.execute("UPDATE upload_attempts SET uplink='office'")
+        self.db.commit()
+        office = self.read(worker_step={"disposition": "stage_completed"})["office"]
+        self.assertEqual((office["hold"]["reason"], office["uploading"]), ("page timeout", "alice"))
         self.assertEqual(data["budget"]["uplinks"][1]["daily"], 50000000000)
         self.db.execute("UPDATE campaign_control SET state='running', attention_reason=NULL")
         self.db.execute("UPDATE recordings SET state='metadata_ready'")

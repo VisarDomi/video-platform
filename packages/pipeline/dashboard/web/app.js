@@ -299,6 +299,7 @@ function renderHero() {
   } else if (a?.stage === 'upload') {
     extras.push('Transfer active; awaiting first acknowledged byte update.');
   }
+  if (a?.uplink && a.uplink !== 'home') extras.push(`Sent from the ${a.uplink} network.`);
   if (a?.reservation_month && a.reservation_month !== data.budget.month) {
     extras.push(`Budgeted in ${new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(new Date(a.reservation_month + '-15T12:00:00Z'))}.`);
   }
@@ -430,7 +431,10 @@ function renderCarrier() {
   }
   const notes = { ready: 'Ready: it may be pulled at any moment.', full: 'Full: take it to the office.',
     unknown: 'This drive is not set up as the carrier (carrier-init).', done: 'The office sent everything: bring it home.' };
-  text('carrier-note', [notes[k.notice] || '', k.note || ''].filter(Boolean).join(' '));
+  const o = data.office;
+  const office = o?.uploading ? `Uploading from the office: ${o.uploading}${o.progress ? ` (${o.progress.percent.toFixed(0)}%)` : ''}.`
+    : o?.hold ? `Office uploads held until ${time(o.hold.resume_at, true)}: ${o.hold.reason}.` : '';
+  text('carrier-note', [office, notes[k.notice] || '', k.note || ''].filter(Boolean).join(' '));
 }
 
 function svgNode(name, attributes) {

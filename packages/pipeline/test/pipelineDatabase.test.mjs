@@ -983,3 +983,21 @@ for (const cleaned of [false, true]) test(`a provider removal revokes ${cleaned 
     assert.equal(raw.prepare("SELECT SUM(transmitted_bytes) AS bytes FROM bandwidth_events").get().bytes, 500);
     raw.close();
 });
+
+test("a restart in the middle of an upload from another uplink resumes as a home upload would, billed to that uplink", async (t) => {
+    const { database, databasePath, directory } = await databaseFixture(t, false);
+    const recording = database.discover(input(directory, "office-cut"));
+    advanceToMetadataReady(database, recording, directory, 1_000);
+    const now = new Date("2026-11-24T10:00:00Z");
+    const reservation = database.reserveUpload(recording.id, 2_000, now, "Europe/Tirane", 1_000_000, database.getActiveUploadProvider(), "office");
+    const attempt = database.beginUpload(recording.id, reservation, now);
+    database.updateUploadProgress(attempt, "metadata_submitting", 1_200, now);
+    database.close();
+    // The PC lost power; the next start recovers.
+    const reopened = new PipelineDatabase(databasePath);
+    t.after(() => reopened.close());
+    assert.deepEqual(reopened.recoverInterruptedUploads(now), [{ recordingId: recording.id, disposition: "confirmation_required" }]);
+    assert.equal(reopened.get(recording.id).state, "upload_uncertain");
+    assert.deepEqual(reopened.uploadUsage("2026-11", "office"), { spent: 1_200, reserved: 0 });
+    assert.deepEqual(reopened.uploadUsage("2026-11", "home"), { spent: 0, reserved: 0 });
+});

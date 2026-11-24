@@ -1855,6 +1855,39 @@ export class PipelineDatabase {
         return Number(result.changes) === 1;
     }
 
+    // ---- an uplink's own upload hold ----
+
+    uplinkHold(uplink: string): { resumeAt: string | null; reason: string | null; failures: number; updatedAt: string } | null {
+        const row = this.database.prepare("SELECT resume_at, reason, failures, updated_at FROM uplink_holds WHERE uplink = ?").get(uplink) as
+            { resume_at: string | null; reason: string | null; failures: number; updated_at: string } | undefined;
+        return row ? { resumeAt: row.resume_at, reason: row.reason, failures: row.failures, updatedAt: row.updated_at } : null;
+    }
+
+    // A failed upload from the uplink: wait 15 minutes, twice as long after each failure in a
+    // row, at most a day; a day at once when a person is needed.
+    recordUplinkFailure(uplink: string, reason: string, personNeeded: boolean, now = new Date()): { resumeAt: string; failures: number } {
+        return this.transaction(() => {
+            const failures = (this.uplinkHold(uplink)?.failures ?? 0) + 1;
+            const day = 24 * 60 * 60_000;
+            const wait = personNeeded ? day : Math.min(day, 15 * 60_000 * 2 ** Math.min(failures - 1, 20));
+            const resumeAt = new Date(now.getTime() + wait).toISOString();
+            this.database.prepare(`INSERT INTO uplink_holds (uplink, resume_at, reason, failures, updated_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (uplink) DO UPDATE SET resume_at = excluded.resume_at, reason = excluded.reason,
+                    failures = excluded.failures, updated_at = excluded.updated_at`).run(uplink, resumeAt, reason, failures, now.toISOString());
+            return { resumeAt, failures };
+        });
+    }
+
+    // An upload from this uplink settled with the site's video ID.
+    uplinkHasSentOne(uplink: string): boolean {
+        return !!this.database.prepare("SELECT 1 FROM upload_attempts WHERE uplink = ? AND remote_id IS NOT NULL LIMIT 1").get(uplink);
+    }
+
+    clearUplinkHold(uplink: string, now = new Date()): void {
+        this.database.prepare(`UPDATE uplink_holds SET resume_at = NULL, reason = NULL, failures = 0, updated_at = ?
+            WHERE uplink = ? AND (failures <> 0 OR resume_at IS NOT NULL)`).run(now.toISOString(), uplink);
+    }
+
     // Bytes billed to a month and bytes reserved for it; per uplink, or all uplinks together
     // when none is named.
     uploadUsage(month: string, uplink?: string): UsageRow {

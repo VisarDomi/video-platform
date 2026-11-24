@@ -15,6 +15,7 @@ import { recoveryInProgress, readRecoveryState } from "../upload/sessionRecovery
 import { access } from "node:fs/promises";
 import { AccountSlot } from "../campaign/accountSlot.js";
 import { runCarrierLane } from "../uplink/carrierLane.js";
+import { runOfficeLane } from "../uplink/officeLane.js";
 
 const IDLE_POLL_MILLISECONDS = 30_000;
 // Well inside common PHP session idle limits; one light request each time.
@@ -218,6 +219,11 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
         : Promise.resolve();
     let lastStep = "";
     let verificationHold: string | null = null;
+    // The office lane uploads from the other uplink beside the main loop, sharing the slot.
+    const officeLane = config.uplink ? runOfficeLane(config, signal, slot, (_notice, title, body) => notifyDesktop(title, body, true),
+        () => verificationHold)
+        .catch((error: unknown) => console.error(journalPriority("error", 2) + JSON.stringify({ event: "office-lane-error", error: String(error) })))
+        : Promise.resolve();
     const reconcileOutcomes = new Map<string, string>();
     let waitingForRecovery = false;
     while (!signal.aborted) {
@@ -285,5 +291,5 @@ export async function runCampaignWorker(config: PipelineConfig, signal: AbortSig
     }
     // A copy in progress ends at its next step (a killed one leaves only a .partial file,
     // which the next pass deletes).
-    await carrierLane;
+    await Promise.all([carrierLane, officeLane]);
 }
