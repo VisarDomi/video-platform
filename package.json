@@ -18,6 +18,7 @@
         "test:sim-plugins": "node --test plugins/*/test/*.test.mjs",
         "e2e:capture": "node e2e/capture.e2e.mjs",
         "e2e:pipeline": "node e2e/pipeline.e2e.mjs",
+        "e2e:uplink": "node e2e/uplink.e2e.mjs",
         "e2e:file-host": "node e2e/file-host.e2e.mjs",
         "demo:build": "podman build -t localhost/video-platform-demo:latest -f deploy/demo/Containerfile .",
         "demo": "bash deploy/demo/demo.sh start",

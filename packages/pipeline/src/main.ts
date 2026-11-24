@@ -8,7 +8,10 @@ import { readFinalizationContract } from "./discovery/finalizationContract.js";
 import { ensureFinalizedRemuxOne } from "./commands/ensureFinalizedRemuxOne.js";
 import { describeOne } from "./commands/describeOne.js";
 import { uploadOne } from "./commands/uploadOne.js";
-import { probeUplink } from "./uplink/uplinkCommands.js";
+import { probeUplink, requireUplink } from "./uplink/uplinkCommands.js";
+import { carrierFor } from "./uplink/carrier.js";
+import { carrierPass } from "./uplink/carrierLane.js";
+import { officeTick } from "./uplink/officeLane.js";
 import { carrierStatus, initCarrier, recallCarrier, writeOffCarrier } from "./uplink/carrierCommands.js";
 import { reconcileDueUploads } from "./commands/reconcileUploads.js";
 import { TargetCatalogResolver } from "./provenance/targetResolver.js";
@@ -44,6 +47,7 @@ function usage(): never {
         "  upload-one --recording ID [--uplink ID [--carrier-dir DIR]] --apply | reconcile-uploads --apply",
         "  uplink-probe [--carrier-dir DIR]",
         "  carrier-init --apply | carrier-status | carrier-recall [--apply] | carrier-writeoff --carrier ID --apply",
+        "  carrier-pass [--max-copies N] --apply | office-tick --apply   (one pass of a worker lane, the worker stopped)",
         "  upload-provider [--provider DESTINATION --apply]",
         "  metadata-check [--provider DESTINATION]",
         "  plus each destination's own commands (its sites-file entry's \"commands\" package)",
@@ -112,7 +116,7 @@ async function main(): Promise<void> {
         "reconcile-uploads", "campaign-configure", "campaign-resume", "campaign-pause",
         "campaign-status", "campaign-step", "campaign-worker", "campaign-prepare", "campaign-select", "comparison-report",
         "upload-provider", "metadata-check", "uplink-probe", "carrier-init", "carrier-status", "carrier-recall",
-        "carrier-writeoff"].includes(command ?? "")) {
+        "carrier-writeoff", "carrier-pass", "office-tick"].includes(command ?? "")) {
         // Not a core command: a destination's own (named by its sites-file entry), or none.
         const run = await destinationCommand(command ?? "");
         if (!run) {
@@ -126,7 +130,7 @@ async function main(): Promise<void> {
     // upload metadata. The worker and the stage commands stop here, before touching
     // anything, without it; session upkeep and reports run either way.
     if (!await initContentProfile() && ["campaign-worker", "campaign-step", "describe-one", "process-one",
-        "metadata-check", "retry", "upload-one"].includes(command ?? "")) contentProfile();
+        "metadata-check", "retry", "upload-one", "office-tick"].includes(command ?? "")) contentProfile();
     if (command === "campaign-prepare") {
         requireApply(process.argv.slice(3));
         assertCampaignIdle(pipelineConfig);
@@ -218,6 +222,28 @@ async function main(): Promise<void> {
         const carrier = option(args, "--carrier");
         if (!carrier) usage();
         console.log(JSON.stringify(writeOffCarrier(pipelineConfig, carrier), null, 2));
+        return;
+    }
+    if (command === "carrier-pass") {
+        const args = process.argv.slice(3);
+        requireApply(args);
+        assertCampaignIdle(pipelineConfig);
+        const uplink = requireUplink(pipelineConfig);
+        const rawMax = option(args, "--max-copies");
+        const database = new PipelineDatabase(pipelineConfig.databasePath);
+        try {
+            console.log(JSON.stringify(await carrierPass(database, pipelineConfig, carrierFor(uplink), {
+                ...(rawMax === null ? {} : { maxCopies: Number(rawMax) }),
+                notify: (notice, title, body) => console.error(JSON.stringify({ event: "carrier-notice", notice, title, body })),
+            }), null, 2));
+        } finally { database.close(); }
+        return;
+    }
+    if (command === "office-tick") {
+        requireApply(process.argv.slice(3));
+        assertCampaignIdle(pipelineConfig);
+        console.log(JSON.stringify(await officeTick(pipelineConfig, null,
+            (notice, title, body) => console.error(JSON.stringify({ event: "office-notice", notice, title, body }))), null, 2));
         return;
     }
     if (command === "uplink-probe") {

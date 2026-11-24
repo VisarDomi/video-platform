@@ -60,6 +60,19 @@ function safeName(name: unknown): string {
     return name;
 }
 
+// The runner's private folder (the session file, the browser profile) lives only as long
+// as its upload; one left by a runner that was killed is deleted by the next upload.
+const SCRATCH_PREFIX = "video-uplink-";
+const STALE_SCRATCH_MS = 6 * 60 * 60_000;
+async function removeStaleScratch(): Promise<void> {
+    const names = await readdir(os.tmpdir()).catch(() => [] as string[]);
+    for (const name of names.filter((entry) => entry.startsWith(SCRATCH_PREFIX))) {
+        const folder = path.join(os.tmpdir(), name);
+        const info = await stat(folder).catch(() => null);
+        if (info?.isDirectory() && Date.now() - info.mtimeMs > STALE_SCRATCH_MS) await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+    }
+}
+
 class Runner {
     private readonly controller = new AbortController();
     private readonly pending = new Map<number, { resolve: () => void; reject: (error: Error) => void }>();
@@ -193,7 +206,8 @@ async function upload(runner: Runner, message: Record<string, unknown>): Promise
     const plugin = await loadDestinationPlugin(entry);
     if (!plugin.createCompanionDestination) throw new Error(`uplink: destination ${entry.id} cannot upload on a shared session`);
 
-    const scratch = await mkdtemp(path.join(os.tmpdir(), "video-uplink-"));
+    await removeStaleScratch();
+    const scratch = await mkdtemp(path.join(os.tmpdir(), SCRATCH_PREFIX));
     // The network is checked again while the transfer runs; a different one stops it. Once
     // the metadata step is reported the copy may exist: from then on nothing stops the
     // upload, and its outcome (or error) goes to the PC as it is.

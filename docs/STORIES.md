@@ -105,3 +105,21 @@ with the rules it lost nothing in 160 cuts (130 with QEMU's `writeback` cache, 3
 `unsafe`); without the fsyncs, under `writeback`, it lost acknowledged records in 17 of 30
 cuts and left torn state in 4. The numbers and raw results are in
 `deploy/vm/README.md`.
+
+## A ledger whose schema was not its own
+
+**Symptom.** The first upgrade of the pipeline ledger in months (schema 17 to 18, for the
+second uplink) passed its test, which upgrades a new schema-17 ledger and compares it with a
+new schema-18 one, then failed its check on a copy of the live ledger: the upgraded live
+schema differed from a new ledger's in column order, quoting and CHECK constraints.
+
+**Cause.** The live ledger had been built over a year by upgrades whose code was removed
+once they had run (`ALTER TABLE ... ADD COLUMN` appends columns; rebuilt tables keep their
+quoted names; some CHECK constraints were never added to old tables). Its schema 17 was
+never a new ledger's schema 17, so no upgrade could make it a new ledger's schema 18.
+
+**Fix.** The live check compares what the upgrade changes, not where it ends: every object
+of the old ledger is unchanged except the three tables that gain the uplink column and the
+renamed allowance column, and the new tables and indexes equal a new ledger's
+(`private/scripts/ledger-schema18-check.mjs`). The public test still proves that a new
+schema-17 ledger upgrades to exactly a new schema-18 one.

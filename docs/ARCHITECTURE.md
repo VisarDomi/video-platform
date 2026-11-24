@@ -40,12 +40,30 @@ each one is tested. Every claim names the code or the command that holds it.
    through a state machine in a SQLite ledger: provenance (the channel's pages, from the
    server), conversion, description (a local vision model with the content profile's
    prompt), joining short pieces, upload, and verification a day later. Its campaign
-   worker takes one step at a time, under a monthly byte budget. It deletes an original
+   worker takes one step at a time, under a daily byte allowance per network. It deletes an original
    only when every upload covering it has been verified online, and keeps the receipts.
 6. **The destination plug-in** speaks the upload site's protocol: sign in, transfer, create
    the video, list the account's uploads, and probe one. The core owns everything that
    must not go wrong around it: attempts, reservations, retries, verification, removal
    bans and cleanup.
+
+## A second uplink
+
+Uploads can also leave from a second network (the sites file's `uplink` section), with its
+own daily allowance. The PC stays the **single writer** of the ledger: the other network's
+machine runs only a **runner** that performs one upload when the PC tells it to (JSON lines
+over an ssh session) and holds no state that matters. The PC reserves the bytes, records the
+attempt, and records each progress and evidence report durably before the runner may go on,
+so the creation boundary and every settlement are the PC's unchanged code; the runner checks
+its network (the default gateway's hardware address) and the file's hash before anything
+leaves, uploads on the PC's shared session without ever signing in, and stops when the PC
+stops pinging. Files reach it on a **carrier** drive: the PC copies the ready recordings
+beyond home's reserve to it (file first, read back against the ledger's hash, then the
+row), keeps its own copy until the site accepted the upload, and alone deletes from the
+drive; a pull at any moment leaves a state the next pass repairs. With the section,
+conversion runs ahead of uploads up to one carrier's worth plus two days of home's
+allowance, and a held upload holds uploads only. One in-process **account slot** lets one
+upload or uploads-list scan run at a time across both networks.
 
 Single files take a shorter road: a **file host** plug-in knows a file host's pages, and the
 core's queue (`dist/fileHosts.js`) copies the original file into a local library, resuming
@@ -114,6 +132,7 @@ The decisions that cost something if they are wrong are taken only on proof:
 | Unit and contract tests | `npm test -w sdk`, `npm test -w pipeline`, `npm run test:sim-plugins` | each package and plug-in on its own |
 | Capture | `npm run e2e:capture` | the real downloader and auth daemon against three simulated live sites with outages, skips, restarts, edge failover, damaged segments, renames and a token revocation; every recording judged byte for byte against the simulator's ground-truth log |
 | Pipeline | `npm run e2e:pipeline` (`-- --destination api-host`) | the real pipeline from finalized recordings to verified uploads: a refused word learned, sessions ended mid-campaign, a removal banned |
+| Second uplink | `npm run e2e:uplink` | conversion ahead of a spent allowance, a carrier pulled mid-copy and repaired, the real runner refusing the wrong network, killed before and after the creation boundary, every recording uploaded exactly once from the other network and verified, the drive cleaned at home |
 | File host | `npm run e2e:file-host` | the queue service against the simulated file host: an off-site redirect refused, a dropped transfer resumed, the service killed mid-transfer and resumed from fsynced bytes |
 | Power cuts | `deploy/vm/harness run` | the durability rules under real resets |
 | Everything at once | `npm run demo` | the whole platform in a Podman pod against the simulator |

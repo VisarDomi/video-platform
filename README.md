@@ -23,7 +23,7 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `packages/downloader` | Live capture: HLS playlists polled per channel, segments written durably, edge failover, honest gap accounting |
 | `packages/server` | The API, finalization (repairing and closing recordings), download lists, the website's backend |
 | `packages/auth` | Keeps every site's sign-in fresh, in one place |
-| `packages/pipeline` | Conversion, description, upload and verification: a SQLite ledger with a state machine, a monthly upload budget, retries that never duplicate an upload, removal bans, receipt-matched cleanup, and a dashboard |
+| `packages/pipeline` | Conversion, description, upload and verification: a SQLite ledger with a state machine, a daily upload allowance per network (a second uplink optional), retries that never duplicate an upload, removal bans, receipt-matched cleanup, and a dashboard |
 | `packages/descriptor` | Describes a recording with a local vision model (llama.cpp) for its title and description |
 | `packages/app` | The website: lists, a viewer with editing, phone-first gestures |
 | `packages/live-extensions` | Safari web extensions built from each site plug-in's description |
@@ -31,7 +31,7 @@ several CDN edges). Recordings are described with a tennis content profile.
 | `packages/simulator` | Simulated live sites, a file host and two upload destinations (a browser-style form host and an API host), with scenarios, faults, a ground-truth log and a checker |
 | `plugins/*` | Public plug-ins for the simulated sites: `ts-live` (an account-gated live source, with its sign-in), `ladder-live`, `fmp4-live` (live sources), `file-host` (single files copied to the PC), `form-host`, `api-host` (upload destinations) |
 | `profiles/tennis` | The tennis content profile: the descriptor's prompt, the description footer and the tags |
-| `e2e/` | End-to-end runs: the real downloader and auth daemon against the simulated live sites (`npm run e2e:capture`), the real pipeline against either simulated destination (`npm run e2e:pipeline`, `-- --destination api-host`), the real file-host queue against the simulated file host, killed mid-transfer (`npm run e2e:file-host`) |
+| `e2e/` | End-to-end runs: the real downloader and auth daemon against the simulated live sites (`npm run e2e:capture`), the real pipeline against either simulated destination (`npm run e2e:pipeline`, `-- --destination api-host`), the second uplink's carrier, runner and office lane (`npm run e2e:uplink`), the real file-host queue against the simulated file host, killed mid-transfer (`npm run e2e:file-host`) |
 | `deploy/demo` | The whole platform against the simulator in one rootless Podman pod, on demand (`npm run demo`; stopping it, or a power cut, leaves nothing behind) |
 | `deploy/vm` | A QEMU harness that hard-resets a VM at random points and checks every invariant after each boot |
 | `systemd/` | The user services |
@@ -58,7 +58,7 @@ fixes: [docs/STORIES.md](docs/STORIES.md).
   listing; a cached page or a page that should exist but fails is inconclusive.
 - **Removed means never again.** A copy the destination removed is recorded and that
   recording is never uploaded there again.
-- **Bytes are reserved before they leave**, so the monthly upload budget holds even when a
+- **Bytes are reserved before they leave**, so the upload allowance holds even when a
   transfer dies halfway.
 
 ## Running it
@@ -75,6 +75,7 @@ npm run test:sim-plugins
 npm run e2e:capture     # about two minutes
 npm run e2e:pipeline    # about twenty seconds
 npm run e2e:pipeline -- --destination api-host
+npm run e2e:uplink      # about a minute
 npm run e2e:file-host   # about a minute
 ```
 
